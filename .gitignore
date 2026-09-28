@@ -26,3 +26,4 @@ inbox/*
 .idea/
 .vscode/*
 !.vscode/settings.json
+__pycache__/
