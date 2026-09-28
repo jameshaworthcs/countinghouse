@@ -8,12 +8,13 @@
     "node": ">=22.12"
   },
   "scripts": {
-    "dev": "concurrently -k -n api,web -c blue,magenta \"tsx watch --clear-screen=false src/server/main.ts\" \"vite\"",
+    "dev": "tsx scripts/demo-data.ts --if-missing && FINANCE_DATA_DIR=\"${FINANCE_DATA_DIR:-demo-data}\" concurrently -k -n api,web -c blue,magenta \"tsx watch --clear-screen=false src/server/main.ts\" \"vite\"",
     "build": "vite build",
     "start": "npm run build && NODE_ENV=production tsx src/server/main.ts",
     "serve": "NODE_ENV=production tsx src/server/main.ts",
-    "demo": "tsx scripts/demo-data.ts --if-missing && FINANCE_DATA_DIR=demo-data npm run start",
-    "demo:dev": "tsx scripts/demo-data.ts --if-missing && FINANCE_DATA_DIR=demo-data npm run dev",
+    "demo": "tsx scripts/demo-data.ts --if-missing && npm run build && FINANCE_DATA_DIR=demo-data PORT=\"${PORT:-4770}\" NODE_ENV=production tsx src/server/main.ts",
+    "demo:dev": "npm run dev",
+    "deploy": "bash scripts/deploy.sh",
     "demo:reset": "tsx scripts/demo-data.ts --force",
     "import": "tsx scripts/import.ts",
     "validate": "tsx scripts/validate-data.ts",

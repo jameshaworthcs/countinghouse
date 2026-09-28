@@ -1,8 +1,8 @@
 // Screenshot smoke test: loads every page in headless Chrome, saves PNGs to screens/, and fails if
 // any page logs an error. Run against a server that is already up:
 //
-//   FINANCE_DATA_DIR=demo-data npm run serve &     (or npm run demo)
-//   npm run screens -- --base http://127.0.0.1:4750
+//   npm run demo &                                   (demo data, built UI, port 4770)
+//   npm run screens -- --base http://127.0.0.1:4770
 //
 // A server with a login also needs SCREENS_USER and SCREENS_PASSWORD. The script then signs in
 // through the login page first, and fails unless that lands in the app on the first try.
@@ -17,7 +17,7 @@ const arg = (name: string, fallback: string) => {
   const i = argv.indexOf(`--${name}`);
   return i >= 0 && argv[i + 1] ? argv[i + 1]! : fallback;
 };
-const base = arg('base', 'http://127.0.0.1:4750');
+const base = arg('base', 'http://127.0.0.1:4770');
 const out = path.join(PROJECT_ROOT, 'screens');
 const chrome = process.env.CHROME_BIN ?? '/usr/bin/google-chrome';
 const only = arg('only', '');

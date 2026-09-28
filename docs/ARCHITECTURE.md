@@ -4,7 +4,7 @@
 Browser (React SPA, TanStack Query)
    │  JSON over HTTP · server-sent events for live updates
    ▼
-Hono server  (Node 24, tsx; 127.0.0.1:4750)
+Hono server  (Node 24, tsx; 127.0.0.1:4750 live, 4760 in development)
    ├─ security: Host allow-list · CSRF (custom header + Origin) · auth gate · CSP
    ├─ routes/   auth · data (CRUD) · imports · analytics · system (SSE, git)
    ├─ Store ─────────────────► data/*.json(l)  (atomic writes, validation, quarantine, file watcher)

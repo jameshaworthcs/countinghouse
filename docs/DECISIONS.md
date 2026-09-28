@@ -62,3 +62,27 @@ Newest last. Each entry says what was decided, what else was considered, and why
   - Login is password-based for now; OIDC can be added in-app later.
 - **The login is generated, not chosen.** A random password is stored outside the repo (0600). Only
   its scrypt hash is in `.env`.
+
+## 2026-09-28: Development separated from the live site
+
+- **The live service runs from its own worktree, `~/dev/finance-live`, at a deployed commit.**
+  - Until now the service ran from the development checkout itself: any `npm run build` replaced
+    the live UI, a crash-restart picked up half-edited server code, and `npm run start` or
+    `npm run demo` clashed with it on port 4750.
+  - The owner suggested building into a separate directory or using a worktree of main. The
+    worktree was chosen because it isolates the server code as well as the build, and a rollback
+    is a checkout of the previous commit.
+  - `npm run deploy` builds, restarts, checks `/api/health` for the new commit, and rolls back on
+    failure.
+- **The live worktree has no `data/`; the service keeps using the development checkout's.** A
+  sparse checkout leaves `data/` out, and `FINANCE_DATA_DIR` points at `~/dev/finance/data`. Git
+  resolves that directory to the main worktree, so auto-commits land on `main` as before.
+- **Data auto-commits are held unless the data checkout is on `main`** (`FINANCE_DATA_BRANCH`).
+  Committing onto a feature branch or a detached HEAD would scatter the audit log. The changes
+  stay on disk, the reason shows in Settings, and the next change commits everything.
+- **Real data needs a login even on loopback.** A server on a directory tracked in git refuses to
+  start without one. P360 runs network-facing services as isolated local users; a login-free
+  development server on real data would have let any of them read it.
+- **Ports:** live 4750, development 4760 (Vite 4761), demo 4770.
+- **A missing data directory in production is an error, not an empty start.**
+  `FINANCE_INIT_DATA=1` creates one on purpose.

@@ -2,9 +2,10 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 
-// The API server (src/server/main.ts) listens on PORT (default 4750). In dev, Vite serves the UI on
-// 4751 and proxies /api to it; in production the API server serves the built UI itself on one port.
-const apiPort = Number(process.env.PORT ?? 4750);
+// In development (`npm run dev`) the API server listens on PORT (default 4760) and Vite serves the UI
+// on 4761, proxying /api to it. Built, the API server serves the UI itself on one port (the live
+// service on 4750, `npm run demo` on 4770).
+const apiPort = Number(process.env.PORT ?? 4760);
 
 export default defineConfig({
   root: 'src/web',
@@ -18,7 +19,7 @@ export default defineConfig({
   },
   server: {
     host: '127.0.0.1',
-    port: 4751,
+    port: 4761,
     strictPort: true,
     proxy: { '/api': `http://127.0.0.1:${apiPort}` },
   },

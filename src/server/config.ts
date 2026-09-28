@@ -6,6 +6,13 @@ import { fileURLToPath } from 'node:url';
 
 export const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
+/**
+ * Ports. The live service (finance.service) sets PORT=4750 in its own .env; everything run from a
+ * development checkout defaults elsewhere so it can never clash with it: the dev API on 4760 (Vite
+ * on 4761), the demo on 4770.
+ */
+export const DEV_PORT = 4760;
+
 export interface Config {
   host: string;
   port: number;
@@ -20,6 +27,10 @@ export interface Config {
   anthropicApiKey?: string;
   /** Watch the inbox folder and the data directory for changes. */
   watch: boolean;
+  /** Branch that data auto-commits must land on; commits are held (and reported) on any other. */
+  dataBranch: string;
+  /** Allow creating a fresh data directory in production (otherwise a missing one is an error). */
+  initData: boolean;
 }
 
 let envLoaded = false;
@@ -50,7 +61,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, root = PROJECT_
   const host = env.HOST || '127.0.0.1';
   const config: Config = {
     host,
-    port: Number(env.PORT || 4750),
+    port: Number(env.PORT || DEV_PORT),
     production: env.NODE_ENV === 'production',
     projectRoot: root,
     dataDir,
@@ -62,6 +73,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, root = PROJECT_
       .map((h) => h.trim().toLowerCase())
       .filter(Boolean),
     watch: env.FINANCE_WATCH !== '0',
+    dataBranch: env.FINANCE_DATA_BRANCH || 'main',
+    initData: env.FINANCE_INIT_DATA === '1',
   };
   if (env.ANTHROPIC_API_KEY) config.anthropicApiKey = env.ANTHROPIC_API_KEY;
   return config;

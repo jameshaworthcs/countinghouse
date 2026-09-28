@@ -24,6 +24,8 @@ import { Store, StoreError, type ChangeEvent } from './store';
 
 export interface CreateAppOptions {
   version: string;
+  /** Short hash of the code commit being served (shown by /api/health, used to verify deploys). */
+  commit?: string | undefined;
   env?: NodeJS.ProcessEnv;
   /** Start the inbox watcher (off in tests). */
   inbox?: boolean;
@@ -37,9 +39,14 @@ export interface App {
 
 export async function createApp(config: Config, opts: CreateAppOptions): Promise<App> {
   const env = opts.env ?? process.env;
+  // In production a missing data directory is a misconfiguration (a wrong FINANCE_DATA_DIR), not a
+  // request to start an empty one: refuse rather than quietly create and commit a blank dataset.
+  if (config.production && !config.initData && !existsSync(path.join(config.dataDir, 'meta.json'))) {
+    throw new Error(`No data directory at ${config.dataDir}. Check FINANCE_DATA_DIR, or set FINANCE_INIT_DATA=1 to create a new one.`);
+  }
   const migrated = await runMigrations(config.dataDir);
   const store = await Store.open(config.dataDir, { watch: config.watch });
-  const git = await GitCommitter.create(config.dataDir, () => store.settings.git.autoCommit);
+  const git = await GitCommitter.create(config.dataDir, () => store.settings.git.autoCommit, 2500, config.dataBranch);
   store.on('change', (e: ChangeEvent) => git.queue(e));
   if (migrated) await git.flush(`data: migrate format v${migrated.from} → v${migrated.to}`);
   if (store.created) await git.flush('data: initialise data directory');
@@ -54,6 +61,13 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
     passwordHash: env.FINANCE_PASSWORD_HASH,
     secret: await loadSessionSecret(env, config.workDir),
   });
+  // Local access without a login is for throwaway data only (demo-data, temporary directories).
+  // Real data, tracked in git, always needs a login, even on loopback: other local accounts (the
+  // isolated service users on P360) must not be able to read it from a development server.
+  if (git.tracked && !auth.configured) {
+    store.stopWatching();
+    throw new Error(`${config.dataDir} holds real data (it is tracked in git), so a login is required. Run \`npm run set-password\`, or use the demo data (npm run dev / npm run demo).`);
+  }
 
   let inbox: InboxWatcher | undefined;
   if (opts.inbox !== false && config.watch) {
@@ -70,7 +84,7 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
   app.use('/api/*', csrfGuard());
   app.use('/api/*', authGate(auth));
 
-  app.get('/api/health', (c) => c.json({ ok: true, version: opts.version }));
+  app.get('/api/health', (c) => c.json({ ok: true, version: opts.version, ...(opts.commit ? { commit: opts.commit } : {}) }));
   app.route('/api/auth', authRoutes(ctx));
   app.route('/api/imports', importRoutes(ctx));
   app.route('/api/documents', documentRoutes(ctx));
@@ -102,7 +116,7 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
   } else {
     app.get('*', (c) =>
       c.html(
-        '<!doctype html><meta charset="utf-8"><title>Finance</title><body style="font-family:system-ui;padding:2rem"><h1>Finance API is running</h1><p>The web app is not built. Run <code>npm run build</code> (or use <code>npm run dev</code> and open port 4751).</p></body>',
+        '<!doctype html><meta charset="utf-8"><title>Finance</title><body style="font-family:system-ui;padding:2rem"><h1>Finance API is running</h1><p>The web app is not built. Run <code>npm run build</code> (or use <code>npm run dev</code> and open port 4761).</p></body>',
       ),
     );
   }

@@ -52,15 +52,22 @@ export class GitCommitter {
     readonly dataRel: string,
     private readonly isEnabled: () => boolean,
     private readonly debounceMs: number,
+    /** The branch data commits must land on (null: any branch, but never a detached HEAD). */
+    readonly branch: string | null,
   ) {}
 
-  static async create(dataDir: string, isEnabled: () => boolean, debounceMs = 2500): Promise<GitCommitter> {
+  static async create(dataDir: string, isEnabled: () => boolean, debounceMs = 2500, branch: string | null = null): Promise<GitCommitter> {
     const root = (await git(dataDir, ['rev-parse', '--show-toplevel'], true)).trim();
-    if (!root) return new GitCommitter(null, '', () => false, debounceMs);
+    if (!root) return new GitCommitter(null, '', () => false, debounceMs, branch);
     const rel = path.relative(root, dataDir) || '.';
     // A data dir that git ignores (e.g. demo-data/) is never committed.
-    if (await isIgnored(root, rel)) return new GitCommitter(null, rel, () => false, debounceMs);
-    return new GitCommitter(root, rel, isEnabled, debounceMs);
+    if (await isIgnored(root, rel)) return new GitCommitter(null, rel, () => false, debounceMs, branch);
+    return new GitCommitter(root, rel, isEnabled, debounceMs, branch);
+  }
+
+  /** True when the data directory is tracked by git (real data rather than a throwaway copy). */
+  get tracked(): boolean {
+    return this.repoRoot !== null;
   }
 
   get enabled(): boolean {
@@ -89,16 +96,28 @@ export class GitCommitter {
 
   private async commit(messages: string[]): Promise<void> {
     if (!this.repoRoot) return;
-    await git(this.repoRoot, ['add', '-A', '--', this.dataRel]);
+    // Data commits belong on one branch. If the checkout holding data/ is on another branch or a
+    // detached HEAD, hold them (the changes stay on disk) and say so, rather than scatter the audit
+    // log across branches. They are committed by the next flush once the branch is right again.
+    const head = (await git(this.repoRoot, ['symbolic-ref', '--quiet', '--short', 'HEAD'], true)).trim();
+    if (!head || (this.branch && head !== this.branch)) {
+      throw new Error(
+        `data changes are not being committed: the repository is on ${head ? `branch "${head}"` : 'a detached HEAD'}, not "${this.branch ?? 'a branch'}". Check out ${this.branch ?? 'a branch'} in ${this.repoRoot}; the next change commits everything pending.`,
+      );
+    }
+    await withLockRetry(() => git(this.repoRoot!, ['add', '-A', '--', this.dataRel]));
     const staged = await git(this.repoRoot, ['diff', '--cached', '--name-only', '--', this.dataRel]);
-    if (!staged.trim()) return;
+    if (!staged.trim()) {
+      this.lastError = undefined;
+      return;
+    }
     const unique = [...new Set(messages.filter(Boolean))];
     const subject = unique.length === 1 ? unique[0]! : unique.length === 0 ? 'data: update' : `data: ${unique.length} changes`;
     const body = unique.length > 1 ? unique.map((m) => `- ${m}`).join('\n') : '';
     const args = ['commit', '--quiet', '-m', subject];
     if (body) args.push('-m', body);
     args.push('-m', 'Committed by the finance app.', '--', this.dataRel);
-    await git(this.repoRoot, args);
+    await withLockRetry(() => git(this.repoRoot!, args));
     this.lastError = undefined;
   }
 
@@ -138,6 +157,21 @@ export class GitCommitter {
         const [hash = '', author = '', date = '', subject = '', body = ''] = chunk.split('\x1f');
         return { hash, author, date, subject, body: body.trim() };
       });
+  }
+}
+
+/**
+ * Another git process (a person committing code in the same checkout) may hold the index lock for
+ * a moment. Retry briefly instead of failing the commit.
+ */
+async function withLockRetry<T>(fn: () => Promise<T>, attempts = 8): Promise<T> {
+  for (let i = 1; ; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (i >= attempts || !/index\.lock|Unable to create .*\.lock/i.test((err as Error).message)) throw err;
+      await new Promise((r) => setTimeout(r, 250 * i));
+    }
   }
 }
 

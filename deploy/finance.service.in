@@ -1,8 +1,12 @@
-# systemd unit for the finance app. Installed by deploy/install.sh, which fills in @NODE_BIN@,
-# @APP_DIR@ and @USER@. See docs/DEPLOY.md.
+# systemd unit for the finance app. Installed and kept current by scripts/deploy.sh (npm run deploy),
+# which fills in @NODE_BIN@, @APP_DIR@ (the live worktree), @USER@ and @HOME@. See docs/DEPLOY.md.
+#
+# The service runs the code in the live worktree, @APP_DIR@, at the commit last deployed. Its data is
+# the development checkout's data/ (@DATA_REPO@/data, set in @APP_DIR@/.env), so the app's
+# auto-commits land on main there.
 [Unit]
 Description=Finance (private personal-finance tracker)
-Documentation=file://@APP_DIR@/docs/DEPLOY.md
+Documentation=file://@DATA_REPO@/docs/DEPLOY.md
 After=network-online.target
 Wants=network-online.target
 
@@ -14,8 +18,8 @@ WorkingDirectory=@APP_DIR@
 Environment=NODE_ENV=production
 Environment=HOME=@HOME@
 Environment=PATH=@NODE_BIN@:@HOME@/.local/bin:/usr/local/bin:/usr/bin:/bin
-# Rebuild the web app from the checked-out source, then serve it with the API on 127.0.0.1:4750.
-ExecStartPre=@NODE_BIN@/npm run build --silent
+# Serve the API and the UI built by the last deploy on 127.0.0.1:4750 (PORT in @APP_DIR@/.env). A
+# plain restart does not rebuild: it restarts the deployed commit exactly as it was.
 ExecStart=@NODE_BIN@/node --import tsx src/server/main.ts
 Restart=on-failure
 RestartSec=5

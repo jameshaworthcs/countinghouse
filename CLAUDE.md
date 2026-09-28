@@ -8,23 +8,29 @@ for the map and [docs/DATA_FORMAT.md](docs/DATA_FORMAT.md) before touching data 
 
 - `npm run check`: typecheck (server + web), ESLint, Vitest. Must be green before you call
   anything done.
-- `npm run dev`: API on :4750 (tsx watch), UI on :4751 (Vite, proxies `/api`).
+- `npm run dev`: demo data, API on :4760 (tsx watch), UI on :4761 (Vite, proxies `/api`). Point
+  it elsewhere with `FINANCE_DATA_DIR`; data tracked in git (the real `data/`) needs a login.
 - Visual check of every page (light, dark and mobile), starting with the sign-in:
   - It fails on any console error, or if signing in bounces back to the form.
   - Look at the PNGs in `screens/`, don't just count them.
-  - `.env` gives every server the real login, so run the demo with a throwaway one:
+  - Run the demo with a throwaway login, so the sign-in is exercised:
     ```bash
-    npm run demo:reset
+    npm run demo:reset && npm run build
     export SCREENS_USER=demo SCREENS_PASSWORD=demo-password-1
     FINANCE_USERNAME=$SCREENS_USER FINANCE_PASSWORD_HASH="$(FINANCE_NEW_PASSWORD=$SCREENS_PASSWORD npm run -s set-password -- --print-hash)" \
       FINANCE_DATA_DIR=demo-data PORT=4770 npm run serve &
     npm run screens -- --base http://127.0.0.1:4770
     ```
-- **This checkout is the live deployment** (`finance.service` on P360; see
-  [docs/DEPLOY.md](docs/DEPLOY.md)).
-  - `npm run build` replaces the live UI at once.
-  - Server changes go live with `sudo systemctl restart finance`, which also rebuilds.
-  - `npm run start` and `npm run demo` would clash with the service on port 4750.
+- **The live site runs from its own worktree**, `~/dev/finance-live`, at the commit last deployed
+  (`finance.service` on P360; see [docs/DEPLOY.md](docs/DEPLOY.md)).
+  - Nothing here reaches it until `npm run deploy` (main by default; it rolls back on failure).
+    `npm run deploy -- --status` shows what is live.
+  - It reads and writes this checkout's `data/`, so keep this checkout on `main`: data
+    auto-commits are held while it is on another branch.
+  - Commit code with explicit paths, never `git add -A`, so a pending data change is not swept
+    into a code commit.
+  - The live login is in `~/dev/finance-live/.env`; this checkout's `.env` has no production
+    settings.
 - `npm run validate`: format check of `data/`.
 
 ## Invariants: do not change without asking the owner

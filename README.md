@@ -29,9 +29,9 @@ own Claude login. That call is shown on every import, and CSV/OFX/QIF files are 
 
 ```bash
 npm install
-npm run demo          # generated demo data at http://127.0.0.1:4750 — nothing real is touched
-npm start             # your real data (./data) at http://127.0.0.1:4750
-npm run dev           # development: API on :4750, UI with hot reload on http://127.0.0.1:4751
+npm run demo          # generated demo data at http://127.0.0.1:4770 — nothing real is touched
+npm run dev           # development on demo data: API on :4760, UI with hot reload on http://127.0.0.1:4761
+npm run deploy        # put main live (the service runs from its own worktree; see docs/DEPLOY.md)
 ```
 
 Requirements: Node 22.12+ (24 here). Optional: `tesseract-ocr` and `poppler-utils` for the offline
@@ -58,9 +58,10 @@ engine, and the [`claude`](https://claude.com/claude-code) CLI logged in (or `AN
 
 | Command | What it does |
 |---|---|
-| `npm start` | Build the UI and serve everything on `127.0.0.1:4750` |
-| `npm run dev` | API with reload on :4750, Vite UI on :4751 |
-| `npm run demo` / `npm run demo:reset` | Serve / regenerate the synthetic dataset in `demo-data/` |
+| `npm start` | Build the UI and serve this checkout on `127.0.0.1:4760` (`PORT` to change; real data needs a login) |
+| `npm run dev` | Demo data, API with reload on :4760, Vite UI on :4761 (`FINANCE_DATA_DIR` to change) |
+| `npm run demo` / `npm run demo:reset` | Serve on :4770 / regenerate the synthetic dataset in `demo-data/` |
+| `npm run deploy` | Deploy `main` (or `-- <ref>`) to the live service, with rollback; `-- --status` shows what is live |
 | `npm run import -- <files…>` | Queue files for import from the terminal (copies them to `inbox/`) |
 | `npm run set-password` | Set the login (scrypt hash into `.env`) |
 | `npm run validate` | Check `data/` against the format (same checks as start-up) |
