@@ -2,7 +2,8 @@
 
 All figures live in dated tables in [`src/shared/uk.ts`](../src/shared/uk.ts). A tax year runs from
 **6 April to 5 April**; rows apply from the tax year they name until superseded. When the rules
-change, add a row there and update this page. Figures were checked on 28 September 2026.
+change, add a row there and update this page. The 2026/27 figures were checked against gov.uk,
+HMRC, the FSCS and the Bank of England on 29 September 2026 (sources at the end).
 
 ## Tax-year allowances
 
@@ -20,11 +21,40 @@ change, add a row there and update this page. Figures were checked on 28 Septemb
 Other parameters:
 
 - **Personal Savings Allowance:** £1,000 basic, £500 higher, £0 additional (since 2016/17).
-- **Starting rate for savings:** £5,000.
-- **Personal allowance:** £12,570 (from 2021/22, frozen).
-- **Lump Sum Allowance:** £268,275 (from 2024/25).
-- **Dividend tax rates:** from 2026/27, 10.75% basic, 35.75% higher, 39.35% additional.
-- **Savings income tax rates:** from 2027/28, 22% basic, 42% higher, 47% additional.
+- **Starting rate for savings:** £5,000. It shrinks by £1 for every £1 of other income above the
+  personal allowance, and is gone at £17,570. It is kept at £5,000 to 2030/31.
+- **Personal allowance:** £12,570 (from 2021/22). It tapers by £1 for every £2 of income over
+  £100,000, and is frozen to 2030/31 (Budget 2025).
+- **Income tax (England, Wales, Northern Ireland), 2026/27:**
+  - 20% on the first £37,700 above the allowance;
+  - 40% up to £125,140;
+  - 45% above.
+  - The basic-rate band is frozen to 2030/31.
+  - Earlier years: £32,000 (2016/17), £33,500, £34,500, £37,500 (2019/20 and 2020/21), then
+    £37,700.
+  - The additional rate started at £150,000 until 2022/23.
+  - Scottish rates are not modelled.
+- **Lump Sum Allowance:** £268,275; **Lump Sum and Death Benefit Allowance:** £1,073,100 (both from
+  2024/25). Usually 25% of a pension can be taken tax-free, within the Lump Sum Allowance.
+- **Dividend tax rates:**
+  - 8.75%, 33.75% and 39.35% to 2025/26;
+  - from 2026/27, 10.75% basic, 35.75% higher and 39.35% additional (unchanged).
+  - The dividend allowance is £500.
+- **Savings income tax rates:** from 2027/28, 22% basic, 42% higher, 47% additional (property
+  income likewise).
+- **Relief at source:** a net pension contribution is grossed up at the basic rate, 20% (£80 →
+  £100).
+- **High Income Child Benefit Charge:**
+  - from 2024/25, it starts above £60,000 of adjusted net income, at 1% of the benefit for every
+    £200, reaching the full benefit at £80,000;
+  - before that, £50,000 and £60,000.
+- **Trading and property allowances:** £1,000 each (from 2017/18). Gross trading income above
+  £1,000 must be reported; above £2,500 you must register for Self Assessment.
+- **Capital gains:**
+  - The annual exempt amount is £3,000.
+  - If you are registered for Self Assessment, gains must be reported when total disposal
+    proceeds exceed £50,000, even with no tax due. Before 2023/24 the threshold was 4 × the
+    exempt amount.
 
 ### ISA reform, April 2027 (Autumn Budget 2025)
 
@@ -37,6 +67,38 @@ Other parameters:
 - The app applies the cash cap using your date of birth. If no date of birth is set, the cap is
   assumed to apply.
 
+### State Pension
+
+| From | Full new State Pension a week | a year |
+|---|---|---|
+| 2016/17 | £155.65 | |
+| 2017/18 | £159.55 | |
+| 2018/19 | £164.35 | |
+| 2019/20 | £168.60 | |
+| 2020/21 | £175.20 | |
+| 2021/22 | £179.60 | |
+| 2022/23 | £185.15 | |
+| 2023/24 | £203.85 | |
+| 2024/25 | £221.20 | |
+| 2025/26 | £230.25 | |
+| 2026/27 | **£241.30** (+4.8%, with earnings) | £12,547.60 |
+
+- **How it rises:** the triple lock, by the highest of earnings growth, CPI inflation and 2.5%.
+  The app's `statePension.growth` assumption follows it.
+- **Fallback:** without your forecast, the app uses the full rate, labelled as a fallback. Your
+  gov.uk forecast replaces it, since the amount depends on your National Insurance record.
+- **State Pension age** (current law, `statePensionDate`):
+
+  | Born | State Pension age |
+  |---|---|
+  | 6 October 1954 – 5 April 1960 | 66 |
+  | 6 April 1960 – 5 March 1961 | 66 and 1–11 months (6 April – 5 May 1960: 66 and 1 month; each later month of birth one more) |
+  | 6 March 1961 – 5 April 1977 | 67 |
+  | 6 April 1977 – 5 April 1978 | a fixed date from 6 May 2044 (born 6 April – 5 May 1977) to 6 March 2046, two months later for each later month of birth |
+  | 6 April 1978 onwards | 68 |
+
+  The move from 67 to 68 is subject to the statutory reviews and may change.
+
 ### Lifetime ISA
 
 - £4,000 a year, counted within the £20,000.
@@ -48,8 +110,13 @@ Other parameters:
   - on terminal illness.
 - The charge applies to the whole withdrawal, so you get back 75% of the value. That loses the
   bonus plus 6.25% of your own money; the app shows this "penalty-adjusted value".
-- **Proposed:** a First-Time Buyer ISA replacing the LISA for new savers from April 2028. The
-  consultation was published 23 June 2026. Existing LISAs continue.
+- **Proposed:** a First Time Buyer ISA, to be offered in place of the LISA once available.
+  - HM Treasury consulted in June 2026; responses closed 18 August 2026.
+  - No start date has been set ("as soon as practically possible").
+  - Until then LISAs can still be opened, and existing holders can keep saving under the current
+    rules indefinitely.
+  - The new bonus is to be paid on subscriptions at purchase. Limits, bonus and price cap are to
+    be announced at a future fiscal event.
 
 ### Pensions
 
@@ -62,8 +129,8 @@ Other parameters:
   rate relief is claimed through Self Assessment.
 - **Normal minimum pension age** rises from **55 to 57 on 6 April 2028**. The app uses 55 if you
   reach 55 before that date, otherwise 57; protected pension ages are not modelled.
-- Salary sacrifice: NI-free pension sacrifice is to be capped at £2,000 a year from April 2029
-  (Autumn Budget 2025; informational only).
+- Salary sacrifice: from 6 April 2029, pension contributions above £2,000 a year made by salary
+  sacrifice become subject to National Insurance (Budget 2025; informational only).
 
 ### FSCS
 
@@ -84,6 +151,24 @@ change between years, so the page names sections, not boxes. Filing and payment 
 **Everything on that page must be checked by you against your own documents before you submit.**
 
 ## Sources
+
+Checked 29 September 2026:
+
+- GOV.UK, [The new State Pension: what you'll get](https://www.gov.uk/new-state-pension/what-youll-get) and [Over 12 million pensioners to receive £575 State Pension boost](https://www.gov.uk/government/news/over-12-million-pensioners-to-receive-575-state-pension-boost) (£241.30 a week from April 2026)
+- GOV.UK, [State Pension age timetable](https://www.gov.uk/government/publications/state-pension-age-timetable/state-pension-age-timetable)
+- GOV.UK, [Income Tax rates and allowances for current and past years](https://www.gov.uk/government/publications/rates-and-allowances-income-tax/income-tax-rates-and-allowances-current-and-past)
+- GOV.UK, [Budget 2025: overview of tax legislation and rates](https://www.gov.uk/government/publications/budget-2025-overview-of-tax-legislation-and-rates-ootlar/budget-2025-overview-of-tax-legislation-and-rates-ootlar) (freezes to 2030/31, savings and property rates from 2027/28, dividend rates from 2026/27, cash-ISA limit, salary sacrifice)
+- GOV.UK, [Pension schemes rates and allowances](https://www.gov.uk/government/publications/rates-and-allowances-pension-schemes/pension-schemes-rates) and [Work out your tapered annual allowance](https://www.gov.uk/guidance/pension-schemes-work-out-your-tapered-annual-allowance)
+- GOV.UK, [Individual Savings Accounts](https://www.gov.uk/individual-savings-accounts), [Lifetime ISA](https://www.gov.uk/lifetime-isa) and [withdrawing from a Lifetime ISA](https://www.gov.uk/lifetime-isa/withdrawing-money-from-your-lifetime-isa)
+- GOV.UK, [First Time Buyer ISA: consultation](https://www.gov.uk/government/consultations/first-time-buyer-isa-consultation/first-time-buyer-isa-consultation)
+- GOV.UK, [High Income Child Benefit Charge](https://www.gov.uk/child-benefit-tax-charge)
+- GOV.UK, [Tax on savings interest: how much is tax-free](https://www.gov.uk/apply-tax-free-interest-on-savings/how-much-is-tax-free)
+- GOV.UK, [Tax-free allowances on property and trading income](https://www.gov.uk/guidance/tax-free-allowances-on-property-and-trading-income)
+- GOV.UK, [Capital Gains Tax: work out if you need to pay](https://www.gov.uk/capital-gains-tax/work-out-need-to-pay) and [allowances](https://www.gov.uk/capital-gains-tax/allowances)
+- GOV.UK, [Who must send a tax return](https://www.gov.uk/self-assessment-tax-returns/who-must-send-a-tax-return). It no longer lists a £10,000 savings-income threshold, so the Self Assessment page does not claim one.
+- Bank of England, [PRA confirms FSCS deposit limit to be increased to £120,000 from 1 December](https://www.bankofengland.co.uk/news/2025/november/pra-confirms-fscs-deposit-limit-to-be-increased-to-120000-from-1-december)
+
+Earlier:
 
 - GOV.UK, [Cash ISA limit reduction](https://www.gov.uk/government/publications/reduction-in-the-cash-individual-savings-account-isa-limit/cash-individual-savings-account-isa-limit-reduction)
 - GOV.UK, [ISA reform 2027: anti-circumvention rules factsheet](https://www.gov.uk/government/publications/fiscal-events-2026-factsheets/isa-reform-2027-anti-circumvention-rules-factsheet)

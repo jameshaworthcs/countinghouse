@@ -12,8 +12,12 @@ export interface TimeSeries {
   id: string;
   label: string;
   color: string;
+  /** For bands: the upper edge. */
   values: (number | null)[];
-  kind: 'area' | 'line';
+  /** "band": a light wash between `lower` and `values` (an uncertainty range). */
+  kind: 'area' | 'line' | 'band';
+  /** Bands only: the lower edge. */
+  lower?: (number | null)[];
   dashed?: boolean;
   stack?: boolean;
   markers?: boolean;
@@ -66,7 +70,7 @@ export function TimeChart({ dates, series, height = 260, format = (v) => money(v
     }
     for (const s of series) {
       if (s.kind === 'area' && s.stack) continue;
-      for (const v of s.values) if (v !== null) {
+      for (const v of [...s.values, ...(s.lower ?? [])]) if (v !== null) {
         lo = Math.min(lo, v);
         hi = Math.max(hi, v);
       }
@@ -145,8 +149,12 @@ export function TimeChart({ dates, series, height = 260, format = (v) => money(v
     hover === null
       ? []
       : series
-          .filter((s) => !s.quiet && s.values[hover] !== null && s.values[hover] !== undefined)
+          .filter((s) => !s.quiet && s.kind !== 'band' && s.values[hover] !== null && s.values[hover] !== undefined)
           .map((s) => ({ s, v: s.values[hover]! }));
+  const hoverBands =
+    hover === null
+      ? []
+      : series.filter((s) => s.kind === 'band' && !s.quiet && s.values[hover] !== null && s.lower?.[hover] !== null && s.lower?.[hover] !== undefined).map((s) => ({ s, lo: s.lower![hover]!, hi: s.values[hover]! }));
 
   return (
     <div ref={wrapRef} className="relative select-none">
@@ -197,7 +205,19 @@ export function TimeChart({ dates, series, height = 260, format = (v) => money(v
             );
           })}
           {series
-            .filter((s) => !(s.kind === 'area' && s.stack))
+            .filter((s) => s.kind === 'band')
+            .map((s) => {
+              const pts = s.values.map((v, i) => [i, s.lower?.[i] ?? null, v] as const);
+              const d = d3area<readonly [number, number | null, number | null]>()
+                .defined((p) => p[1] !== null && p[2] !== null)
+                .x((p) => xi(p[0]))
+                .y0((p) => y(p[1]!))
+                .y1((p) => y(p[2]!))
+                .curve(curveMonotoneX)(pts);
+              return <path key={s.id} d={d ?? undefined} fill={s.color} fillOpacity={0.12} />;
+            })}
+          {series
+            .filter((s) => !(s.kind === 'area' && s.stack) && s.kind !== 'band')
             .map((s) => {
               const pts = s.values.map((v, i) => [i, v] as const);
               const lineD = d3line<readonly [number, number | null]>()
@@ -240,6 +260,7 @@ export function TimeChart({ dates, series, height = 260, format = (v) => money(v
             <g>
               <line x1={xi(hover)} x2={xi(hover)} y1={0} y2={innerH} stroke="var(--ink-3)" strokeWidth={1} />
               {series.map((s, si) => {
+                if (s.kind === 'band') return null;
                 let v: number | null = s.values[hover] ?? null;
                 if (s.kind === 'area' && s.stack) {
                   const layer = layers[stacked.indexOf(s)];
@@ -255,11 +276,14 @@ export function TimeChart({ dates, series, height = 260, format = (v) => money(v
           <rect width={innerW} height={innerH} fill="transparent" onPointerMove={onMove} onPointerLeave={() => setHover(null)} style={{ touchAction: 'pan-y' }} />
         </g>
       </svg>
-      {hover !== null && hoverRows.length > 0 && (
+      {hover !== null && hoverRows.length + hoverBands.length > 0 && (
         <ChartTooltip x={margin.left + xi(hover)} y={margin.top} width={width}>
           <div className="mb-1 font-medium text-ink">{formatDate(dates[hover]!)}</div>
           {hoverRows.map(({ s, v }) => (
             <TooltipRow key={s.id} color={s.color} kind={s.dashed ? 'dash' : 'line'} label={s.label} value={format(v)} />
+          ))}
+          {hoverBands.map(({ s, lo, hi }) => (
+            <TooltipRow key={s.id} color={s.color} kind="area" label={s.label} value={`${axisFormat(lo)} – ${axisFormat(hi)}`} />
           ))}
         </ChartTooltip>
       )}

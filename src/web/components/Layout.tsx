@@ -5,6 +5,7 @@ import {
   EyeOff,
   Landmark,
   LayoutDashboard,
+  Library,
   LogOut,
   Menu,
   Monitor,
@@ -35,6 +36,7 @@ const NAV: { to: string; label: string; icon: ReactNode; end?: boolean }[] = [
   { to: '/projections', label: 'Projections', icon: <Telescope className="size-[18px]" /> },
   { to: '/investments', label: 'Investments & pensions', icon: <TrendingUp className="size-[18px]" /> },
   { to: '/tax', label: 'Tax year', icon: <Landmark className="size-[18px]" /> },
+  { to: '/assumptions', label: 'Assumptions & research', icon: <Library className="size-[18px]" /> },
   { to: '/import', label: 'Import', icon: <Upload className="size-[18px]" /> },
   { to: '/settings', label: 'Settings', icon: <Settings className="size-[18px]" /> },
 ];

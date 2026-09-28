@@ -2,10 +2,12 @@ import { FileText, Pencil, Plus, Trash2, TriangleAlert, Upload } from 'lucide-re
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { ACCOUNT_TYPE_META, balanceModeOf } from '../../shared/accounts';
-import type { AccountDetailResponse, TransactionsResponse } from '../../shared/api';
+import type { AccountDetailResponse, CoverageResponse, TransactionsResponse } from '../../shared/api';
 import { AccountDialog, BalanceDialog } from '../components/AccountForms';
 import { ChartFrame } from '../components/charts/common';
 import { TimeChart } from '../components/charts/TimeChart';
+import { CoverageGrid } from '../components/Coverage';
+import { InsightsPanel } from '../components/Intel';
 import { TransactionList } from '../components/TransactionList';
 import { Badge, Button, Callout, Card, EmptyState, ErrorNote, Loading, Money, PageHeader, Stat, Tabs, tableClasses, useToast } from '../components/ui';
 import { FilePickerButton } from '../components/Upload';
@@ -19,7 +21,8 @@ export default function AccountDetail() {
   const navigate = useNavigate();
   const toast = useToast();
   const q = useApi<AccountDetailResponse>(['account', id], `/accounts/${id}`);
-  const txs = useApi<TransactionsResponse>(['transactions', 'account', id], `/transactions${qs({ accounts: id, limit: 300 })}`);
+  const txs = useApi<TransactionsResponse>(['transactions', 'account', id], `/transactions${qs({ accounts: id, limit: 50 })}`);
+  const cov = useApi<CoverageResponse>(['coverage'], '/coverage');
   const [tab, setTab] = useState<Tab>('transactions');
   const [editing, setEditing] = useState(false);
   const [recording, setRecording] = useState(false);
@@ -78,6 +81,7 @@ export default function AccountDetail() {
         )}
       </div>
 
+      <InsightsPanel page="accounts" accountId={id} title="Claude’s notes on this account" className="mb-5" />
       {gaps.length > 0 && (
         <Callout tone="warn" className="mb-5" title={`${gaps.length} gap${gaps.length > 1 ? 's' : ''} in this account’s history`}>
           Balances don’t add up between some statements, which usually means a statement or some transactions are missing:
@@ -116,6 +120,20 @@ export default function AccountDetail() {
             />
           </ChartFrame>
         )
+      )}
+
+      {cov.data && !empty && cov.data.accounts.some((a) => a.accountId === id && a.source !== 'none') && (
+        <Card
+          className="mb-5"
+          title="Data coverage"
+          description={(() => {
+            const row = cov.data.accounts.find((a) => a.accountId === id)!;
+            const span = row.from && row.to ? `${formatDate(row.from)} to ${formatDate(row.to)}` : 'no dates yet';
+            return `Days with transaction data in each of the last 13 months (${row.source === 'imports' ? 'from the periods your statements cover' : 'from the first to the last transaction'}; ${span}). Months without data are left out of averages rather than counted as no spending.`;
+          })()}
+        >
+          <CoverageGrid cov={cov.data} only={id} />
+        </Card>
       )}
 
       <Tabs

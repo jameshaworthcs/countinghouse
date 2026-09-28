@@ -1,12 +1,13 @@
 // Statement reconciliation: does opening balance + transactions = closing balance, and do running
-// balances follow the amounts? Used on drafts (before commit) and in data-health checks.
+// balances follow the amounts? Used on drafts (before commit) and in data-health checks. Pending
+// rows are left out: statement and export balances are of settled transactions.
 
 import { fromMinor, toMinor } from './money';
 
 export interface ReconcileInput {
   openingBalance?: number | undefined;
   closingBalance?: number | undefined;
-  transactions: { amount: number; balanceAfter?: number | undefined; date: string }[];
+  transactions: { amount: number; balanceAfter?: number | undefined; date: string; pending?: boolean | undefined }[];
 }
 
 export interface ReconcileResult {
@@ -21,6 +22,7 @@ export interface ReconcileResult {
 }
 
 export function reconcile(input: ReconcileInput): ReconcileResult {
+  input = { ...input, transactions: input.transactions.filter((t) => !t.pending) };
   const checks: string[] = [];
   const runningBreaks: number[] = [];
   let status: ReconcileResult['status'] = 'unknown';

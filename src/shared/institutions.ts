@@ -11,7 +11,15 @@ import type { Institution } from './schema';
 export interface CatalogInstitution extends Institution {
   /** Case-insensitive regex source used to recognise the institution in text. */
   match: string;
+  /**
+   * The name is also an everyday word ("Chip", "Plum", "Nest"): a payment description naming it is
+   * a transfer to your account there only when it also looks like a transfer.
+   */
+  ambiguous?: boolean;
 }
+
+/** Words that mark a description as a transfer rather than a purchase. */
+export const TRANSFER_WORDS = /\b(TRANSFER|TFR|FPO|FPI|FASTER|STANDING ORDER|S\/O|BANK CREDIT|DEPOSIT|SAVINGS?|TOP ?UP|WITHDRAW|INVEST)/i;
 
 const I = (
   id: string,
@@ -19,7 +27,8 @@ const I = (
   kind: Institution['kind'],
   match: string,
   fscsGroup?: string,
-): CatalogInstitution => ({ id, name, kind, match, ...(fscsGroup ? { fscsGroup } : {}) });
+  ambiguous?: boolean,
+): CatalogInstitution => ({ id, name, kind, match, ...(fscsGroup ? { fscsGroup } : {}), ...(ambiguous ? { ambiguous } : {}) });
 
 export const INSTITUTION_CATALOG: CatalogInstitution[] = [
   // Banks
@@ -47,7 +56,7 @@ export const INSTITUTION_CATALOG: CatalogInstitution[] = [
   I('metro-bank', 'Metro Bank', 'bank', '\\bmetro\\s*bank\\b'),
   I('tesco-bank', 'Tesco Bank', 'bank', '\\btesco\\s*bank\\b'),
   I('marcus', 'Marcus by Goldman Sachs', 'bank', '\\bmarcus\\b', 'goldman-sachs-intl-bank'),
-  I('kroo', 'Kroo', 'bank', '\\bkroo\\b'),
+  I('kroo', 'Kroo', 'bank', '\\bkroo\\b', undefined, true),
   I('atom', 'Atom bank', 'bank', '\\batom\\s*bank\\b'),
   I('zopa', 'Zopa', 'bank', '\\bzopa\\b'),
   I('allica', 'Allica Bank', 'bank', '\\ballica\\b'),
@@ -75,15 +84,15 @@ export const INSTITUTION_CATALOG: CatalogInstitution[] = [
   I('invest-engine', 'InvestEngine', 'investment_platform', '\\binvest\\s*engine\\b'),
   I('nutmeg', 'Nutmeg', 'investment_platform', '\\bnutmeg\\b'),
   I('moneybox', 'Moneybox', 'investment_platform', '\\bmoney\\s*box\\b'),
-  I('plum', 'Plum', 'investment_platform', '\\bplum\\b'),
-  I('chip', 'Chip', 'investment_platform', '\\bchip\\b'),
+  I('plum', 'Plum', 'investment_platform', '\\bplum\\b', undefined, true),
+  I('chip', 'Chip', 'investment_platform', '\\bchip\\b', undefined, true),
   I('wealthify', 'Wealthify', 'investment_platform', '\\bwealthify\\b'),
-  I('lightyear', 'Lightyear', 'investment_platform', '\\blightyear\\b'),
+  I('lightyear', 'Lightyear', 'investment_platform', '\\blightyear\\b', undefined, true),
   I('coinbase', 'Coinbase', 'crypto_exchange', '\\bcoinbase\\b'),
   I('kraken', 'Kraken', 'crypto_exchange', '\\bkraken\\b'),
   // Pensions
   I('pensionbee', 'PensionBee', 'pension_provider', '\\bpension\\s*bee\\b'),
-  I('nest', 'Nest', 'pension_provider', '\\bnest\\b(?!\\s*egg)'),
+  I('nest', 'Nest', 'pension_provider', '\\bnest\\b(?!\\s*egg)', undefined, true),
   I('peoples-pension', "The People's Pension", 'pension_provider', "people'?s\\s*pension"),
   I('aviva', 'Aviva', 'pension_provider', '\\baviva\\b'),
   I('scottish-widows', 'Scottish Widows', 'pension_provider', '\\bscottish\\s*widows\\b'),

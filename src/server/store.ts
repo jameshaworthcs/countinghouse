@@ -15,30 +15,42 @@ import type { z } from 'zod';
 import { defaultCategories } from '../shared/categories';
 import {
   AccountSchema,
+  AssumptionSchema,
   BalanceSnapshotSchema,
   CategorySchema,
+  ContextSchema,
   CsvProfileSchema,
   FigureSchema,
   GoalSchema,
   HoldingsSnapshotSchema,
   ImportRecordSchema,
+  InsightSchema,
   InstitutionSchema,
+  InstrumentSchema,
   MetaSchema,
+  NoteSchema,
   ProfileSchema,
+  ResearchSchema,
   RuleSchema,
   SettingsSchema,
   TransactionSchema,
   type Account,
+  type Assumption,
   type BalanceSnapshot,
   type Category,
+  type ContextRecord,
   type CsvProfile,
   type Figure,
   type Goal,
   type HoldingsSnapshot,
   type ImportRecord,
+  type Insight,
   type Institution,
+  type Instrument,
   type Meta,
+  type Note,
   type Profile,
+  type Research,
   type Rule,
   type Settings,
   type Transaction,
@@ -46,7 +58,7 @@ import {
 import { atomicWrite, Mutex, nowISO, readTextIfExists, sha256 } from './fsutil';
 
 /** Bump when the on-disk format changes, and add a migration in migrations.ts. */
-export const FORMAT_VERSION = 1;
+export const FORMAT_VERSION = 2;
 
 export interface DataIssue {
   file: string;
@@ -65,6 +77,8 @@ export interface ImportSummary {
   engine?: string | undefined;
   detail?: string | undefined;
   result?: ImportRecord['result'];
+  /** The period each account's section covered (statement period, or the span of its rows). */
+  sections: { accountId: string; from: string; to: string }[];
   path: string;
 }
 
@@ -82,6 +96,16 @@ const ARRAY_FILES = {
   rules: { file: 'rules.json', key: 'rules', schema: RuleSchema },
   goals: { file: 'goals.json', key: 'goals', schema: GoalSchema },
   csvProfiles: { file: 'csv-profiles.json', key: 'profiles', schema: CsvProfileSchema },
+  instruments: { file: 'instruments.json', key: 'instruments', schema: InstrumentSchema },
+} as const;
+
+/** Single-file JSONL collections: one record per line. */
+const JSONL_FILES = {
+  assumptions: { file: 'assumptions.jsonl', schema: AssumptionSchema },
+  research: { file: 'research.jsonl', schema: ResearchSchema },
+  insights: { file: 'insights.jsonl', schema: InsightSchema },
+  context: { file: 'context.jsonl', schema: ContextSchema },
+  notes: { file: 'notes.jsonl', schema: NoteSchema },
 } as const;
 
 interface State {
@@ -94,6 +118,14 @@ interface State {
   rules: Rule[];
   goals: Goal[];
   csvProfiles: CsvProfile[];
+  instruments: Instrument[];
+  /** Append-only: every version of every assumption, in file order. */
+  assumptions: Assumption[];
+  /** Append-only: every research record, in file order. */
+  research: Research[];
+  insights: Insight[];
+  context: ContextRecord[];
+  notes: Note[];
   transactions: Map<string, Transaction[]>;
   balances: Map<string, BalanceSnapshot[]>;
   holdings: Map<string, HoldingsSnapshot[]>;
@@ -112,6 +144,12 @@ function emptyState(): State {
     rules: [],
     goals: [],
     csvProfiles: [],
+    instruments: [],
+    assumptions: [],
+    research: [],
+    insights: [],
+    context: [],
+    notes: [],
     transactions: new Map(),
     balances: new Map(),
     holdings: new Map(),
@@ -189,8 +227,10 @@ export class Store extends EventEmitter {
       ['rules.json', { $schema: '../schemas/rules.schema.json', rules: [] }],
       ['goals.json', { $schema: '../schemas/goals.schema.json', goals: [] }],
       ['csv-profiles.json', { $schema: '../schemas/csv-profiles.schema.json', profiles: [] }],
+      ['instruments.json', { $schema: '../schemas/instruments.schema.json', instruments: [] }],
     ];
     for (const [rel, value] of writes) await this.writeJson(rel, value);
+    for (const def of Object.values(JSONL_FILES)) await atomicWrite(this.abs(def.file), '');
     for (const dir of ['transactions', 'balances', 'holdings', 'imports', 'documents']) {
       await mkdir(this.abs(dir), { recursive: true });
       await atomicWrite(this.abs(`${dir}/.gitkeep`), '');
@@ -308,6 +348,9 @@ export class Store extends EventEmitter {
       next.holdings.set(accountId, sortByDate(await loadJsonl(`holdings/${f}`, HoldingsSnapshotSchema)));
     }
     next.figures = await loadJsonl('figures.jsonl', FigureSchema);
+    for (const [name, def] of Object.entries(JSONL_FILES) as [keyof typeof JSONL_FILES, (typeof JSONL_FILES)[keyof typeof JSONL_FILES]][]) {
+      (next as unknown as Record<string, unknown[]>)[name] = await loadJsonl(def.file, def.schema as z.ZodType<unknown>);
+    }
 
     // Committed import records (summaries only; full records are read on demand).
     for (const year of await listDirs(this.abs('imports'))) {
@@ -425,8 +468,11 @@ export class Store extends EventEmitter {
     this.emit('change', { message, paths } satisfies ChangeEvent);
   }
 
-  /** Run a mutation exclusively. */
+  /** Run a mutation exclusively. Data written by a newer version of the app is read-only. */
   private exclusive<T>(fn: () => Promise<T>): Promise<T> {
+    if (this.state.meta.version > FORMAT_VERSION) {
+      return Promise.reject(new StoreError(`The data is format v${this.state.meta.version}, newer than this app understands (v${FORMAT_VERSION}); it is read-only until the app is updated.`, 409));
+    }
     return this.mutex.run(fn);
   }
 
@@ -462,6 +508,25 @@ export class Store extends EventEmitter {
   get figures(): Figure[] {
     return this.state.figures;
   }
+  get instruments(): Instrument[] {
+    return this.state.instruments;
+  }
+  /** Every version of every assumption, oldest first (resolve with shared/assumptions.ts). */
+  get assumptions(): Assumption[] {
+    return this.state.assumptions;
+  }
+  get research(): Research[] {
+    return this.state.research;
+  }
+  get insights(): Insight[] {
+    return this.state.insights;
+  }
+  get context(): ContextRecord[] {
+    return this.state.context;
+  }
+  get notes(): Note[] {
+    return this.state.notes;
+  }
   get imports(): ImportSummary[] {
     return this.state.imports;
   }
@@ -472,6 +537,10 @@ export class Store extends EventEmitter {
 
   institution(id: string | undefined): Institution | undefined {
     return id ? this.state.institutions.find((i) => i.id === id) : undefined;
+  }
+
+  instrument(id: string | undefined): Instrument | undefined {
+    return id ? this.state.instruments.find((i) => i.id === id) : undefined;
   }
 
   transaction(id: string): Transaction | undefined {
@@ -571,6 +640,53 @@ export class Store extends EventEmitter {
   }
   setAccounts(list: Account[], message = 'accounts: update'): Promise<void> {
     return this.setArray('accounts', list, message);
+  }
+  setInstruments(list: Instrument[], message = 'instruments: update'): Promise<void> {
+    return this.setArray('instruments', list, message);
+  }
+
+  // ─── Writes: agent-maintained collections (assumptions, research, insights, context, notes) ──
+
+  /**
+   * Append records to an append-only collection (assumptions, research). Existing ids are skipped.
+   * Returns the records added.
+   */
+  appendRecords<K extends 'assumptions' | 'research'>(name: K, records: State[K], message: string): Promise<State[K]> {
+    return this.exclusive(async () => {
+      const def = JSONL_FILES[name];
+      const list = this.state[name] as unknown as { id: string }[];
+      const ids = new Set(list.map((r) => r.id));
+      const added: unknown[] = [];
+      for (const raw of records as unknown as unknown[]) {
+        const r = (def.schema as z.ZodType<{ id: string }>).parse(raw);
+        if (ids.has(r.id)) continue;
+        ids.add(r.id);
+        list.push(r);
+        added.push(r);
+      }
+      if (added.length) {
+        await this.writeJsonl(def.file, list);
+        this.changed(message, [def.file]);
+      }
+      return added as State[K];
+    });
+  }
+
+  /** Insert or replace records by id in a rewritable collection (insights, context, notes). */
+  upsertRecords<K extends 'insights' | 'context' | 'notes'>(name: K, records: State[K], message: string): Promise<void> {
+    return this.exclusive(async () => {
+      const def = JSONL_FILES[name];
+      const list = [...(this.state[name] as unknown as { id: string }[])];
+      for (const raw of records as unknown as unknown[]) {
+        const r = (def.schema as z.ZodType<{ id: string }>).parse(raw);
+        const i = list.findIndex((x) => x.id === r.id);
+        if (i >= 0) list[i] = r;
+        else list.push(r);
+      }
+      await this.writeJsonl(def.file, list);
+      (this.state as unknown as Record<string, unknown>)[name] = list;
+      this.changed(message, [def.file]);
+    });
   }
 
   async upsertInstitution(inst: Institution): Promise<void> {
@@ -884,8 +1000,23 @@ export class StoreError extends Error {
   }
 }
 
+function sectionsOf(r: ImportRecord): ImportSummary['sections'] {
+  if (r.status !== 'committed' || !r.draft) return [];
+  const out: ImportSummary['sections'] = [];
+  for (const s of r.draft.sections) {
+    if (s.target.mode === 'skip') continue;
+    const accountId = r.result?.sections?.find((x) => x.key === s.key)?.accountId ?? (s.target.mode === 'existing' ? s.target.accountId : s.target.account.id);
+    const dates = s.transactions.map((t) => t.date).sort();
+    const from = s.periodStart ?? dates[0];
+    const to = s.periodEnd ?? dates[dates.length - 1];
+    if (from && to && from <= to) out.push({ accountId, from, to });
+  }
+  return out;
+}
+
 function summarise(r: ImportRecord, rel: string): ImportSummary {
   return {
+    sections: sectionsOf(r),
     id: r.id,
     createdAt: r.createdAt,
     committedAt: r.committedAt,

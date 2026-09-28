@@ -11,7 +11,7 @@
 
 import { ACCOUNT_TYPE_META } from './accounts';
 import { CategoryIndex, mapBankCategory } from './categories';
-import { INSTITUTION_CATALOG } from './institutions';
+import { INSTITUTION_CATALOG, TRANSFER_WORDS } from './institutions';
 import { cleanPayee, GENERIC_PAYEES, matchMerchant, normaliseDescription } from './merchants';
 import type { Account, AccountType, CategorisedBy, Institution, Rule } from './schema';
 
@@ -104,7 +104,7 @@ export class Categoriser {
   private readonly rules: CompiledRule[];
   private readonly categories: CategoryIndex;
   private readonly accountsById: Map<string, Account>;
-  private readonly ownMatchers: { account: Account; aliases: RegExp[]; institution: RegExp[] }[];
+  private readonly ownMatchers: { account: Account; aliases: RegExp[]; institution: RegExp[]; ambiguous: boolean }[];
 
   constructor(rules: Rule[], categories: CategoryIndex, accounts: Account[], institutions: Institution[]) {
     this.rules = rules
@@ -132,7 +132,7 @@ export class Categoriser {
           if (catalog) institution.push(new RegExp(catalog.match, 'i'));
           else if (inst && inst.name.length >= 4) institution.push(new RegExp(`\\b${escapeRegex(inst.name)}\\b`, 'i'));
         }
-        return { account, aliases, institution };
+        return { account, aliases, institution, ambiguous: Boolean(catalog?.ambiguous) };
       })
       .filter((m) => m.aliases.length + m.institution.length > 0);
   }
@@ -156,8 +156,13 @@ export class Categoriser {
    */
   ownAccountsMentioned(accountId: string, description: string, useInstitutions = true): Account[] {
     const text = normaliseDescription(description);
+    const transferish = TRANSFER_WORDS.test(text);
     return this.ownMatchers
-      .filter((m) => m.account.id !== accountId && (m.aliases.some((re) => re.test(text)) || (useInstitutions && m.institution.some((re) => re.test(text)))))
+      .filter(
+        (m) =>
+          m.account.id !== accountId &&
+          (m.aliases.some((re) => re.test(text)) || (useInstitutions && (!m.ambiguous || transferish) && m.institution.some((re) => re.test(text)))),
+      )
       .map((m) => m.account);
   }
 

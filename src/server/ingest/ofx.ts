@@ -4,7 +4,7 @@ import { parseFlexibleDate } from '../../shared/dates';
 import { parseAmount } from '../../shared/money';
 import { ExtractionSchema, type ExtractedAccount, type ExtractedTransaction, type Extraction } from '../../shared/schema';
 
-export const OFX_ENGINE_VERSION = 'ofx-1';
+export const OFX_ENGINE_VERSION = 'ofx-2';
 
 interface Node {
   name: string;
@@ -116,20 +116,27 @@ export function parseOfx(text: string): Extraction {
       }
       const name = val(t, 'NAME') ?? val(find(t, 'PAYEE') ?? t, 'NAME');
       const memo = val(t, 'MEMO');
-      const orig = find(t, 'ORIGCURRENCY') ?? find(t, 'CURRENCY');
+      // <ORIGCURRENCY>: TRNAMT is already in the account currency, converted at CURRATE from CURSYM.
+      // <CURRENCY>: TRNAMT is in CURSYM; multiply by CURRATE for the account currency (OFX 2.1.1 §5.2).
+      const origAgg = find(t, 'ORIGCURRENCY');
+      const curAgg = origAgg ? undefined : find(t, 'CURRENCY');
+      const orig = origAgg ?? curAgg;
       const rate = parseFloat(val(orig ?? t, 'CURRATE') ?? '');
       const origCur = val(orig ?? t, 'CURSYM');
+      const foreign = Boolean(orig && origCur && origCur.toUpperCase() !== currency && Number.isFinite(rate) && rate > 0);
+      const accountAmount = foreign && curAgg ? Math.round(amount * rate * 100) / 100 : amount;
+      const originalAmount = foreign ? (curAgg ? amount : Math.round((amount / rate) * 100) / 100) : null;
       txs.push({
         date,
         description: joinDesc(name, memo) || val(t, 'TRNTYPE') || '(no description)',
-        amount,
+        amount: accountAmount,
         balanceAfter: null,
         category: null,
         payee: name ?? null,
         pending: false,
         currency,
-        originalAmount: origCur && Number.isFinite(rate) && rate > 0 ? Math.round((amount / rate) * 100) / 100 : null,
-        originalCurrency: origCur && origCur !== currency ? origCur : null,
+        originalAmount,
+        originalCurrency: foreign ? origCur!.toUpperCase() : null,
         transactionDate: parseFlexibleDate(val(t, 'DTUSER'), 'YMD'),
         time: null,
         sourceId: val(t, 'FITID') ?? null,
@@ -140,7 +147,7 @@ export function parseOfx(text: string): Extraction {
         cardLast4: null,
         bankCategory: null,
         fee: null,
-        exchangeRate: Number.isFinite(rate) && rate > 0 ? rate : null,
+        exchangeRate: foreign ? rate : null,
         raw: leaves(t),
         attributes: null,
         merchant: null,

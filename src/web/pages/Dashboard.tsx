@@ -9,6 +9,7 @@ import { ChartFrame, type LegendItem } from '../components/charts/common';
 import { TimeChart, type TimeSeries } from '../components/charts/TimeChart';
 import { TransactionList } from '../components/TransactionList';
 import { Badge, Button, Card, Callout, Delta, EmptyState, ErrorNote, Loading, Money, PageHeader, Segmented, Stat } from '../components/ui';
+import { InsightsPanel } from '../components/Intel';
 import { DropZone } from '../components/Upload';
 import { qs, useApi } from '../lib/api';
 import { useAppData } from '../lib/data';
@@ -186,24 +187,23 @@ function MonthlyPanel() {
 
 function Kpis({ summary }: { summary: SummaryResponse }) {
   const t = today();
-  const from = startOfMonth(addMonths(t, -3));
+  const from = startOfMonth(t);
   const cf = useApi<CashflowResponse>(['cashflow', from, t], `/cashflow${qs({ from, to: t })}`);
-  const months = cf.data?.months ?? [];
-  const thisMonth = months[months.length - 1];
-  const lastMonth = months[months.length - 2];
+  const thisMonth = cf.data?.months[cf.data.months.length - 1];
   // Compare this month so far with the same number of days last month.
   const dayOfMonth = Number(t.slice(8, 10));
   const lastMonthEnd = endOfMonth(addMonths(t, -1));
   const lastMonthSameDay = addDays(startOfMonth(lastMonthEnd), Math.min(dayOfMonth, Number(lastMonthEnd.slice(8, 10))) - 1);
   const prevSoFar = useApi<CashflowResponse>(['cashflow', startOfMonth(lastMonthEnd), lastMonthSameDay], `/cashflow${qs({ from: startOfMonth(lastMonthEnd), to: lastMonthSameDay })}`);
-  const full3 = months.slice(0, 3);
-  const income3 = full3.reduce((s, m) => s + m.income, 0);
-  const spend3 = full3.reduce((s, m) => s + m.spending, 0);
-  const savingsRate = income3 > 0 ? (income3 - spend3) / income3 : null;
-  const accessible = summary.access.find((g) => g.id === 'now')?.value ?? 0;
-  const runway = spend3 > 0 ? accessible / (spend3 / 3) : null;
+  const k = summary.kpis;
   const pensions = summary.groups.find((g) => g.id === 'pensions')?.value ?? 0;
   const prevSpend = prevSoFar.data?.totals.spending;
+  const basis = (
+    <span className="inline-flex flex-wrap items-center gap-1">
+      {k.basis}
+      {k.savingsRate !== null && k.confidence !== 'high' && <Badge tone="muted">{k.confidence} confidence</Badge>}
+    </span>
+  );
   return (
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
       <Stat
@@ -211,9 +211,25 @@ function Kpis({ summary }: { summary: SummaryResponse }) {
         value={<Money value={thisMonth?.spending ?? 0} decimals={0} />}
         delta={prevSpend !== undefined && thisMonth ? <Delta value={thisMonth.spending - prevSpend} upIsGood={false} label="vs last month so far" /> : undefined}
       />
-      <Stat label="Savings rate" value={pct(savingsRate, 0)} sub={<span>last 3 months{lastMonth ? `, ${money(income3 - spend3, { decimals: 0 })} saved` : ''}</span>} />
-      <Stat label="Cash runway" value={runway !== null ? `${runway.toFixed(1)} months` : '—'} sub="accessible cash ÷ monthly spending" />
+      <Stat label="Savings rate" value={pct(k.savingsRate, 0)} sub={k.monthlySaving !== null ? <span>{money(k.monthlySaving, { decimals: 0 })} a month saved · {basis}</span> : basis} />
+      <Stat label="Cash runway" value={k.runwayMonths !== null ? `${k.runwayMonths.toFixed(1)} months` : '—'} sub={k.runwayMonths !== null ? 'accessible cash ÷ monthly spending' : basis} />
       <Stat label="Pensions" value={<Money value={pensions} decimals={0} />} sub={<Link to="/investments" className="text-accent hover:underline">Retirement outlook</Link>} />
+    </div>
+  );
+}
+
+function CoverageNote({ summary }: { summary: SummaryResponse }) {
+  const c = summary.coverage;
+  if (!summary.hasData) return null;
+  if (!c.jointTo && !c.limiting.length) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12.5px] text-ink-3">
+      <span>
+        {c.lastCompleteMonth ? <>Complete data for every account up to <span className="text-ink-2">{formatMonth(c.lastCompleteMonth)}</span></> : 'No month has data for every account yet'}
+        {c.jointTo && <>; latest day covered by all: <span className="text-ink-2">{formatDate(c.jointTo)}</span></>}.
+      </span>
+      {c.limiting.length > 0 && <span>Missing most recently: {c.limiting.slice(0, 3).map((l) => l.name).join(', ')}.</span>}
+      <Link to="/settings#health" className="text-accent hover:underline">Coverage</Link>
     </div>
   );
 }
@@ -311,6 +327,8 @@ export default function Dashboard() {
           </section>
 
           <Kpis summary={s} />
+          <CoverageNote summary={s} />
+          <InsightsPanel page="overview" title="Month in review and what to look at" />
 
           <section className="grid gap-5 lg:grid-cols-[1.35fr_1fr]">
             <AccountsPanel accounts={s.accounts} />

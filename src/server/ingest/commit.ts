@@ -7,7 +7,7 @@ import { catalogInstitution, findInstitution } from '../../shared/institutions';
 import { formatMoney } from '../../shared/money';
 import { taxYearOf } from '../../shared/uk';
 import type { Account, BalanceSnapshot, Draft, Figure, HoldingsSnapshot, ImportRecord, Transaction } from '../../shared/schema';
-import { DraftSchema } from '../../shared/schema';
+import { AccountSchema, BalanceSnapshotSchema, DraftSchema, FigureSchema, HoldingsSnapshotSchema, TransactionSchema } from '../../shared/schema';
 import { nowISO, safeFileName } from '../fsutil';
 import { balanceId, figureId, holdingsId, transactionId, transferGroupId } from '../ids';
 import { StoreError, type Store } from '../store';
@@ -33,8 +33,11 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
   const accountsCreated: string[] = [];
   const accountIds: string[] = [];
 
+  // Everything is built and validated first; nothing is written until all of it passes. Writes then
+  // follow in dependency order, and ids are derived from the import so a retry is idempotent.
   // 1. Accounts (and institutions) that need creating.
   const resolved = new Map<string, Account>();
+  const toCreate: { account: Account; institution?: { id: string; name: string; kind: string; fscsGroup?: string } }[] = [];
   for (const section of draft.sections) {
     if (section.target.mode === 'skip') continue;
     if (section.target.mode === 'existing') {
@@ -49,16 +52,13 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
       const cat = findInstitution(input.institutionName);
       institutionId = cat?.id ?? slugify(input.institutionName, store.institutions.map((i) => i.id));
     }
+    let institution: (typeof toCreate)[number]['institution'];
     if (institutionId && !store.institution(institutionId)) {
       const cat = catalogInstitution(institutionId);
-      await store.upsertInstitution({
-        id: institutionId,
-        name: cat?.name ?? input.institutionName ?? institutionId,
-        kind: cat?.kind ?? 'bank',
-        ...(cat?.fscsGroup ? { fscsGroup: cat.fscsGroup } : {}),
-      });
+      institution = { id: institutionId, name: cat?.name ?? input.institutionName ?? institutionId, kind: cat?.kind ?? 'bank', ...(cat?.fscsGroup ? { fscsGroup: cat.fscsGroup } : {}) };
     }
-    const id = store.account(input.id) ? slugify(input.id, store.accounts.map((a) => a.id)) : input.id;
+    const taken = [...store.accounts.map((a) => a.id), ...toCreate.map((x) => x.account.id)];
+    const id = taken.includes(input.id) ? slugify(input.id, taken) : input.id;
     const account: Account = {
       id,
       name: input.name,
@@ -72,7 +72,8 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
       ...(institutionId ? { institutionId } : {}),
       ...(input.last4 ? { last4: input.last4 } : {}),
     };
-    await store.upsertAccount(account);
+    AccountSchema.parse(account);
+    toCreate.push({ account, ...(institution ? { institution } : {}) });
     accountsCreated.push(id);
     resolved.set(section.key, account);
   }
@@ -93,8 +94,8 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
       }
       const base = `${row.date}|${row.amount}|${row.description}`;
       let occurrence = occurrences.get(base) ?? 0;
-      let id = transactionId(account.id, row.date, row.amount, row.description, occurrence);
-      while (store.transaction(id) || newTx.some((t) => t.id === id)) id = transactionId(account.id, row.date, row.amount, row.description, ++occurrence);
+      let id = transactionId(account.id, row.date, row.amount, row.description, occurrence, record.id);
+      while (newTx.some((t) => t.id === id)) id = transactionId(account.id, row.date, row.amount, row.description, ++occurrence, record.id);
       occurrences.set(base, occurrence + 1);
       const tx: Transaction = {
         id,
@@ -186,7 +187,17 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
       ...(f.payerReference ? { payerReference: f.payerReference } : {}),
     }));
 
+  // Validate everything before the first write.
+  for (const t of newTx) TransactionSchema.parse(t);
+  for (const b of balances) BalanceSnapshotSchema.parse(b);
+  for (const h of holdings) HoldingsSnapshotSchema.parse(h);
+  for (const f of figures) FigureSchema.parse(f);
+
   // 4. Write.
+  for (const { account, institution } of toCreate) {
+    if (institution && !store.institution(institution.id)) await store.upsertInstitution(institution as Parameters<Store['upsertInstitution']>[0]);
+    if (!store.account(account.id)) await store.upsertAccount(account);
+  }
   const label = record.document.fileName;
   const added = newTx.length ? await store.addTransactions(newTx, `import: ${label} (+${newTx.length} transactions)`) : 0;
   if (transferLinks.length) {
@@ -225,6 +236,10 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
       balancesAdded,
       holdingsAdded,
       figuresAdded,
+      sections: draft.sections.flatMap((s) => {
+        const account = resolved.get(s.key);
+        return account ? [{ key: s.key, accountId: account.id }] : [];
+      }),
     },
   };
   const names = [...new Set(accountIds)].map((id) => store.account(id)?.name ?? id).join(', ');

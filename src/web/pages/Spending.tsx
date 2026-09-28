@@ -1,13 +1,14 @@
-import { ArrowDownRight, ArrowUpRight, CircleCheck, Info, Repeat, TriangleAlert } from 'lucide-react';
+import { ArrowDownRight, ArrowUpRight, Calculator, Repeat } from 'lucide-react';
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import type { CashflowResponse, SpendingResponse } from '../../shared/api';
-import { addDays, addMonths, endOfMonth, formatMonth, startOfMonth, today } from '../../shared/dates';
+import { addMonths, endOfMonth, formatMonth, startOfMonth, today } from '../../shared/dates';
 import { taxYearOf } from '../../shared/uk';
 import { BarList, ColumnChart, Heatmap } from '../components/charts/bars';
 import { ChartFrame } from '../components/charts/common';
+import { InsightsPanel, SignalList } from '../components/Intel';
 import { TransactionList } from '../components/TransactionList';
-import { Badge, Card, EmptyState, Loading, Money, PageHeader, Segmented, Select, Stat, tableClasses } from '../components/ui';
+import { Badge, Callout, Card, EmptyState, Loading, Money, PageHeader, Segmented, Select, Stat, tableClasses } from '../components/ui';
 import { qs, useApi } from '../lib/api';
 import { cn, formatDate, money, pct } from '../lib/format';
 
@@ -25,7 +26,8 @@ function periodRange(p: Period): [string, string] {
     case 'tax-year':
       return [taxYearOf(t).start, t];
     default:
-      return [addDays(t, -89), t];
+      // This month and the two before, so each month's bills fall inside the period.
+      return [startOfMonth(addMonths(t, -2)), t];
   }
 }
 
@@ -52,6 +54,11 @@ export default function Spending() {
   const drill = (category: string, f = from, t = to) => void navigate(`/transactions?categories=${category}&period=custom&from=${f}&to=${t}`);
   const rows = s ? (level === 'groups' ? s.groups : s.categories) : [];
   const recurring = s?.recurring.filter((r) => r.active) ?? [];
+  // Compare spending rates over covered days, and only when both periods are at least half covered.
+  const rateChange =
+    s && s.previousTotal > 0 && s.coverage.days >= s.coverage.totalDays / 2 && s.coverage.previousDays >= s.coverage.totalDays / 2
+      ? s.total / s.coverage.days / (s.previousTotal / s.coverage.previousDays) - 1
+      : null;
 
   return (
     <div>
@@ -81,36 +88,40 @@ export default function Spending() {
               label="Spent"
               value={<Money value={s.total} decimals={0} />}
               delta={
-                s.previousTotal > 0 && Math.abs(s.total - s.previousTotal) / s.previousTotal >= 0.005 ? (
-                  <span className={cn('inline-flex items-center gap-0.5', s.total > s.previousTotal ? 'text-bad-ink' : 'text-good-ink')}>
-                    {s.total > s.previousTotal ? <ArrowUpRight className="size-3.5" /> : <ArrowDownRight className="size-3.5" />}
-                    {pct(Math.abs(s.total - s.previousTotal) / s.previousTotal, 0)}
+                rateChange !== null && Math.abs(rateChange) >= 0.005 ? (
+                  <span className={cn('inline-flex items-center gap-0.5', rateChange > 0 ? 'text-bad-ink' : 'text-good-ink')}>
+                    {rateChange > 0 ? <ArrowUpRight className="size-3.5" /> : <ArrowDownRight className="size-3.5" />}
+                    {pct(Math.abs(rateChange), 0)}
                   </span>
                 ) : undefined
               }
-              sub="vs the previous period"
+              sub={rateChange !== null ? `per day vs ${formatDate(s.previousFrom, { year: s.previousFrom.slice(0, 4) !== to.slice(0, 4) })} – ${formatDate(s.previousTo, { year: s.previousTo.slice(0, 4) !== to.slice(0, 4) })}` : 'too little data in the previous period to compare'}
             />
-            <Stat label="Per day" value={<Money value={s.dailyAverage} />} sub="average" />
+            <Stat label="Per day" value={<Money value={s.dailyAverage} />} sub={s.coverage.days < s.coverage.totalDays ? `over the ${s.coverage.days} days with data` : 'average'} />
             <Stat label="Biggest category" value={s.groups[0]?.name ?? '—'} sub={s.groups[0] ? <span><Money value={s.groups[0].amount} decimals={0} /> · {pct(s.groups[0].share, 0)}</span> : undefined} />
             <Stat label="Regular payments" value={<Money value={recurring.reduce((x, r) => x + r.monthlyCost, 0)} decimals={0} />} sub={`a month across ${recurring.length}`} />
           </div>
 
-          {s.insights.length > 0 && (
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {s.insights.map((i) => {
-                const Icon = i.tone === 'good' ? CircleCheck : i.tone === 'warning' ? TriangleAlert : Info;
-                return (
-                  <div key={i.id} className="flex gap-3 rounded-xl border border-line bg-panel px-4 py-3 shadow-card">
-                    <Icon className={cn('mt-0.5 size-4 shrink-0', i.tone === 'good' ? 'text-good-ink' : i.tone === 'warning' ? 'text-warn-ink' : 'text-accent')} />
-                    <div>
-                      <div className="text-[13.5px] font-semibold text-ink">{i.title}</div>
-                      <div className="sensitive text-[12.5px] text-ink-3">{i.detail}</div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+          {s.coverage.days < s.coverage.totalDays && (
+            <Callout tone="neutral" title={`Data covers ${s.coverage.days} of the ${s.coverage.totalDays} days in this period`}>
+              Totals include only what has been imported; averages use the covered days.
+              {s.coverage.limiting.length > 0 && ` Missing most: ${s.coverage.limiting.map((l) => `${l.name} (${l.missingDays} days)`).join(', ')}.`}
+            </Callout>
           )}
+
+          <div className="grid gap-5 lg:grid-cols-2">
+            <Card
+              title={
+                <span className="inline-flex items-center gap-2">
+                  <Calculator className="size-4 text-ink-3" aria-hidden /> Signals
+                </span>
+              }
+              description="Computed from your data by fixed rules; each shows its rule."
+            >
+              <SignalList signals={s.signals} empty={<div className="text-[13px] text-ink-3">Nothing stands out by the rules for this period.</div>} />
+            </Card>
+            <InsightsPanel page="spending" title="Claude’s notes on your habits" empty={<div className="text-[13px] text-ink-3">No notes yet. They are written after each import and in the monthly review.</div>} />
+          </div>
 
           {cf.data && (
             <ChartFrame
@@ -144,7 +155,7 @@ export default function Spending() {
           <div className="grid gap-5 lg:grid-cols-2">
             <Card
               title="Where it went"
-              description="Compared with the previous period of the same length"
+              description={`Compared with ${formatDate(s.previousFrom)} – ${formatDate(s.previousTo)}, the same stretch of the previous period`}
               actions={<Segmented size="sm" value={level} onChange={setLevel} options={[{ value: 'groups', label: 'Groups' }, { value: 'categories', label: 'Categories' }]} />}
             >
               <BarList
@@ -152,10 +163,11 @@ export default function Spending() {
                   id: c.id,
                   label: c.name,
                   value: c.amount,
-                  note: <ChangeNote change={c.change} />,
+                  note: c.amount === 0 && c.previous ? <span className="text-[12px] text-ink-3">was {money(c.previous, { decimals: 0 })}</span> : <ChangeNote change={c.change} />,
                   sub: c.groupName ? c.groupName : undefined,
                 }))}
-                onSelect={(id) => drill(id)}
+                // A category with nothing this period opens its transactions from the earlier one.
+                onSelect={(id) => (rows.find((r) => r.id === id)?.amount === 0 ? drill(id, s.previousFrom, s.previousTo) : drill(id))}
               />
             </Card>
             <Card title="Top merchants" padded={false}>

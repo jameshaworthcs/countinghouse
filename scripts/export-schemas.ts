@@ -8,16 +8,22 @@ import { z } from 'zod';
 import { PROJECT_ROOT } from '../src/server/config';
 import {
   AccountsFileSchema,
+  AssumptionSchema,
   BalanceSnapshotSchema,
+  ContextSchema,
   CategoriesFileSchema,
   CsvProfilesFileSchema,
   FigureSchema,
   GoalsFileSchema,
   HoldingsSnapshotSchema,
   ImportRecordSchema,
+  InsightSchema,
   InstitutionsFileSchema,
+  InstrumentsFileSchema,
   MetaSchema,
+  NoteSchema,
   ProfileSchema,
+  ResearchSchema,
   RulesFileSchema,
   SettingsSchema,
   TransactionSchema,
@@ -40,6 +46,12 @@ const schemas: [string, z.ZodType, string][] = [
   ['holdings', HoldingsSnapshotSchema, 'one line of data/holdings/<account>.jsonl'],
   ['figure', FigureSchema, 'one line of data/figures.jsonl'],
   ['import', ImportRecordSchema, 'data/imports/<year>/<id>.json'],
+  ['instruments', withSchemaKey(InstrumentsFileSchema), 'data/instruments.json'],
+  ['assumption', AssumptionSchema, 'one line of data/assumptions.jsonl'],
+  ['research', ResearchSchema, 'one line of data/research.jsonl'],
+  ['insight', InsightSchema, 'one line of data/insights.jsonl'],
+  ['context', ContextSchema, 'one line of data/context.jsonl'],
+  ['note', NoteSchema, 'one line of data/notes.jsonl'],
 ];
 await mkdir(out, { recursive: true });
 for (const [name, schema, describes] of schemas) {

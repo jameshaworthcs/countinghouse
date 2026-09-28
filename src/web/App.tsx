@@ -17,6 +17,7 @@ const TaxYear = lazy(() => import('./pages/TaxYear'));
 const Import = lazy(() => import('./pages/Import'));
 const Review = lazy(() => import('./pages/Review'));
 const Settings = lazy(() => import('./pages/Settings'));
+const Assumptions = lazy(() => import('./pages/Assumptions'));
 
 interface AuthStatus {
   configured: boolean;
@@ -71,6 +72,7 @@ const router = createBrowserRouter([
       { path: 'investments', element: page(<Investments />) },
       { path: 'tax', element: page(<TaxYear />) },
       { path: 'tax/:tab', element: page(<TaxYear />) },
+      { path: 'assumptions', element: page(<Assumptions />) },
       { path: 'import', element: page(<Import />) },
       { path: 'import/:id', element: page(<Review />) },
       { path: 'settings', element: page(<Settings />) },

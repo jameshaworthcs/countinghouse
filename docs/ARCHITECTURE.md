@@ -6,9 +6,14 @@ Browser (React SPA, TanStack Query)
    ▼
 Hono server  (Node 24, tsx; 127.0.0.1:4750 live, 4760 in development)
    ├─ security: Host allow-list · CSRF (custom header + Origin) · auth gate · CSP
-   ├─ routes/   auth · data (CRUD) · imports · analytics · system (SSE, git)
+   ├─ routes/   auth · data (CRUD) · imports · analytics · records · jobs · system (SSE, git)
    ├─ Store ─────────────────► data/*.json(l)  (atomic writes, validation, quarantine, file watcher)
-   │    └─ 'change' events ──► GitCommitter ──► git commit -- data/   (debounced, pathspec-limited)
+   │    └─ 'change' events ──► GitCommitter ──► git commit -- data/   (debounced, pathspec-limited, main only)
+   ├─ records.ts: the validated write path for assumptions, research, insights, context, instruments
+   │    (in-app jobs · POST /api/records · npm run records)
+   ├─ JobRunner (agents/) ───► claude CLI, locked down, one job at a time; state in the work area
+   │    ├─ research-instrument · research-provider · refresh-assumptions   (web tools, public inputs)
+   │    └─ insights-after-import · monthly-review · interpret-note          (the owner's data, no web)
    ├─ ImportService (queue) ─► work area .work/<data-dir>/   (uploads + drafts, never committed)
    │    ├─ detect → csv profiles · ofx · qif · santander-txt   (deterministic, local)
    │    ├─ images: capture date (EXIF/filename/mtime), tiling of long screenshots
@@ -17,8 +22,10 @@ Hono server  (Node 24, tsx; 127.0.0.1:4750 live, 4760 in development)
    │    └─ commitDraft → Store (+ document archived, import record written)
    ├─ InboxWatcher: inbox/ → ImportService
    └─ Analytics (cached per store version)
-        BalanceEngine · estate · cashflow · spending · recurring · projections
-        allowances · selfassessment · investments · monthly · health (+FSCS)
+        BalanceEngine · Coverage · estate · cashflow · spending (+ computed signals) · recurring
+        params (per account and fund, from assumptions, research and statements) · model (pure
+        projection, bands, retirement, fee drag) · projections · investments · allowances
+        selfassessment · monthly · health (+coverage, FSCS)
 ```
 
 Source layout:
@@ -28,9 +35,11 @@ Source layout:
 | `src/shared/` | Isomorphic code: schemas (`schema.ts`), money, dates, UK rules, account-type metadata, categories, merchants, categoriser, reconciliation, API types |
 | `src/server/` | Store, git, auth, security, migrations, enrichment, routes, app composition |
 | `src/server/ingest/` | Everything from bytes to committed records |
-| `src/server/analytics/` | Read-only computations over the store |
+| `src/server/analytics/` | Read-only computations over the store; `model.ts` is pure (no store access) |
+| `src/server/agents/` | Agent jobs: the CLI runner, job kinds and prompts, the digest, the queue |
+| `src/server/records.ts` | The validated write path for agent-maintained records |
 | `src/web/` | The React app: `pages/`, `components/` (UI kit, charts), `lib/` (API client, prefs, data context) |
-| `scripts/` | Demo data, import CLI, validate, schema export, screenshots, set-password |
+| `scripts/` | Demo data, import CLI, records CLI, validate, schema export, screenshots, set-password, deploy |
 | `tests/` | Vitest suites + synthetic fixtures for every supported bank format |
 | `deploy/` | systemd unit template, Caddy site block, installer |
 
@@ -55,6 +64,33 @@ Every number can be traced back, and every derived value can be rebuilt without 
 - New derived features read existing records.
 - New source fields are backfilled by a migration from `raw` or from the stored extraction.
 - A better extraction prompt can be re-run on the archived document.
+
+## Assumptions, research and insights
+
+The equations are in [FORMULAS.md](FORMULAS.md); the rules for writing these records are in
+[AGENTS.md](AGENTS.md).
+
+- **Assumptions** (`data/assumptions.jsonl`) are append-only versions. `AssumptionSet`
+  (`src/shared/assumptions.ts`) resolves a key for a target:
+  - your records first, then agents', then the code fallback;
+  - within each, the most specific scope wins.
+- **Parameters** (`analytics/params.ts`):
+  - Each account's and holding's expected return, volatility, charges and interest come with their
+    source and a plain-words basis.
+  - Facts (fund charges, make-up, fee schedules, current rates) come from statements and research;
+    forecasts only from assumptions.
+- **The model** (`analytics/model.ts`) is pure. It simulates month by month, with inflation and
+  charges, and computes the p10–p90 range from exact moment recursions (with the uncertainty in
+  expected returns integrated), checked against Monte Carlo in the tests.
+- **Coverage** (`analytics/coverage.ts`):
+  - It knows which days each account has data for, from import statement periods.
+  - Averages, baselines and signals use covered time only, and every page can say what is missing.
+- **Research and insights** are written by agent jobs through `records.ts`, with provenance.
+  - Pages show insights in a panel labelled as Claude's inferences, apart from computed figures
+    and computed signals.
+  - The **Assumptions & research** page shows every assumption with its source and history, your
+    overrides, funds and providers with their research, what you have told the app, and the agent
+    jobs.
 
 ## Store
 
@@ -96,9 +132,17 @@ Every number can be traced back, and every derived value can be rebuilt without 
    - The balance date and its provenance are resolved.
    - Tax figures (P60, interest certificates…) are matched to accounts and deduplicated.
 5. **Review.** The UI edits the draft; reconciliation runs live in the browser.
-6. **Commit.** `commitDraft` creates accounts and institutions, assigns stable ids (content hash
-   plus occurrence), links transfers on both legs, writes balances, holdings and figures, archives
-   the document and writes the import record. The result is a single git commit.
+6. **Commit.** `commitDraft` builds and validates everything first, then writes.
+   - It creates accounts and institutions.
+   - It assigns stable ids: a content hash plus occurrence, including the import id, so retrying
+     a failed commit adds nothing twice.
+   - It links transfers on both legs, and writes balances, holdings and figures.
+   - It archives the document and writes the import record, including the account each section
+     went to, which gives coverage.
+   - The result is a single git commit.
+
+   Pending rows are shown but not recorded unless you include them: the settled row arrives with
+   the next statement.
 
 "Commit all ready" commits only drafts with:
 
@@ -140,8 +184,8 @@ and a card in credit counts as cash.
   - a table view on every chart;
   - privacy blur on all amounts.
 - Pages: Overview, Accounts (+ detail), Transactions (virtualised), Spending, Projections,
-  Investments & pensions, Tax year (Allowances, Self Assessment prep), Import (+ Review),
-  Settings, Login.
+  Investments & pensions, Tax year (Allowances, Self Assessment prep), Assumptions & research,
+  Import (+ Review), Settings, Login.
 
 ## Security model
 
@@ -156,6 +200,10 @@ and a card in credit counts as cash.
     password-hash epoch (changing the password logs everyone out).
   - Logins are throttled at 10 failures per client and 50 in total per 15 minutes.
   - Client IP and `https` are trusted from `X-Forwarded-*` only when the peer is loopback (Caddy).
-- **Claude CLI extraction** runs with `--tools Read`, `--safe-mode` (no hooks, plugins, MCP or
-  CLAUDE.md), `--no-session-persistence`, and non-essential traffic disabled, in a scratch
-  directory holding only that document.
+- **Claude CLI extraction** runs with `--tools Read`, `--restricted` (file tools confined to the
+  working directory), `--safe-mode` (no hooks, plugins, MCP or CLAUDE.md),
+  `--no-session-persistence`, and non-essential traffic disabled, in a scratch directory holding
+  only that document.
+- **Agent jobs** run the same way, with the tools their privacy class allows:
+  - research gets WebSearch and WebFetch, with a prompt built only from public identifiers;
+  - analysis gets Read of a digest in its scratch directory, or no tools.

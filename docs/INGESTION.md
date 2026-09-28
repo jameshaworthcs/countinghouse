@@ -32,7 +32,7 @@ The same file twice (by SHA-256) is recognised as already imported.
 | first direct and other Date/Description/Amount CSVs | `date-description-amount` | |
 | Trading 212 CSV | `trading-212` | Buys and withdrawals are money out; deposits count as contributions |
 | Anything else CSV | auto-detected mapping | Confident mappings import straight away (flagged); otherwise you map the columns once and save them as a profile |
-| OFX / QFX (1.x SGML and 2.x XML) | `ofx` | Bank and credit-card statements, FITID as id, ledger/available balance |
+| OFX / QFX (1.x SGML and 2.x XML) | `ofx` | Bank and credit-card statements, FITID as id, ledger/available balance; foreign amounts per `<ORIGCURRENCY>` (already converted) or `<CURRENCY>` (converted at CURRATE) |
 | QIF | `qif` | Day/month order detected across the whole file |
 | Santander text export | `santander-txt` | Newest-first, running balances |
 
@@ -62,7 +62,7 @@ ISA, LISA, SIPP or pension app go to the extraction engine chosen in Settings:
 
 | Engine | When | How |
 |---|---|---|
-| `claude-cli` | Default when the `claude` CLI is installed and logged in | `claude -p` with `--json-schema`, `--tools Read`, `--safe-mode`, `--no-session-persistence`, run in a scratch directory containing only the document |
+| `claude-cli` | Default when the `claude` CLI is installed and logged in | `claude -p` with `--json-schema`, `--tools Read`, `--restricted` (file tools confined to the scratch directory), `--safe-mode`, `--no-session-persistence`, run in a scratch directory containing only the document |
 | `claude-api` | When `ANTHROPIC_API_KEY` is set (or chosen) | Messages API with structured outputs (`output_config.format`), streaming, and `fallbacks: "default"` so a refusal is retried on the recommended fallback model |
 | `ocr` | Always available offline | tesseract / pdftotext; proposes the headline balance and candidate values, and parses statement-style lines using running balances to infer signs. Low confidence, so review carefully |
 
@@ -120,3 +120,12 @@ Screenshot dates come from the first available of:
   pension becomes a `contribution`.
 - **Liabilities.** A credit-card balance printed as a positive "amount owed" is stored as
   negative, with a note.
+- **Pending rows** are shown in the draft but not included by default, and reconciliation leaves
+  them out. Statement balances are of settled transactions, and the settled row arrives with the
+  next statement. Include one only if you know it will never appear settled.
+- **Figures** are matched to an account by last 4 digits only when exactly one account has them.
+- **Committing is safe to retry.** Everything is validated before the first write. Transaction ids
+  include the import id, so committing the same import again adds nothing twice.
+- **Funds on statements become instruments.** A holding with no matching instrument is recorded as
+  one, with its name and identifiers exactly as printed, and researched by an agent job
+  ([AGENTS.md](AGENTS.md)).

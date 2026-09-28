@@ -1,0 +1,1362 @@
+{
+  "$id": "research.schema.json",
+  "title": "research",
+  "description": "Schema for one line of data/research.jsonl. Generated from src/shared/schema.ts by `npm run schemas`; do not edit.",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^res_[0-9a-f]{16}$"
+        },
+        "subject": {
+          "type": "object",
+          "properties": {
+            "instrumentId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+              "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+            },
+            "institutionId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+              "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+            },
+            "assetClass": {
+              "type": "string",
+              "enum": [
+                "equity",
+                "bond",
+                "mixed",
+                "property",
+                "cash",
+                "commodity",
+                "crypto",
+                "other"
+              ]
+            },
+            "topic": {
+              "type": "string",
+              "maxLength": 80
+            }
+          }
+        },
+        "asOf": {
+          "type": "string",
+          "description": "Calendar date, YYYY-MM-DD"
+        },
+        "sources": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 300
+              },
+              "url": {
+                "type": "string",
+                "format": "uri"
+              },
+              "publisher": {
+                "type": "string",
+                "maxLength": 120
+              },
+              "retrievedOn": {
+                "type": "string",
+                "description": "Calendar date, YYYY-MM-DD"
+              },
+              "quote": {
+                "type": "string",
+                "maxLength": 600
+              }
+            },
+            "required": [
+              "title"
+            ]
+          }
+        },
+        "confidence": {
+          "default": "medium",
+          "type": "string",
+          "enum": [
+            "high",
+            "medium",
+            "low"
+          ]
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "provenance": {
+          "type": "object",
+          "properties": {
+            "setBy": {
+              "type": "string",
+              "enum": [
+                "owner",
+                "agent",
+                "system"
+              ]
+            },
+            "model": {
+              "type": "string"
+            },
+            "promptVersion": {
+              "type": "string"
+            },
+            "jobId": {
+              "type": "string"
+            },
+            "session": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "setBy"
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+          "description": "ISO 8601 timestamp"
+        },
+        "kind": {
+          "type": "string",
+          "const": "instrument.facts"
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "isin": {
+              "type": "string"
+            },
+            "ticker": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "fund",
+                "etf",
+                "investment_trust",
+                "share",
+                "bond",
+                "gilt",
+                "money_market",
+                "crypto",
+                "other"
+              ]
+            },
+            "manager": {
+              "type": "string"
+            },
+            "ocf": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 0.05
+            },
+            "transactionCosts": {
+              "type": "number",
+              "minimum": -0.01,
+              "maximum": 0.05
+            },
+            "allocation": {
+              "type": "object",
+              "properties": {
+                "equity": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "bond": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "cash": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "property": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "commodity": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "crypto": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "other": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                }
+              }
+            },
+            "regions": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              }
+            },
+            "benchmark": {
+              "type": "string"
+            },
+            "launchDate": {
+              "type": "string",
+              "description": "Calendar date, YYYY-MM-DD"
+            },
+            "distribution": {
+              "type": "string",
+              "enum": [
+                "accumulation",
+                "income"
+              ]
+            },
+            "riskIndicator": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 7
+            },
+            "currency": {
+              "type": "string",
+              "pattern": "^[A-Z]{3}$",
+              "description": "ISO 4217 currency code"
+            },
+            "fundSizeGbp": {
+              "type": "number",
+              "minimum": 0
+            }
+          }
+        }
+      },
+      "required": [
+        "id",
+        "subject",
+        "asOf",
+        "sources",
+        "provenance",
+        "createdAt",
+        "kind",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^res_[0-9a-f]{16}$"
+        },
+        "subject": {
+          "type": "object",
+          "properties": {
+            "instrumentId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+              "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+            },
+            "institutionId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+              "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+            },
+            "assetClass": {
+              "type": "string",
+              "enum": [
+                "equity",
+                "bond",
+                "mixed",
+                "property",
+                "cash",
+                "commodity",
+                "crypto",
+                "other"
+              ]
+            },
+            "topic": {
+              "type": "string",
+              "maxLength": 80
+            }
+          }
+        },
+        "asOf": {
+          "type": "string",
+          "description": "Calendar date, YYYY-MM-DD"
+        },
+        "sources": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 300
+              },
+              "url": {
+                "type": "string",
+                "format": "uri"
+              },
+              "publisher": {
+                "type": "string",
+                "maxLength": 120
+              },
+              "retrievedOn": {
+                "type": "string",
+                "description": "Calendar date, YYYY-MM-DD"
+              },
+              "quote": {
+                "type": "string",
+                "maxLength": 600
+              }
+            },
+            "required": [
+              "title"
+            ]
+          }
+        },
+        "confidence": {
+          "default": "medium",
+          "type": "string",
+          "enum": [
+            "high",
+            "medium",
+            "low"
+          ]
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "provenance": {
+          "type": "object",
+          "properties": {
+            "setBy": {
+              "type": "string",
+              "enum": [
+                "owner",
+                "agent",
+                "system"
+              ]
+            },
+            "model": {
+              "type": "string"
+            },
+            "promptVersion": {
+              "type": "string"
+            },
+            "jobId": {
+              "type": "string"
+            },
+            "session": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "setBy"
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+          "description": "ISO 8601 timestamp"
+        },
+        "kind": {
+          "type": "string",
+          "const": "instrument.performance"
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "currency": {
+              "default": "GBP",
+              "type": "string",
+              "pattern": "^[A-Z]{3}$",
+              "description": "ISO 4217 currency code"
+            },
+            "periodEnd": {
+              "type": "string",
+              "description": "Calendar date, YYYY-MM-DD"
+            },
+            "returns": {
+              "type": "object",
+              "properties": {
+                "y1": {
+                  "type": "number",
+                  "minimum": -1,
+                  "maximum": 10
+                },
+                "y3": {
+                  "type": "number",
+                  "minimum": -1,
+                  "maximum": 10
+                },
+                "y5": {
+                  "type": "number",
+                  "minimum": -1,
+                  "maximum": 10
+                },
+                "y10": {
+                  "type": "number",
+                  "minimum": -1,
+                  "maximum": 10
+                },
+                "sinceLaunch": {
+                  "type": "number",
+                  "minimum": -1,
+                  "maximum": 10
+                }
+              }
+            },
+            "benchmarkReturns": {
+              "type": "object",
+              "properties": {
+                "y1": {
+                  "type": "number",
+                  "minimum": -1,
+                  "maximum": 10
+                },
+                "y3": {
+                  "type": "number",
+                  "minimum": -1,
+                  "maximum": 10
+                },
+                "y5": {
+                  "type": "number",
+                  "minimum": -1,
+                  "maximum": 10
+                },
+                "y10": {
+                  "type": "number",
+                  "minimum": -1,
+                  "maximum": 10
+                },
+                "sinceLaunch": {
+                  "type": "number",
+                  "minimum": -1,
+                  "maximum": 10
+                }
+              }
+            },
+            "calendarYears": {
+              "default": [],
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "year": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "return": {
+                    "type": "number",
+                    "minimum": -1,
+                    "maximum": 10
+                  }
+                },
+                "required": [
+                  "year",
+                  "return"
+                ]
+              }
+            },
+            "volatility": {
+              "default": {},
+              "type": "object",
+              "properties": {
+                "y3": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 5
+                },
+                "y5": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 5
+                }
+              }
+            },
+            "maxDrawdown": {
+              "type": "number",
+              "minimum": -1,
+              "maximum": 0
+            }
+          },
+          "required": [
+            "periodEnd",
+            "returns"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "subject",
+        "asOf",
+        "sources",
+        "provenance",
+        "createdAt",
+        "kind",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^res_[0-9a-f]{16}$"
+        },
+        "subject": {
+          "type": "object",
+          "properties": {
+            "instrumentId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+              "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+            },
+            "institutionId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+              "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+            },
+            "assetClass": {
+              "type": "string",
+              "enum": [
+                "equity",
+                "bond",
+                "mixed",
+                "property",
+                "cash",
+                "commodity",
+                "crypto",
+                "other"
+              ]
+            },
+            "topic": {
+              "type": "string",
+              "maxLength": 80
+            }
+          }
+        },
+        "asOf": {
+          "type": "string",
+          "description": "Calendar date, YYYY-MM-DD"
+        },
+        "sources": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 300
+              },
+              "url": {
+                "type": "string",
+                "format": "uri"
+              },
+              "publisher": {
+                "type": "string",
+                "maxLength": 120
+              },
+              "retrievedOn": {
+                "type": "string",
+                "description": "Calendar date, YYYY-MM-DD"
+              },
+              "quote": {
+                "type": "string",
+                "maxLength": 600
+              }
+            },
+            "required": [
+              "title"
+            ]
+          }
+        },
+        "confidence": {
+          "default": "medium",
+          "type": "string",
+          "enum": [
+            "high",
+            "medium",
+            "low"
+          ]
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "provenance": {
+          "type": "object",
+          "properties": {
+            "setBy": {
+              "type": "string",
+              "enum": [
+                "owner",
+                "agent",
+                "system"
+              ]
+            },
+            "model": {
+              "type": "string"
+            },
+            "promptVersion": {
+              "type": "string"
+            },
+            "jobId": {
+              "type": "string"
+            },
+            "session": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "setBy"
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+          "description": "ISO 8601 timestamp"
+        },
+        "kind": {
+          "type": "string",
+          "const": "provider.rates"
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "products": {
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "accountType": {
+                    "type": "string",
+                    "enum": [
+                      "current",
+                      "savings",
+                      "cash_isa",
+                      "stocks_isa",
+                      "lisa",
+                      "ifisa",
+                      "gia",
+                      "sipp",
+                      "workplace_pension",
+                      "personal_pension",
+                      "db_pension",
+                      "state_pension",
+                      "premium_bonds",
+                      "crypto",
+                      "property",
+                      "other_asset",
+                      "credit_card",
+                      "loan",
+                      "mortgage",
+                      "student_loan",
+                      "other_liability"
+                    ]
+                  },
+                  "aer": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 0.25
+                  },
+                  "variable": {
+                    "default": true,
+                    "type": "boolean"
+                  },
+                  "bonus": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 0.25
+                  },
+                  "bonusEndsOn": {
+                    "type": "string",
+                    "description": "Calendar date, YYYY-MM-DD"
+                  },
+                  "conditions": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "aer"
+                ]
+              }
+            }
+          },
+          "required": [
+            "products"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "subject",
+        "asOf",
+        "sources",
+        "provenance",
+        "createdAt",
+        "kind",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^res_[0-9a-f]{16}$"
+        },
+        "subject": {
+          "type": "object",
+          "properties": {
+            "instrumentId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+              "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+            },
+            "institutionId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+              "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+            },
+            "assetClass": {
+              "type": "string",
+              "enum": [
+                "equity",
+                "bond",
+                "mixed",
+                "property",
+                "cash",
+                "commodity",
+                "crypto",
+                "other"
+              ]
+            },
+            "topic": {
+              "type": "string",
+              "maxLength": 80
+            }
+          }
+        },
+        "asOf": {
+          "type": "string",
+          "description": "Calendar date, YYYY-MM-DD"
+        },
+        "sources": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 300
+              },
+              "url": {
+                "type": "string",
+                "format": "uri"
+              },
+              "publisher": {
+                "type": "string",
+                "maxLength": 120
+              },
+              "retrievedOn": {
+                "type": "string",
+                "description": "Calendar date, YYYY-MM-DD"
+              },
+              "quote": {
+                "type": "string",
+                "maxLength": 600
+              }
+            },
+            "required": [
+              "title"
+            ]
+          }
+        },
+        "confidence": {
+          "default": "medium",
+          "type": "string",
+          "enum": [
+            "high",
+            "medium",
+            "low"
+          ]
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "provenance": {
+          "type": "object",
+          "properties": {
+            "setBy": {
+              "type": "string",
+              "enum": [
+                "owner",
+                "agent",
+                "system"
+              ]
+            },
+            "model": {
+              "type": "string"
+            },
+            "promptVersion": {
+              "type": "string"
+            },
+            "jobId": {
+              "type": "string"
+            },
+            "session": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "setBy"
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+          "description": "ISO 8601 timestamp"
+        },
+        "kind": {
+          "type": "string",
+          "const": "provider.fees"
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "tiers": {
+              "default": [],
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "upToGbp": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  },
+                  "rate": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 0.05
+                  }
+                },
+                "required": [
+                  "rate"
+                ]
+              }
+            },
+            "capGbpPerYear": {
+              "type": "number",
+              "minimum": 0
+            },
+            "fixedGbpPerYear": {
+              "type": "number",
+              "minimum": 0
+            },
+            "accountTypes": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "current",
+                  "savings",
+                  "cash_isa",
+                  "stocks_isa",
+                  "lisa",
+                  "ifisa",
+                  "gia",
+                  "sipp",
+                  "workplace_pension",
+                  "personal_pension",
+                  "db_pension",
+                  "state_pension",
+                  "premium_bonds",
+                  "crypto",
+                  "property",
+                  "other_asset",
+                  "credit_card",
+                  "loan",
+                  "mortgage",
+                  "student_loan",
+                  "other_liability"
+                ]
+              }
+            },
+            "notes": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "required": [
+        "id",
+        "subject",
+        "asOf",
+        "sources",
+        "provenance",
+        "createdAt",
+        "kind",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^res_[0-9a-f]{16}$"
+        },
+        "subject": {
+          "type": "object",
+          "properties": {
+            "instrumentId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+              "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+            },
+            "institutionId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+              "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+            },
+            "assetClass": {
+              "type": "string",
+              "enum": [
+                "equity",
+                "bond",
+                "mixed",
+                "property",
+                "cash",
+                "commodity",
+                "crypto",
+                "other"
+              ]
+            },
+            "topic": {
+              "type": "string",
+              "maxLength": 80
+            }
+          }
+        },
+        "asOf": {
+          "type": "string",
+          "description": "Calendar date, YYYY-MM-DD"
+        },
+        "sources": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 300
+              },
+              "url": {
+                "type": "string",
+                "format": "uri"
+              },
+              "publisher": {
+                "type": "string",
+                "maxLength": 120
+              },
+              "retrievedOn": {
+                "type": "string",
+                "description": "Calendar date, YYYY-MM-DD"
+              },
+              "quote": {
+                "type": "string",
+                "maxLength": 600
+              }
+            },
+            "required": [
+              "title"
+            ]
+          }
+        },
+        "confidence": {
+          "default": "medium",
+          "type": "string",
+          "enum": [
+            "high",
+            "medium",
+            "low"
+          ]
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "provenance": {
+          "type": "object",
+          "properties": {
+            "setBy": {
+              "type": "string",
+              "enum": [
+                "owner",
+                "agent",
+                "system"
+              ]
+            },
+            "model": {
+              "type": "string"
+            },
+            "promptVersion": {
+              "type": "string"
+            },
+            "jobId": {
+              "type": "string"
+            },
+            "session": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "setBy"
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+          "description": "ISO 8601 timestamp"
+        },
+        "kind": {
+          "type": "string",
+          "const": "market.outlook"
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "assetClass": {
+              "type": "string",
+              "enum": [
+                "equity",
+                "bond",
+                "mixed",
+                "property",
+                "cash",
+                "commodity",
+                "crypto",
+                "other"
+              ]
+            },
+            "publisher": {
+              "type": "string",
+              "minLength": 1
+            },
+            "horizonYears": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50
+            },
+            "currency": {
+              "default": "GBP",
+              "type": "string",
+              "pattern": "^[A-Z]{3}$",
+              "description": "ISO 4217 currency code"
+            },
+            "expectedReturnNominal": {
+              "type": "number",
+              "minimum": -1,
+              "maximum": 10
+            },
+            "expectedReturnReal": {
+              "type": "number",
+              "minimum": -1,
+              "maximum": 10
+            },
+            "range": {
+              "type": "object",
+              "properties": {
+                "low": {
+                  "type": "number",
+                  "minimum": -1,
+                  "maximum": 10
+                },
+                "high": {
+                  "type": "number",
+                  "minimum": -1,
+                  "maximum": 10
+                }
+              },
+              "required": [
+                "low",
+                "high"
+              ]
+            },
+            "volatility": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 5
+            }
+          },
+          "required": [
+            "assetClass",
+            "publisher",
+            "horizonYears"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "subject",
+        "asOf",
+        "sources",
+        "provenance",
+        "createdAt",
+        "kind",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^res_[0-9a-f]{16}$"
+        },
+        "subject": {
+          "type": "object",
+          "properties": {
+            "instrumentId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+              "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+            },
+            "institutionId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+              "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+            },
+            "assetClass": {
+              "type": "string",
+              "enum": [
+                "equity",
+                "bond",
+                "mixed",
+                "property",
+                "cash",
+                "commodity",
+                "crypto",
+                "other"
+              ]
+            },
+            "topic": {
+              "type": "string",
+              "maxLength": 80
+            }
+          }
+        },
+        "asOf": {
+          "type": "string",
+          "description": "Calendar date, YYYY-MM-DD"
+        },
+        "sources": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 300
+              },
+              "url": {
+                "type": "string",
+                "format": "uri"
+              },
+              "publisher": {
+                "type": "string",
+                "maxLength": 120
+              },
+              "retrievedOn": {
+                "type": "string",
+                "description": "Calendar date, YYYY-MM-DD"
+              },
+              "quote": {
+                "type": "string",
+                "maxLength": 600
+              }
+            },
+            "required": [
+              "title"
+            ]
+          }
+        },
+        "confidence": {
+          "default": "medium",
+          "type": "string",
+          "enum": [
+            "high",
+            "medium",
+            "low"
+          ]
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "provenance": {
+          "type": "object",
+          "properties": {
+            "setBy": {
+              "type": "string",
+              "enum": [
+                "owner",
+                "agent",
+                "system"
+              ]
+            },
+            "model": {
+              "type": "string"
+            },
+            "promptVersion": {
+              "type": "string"
+            },
+            "jobId": {
+              "type": "string"
+            },
+            "session": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "setBy"
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+          "description": "ISO 8601 timestamp"
+        },
+        "kind": {
+          "type": "string",
+          "const": "economy.indicator"
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "indicator": {
+              "type": "string",
+              "enum": [
+                "cpi",
+                "earnings",
+                "bank-rate",
+                "house-prices",
+                "gilt-yield"
+              ]
+            },
+            "basis": {
+              "type": "string",
+              "enum": [
+                "latest",
+                "forecast",
+                "target"
+              ]
+            },
+            "value": {
+              "type": "number",
+              "minimum": -1,
+              "maximum": 1
+            },
+            "period": {
+              "type": "string",
+              "maxLength": 40
+            },
+            "publisher": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "indicator",
+            "basis",
+            "value",
+            "period",
+            "publisher"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "subject",
+        "asOf",
+        "sources",
+        "provenance",
+        "createdAt",
+        "kind",
+        "data"
+      ]
+    }
+  ]
+}

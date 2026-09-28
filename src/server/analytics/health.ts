@@ -1,7 +1,7 @@
 // Data health: validation problems, statement gaps, uncategorised spending, accounts with no known
 // balance, stale accounts and FSCS exposure.
 
-import { balanceModeOf, cadenceOf } from '../../shared/accounts';
+import { balanceModeOf, staleAfterDays } from '../../shared/accounts';
 import type { DataHealthResponse } from '../../shared/api';
 import { CategoryIndex } from '../../shared/categories';
 import { addDays, diffDays, today } from '../../shared/dates';
@@ -12,6 +12,9 @@ import type { BalanceEngine } from './balances';
 import { classifyFlow } from './cashflow';
 
 const DEPOSIT_TYPES = new Set(['current', 'savings', 'cash_isa']);
+
+/** Share of the FSCS limit at which a banking licence's total is flagged as close to it. */
+export const FSCS_WARN_SHARE = 0.8;
 
 export function fscsExposure(store: Store, engine: BalanceEngine): DataHealthResponse['fscs'] {
   const now = today();
@@ -29,7 +32,7 @@ export function fscsExposure(store: Store, engine: BalanceEngine): DataHealthRes
     groups.set(group, g);
   }
   return [...groups.entries()]
-    .map(([group, g]) => ({ group, institutions: [...g.institutions], total: fromMinor(g.total), limit, over: fromMinor(g.total) > limit }))
+    .map(([group, g]) => ({ group, institutions: [...g.institutions], total: fromMinor(g.total), limit, over: fromMinor(g.total) > limit, near: fromMinor(g.total) >= limit * FSCS_WARN_SHARE }))
     .sort((a, b) => b.total - a.total);
 }
 
@@ -45,7 +48,7 @@ export function dataHealth(store: Store, engine: BalanceEngine): DataHealthRespo
     const info = engine.info(a.id);
     if (balanceModeOf(a) === 'ledger' && info && info.anchors === 0 && store.transactions(a.id).length > 0) noBalance.push({ accountId: a.id, name: a.name });
     const last = engine.lastDataDate(a.id);
-    if (a.status === 'open' && last && diffDays(last, now) > (cadenceOf(a.type) === 'yearly' ? 400 : store.settings.staleAfterDays)) stale.push({ accountId: a.id, name: a.name, days: diffDays(last, now) });
+    if (a.status === 'open' && last && diffDays(last, now) > staleAfterDays(a.type, store.settings.staleAfterDays)) stale.push({ accountId: a.id, name: a.name, days: diffDays(last, now) });
   }
   const since = addDays(now, -365);
   const uncategorised = store

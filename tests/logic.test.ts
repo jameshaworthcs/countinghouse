@@ -12,6 +12,7 @@ import { classifyDuplicates } from '../src/server/ingest/dedup';
 import { matchAccount } from '../src/server/ingest/match';
 import { Store } from '../src/server/store';
 import { CategoryIndex, defaultCategories } from '../src/shared/categories';
+import { addDays } from '../src/shared/dates';
 import { Categoriser } from '../src/shared/categorise';
 import { cleanPayee, matchMerchant } from '../src/shared/merchants';
 import type { Account, Rule, Transaction } from '../src/shared/schema';
@@ -232,6 +233,35 @@ describe('store, balances and analytics', () => {
     const [sub] = detectRecurring(store, '2026-09-20');
     expect(sub).toMatchObject({ payee: 'Netflix', cadence: 'monthly', typicalAmount: 12.99, active: true });
     expect(sub!.priceChange).toMatchObject({ from: 10.99, to: 12.99 });
+  });
+
+  it('follows a subscription moved to another account, and keeps concurrent ones apart', async () => {
+    await store.setCategories(defaultCategories());
+    await store.setAccounts([...store.accounts, acct('card', 'credit_card')]);
+    // Spotify: two payments from the current account, then three from the card. Neither run alone
+    // has the three payments a subscription needs.
+    const spotify = [
+      ['current', '2026-05-03'],
+      ['current', '2026-06-03'],
+      ['card', '2026-07-03'],
+      ['card', '2026-08-03'],
+      ['card', '2026-09-03'],
+    ] as const;
+    // A gym paid monthly from both accounts at once: two memberships, not one fortnightly payment.
+    const gym = ['2026-06-01', '2026-07-01', '2026-08-01', '2026-09-01'].flatMap((d) => [
+      tx('current', d, -30, 'PUREGYM', { payee: 'PureGym', category: 'fitness' }),
+      tx('card', addDays(d, 14), -30, 'PUREGYM', { payee: 'PureGym', category: 'fitness' }),
+    ]);
+    await store.addTransactions([...spotify.map(([a, d]) => tx(a, d, -11.99, 'SPOTIFY', { payee: 'Spotify', category: 'streaming' })), ...gym], 'test');
+    const found = detectRecurring(store, '2026-09-20');
+    const music = found.filter((r) => r.payee === 'Spotify');
+    expect(music).toHaveLength(1);
+    expect(music[0]).toMatchObject({ cadence: 'monthly', count: 5, accountId: 'card', active: true });
+    const gyms = found.filter((r) => r.payee === 'PureGym');
+    expect(gyms.map((g) => [g.accountId, g.cadence]).sort()).toEqual([
+      ['card', 'monthly'],
+      ['current', 'monthly'],
+    ]);
   });
 
   it('counts ISA subscriptions, provider figures and one-sided transfers', async () => {

@@ -2,6 +2,7 @@
 
 import type { Context } from 'hono';
 import { z } from 'zod';
+import type { JobRunner } from './agents/jobs';
 import type { Analytics } from './analytics';
 import type { Auth } from './auth';
 import type { Config } from './config';
@@ -9,6 +10,11 @@ import type { GitCommitter } from './git';
 import type { InboxWatcher } from './ingest/inbox';
 import type { ImportService } from './ingest/service';
 import { StoreError, type Store } from './store';
+
+/** What routes need from the agent job runner (src/server/agents/jobs.ts). */
+export interface JobQueue {
+  enqueue(input: { kind: string; params?: Record<string, unknown>; trigger: 'owner' | 'post-import' | 'schedule' | 'stale' }): unknown;
+}
 
 export interface AppContext {
   config: Config;
@@ -18,6 +24,8 @@ export interface AppContext {
   git: GitCommitter;
   auth: Auth;
   inbox?: InboxWatcher | undefined;
+  jobs?: JobQueue | undefined;
+  runner?: JobRunner | undefined;
   version: string;
 }
 
@@ -37,4 +45,11 @@ export async function readJson<T>(c: Context, schema: z.ZodType<T>): Promise<T> 
 
 export function queryDate(value: string | undefined): string | undefined {
   return value && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : undefined;
+}
+
+/** One CSV cell: quoted when needed, with spreadsheet formula injection neutralised. */
+export function csvCell(v: string | number | null | undefined): string {
+  const s = v === undefined || v === null ? '' : String(v);
+  const safe = /^[=+\-@\t\r]/.test(s) && !/^-?\d/.test(s) ? `'${s}` : s;
+  return /[",\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
 }

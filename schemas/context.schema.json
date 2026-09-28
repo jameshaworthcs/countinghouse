@@ -1,0 +1,187 @@
+{
+  "$id": "context.schema.json",
+  "title": "context",
+  "description": "Schema for one line of data/context.jsonl. Generated from src/shared/schema.ts by `npm run schemas`; do not edit.",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^ctx_[0-9a-f]{16}$"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "holding",
+        "plan",
+        "goal",
+        "preference",
+        "income",
+        "household",
+        "property",
+        "fact"
+      ]
+    },
+    "statement": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1000
+    },
+    "detail": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+        },
+        "institutionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+        },
+        "instrumentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+        },
+        "event": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "amount": {
+          "type": "number",
+          "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+        },
+        "annualAmount": {
+          "type": "number",
+          "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+        },
+        "rate": {
+          "type": "number",
+          "minimum": -1,
+          "maximum": 1
+        },
+        "date": {
+          "type": "string",
+          "description": "Calendar date, YYYY-MM-DD"
+        },
+        "from": {
+          "type": "string",
+          "description": "Calendar date, YYYY-MM-DD"
+        },
+        "to": {
+          "type": "string",
+          "description": "Calendar date, YYYY-MM-DD"
+        },
+        "accountIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+            "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+          }
+        },
+        "attributes": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ]
+          },
+          "description": "Extra detail from the source with no dedicated field yet (namespaced keys welcome)"
+        }
+      }
+    },
+    "status": {
+      "default": "active",
+      "type": "string",
+      "enum": [
+        "active",
+        "done",
+        "retired"
+      ]
+    },
+    "origin": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "form",
+            "note"
+          ]
+        },
+        "noteId": {
+          "type": "string"
+        },
+        "interpretedBy": {
+          "type": "object",
+          "properties": {
+            "setBy": {
+              "type": "string",
+              "enum": [
+                "owner",
+                "agent",
+                "system"
+              ]
+            },
+            "model": {
+              "type": "string"
+            },
+            "promptVersion": {
+              "type": "string"
+            },
+            "jobId": {
+              "type": "string"
+            },
+            "session": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "setBy"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ]
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+      "description": "ISO 8601 timestamp"
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+      "description": "ISO 8601 timestamp"
+    }
+  },
+  "required": [
+    "id",
+    "kind",
+    "statement",
+    "origin",
+    "createdAt",
+    "updatedAt"
+  ]
+}

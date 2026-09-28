@@ -157,7 +157,8 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
       };
       const row: DraftTransaction = {
         key: `s${si}-t${ti}`,
-        include: dup.status === 'new',
+        // Pending rows are shown but not recorded: the settled row arrives with the next statement.
+        include: dup.status === 'new' && !t.pending,
         status: dup.status,
         date: t.date,
         amount: t.amount,
@@ -225,7 +226,9 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
 
   // Figures, matched to accounts by last 4 digits and checked against what is already stored.
   const figures: DraftFigure[] = extraction.figures.map((f, fi) => {
-    const account = f.accountLast4 ? store.accounts.find((a) => a.last4 === f.accountLast4) : undefined;
+    // Matched by last 4 digits only when exactly one account has them.
+    const byLast4 = f.accountLast4 ? store.accounts.filter((a) => a.last4 === f.accountLast4) : [];
+    const account = byLast4.length === 1 ? byLast4[0] : undefined;
     const dup = store.figures.find(
       (x) =>
         x.kind === f.kind &&

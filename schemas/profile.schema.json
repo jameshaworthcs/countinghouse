@@ -40,12 +40,6 @@
       "type": "integer",
       "minimum": 50,
       "maximum": 80
-    },
-    "assumedRealReturn": {
-      "default": 0.04,
-      "type": "number",
-      "minimum": -0.1,
-      "maximum": 0.2
     }
   }
 }

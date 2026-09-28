@@ -4,7 +4,7 @@
 // through the codebase. Sources and caveats: docs/UK_RULES.md. When adding a year, add a row to
 // TAX_YEAR_PARAMS with only the fields that changed; later years inherit earlier values.
 
-import { addYears, makeDate, type ISODate } from './dates';
+import { addMonths, addYears, makeDate, type ISODate } from './dates';
 
 export interface TaxYear {
   /** "2026/27" */
@@ -83,6 +83,28 @@ export interface TaxYearParams {
   /** Income tax rates on savings income above allowances, by band. */
   savingsTaxRates: Record<Exclude<TaxBand, 'none'>, number>;
   dividendTaxRates: Record<Exclude<TaxBand, 'none'>, number>;
+  /** Income tax (England, Wales, Northern Ireland): the basic-rate band above the personal allowance. */
+  basicRateLimit: number;
+  /** Taxable income above which the additional rate applies (gross income, as HMRC quotes it). */
+  additionalRateThreshold: number;
+  /** Income above which the personal allowance falls by £1 for every £2. */
+  personalAllowanceTaperThreshold: number;
+  incomeTaxRates: Record<Exclude<TaxBand, 'none'>, number>;
+  /** Basic-rate relief added to relief-at-source pension contributions (net £80 → gross £100). */
+  reliefAtSourceRate: number;
+  /** Share of a pension that can usually be taken tax-free (up to the lump sum allowance). */
+  pensionTaxFreeShare: number;
+  /** Lump Sum and Death Benefit Allowance (from 2024/25). */
+  lumpSumAndDeathBenefitAllowance: number | null;
+  /** High Income Child Benefit Charge: starts above `threshold`, equals the benefit at `fullAt`. */
+  hicbc: { threshold: number; fullAt: number };
+  /** Trading and property allowances (0 before they existed). */
+  tradingAllowance: number;
+  propertyAllowance: number;
+  /** Disposals must be reported when proceeds exceed this, even with no tax due (null: 4 × the exempt amount). */
+  cgtReportingProceeds: number | null;
+  /** Full new State Pension, per week. */
+  statePensionFullWeekly: number;
 }
 
 type ParamsRow = { from: number } & Partial<TaxYearParams>;
@@ -115,6 +137,18 @@ export const TAX_YEAR_PARAMS: ParamsRow[] = [
     lumpSumAllowance: null,
     savingsTaxRates: { basic: 0.2, higher: 0.4, additional: 0.45 },
     dividendTaxRates: { basic: 0.075, higher: 0.325, additional: 0.381 },
+    basicRateLimit: 32_000,
+    additionalRateThreshold: 150_000,
+    personalAllowanceTaperThreshold: 100_000,
+    incomeTaxRates: { basic: 0.2, higher: 0.4, additional: 0.45 },
+    reliefAtSourceRate: 0.2,
+    pensionTaxFreeShare: 0.25,
+    lumpSumAndDeathBenefitAllowance: null,
+    hicbc: { threshold: 50_000, fullAt: 60_000 },
+    tradingAllowance: 0,
+    propertyAllowance: 0,
+    cgtReportingProceeds: null,
+    statePensionFullWeekly: 155.65,
   },
   {
     from: 2017,
@@ -124,9 +158,13 @@ export const TAX_YEAR_PARAMS: ParamsRow[] = [
     moneyPurchaseAnnualAllowance: 4_000,
     cgtAnnualExemptAmount: 11_300,
     personalAllowance: 11_500,
+    basicRateLimit: 33_500,
+    tradingAllowance: 1_000,
+    propertyAllowance: 1_000,
+    statePensionFullWeekly: 159.55,
   },
-  { from: 2018, juniorIsaAllowance: 4_260, dividendAllowance: 2_000, cgtAnnualExemptAmount: 11_700, personalAllowance: 11_850 },
-  { from: 2019, juniorIsaAllowance: 4_368, cgtAnnualExemptAmount: 12_000, personalAllowance: 12_500 },
+  { from: 2018, juniorIsaAllowance: 4_260, dividendAllowance: 2_000, cgtAnnualExemptAmount: 11_700, personalAllowance: 11_850, basicRateLimit: 34_500, statePensionFullWeekly: 164.35 },
+  { from: 2019, juniorIsaAllowance: 4_368, cgtAnnualExemptAmount: 12_000, personalAllowance: 12_500, basicRateLimit: 37_500, statePensionFullWeekly: 168.6 },
   {
     from: 2020,
     juniorIsaAllowance: 9_000,
@@ -134,9 +172,10 @@ export const TAX_YEAR_PARAMS: ParamsRow[] = [
     pensionTaperAdjustedIncome: 240_000,
     pensionTaperMinimum: 4_000,
     cgtAnnualExemptAmount: 12_300,
+    statePensionFullWeekly: 175.2,
   },
-  { from: 2021, personalAllowance: 12_570 },
-  { from: 2022, dividendTaxRates: { basic: 0.0875, higher: 0.3375, additional: 0.3935 } },
+  { from: 2021, personalAllowance: 12_570, basicRateLimit: 37_700, statePensionFullWeekly: 179.6 },
+  { from: 2022, dividendTaxRates: { basic: 0.0875, higher: 0.3375, additional: 0.3935 }, statePensionFullWeekly: 185.15 },
   {
     from: 2023,
     pensionAnnualAllowance: 60_000,
@@ -145,10 +184,23 @@ export const TAX_YEAR_PARAMS: ParamsRow[] = [
     moneyPurchaseAnnualAllowance: 10_000,
     dividendAllowance: 1_000,
     cgtAnnualExemptAmount: 6_000,
+    additionalRateThreshold: 125_140,
+    cgtReportingProceeds: 50_000,
+    statePensionFullWeekly: 203.85,
   },
-  { from: 2024, dividendAllowance: 500, cgtAnnualExemptAmount: 3_000, lumpSumAllowance: 268_275 },
-  // Autumn Budget 2025: dividend rates +2pp from April 2026.
-  { from: 2026, dividendTaxRates: { basic: 0.1075, higher: 0.3575, additional: 0.3935 } },
+  {
+    from: 2024,
+    dividendAllowance: 500,
+    cgtAnnualExemptAmount: 3_000,
+    lumpSumAllowance: 268_275,
+    lumpSumAndDeathBenefitAllowance: 1_073_100,
+    hicbc: { threshold: 60_000, fullAt: 80_000 },
+    statePensionFullWeekly: 221.2,
+  },
+  { from: 2025, statePensionFullWeekly: 230.25 },
+  // Budget 2025: dividend ordinary and upper rates +2pp from April 2026 (additional unchanged).
+  // State Pension up 4.8% with earnings (the triple lock).
+  { from: 2026, dividendTaxRates: { basic: 0.1075, higher: 0.3575, additional: 0.3935 }, statePensionFullWeekly: 241.3 },
   // Autumn Budget 2025: cash-ISA limit £12,000 for under-65s from 6 April 2027 (overall stays
   // £20,000); savings income tax rates +2pp from April 2027.
   { from: 2027, cashIsaLimitUnder65: 12_000, savingsTaxRates: { basic: 0.22, higher: 0.42, additional: 0.47 } },
@@ -274,8 +326,51 @@ export function daysLeftInTaxYear(date: ISODate): number {
 }
 
 /** Relief at source: a net personal contribution of £80 is grossed up to £100 by basic-rate relief. */
-export function grossUpReliefAtSource(net: number): number {
-  return Math.round((net / 0.8) * 100) / 100;
+export function grossUpReliefAtSource(net: number, ty: TaxYear = taxYearOf(`${new Date().getFullYear()}-04-06`)): number {
+  const rate = taxYearParams(ty).reliefAtSourceRate;
+  return Math.round((net / (1 - rate)) * 100) / 100;
+}
+
+/**
+ * State Pension age under current law (Pensions Acts 2007, 2011 and 2014; gov.uk "State Pension age
+ * timetable"):
+ *   - born 6 October 1954 – 5 April 1960: 66;
+ *   - born 6 April 1960 – 5 March 1961: 66 plus 1–11 months (one more month per month of birth);
+ *   - born 6 March 1961 – 5 April 1977: 67;
+ *   - born 6 April 1977 – 5 April 1978: a fixed date between 6 May 2044 and 6 March 2046;
+ *   - born on or after 6 April 1978: 68.
+ * Earlier cohorts are not modelled (they have reached it). The 67→68 timetable is subject to
+ * statutory reviews and may change.
+ */
+export function statePensionDate(dateOfBirth: ISODate): ISODate {
+  if (dateOfBirth < '1954-10-06') return addYears(dateOfBirth, 65);
+  if (dateOfBirth < '1960-04-06') return addYears(dateOfBirth, 66);
+  if (dateOfBirth < '1961-03-06') {
+    // 6 April 1960 – 5 May 1960 → 66 years 1 month; each later month of birth adds a month.
+    const y = Number(dateOfBirth.slice(0, 4));
+    const m = Number(dateOfBirth.slice(5, 7));
+    const d = Number(dateOfBirth.slice(8, 10));
+    const cohortStartMonth = d >= 6 ? m : m - 1; // the month in which the cohort's 6th falls
+    const monthsSinceApril1960 = (y - 1960) * 12 + (cohortStartMonth - 4);
+    return addMonths(addYears(dateOfBirth, 66), monthsSinceApril1960 + 1);
+  }
+  if (dateOfBirth < '1977-04-06') return addYears(dateOfBirth, 67);
+  if (dateOfBirth < '1978-04-06') {
+    // Cohorts of one month of birth (from the 6th) reach State Pension age on the 6th of every other
+    // month from 6 May 2044 to 6 March 2046.
+    const y = Number(dateOfBirth.slice(0, 4));
+    const m = Number(dateOfBirth.slice(5, 7));
+    const d = Number(dateOfBirth.slice(8, 10));
+    const cohortStartMonth = d >= 6 ? m : m - 1;
+    const index = (y - 1977) * 12 + (cohortStartMonth - 4); // 0 for 6 April – 5 May 1977
+    return addMonths('2044-05-06', 2 * index);
+  }
+  return addYears(dateOfBirth, 68);
+}
+
+/** The full new State Pension a year, for a tax year (52 weeks). */
+export function statePensionFullYearly(ty: TaxYear): number {
+  return Math.round(taxYearParams(ty).statePensionFullWeekly * 52 * 100) / 100;
 }
 
 /** Notable dated rule changes, surfaced as notes in the UI. */
@@ -285,8 +380,11 @@ export const RULE_NOTES: { from: ISODate; text: string }[] = [
     from: '2027-04-06',
     text: 'Cash ISA subscriptions capped at £12,000 a year for under-65s (overall ISA allowance stays £20,000). Transfers from stocks & shares ISAs into cash ISAs are no longer allowed, and interest on cash held in stocks & shares ISAs is charged at 22%.',
   },
+  { from: '2027-04-06', text: 'Tax on savings and property income rises by 2 percentage points (22%, 42%, 47%).' },
+  { from: '2028-04-06', text: 'Normal minimum pension age rises from 55 to 57.' },
   {
-    from: '2028-04-06',
-    text: 'Normal minimum pension age rises from 55 to 57. The Lifetime ISA is due to be replaced by a First-Time Buyer ISA for new savers (existing LISAs continue).',
+    from: '2026-06-29',
+    text: 'A First Time Buyer ISA is to be offered in place of the Lifetime ISA once available (no date yet; consultation closed 18 August 2026). Existing LISAs continue under the current rules indefinitely.',
   },
+  { from: '2029-04-06', text: 'Salary-sacrificed pension contributions above £2,000 a year become subject to National Insurance.' },
 ];

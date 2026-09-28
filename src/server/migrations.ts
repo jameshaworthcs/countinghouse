@@ -10,9 +10,10 @@
 //                           extraction kept in data/imports/, never by re-uploading documents;
 //   - renamed/split fields → rewritten here, once, with a git commit recording the change.
 
-import { readdir, readFile } from 'node:fs/promises';
+import { access, readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { atomicWrite, nowISO } from './fsutil';
+import { today } from '../shared/dates';
+import { atomicWrite, nowISO, shortHash } from './fsutil';
 import { FORMAT_VERSION } from './store';
 
 export interface MigrationContext {
@@ -20,6 +21,9 @@ export interface MigrationContext {
   /** Read a JSON file relative to the data dir (undefined if missing). */
   readJson(rel: string): Promise<unknown>;
   writeJson(rel: string, value: unknown): Promise<void>;
+  /** Write a text file relative to the data dir. */
+  writeText(rel: string, text: string): Promise<void>;
+  exists(rel: string): Promise<boolean>;
   /** Rewrite every line of every JSONL file under `dir` with `fn` (return null to keep as-is). */
   mapJsonl(dir: string, fn: (record: Record<string, unknown>, file: string) => Record<string, unknown> | null): Promise<number>;
   log(message: string): void;
@@ -33,18 +37,53 @@ export interface Migration {
 }
 
 /**
- * Registered migrations, oldest first. Example of the shape a future one takes:
+ * Registered migrations, oldest first. A backfill from raw rows would look like:
  *
- *   {
- *     from: 1,
- *     description: 'Backfill transaction.time from Monzo raw rows',
- *     run: (ctx) => ctx.mapJsonl('transactions', (t) => {
- *       const raw = t.raw as Record<string, string> | undefined;
- *       return raw?.Time && !t.time ? { ...t, time: raw.Time } : null;
- *     }).then(() => undefined),
- *   }
+ *   run: (ctx) => ctx.mapJsonl('transactions', (t) => {
+ *     const raw = t.raw as Record<string, string> | undefined;
+ *     return raw?.Time && !t.time ? { ...t, time: raw.Time } : null;
+ *   }).then(() => undefined),
  */
-export const MIGRATIONS: Migration[] = [];
+export const MIGRATIONS: Migration[] = [
+  {
+    from: 1,
+    description: 'Assumptions become data: profile.assumedRealReturn moves to assumptions.jsonl; add instruments, research, insights, context and notes',
+    async run(ctx) {
+      const profile = (await ctx.readJson('profile.json')) as Record<string, unknown> | undefined;
+      if (profile && 'assumedRealReturn' in profile) {
+        const real = profile.assumedRealReturn;
+        delete profile.assumedRealReturn;
+        await ctx.writeJson('profile.json', profile);
+        // 4% was the default. A different value was the owner's choice, so it stays theirs, as a
+        // global expected-return override (nominal, at the 2% inflation the old model implied).
+        if (typeof real === 'number' && Math.abs(real - 0.04) > 1e-9) {
+          const nominal = Math.round(((1 + real) * 1.02 - 1) * 10_000) / 10_000;
+          const record = {
+            id: `asm_${shortHash('asm', 'v2-migration', real)}`,
+            key: 'return.expected',
+            scope: { kind: 'global' },
+            value: nominal,
+            asOf: today(),
+            source: 'Your profile setting before data format v2',
+            evidence: [],
+            basedOn: [],
+            rationale: `Migrated from the profile's assumed real return of ${(real * 100).toFixed(1)}% a year, converted to a nominal return assuming 2% inflation.`,
+            provenance: { setBy: 'owner' },
+            status: 'active',
+            createdAt: nowISO(),
+          };
+          const existing = (await ctx.exists('assumptions.jsonl')) ? await readFile(path.join(ctx.dataDir, 'assumptions.jsonl'), 'utf8') : '';
+          await ctx.writeText('assumptions.jsonl', `${existing}${JSON.stringify(record)}\n`);
+          ctx.log(`[migrate] kept your ${(real * 100).toFixed(1)}% real return as a global expected-return override`);
+        }
+      }
+      for (const f of ['assumptions.jsonl', 'research.jsonl', 'insights.jsonl', 'context.jsonl', 'notes.jsonl']) {
+        if (!(await ctx.exists(f))) await ctx.writeText(f, '');
+      }
+      if (!(await ctx.exists('instruments.json'))) await ctx.writeJson('instruments.json', { $schema: '../schemas/instruments.schema.json', instruments: [] });
+    },
+  },
+];
 
 export interface MigrationResult {
   from: number;
@@ -88,6 +127,17 @@ export async function runMigrations(dataDir: string, log: (m: string) => void = 
     },
     async writeJson(rel, value) {
       await atomicWrite(path.join(dataDir, rel), `${JSON.stringify(value, null, 2)}\n`);
+    },
+    async writeText(rel, text) {
+      await atomicWrite(path.join(dataDir, rel), text);
+    },
+    async exists(rel) {
+      try {
+        await access(path.join(dataDir, rel));
+        return true;
+      } catch {
+        return false;
+      }
     },
     async mapJsonl(dir, fn) {
       let changed = 0;

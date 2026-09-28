@@ -1,7 +1,7 @@
 // Estate value (net worth): everything you hold minus what you owe, now and over time.
 
 import {
-  cadenceOf,
+  staleAfterDays,
   ACCESS_GROUP_LABELS,
   ACCESS_GROUPS,
   ACCOUNT_TYPE_META,
@@ -137,7 +137,7 @@ export function accountSummary(store: Store, engine: BalanceEngine, account: Acc
     estimated: latest?.estimated ?? false,
     asOf,
     staleDays,
-    stale: account.status === 'open' && (staleDays === null || staleDays > (cadenceOf(account.type) === 'yearly' ? 400 : store.settings.staleAfterDays)),
+    stale: account.status === 'open' && (staleDays === null || staleDays > staleAfterDays(account.type, store.settings.staleAfterDays)),
     annualIncome: store.balances(account.id).findLast((b) => b.annualIncome !== undefined)?.annualIncome ?? null,
     lastSnapshot: info?.lastSnapshot ?? null,
     lastTransaction: info?.lastTransaction ?? null,

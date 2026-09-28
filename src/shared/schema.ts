@@ -216,10 +216,27 @@ export const TransactionSchema = z.object({
   pending: z.boolean().optional(),
   raw: RawRowSchema.optional(),
   attributes: AttributesSchema.optional(),
+  /**
+   * Your corrections to what was read from the document (a misread amount, a wrong date), oldest
+   * first. The fields above hold the corrected values; each entry keeps what was there before.
+   */
+  corrections: z
+    .array(
+      z.object({
+        field: z.enum(['date', 'amount', 'description']),
+        from: z.union([z.string(), z.number()]),
+        to: z.union([z.string(), z.number()]),
+        at: TimestampSchema,
+        note: z.string().max(500).optional(),
+      }),
+    )
+    .optional(),
 
   // ── Enrichment: derived and recomputable (except where categorisedBy = "user"). ──
   /** Clean merchant or counterparty name. */
   payee: z.string().optional(),
+  /** "user" when you set the payee yourself: re-running enrichment never changes it. */
+  payeeSetBy: z.enum(['user']).optional(),
   /** Category id from categories.json. Absent = uncategorised. */
   category: z.string().optional(),
   categorisedBy: z.enum(CATEGORISED_BY).optional(),
@@ -494,9 +511,10 @@ export const ProfileSchema = z.object({
   taxBand: z.enum(['none', 'basic', 'higher', 'additional']).optional(),
   /** Gross annual salary, optional; used for savings rate and pension headroom hints. */
   grossSalary: MoneySchema.optional(),
+  /** When you plan to stop work: drives the retirement outlook. */
   retirementAge: z.number().int().min(50).max(80).default(67),
-  /** Assumed real (after inflation) annual growth for projections, e.g. 0.04. */
-  assumedRealReturn: z.number().min(-0.1).max(0.2).default(0.04),
+  // Returns, inflation and other modelling parameters are assumption records (assumptions.jsonl),
+  // not profile fields. Format v1's `assumedRealReturn` was moved there by the v2 migration.
 });
 export type Profile = z.infer<typeof ProfileSchema>;
 
@@ -526,6 +544,22 @@ export const SettingsSchema = z.object({
   staleAfterDays: z.number().int().min(1).max(3650).default(35),
   /** Manual FX: value of one unit of each currency in GBP, e.g. { "USD": 0.74 }. */
   fx: z.record(CurrencySchema, z.number().positive()).default({}),
+  /** In-app agent jobs (research, insights, reviews) run through the same Claude engine. */
+  agents: z
+    .object({
+      enabled: z.boolean().default(true),
+      /** "opus", "sonnet" or a full model id. */
+      model: z.string().default('opus'),
+      effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).default('high'),
+      /** Research older than this is refreshed. */
+      researchStaleAfterDays: z.number().int().min(7).max(730).default(90),
+      /** Produce insights after each committed import. */
+      insightsAfterImport: z.boolean().default(true),
+      /** Write a month in review once last month's data is in. */
+      monthlyReview: z.boolean().default(true),
+      timeoutSeconds: z.number().int().min(60).max(3600).default(1200),
+    })
+    .default({ enabled: true, model: 'opus', effort: 'high', researchStaleAfterDays: 90, insightsAfterImport: true, monthlyReview: true, timeoutSeconds: 1200 }),
 });
 export type Settings = z.infer<typeof SettingsSchema>;
 
@@ -855,14 +889,410 @@ export const ImportRecordSchema = z.object({
       balancesAdded: z.number().int().nonnegative(),
       holdingsAdded: z.number().int().nonnegative(),
       figuresAdded: z.number().int().nonnegative().default(0),
+      /** The account each draft section was committed to (new accounts get their final id). */
+      sections: z.array(z.object({ key: z.string(), accountId: SlugSchema })).optional(),
     })
     .optional(),
 });
 export type ImportRecord = z.infer<typeof ImportRecordSchema>;
 
+// ─── Provenance shared by agent-maintained records ───────────────────────────────────────────────
+
+/** Who set a record. The owner's records always win over an agent's (see docs/AGENTS.md). */
+export const SET_BY = ['owner', 'agent', 'system'] as const;
+export type SetBy = (typeof SET_BY)[number];
+
+export const ProvenanceSchema = z.object({
+  setBy: z.enum(SET_BY),
+  /** Model that produced it (agents), e.g. "claude-opus-5-5". */
+  model: z.string().optional(),
+  /** Version of the job prompt that produced it, e.g. "research-instrument-1". */
+  promptVersion: z.string().optional(),
+  /** The in-app job that wrote it. */
+  jobId: z.string().optional(),
+  /** Where an agent ran outside the app, e.g. "claude-code". */
+  session: z.string().optional(),
+});
+export type Provenance = z.infer<typeof ProvenanceSchema>;
+
+/** A public source a record rests on. */
+export const SourceLinkSchema = z.object({
+  title: z.string().min(1).max(300),
+  url: z.url({ protocol: /^https?$/ }).optional(),
+  publisher: z.string().max(120).optional(),
+  /** When the page was read. */
+  retrievedOn: ISODateSchema.optional(),
+  /** A short verbatim excerpt supporting the value. */
+  quote: z.string().max(600).optional(),
+});
+export type SourceLink = z.infer<typeof SourceLinkSchema>;
+
+export const CONFIDENCE = ['high', 'medium', 'low'] as const;
+export type Confidence = (typeof CONFIDENCE)[number];
+
+// ─── Instruments (funds, ETFs, shares…) ──────────────────────────────────────────────────────────
+
+export const INSTRUMENT_TYPES = ['fund', 'etf', 'investment_trust', 'share', 'bond', 'gilt', 'money_market', 'crypto', 'other'] as const;
+
+/** Fractions by asset class, summing to 1 (±0.02). */
+export const AllocationSchema = z
+  .object({
+    equity: z.number().min(0).max(1).optional(),
+    bond: z.number().min(0).max(1).optional(),
+    cash: z.number().min(0).max(1).optional(),
+    property: z.number().min(0).max(1).optional(),
+    commodity: z.number().min(0).max(1).optional(),
+    crypto: z.number().min(0).max(1).optional(),
+    other: z.number().min(0).max(1).optional(),
+  })
+  .refine((a) => {
+    const total = Object.values(a).reduce((s, v) => s + (v ?? 0), 0);
+    return total > 0.98 && total < 1.02;
+  }, 'Allocation fractions must sum to 1');
+export type Allocation = z.infer<typeof AllocationSchema>;
+
+export const InstrumentSchema = z.object({
+  id: SlugSchema,
+  name: z.string().min(1),
+  type: z.enum(INSTRUMENT_TYPES).optional(),
+  isin: z
+    .string()
+    .regex(/^[A-Z]{2}[A-Z0-9]{9}\d$/, 'ISIN: 2 letters, 9 characters, 1 check digit')
+    .optional(),
+  ticker: z.string().max(20).optional(),
+  sedol: z
+    .string()
+    .regex(/^[0-9BCDFGHJKLMNPQRSTVWXYZ]{6}\d$/)
+    .optional(),
+  currency: CurrencySchema.optional(),
+  /** Fund manager or issuer, e.g. "Vanguard". */
+  manager: z.string().optional(),
+  /** Your own allocation for it; beats researched allocation. */
+  allocation: AllocationSchema.optional(),
+  /** Other names it appears under on statements and screenshots. */
+  aliases: z.array(z.string()).default([]),
+  notes: z.string().optional(),
+  createdAt: TimestampSchema,
+  updatedAt: TimestampSchema,
+});
+export type Instrument = z.infer<typeof InstrumentSchema>;
+
+// ─── Assumptions (forward-looking modelling parameters) ──────────────────────────────────────────
+
+export const ASSUMPTION_SCOPE_KINDS = ['global', 'assetClass', 'accountType', 'institution', 'account', 'instrument'] as const;
+export type AssumptionScopeKind = (typeof ASSUMPTION_SCOPE_KINDS)[number];
+
+export const AssumptionScopeSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('global') }),
+  z.object({ kind: z.literal('assetClass'), assetClass: z.enum(ASSET_CLASSES) }),
+  z.object({ kind: z.literal('accountType'), accountType: AccountTypeSchema }),
+  z.object({ kind: z.literal('institution'), institutionId: SlugSchema }),
+  z.object({ kind: z.literal('account'), accountId: SlugSchema }),
+  z.object({ kind: z.literal('instrument'), instrumentId: SlugSchema }),
+]);
+export type AssumptionScope = z.infer<typeof AssumptionScopeSchema>;
+
+/**
+ * One version of one assumption. The file is append-only: a change appends a new record, so the
+ * file itself is the history. The current value for (key, scope, who) is the newest record, unless
+ * that record retires it. Keys, units, bounds and fallbacks are defined in src/shared/assumptions.ts.
+ */
+export const AssumptionSchema = z.object({
+  id: z.string().regex(/^asm_[0-9a-f]{16}$/),
+  key: z.string().min(1).max(64),
+  scope: AssumptionScopeSchema,
+  /** Rates are decimals (0.05 = 5% a year); money in pounds. */
+  value: z.number(),
+  /** Plausible range (roughly the 10th to 90th percentile of the long-run value). */
+  range: z.object({ low: z.number(), high: z.number() }).optional(),
+  /** The date the value reflects (e.g. the publication date of the outlook it rests on). */
+  asOf: ISODateSchema,
+  /** Short name of the source, e.g. "Vanguard economic and market outlook, Aug 2026". */
+  source: z.string().min(1).max(300),
+  evidence: z.array(SourceLinkSchema).default([]),
+  /** Research records this value was derived from (the reasoning that links history to outlook). */
+  basedOn: z.array(z.string().regex(/^res_[0-9a-f]{16}$/)).default([]),
+  rationale: z.string().min(1).max(2000),
+  provenance: ProvenanceSchema,
+  /** "retired" withdraws this (key, scope) for this setter, e.g. an override you removed. */
+  status: z.enum(['active', 'retired']).default('active'),
+  /** Refresh after this date (agents treat the value as stale). */
+  reviewBy: ISODateSchema.optional(),
+  createdAt: TimestampSchema,
+});
+export type Assumption = z.infer<typeof AssumptionSchema>;
+
+// ─── Research (dated, sourced facts about what you hold) ─────────────────────────────────────────
+
+const Rate = z.number().min(-1).max(10);
+const PeriodReturns = z.object({
+  /** Annualised returns (decimals) over standard periods ending `periodEnd`. */
+  y1: Rate.optional(),
+  y3: Rate.optional(),
+  y5: Rate.optional(),
+  y10: Rate.optional(),
+  sinceLaunch: Rate.optional(),
+});
+
+export const ResearchDataSchemas = {
+  /** Identity, charges, allocation and benchmark of a fund, ETF or share. */
+  'instrument.facts': z.object({
+    name: z.string().optional(),
+    isin: z.string().optional(),
+    ticker: z.string().optional(),
+    type: z.enum(INSTRUMENT_TYPES).optional(),
+    manager: z.string().optional(),
+    /** Ongoing charges figure, a decimal (0.0022 = 0.22% a year). */
+    ocf: z.number().min(0).max(0.05).optional(),
+    /** Transaction costs disclosed in the KID/factsheet, a decimal a year. */
+    transactionCosts: z.number().min(-0.01).max(0.05).optional(),
+    allocation: AllocationSchema.optional(),
+    /** Fractions by region for the equity part, free-form keys (uk, northAmerica, europe, japan, asiaPacific, emerging…). */
+    regions: z.record(z.string(), z.number().min(0).max(1)).optional(),
+    benchmark: z.string().optional(),
+    launchDate: ISODateSchema.optional(),
+    distribution: z.enum(['accumulation', 'income']).optional(),
+    /** Summary risk indicator 1-7 from the KID. */
+    riskIndicator: z.number().int().min(1).max(7).optional(),
+    currency: CurrencySchema.optional(),
+    fundSizeGbp: z.number().nonnegative().optional(),
+  }),
+  /** Historical performance: past, not a forecast. */
+  'instrument.performance': z.object({
+    currency: CurrencySchema.default('GBP'),
+    periodEnd: ISODateSchema,
+    returns: PeriodReturns,
+    benchmarkReturns: PeriodReturns.optional(),
+    /** Calendar-year returns, oldest first. */
+    calendarYears: z.array(z.object({ year: z.number().int(), return: Rate })).default([]),
+    /** Annualised volatility of returns (standard deviation), decimals. */
+    volatility: z.object({ y3: z.number().min(0).max(5).optional(), y5: z.number().min(0).max(5).optional() }).default({}),
+    maxDrawdown: z.number().min(-1).max(0).optional(),
+  }),
+  /** Interest rates of a provider's savings products. */
+  'provider.rates': z.object({
+    products: z
+      .array(
+        z.object({
+          name: z.string().min(1),
+          accountType: AccountTypeSchema.optional(),
+          /** AER, a decimal. */
+          aer: z.number().min(0).max(0.25),
+          variable: z.boolean().default(true),
+          /** An introductory bonus included in `aer`, and when it ends. */
+          bonus: z.number().min(0).max(0.25).optional(),
+          bonusEndsOn: ISODateSchema.optional(),
+          conditions: z.string().optional(),
+        }),
+      )
+      .min(1),
+  }),
+  /** Platform or provider charges. */
+  'provider.fees': z.object({
+    /** Percentage fee on assets, in tiers of account value (last tier has no upper bound). */
+    tiers: z.array(z.object({ upToGbp: z.number().positive().optional(), rate: z.number().min(0).max(0.05) })).default([]),
+    capGbpPerYear: z.number().nonnegative().optional(),
+    fixedGbpPerYear: z.number().nonnegative().optional(),
+    /** Which account types the schedule applies to (all when absent). */
+    accountTypes: z.array(AccountTypeSchema).optional(),
+    notes: z.string().optional(),
+  }),
+  /** A published long-run outlook (capital market assumptions) for an asset class. */
+  'market.outlook': z.object({
+    assetClass: z.enum(ASSET_CLASSES),
+    publisher: z.string().min(1),
+    horizonYears: z.number().int().min(1).max(50),
+    currency: CurrencySchema.default('GBP'),
+    expectedReturnNominal: Rate.optional(),
+    expectedReturnReal: Rate.optional(),
+    range: z.object({ low: Rate, high: Rate }).optional(),
+    volatility: z.number().min(0).max(5).optional(),
+  }),
+  /** An economic series or forecast (inflation, earnings growth, Bank Rate). */
+  'economy.indicator': z.object({
+    indicator: z.enum(['cpi', 'earnings', 'bank-rate', 'house-prices', 'gilt-yield']),
+    /** "latest" is an observed figure; "forecast" a published projection. */
+    basis: z.enum(['latest', 'forecast', 'target']),
+    value: z.number().min(-1).max(1),
+    period: z.string().max(40),
+    publisher: z.string().min(1),
+  }),
+} as const;
+
+export const RESEARCH_KINDS = Object.keys(ResearchDataSchemas) as (keyof typeof ResearchDataSchemas)[];
+export type ResearchKind = keyof typeof ResearchDataSchemas;
+
+export const ResearchSubjectSchema = z
+  .object({
+    instrumentId: SlugSchema.optional(),
+    institutionId: SlugSchema.optional(),
+    assetClass: z.enum(ASSET_CLASSES).optional(),
+    topic: z.string().max(80).optional(),
+  })
+  .refine((s) => Boolean(s.instrumentId || s.institutionId || s.assetClass || s.topic), 'A research record needs a subject');
+
+/** What a writer supplies; the app adds id, provenance and createdAt. */
+const researchInputBase = {
+  subject: ResearchSubjectSchema,
+  /** The date the facts describe (factsheet date, rate-table date). */
+  asOf: ISODateSchema,
+  sources: z.array(SourceLinkSchema).min(1),
+  confidence: z.enum(CONFIDENCE).default('medium'),
+  notes: z.string().max(2000).optional(),
+};
+const researchBase = {
+  id: z.string().regex(/^res_[0-9a-f]{16}$/),
+  ...researchInputBase,
+  provenance: ProvenanceSchema,
+  createdAt: TimestampSchema,
+};
+const D = ResearchDataSchemas;
+
+export const ResearchInputSchema = z.discriminatedUnion('kind', [
+  z.object({ ...researchInputBase, kind: z.literal('instrument.facts'), data: D['instrument.facts'] }),
+  z.object({ ...researchInputBase, kind: z.literal('instrument.performance'), data: D['instrument.performance'] }),
+  z.object({ ...researchInputBase, kind: z.literal('provider.rates'), data: D['provider.rates'] }),
+  z.object({ ...researchInputBase, kind: z.literal('provider.fees'), data: D['provider.fees'] }),
+  z.object({ ...researchInputBase, kind: z.literal('market.outlook'), data: D['market.outlook'] }),
+  z.object({ ...researchInputBase, kind: z.literal('economy.indicator'), data: D['economy.indicator'] }),
+]);
+
+export const ResearchSchema = z.discriminatedUnion('kind', [
+  z.object({ ...researchBase, kind: z.literal('instrument.facts'), data: D['instrument.facts'] }),
+  z.object({ ...researchBase, kind: z.literal('instrument.performance'), data: D['instrument.performance'] }),
+  z.object({ ...researchBase, kind: z.literal('provider.rates'), data: D['provider.rates'] }),
+  z.object({ ...researchBase, kind: z.literal('provider.fees'), data: D['provider.fees'] }),
+  z.object({ ...researchBase, kind: z.literal('market.outlook'), data: D['market.outlook'] }),
+  z.object({ ...researchBase, kind: z.literal('economy.indicator'), data: D['economy.indicator'] }),
+]);
+export type Research = z.infer<typeof ResearchSchema>;
+
+// ─── Insights (inferred by Claude, never computed) ───────────────────────────────────────────────
+
+export const INSIGHT_KINDS = ['month-review', 'habit', 'subscription', 'opportunity', 'risk', 'anomaly', 'fund', 'allowance', 'projection', 'data-quality', 'note'] as const;
+export const INSIGHT_PAGES = ['overview', 'accounts', 'transactions', 'spending', 'projections', 'investments', 'tax', 'import'] as const;
+export type InsightPage = (typeof INSIGHT_PAGES)[number];
+
+/** What an insight rests on. Ids must resolve to stored records when the insight is written. */
+export const InsightEvidenceSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('transactions'), ids: z.array(z.string().regex(/^tx_[0-9a-f]{16}$/)).min(1).max(200), label: z.string().max(200).optional() }),
+  z.object({ type: z.literal('balance'), id: z.string().regex(/^bal_[0-9a-f]{16}$/), label: z.string().max(200).optional() }),
+  z.object({ type: z.literal('holdings'), id: z.string().regex(/^hld_[0-9a-f]{16}$/), label: z.string().max(200).optional() }),
+  z.object({ type: z.literal('figure'), id: z.string().regex(/^fig_[0-9a-f]{16}$/), label: z.string().max(200).optional() }),
+  z.object({ type: z.literal('research'), id: z.string().regex(/^res_[0-9a-f]{16}$/), label: z.string().max(200).optional() }),
+  z.object({ type: z.literal('assumption'), id: z.string().regex(/^asm_[0-9a-f]{16}$/), label: z.string().max(200).optional() }),
+  z.object({ type: z.literal('context'), id: z.string().regex(/^ctx_[0-9a-f]{16}$/), label: z.string().max(200).optional() }),
+  z.object({ type: z.literal('account'), id: SlugSchema, label: z.string().max(200).optional() }),
+  /** A computed figure the insight quotes, as the app reported it to the job. */
+  z.object({ type: z.literal('computed'), metric: z.string().min(1).max(120), value: z.number().optional(), label: z.string().max(200).optional() }),
+]);
+export type InsightEvidence = z.infer<typeof InsightEvidenceSchema>;
+
+export const InsightSchema = z.object({
+  id: z.string().regex(/^inf_[0-9a-f]{16}$/),
+  kind: z.enum(INSIGHT_KINDS),
+  /** Pages that show it. */
+  pages: z.array(z.enum(INSIGHT_PAGES)).min(1),
+  subject: z
+    .object({
+      accountId: SlugSchema.optional(),
+      instrumentId: SlugSchema.optional(),
+      category: z.string().optional(),
+      taxYear: z
+        .string()
+        .regex(/^\d{4}\/\d{2}$/)
+        .optional(),
+      month: z
+        .string()
+        .regex(/^\d{4}-\d{2}$/)
+        .optional(),
+    })
+    .default({}),
+  title: z.string().min(1).max(160),
+  body: z.string().max(4000),
+  evidence: z.array(InsightEvidenceSchema).min(1),
+  confidence: z.enum(CONFIDENCE),
+  /** The data period the insight is about. */
+  period: z.object({ from: ISODateSchema, to: ISODateSchema }).optional(),
+  /** When it stops being relevant (hidden afterwards). */
+  expiresOn: ISODateSchema.optional(),
+  provenance: ProvenanceSchema,
+  status: z.enum(['active', 'dismissed', 'superseded']).default('active'),
+  /** The insight this one replaces (same job kind and subject, newer run). */
+  supersedes: z.string().optional(),
+  /** Your reaction: kept with the insight so later jobs learn from it. */
+  feedback: z.object({ useful: z.boolean(), note: z.string().max(500).optional(), at: TimestampSchema }).optional(),
+  createdAt: TimestampSchema,
+});
+export type Insight = z.infer<typeof InsightSchema>;
+
+// ─── Owner context (what you tell the app about yourself and your plans) ─────────────────────────
+
+export const CONTEXT_KINDS = ['holding', 'plan', 'goal', 'preference', 'income', 'household', 'property', 'fact'] as const;
+export type ContextKind = (typeof CONTEXT_KINDS)[number];
+
+export const ContextSchema = z.object({
+  id: z.string().regex(/^ctx_[0-9a-f]{16}$/),
+  kind: z.enum(CONTEXT_KINDS),
+  /** A one-line statement in plain words ("We plan to buy a house in 2028 for about £400,000"). */
+  statement: z.string().min(1).max(1000),
+  /** Structured detail; every field optional, used as the kind needs. */
+  detail: z
+    .object({
+      accountId: SlugSchema.optional(),
+      institutionId: SlugSchema.optional(),
+      instrumentId: SlugSchema.optional(),
+      /** "buy-home", "retire", "career-break", "child", "wedding"… */
+      event: z.string().max(40).optional(),
+      amount: MoneySchema.optional(),
+      /** A yearly amount (salary, pension income wanted, contributions). */
+      annualAmount: MoneySchema.optional(),
+      rate: z.number().min(-1).max(1).optional(),
+      date: ISODateSchema.optional(),
+      from: ISODateSchema.optional(),
+      to: ISODateSchema.optional(),
+      /** Accounts a plan draws on (e.g. the LISA and savings for a deposit). */
+      accountIds: z.array(SlugSchema).optional(),
+      attributes: AttributesSchema.optional(),
+    })
+    .default({}),
+  status: z.enum(['active', 'done', 'retired']).default('active'),
+  /** Where it came from: typed in a form, or interpreted from one of your notes. */
+  origin: z.object({ kind: z.enum(['form', 'note']), noteId: z.string().optional(), interpretedBy: ProvenanceSchema.optional() }),
+  createdAt: TimestampSchema,
+  updatedAt: TimestampSchema,
+});
+export type ContextRecord = z.infer<typeof ContextSchema>;
+
+/** Something you told the app in plain words, and what an agent proposed to record from it. */
+export const NoteSchema = z.object({
+  id: z.string().regex(/^note_[0-9a-f]{16}$/),
+  text: z.string().min(1).max(4000),
+  status: z.enum(['new', 'interpreting', 'proposed', 'applied', 'dismissed', 'failed']).default('new'),
+  /** Records proposed by the interpreting job, waiting for you to accept or edit. */
+  proposals: z
+    .array(
+      z.object({
+        key: z.string(),
+        type: z.enum(['context', 'instrument']),
+        /** The record as proposed (validated again when you accept it). */
+        record: z.record(z.string(), z.unknown()),
+        explanation: z.string().max(500),
+        accepted: z.boolean().optional(),
+      }),
+    )
+    .default([]),
+  jobId: z.string().optional(),
+  error: z.string().optional(),
+  createdAt: TimestampSchema,
+  updatedAt: TimestampSchema,
+});
+export type Note = z.infer<typeof NoteSchema>;
+
 // ─── On-disk file envelopes ──────────────────────────────────────────────────────────────────────
 
 export const AccountsFileSchema = z.object({ accounts: z.array(AccountSchema) });
+export const InstrumentsFileSchema = z.object({ instruments: z.array(InstrumentSchema) });
 export const InstitutionsFileSchema = z.object({ institutions: z.array(InstitutionSchema) });
 export const CategoriesFileSchema = z.object({ categories: z.array(CategorySchema) });
 export const RulesFileSchema = z.object({ rules: z.array(RuleSchema) });

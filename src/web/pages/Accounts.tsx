@@ -61,7 +61,7 @@ export default function Accounts() {
   const open = q.data.filter((a) => a.status === 'open');
   const closed = q.data.filter((a) => a.status === 'closed');
   const groups = WRAPPER_GROUPS.map((g) => ({ id: g, label: WRAPPER_GROUP_LABELS[g], items: open.filter((a) => (a.liability ? 'liabilities' : a.group) === g) })).filter((g) => g.items.length);
-  const fscs = health.data?.fscs.filter((f) => f.total >= f.limit * 0.8) ?? [];
+  const fscs = health.data?.fscs.filter((f) => f.near) ?? [];
   return (
     <div>
       <PageHeader title="Accounts" subtitle={`${open.length} open accounts`} actions={<Button variant="primary" icon={<Plus className="size-4" />} onClick={() => setAdding(true)}>Add account</Button>} />

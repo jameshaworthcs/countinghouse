@@ -65,6 +65,16 @@ export interface SummaryResponse {
   imports: Record<string, number>;
   taxYear: { label: string; daysLeft: number; start: string; end: string };
   hasData: boolean;
+  /** From the last 3 full months, counting covered time only. */
+  kpis: {
+    savingsRate: number | null;
+    monthlySaving: number | null;
+    monthlySpending: number | null;
+    runwayMonths: number | null;
+    confidence: 'high' | 'medium' | 'low';
+    basis: string;
+  };
+  coverage: { lastCompleteMonth: string | null; jointTo: string | null; limiting: { accountId: string; name: string; missingDays: number }[] };
 }
 
 export interface EstateSeriesResponse {
@@ -108,11 +118,14 @@ export interface CashflowResponse {
   groups: CategoryAmount[];
 }
 
-export interface Insight {
+/** A computed signal: a deterministic observation from a named rule (never an inference). */
+export interface Signal {
   id: string;
   tone: 'good' | 'neutral' | 'warning';
   title: string;
   detail: string;
+  /** The rule that produced it, in plain words. */
+  rule: string;
 }
 
 export interface RecurringItem {
@@ -142,6 +155,8 @@ export interface SpendingResponse {
   total: number;
   previousTotal: number;
   dailyAverage: number;
+  /** Days in the period (and the previous one) on which every account has data. */
+  coverage: { days: number; totalDays: number; previousDays: number; limiting: { accountId: string; name: string; missingDays: number }[] };
   categories: CategoryAmount[];
   groups: CategoryAmount[];
   heatmap: { months: string[]; rows: { id: string; name: string; values: number[]; total: number }[] };
@@ -150,31 +165,138 @@ export interface SpendingResponse {
   hours: { hour: number; total: number; count: number }[] | null;
   largest: Transaction[];
   small: { threshold: number; count: number; total: number };
-  insights: Insight[];
+  signals: Signal[];
   recurring: RecurringItem[];
 }
 
-export interface ProjectionScenario {
-  id: string;
-  label: string;
+/** A modelling value and where it came from (see src/server/analytics/params.ts). */
+export interface SourcedValue {
+  value: number;
+  range?: { low: number; high: number } | undefined;
+  source: 'owner' | 'agent' | 'research' | 'statement' | 'account' | 'fallback';
+  basis: string;
+  recordId?: string | undefined;
+  asOf?: string | undefined;
+  stale?: boolean | undefined;
+}
+
+export interface Band {
+  p10: number;
+  p50: number;
+  p90: number;
+}
+
+export interface CoverageResponse {
+  months: string[];
+  accounts: {
+    accountId: string;
+    name: string;
+    source: 'imports' | 'transactions' | 'none';
+    from: string | null;
+    to: string | null;
+    months: { month: string; fraction: number }[];
+  }[];
+  /** Months in which every account has data (≥ 90% of days). */
+  completeMonths: string[];
+  lastCompleteMonth: string | null;
+  /** The last day on which every account has data. */
+  jointTo: string | null;
+}
+
+export interface BaselineSummary {
   from: string;
   to: string;
   available: boolean;
-  reason?: string;
-  monthly: { income: number; spending: number; net: number; investing: number; pensionInflow: number };
+  reason?: string | undefined;
+  confidence: 'high' | 'medium' | 'low';
+  basis: { kind: 'months' | 'days'; months: string[]; days: number; limiting: { accountId: string; name: string; missingDays: number }[] };
+  monthly: { income: number; spending: number; net: number; investing: number; external: number };
+  netSd: number;
+  netSdBasis: string;
+  wrappers: { accountId: string; name: string; personal: number; external: number; notes: string[] }[];
+}
+
+export interface ProjectionScenario extends BaselineSummary {
+  id: string;
+  label: string;
+}
+
+export interface ProjectionPoint {
+  date: string;
+  month: number;
+  cash: number;
+  market: number;
+  pension: number;
+  property: number;
+  debt: number;
+  total: number;
+  band: Band;
+}
+
+export interface HoldingParamsSummary {
+  name: string;
+  instrumentId?: string | undefined;
+  value: number;
+  exposureBasis: string;
+  expectedReturn: SourcedValue;
+  volatility: SourcedValue;
+  fundFee: SourcedValue;
+}
+
+export interface AccountParamsSummary {
+  id: string;
+  name: string;
+  type: Account['type'];
+  bucket: 'cash' | 'market' | 'pension' | 'property' | 'debt' | 'income';
+  value: number;
+  holdingsKnown: boolean;
+  holdingsAsOf?: string | undefined;
+  holdings: HoldingParamsSummary[];
+  expectedReturn: SourcedValue;
+  volatility: SourcedValue;
+  fundFee: SourcedValue;
+  platformFee: SourcedValue;
+  platformFixed: SourcedValue;
+  interest?: SourcedValue | undefined;
+  growth?: SourcedValue | undefined;
+  /** Median growth a year after charges (market and pension accounts). */
+  netGrowth?: number | undefined;
+  /** Charges this year, in pounds, at today's value. */
+  annualCharges?: number | undefined;
+}
+
+export interface AssumptionInUse {
+  key: string;
+  label: string;
+  unit: 'rate' | 'gbpPerYear' | 'ratio';
+  value: number;
+  range?: { low: number; high: number } | undefined;
+  source: 'owner' | 'agent' | 'fallback';
+  basis: string;
+  recordId?: string | undefined;
+  asOf?: string | undefined;
+  stale?: boolean | undefined;
 }
 
 export interface ProjectionResponse {
   startDate: string;
   months: number;
-  assumedRealReturn: number;
+  /** "real": today's money (deflated by the inflation assumption); "nominal": future pounds. */
+  units: 'real' | 'nominal';
   spendingAdjustment: number;
-  start: { liquid: number; invested: number; pensions: number; property: number; debts: number; total: number };
+  start: { cash: number; market: number; pension: number; property: number; debt: number; total: number };
   scenarios: ProjectionScenario[];
   history: { date: string; value: number }[];
-  series: { id: string; label: string; points: { date: string; value: number; liquid: number }[] }[];
+  series: { id: string; label: string; points: ProjectionPoint[] }[];
+  /** The global assumptions the projection used. */
+  assumptions: AssumptionInUse[];
+  /** Each account's parameters. */
+  accounts: AccountParamsSummary[];
+  /** The market and pension accounts as one portfolio. */
+  pool: { value: number; mu: number; muRange?: { low: number; high: number } | undefined; sigma: number; fee: number };
   categories: { id: string; name: string; recentAnnual: number; lastYear: number }[];
   runwayMonths: number | null;
+  retirement: { date: string; age: number } | null;
   notes: string[];
 }
 
@@ -199,7 +321,8 @@ export interface AllowancesResponse {
     relief: number;
     total: number;
     remaining: number;
-    carryForward: { taxYear: string; unused: number }[];
+    /** Unused allowance from earlier years; null when contributions for that year are not fully known. */
+    carryForward: { taxYear: string; unused: number | null; basis: string }[];
     lines: AllowanceLine[];
     notes: string[];
   };
@@ -257,23 +380,34 @@ export interface InvestmentAccountSummary {
   xirr: number | null;
   history: { date: string; value: number; contributions: number | null }[];
   holdings: HoldingsSnapshot | null;
+  params: AccountParamsSummary;
+  /** Charges in pounds: this year, and their cost by retirement (or over 10 years). */
+  charges: { annual: number; drag: number; horizonYears: number; rate: number };
   lisa?: { bonusToDate: number | null; penaltyAdjustedValue: number | null; penaltyFreeFrom: string | null };
-  pension?: { accessDate: string | null; projectedAtRetirement: number | null };
+  pension?: { accessDate: string | null };
 }
 
 export interface InvestmentsResponse {
-  totals: { value: number; contributions: number; growth: number; pensions: number; isas: number };
+  totals: { value: number; contributions: number; growth: number; pensions: number; isas: number; annualCharges: number };
   accounts: InvestmentAccountSummary[];
   allocation: { assetClass: string; value: number; share: number }[];
   retirement: {
     age: number;
     date: string | null;
     potToday: number;
-    monthlyContribution: number;
-    projectedPot: number | null;
-    projectedIncome: number | null;
-    statePension: number | null;
-    assumedRealReturn: number;
+    /** Monthly into pensions: from your cash, and from payroll, employer and relief. */
+    monthlyPersonal: number;
+    monthlyExternal: number;
+    /** Pension pots at retirement and the yearly income they sustain, today's money. */
+    pot: Band | null;
+    income: Band | null;
+    withdrawalRate: AssumptionInUse;
+    statePension: { annual: number; source: 'forecast' | 'fallback'; basis: string; startsOn: string | null } | null;
+    /** Defined-benefit pensions' yearly income, from their statements. */
+    dbIncome: number;
+    taxFreeCash: { share: number; lumpSumAllowance: number | null };
+    pool: { mu: number; sigma: number; fee: number };
+    assumptions: AssumptionInUse[];
     notes: string[];
   };
 }
@@ -298,12 +432,14 @@ export interface MonthlyChecklistResponse {
 }
 
 export interface DataHealthResponse {
+  coverage?: CoverageResponse;
   issues: { file: string; severity: 'error' | 'warning'; message: string }[];
   gaps: { accountId: string; name: string; from: string; to: string; difference: number }[];
   uncategorised: number;
   noBalance: { accountId: string; name: string }[];
   stale: { accountId: string; name: string; days: number }[];
-  fscs: { group: string; institutions: string[]; total: number; limit: number; over: boolean }[];
+  /** Deposits per banking licence; `near` from 80% of the limit, `over` above it. */
+  fscs: { group: string; institutions: string[]; total: number; limit: number; over: boolean; near: boolean }[];
 }
 
 export interface BootstrapResponse {

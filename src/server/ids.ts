@@ -3,8 +3,12 @@
 
 import { randomHex, shortHash } from './fsutil';
 
-export function transactionId(accountId: string, date: string, amount: number, description: string, occurrence: number): string {
-  return `tx_${shortHash('tx', accountId, date, amount.toFixed(2), description, occurrence)}`;
+/**
+ * Transactions from an import include the import id, so committing the same import twice (a retry
+ * after a failure) produces the same ids and adds nothing twice. Hand-entered ones have no import.
+ */
+export function transactionId(accountId: string, date: string, amount: number, description: string, occurrence: number, importId?: string): string {
+  return importId ? `tx_${shortHash('tx', accountId, date, amount.toFixed(2), description, occurrence, importId)}` : `tx_${shortHash('tx', accountId, date, amount.toFixed(2), description, occurrence)}`;
 }
 
 export function balanceId(accountId: string, date: string, balance: number, kind: string, salt = ''): string {

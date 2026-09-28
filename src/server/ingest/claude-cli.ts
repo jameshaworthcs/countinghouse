@@ -1,8 +1,9 @@
 // Extraction through your logged-in Claude Code CLI (`claude -p`), so no API key is needed.
 //
 // Isolation: runs in a throwaway directory holding only the files to read, with only the Read tool
-// allowed, --safe-mode (no hooks, plugins, MCP servers or CLAUDE.md), no session persistence, and
-// non-essential traffic disabled. The output is constrained by --json-schema.
+// allowed and confined to that directory (--restricted), --safe-mode (no hooks, plugins, MCP
+// servers or CLAUDE.md), no session persistence, and non-essential traffic disabled. The output is
+// constrained by --json-schema.
 
 import { spawn } from 'node:child_process';
 import { access, constants } from 'node:fs/promises';
@@ -56,10 +57,14 @@ export async function resolveClaudeBin(env: NodeJS.ProcessEnv = process.env): Pr
 export function runProcess(
   bin: string,
   args: string[],
-  opts: { cwd: string; timeoutMs: number; env?: NodeJS.ProcessEnv; signal?: AbortSignal | undefined },
+  opts: { cwd: string; timeoutMs: number; env?: NodeJS.ProcessEnv; signal?: AbortSignal | undefined; input?: string },
 ): Promise<{ stdout: string; stderr: string; code: number | null }> {
   return new Promise((resolve, reject) => {
-    const child = spawn(bin, args, { cwd: opts.cwd, env: opts.env ?? process.env, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(bin, args, { cwd: opts.cwd, env: opts.env ?? process.env, stdio: [opts.input !== undefined ? 'pipe' : 'ignore', 'pipe', 'pipe'] });
+    if (opts.input !== undefined) {
+      child.stdin!.on('error', () => undefined);
+      child.stdin!.end(opts.input);
+    }
     let stdout = '';
     let stderr = '';
     let settled = false;
@@ -72,8 +77,8 @@ export function runProcess(
     };
     const timer = setTimeout(() => kill(`Timed out after ${Math.round(opts.timeoutMs / 1000)}s`), opts.timeoutMs);
     opts.signal?.addEventListener('abort', () => kill('Cancelled'), { once: true });
-    child.stdout.on('data', (d: Buffer) => (stdout += d.toString('utf8')));
-    child.stderr.on('data', (d: Buffer) => (stderr += d.toString('utf8')));
+    child.stdout!.on('data', (d: Buffer) => (stdout += d.toString('utf8')));
+    child.stderr!.on('data', (d: Buffer) => (stderr += d.toString('utf8')));
     child.on('error', (err) => {
       clearTimeout(timer);
       if (!settled) {
@@ -108,6 +113,7 @@ export async function extractWithClaudeCli(opts: CliOptions): Promise<EngineResu
     '--no-session-persistence',
     '--strict-mcp-config',
     '--safe-mode',
+    '--restricted',
     '--model',
     opts.model,
     '--effort',

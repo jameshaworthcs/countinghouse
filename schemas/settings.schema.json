@@ -89,6 +89,59 @@
         "type": "number",
         "exclusiveMinimum": 0
       }
+    },
+    "agents": {
+      "default": {
+        "enabled": true,
+        "model": "opus",
+        "effort": "high",
+        "researchStaleAfterDays": 90,
+        "insightsAfterImport": true,
+        "monthlyReview": true,
+        "timeoutSeconds": 1200
+      },
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "type": "boolean"
+        },
+        "model": {
+          "default": "opus",
+          "type": "string"
+        },
+        "effort": {
+          "default": "high",
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        },
+        "researchStaleAfterDays": {
+          "default": 90,
+          "type": "integer",
+          "minimum": 7,
+          "maximum": 730
+        },
+        "insightsAfterImport": {
+          "default": true,
+          "type": "boolean"
+        },
+        "monthlyReview": {
+          "default": true,
+          "type": "boolean"
+        },
+        "timeoutSeconds": {
+          "default": 1200,
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 3600
+        }
+      }
     }
   }
 }

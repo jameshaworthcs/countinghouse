@@ -3,7 +3,7 @@
 
 import { ACCOUNT_TYPE_META, balanceModeOf } from '../../shared/accounts';
 import type { AllowanceLine, AllowancesResponse } from '../../shared/api';
-import { today } from '../../shared/dates';
+import { addDays, diffDays, today } from '../../shared/dates';
 import { fromMinor, toMinor } from '../../shared/money';
 import type { Account, Transaction } from '../../shared/schema';
 import {
@@ -20,9 +20,22 @@ import {
   type TaxYear,
 } from '../../shared/uk';
 import type { Store } from '../store';
+import { covers, mergeIntervals, type Interval } from './coverage';
 
 const inYear = (t: { date: string }, ty: TaxYear) => t.date >= ty.start && t.date <= ty.end;
 const TRANSFER_OUT = new Set(['savings-transfer', 'investment-transfer', 'transfer']);
+
+/**
+ * The periods a wrapper account's own records cover: its imported statements' periods, or the span
+ * of its transactions when it has no import records.
+ */
+export function wrapperDataSpan(store: Store, account: Account): Interval[] {
+  const intervals: Interval[] = [];
+  for (const imp of store.imports) for (const s of imp.sections ?? []) if (s.accountId === account.id) intervals.push({ from: s.from, to: s.to });
+  const txs = store.transactions(account.id);
+  if (!intervals.length && txs.length) intervals.push({ from: txs[0]!.date, to: txs[txs.length - 1]!.date });
+  return mergeIntervals(intervals);
+}
 
 /** Money into a wrapper account in the tax year that counts as a new subscription/contribution. */
 export function wrapperContributions(store: Store, account: Account, ty: TaxYear): { minor: number; lines: AllowanceLine[] } {
@@ -39,13 +52,18 @@ export function wrapperContributions(store: Store, account: Account, ty: TaxYear
     for (const t of own) if (t.amount < 0 && t.category === 'withdrawal') minor += toMinor(t.amount);
     minor = Math.max(0, minor);
   }
-  // One-sided transfers recorded only in the paying account.
+  // Payments recorded only in the paying account. Where the wrapper's own statements cover the
+  // date (allowing 10 days for the money to arrive), they are the record and the payment is not
+  // counted again.
+  const span = wrapperDataSpan(store, account);
   const oneSided: Transaction[] = [];
   for (const other of store.accounts) {
     if (other.id === account.id || balanceModeOf(other) !== 'ledger') continue;
     for (const t of store.transactions(other.id)) {
       if (!inYear(t, ty) || t.amount >= 0 || t.transferGroup) continue;
-      if (t.counterpartyAccountId === account.id && t.category && TRANSFER_OUT.has(t.category)) oneSided.push(t);
+      if (t.counterpartyAccountId !== account.id || !t.category || !TRANSFER_OUT.has(t.category)) continue;
+      if (covers(span, t.date) || covers(span, addDays(t.date, 10))) continue;
+      oneSided.push(t);
     }
   }
   for (const t of oneSided) {
@@ -95,8 +113,9 @@ export function pensionTotals(store: Store, ty: TaxYear) {
     if (reliefAtSource) {
       if (rel.minor) gross = contrib.minor + rel.minor;
       else if (contrib.minor) {
-        gross = Math.round(contrib.minor / 0.8);
-        notes.push(`${a.name}: no tax-relief payments recorded yet, so relief at source is estimated as 25% of your payments.`);
+        const rate = taxYearParams(ty).reliefAtSourceRate;
+        gross = Math.round(contrib.minor / (1 - rate));
+        notes.push(`${a.name}: no tax-relief payments recorded yet, so basic-rate relief at source (${Math.round(rate * 100)}% of the gross) is estimated.`);
       }
     }
     personal += contrib.minor;
@@ -182,7 +201,7 @@ export function allowances(store: Store, label?: string): AllowancesResponse {
       const age = ageOn(dob, ty.start);
       if (age >= 50) notes.push('You are 50 or over, so LISA contributions and bonuses have stopped.');
     } else notes.push('Add your date of birth in Settings to check LISA age limits.');
-    notes.push('The 25% bonus is paid monthly by HMRC on contributions up to £4,000 a year.');
+    notes.push(`The ${Math.round(params.lisaBonusRate * 100)}% bonus is paid monthly by HMRC on contributions up to £${params.lisaAllowance.toLocaleString('en-GB')} a year.`);
     const allowance = toMinor(params.lisaAllowance);
     lisa = {
       allowance: params.lisaAllowance,
@@ -195,18 +214,31 @@ export function allowances(store: Store, label?: string): AllowancesResponse {
     };
   }
 
-  // Pensions, with carry-forward from the previous three years.
+  // Pensions, with carry-forward from the previous three years. A year counts only when its
+  // contributions are known: every pension account's statements cover the whole year, or pension
+  // statements gave the year's totals. Otherwise the unused amount is unknown, never assumed.
   const pen = pensionTotals(store, ty);
   const aa = pensionAnnualAllowance(ty);
-  const carryForward: { taxYear: string; unused: number }[] = [];
+  const pensionAccounts = store.accounts.filter((a) => ACCOUNT_TYPE_META[a.type].pension && a.type !== 'state_pension' && a.type !== 'db_pension');
+  const carryForward: AllowancesResponse['pension']['carryForward'] = [];
   for (let back = 3; back >= 1; back--) {
     const prev = makeTaxYear(ty.startYear - back);
-    const hadPension = store.accounts.some(
-      (a) => ACCOUNT_TYPE_META[a.type].pension && (store.transactions(a.id).some((t) => t.date <= prev.end) || store.balances(a.id).some((b) => b.date <= prev.end)),
-    );
-    if (!hadPension) continue;
+    const existed = pensionAccounts.filter((a) => store.transactions(a.id).some((t) => t.date <= prev.end) || store.balances(a.id).some((b) => b.date <= prev.end) || (a.openedOn !== undefined && a.openedOn <= prev.end));
+    const figures = store.figures.some((f) => f.taxYear === prev.label && (f.kind === 'pension_contribution_employee' || f.kind === 'pension_contribution_employer'));
+    const fullyCovered = existed.length > 0 && existed.every((a) => {
+      const span = wrapperDataSpan(store, a);
+      return span.some((i) => diffDays(prev.start, i.from) <= 45 && diffDays(i.to, prev.end) <= 45);
+    });
+    if (!existed.length && !figures) {
+      carryForward.push({ taxYear: prev.label, unused: null, basis: 'No pension data for this year. If you were in a pension scheme, import its statement to count what you left unused.' });
+      continue;
+    }
+    if (!fullyCovered && !figures) {
+      carryForward.push({ taxYear: prev.label, unused: null, basis: 'Contributions for this year are not fully known: import statements covering the whole year.' });
+      continue;
+    }
     const used = pensionTotals(store, prev).total;
-    carryForward.push({ taxYear: prev.label, unused: fromMinor(Math.max(0, toMinor(pensionAnnualAllowance(prev)) - used)) });
+    carryForward.push({ taxYear: prev.label, unused: fromMinor(Math.max(0, toMinor(pensionAnnualAllowance(prev)) - used)), basis: figures ? 'From pension statement totals' : 'From statements covering the whole year' });
   }
   const pensionNotes = [...pen.notes];
   if ((store.profile.grossSalary ?? 0) > params.pensionTaperThresholdIncome) {

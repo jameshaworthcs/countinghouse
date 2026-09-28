@@ -113,3 +113,61 @@ as invariants.
     only from public identifiers.
   - Jobs that read personal data (insights, reviews, interpreting notes) get no web tools, so
     they cannot send it anywhere but Claude.
+
+## 2026-09-29: Data format v2, the modelling engine and agents
+
+- **Assumptions are append-only records with scopes and layers.**
+  - One file, `assumptions.jsonl`: a change appends a version, so the file is the audit trail as
+    well as git.
+  - Resolution is layers first (owner, then agent, then fallback), then specificity, then
+    recency. That makes "your override wins" hold even against an agent's fund-level value; the
+    alternative (specificity first) would let an agent's fund figure silently beat a global value
+    the owner had set.
+  - Keys, units, bounds, scopes and fallbacks are a registry in code. The values are data.
+- **Facts and forecasts are kept apart.**
+  - A fund's charge and make-up, a platform's fee schedule and an account's current rate are facts
+    (statements and research).
+  - Returns, volatility, inflation, growth and the withdrawal rate are forecasts: assumption
+    records only.
+  - Historical performance is research, never used as a forecast directly; an assumption cites the
+    outlooks it rests on (`basedOn`).
+- **Projections run per account, with ranges from moments, not Monte Carlo.**
+  - Each account compounds at its median growth after charges. Cash earns its interest; spending
+    and pay grow with their assumptions; results are shown in today's money.
+  - The p10–p90 range comes from an exact recursion of the portfolio's first two moments, with
+    uncertainty in the expected return integrated by Gauss–Hermite quadrature and a lognormal fit.
+  - This was chosen over seeded Monte Carlo because it is deterministic, fast, and written down
+    as equations. Monte Carlo stays in the tests as the oracle.
+  - The uncertainty in the saving estimate grows linearly and is combined root-sum-square.
+- **Coverage drives every average.**
+  - Baselines use complete months where every account has data, else at least 14 jointly covered
+    days (low confidence). An account counts from its opening or first data until it closes.
+  - The alternative, dividing by calendar months, understated a 12-month projection threefold with
+    four months of data.
+- **Withdrawal-rate fallback is 3.5%, not 4%.** UK studies put a 30-year sustainable rate nearer
+  3–3.5% than the US-derived "4% rule". It is a fallback, labelled as such, and agents and the
+  owner replace it.
+- **Agents are in-app jobs through the same locked-down claude CLI**, with two privacy classes:
+  - research gets web tools and public identifiers only;
+  - analysis gets the owner's data (a digest of computed figures with record ids) and no web tools.
+  - Automatic starts are conservative: new funds and providers, at most three stale refreshes a
+    day, assumptions at most weekly, insights after imports, a monthly review.
+  - Plain-word notes become proposals that the owner confirms, following "review before commit".
+- **Research ids are content hashes of canonical JSON.** Writing the same findings twice is a
+  no-op, and an assumption can cite research from the same batch.
+- **Pending rows are excluded by default** and never reconciled. They double-counted when the
+  settled row arrived.
+- **`isMoney` became an exact check.** The property tests found that an absolute tolerance
+  rejected valid amounts above about £86 million.
+- **The Self Assessment hint "£10,000 of interest means you must file" was removed.** Current
+  gov.uk guidance on who must send a return no longer lists it.
+- **Spending compares like for like.** "Last 3 months" became this month and the two before, and
+  the previous period is the same stretch shifted by whole months (or a year for a tax year).
+  A rolling 90 days held two rent payments in one window and three in the next, which showed as
+  a 27% drop in spending on the demo data.
+- **A subscription moved to another card stays one regular payment.** Runs of the same payee on
+  different accounts join when one ends as the next begins; running at the same time, they stay
+  separate.
+- **Owner corrections keep what was read.** Correcting a transaction's date, amount or
+  description records the previous value in `corrections`, and saving other fields no longer
+  marks the payee as set by the owner.

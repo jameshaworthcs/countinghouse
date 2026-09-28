@@ -1,4 +1,4 @@
-# Data format (v1)
+# Data format (v2)
 
 Everything the app knows lives in the data directory (`data/`, or `demo-data/` for the demo) as
 plain JSON and JSONL. The Zod schemas in [`src/shared/schema.ts`](../src/shared/schema.ts) are the
@@ -14,21 +14,27 @@ point at them with `"$schema"` so editors validate as you type.
 | Dates | `YYYY-MM-DD` calendar dates. Timestamps are ISO 8601 with offset (`2026-09-28T21:08:17+01:00`). |
 | Ids | Accounts, institutions and categories are readable slugs (`monzo-current`). Records have prefixed content hashes assigned once at creation: `tx_`, `bal_`, `hld_`, `fig_` + 16 hex. Imports: `imp_YYYYMMDD_HHMMSS_xxxx`. Documents: `doc_` + first 16 hex of the SHA-256. |
 | Unknown fields | Not part of the format. They are reported by `npm run validate`, and a record that fails validation is kept verbatim (quarantined) rather than lost. |
-| Versioning | `meta.json → version`. Migrations upgrade files in place (see `src/server/migrations.ts`). |
+| Versioning | `meta.json → version`. Migrations upgrade files in place (see `src/server/migrations.ts` and "Versions" below). |
 
 ## Layout
 
 ```
 data/
   meta.json            format + version + base currency
-  profile.json         you: date of birth, tax band, region, salary, retirement age, assumed return
-  settings.json        extraction engine/model, git behaviour, stale threshold, FX rates
+  profile.json         you: date of birth, tax band, region, salary, retirement age
+  settings.json        extraction engine/model, agents, git behaviour, stale threshold, FX rates
   institutions.json    { institutions: [...] }   banks, platforms, providers (+ FSCS group)
   accounts.json        { accounts: [...] }
   categories.json      { categories: [...] }     editable taxonomy (system ones drive calculations)
   rules.json           { rules: [...] }          your categorisation rules
   goals.json           { goals: [...] }
   csv-profiles.json    { profiles: [...] }       your saved CSV column mappings
+  instruments.json     { instruments: [...] }    funds, ETFs and shares you hold
+  assumptions.jsonl    every version of every modelling assumption (append-only)
+  research.jsonl       dated, sourced research about funds, providers and the economy (append-only)
+  insights.jsonl       Claude's inferences, with evidence and provenance
+  context.jsonl        what you have told the app about yourself and your plans
+  notes.jsonl          your words, and the records proposed from them
   figures.jsonl        one tax figure per line (P60, interest certificates, …)
   transactions/<account-id>/<yyyy>.jsonl    one transaction per line, by posting date
   balances/<account-id>.jsonl               balance / valuation snapshots
@@ -78,11 +84,18 @@ depend on).
 | `raw`? | the source row verbatim (every CSV column, OFX tag or QIF field) |
 | `attributes`? | anything else, namespaced keys welcome |
 
+**Corrections** to what was read (a misread amount or date) keep what was there:
+
+| Field | Notes |
+|---|---|
+| `corrections` | `[{field: date\|amount\|description, from, to, at, note?}]`, oldest first; the fields above hold the corrected values |
+
 **Enrichment** is recomputable:
 
 | Field | Notes |
 |---|---|
 | `payee` | clean name |
+| `payeeSetBy` | `user` when you set the payee: re-running enrichment keeps it |
 | `category` | category id; absent = uncategorised |
 | `categorisedBy` | `user` (never overwritten), `rule`, `builtin`, `bank`, `ai`, `transfer` |
 | `ruleId` | the rule that set it |
@@ -131,7 +144,9 @@ Standalone figures from documents, used for Self Assessment:
 - `extraction`: `{engine, engineVersion, detail, model, durationMs, costUsd, warnings, raw}`.
   `raw` is the engine's complete output, kept for audit and re-derivation.
 - `draft`: exactly what you reviewed and committed.
-- `result`: `{accountIds, accountsCreated, transactionsAdded, transactionsSkipped, balancesAdded, holdingsAdded, figuresAdded}`.
+- `result`: `{accountIds, accountsCreated, transactionsAdded, transactionsSkipped, balancesAdded, holdingsAdded, figuresAdded, sections}`.
+  `sections` maps each draft section to the account it was committed to; with the sections'
+  statement periods it gives each account's **coverage** (the days it has data for).
 
 ## categories.json, rules.json, csv-profiles.json
 
@@ -149,6 +164,114 @@ Standalone figures from documents, used for Self Assessment:
 - **CSV profile**: `headerSignature` (normalised header names), column mapping, `dateOrder`,
   `amountSign`, `filter`, `splitBy`, `negativeWhen`. Same shape as the built-in bank profiles in
   `src/server/ingest/csv-profiles.ts`.
+
+## Assumptions, research, insights and context
+
+These hold the app's modelling assumptions and what agents and you have added. The rules for
+writing them are in [AGENTS.md](AGENTS.md); how they are used is in [FORMULAS.md](FORMULAS.md).
+
+Shared pieces:
+
+- **Provenance** is `{setBy: owner|agent|system, model?, promptVersion?, jobId?, session?}`.
+  Records you set (`owner`) always win.
+- **A source** is `{title, url?, publisher?, retrievedOn?, quote?}`: a public page a record rests
+  on, with a short quote of the key figure.
+
+### instruments.json
+
+| Field | Notes |
+|---|---|
+| `id` | slug |
+| `name` | as printed or as you gave it |
+| `type` | `fund` `etf` `investment_trust` `share` `bond` `gilt` `money_market` `crypto` `other` |
+| `isin`, `ticker`, `sedol`, `currency`, `manager` | identifiers, all optional |
+| `allocation` | your own `{equity, bond, cash, property, commodity, crypto, other}` fractions summing to 1; beats research |
+| `aliases` | other names it appears under on statements |
+
+Holdings are matched to instruments by ISIN, then ticker, then name or alias.
+
+### assumptions.jsonl
+
+One record per line, **append-only**: a change adds a version, and the file is the history.
+
+| Field | Notes |
+|---|---|
+| `id` | `asm_` + 16 hex |
+| `key` | from the registry in `src/shared/assumptions.ts` (`npm run records -- keys`): `inflation`, `earnings.growth`, `salary.growth`, `contribution.growth`, `spending.growth`, `return.expected`, `return.volatility`, `correlation.assetClasses`, `fee.fund`, `fee.platform`, `fee.platformFixed`, `interest.rate`, `withdrawal.rate`, `statePension.growth`, `property.growth`, `mortgage.rate`, `cashflow.uncertainty` |
+| `scope` | `{kind: global}` · `{kind: assetClass, assetClass}` · `{kind: accountType, accountType}` · `{kind: institution, institutionId}` · `{kind: account, accountId}` · `{kind: instrument, instrumentId}`; each key allows some |
+| `value`, `range` | rates as decimals; `range` is `{low, high}`, roughly the 10th–90th percentile |
+| `asOf` | the date the value reflects |
+| `source`, `evidence`, `basedOn` | a short source name, sources, and the research records (`res_…`) it rests on |
+| `rationale` | why this value |
+| `provenance` | who set it |
+| `status` | `active`, or `retired` to withdraw it (e.g. an override you removed) |
+| `reviewBy` | when agents should refresh it |
+| `createdAt` | |
+
+The value in force for (key, scope, who) is the newest record. Which one applies is
+[FORMULAS.md §1](FORMULAS.md).
+
+### research.jsonl
+
+One record per line, **append-only**, content-addressed (the same findings get the same id).
+
+| Field | Notes |
+|---|---|
+| `id` | `res_` + 16 hex |
+| `kind` | `instrument.facts` `instrument.performance` `provider.rates` `provider.fees` `market.outlook` `economy.indicator` |
+| `subject` | `{instrumentId?, institutionId?, assetClass?, topic?}` |
+| `data` | per kind: see `ResearchDataSchemas` in `src/shared/schema.ts` and [AGENTS.md §3](AGENTS.md) |
+| `asOf` | the date the facts describe |
+| `sources` | at least one |
+| `confidence` | `high` `medium` `low` |
+| `notes`, `provenance`, `createdAt` | |
+
+### insights.jsonl
+
+| Field | Notes |
+|---|---|
+| `id` | `inf_` + 16 hex |
+| `kind` | `month-review` `habit` `subscription` `opportunity` `risk` `anomaly` `fund` `allowance` `projection` `data-quality` `note` |
+| `pages` | where it shows: `overview` `accounts` `transactions` `spending` `projections` `investments` `tax` `import` |
+| `subject` | `{accountId?, instrumentId?, category?, taxYear?, month?}` |
+| `title`, `body` | |
+| `evidence` | what it rests on: `{type: transactions, ids}`, `{type: balance\|holdings\|figure\|research\|assumption\|context\|account, id}` or `{type: computed, metric, value?}`, each with an optional `label` |
+| `confidence` | |
+| `period`, `expiresOn` | optional |
+| `provenance` | model, prompt version, job |
+| `status` | `active`, `dismissed` (by you) or `superseded` (by a newer run of the same job) |
+| `supersedes`, `feedback`, `createdAt` | `feedback` is `{useful, note?, at}` |
+
+### context.jsonl and notes.jsonl
+
+**Context** is facts and plans about you:
+
+| Field | Notes |
+|---|---|
+| `id` | `ctx_` + 16 hex |
+| `kind` | `holding` `plan` `goal` `preference` `income` `household` `property` `fact` |
+| `statement` | one plain sentence |
+| `detail` | optional `{accountId, institutionId, instrumentId, event, amount, annualAmount, rate, date, from, to, accountIds, attributes}` |
+| `status` | `active` `done` `retired` |
+| `origin` | `{kind: form}`, or `{kind: note, noteId, interpretedBy}` |
+| `createdAt`, `updatedAt` | |
+
+**Notes** are what you told the app in your own words:
+
+- Fields: `{id: note_…, text, status, proposals, jobId?, error?, createdAt, updatedAt}`.
+- `status` is one of `new` `interpreting` `proposed` `applied` `dismissed` `failed`.
+- `proposals` are records suggested from your words, each `{key, type: context|instrument, record,
+  explanation, accepted?}`. Nothing is recorded until you accept it.
+
+## Versions
+
+| Version | Change | Migration |
+|---|---|---|
+| 1 | first format | |
+| 2 | Assumptions become data. `profile.assumedRealReturn` is removed: kept as your global `return.expected` override (nominal, at 2% inflation) if you had changed it from 4%. Added `instruments.json`, `assumptions.jsonl`, `research.jsonl`, `insights.jsonl`, `context.jsonl`, `notes.jsonl`, `settings.agents`, and the optional `payeeSetBy`, `corrections` and `result.sections` fields | `from: 1` in `src/server/migrations.ts` |
+
+Data written by a newer version of the app than the one running is read-only until the app is
+updated.
 
 ## Querying
 

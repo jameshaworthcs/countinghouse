@@ -1,0 +1,208 @@
+// Regressions for the problems a review of the codebase found on 28 September 2026.
+
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { allowances } from '../src/server/analytics/allowances';
+import { enrich } from '../src/server/enrich';
+import { transactionId } from '../src/server/ids';
+import { commitDraft } from '../src/server/ingest/commit';
+import { buildDraft } from '../src/server/ingest/draft';
+import { normaliseExtraction } from '../src/server/ingest/normalise';
+import { parseOfx } from '../src/server/ingest/ofx';
+import { Store } from '../src/server/store';
+import { CategoryIndex, defaultCategories } from '../src/shared/categories';
+import { Categoriser } from '../src/shared/categorise';
+import { isMoney } from '../src/shared/money';
+import { ExtractionSchema, type Account, type ImportRecord, type Transaction } from '../src/shared/schema';
+import { grossUpReliefAtSource, statePensionDate, statePensionFullYearly, taxYear, taxYearParams } from '../src/shared/uk';
+
+const stamp = '2026-01-01T00:00:00+00:00';
+const acct = (id: string, type: Account['type'], extra: Partial<Account> = {}): Account => ({ id, name: id, type, currency: 'GBP', status: 'open', aliases: [], includeInNetWorth: true, createdAt: stamp, updatedAt: stamp, ...extra });
+let n = 0;
+const tx = (accountId: string, date: string, amount: number, description: string, extra: Partial<Transaction> = {}): Transaction => ({ id: transactionId(accountId, date, amount, description, n++), accountId, date, amount, currency: 'GBP', description, source: {}, ...extra });
+
+let dir: string;
+let store: Store;
+beforeEach(async () => {
+  dir = await mkdtemp(path.join(os.tmpdir(), 'finance-fixes-'));
+  store = await Store.open(path.join(dir, 'data'));
+});
+afterEach(async () => {
+  store.stopWatching();
+  await rm(dir, { recursive: true, force: true });
+});
+
+describe('allowances', () => {
+  it('a bank payment to a SIPP is not counted again when the SIPP statement has it', async () => {
+    await store.setAccounts([acct('current', 'current'), acct('sipp', 'sipp', { pension: { method: 'relief_at_source' } })]);
+    await store.addTransactions(
+      [
+        // Paid on 1 May, credited to the SIPP 8 days later: too far apart to be linked as one transfer.
+        tx('current', '2026-05-01', -800, 'AJ BELL SIPP', { category: 'investment-transfer', counterpartyAccountId: 'sipp' }),
+        tx('sipp', '2026-05-09', 800, 'Contribution', { category: 'contribution' }),
+        tx('sipp', '2026-06-20', 200, 'Tax relief', { category: 'tax-relief' }),
+      ],
+      't',
+    );
+    const a = allowances(store, '2026/27');
+    expect(a.pension.personal).toBe(800);
+    expect(a.pension.personalGross).toBe(1000);
+  });
+
+  it('without the SIPP’s own statement the bank payment still counts', async () => {
+    await store.setAccounts([acct('current', 'current'), acct('sipp', 'sipp')]);
+    await store.addTransactions([tx('current', '2026-05-01', -800, 'AJ BELL SIPP', { category: 'investment-transfer', counterpartyAccountId: 'sipp' })], 't');
+    const a = allowances(store, '2026/27');
+    expect(a.pension.personal).toBe(800);
+    expect(a.pension.personalGross).toBe(grossUpReliefAtSource(800, taxYear(2026)));
+  });
+
+  it('carry-forward is unknown, not £60,000, when a year’s contributions are not known', async () => {
+    await store.setAccounts([acct('pension', 'workplace_pension', { openedOn: '2020-01-01' })]);
+    await store.addTransactions([tx('pension', '2026-05-28', 500, 'Employer', { category: 'employer-contribution' })], 't');
+    const cf = allowances(store, '2026/27').pension.carryForward;
+    expect(cf).toHaveLength(3);
+    for (const c of cf) expect(c.unused).toBeNull();
+    expect(cf[0]!.basis).toMatch(/not fully known|No pension data/);
+  });
+
+  it('carry-forward is counted for a year the data covers from start to end', async () => {
+    await store.setAccounts([acct('pension', 'workplace_pension')]);
+    // Monthly contributions from Jan 2024 to Sep 2026: 2024/25 and 2025/26 are covered in full;
+    // 2023/24 only from January, so it stays unknown.
+    const months = Array.from({ length: 33 }, (_, i) => `${2024 + Math.floor(i / 12)}-${String((i % 12) + 1).padStart(2, '0')}-28`);
+    await store.addTransactions(months.map((d) => tx('pension', d, 500, 'Employer', { category: 'employer-contribution' })), 't');
+    const cf = allowances(store, '2026/27').pension.carryForward;
+    expect(cf.map((c) => c.taxYear)).toEqual(['2023/24', '2024/25', '2025/26']);
+    expect(cf[0]!.unused).toBeNull();
+    expect(cf[1]!.unused).toBe(60_000 - 12 * 500);
+    expect(cf[2]!.unused).toBe(60_000 - 12 * 500);
+  });
+});
+
+describe('pending rows, payees and corrections', () => {
+  it('pending rows are shown but not included by default', async () => {
+    await store.setAccounts([acct('current', 'current', { last4: '1234' })]);
+    const extraction = ExtractionSchema.parse({
+      documentType: 'transactions_screenshot',
+      accounts: [{ accountType: 'current', last4: '1234', transactions: [{ date: '2026-09-20', description: 'TESCO', amount: -12.5, pending: true }, { date: '2026-09-19', description: 'PRET', amount: -4.1 }] }],
+    });
+    const draft = buildDraft(extraction, { store, document: { id: 'doc_0000000000000001', sha256: '1'.repeat(64), fileName: 'x.png', mediaType: 'image/png', size: 1 }, uploadedOn: '2026-09-21' });
+    const rows = draft.sections[0]!.transactions;
+    expect(rows.find((r) => r.description === 'TESCO')).toMatchObject({ include: false, pending: true });
+    expect(rows.find((r) => r.description === 'PRET')).toMatchObject({ include: true });
+  });
+
+  it('re-running enrichment keeps a payee you set', async () => {
+    await store.setAccounts([acct('current', 'current')]);
+    await store.setCategories(defaultCategories());
+    const t = tx('current', '2026-09-01', -9.99, 'SQ *THE CORNER CAFE', { payee: 'Corner Cafe (Tom’s)', payeeSetBy: 'user' });
+    await store.addTransactions([t], 't');
+    await enrich(store);
+    expect(store.transaction(t.id)!.payee).toBe('Corner Cafe (Tom’s)');
+  });
+
+  it('the model’s money strings go through the bank-amount parser', () => {
+    const { extraction } = normaliseExtraction({ documentType: 'bank_statement', accounts: [{ closingBalance: '(1,234.56)', transactions: [{ date: '2026-09-01', description: 'X', amount: '12.30 DR' }] }] });
+    expect(extraction.accounts[0]!.closingBalance).toBe(-1234.56);
+    expect(extraction.accounts[0]!.transactions[0]!.amount).toBe(-12.3);
+  });
+
+  it('isMoney accepts large amounts and rejects 3 decimal places', () => {
+    expect(isMoney(156_810_164.61)).toBe(true);
+    expect(isMoney(0.1 + 0.2)).toBe(false);
+    expect(isMoney(12.345)).toBe(false);
+  });
+});
+
+describe('committing an import twice adds nothing twice', () => {
+  it('is idempotent on retry', async () => {
+    await store.setAccounts([acct('current', 'current')]);
+    const workFile = path.join(dir, 'upload.csv');
+    await writeFile(workFile, 'x');
+    const record: ImportRecord = {
+      id: 'imp_20260928_120000_abcd',
+      status: 'review',
+      createdAt: stamp,
+      updatedAt: stamp,
+      origin: 'upload',
+      document: { id: 'doc_00000000000000ab', sha256: 'ab'.repeat(32), fileName: 'upload.csv', mediaType: 'text/csv', size: 1 },
+      extraction: { warnings: [] },
+    };
+    const draft = {
+      documentType: 'csv_export' as const,
+      sections: [
+        {
+          key: 's0',
+          detected: {},
+          target: { mode: 'existing' as const, accountId: 'current' },
+          currency: 'GBP',
+          recordBalance: true,
+          balance: 100,
+          balanceDate: '2026-09-02',
+          transactions: [
+            { key: 'a', include: true, status: 'new' as const, date: '2026-09-01', amount: -3, description: 'COFFEE' },
+            { key: 'b', include: true, status: 'new' as const, date: '2026-09-01', amount: -3, description: 'COFFEE' },
+          ],
+          recordHoldings: false,
+          holdings: [],
+        },
+      ],
+      figures: [],
+      notes: [],
+    };
+    const first = await commitDraft(store, { record, draft, workFile });
+    expect(first.result!.transactionsAdded).toBe(2);
+    const second = await commitDraft(store, { record, draft, workFile });
+    expect(second.result!.transactionsAdded).toBe(0);
+    expect(store.transactions('current')).toHaveLength(2);
+    expect(store.balances('current')).toHaveLength(1);
+  });
+});
+
+describe('UK rules', () => {
+  it('State Pension age follows the legislated timetable', () => {
+    expect(statePensionDate('1958-03-01')).toBe('2024-03-01');
+    expect(statePensionDate('1960-04-10')).toBe('2026-05-10');
+    expect(statePensionDate('1960-05-05')).toBe('2026-06-05');
+    expect(statePensionDate('1961-03-05')).toBe('2028-02-05');
+    expect(statePensionDate('1961-03-06')).toBe('2028-03-06');
+    expect(statePensionDate('1977-04-06')).toBe('2044-05-06');
+    expect(statePensionDate('1978-02-10')).toBe('2046-01-06');
+    expect(statePensionDate('1978-04-05')).toBe('2046-03-06');
+    expect(statePensionDate('1990-07-15')).toBe('2058-07-15');
+  });
+
+  it('2026/27 figures checked against gov.uk', () => {
+    const p = taxYearParams(taxYear(2026));
+    expect(p.statePensionFullWeekly).toBe(241.3);
+    expect(statePensionFullYearly(taxYear(2026))).toBe(12_547.6);
+    expect(p.dividendTaxRates).toEqual({ basic: 0.1075, higher: 0.3575, additional: 0.3935 });
+    expect(p.hicbc).toEqual({ threshold: 60_000, fullAt: 80_000 });
+    expect(p.cgtReportingProceeds).toBe(50_000);
+    expect(p.lumpSumAndDeathBenefitAllowance).toBe(1_073_100);
+    expect(taxYearParams(taxYear(2027)).savingsTaxRates).toEqual({ basic: 0.22, higher: 0.42, additional: 0.47 });
+    expect(taxYearParams(taxYear(2025)).statePensionFullWeekly).toBe(230.25);
+    expect(grossUpReliefAtSource(80, taxYear(2026))).toBe(100);
+  });
+});
+
+describe('ingestion details', () => {
+  it('OFX foreign amounts, both directions', () => {
+    const ofx = (agg: string, amount: string) =>
+      `OFXHEADER:100\n<OFX><BANKMSGSRSV1><STMTTRNRS><STMTRS><CURDEF>GBP<BANKACCTFROM><ACCTID>12345678</BANKACCTFROM><BANKTRANLIST><STMTTRN><TRNTYPE>DEBIT<DTPOSTED>20260901<TRNAMT>${amount}<FITID>1<NAME>CAFE PARIS${agg}</STMTTRN></BANKTRANLIST></STMTRS></STMTTRNRS></BANKMSGSRSV1></OFX>`;
+    const inForeign = parseOfx(ofx('<CURRENCY><CURRATE>0.85<CURSYM>EUR</CURRENCY>', '-100.00')).accounts[0]!.transactions[0]!;
+    expect(inForeign).toMatchObject({ amount: -85, originalAmount: -100, originalCurrency: 'EUR', exchangeRate: 0.85 });
+    const converted = parseOfx(ofx('<ORIGCURRENCY><CURRATE>0.85<CURSYM>EUR</ORIGCURRENCY>', '-85.00')).accounts[0]!.transactions[0]!;
+    expect(converted).toMatchObject({ amount: -85, originalAmount: -100, originalCurrency: 'EUR' });
+  });
+
+  it('a card purchase mentioning "chip" is not a transfer to your Chip account', () => {
+    const accounts = [acct('current', 'current'), acct('chip-savings', 'savings', { institutionId: 'chip' })];
+    const c = new Categoriser([], new CategoryIndex(defaultCategories()), accounts, [{ id: 'chip', name: 'Chip', kind: 'investment_platform' }]);
+    expect(c.categorise({ accountId: 'current', description: 'CHIP AND PIN FISH BAR', amount: -8.5 }).categorisedBy).not.toBe('transfer');
+    expect(c.categorise({ accountId: 'current', description: 'TRANSFER TO CHIP SAVINGS', amount: -100 }).categorisedBy).toBe('transfer');
+  });
+});

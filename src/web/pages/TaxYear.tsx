@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from 'react-router';
 import type { AllowanceLine, AllowancesResponse, SaItem, SelfAssessmentResponse } from '../../shared/api';
 import { formatDate } from '../../shared/dates';
 import { Meter } from '../components/charts/bars';
+import { InsightsPanel } from '../components/Intel';
 import { Badge, Button, Callout, Card, KeyValue, Loading, Money, PageHeader, Select, StatusBadge, Tabs, tableClasses } from '../components/ui';
 import { qs, useApi } from '../lib/api';
 import { useAppData } from '../lib/data';
@@ -99,10 +100,15 @@ function Allowances({ a }: { a: AllowancesResponse }) {
               {a.pension.carryForward.map((c) => (
                 <li key={c.taxYear} className="flex justify-between text-ink-3">
                   <span>{c.taxYear}</span>
-                  <Money value={c.unused} decimals={0} />
+                  {c.unused === null ? <span title={c.basis}>not known</span> : <Money value={c.unused} decimals={0} />}
                 </li>
               ))}
             </ul>
+            {[...new Set(a.pension.carryForward.filter((c) => c.unused === null).map((c) => c.basis))].map((b) => (
+              <p key={b} className="mt-1 text-[12px] text-ink-3">
+                {b}
+              </p>
+            ))}
           </div>
         )}
         <Lines lines={a.pension.lines} />
@@ -291,6 +297,7 @@ export default function TaxYear() {
           { value: 'self-assessment', label: 'Self Assessment prep' },
         ]}
       />
+      {tab === 'allowances' && <InsightsPanel page="tax" title="Claude’s notes on your allowances" className="my-5" />}
       {tab === 'self-assessment' ? sa.data ? <SelfAssessment sa={sa.data} taxYear={ty} /> : <Loading /> : allowances.data ? <Allowances a={allowances.data} /> : <Loading />}
       {tab === 'allowances' && (
         <Link to="/tax/self-assessment" className="no-print mt-6 inline-flex items-center gap-1 text-[13px] font-medium text-accent hover:underline">

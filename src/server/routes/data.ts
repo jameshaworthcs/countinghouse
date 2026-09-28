@@ -31,7 +31,7 @@ import {
   type Transaction,
 } from '../../shared/schema';
 import { SYSTEM_CATEGORY_IDS } from '../../shared/categories';
-import { queryDate, readJson, type AppContext } from '../context';
+import { csvCell, queryDate, readJson, type AppContext } from '../context';
 import { enrich } from '../enrich';
 import { nowISO } from '../fsutil';
 import { balanceId, figureId, ruleId, transactionId } from '../ids';
@@ -98,10 +98,11 @@ const TxPatch = z.object({
   notes: z.string().max(2000).optional().nullable(),
   tags: z.array(z.string().max(40)).max(20).optional(),
   pending: z.boolean().optional(),
-  // Corrections to source facts (kept in git history).
+  // Corrections to what was read from the document: the previous value is kept in `corrections`.
   date: ISODateSchema.optional(),
   amount: MoneySchema.optional(),
   description: z.string().max(500).optional(),
+  correctionNote: z.string().max(500).optional(),
 });
 
 const NewTx = z.object({
@@ -375,12 +376,7 @@ export function dataRoutes(ctx: AppContext): Hono {
   app.get('/transactions/export.csv', (c) => {
     const list = filterTransactions(ctx, c.req.query()).sort((a, b) => a.date.localeCompare(b.date));
     const cats = new CategoryIndex(store.categories);
-    const esc = (v: string | number | null | undefined) => {
-      const s = v === undefined || v === null ? '' : String(v);
-      // Neutralise spreadsheet formula injection.
-      const safe = /^[=+\-@\t\r]/.test(s) && !/^-?\d/.test(s) ? `'${s}` : s;
-      return /[",\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
-    };
+    const esc = csvCell;
     const header = ['date', 'account', 'amount', 'currency', 'description', 'payee', 'category', 'group', 'notes', 'tags', 'id'];
     const rows = list.map((t) =>
       [t.date, store.account(t.accountId)?.name ?? t.accountId, t.amount.toFixed(2), t.currency, t.description, t.payee, cats.name(t.category), cats.groupOf(t.category)?.name, t.notes, (t.tags ?? []).join(' '), t.id]
@@ -418,10 +414,18 @@ export function dataRoutes(ctx: AppContext): Hono {
   });
 
   app.patch('/transactions/:id', async (c) => {
-    const body = await readJson(c, TxPatch);
+    const { correctionNote, ...body } = await readJson(c, TxPatch);
+    const current = store.transaction(c.req.param('id'));
+    if (!current) throw new StoreError('Unknown transaction', 404);
     const patch = applyNulls(body) as Partial<Transaction>;
     if ('category' in body) patch.categorisedBy = body.category ? 'user' : undefined;
     if ('category' in body) patch.ruleId = undefined;
+    if ('payee' in body) patch.payeeSetBy = body.payee ? 'user' : undefined;
+    const at = nowISO();
+    const corrections = (['date', 'amount', 'description'] as const)
+      .filter((f) => body[f] !== undefined && body[f] !== current[f])
+      .map((f) => ({ field: f, from: current[f], to: body[f]!, at, ...(correctionNote ? { note: correctionNote } : {}) }));
+    if (corrections.length) patch.corrections = [...(current.corrections ?? []), ...corrections];
     const [updated] = await store.updateTransactions([{ id: c.req.param('id'), patch }], `transaction: edit ${c.req.param('id')}`);
     return c.json(updated);
   });

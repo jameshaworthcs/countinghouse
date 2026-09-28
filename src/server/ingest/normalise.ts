@@ -2,7 +2,7 @@
 // drop rows that cannot be salvaged (with a note), and fill defaults.
 
 import { isISODate, parseFlexibleDate } from '../../shared/dates';
-import { roundMoney } from '../../shared/money';
+import { parseAmount, roundMoney } from '../../shared/money';
 import { ExtractionSchema, type Extraction } from '../../shared/schema';
 import { formatZodError } from '../store';
 
@@ -29,10 +29,7 @@ const DATE_KEYS = new Set(['date', 'transactionDate', 'periodStart', 'periodEnd'
 
 function fixValue(key: string, v: unknown): unknown {
   if (MONEY_KEYS.has(key)) {
-    if (typeof v === 'string') {
-      const n = Number(v.replace(/[£,\s]/g, ''));
-      return Number.isFinite(n) ? roundMoney(n) : null;
-    }
+    if (typeof v === 'string') return parseAmount(v);
     if (typeof v === 'number') return Number.isFinite(v) ? roundMoney(v) : null;
     return v;
   }

@@ -32,6 +32,10 @@ for the map and [docs/DATA_FORMAT.md](docs/DATA_FORMAT.md) before touching data 
   - The live login is in `~/dev/finance-live/.env`; this checkout's `.env` has no production
     settings.
 - `npm run validate`: format check of `data/`.
+- `npm run records -- keys | status | check <batch.json> | write <batch.json>`: the validated
+  write path for assumptions, research, insights and instruments
+  ([docs/AGENTS.md](docs/AGENTS.md)). Research and assumptions go through this, never by hand
+  edits of `data/`.
 
 ## Invariants: do not change without asking the owner
 
@@ -91,6 +95,16 @@ for the map and [docs/DATA_FORMAT.md](docs/DATA_FORMAT.md) before touching data 
 
 - Tests live in `tests/`. Add a fixture and a test for any parser change (`tests/fixtures/*`).
   Synthetic data only: never commit real statements to `tests/`.
+- Any change to a computed figure updates [docs/FORMULAS.md](docs/FORMULAS.md) and its tests:
+  - property-based tests (fast-check) for money and the balance engine;
+  - the Monte Carlo check for the projection model.
+- Modelling values come from `AssumptionSet` and `analytics/params.ts` with their sources. A new
+  parameter is a key in `src/shared/assumptions.ts`, with a labelled fallback.
+- Agents follow [docs/AGENTS.md](docs/AGENTS.md).
+  - A new job kind declares its privacy class: web tools with public inputs, or the owner's data
+    with no web.
+  - Bump a job's `promptVersion` whenever its prompt or output schema changes.
+  - Demo data never starts jobs by itself (they spend the owner's Claude plan).
 - Charts follow the data-viz rules baked into `src/web/components/charts/`:
   - fixed categorical order (`SERIES`) that never cycles;
   - one axis;

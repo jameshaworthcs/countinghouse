@@ -1,0 +1,289 @@
+{
+  "$id": "assumption.schema.json",
+  "title": "assumption",
+  "description": "Schema for one line of data/assumptions.jsonl. Generated from src/shared/schema.ts by `npm run schemas`; do not edit.",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^asm_[0-9a-f]{16}$"
+    },
+    "key": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "scope": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "global"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "assetClass"
+            },
+            "assetClass": {
+              "type": "string",
+              "enum": [
+                "equity",
+                "bond",
+                "mixed",
+                "property",
+                "cash",
+                "commodity",
+                "crypto",
+                "other"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "assetClass"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "accountType"
+            },
+            "accountType": {
+              "type": "string",
+              "enum": [
+                "current",
+                "savings",
+                "cash_isa",
+                "stocks_isa",
+                "lisa",
+                "ifisa",
+                "gia",
+                "sipp",
+                "workplace_pension",
+                "personal_pension",
+                "db_pension",
+                "state_pension",
+                "premium_bonds",
+                "crypto",
+                "property",
+                "other_asset",
+                "credit_card",
+                "loan",
+                "mortgage",
+                "student_loan",
+                "other_liability"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "accountType"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "institution"
+            },
+            "institutionId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+              "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+            }
+          },
+          "required": [
+            "kind",
+            "institutionId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "account"
+            },
+            "accountId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+              "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+            }
+          },
+          "required": [
+            "kind",
+            "accountId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "instrument"
+            },
+            "instrumentId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+              "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+            }
+          },
+          "required": [
+            "kind",
+            "instrumentId"
+          ]
+        }
+      ]
+    },
+    "value": {
+      "type": "number"
+    },
+    "range": {
+      "type": "object",
+      "properties": {
+        "low": {
+          "type": "number"
+        },
+        "high": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "low",
+        "high"
+      ]
+    },
+    "asOf": {
+      "type": "string",
+      "description": "Calendar date, YYYY-MM-DD"
+    },
+    "source": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 300
+    },
+    "evidence": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "publisher": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "retrievedOn": {
+            "type": "string",
+            "description": "Calendar date, YYYY-MM-DD"
+          },
+          "quote": {
+            "type": "string",
+            "maxLength": 600
+          }
+        },
+        "required": [
+          "title"
+        ]
+      }
+    },
+    "basedOn": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^res_[0-9a-f]{16}$"
+      }
+    },
+    "rationale": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "provenance": {
+      "type": "object",
+      "properties": {
+        "setBy": {
+          "type": "string",
+          "enum": [
+            "owner",
+            "agent",
+            "system"
+          ]
+        },
+        "model": {
+          "type": "string"
+        },
+        "promptVersion": {
+          "type": "string"
+        },
+        "jobId": {
+          "type": "string"
+        },
+        "session": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "setBy"
+      ]
+    },
+    "status": {
+      "default": "active",
+      "type": "string",
+      "enum": [
+        "active",
+        "retired"
+      ]
+    },
+    "reviewBy": {
+      "type": "string",
+      "description": "Calendar date, YYYY-MM-DD"
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+      "description": "ISO 8601 timestamp"
+    }
+  },
+  "required": [
+    "id",
+    "key",
+    "scope",
+    "value",
+    "asOf",
+    "source",
+    "rationale",
+    "provenance",
+    "createdAt"
+  ]
+}

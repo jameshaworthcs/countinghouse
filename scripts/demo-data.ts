@@ -12,6 +12,7 @@ import { enrich } from '../src/server/enrich';
 import { nowISO } from '../src/server/fsutil';
 import { balanceId, figureId, holdingsId, transactionId } from '../src/server/ids';
 import { ImportService } from '../src/server/ingest/service';
+import { applyRecords, researchIdOf, setOwnerAssumption } from '../src/server/records';
 import { WorkArea } from '../src/server/ingest/workarea';
 import { Store } from '../src/server/store';
 import { addDays, addMonths, endOfMonth, startOfMonth, today, weekday } from '../src/shared/dates';
@@ -73,7 +74,9 @@ async function main() {
   await rm(DIR, { recursive: true, force: true });
   await rm(WORK, { recursive: true, force: true });
   const store = await Store.open(DIR);
-  await store.setProfile({ name: 'Jo Bloggs', dateOfBirth: '1990-05-14', taxRegion: 'england', taxBand: 'higher', grossSalary: 115_000, retirementAge: 67, assumedRealReturn: 0.04 });
+  await store.setProfile({ name: 'Jo Bloggs', dateOfBirth: '1990-05-14', taxRegion: 'england', taxBand: 'higher', grossSalary: 115_000, retirementAge: 67 });
+  // Demo data never starts agent jobs on its own (they would spend your Claude plan).
+  await store.setSettings({ ...store.settings, agents: { ...store.settings.agents, enabled: false } });
   for (const inst of [
     { id: 'example-bank', name: 'Example Bank', kind: 'bank' as const },
     { id: 'example-cards', name: 'Example Cards', kind: 'card_issuer' as const },
@@ -289,6 +292,7 @@ async function main() {
   );
   const res = await enrich(store);
   console.log(`demo: ${txs.length} transactions, ${snapshots.length} balances; enrich: ${res.recategorised} categorised, ${res.transfersLinked} transfers linked`);
+  await demoIntelligence(store);
 
   // A pending import to review: this month's export from the bank, in Monzo's CSV layout, overlapping
   // what is already stored.
@@ -310,6 +314,83 @@ async function main() {
   await rm(file, { force: true });
   console.log(`demo: pending import ${record?.id} (${svc.getPending(record!.id)?.status})`);
   store.stopWatching();
+}
+
+/**
+ * Synthetic research, assumptions, insights and context, so every page shows its researched and
+ * inferred parts. Everything here is made up and labelled as demo; the figures are illustrative.
+ */
+async function demoIntelligence(store: Store) {
+  const demo = { setBy: 'agent' as const, model: 'demo', promptVersion: 'demo', session: 'demo-data' };
+  const src = (title: string) => [{ title: `${title} (demo, synthetic)`, url: 'https://example.com/demo-research', publisher: 'Demo' }];
+  const asOf = addDays(END, -28);
+  const funds = [
+    { id: 'vanguard-ftse-global-all-cap', name: 'Vanguard FTSE Global All Cap Index Fund Acc', isin: 'GB00BD3RZ582', ocf: 0.0023, allocation: { equity: 1 } },
+    { id: 'vanguard-lifestrategy-80', name: 'Vanguard LifeStrategy 80% Equity Fund Acc', isin: 'GB00B4PQW151', ocf: 0.002, allocation: { equity: 0.8, bond: 0.2 } },
+    { id: 'vanguard-uk-gov-bond', name: 'Vanguard U.K. Government Bond Index Fund Acc', isin: 'IE00B1S74Q32', ocf: 0.0012, allocation: { bond: 1 } },
+    { id: 'fidelity-index-world', name: 'Fidelity Index World Fund P Acc', isin: 'GB00BJS8SJ34', ocf: 0.0012, allocation: { equity: 1 } },
+  ];
+  const cpi = { kind: 'economy.indicator' as const, subject: { topic: 'cpi' }, asOf, sources: src('Inflation target'), confidence: 'high' as const, data: { indicator: 'cpi' as const, basis: 'target' as const, value: 0.02, period: 'long run', publisher: 'Demo central bank' } };
+  const eqOutlook = { kind: 'market.outlook' as const, subject: { assetClass: 'equity' as const }, asOf, sources: src('10-year outlook'), confidence: 'medium' as const, data: { assetClass: 'equity' as const, publisher: 'Demo asset manager', horizonYears: 10, currency: 'GBP', expectedReturnNominal: 0.062, range: { low: 0.04, high: 0.085 }, volatility: 0.16 } };
+  const bondOutlook = { kind: 'market.outlook' as const, subject: { assetClass: 'bond' as const }, asOf, sources: src('10-year outlook'), confidence: 'medium' as const, data: { assetClass: 'bond' as const, publisher: 'Demo asset manager', horizonYears: 10, currency: 'GBP', expectedReturnNominal: 0.043, range: { low: 0.03, high: 0.055 }, volatility: 0.07 } };
+  await applyRecords(store, {
+    provenance: demo,
+    supersede: false,
+    records: [
+      ...funds.map((f) => ({ type: 'instrument' as const, record: { id: f.id, name: f.name, isin: f.isin, type: 'fund' as const, aliases: [] } })),
+      ...funds.map((f) => ({ type: 'research' as const, record: { kind: 'instrument.facts' as const, subject: { instrumentId: f.id }, asOf, sources: src('Factsheet'), confidence: 'medium' as const, data: { ocf: f.ocf, allocation: f.allocation } } })),
+      { type: 'research', record: { kind: 'instrument.performance', subject: { instrumentId: 'vanguard-lifestrategy-80' }, asOf, sources: src('Performance'), confidence: 'medium', data: { currency: 'GBP', periodEnd: asOf, returns: { y1: 0.074, y3: 0.058, y5: 0.061 }, calendarYears: [], volatility: { y5: 0.097 } } } },
+      { type: 'research', record: { kind: 'provider.fees', subject: { institutionId: 'example-invest' }, asOf, sources: src('Charges'), confidence: 'medium', data: { tiers: [{ rate: 0.0025 }], capGbpPerYear: 300 } } },
+      { type: 'research', record: { kind: 'provider.rates', subject: { institutionId: 'example-savings' }, asOf, sources: src('Savings rates'), confidence: 'medium', data: { products: [{ name: 'Easy Access', accountType: 'savings', aer: 0.041, variable: true }] } } },
+      { type: 'research', record: cpi },
+      { type: 'research', record: eqOutlook },
+      { type: 'research', record: bondOutlook },
+      { type: 'assumption', record: { key: 'inflation', scope: { kind: 'global' }, value: 0.022, range: { low: 0.015, high: 0.035 }, asOf, source: 'Demo research', evidence: [], basedOn: [researchIdOf(cpi)], rationale: 'The 2% target with a small premium for recent overshoots (demo).', status: 'active' } },
+      { type: 'assumption', record: { key: 'return.expected', scope: { kind: 'assetClass', assetClass: 'equity' }, value: 0.062, range: { low: 0.04, high: 0.085 }, asOf, source: 'Demo research', evidence: [], basedOn: [researchIdOf(eqOutlook)], rationale: 'Published 10-year outlooks for global shares in GBP (demo).', status: 'active' } },
+      { type: 'assumption', record: { key: 'return.expected', scope: { kind: 'assetClass', assetClass: 'bond' }, value: 0.043, range: { low: 0.03, high: 0.055 }, asOf, source: 'Demo research', evidence: [], basedOn: [researchIdOf(bondOutlook)], rationale: 'Current gilt yields plus a small term premium (demo).', status: 'active' } },
+    ],
+  });
+  await setOwnerAssumption(store, { key: 'withdrawal.rate', scope: { kind: 'global' }, value: 0.0325, range: { low: 0.025, high: 0.04 }, rationale: 'I would rather plan cautiously (demo).' });
+  const ctx = await applyRecords(store, {
+    provenance: { setBy: 'owner' },
+    supersede: false,
+    records: [
+      { type: 'context', record: { kind: 'plan', statement: 'You plan to buy a home in 2028 for about £450,000, using your Lifetime ISA for the deposit.', detail: { event: 'buy-home', amount: 450_000, date: '2028-06-30', accountIds: ['lifetime-isa', 'easy-access'] }, status: 'active', origin: { kind: 'form' } } },
+      { type: 'context', record: { kind: 'goal', statement: 'You want an emergency fund of six months’ spending.', detail: {}, status: 'active', origin: { kind: 'form' } } },
+    ],
+  });
+  // Insights citing real demo records.
+  const all = store.transactions();
+  const month = addMonths(END, -1).slice(0, 7);
+  const takeaways = all.filter((t) => t.category === 'takeaway' && t.date.startsWith(month));
+  const netflix = all.filter((t) => t.description === 'NETFLIX.COM').slice(-3);
+  const planId = ctx.written.find((w) => w.type === 'context')!.id;
+  const lsFacts = store.research.find((r) => r.kind === 'instrument.facts' && r.subject.instrumentId === 'vanguard-lifestrategy-80')!;
+  await applyRecords(store, {
+    provenance: demo,
+    supersede: false,
+    records: [
+      {
+        type: 'insight',
+        record: {
+          kind: 'month-review',
+          pages: ['overview'],
+          subject: { month },
+          title: `${month}: a steady month (demo)`,
+          body: 'Spending was close to your recent average and you saved about a third of your income. The ISA and pensions grew with markets; the estate rose by a little over 1% (synthetic demo insight).',
+          evidence: [{ type: 'computed', metric: 'months.net', label: 'saved this month' }],
+          confidence: 'medium',
+        },
+      },
+      ...(takeaways.length ? [{ type: 'insight' as const, record: { kind: 'habit' as const, pages: ['spending' as const], subject: { category: 'takeaway', month }, title: 'Takeaways are creeping up (demo)', body: `${takeaways.length} takeaways last month, mostly on Fridays. At this pace that is several hundred pounds a year (synthetic demo insight).`, evidence: [{ type: 'transactions' as const, ids: takeaways.map((t) => t.id).slice(0, 20), label: `${takeaways.length} takeaways` }], confidence: 'medium' as const } }] : []),
+      ...(netflix.length ? [{ type: 'insight' as const, record: { kind: 'subscription' as const, pages: ['spending' as const, 'overview' as const], subject: {}, title: 'Netflix went up this year (demo)', body: 'Your plan rose from £10.99 to £12.99 a month. Worth checking you still use it enough (synthetic demo insight).', evidence: [{ type: 'transactions' as const, ids: netflix.map((t) => t.id), label: 'recent payments' }], confidence: 'high' as const } }] : []),
+      { type: 'insight', record: { kind: 'allowance', pages: ['tax'], subject: { taxYear: '2026/27' }, title: 'Room left in your ISA this year (demo)', body: 'Much of this year’s ISA allowance is still unused. Your regular payments will use about three quarters of it by April (synthetic demo insight).', evidence: [{ type: 'account', id: 'stocks-isa', label: 'Example Invest ISA' }], confidence: 'medium' } },
+      { type: 'insight', record: { kind: 'fund', pages: ['investments'], subject: { instrumentId: 'vanguard-lifestrategy-80' }, title: 'A low-cost multi-asset fund (demo)', body: 'LifeStrategy 80’s charge is well below the typical UK multi-asset fund; its 20% in bonds makes it less volatile than your all-share funds (synthetic demo insight).', evidence: [{ type: 'research', id: lsFacts.id, label: 'fund research' }], confidence: 'medium' } },
+      { type: 'insight', record: { kind: 'projection', pages: ['projections'], subject: {}, title: 'The 2028 deposit looks on track (demo)', body: 'At the recent pace, the LISA and savings together reach a 30% deposit on a £450,000 home by mid-2028, with the bonus included (synthetic demo insight).', evidence: [{ type: 'context', id: planId, label: 'your plan' }, { type: 'account', id: 'lifetime-isa', label: 'LISA' }], confidence: 'low' } },
+    ],
+  });
+  const stampNote = nowISO();
+  await store.upsertRecords('notes', [{ id: 'note_00000000000000d1', text: 'We are buying a flat in 2028 and I want six months of spending as an emergency fund (demo).', status: 'applied', proposals: [], createdAt: stampNote, updatedAt: stampNote }], 'demo: note');
 }
 
 await main();

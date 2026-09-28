@@ -51,14 +51,17 @@ export function systemRoutes(ctx: AppContext): Hono {
       };
       const onData = () => send('data', { version: ctx.store.version });
       const onImport = (r: ImportRecord) => send('import', { id: r.id, status: r.status });
+      const onJob = (j: { id: string; status: string }) => send('job', { id: j.id, status: j.status });
       ctx.store.on('change', onData);
       ctx.store.on('reload', onData);
       ctx.imports.on('update', onImport);
+      ctx.runner?.on('update', onJob);
       stream.onAbort(() => {
         closed = true;
         ctx.store.off('change', onData);
         ctx.store.off('reload', onData);
         ctx.imports.off('update', onImport);
+        ctx.runner?.off('update', onJob);
       });
       send('hello', { version: ctx.store.version });
       while (!closed) {

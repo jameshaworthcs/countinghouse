@@ -1,6 +1,7 @@
-import { ArrowLeftRight, ExternalLink, FileText, Link2, StickyNote, Tag, Wand2 } from 'lucide-react';
+import { ArrowLeftRight, ExternalLink, FileText, History, Link2, PencilLine, StickyNote, Tag, Wand2 } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
+import { parseAmount } from '../../shared/money';
 import type { Rule, Transaction } from '../../shared/schema';
 import { api, useApi, useApiMutation } from '../lib/api';
 import { useAppData } from '../lib/data';
@@ -125,7 +126,8 @@ export function TransactionDrawer({ tx, onClose }: { tx: Transaction; onClose: (
       api<Transaction>(`/transactions/${tx.id}`, {
         method: 'PATCH',
         body: {
-          payee: payee.trim() || null,
+          // Only a changed payee is sent: sending it marks it as yours, and enrichment then leaves it alone.
+          ...(payee.trim() !== (tx.payee ?? '') ? { payee: payee.trim() || null } : {}),
           ...(category !== tx.category ? { category: category ?? null } : {}),
           notes: notes.trim() || null,
           tags: tags
@@ -175,7 +177,7 @@ export function TransactionDrawer({ tx, onClose }: { tx: Transaction; onClose: (
             save.mutate(undefined);
           }}
         >
-          <Field label="Payee">
+          <Field label="Payee" hint={tx.payeeSetBy === 'user' ? 'Set by you: rules and re-running enrichment leave it alone.' : undefined}>
             <Input value={payee} onChange={(e) => setPayee(e.target.value)} />
           </Field>
           <Field label="Category">
@@ -202,6 +204,8 @@ export function TransactionDrawer({ tx, onClose }: { tx: Transaction; onClose: (
           </h3>
           <KeyValue items={detail} />
         </section>
+        {tx.corrections?.length ? <CorrectionTrail tx={tx} /> : null}
+        <CorrectSource tx={tx} onDone={onClose} />
         {tx.raw && (
           <details className="rounded-lg border border-line">
             <summary className="cursor-pointer px-3 py-2 text-[13px] font-medium text-ink-2">Original row, exactly as imported</summary>
@@ -224,6 +228,91 @@ export function TransactionDrawer({ tx, onClose }: { tx: Transaction; onClose: (
         )}
       </div>
     </Drawer>
+  );
+}
+
+const CORRECTION_LABEL = { date: 'Date', amount: 'Amount', description: 'Description' } as const;
+
+function correctionValue(field: keyof typeof CORRECTION_LABEL, v: string | number): string {
+  if (field === 'amount' && typeof v === 'number') return money(v);
+  if (field === 'date' && typeof v === 'string') return formatDate(v);
+  return String(v);
+}
+
+/** What you corrected, oldest first: the document's reading is kept alongside your value. */
+function CorrectionTrail({ tx }: { tx: Transaction }) {
+  return (
+    <section>
+      <h3 className="mb-2 flex items-center gap-1.5 text-[13px] font-semibold text-ink">
+        <History className="size-4 text-ink-3" /> Your corrections
+      </h3>
+      <ul className="flex flex-col gap-1.5 text-[12.5px] text-ink-2">
+        {(tx.corrections ?? []).map((c, i) => (
+          <li key={i}>
+            <span className="font-medium text-ink">{CORRECTION_LABEL[c.field]}</span> was {correctionValue(c.field, c.from)}, now {correctionValue(c.field, c.to)}
+            <span className="text-ink-3"> · {formatDate(c.at.slice(0, 10))}</span>
+            {c.note && <div className="text-ink-3">{c.note}</div>}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/** Fix a value the import misread. The previous value is kept in the transaction's corrections. */
+function CorrectSource({ tx, onDone }: { tx: Transaction; onDone: () => void }) {
+  const toast = useToast();
+  const [date, setDate] = useState(tx.date);
+  const [amount, setAmount] = useState(tx.amount.toFixed(2));
+  const [description, setDescription] = useState(tx.description);
+  const [note, setNote] = useState('');
+  const parsed = parseAmount(amount);
+  const changes = {
+    ...(date !== tx.date ? { date } : {}),
+    ...(parsed !== null && parsed !== tx.amount ? { amount: parsed } : {}),
+    ...(description.trim() && description.trim() !== tx.description ? { description: description.trim() } : {}),
+  };
+  const save = useApiMutation(() => api<Transaction>(`/transactions/${tx.id}`, { method: 'PATCH', body: { ...changes, ...(note.trim() ? { correctionNote: note.trim() } : {}) } }), {
+    onSuccess: () => {
+      toast({ tone: 'good', text: 'Corrected; the value that was read is kept' });
+      onDone();
+    },
+  });
+  return (
+    <details className="rounded-lg border border-line">
+      <summary className="flex cursor-pointer items-center gap-1.5 px-3 py-2 text-[13px] font-medium text-ink-2">
+        <PencilLine className="size-3.5" /> Correct a misread date, amount or description
+      </summary>
+      <form
+        className="flex flex-col gap-3 border-t border-line px-3 py-3"
+        onSubmit={(e) => {
+          e.preventDefault();
+          save.mutate(undefined);
+        }}
+      >
+        <p className="text-[12.5px] text-ink-3">Only for values the import got wrong. Balances and totals use your value; the transaction keeps a note of what was read.</p>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Date">
+            <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
+          </Field>
+          <Field label="Amount" hint="Money out is negative" error={parsed === null ? 'Not an amount' : undefined}>
+            <Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} />
+          </Field>
+        </div>
+        <Field label="Description">
+          <Input value={description} onChange={(e) => setDescription(e.target.value)} />
+        </Field>
+        <Field label="Why (optional)">
+          <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. statement shows £12.50; the scan read £72.50" />
+        </Field>
+        {save.error && <Callout tone="bad">{save.error.message}</Callout>}
+        <div className="flex justify-end">
+          <Button type="submit" variant="primary" loading={save.isPending} disabled={!Object.keys(changes).length || parsed === null}>
+            Save correction
+          </Button>
+        </div>
+      </form>
+    </details>
   );
 }
 

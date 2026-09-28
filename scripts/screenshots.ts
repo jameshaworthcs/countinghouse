@@ -71,6 +71,10 @@ async function main() {
     ['investments', '/investments'],
     ['tax', '/tax'],
     ['self-assessment', '/tax/self-assessment'],
+    ['assumptions', '/assumptions'],
+    ['assumptions-research', '/assumptions#research'],
+    ['assumptions-about', '/assumptions#about'],
+    ['assumptions-jobs', '/assumptions#jobs'],
     ['import', '/import'],
     ...(pendingId ? ([['review', `/import/${pendingId}`]] as [string, string][]) : []),
     ['settings', '/settings'],
@@ -78,7 +82,8 @@ async function main() {
     ['settings-health', '/settings#health'],
   ];
   const problems: string[] = [];
-  const shoot = async (name: string, route: string, opts: { width: number; height: number; theme: 'light' | 'dark'; mobile?: boolean }) => {
+  type Page = Awaited<ReturnType<typeof browser.newPage>>;
+  const shoot = async (name: string, route: string, opts: { width: number; height: number; theme: 'light' | 'dark'; mobile?: boolean; act?: (page: Page) => Promise<void> }) => {
     const page = await browser.newPage();
     await page.setViewport({ width: opts.width, height: opts.height, deviceScaleFactor: 1, isMobile: Boolean(opts.mobile), hasTouch: Boolean(opts.mobile) });
     await page.evaluateOnNewDocument((theme: string) => {
@@ -92,8 +97,13 @@ async function main() {
     await page.goto(`${base}${route}`, { waitUntil: 'networkidle2', timeout: 30_000 });
     await page.waitForSelector('h1', { timeout: 15_000 });
     await new Promise((r) => setTimeout(r, 900));
+    if (opts.act) {
+      await opts.act(page);
+      await new Promise((r) => setTimeout(r, 400));
+    }
     const file = path.join(out, `${name}${opts.theme === 'dark' ? '-dark' : ''}${opts.mobile ? '-mobile' : ''}.png`);
-    await page.screenshot({ path: file, fullPage: true });
+    // A drawer is fixed to the viewport, so it is shot as the viewport shows it.
+    await page.screenshot({ path: file, fullPage: !opts.act });
     await page.close();
     return file;
   };
@@ -102,11 +112,24 @@ async function main() {
     await shoot(name, route, { width: 1440, height: 900, theme: 'light' });
     console.log(`✓ ${name}`);
   }
+  // The transaction drawer, with the form for correcting a misread value open.
+  const openDrawer = async (page: Page) => {
+    const row = await page.$('main button.min-w-0.text-left');
+    if (!row) throw new Error('transaction-drawer: no transaction row to open');
+    await row.click();
+    await page.waitForSelector('[role="dialog"]', { timeout: 5_000 });
+    await page.click('[role="dialog"] summary::-p-text(Correct a misread)');
+  };
+  if (!only || 'transaction-drawer'.includes(only)) {
+    await shoot('transaction-drawer', '/transactions', { width: 1440, height: 1500, theme: 'light', act: openDrawer });
+    console.log('✓ transaction-drawer');
+  }
   if (!only) {
-    for (const [name, route] of [['overview', '/'], ['spending', '/spending'], ['review', pendingId ? `/import/${pendingId}` : '/import']] as [string, string][]) {
+    await shoot('transaction-drawer', '/transactions', { width: 390, height: 844, theme: 'dark', mobile: true, act: openDrawer });
+    for (const [name, route] of [['overview', '/'], ['spending', '/spending'], ['projections', '/projections'], ['assumptions', '/assumptions'], ['review', pendingId ? `/import/${pendingId}` : '/import']] as [string, string][]) {
       await shoot(name, route, { width: 1440, height: 900, theme: 'dark' });
     }
-    for (const [name, route] of [['overview', '/'], ['import', '/import'], ['transactions', '/transactions']] as [string, string][]) {
+    for (const [name, route] of [['overview', '/'], ['import', '/import'], ['transactions', '/transactions'], ['projections', '/projections']] as [string, string][]) {
       await shoot(name, route, { width: 390, height: 844, theme: 'light', mobile: true });
     }
   }

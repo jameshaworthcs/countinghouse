@@ -42,10 +42,14 @@ export function subMoney(a: number, b: number): number {
   return fromMinor(toMinor(a) - toMinor(b));
 }
 
-/** True when `amount` is a finite number with no more than 2 decimal places. */
+/**
+ * True when `amount` is a finite number with no more than 2 decimal places: exactly the double
+ * that a 2-dp decimal parses to (what fromMinor produces and JSON.parse reads). An absolute
+ * tolerance would wrongly reject large amounts, where doubles are further apart than it.
+ */
 export function isMoney(amount: number): boolean {
   if (!Number.isFinite(amount)) return false;
-  return Math.abs(amount * 100 - Math.round(amount * 100)) < 1e-6;
+  return Math.round(amount * 100) / 100 === amount;
 }
 
 const AMOUNT_NOISE = /[£$€¥\s\u00a0\u202f']|GBP|USD|EUR/gi;

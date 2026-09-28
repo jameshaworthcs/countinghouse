@@ -81,7 +81,17 @@ describe('API without login configured', () => {
     expect(txs.total).toBe(1);
     expect(txs.items[0]!.category).toBe('groceries');
     const patched = await req(`/api/transactions/${txs.items[0]!.id}`, { method: 'PATCH', headers: { ...CSRF, 'content-type': 'application/json' }, body: JSON.stringify({ category: 'home-garden', notes: 'bulbs' }) });
-    expect(((await patched.json()) as { categorisedBy: string }).categorisedBy).toBe('user');
+    const edited = (await patched.json()) as { categorisedBy: string; payeeSetBy?: string; amount: number };
+    expect(edited.categorisedBy).toBe('user');
+    // Saving a note without touching the payee does not lock the payee.
+    expect(edited.payeeSetBy).toBeUndefined();
+
+    // Correcting a misread amount keeps what the document said.
+    const before = edited.amount;
+    const corrected = await req(`/api/transactions/${txs.items[0]!.id}`, { method: 'PATCH', headers: { ...CSRF, 'content-type': 'application/json' }, body: JSON.stringify({ amount: before - 1, correctionNote: 'scan misread' }) });
+    const fixed = (await corrected.json()) as { amount: number; corrections: { field: string; from: number; to: number; note?: string }[] };
+    expect(fixed.amount).toBe(before - 1);
+    expect(fixed.corrections).toEqual([expect.objectContaining({ field: 'amount', from: before, to: before - 1, note: 'scan misread' })]);
   });
 
   it('asks for a column mapping when a CSV layout is unknown', async () => {

@@ -9,6 +9,9 @@ import type { Store } from '../store';
 import { allowances } from './allowances';
 import { BalanceEngine } from './balances';
 import { cashflow } from './cashflow';
+import { AssumptionSet } from '../../shared/assumptions';
+import { computeBaseline, standardPeriods } from './baseline';
+import { Coverage } from './coverage';
 import { accountSummary, estateOn, estateSeries, firstDataDate } from './estate';
 import { dataHealth } from './health';
 import { investments } from './investments';
@@ -36,6 +39,14 @@ export class Analytics {
     return this.cached('engine', () => new BalanceEngine(this.store));
   }
 
+  get coverageIndex(): Coverage {
+    return this.cached('coverage-index', () => new Coverage(this.store));
+  }
+
+  coverage() {
+    return this.cached(`coverage:${today()}`, () => this.coverageIndex.summary());
+  }
+
   accountSummaries() {
     return this.cached(`accounts:${today()}`, () => this.store.accounts.map((a) => accountSummary(this.store, this.engine, a)));
   }
@@ -51,7 +62,7 @@ export class Analytics {
   }
 
   spending(from: string, to: string) {
-    return this.cached(`spending:${from}:${to}`, () => spending(this.store, from, to));
+    return this.cached(`spending:${from}:${to}`, () => spending(this.store, from, to, this.coverageIndex));
   }
 
   recurring() {
@@ -79,7 +90,7 @@ export class Analytics {
   }
 
   health() {
-    return this.cached(`health:${today()}`, () => dataHealth(this.store, this.engine));
+    return this.cached(`health:${today()}`, () => ({ ...dataHealth(this.store, this.engine), coverage: this.coverage() }));
   }
 
   summary(importCounts: Record<string, number>): SummaryResponse {
@@ -97,6 +108,22 @@ export class Analytics {
         return { id, label, since, change, pct: then !== 0 ? change / Math.abs(then) : null };
       };
       const deltas = [compare('30d', 'Past 30 days', addDays(now, -30)), compare('tax-year', `Since ${ty.label} began`, ty.start), compare('1y', 'Past year', addYears(now, -1))];
+      // Saving and runway from the last 3 full months, using covered time only.
+      const set = new AssumptionSet(this.store.assumptions, now);
+      const [recent] = standardPeriods(now);
+      const b = computeBaseline(this.store, this.coverageIndex, recent!.from, recent!.to, set);
+      const accessible = [...e.access.entries()].filter(([k]) => k === 'now').reduce((s, [, v]) => s + v, 0);
+      const kpis = b.available
+        ? {
+            savingsRate: b.monthly.income > 0 ? (b.monthly.income - b.monthly.spending) / b.monthly.income : null,
+            monthlySaving: b.monthly.net,
+            monthlySpending: b.monthly.spending,
+            runwayMonths: b.monthly.spending > 0 ? Math.round((accessible / b.monthly.spending) * 10) / 10 : null,
+            confidence: b.confidence,
+            basis: b.basis.kind === 'months' ? `${b.basis.months.length} complete month${b.basis.months.length > 1 ? 's' : ''}` : `${b.basis.days} covered days`,
+          }
+        : { savingsRate: null, monthlySaving: null, monthlySpending: null, runwayMonths: null, confidence: 'low' as const, basis: b.reason ?? 'Not enough data yet' };
+      const cov = this.coverageIndex.summary(3, now);
       const alerts: Alert[] = [];
       const health = this.health();
       const errors = health.issues.filter((i) => i.severity === 'error');
@@ -125,8 +152,13 @@ export class Analytics {
         const g = health.gaps[0]!;
         alerts.push({ id: 'gaps', level: 'warning', title: `${health.gaps.length} balance gap${health.gaps.length > 1 ? 's' : ''} (missing statements?)`, detail: `${g.name}: ${formatMoney(g.difference)} unexplained between ${g.from} and ${g.to}.`, action: { label: 'Details', href: '/settings#health' } });
       }
-      for (const f of health.fscs.filter((x) => x.over)) {
-        alerts.push({ id: `fscs-${f.group}`, level: 'warning', title: `${formatMoney(f.total, { decimals: 0 })} with ${f.institutions.join(' / ')}`, detail: `Above the ${formatMoney(f.limit, { decimals: 0 })} FSCS limit for one banking licence.` });
+      for (const f of health.fscs.filter((x) => x.near)) {
+        alerts.push({
+          id: `fscs-${f.group}`,
+          level: 'warning',
+          title: `${formatMoney(f.total, { decimals: 0 })} with ${f.institutions.join(' / ')}`,
+          detail: f.over ? `Above the ${formatMoney(f.limit, { decimals: 0 })} FSCS limit for one banking licence.` : `Close to the ${formatMoney(f.limit, { decimals: 0 })} FSCS limit for one banking licence.`,
+        });
       }
       if (!this.store.profile.dateOfBirth || !this.store.profile.taxBand) {
         alerts.push({ id: 'profile', level: 'info', title: 'Add your date of birth and tax band', detail: 'They drive LISA, cash-ISA, pension-age and savings-allowance rules.', action: { label: 'Settings', href: '/settings' } });
@@ -147,6 +179,8 @@ export class Analytics {
         imports: importCounts,
         taxYear: { label: ty.label, daysLeft, start: ty.start, end: ty.end },
         hasData: this.store.accounts.length > 0,
+        kpis,
+        coverage: { lastCompleteMonth: cov.lastCompleteMonth, jointTo: cov.jointTo, limiting: b.basis.limiting.slice(0, 5) },
       };
     });
   }

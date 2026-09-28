@@ -175,7 +175,7 @@ export function BarList({ rows, color = 'var(--s1)', format = (v: number) => mon
               </span>
             </div>
             <div className="h-2 rounded-r bg-transparent">
-              <div className="h-2 rounded-r-[4px]" style={{ width: `${Math.max(0.5, (Math.abs(r.value) / top) * 100)}%`, background: color }} />
+              {r.value !== 0 && <div className="h-2 rounded-r-[4px]" style={{ width: `${Math.max(0.5, (Math.abs(r.value) / top) * 100)}%`, background: color }} />}
             </div>
             {r.sub && <div className="mt-0.5 text-[12px] text-ink-3">{r.sub}</div>}
           </button>

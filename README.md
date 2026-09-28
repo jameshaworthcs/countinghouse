@@ -9,8 +9,9 @@ structured, validated, git-versioned data in [`data/`](data/), and shows you the
   wrapper (cash, ISAs, LISA, investments, pensions, property, debts) or by when you could spend it.
 - **Spending habits.** Where the money goes and how that is changing, regular payments and price
   rises, weekday and time-of-day patterns, top merchants, and plain-English insights.
-- **Projections.** Where your estate value heads if the last 3 months, the last 12 months, or any
-  past period you choose carried on, with a spending slider and category run-rates.
+- **Projections.** Where your estate value heads if your income, spending and saving carried on,
+  with each account growing at its own rate after charges. Shown as a range, not a single line, in
+  today's money or future pounds, with a spending slider and a comparison against any past period.
 - **Investments & pensions.** Value against money paid in, money-weighted returns, holdings and
   allocation, LISA bonus and penalty-adjusted value, and a retirement outlook.
 - **Tax year.** The ISA allowance (and the £12,000 cash-ISA cap from April 2027), the LISA, the
@@ -18,10 +19,20 @@ structured, validated, git-versioned data in [`data/`](data/), and shows you the
 - **Self Assessment prep.** The figures an SA100 return usually needs, gathered from your data with
   their sources, gaps flagged, and a clear reminder that you must check everything yourself before
   you submit.
+- **Assumptions & research.** Every modelling assumption (inflation, expected returns, fees,
+  withdrawal rate…) is a dated, sourced record you can see and override. Agents research your funds
+  and providers from public sources and keep the assumptions current; the app says which figures
+  are computed from your data and which are inferred.
 
 Everything you import is a draft until you've reviewed it against the original document side by
-side. Nothing leaves the machine except PDFs and screenshots, which are read by Claude through your
-own Claude login. That call is shown on every import, and CSV/OFX/QIF files are parsed locally.
+side. Only two things leave the machine, both through your own Claude login:
+
+- PDFs and screenshots, which Claude reads. That call is shown on every import; CSV, OFX and QIF
+  files are parsed locally.
+- Research queries, which carry only public, non-personal facts: fund names, ISINs, provider
+  product pages. No balances, transactions or personal details ever go into one.
+
+The agents that write insights read a digest of the app's own figures, with no web access.
 
 ![Overview](docs/images/overview.png)
 
@@ -63,6 +74,7 @@ engine, and the [`claude`](https://claude.com/claude-code) CLI logged in (or `AN
 | `npm run demo` / `npm run demo:reset` | Serve on :4770 / regenerate the synthetic dataset in `demo-data/` |
 | `npm run deploy` | Deploy `main` (or `-- <ref>`) to the live service, with rollback; `-- --status` shows what is live |
 | `npm run import -- <files…>` | Queue files for import from the terminal (copies them to `inbox/`) |
+| `npm run records -- keys \| status \| check \| write` | The validated write path for assumptions, research and insights ([docs/AGENTS.md](docs/AGENTS.md)) |
 | `npm run set-password` | Set the login (scrypt hash into `.env`) |
 | `npm run validate` | Check `data/` against the format (same checks as start-up) |
 | `npm run schemas` | Regenerate the JSON Schemas in `schemas/` |
@@ -109,5 +121,7 @@ re-import old documents. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 | [docs/DATA_FORMAT.md](docs/DATA_FORMAT.md) | The data format, file by file and field by field |
 | [docs/INGESTION.md](docs/INGESTION.md) | Importers, adding a bank, how Claude extraction works |
 | [docs/UK_RULES.md](docs/UK_RULES.md) | Tax-year rules and allowance tables, with sources |
+| [docs/FORMULAS.md](docs/FORMULAS.md) | Every computed figure: the formula, its inputs and its tests |
+| [docs/AGENTS.md](docs/AGENTS.md) | The contract for agents: research, assumptions, insights and the write path |
 | [docs/DEPLOY.md](docs/DEPLOY.md) | Running it as a service on P360 behind Caddy on the tailnet |
 | [docs/DECISIONS.md](docs/DECISIONS.md) | Decision log |

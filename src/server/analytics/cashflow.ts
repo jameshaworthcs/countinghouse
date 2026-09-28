@@ -57,7 +57,8 @@ export function categoryBreakdown(list: FlowTx[], cats: CategoryIndex, cls: 'inc
     return m;
   };
   const leafKey = (f: FlowTx) => f.t.category ?? 'uncategorised';
-  const groupKey = (f: FlowTx) => (f.t.category ? (cats.groupOf(f.t.category)?.id ?? f.t.category) : 'uncategorised');
+  // Refunds count as negative spending; as a group they are "Refunds", not their "Income" parent.
+  const groupKey = (f: FlowTx) => (!f.t.category ? 'uncategorised' : f.cls === 'spending' && cats.kindOf(f.t.category) === 'income' ? f.t.category : (cats.groupOf(f.t.category)?.id ?? f.t.category));
   const build = (m: Map<string, { minor: number; count: number }>, prev: Map<string, { minor: number; count: number }> | undefined, isGroup: boolean): CategoryAmount[] => {
     const total = [...m.values()].reduce((s, e) => s + e.minor, 0);
     return [...m.entries()]
@@ -80,7 +81,27 @@ export function categoryBreakdown(list: FlowTx[], cats: CategoryIndex, cls: 'inc
         }
         return out;
       })
-      .sort((a, b) => b.amount - a.amount);
+      .concat(
+        // What was spent before and not at all now. Refunds on their own (a negative amount) are
+        // left out: they are not somewhere the money went.
+        [...(prev ?? new Map<string, { minor: number; count: number }>())]
+          .filter(([id, e]) => !m.has(id) && e.minor > 0)
+          .map(([id, e]) => {
+            const group = isGroup ? undefined : cats.groupOf(id);
+            return {
+              id,
+              name: id === 'uncategorised' ? 'Uncategorised' : (cats.get(id)?.name ?? id),
+              kind: cats.get(id)?.kind ?? (cls === 'income' ? 'income' : 'expense'),
+              amount: 0,
+              count: 0,
+              share: 0,
+              previous: fromMinor(e.minor),
+              change: -1,
+              ...(group && group.id !== id ? { groupId: group.id, groupName: group.name } : {}),
+            };
+          }),
+      )
+      .sort((a, b) => b.amount - a.amount || (b.previous ?? 0) - (a.previous ?? 0));
   };
   const prevLeaf = previous ? agg(previous, leafKey) : undefined;
   const prevGroup = previous ? agg(previous, groupKey) : undefined;

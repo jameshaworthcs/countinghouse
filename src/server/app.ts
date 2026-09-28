@@ -5,6 +5,7 @@ import path from 'node:path';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
 import { ZodError } from 'zod';
+import { JobRunner } from './agents/jobs';
 import { Analytics } from './analytics';
 import { Auth, loadSessionSecret } from './auth';
 import type { Config } from './config';
@@ -18,6 +19,8 @@ import { analyticsRoutes } from './routes/analytics';
 import { authRoutes } from './routes/auth';
 import { dataRoutes } from './routes/data';
 import { documentRoutes, importRoutes } from './routes/imports';
+import { jobRoutes } from './routes/jobs';
+import { recordRoutes } from './routes/records';
 import { systemRoutes } from './routes/system';
 import { authGate, csrfGuard, hostGuard, securityHeaders } from './security';
 import { Store, StoreError, type ChangeEvent } from './store';
@@ -69,13 +72,20 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
     throw new Error(`${config.dataDir} holds real data (it is tracked in git), so a login is required. Run \`npm run set-password\`, or use the demo data (npm run dev / npm run demo).`);
   }
 
+  // Agent jobs start on their own only in a watching (serving) instance, never in tests or scripts.
+  const runner = new JobRunner(store, analytics, config, { autoRun: config.watch && opts.inbox !== false });
+  await runner.init();
+  imports.on('update', (r: { id: string; status: string }) => {
+    if (r.status === 'committed') runner.onImportCommitted(r.id);
+  });
+
   let inbox: InboxWatcher | undefined;
   if (opts.inbox !== false && config.watch) {
     inbox = new InboxWatcher(config.inboxDir, imports);
     await inbox.start();
   }
 
-  const ctx: AppContext = { config, store, analytics, imports, git, auth, inbox, version: opts.version };
+  const ctx: AppContext = { config, store, analytics, imports, git, auth, inbox, jobs: runner, runner, version: opts.version };
   const app = new Hono();
   const secOpts = { allowedHosts: config.allowedHosts, production: config.production };
 
@@ -87,8 +97,10 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
   app.get('/api/health', (c) => c.json({ ok: true, version: opts.version, ...(opts.commit ? { commit: opts.commit } : {}) }));
   app.route('/api/auth', authRoutes(ctx));
   app.route('/api/imports', importRoutes(ctx));
+  app.route('/api/jobs', jobRoutes(ctx));
   app.route('/api/documents', documentRoutes(ctx));
   app.route('/api', dataRoutes(ctx));
+  app.route('/api', recordRoutes(ctx));
   app.route('/api', analyticsRoutes(ctx));
   app.route('/api', systemRoutes(ctx));
   app.all('/api/*', (c) => c.json({ error: 'Not found' }, 404));
@@ -132,6 +144,7 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
     app,
     ctx,
     async close() {
+      runner.stop();
       inbox?.stop();
       store.stopWatching();
       await git.flush();

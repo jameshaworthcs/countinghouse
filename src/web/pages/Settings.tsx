@@ -5,6 +5,7 @@ import type { DataHealthResponse, SystemResponse } from '../../shared/api';
 import { formatDate, today } from '../../shared/dates';
 import { FIGURE_KINDS, type Category, type Figure, type Profile, type Rule, type Settings as SettingsT } from '../../shared/schema';
 import { taxYearOf } from '../../shared/uk';
+import { CoverageGrid } from '../components/Coverage';
 import { CategorySelect } from '../components/TransactionList';
 import { Badge, Button, Callout, Card, Checkbox, Field, Input, KeyValue, Loading, Money, PageHeader, Select, StatusBadge, Switch, Tabs, tableClasses, useToast } from '../components/ui';
 import { api, useApi, useApiMutation } from '../lib/api';
@@ -51,9 +52,9 @@ function ProfileForm() {
         <Field label="Retirement age">
           <Input type="number" min={50} max={80} value={p.retirementAge} onChange={(e) => set({ retirementAge: Number(e.target.value) || 67 })} />
         </Field>
-        <Field label="Assumed real return (% a year)" hint="Growth above inflation for projections; 3–5% is a common range">
-          <Input type="number" step={0.5} value={Math.round(p.assumedRealReturn * 1000) / 10} onChange={(e) => set({ assumedRealReturn: Number(e.target.value) / 100 })} />
-        </Field>
+        <div className="text-[13px] text-ink-3 sm:col-span-2">
+          Returns, inflation, charges, interest and the withdrawal rate are assumption records, set from research and overridable by you: see <Link to="/assumptions" className="text-accent hover:underline">Assumptions &amp; research</Link>.
+        </div>
       </div>
       {save.error && <Callout tone="bad" className="mt-3">{save.error.message}</Callout>}
       <div className="mt-4 flex justify-end">
@@ -117,6 +118,36 @@ function ExtractionForm() {
           <Field label="Files read at once">
             <Input type="number" min={1} max={4} value={ex.maxConcurrent} onChange={(e) => setEx({ maxConcurrent: Math.min(4, Math.max(1, Number(e.target.value) || 1)) })} />
           </Field>
+        </div>
+      </Card>
+      <Card title="Agents" description="Jobs that research what you hold, keep assumptions current and write insights, through the same Claude login. Research jobs send only public identifiers (fund names, ISINs, providers); jobs that read your data get no web access.">
+        <div className="flex flex-col gap-3">
+          <Switch checked={s.agents.enabled} onChange={(v) => setS({ ...s, agents: { ...s.agents, enabled: v } })} label="Let agents start jobs by themselves" description="New funds and providers, stale research (at most three a day), assumptions on fallbacks (at most weekly). You can always start jobs yourself." />
+          <Switch checked={s.agents.insightsAfterImport} onChange={(v) => setS({ ...s, agents: { ...s.agents, insightsAfterImport: v } })} label="Insights after each import" />
+          <Switch checked={s.agents.monthlyReview} onChange={(v) => setS({ ...s, agents: { ...s.agents, monthlyReview: v } })} label="A month in review once a month’s data is complete" />
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Field label="Model">
+              <Select value={s.agents.model} onChange={(e) => setS({ ...s, agents: { ...s.agents, model: e.target.value } })}>
+                <option value="opus">Opus</option>
+                <option value="sonnet">Sonnet</option>
+                <option value="fable">Fable</option>
+              </Select>
+            </Field>
+            <Field label="Effort">
+              <Select value={s.agents.effort} onChange={(e) => setS({ ...s, agents: { ...s.agents, effort: e.target.value as SettingsT['agents']['effort'] } })}>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="xhigh">Extra high</option>
+              </Select>
+            </Field>
+            <Field label="Refresh research after (days)">
+              <Input type="number" min={7} max={730} value={s.agents.researchStaleAfterDays} onChange={(e) => setS({ ...s, agents: { ...s.agents, researchStaleAfterDays: Math.min(730, Math.max(7, Number(e.target.value) || 90)) } })} />
+            </Field>
+          </div>
+          <div className="text-[12.5px] text-ink-3">
+            See what is queued, running or stale on <Link to="/assumptions#jobs" className="text-accent hover:underline">Assumptions &amp; research → Agent jobs</Link>.
+          </div>
         </div>
       </Card>
       <Card title="Other">
@@ -574,9 +605,21 @@ function Health() {
   const h = q.data;
   if (!h) return <Loading />;
   const clean = !h.issues.length && !h.gaps.length && !h.noBalance.length && !h.stale.length;
+  const cov = h.coverage;
   return (
     <div className="flex flex-col gap-5">
       {clean && <Callout tone="good" title="All good">No problems found in your data.</Callout>}
+      {cov && cov.accounts.length > 0 && (
+        <Card
+          title="Coverage"
+          description="Which months each account has transaction data for. Averages, projections and signals use only days every account covers; a ✓ marks a month that is complete for all of them."
+          padded={false}
+        >
+          <div className="px-5 py-3">
+            <CoverageGrid cov={cov} />
+          </div>
+        </Card>
+      )}
       {h.issues.length > 0 && (
         <Card title="Problems in the data files" description="Records that don’t match the format are kept untouched and ignored until fixed.">
           <ul className="flex flex-col gap-1.5 text-[13px]">

@@ -50,6 +50,9 @@ export function useLiveUpdates(): void {
         clearTimeout(timer);
         timer = setTimeout(() => void qc.invalidateQueries(), 150);
       });
+      es.addEventListener('job', () => {
+        void qc.invalidateQueries({ queryKey: ['jobs'] });
+      });
       es.addEventListener('import', () => {
         void qc.invalidateQueries({ queryKey: ['imports'] });
         void qc.invalidateQueries({ queryKey: ['import'] });

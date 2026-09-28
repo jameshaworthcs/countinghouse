@@ -35,7 +35,7 @@ export async function enrich(store: Store, opts: { accountIds?: string[]; dryRun
       payee: t.merchant?.name ?? t.counterpartyName,
     });
     const patch: Partial<Transaction> = {};
-    if (res.payee !== t.payee) patch.payee = res.payee;
+    if (res.payee !== t.payee && t.payeeSetBy !== 'user') patch.payee = res.payee;
     if (res.category !== t.category) patch.category = res.category;
     if (res.categorisedBy !== t.categorisedBy) patch.categorisedBy = res.categorisedBy;
     if (res.ruleId !== t.ruleId) patch.ruleId = res.ruleId;

@@ -17,12 +17,25 @@ system as built, and [DECISIONS.md](DECISIONS.md) records why it is the way it i
    Format changes are versioned migrations; nothing ever needs importing again.
 5. **Local and private.** The server binds to loopback and sits behind a login, reached on your own
    machine or private network. The only third party is Claude, through the engine you choose, for
-   reading documents.
+   reading documents and for agent jobs. Research sends public queries only: fund names, ISINs,
+   provider product pages.
 6. **UK-native.** The tax year runs from 6 April to 5 April. ISA, LISA, pension, Personal Savings
    Allowance and FSCS rules are dated tables with sources ([UK_RULES.md](UK_RULES.md)).
 7. **Deterministic where possible, AI where necessary, verified always.** CSV, OFX, QIF and text
    exports parse locally. PDFs and screenshots are read by a model into a strict schema. Both then
    go through validation, reconciliation, duplicate checks and account matching.
+8. **Assumptions are data, not code.** Every modelling parameter (returns, volatility, inflation,
+   fees, interest rates, withdrawal rate, growth rates, the State Pension) is a dated, sourced record
+   with a range, a scope and a history. Agents set them from research; yours win. Code keeps only
+   fallbacks, and the UI labels them as fallbacks.
+9. **Computed and inferred are different things.** Estate value, balances, cash flow, allowances and
+   tax positions are pure, tested equations ([FORMULAS.md](FORMULAS.md)). Insights are inferred and
+   stored with their evidence, confidence, model and prompt version. The UI never shows one as a
+   computed figure, and an inference never changes a source fact.
+10. **Research accumulates.** What agents find about your funds and providers is stored once, dated
+    and sourced, and projections and insights read it instead of working it out again.
+11. **Intelligence throughout.** Every page combines its computed figures with the inferences and
+    research that bear on it; there is no single "insights" page.
 
 ## Not built yet
 

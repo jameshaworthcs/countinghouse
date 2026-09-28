@@ -215,7 +215,7 @@ export function selfAssessment(store: Store, label?: string): SelfAssessmentResp
       amount: cb,
       status: 'check',
       basis: 'Child Benefit payments found in your bank data',
-      notes: ['The charge applies if you or your partner have adjusted net income over £60,000, tapering to the full amount at £80,000.'],
+      notes: [`The charge applies if you or your partner have adjusted net income over £${params.hicbc.threshold.toLocaleString('en-GB')}, rising to the full amount of the benefit at £${params.hicbc.fullAt.toLocaleString('en-GB')}.`],
       sources: childBenefit.map((t) => ({ type: 'transaction' as const, id: t.id, date: t.date, label: t.description, amount: t.amount })),
     });
   }
@@ -230,10 +230,14 @@ export function selfAssessment(store: Store, label?: string): SelfAssessmentResp
       amount: sideTotal,
       status: 'check',
       basis: 'Transactions categorised "Side income"',
-      notes: [sideTotal <= 1000 ? 'Under £1,000: the trading allowance may mean you do not need to declare it.' : 'Over the £1,000 trading allowance: record expenses as well (or use the allowance instead of expenses).'],
+      notes: [
+        params.tradingAllowance && sideTotal <= params.tradingAllowance
+          ? `Under £${params.tradingAllowance.toLocaleString('en-GB')}: the trading allowance may mean you do not need to declare it.`
+          : `Over the £${params.tradingAllowance.toLocaleString('en-GB')} trading allowance: record expenses as well (or deduct the allowance instead of expenses). Above £2,500 you must register for Self Assessment.`,
+      ],
       sources: side.slice(0, 50).map((t) => ({ type: 'transaction' as const, id: t.id, date: t.date, label: t.payee ?? t.description, amount: t.amount })),
     });
-    if (sideTotal > 1000) mayNeedToFile.push({ reason: 'Self-employment income over £1,000', detail: `${formatMoney(sideTotal)} of side income this tax year.` });
+    if (sideTotal > params.tradingAllowance) mayNeedToFile.push({ reason: `Self-employment income over £${params.tradingAllowance.toLocaleString('en-GB')}`, detail: `${formatMoney(sideTotal)} of side income this tax year. Sole traders earning more than this must send a return.` });
   }
   const giaSales = store.accounts
     .filter((a) => a.type === 'gia' || a.type === 'crypto')
@@ -246,24 +250,25 @@ export function selfAssessment(store: Store, label?: string): SelfAssessmentResp
       amount: null,
       status: 'check',
       basis: 'Sales in general investment or crypto accounts',
-      notes: [`Gains are not calculated here. The annual exempt amount is ${formatMoney(params.cgtAnnualExemptAmount, { decimals: 0 })}; you must report if gains exceed it, or if total sale proceeds exceed £50,000.`],
+      notes: [
+        `Gains are not calculated here. The annual exempt amount is ${formatMoney(params.cgtAnnualExemptAmount, { decimals: 0 })}; you must report if gains exceed it, or, if you are registered for Self Assessment, if total sale proceeds exceed ${formatMoney(params.cgtReportingProceeds ?? params.cgtAnnualExemptAmount * 4, { decimals: 0 })}.`,
+      ],
       sources: giaSales.slice(0, 30).map((t) => ({ type: 'transaction' as const, id: t.id, date: t.date, label: t.description, amount: t.amount })),
     });
   }
   if (other.length) sections.push({ id: 'other', title: 'Other income and charges', description: 'Only shown when something in your data suggests it applies.', items: other });
 
-  // ── Do you need to file? (hints only) ──
-  if (allow.savings.interest >= 10_000) mayNeedToFile.push({ reason: 'Savings interest of £10,000 or more', detail: 'HMRC requires a return at this level.' });
-  else if (allow.savings.interest > allow.savings.allowance) {
+  // ── Do you need to file? (hints only; gov.uk/check-if-you-need-tax-return is the authority) ──
+  if (allow.savings.interest > allow.savings.allowance) {
     mayNeedToFile.push({
       reason: 'Interest above your Personal Savings Allowance',
-      detail: 'HMRC usually collects this through your tax code or a simple assessment, but you can declare it on a return.',
+      detail: 'HMRC usually collects the tax through your tax code or sends a tax calculation (simple assessment). You can also declare it on a return.',
     });
   }
   if (rasPersonalGross > 0 && (band === 'higher' || band === 'additional')) {
     mayNeedToFile.push({ reason: 'Higher-rate relief on pension contributions', detail: 'Claim the extra relief on relief-at-source contributions via your return (or by contacting HMRC).' });
   }
-  if (childBenefit.length) mayNeedToFile.push({ reason: 'Child Benefit received', detail: 'You may owe the High Income Child Benefit Charge if income is over £60,000.' });
+  if (childBenefit.length) mayNeedToFile.push({ reason: 'Child Benefit received', detail: `You may owe the High Income Child Benefit Charge if your or your partner's income is over £${params.hicbc.threshold.toLocaleString('en-GB')}.` });
   checklist.push({ id: 'band', done: Boolean(store.profile.taxBand), label: 'Tax band set in your profile', detail: 'Used for the Personal Savings Allowance and pension relief hints.' });
 
   return {

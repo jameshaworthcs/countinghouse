@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
-import { addDays, today } from '../../shared/dates';
-import { queryDate, type AppContext } from '../context';
+import { addDays, addMonths, startOfMonth, today } from '../../shared/dates';
+import { csvCell, queryDate, type AppContext } from '../context';
 
 export function analyticsRoutes(ctx: AppContext): Hono {
   const app = new Hono();
@@ -21,7 +21,7 @@ export function analyticsRoutes(ctx: AppContext): Hono {
 
   app.get('/spending', (c) => {
     const to = queryDate(c.req.query('to')) ?? today();
-    const from = queryDate(c.req.query('from')) ?? addDays(to, -89);
+    const from = queryDate(c.req.query('from')) ?? startOfMonth(addMonths(to, -2));
     return c.json(a.spending(from, to));
   });
 
@@ -36,21 +36,21 @@ export function analyticsRoutes(ctx: AppContext): Hono {
       a.projections({
         months: Number.isFinite(months) ? months : 60,
         spendingAdjustment: Number.isFinite(adjust) ? Math.max(-0.9, Math.min(2, adjust)) : 0,
+        units: c.req.query('units') === 'nominal' ? 'nominal' : 'real',
         ...(pastFrom ? { pastFrom } : {}),
         ...(pastTo ? { pastTo } : {}),
       }),
     );
   });
 
+  app.get('/coverage', (c) => c.json(a.coverage()));
+
   app.get('/allowances', (c) => c.json(a.allowances(c.req.query('taxYear'))));
 
   app.get('/self-assessment', (c) => {
     const sa = a.selfAssessment(c.req.query('taxYear'));
     if (c.req.query('format') !== 'csv') return c.json(sa);
-    const esc = (v: string | number | null | undefined) => {
-      const s = v === undefined || v === null ? '' : String(v);
-      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-    };
+    const esc = csvCell;
     const lines = ['section,item,where,amount,status,basis,notes'];
     for (const s of sa.sections) for (const i of s.items) lines.push([s.title, i.label, i.where, i.amount?.toFixed(2) ?? '', i.status, i.basis, i.notes.join(' ')].map(esc).join(','));
     lines.push('', esc(sa.disclaimer));

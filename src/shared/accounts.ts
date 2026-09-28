@@ -331,6 +331,17 @@ export function cadenceOf(type: AccountType): 'monthly' | 'yearly' {
   return ACCOUNT_TYPE_META[type].cadence ?? 'monthly';
 }
 
+/**
+ * Days after which an account updated once a year (an annual pension statement) counts as stale:
+ * a year plus a month's grace for the statement to arrive. Monthly accounts use
+ * `settings.staleAfterDays`.
+ */
+export const YEARLY_STALE_AFTER_DAYS = 400;
+
+export function staleAfterDays(type: AccountType, monthlyDays: number): number {
+  return cadenceOf(type) === 'yearly' ? YEARLY_STALE_AFTER_DAYS : monthlyDays;
+}
+
 export function balanceModeOf(account: Pick<Account, 'type' | 'balanceMode'>): 'ledger' | 'market' {
   return account.balanceMode ?? ACCOUNT_TYPE_META[account.type].balanceMode;
 }
