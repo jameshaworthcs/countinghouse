@@ -30,7 +30,11 @@ function RequireAuth({ children }: { children: ReactNode }) {
   const location = useLocation();
   if (!status.data) return <div className="p-8">{status.error ? status.error.message : <Loading />}</div>;
   const { configured, user, localAccess } = status.data;
-  if (configured && !user) return <Navigate to={`/login?next=${encodeURIComponent(location.pathname + location.search)}`} replace />;
+  if (configured && !user) {
+    // A cached "signed out" can predate the session, so wait for a refetch before redirecting.
+    if (status.isFetching) return <div className="p-8"><Loading /></div>;
+    return <Navigate to={`/login?next=${encodeURIComponent(location.pathname + location.search)}`} replace />;
+  }
   if (!configured && !localAccess) {
     return (
       <div className="mx-auto mt-24 max-w-md rounded-xl border border-line bg-panel p-6 text-sm text-ink-2">

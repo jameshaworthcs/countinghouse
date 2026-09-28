@@ -9,9 +9,22 @@ for the map and [docs/DATA_FORMAT.md](docs/DATA_FORMAT.md) before touching data 
 - `npm run check`: typecheck (server + web), ESLint, Vitest. Must be green before you call
   anything done.
 - `npm run dev`: API on :4750 (tsx watch), UI on :4751 (Vite, proxies `/api`).
-- `npm run demo:reset && FINANCE_DATA_DIR=demo-data PORT=4770 npm run serve`, then
-  `npm run screens -- --base http://127.0.0.1:4770`: visual check of every page (light, dark and
-  mobile). It fails on any console error. Look at the PNGs in `screens/`, don't just count them.
+- Visual check of every page (light, dark and mobile), starting with the sign-in:
+  - It fails on any console error, or if signing in bounces back to the form.
+  - Look at the PNGs in `screens/`, don't just count them.
+  - `.env` gives every server the real login, so run the demo with a throwaway one:
+    ```bash
+    npm run demo:reset
+    export SCREENS_USER=demo SCREENS_PASSWORD=demo-password-1
+    FINANCE_USERNAME=$SCREENS_USER FINANCE_PASSWORD_HASH="$(FINANCE_NEW_PASSWORD=$SCREENS_PASSWORD npm run -s set-password -- --print-hash)" \
+      FINANCE_DATA_DIR=demo-data PORT=4770 npm run serve &
+    npm run screens -- --base http://127.0.0.1:4770
+    ```
+- **This checkout is the live deployment** (`finance.service` on P360; see
+  [docs/DEPLOY.md](docs/DEPLOY.md)).
+  - `npm run build` replaces the live UI at once.
+  - Server changes go live with `sudo systemctl restart finance`, which also rebuilds.
+  - `npm run start` and `npm run demo` would clash with the service on port 4750.
 - `npm run validate`: format check of `data/`.
 
 ## Invariants: do not change without asking the owner

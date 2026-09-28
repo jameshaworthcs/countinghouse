@@ -82,7 +82,6 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
   // The built web app (production). In development Vite serves it instead.
   const indexFile = path.join(config.webDist, 'index.html');
   if (existsSync(indexFile)) {
-    const indexHtml = readFileSync(indexFile, 'utf8');
     const root = path.relative(process.cwd(), config.webDist) || '.';
     app.use(
       '/assets/*',
@@ -96,7 +95,9 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
     app.use('*', serveStatic({ root }));
     app.get('*', (c) => {
       c.header('Cache-Control', 'no-cache');
-      return c.html(indexHtml);
+      // Read per request, like `/` above: a rebuild replaces the hashed assets, and a copy held
+      // since start-up would point every other route at files that no longer exist.
+      return c.html(readFileSync(indexFile, 'utf8'));
     });
   } else {
     app.get('*', (c) =>

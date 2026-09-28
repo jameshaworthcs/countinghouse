@@ -4,6 +4,8 @@
 //
 //   npm run set-password                      (prompts)
 //   FINANCE_NEW_PASSWORD=… npm run set-password -- --user james   (non-interactive)
+//   FINANCE_NEW_PASSWORD=… npm run -s set-password -- --print-hash (hash only, .env untouched:
+//                                                                   a throwaway login for a demo server)
 
 import { randomBytes } from 'node:crypto';
 import { chmod, readFile, writeFile } from 'node:fs/promises';
@@ -16,6 +18,7 @@ import { PROJECT_ROOT } from '../src/server/config';
 const envFile = path.join(PROJECT_ROOT, '.env');
 const argv = process.argv.slice(2);
 const userArg = argv.includes('--user') ? argv[argv.indexOf('--user') + 1] : undefined;
+const printHash = argv.includes('--print-hash');
 
 function ask(question: string, hidden = false): Promise<string> {
   return new Promise((resolve) => {
@@ -38,13 +41,17 @@ function ask(question: string, hidden = false): Promise<string> {
 async function main() {
   let username = userArg ?? '';
   let password = process.env.FINANCE_NEW_PASSWORD ?? '';
-  if (!username) username = (await ask(`Username [${os.userInfo().username}]: `)).trim() || os.userInfo().username;
+  if (!username && !printHash) username = (await ask(`Username [${os.userInfo().username}]: `)).trim() || os.userInfo().username;
   if (!password) {
     password = await ask('New password: ', true);
     const again = await ask('Repeat password: ', true);
     if (password !== again) throw new Error('Passwords do not match.');
   }
   if (password.length < 12) throw new Error('Use at least 12 characters (a passphrase is best).');
+  if (printHash) {
+    console.log(await hashPassword(password));
+    return;
+  }
   if (!/^[A-Za-z0-9._@-]{1,64}$/.test(username)) throw new Error('Username may contain letters, digits and . _ @ - only.');
 
   let env = '';

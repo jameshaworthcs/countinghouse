@@ -16,7 +16,6 @@ export interface Config {
   /** Pending uploads and drafts; never committed. */
   workDir: string;
   webDist: string;
-  password?: string;
   allowedHosts: string[];
   anthropicApiKey?: string;
   /** Watch the inbox folder and the data directory for changes. */
@@ -64,7 +63,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, root = PROJECT_
       .filter(Boolean),
     watch: env.FINANCE_WATCH !== '0',
   };
-  if (env.FINANCE_PASSWORD) config.password = env.FINANCE_PASSWORD;
   if (env.ANTHROPIC_API_KEY) config.anthropicApiKey = env.ANTHROPIC_API_KEY;
   return config;
 }

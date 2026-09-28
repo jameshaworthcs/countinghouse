@@ -3,10 +3,13 @@
 //
 //   FINANCE_DATA_DIR=demo-data npm run serve &     (or npm run demo)
 //   npm run screens -- --base http://127.0.0.1:4750
+//
+// A server with a login also needs SCREENS_USER and SCREENS_PASSWORD. The script then signs in
+// through the login page first, and fails unless that lands in the app on the first try.
 
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
-import puppeteer from 'puppeteer-core';
+import puppeteer, { type Browser } from 'puppeteer-core';
 import { PROJECT_ROOT } from '../src/server/config';
 
 const argv = process.argv.slice(2);
@@ -18,10 +21,44 @@ const base = arg('base', 'http://127.0.0.1:4750');
 const out = path.join(PROJECT_ROOT, 'screens');
 const chrome = process.env.CHROME_BIN ?? '/usr/bin/google-chrome';
 const only = arg('only', '');
+const login = process.env.SCREENS_USER && process.env.SCREENS_PASSWORD ? { user: process.env.SCREENS_USER, password: process.env.SCREENS_PASSWORD } : null;
+
+/** Sign in through the login page as a person would; returns the session cookie. */
+async function signIn(browser: Browser, creds: { user: string; password: string }): Promise<string> {
+  const page = await browser.newPage();
+  await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
+  // Start at / so the app first learns it is signed out, as on a real visit.
+  await page.goto(`${base}/`, { waitUntil: 'networkidle2', timeout: 30_000 });
+  await page.waitForSelector('input[autocomplete="current-password"]', { timeout: 15_000 });
+  await page.screenshot({ path: path.join(out, 'login.png') });
+  await page.type('input[autocomplete="username"]', creds.user);
+  await page.type('input[autocomplete="current-password"]', creds.password);
+  await page.click('button[type="submit"]');
+  // Runs in the page (a string because scripts are type-checked without the DOM library).
+  const settled = `(() => {
+    if (document.querySelector('aside')) return 'in';
+    const password = document.querySelector('input[autocomplete="current-password"]');
+    if (password && password.value === '') return 'the login form came back empty';
+    return document.querySelector('[role="alert"]')?.textContent || false;
+  })()`;
+  const outcome = await page
+    .waitForFunction(settled, { timeout: 15_000, polling: 50 })
+    .then((h) => h.jsonValue())
+    .catch(() => 'timed out waiting for the app');
+  await page.close();
+  if (outcome !== 'in') throw new Error(`Signing in failed: ${String(outcome)}`);
+  return (await browser.cookies()).map((c) => `${c.name}=${c.value}`).join('; ');
+}
 
 async function main() {
   await mkdir(out, { recursive: true });
-  const imports = (await (await fetch(`${base}/api/imports`, { headers: { host: '127.0.0.1' } })).json()) as { pending: { id: string }[] };
+  const status = (await (await fetch(`${base}/api/auth/status`, { headers: { host: '127.0.0.1' } })).json()) as { configured: boolean };
+  if (status.configured && !login) throw new Error('This server has a login: set SCREENS_USER and SCREENS_PASSWORD.');
+  const browser = await puppeteer.launch({ executablePath: chrome, headless: true, args: ['--no-sandbox', '--disable-gpu', '--hide-scrollbars'] });
+  // Pages share the default browser context, so they all use this session.
+  const cookie = status.configured && login ? await signIn(browser, login) : '';
+  if (cookie) console.log('✓ login');
+  const imports = (await (await fetch(`${base}/api/imports`, { headers: { host: '127.0.0.1', cookie } })).json()) as { pending: { id: string }[] };
   const pendingId = imports.pending[0]?.id;
   const pages: [string, string][] = [
     ['overview', '/'],
@@ -40,7 +77,6 @@ async function main() {
     ['settings-rules', '/settings#rules'],
     ['settings-health', '/settings#health'],
   ];
-  const browser = await puppeteer.launch({ executablePath: chrome, headless: true, args: ['--no-sandbox', '--disable-gpu', '--hide-scrollbars'] });
   const problems: string[] = [];
   const shoot = async (name: string, route: string, opts: { width: number; height: number; theme: 'light' | 'dark'; mobile?: boolean }) => {
     const page = await browser.newPage();

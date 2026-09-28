@@ -22,7 +22,10 @@ export function Login() {
     setError(null);
     try {
       await api('/auth/login', { body: { username, password } });
-      await qc.invalidateQueries();
+      // Everything cached so far was fetched signed out, including the auth status RequireAuth
+      // checks first. Invalidating isn't enough: that query is inactive while this page shows, so
+      // it would keep answering "signed out" and send you straight back to an empty form.
+      qc.clear();
       void navigate(target, { replace: true });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not sign in');
