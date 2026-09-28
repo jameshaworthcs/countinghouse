@@ -86,3 +86,30 @@ Newest last. Each entry says what was decided, what else was considered, and why
 - **Ports:** live 4750, development 4760 (Vite 4761), demo 4770.
 - **A missing data directory in production is an error, not an empty start.**
   `FINANCE_INIT_DATA=1` creates one on purpose.
+
+## 2026-09-28: Assumptions as data, computed vs inferred, research, intelligence throughout
+
+The owner's direction for the rebuild before real statements arrive. It is recorded in CLAUDE.md
+as invariants.
+
+- **Assumptions are data, not code.** The trigger was one global `assumedRealReturn` (4%), a
+  hard-coded 4% withdrawal rate, cash that never grew, and no fees or inflation.
+  - Every modelling parameter becomes a record with scope, provenance and history. Agents set
+    it from research; the owner's overrides win.
+  - Code keeps only labelled fallbacks.
+  - Uncertain parameters carry ranges, and projections show them.
+- **Computed vs inferred.** Deterministic figures are equations in FORMULAS.md with tests.
+  Claude's insights are records with evidence, confidence, model, prompt version and date,
+  displayed as inferences and never mixed with computed figures.
+- **Research accumulates.** Funds, providers and rates the owner holds are researched once,
+  stored dated and sourced, and refreshed when stale. Historical statistics are stored apart
+  from forward-looking assumptions, with the reasoning that links them.
+- **Intelligence throughout.** No insights page; each page carries its own inferences and
+  researched context. What the owner tells the app becomes structured context.
+- **The privacy invariant now covers research.** It now reads: "Research sends only public,
+  non-personal queries: fund names, ISINs, provider product pages. No balances, transactions or
+  personal details ever go into one."
+  - It is enforced by construction. Research jobs get the web tools, and their prompts are built
+    only from public identifiers.
+  - Jobs that read personal data (insights, reviews, interpreting notes) get no web tools, so
+    they cannot send it anywhere but Claude.

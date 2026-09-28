@@ -53,11 +53,29 @@ for the map and [docs/DATA_FORMAT.md](docs/DATA_FORMAT.md) before touching data 
 - **Review before commit.** Imports are drafts until the owner commits them. Don't add paths that
   write extracted data straight to `data/`.
 - **Privacy.**
-  - Nothing may call third-party services except the extraction engine the owner chose (Claude CLI
-    or API).
+  - Nothing may call third-party services except Claude, the engine the owner chose (CLI or API),
+    for extraction and agent jobs.
+  - Research sends only public, non-personal queries: fund names, ISINs, provider product pages.
+    No balances, transactions or personal details ever go into one.
+    - Research jobs get the web tools and are built only from public identifiers.
+    - Jobs that read personal data get no web tools.
   - No CDNs, analytics or fonts from the web.
   - Keep only the last 4 digits of any account or card number.
   - Never print `.env`, the password file or document contents into logs or commits.
+- **Assumptions are data, not code.** Every modelling parameter (return, volatility, inflation,
+  fee, interest rate, withdrawal rate, growth rate, State Pension…) is an assumption record in
+  `data/`.
+  - A record has a value, range, scope (global down to one fund), source, evidence, as-of date,
+    rationale and who set it, with history.
+  - Agents set them from research. The owner's records win, like `categorisedBy: "user"`.
+  - Code keeps only fallbacks, and the UI labels them as fallbacks.
+  - Never add a hard-coded modelling constant.
+- **Computed vs inferred.** Estate value, balances, cash flow, allowances and tax positions are
+  pure, deterministic equations, written down in `docs/FORMULAS.md` and tested hard.
+  - Insights are inferred by Claude and stored as records with evidence, confidence, model,
+    prompt version and date.
+  - The UI never shows an inference as a computed figure.
+  - Inference never changes source facts.
 - **Security guards stay on:**
   - loopback bind;
   - Host allow-list (`FINANCE_ALLOWED_HOSTS`);
