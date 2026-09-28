@@ -1,0 +1,94 @@
+{
+  "$id": "settings.schema.json",
+  "title": "settings",
+  "description": "Schema for data/settings.json. Generated from src/shared/schema.ts by `npm run schemas`; do not edit.",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "extraction": {
+      "default": {
+        "engine": "auto",
+        "model": "opus",
+        "effort": "high",
+        "maxConcurrent": 2,
+        "timeoutSeconds": 900
+      },
+      "type": "object",
+      "properties": {
+        "engine": {
+          "default": "auto",
+          "type": "string",
+          "enum": [
+            "auto",
+            "claude-cli",
+            "claude-api",
+            "ocr"
+          ]
+        },
+        "model": {
+          "default": "opus",
+          "type": "string"
+        },
+        "effort": {
+          "default": "high",
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        },
+        "maxConcurrent": {
+          "default": 2,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4
+        },
+        "timeoutSeconds": {
+          "default": 900,
+          "type": "integer",
+          "minimum": 30,
+          "maximum": 3600
+        }
+      }
+    },
+    "git": {
+      "default": {
+        "autoCommit": true,
+        "trackDocuments": true
+      },
+      "type": "object",
+      "properties": {
+        "autoCommit": {
+          "default": true,
+          "type": "boolean"
+        },
+        "trackDocuments": {
+          "default": true,
+          "type": "boolean"
+        }
+      }
+    },
+    "staleAfterDays": {
+      "default": 35,
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 3650
+    },
+    "fx": {
+      "default": {},
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[A-Z]{3}$",
+        "description": "ISO 4217 currency code"
+      },
+      "additionalProperties": {
+        "type": "number",
+        "exclusiveMinimum": 0
+      }
+    }
+  }
+}

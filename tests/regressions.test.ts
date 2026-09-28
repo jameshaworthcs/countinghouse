@@ -1,0 +1,146 @@
+// Behaviours fixed after reviewing the running app against demo data.
+
+import { execFileSync } from 'node:child_process';
+import { mkdtemp, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { BalanceEngine } from '../src/server/analytics/balances';
+import { estateOn } from '../src/server/analytics/estate';
+import { investments, xirr } from '../src/server/analytics/investments';
+import { hashPassword, verifyPassword } from '../src/server/auth';
+import { GitCommitter } from '../src/server/git';
+import { transactionId } from '../src/server/ids';
+import { Store, type ChangeEvent } from '../src/server/store';
+import { CategoryIndex, defaultCategories } from '../src/shared/categories';
+import { Categoriser } from '../src/shared/categorise';
+import type { Account, BalanceSnapshot, Transaction } from '../src/shared/schema';
+
+const stamp = '2026-01-01T00:00:00+00:00';
+const acct = (id: string, type: Account['type']): Account => ({ id, name: id, type, currency: 'GBP', status: 'open', aliases: [], includeInNetWorth: true, createdAt: stamp, updatedAt: stamp });
+let n = 0;
+const tx = (accountId: string, date: string, amount: number, description: string, extra: Partial<Transaction> = {}): Transaction => ({
+  id: transactionId(accountId, date, amount, description, n++),
+  accountId,
+  date,
+  amount,
+  currency: 'GBP',
+  description,
+  source: {},
+  ...extra,
+});
+const bal = (accountId: string, date: string, balance: number, extra: Partial<BalanceSnapshot> = {}): BalanceSnapshot => ({
+  id: `bal_${(n++).toString(16).padStart(16, '0')}`,
+  accountId,
+  date,
+  balance,
+  currency: 'GBP',
+  kind: 'screenshot',
+  source: {},
+  createdAt: stamp,
+  ...extra,
+});
+
+describe('estate value classification', () => {
+  let dir: string;
+  let store: Store;
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), 'finance-reg-'));
+    store = await Store.open(dir);
+    await store.setAccounts([acct('current', 'current'), acct('card', 'credit_card')]);
+  });
+  afterEach(async () => rm(dir, { recursive: true, force: true }));
+
+  it('treats a card in credit as cash and an overdraft as a debt', async () => {
+    await store.addBalances([bal('card', '2026-05-01', 25), bal('current', '2026-05-01', -300)], 'test');
+    const e = estateOn(store, new BalanceEngine(store), '2026-05-02');
+    expect(e.assets).toBe(25);
+    expect(e.liabilities).toBe(-300);
+    expect(e.wrapper.get('cash')).toBe(25);
+    expect(e.wrapper.get('liabilities')).toBe(-300);
+    expect(e.total).toBe(-275);
+  });
+
+  it('rolls a market account back from a nearby first valuation instead of starting from zero', async () => {
+    await store.setAccounts([...store.accounts, acct('isa', 'stocks_isa')]);
+    await store.addTransactions([tx('isa', '2026-03-28', 600, 'Regular contribution', { category: 'contribution' })], 'test');
+    await store.addBalances([bal('isa', '2026-03-31', 19_000)], 'test');
+    const engine = new BalanceEngine(store);
+    expect(engine.balanceOn('isa', '2026-03-28')!.value).toBe(19_000);
+    expect(engine.balanceOn('isa', '2026-03-27')).toBeNull();
+  });
+});
+
+describe('investment returns', () => {
+  it('computes XIRR for a simple case', () => {
+    const r = xirr([
+      { date: '2025-01-01', amount: -1000 },
+      { date: '2026-01-01', amount: 1100 },
+    ]);
+    expect(r).toBeCloseTo(0.1, 3);
+  });
+
+  it('includes money already invested before the first recorded contribution', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'finance-reg-'));
+    try {
+      const store = await Store.open(dir);
+      await store.setCategories(defaultCategories());
+      await store.setAccounts([acct('isa', 'stocks_isa')]);
+      await store.addBalances([bal('isa', '2025-09-30', 20_000, { contributions: 20_000 })], 'test');
+      await store.addTransactions([tx('isa', '2026-03-31', 1_000, 'Contribution', { category: 'contribution' })], 'test');
+      const today = new Date().toISOString().slice(0, 10);
+      await store.addBalances([bal('isa', today, 22_000, { contributions: 21_000 })], 'test');
+      const inv = investments(store, new BalanceEngine(store));
+      const a = inv.accounts.find((x) => x.id === 'isa')!;
+      expect(a.growth).toBe(1_000);
+      expect(a.xirr).not.toBeNull();
+      expect(a.xirr!).toBeLessThan(0.15);
+      expect(a.xirr!).toBeGreaterThan(0);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('payees for generic merchant matches', () => {
+  it('uses the cleaned description rather than a generic label', () => {
+    const c = new Categoriser([], new CategoryIndex(defaultCategories()), [acct('current', 'current')], []);
+    expect(c.categorise({ accountId: 'current', description: 'UNIQLO REGENT ST', amount: -40 })).toMatchObject({ category: 'clothing', payee: 'Uniqlo Regent St' });
+    expect(c.categorise({ accountId: 'current', description: 'THE FALCON PUB', amount: -12 })).toMatchObject({ category: 'pubs-bars' });
+    expect(c.categorise({ accountId: 'current', description: 'BARCLAYS BANK', amount: -12 }).category).not.toBe('pubs-bars');
+  });
+});
+
+describe('password hashes', () => {
+  it('round-trips and contains no shell or env-special characters', async () => {
+    const h = await hashPassword('correct horse battery staple');
+    expect(h).toMatch(/^scrypt:\d+:\d+:\d+:[A-Za-z0-9_-]+:[A-Za-z0-9_-]+$/);
+    expect(await verifyPassword('correct horse battery staple', h)).toBe(true);
+    expect(await verifyPassword('wrong', h)).toBe(false);
+  });
+});
+
+describe('git auto-commit', () => {
+  it('commits only the data directory, one commit per flush', async () => {
+    const repo = await mkdtemp(path.join(os.tmpdir(), 'finance-git-'));
+    try {
+      const git = (...args: string[]) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' });
+      git('init', '-q', '-b', 'main');
+      git('config', 'user.email', 'test@example.com');
+      git('config', 'user.name', 'Test');
+      const store = await Store.open(path.join(repo, 'data'));
+      const committer = await GitCommitter.create(path.join(repo, 'data'), () => true, 10);
+      store.on('change', (e: ChangeEvent) => committer.queue(e));
+      execFileSync('sh', ['-c', 'echo code > app.txt'], { cwd: repo });
+      await committer.flush('data: initialise');
+      await store.setAccounts([acct('current', 'current')], 'account: add current');
+      await committer.flush();
+      const log = git('log', '--format=%s');
+      expect(log.trim().split('\n')).toEqual(['account: add current', 'data: initialise']);
+      expect(git('status', '--porcelain')).toContain('?? app.txt');
+      expect(git('show', '--name-only', '--format=', 'HEAD').trim()).toBe('data/accounts.json');
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+});

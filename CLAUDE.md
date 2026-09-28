@@ -1,0 +1,65 @@
+# CLAUDE.md: Finance (operating contract)
+
+A private UK personal-finance tracker: a Hono + React app over a git-versioned `data/` directory.
+It holds real financial data. Read this file, then [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+for the map and [docs/DATA_FORMAT.md](docs/DATA_FORMAT.md) before touching data or schemas.
+
+## Commands
+
+- `npm run check`: typecheck (server + web), ESLint, Vitest. Must be green before you call
+  anything done.
+- `npm run dev`: API on :4750 (tsx watch), UI on :4751 (Vite, proxies `/api`).
+- `npm run demo:reset && FINANCE_DATA_DIR=demo-data PORT=4770 npm run serve`, then
+  `npm run screens -- --base http://127.0.0.1:4770`: visual check of every page (light, dark and
+  mobile). It fails on any console error. Look at the PNGs in `screens/`, don't just count them.
+- `npm run validate`: format check of `data/`.
+
+## Invariants: do not change without asking the owner
+
+- **The data is the product.** Never delete or rewrite files in `data/` by hand to "clean up".
+  Changes go through the app or a migration. Git history in `data/` is the audit log; never
+  rewrite it (no rebase, amend or force-push of data commits).
+- **Money** is a JSON number in pounds with ≤ 2 dp, signed from the owner's point of view (money
+  in and assets positive; money out and debts negative). All arithmetic goes through
+  `src/shared/money.ts` (integer pence). Dates are `YYYY-MM-DD` strings; never `new Date(isoDate)`
+  for calendar maths (use `src/shared/dates.ts`).
+- **Source facts are immutable.** `description`, `raw` and the other source fields on a
+  transaction are what the document said. Enrichment (`payee`, `category`, `transferGroup`…) is
+  recomputable, except where `categorisedBy === "user"`, which is never overwritten.
+- **Format changes need a migration.** When you change a persisted schema in a way old files
+  don't satisfy: bump `FORMAT_VERSION` in `src/server/store.ts`, add a migration in
+  `src/server/migrations.ts`, update `docs/DATA_FORMAT.md`, and run `npm run schemas`. Additive
+  optional fields don't need one. Never require re-importing documents; backfill from `raw` or the
+  stored extraction instead.
+- **Review before commit.** Imports are drafts until the owner commits them. Don't add paths that
+  write extracted data straight to `data/`.
+- **Privacy.**
+  - Nothing may call third-party services except the extraction engine the owner chose (Claude CLI
+    or API).
+  - No CDNs, analytics or fonts from the web.
+  - Keep only the last 4 digits of any account or card number.
+  - Never print `.env`, the password file or document contents into logs or commits.
+- **Security guards stay on:**
+  - loopback bind;
+  - Host allow-list (`FINANCE_ALLOWED_HOSTS`);
+  - CSRF header + Origin check;
+  - auth gate on `/api/*`;
+  - CSP in production;
+  - documents served by id, never by path.
+- **UK rules are data.** Figures live in the dated tables in `src/shared/uk.ts` with sources in
+  `docs/UK_RULES.md`. Update both together.
+- **Self Assessment output always carries the "check everything yourself" disclaimer.**
+
+## How to work here
+
+- Tests live in `tests/`. Add a fixture and a test for any parser change (`tests/fixtures/*`).
+  Synthetic data only: never commit real statements to `tests/`.
+- Charts follow the data-viz rules baked into `src/web/components/charts/`:
+  - fixed categorical order (`SERIES`) that never cycles;
+  - one axis;
+  - a legend for 2+ series;
+  - a table view on every chart;
+  - status colours only for status.
+- Keep docs describing the system as built. When you deviate from a doc, fix the doc in the same
+  change and add a line to `docs/DECISIONS.md`.
+- The app auto-commits `data/` only (pathspec-limited). Code commits are yours to make when asked.

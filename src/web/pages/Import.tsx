@@ -1,0 +1,216 @@
+import { ChevronRight, CircleCheck, FileImage, FileSpreadsheet, FileText, FolderInput, LoaderCircle, Sparkles, Trash2, TriangleAlert, Upload } from 'lucide-react';
+import { Link } from 'react-router';
+import type { ImportListResponse, MonthlyChecklistResponse, SystemResponse } from '../../shared/api';
+import type { ImportRecord } from '../../shared/schema';
+import { Badge, Button, Callout, Card, EmptyState, Loading, PageHeader, StatusBadge, useToast } from '../components/ui';
+import { DropZone, FilePickerButton } from '../components/Upload';
+import { api, useApi, useApiMutation } from '../lib/api';
+import { useAppData } from '../lib/data';
+import { cn, fileSize, formatDate, formatMonth, money, plural, timeAgo } from '../lib/format';
+
+type Pending = ImportListResponse['pending'][number];
+
+export function FileIcon({ mediaType, className }: { mediaType: string; className?: string }) {
+  const Icon = mediaType.startsWith('image/') ? FileImage : mediaType === 'application/pdf' ? FileText : FileSpreadsheet;
+  return <Icon className={cn('size-5 shrink-0 text-ink-3', className)} aria-hidden />;
+}
+
+export function importStatus(r: Pick<ImportRecord, 'status'>) {
+  switch (r.status) {
+    case 'queued':
+      return <StatusBadge status="pending">Queued</StatusBadge>;
+    case 'processing':
+      return <StatusBadge status="pending">Reading…</StatusBadge>;
+    case 'needs_mapping':
+      return <StatusBadge status="warn">Map columns</StatusBadge>;
+    case 'review':
+      return <StatusBadge status="info">Ready to review</StatusBadge>;
+    case 'failed':
+      return <StatusBadge status="bad">Failed</StatusBadge>;
+    case 'committed':
+      return <StatusBadge status="good">Committed</StatusBadge>;
+    default:
+      return <Badge tone="muted">{r.status}</Badge>;
+  }
+}
+
+function describeDraft(p: Pending, accountName: (id: string) => string): string {
+  if (!p.draft) return '';
+  const parts = p.draft.sections.map((s) => {
+    const name = s.target.mode === 'existing' ? accountName(s.target.accountId) : s.target.mode === 'new' ? `new: ${s.target.account.name}` : 'skipped';
+    const n = s.transactions.filter((t) => t.include).length;
+    const bits = [n ? plural(n, 'transaction') : '', s.recordBalance && s.balance !== undefined ? money(s.balance) : ''].filter(Boolean);
+    return `${name}${bits.length ? ` (${bits.join(', ')})` : ''}`;
+  });
+  if (p.draft.figures.length) parts.push(plural(p.draft.figures.length, 'tax figure'));
+  return parts.join(' · ');
+}
+
+function QueueItem({ p }: { p: Pending }) {
+  const { accountName } = useAppData();
+  const toast = useToast();
+  const commit = useApiMutation(() => api(`/imports/${p.id}/commit`, { method: 'POST' }), { onSuccess: () => toast({ tone: 'good', text: `${p.document.fileName} committed` }) });
+  const discard = useApiMutation(() => api(`/imports/${p.id}`, { method: 'DELETE' }));
+  const busy = p.status === 'processing' || p.status === 'queued';
+  return (
+    <li className="flex flex-col gap-2 px-5 py-3 sm:flex-row sm:items-center sm:gap-3">
+      <div className="flex min-w-0 flex-1 items-start gap-3">
+      {busy ? <LoaderCircle className="mt-0.5 size-5 shrink-0 animate-spin text-accent" /> : <FileIcon mediaType={p.document.mediaType} className="mt-0.5" />}
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <Link to={`/import/${p.id}`} className="truncate text-[14px] font-medium text-ink hover:underline">
+            {p.document.fileName}
+          </Link>
+          {importStatus(p)}
+        </div>
+        <div className="truncate text-[12.5px] text-ink-3">
+          {busy
+            ? `${fileSize(p.document.size)} · ${p.document.mediaType.startsWith('image/') || p.document.mediaType === 'application/pdf' ? 'being read by Claude, usually under a minute' : 'parsing'}`
+            : p.status === 'failed'
+              ? p.extraction.error
+              : describeDraft(p, accountName)}
+        </div>
+        {p.status === 'review' && p.readiness && !p.readiness.ready && <div className="text-[12px] text-ink-3">Needs a look: {p.readiness.reasons.join(', ')}</div>}
+      </div>
+      </div>
+      <div className="flex items-center justify-end gap-2">
+        {p.status === 'review' && p.readiness?.ready && (
+          <Button size="sm" variant="primary" loading={commit.isPending} onClick={() => commit.mutate(undefined)}>
+            Commit
+          </Button>
+        )}
+        {!busy && (
+          <Link to={`/import/${p.id}`}>
+            <Button size="sm" icon={<ChevronRight className="size-3.5" />}>
+              {p.status === 'needs_mapping' ? 'Map' : p.status === 'failed' ? 'Details' : 'Review'}
+            </Button>
+          </Link>
+        )}
+        <button className="rounded-lg p-2 text-ink-3 hover:bg-panel-2 hover:text-bad-ink" aria-label={`Discard ${p.document.fileName}`} onClick={() => discard.mutate(undefined)}>
+          <Trash2 className="size-4" />
+        </button>
+      </div>
+    </li>
+  );
+}
+
+function EngineLine() {
+  const sys = useApi<SystemResponse>(['system'], '/system');
+  const { data } = useAppData();
+  if (!sys.data) return null;
+  const engine = sys.data.engines.find((e) => e.id === sys.data.selectedEngine);
+  return (
+    <p className="text-[12.5px] text-ink-3">
+      <Sparkles className="mr-1 inline size-3.5 align-[-2px] text-accent" />
+      PDFs and screenshots are read by{' '}
+      {engine ? (
+        <span className="text-ink-2">
+          {engine.id === 'claude-cli' ? `Claude (${data.settings.extraction.model}) via your Claude login` : engine.id === 'claude-api' ? `the Claude API (${data.settings.extraction.model})` : 'offline OCR (lower accuracy)'}
+          {engine.external ? ', which sends them to Anthropic' : ''}
+        </span>
+      ) : (
+        <span className="text-bad-ink">nothing yet: no engine is available</span>
+      )}
+      . CSV, OFX, QIF and TXT exports are parsed on this machine.{' '}
+      <Link to="/settings#extraction" className="text-accent hover:underline">
+        Change
+      </Link>
+    </p>
+  );
+}
+
+function Monthly() {
+  const q = useApi<MonthlyChecklistResponse>(['monthly'], '/monthly');
+  const m = q.data;
+  if (!m) return <Loading />;
+  if (!m.total) return null;
+  return (
+    <Card title={`Monthly update · ${formatMonth(m.month)}`} description={`${m.done} of ${m.total} accounts are up to date. Upload straight onto an account to skip matching.`} padded={false}>
+      <ul className="divide-y divide-line border-t border-line">
+        {m.items.map((i) => (
+          <li key={i.accountId} className="flex flex-wrap items-center gap-3 px-5 py-3">
+            {i.due ? <TriangleAlert className={cn('size-4 shrink-0', i.status === 'due' ? 'text-ink-3' : 'text-warn-ink')} /> : <CircleCheck className="size-4 shrink-0 text-good-ink" />}
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <Link to={`/accounts/${i.accountId}`} className="text-[14px] font-medium text-ink hover:underline">
+                  {i.name}
+                </Link>
+                <Badge tone="muted">{i.want}</Badge>
+                <span className="text-[12px] text-ink-3">{i.lastData ? `latest data ${formatDate(i.lastData)} (${timeAgo(i.lastData)})` : 'no data yet'}</span>
+              </div>
+              {i.due && <div className="mt-0.5 text-[12.5px] text-ink-3">{i.tip}</div>}
+            </div>
+            {i.due && (
+              <FilePickerButton accountId={i.accountId} size="sm" icon={<Upload className="size-3.5" />}>
+                Upload
+              </FilePickerButton>
+            )}
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
+}
+
+export default function Import() {
+  const q = useApi<ImportListResponse>(['imports'], '/imports', { refetchInterval: 5000 });
+  const { data } = useAppData();
+  const toast = useToast();
+  const commitReady = useApiMutation(() => api<{ committed: string[]; skipped: { id: string }[] }>('/imports/commit-ready', { method: 'POST' }), {
+    onSuccess: (r) => toast({ tone: 'good', text: `${plural(r.committed.length, 'import')} committed${r.skipped.length ? `, ${r.skipped.length} need a look` : ''}` }),
+  });
+  const pending = q.data?.pending ?? [];
+  const ready = pending.filter((p) => p.readiness?.ready).length;
+  return (
+    <div>
+      <PageHeader title="Import" subtitle="Statements, exports and screenshots in; reviewed data out" />
+      <div className="flex flex-col gap-5">
+        <DropZone />
+        <EngineLine />
+        {pending.length > 0 && (
+          <Card
+            title="Waiting for you"
+            padded={false}
+            actions={
+              ready > 1 ? (
+                <Button size="sm" variant="primary" loading={commitReady.isPending} onClick={() => commitReady.mutate(undefined)}>
+                  Commit all ready ({ready})
+                </Button>
+              ) : undefined
+            }
+          >
+            <ul className="divide-y divide-line border-t border-line">
+              {pending.map((p) => (
+                <QueueItem key={p.id} p={p} />
+              ))}
+            </ul>
+          </Card>
+        )}
+        <Monthly />
+        <Callout tone="neutral" title="Inbox folder" action={<FolderInput className="size-5 text-ink-3" />}>
+          Files saved into <code className="rounded bg-panel px-1">{data.inboxDir}</code> are imported automatically. Point a Syncthing or cloud-sync folder that your phone saves screenshots to at it, and your monthly screenshots arrive here on their own.
+        </Callout>
+        <Card title="History" padded={false}>
+          {q.data?.committed.length ? (
+            <ul className="divide-y divide-line border-t border-line">
+              {q.data.committed.slice(0, 50).map((c) => (
+                <li key={c.id} className="flex items-center gap-3 px-5 py-2.5 text-[13px]">
+                  <FileIcon mediaType={c.mediaType} className="size-4" />
+                  <Link to={`/import/${c.id}`} className="min-w-0 flex-1 truncate text-ink hover:underline">
+                    {c.fileName}
+                  </Link>
+                  <span className="hidden text-ink-3 sm:inline">
+                    {c.result ? [c.result.transactionsAdded ? `+${c.result.transactionsAdded} transactions` : '', c.result.balancesAdded ? 'balance' : '', c.result.holdingsAdded ? 'holdings' : '', c.result.figuresAdded ? `${c.result.figuresAdded} figures` : ''].filter(Boolean).join(', ') : ''}
+                  </span>
+                  <span className="w-24 text-right text-ink-3">{c.committedAt ? formatDate(c.committedAt.slice(0, 10)) : ''}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <EmptyState title="Nothing imported yet" />
+          )}
+        </Card>
+      </div>
+    </div>
+  );
+}

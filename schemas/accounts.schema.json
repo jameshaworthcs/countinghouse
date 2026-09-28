@@ -1,0 +1,176 @@
+{
+  "$id": "accounts.schema.json",
+  "title": "accounts",
+  "description": "Schema for data/accounts.json. Generated from src/shared/schema.ts by `npm run schemas`; do not edit.",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "accounts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+            "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "current",
+              "savings",
+              "cash_isa",
+              "stocks_isa",
+              "lisa",
+              "ifisa",
+              "gia",
+              "sipp",
+              "workplace_pension",
+              "personal_pension",
+              "db_pension",
+              "state_pension",
+              "premium_bonds",
+              "crypto",
+              "property",
+              "other_asset",
+              "credit_card",
+              "loan",
+              "mortgage",
+              "student_loan",
+              "other_liability"
+            ]
+          },
+          "institutionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+            "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+          },
+          "currency": {
+            "default": "GBP",
+            "type": "string",
+            "pattern": "^[A-Z]{3}$",
+            "description": "ISO 4217 currency code"
+          },
+          "status": {
+            "default": "open",
+            "type": "string",
+            "enum": [
+              "open",
+              "closed"
+            ]
+          },
+          "openedOn": {
+            "type": "string",
+            "description": "Calendar date, YYYY-MM-DD"
+          },
+          "closedOn": {
+            "type": "string",
+            "description": "Calendar date, YYYY-MM-DD"
+          },
+          "last4": {
+            "type": "string",
+            "pattern": "^\\d{2,6}$"
+          },
+          "aliases": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "balanceMode": {
+            "type": "string",
+            "enum": [
+              "ledger",
+              "market"
+            ]
+          },
+          "includeInNetWorth": {
+            "default": true,
+            "type": "boolean"
+          },
+          "flexibleIsa": {
+            "type": "boolean"
+          },
+          "interestRate": {
+            "type": "number",
+            "minimum": -100,
+            "maximum": 100
+          },
+          "maturesOn": {
+            "type": "string",
+            "description": "Calendar date, YYYY-MM-DD"
+          },
+          "pension": {
+            "type": "object",
+            "properties": {
+              "employer": {
+                "type": "string"
+              },
+              "method": {
+                "type": "string",
+                "enum": [
+                  "relief_at_source",
+                  "net_pay",
+                  "salary_sacrifice"
+                ]
+              }
+            }
+          },
+          "notes": {
+            "type": "string"
+          },
+          "attributes": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": [
+                "string",
+                "number",
+                "boolean",
+                "null"
+              ]
+            },
+            "description": "Extra detail from the source with no dedicated field yet (namespaced keys welcome)"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "description": "ISO 8601 timestamp"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "description": "ISO 8601 timestamp"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "type",
+          "createdAt",
+          "updatedAt"
+        ]
+      }
+    },
+    "$schema": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "accounts"
+  ]
+}

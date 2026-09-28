@@ -1,0 +1,51 @@
+{
+  "$id": "profile.schema.json",
+  "title": "profile",
+  "description": "Schema for data/profile.json. Generated from src/shared/schema.ts by `npm run schemas`; do not edit.",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "dateOfBirth": {
+      "type": "string",
+      "description": "Calendar date, YYYY-MM-DD"
+    },
+    "taxRegion": {
+      "default": "england",
+      "type": "string",
+      "enum": [
+        "england",
+        "wales",
+        "scotland",
+        "northern-ireland"
+      ]
+    },
+    "taxBand": {
+      "type": "string",
+      "enum": [
+        "none",
+        "basic",
+        "higher",
+        "additional"
+      ]
+    },
+    "grossSalary": {
+      "type": "number",
+      "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+    },
+    "retirementAge": {
+      "default": 67,
+      "type": "integer",
+      "minimum": 50,
+      "maximum": 80
+    },
+    "assumedRealReturn": {
+      "default": 0.04,
+      "type": "number",
+      "minimum": -0.1,
+      "maximum": 0.2
+    }
+  }
+}

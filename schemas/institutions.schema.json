@@ -1,0 +1,62 @@
+{
+  "$id": "institutions.schema.json",
+  "title": "institutions",
+  "description": "Schema for data/institutions.json. Generated from src/shared/schema.ts by `npm run schemas`; do not edit.",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "institutions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+            "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "kind": {
+            "default": "bank",
+            "type": "string",
+            "enum": [
+              "bank",
+              "building_society",
+              "investment_platform",
+              "pension_provider",
+              "card_issuer",
+              "lender",
+              "government",
+              "crypto_exchange",
+              "other"
+            ]
+          },
+          "fscsGroup": {
+            "type": "string"
+          },
+          "website": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ]
+      }
+    },
+    "$schema": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "institutions"
+  ]
+}

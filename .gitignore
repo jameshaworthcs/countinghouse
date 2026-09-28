@@ -1,0 +1,28 @@
+# dependencies & build output
+node_modules/
+dist/
+coverage/
+screens/
+
+# local secrets
+.env
+.env.*
+!.env.example
+
+# work area: uploads and drafts that have not been reviewed and committed yet
+.work/
+
+# demo dataset (regenerate with `npm run demo:reset`)
+demo-data/
+
+# inbox: files waiting to be ingested (they move into data/documents once committed)
+inbox/*
+!inbox/README.md
+
+# OS / editor noise
+.DS_Store
+*.log
+*.swp
+.idea/
+.vscode/*
+!.vscode/settings.json

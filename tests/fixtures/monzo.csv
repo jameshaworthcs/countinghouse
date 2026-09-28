@@ -1,0 +1,10 @@
+Transaction ID,Date,Time,Type,Name,Emoji,Category,Amount,Currency,Local amount,Local currency,Notes and #tags,Address,Receipt,Description,Category split,Money Out,Money In
+tx_0000A1,01/09/2026,08:12:44,Card payment,Pret A Manger,☕,Eating out,-4.50,GBP,-4.50,GBP,,1 Oxford St,,PRET A MANGER LONDON GBR,,-4.50,
+tx_0000A2,01/09/2026,12:30:01,Card payment,Tesco,🛒,Groceries,-23.47,GBP,-23.47,GBP,,,,TESCO STORES 3297 LONDON GBR,,-23.47,
+tx_0000A3,01/09/2026,17:02:10,Faster payment,ACME LTD,,Income,2450.00,GBP,2450.00,GBP,,,,ACME LTD SALARY SEP,,,2450.00
+tx_0000A4,02/09/2026,19:45:00,Card payment,Deliveroo,🍕,Eating out,-18.90,GBP,-18.90,GBP,,,,DELIVEROO LONDON GBR,,-18.90,
+tx_0000A5,03/09/2026,07:55:12,Card payment,Transport for London,🚇,Transport,-2.80,GBP,-2.80,GBP,,,,TFL TRAVEL CH TFL.GOV.UK/CP GBR,,-2.80,
+tx_0000A6,05/09/2026,09:00:00,Direct Debit,Octopus Energy,,Bills,-86.00,GBP,-86.00,GBP,,,,OCTOPUS ENERGY,,-86.00,
+tx_0000A7,06/09/2026,14:20:33,Card payment,Café de Flore,🥐,Eating out,-12.40,GBP,-14.00,EUR,,Paris,,CAFE DE FLORE PARIS FRA,,-12.40,
+tx_0000A8,08/09/2026,10:00:00,Pot transfer,Savings,,Savings,-300.00,GBP,-300.00,GBP,,,,Savings Pot,,-300.00,
+tx_0000A9,10/09/2026,11:11:11,Card payment,Netflix,,Entertainment,-12.99,GBP,-12.99,GBP,,,,NETFLIX.COM,,-12.99,

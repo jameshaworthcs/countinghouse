@@ -1,0 +1,243 @@
+{
+  "$id": "csv-profiles.schema.json",
+  "title": "csv-profiles",
+  "description": "Schema for data/csv-profiles.json. Generated from src/shared/schema.ts by `npm run schemas`; do not edit.",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "profiles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+            "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "institutionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+            "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+          },
+          "accountType": {
+            "type": "string",
+            "enum": [
+              "current",
+              "savings",
+              "cash_isa",
+              "stocks_isa",
+              "lisa",
+              "ifisa",
+              "gia",
+              "sipp",
+              "workplace_pension",
+              "personal_pension",
+              "db_pension",
+              "state_pension",
+              "premium_bonds",
+              "crypto",
+              "property",
+              "other_asset",
+              "credit_card",
+              "loan",
+              "mortgage",
+              "student_loan",
+              "other_liability"
+            ]
+          },
+          "headerSignature": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "headerless": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "dateOrder": {
+            "default": "DMY",
+            "type": "string",
+            "enum": [
+              "DMY",
+              "MDY",
+              "YMD",
+              "auto"
+            ]
+          },
+          "columns": {
+            "type": "object",
+            "properties": {
+              "date": {
+                "type": "string"
+              },
+              "description": {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "amount": {
+                "type": "string"
+              },
+              "debit": {
+                "type": "string"
+              },
+              "credit": {
+                "type": "string"
+              },
+              "balance": {
+                "type": "string"
+              },
+              "currency": {
+                "type": "string"
+              },
+              "category": {
+                "type": "string"
+              },
+              "payee": {
+                "type": "string"
+              },
+              "fee": {
+                "type": "string"
+              },
+              "localAmount": {
+                "type": "string"
+              },
+              "localCurrency": {
+                "type": "string"
+              },
+              "time": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "reference": {
+                "type": "string"
+              },
+              "counterparty": {
+                "type": "string"
+              },
+              "transactionDate": {
+                "type": "string"
+              },
+              "merchantAddress": {
+                "type": "string"
+              },
+              "merchantCity": {
+                "type": "string"
+              },
+              "merchantPostcode": {
+                "type": "string"
+              },
+              "merchantCountry": {
+                "type": "string"
+              },
+              "accountNumber": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "date",
+              "description"
+            ]
+          },
+          "splitBy": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "negativeWhen": {
+            "type": "object",
+            "properties": {
+              "column": {
+                "type": "string"
+              },
+              "values": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "column",
+              "values"
+            ]
+          },
+          "amountSign": {
+            "default": "normal",
+            "type": "string",
+            "enum": [
+              "normal",
+              "inverted"
+            ]
+          },
+          "filter": {
+            "type": "object",
+            "properties": {
+              "column": {
+                "type": "string"
+              },
+              "values": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "column",
+              "values"
+            ]
+          },
+          "skipDescriptions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "builtin": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "description": "ISO 8601 timestamp"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "headerSignature",
+          "columns"
+        ]
+      }
+    },
+    "$schema": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "profiles"
+  ]
+}

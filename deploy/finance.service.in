@@ -1,0 +1,47 @@
+# systemd unit for the finance app. Installed by deploy/install.sh, which fills in @NODE_BIN@,
+# @APP_DIR@ and @USER@. See docs/DEPLOY.md.
+[Unit]
+Description=Finance (private personal-finance tracker)
+Documentation=file://@APP_DIR@/docs/DEPLOY.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@USER@
+Group=@USER@
+WorkingDirectory=@APP_DIR@
+Environment=NODE_ENV=production
+Environment=HOME=@HOME@
+Environment=PATH=@NODE_BIN@:@HOME@/.local/bin:/usr/local/bin:/usr/bin:/bin
+# Rebuild the web app from the checked-out source, then serve it with the API on 127.0.0.1:4750.
+ExecStartPre=@NODE_BIN@/npm run build --silent
+ExecStart=@NODE_BIN@/node --import tsx src/server/main.ts
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+UMask=0077
+
+# Hardening. Home stays writable because the claude CLI (which reads PDFs and screenshots with your
+# Claude login) keeps its credentials and state there; everything else in the OS is read-only.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ReadWritePaths=@HOME@
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+
+[Install]
+WantedBy=multi-user.target

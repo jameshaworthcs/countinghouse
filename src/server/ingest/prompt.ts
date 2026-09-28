@@ -1,0 +1,164 @@
+// The extraction contract shared by the Claude CLI and Claude API engines: one system prompt, one
+// JSON schema. Bump PROMPT_VERSION whenever either changes; it is recorded on every import so old
+// extractions can be told apart (and re-run) later.
+
+import { ACCOUNT_TYPES, ASSET_CLASSES, EXTRACTION_DOC_TYPES, FIGURE_KINDS } from '../../shared/schema';
+
+export const PROMPT_VERSION = 'extract-3';
+
+export const SYSTEM_PROMPT = `You are the extraction engine of a private UK personal-finance tracker. You read one financial document — a bank, credit-card or savings statement; an investment, ISA, LISA, SIPP or pension statement; a P60, payslip, P11D or interest certificate; or a screenshot of a banking, savings, investment or pension app — and return its contents as JSON that matches the provided schema exactly.
+
+Accuracy matters more than completeness:
+1. Report only what is visible. Never guess, and never compute a value that is not shown unless a rule below says so. Use null for anything not present.
+2. Copy numbers exactly. Amounts are plain numbers in the account currency, without symbols or thousands separators (1234.56).
+3. Signs are from the account holder's point of view.
+   - Money into the account is positive (salary, refunds, interest, transfers in, contributions).
+   - Money out is negative (purchases, bills, transfers out, withdrawals, fees).
+   - On credit cards, purchases, cash advances, fees and interest are negative; payments to the card and refunds are positive.
+   - Balances: assets are positive; amounts owed (credit-card balance, loan, mortgage, an overdrawn current account) are negative.
+   - Convert separate debit/credit (paid out/paid in) columns and DR/CR markers into signs. When a running-balance column exists, check each sign against the change in balance.
+4. Dates are YYYY-MM-DD. UK documents are day-first: 03/04/2026 is 3 April 2026. When rows omit the year, take it from the statement period (watch for periods that cross a new year).
+5. Transactions: one entry per printed row, in printed order. Do not merge, summarise, skip or deduplicate rows. Put "balance brought/carried forward", opening and closing balance lines into openingBalance/closingBalance, not transactions. Mark pending or uncleared items with pending: true.
+6. description is the transaction text exactly as printed. payee is a clean merchant or counterparty name when obvious ("Tesco"), otherwise null. category is the best id from the category list in the request, or null if unsure. type is the bank's transaction type/code if printed (e.g. "DD", "Card payment"); reference is a payment reference printed separately; time is HH:MM if shown.
+7. closingBalance is the balance or value at the end of the period, or the headline balance/value on a screenshot. balanceDate is the date it applies to (the statement end date, or an "as at" / "valued on" date). On a screenshot with no visible date, balanceDate is null. documentDate is any date printed on the document itself.
+8. For investment, ISA, LISA and pension documents, closingBalance is the total value. Also capture:
+   - contributionsToDate ("total paid in", "net contributions")
+   - gainLoss (growth or return in money)
+   - governmentBonusToDate (LISA bonus received)
+   - taxYearContributions ("allowance used", "paid in this tax year")
+   - cashBalance (uninvested cash)
+   - every holding, with its name, ISIN or ticker if shown, units, price and value.
+9. accountType uses these clues:
+   - "Lifetime ISA"/"LISA" → lisa; "Stocks and Shares ISA"/"Investment ISA" → stocks_isa; "Cash ISA" → cash_isa.
+   - "SIPP" or "self-invested personal pension" → sipp; workplace, company or auto-enrolment pensions (Nest, The People's Pension, and employer schemes run by Aviva, Scottish Widows, L&G or Royal London) → workplace_pension.
+   - A general, trading or "fund and share" account → gia; Premium Bonds → premium_bonds; defined benefit or final salary → db_pension; a State Pension forecast → state_pension (use annualIncome).
+   - Credit cards → credit_card.
+10. last4 is the last four digits of the account, card, plan or policy number shown ("••••4471" → "4471"). Never output a full account number, card number or sort code anywhere.
+11. A document can cover several accounts (an app home screen listing accounts, a platform statement with an ISA and a GIA). Output one entry in accounts per account, each with its own balance, transactions and holdings.
+12. figures records standalone figures that matter for a tax return. Use the label exactly as printed, and the tax year as YYYY/YY when it is stated or implied.
+    - Interest certificates → interest_paid per account.
+    - A P60 → gross_pay, tax_deducted, national_insurance and student_loan_deducted, with the employer as payer.
+    - Payslips → the same kinds for the pay period.
+    - A P11D → benefit_in_kind.
+    - Pension statements → pension_contribution_employee, pension_contribution_employer and pension_tax_relief.
+    - Dividend vouchers → dividends_paid.
+13. Several images may be consecutive, overlapping parts of one long screenshot. Treat them as one screen, and report rows that appear in an overlap only once.
+14. notes holds brief remarks about anything uncertain: cut-off rows, illegible values, figures you could not place. confidence is high if everything was clearly legible, medium if some values were uncertain, and low if the document was hard to read.`;
+
+const nullable = (schema: Record<string, unknown>) => ({ anyOf: [schema, { type: 'null' }] });
+const str = (description?: string) => ({ type: 'string', ...(description ? { description } : {}) });
+const num = (description?: string) => ({ type: 'number', ...(description ? { description } : {}) });
+const date = (description = 'YYYY-MM-DD') => ({ type: 'string', description });
+
+function object(properties: Record<string, unknown>) {
+  return { type: 'object', properties, required: Object.keys(properties), additionalProperties: false };
+}
+
+/** JSON Schema for the model's output (every field required; absent values are null). */
+export function extractionJsonSchema(): Record<string, unknown> {
+  const transaction = object({
+    date: date('Posting date, YYYY-MM-DD'),
+    transactionDate: nullable(date('Transaction date if printed separately')),
+    time: nullable(str('HH:MM if shown')),
+    description: str('Exactly as printed'),
+    amount: num('Signed: money in positive, money out negative'),
+    balanceAfter: nullable(num('Running balance after this row, if printed')),
+    currency: nullable(str('ISO code if not the account currency')),
+    originalAmount: nullable(num('Foreign-currency amount for payments abroad')),
+    originalCurrency: nullable(str()),
+    type: nullable(str('Bank transaction type/code if printed')),
+    reference: nullable(str()),
+    counterpartyName: nullable(str('Other party for transfers/payments')),
+    merchantLocation: nullable(str()),
+    cardLast4: nullable(str()),
+    category: nullable(str('Category id from the list provided')),
+    payee: nullable(str('Clean merchant name')),
+    pending: { type: 'boolean' },
+    fee: nullable(num('Fee shown separately, negative')),
+  });
+  const holding = object({
+    name: str(),
+    isin: nullable(str()),
+    ticker: nullable(str()),
+    units: nullable(num()),
+    price: nullable(num('Price per unit')),
+    value: num(),
+    currency: nullable(str()),
+    assetClass: nullable({ type: 'string', enum: [...ASSET_CLASSES] }),
+  });
+  const account = object({
+    institutionName: nullable(str()),
+    accountName: nullable(str('Account/product name as shown')),
+    accountType: nullable({ type: 'string', enum: [...ACCOUNT_TYPES] }),
+    last4: nullable(str('Last 4 digits only')),
+    currency: nullable(str('ISO 4217, e.g. GBP')),
+    periodStart: nullable(date()),
+    periodEnd: nullable(date()),
+    openingBalance: nullable(num()),
+    closingBalance: nullable(num('Balance or total value; negative if owed')),
+    balanceDate: nullable(date()),
+    availableBalance: nullable(num()),
+    creditLimit: nullable(num()),
+    contributionsToDate: nullable(num()),
+    gainLoss: nullable(num()),
+    governmentBonusToDate: nullable(num()),
+    taxYearContributions: nullable(num()),
+    cashBalance: nullable(num()),
+    annualIncome: nullable(num('DB / State Pension forecast per year')),
+    interestRate: nullable(num('AER % if shown')),
+    transactions: { type: 'array', items: transaction },
+    holdings: { type: 'array', items: holding },
+  });
+  const figure = object({
+    kind: { type: 'string', enum: [...FIGURE_KINDS] },
+    label: str('Exactly as printed'),
+    amount: num(),
+    currency: nullable(str()),
+    periodStart: nullable(date()),
+    periodEnd: nullable(date()),
+    taxYear: nullable(str('YYYY/YY, e.g. 2025/26')),
+    payer: nullable(str('Employer, bank or payer')),
+    payerReference: nullable(str()),
+    accountLast4: nullable(str()),
+  });
+  return object({
+    documentType: { type: 'string', enum: [...EXTRACTION_DOC_TYPES] },
+    institutionName: nullable(str()),
+    documentDate: nullable(date()),
+    accounts: { type: 'array', items: account },
+    figures: { type: 'array', items: figure },
+    notes: { type: 'array', items: str() },
+    confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
+  });
+}
+
+export interface PromptContext {
+  fileName: string;
+  /** Paths the CLI engine should read, relative to its working directory. */
+  files?: string[];
+  tiled?: boolean;
+  capturedOn?: string | undefined;
+  capturedOnSource?: string | undefined;
+  uploadedOn: string;
+  categoryIds: string[];
+  /** The account the user says this document belongs to, if they said. */
+  accountHint?: string | undefined;
+}
+
+export function userPrompt(ctx: PromptContext): string {
+  const lines: string[] = [];
+  if (ctx.files?.length) {
+    lines.push(`Read ${ctx.files.length === 1 ? 'this file' : `all ${ctx.files.length} of these files, in order`} with the Read tool, then extract it:`);
+    for (const f of ctx.files) lines.push(`- ${f}`);
+  } else {
+    lines.push('Extract the attached document.');
+  }
+  if (ctx.tiled) lines.push('The images are consecutive, overlapping slices of one long screenshot, top to bottom.');
+  lines.push('', `Original file name: ${ctx.fileName}`);
+  lines.push(`Uploaded on: ${ctx.uploadedOn}`);
+  if (ctx.capturedOn) lines.push(`Captured on (from ${ctx.capturedOnSource ?? 'metadata'}): ${ctx.capturedOn}. Use it only to resolve partial dates; leave balanceDate null unless a date is visible.`);
+  if (ctx.accountHint) lines.push(`The user says this document belongs to: ${ctx.accountHint}.`);
+  lines.push('', `Category ids: ${ctx.categoryIds.join(', ')}`);
+  lines.push('', 'Return only the structured output.');
+  return lines.join('\n');
+}

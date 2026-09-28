@@ -1,0 +1,204 @@
+@import 'tailwindcss';
+
+/*
+  Design tokens. Surfaces, ink and chart colours follow the validated data-viz palette:
+  the categorical slots are in their fixed, colour-blind-safe order and have their own dark-mode
+  steps; status colours are reserved for good / warning / serious / critical.
+*/
+:root {
+  color-scheme: light;
+  --canvas: #f9f9f7;
+  --panel: #fcfcfb;
+  --panel-2: #f3f2ef;
+  --panel-3: #ebeae6;
+  --line: rgba(11, 11, 11, 0.1);
+  --line-strong: rgba(11, 11, 11, 0.18);
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --ink-3: #6f6e69;
+  --ink-inverse: #ffffff;
+  --accent: #256abf;
+  --accent-hover: #1c5cab;
+  --accent-soft: #e6effb;
+  --good: #0ca30c;
+  --good-ink: #006300;
+  --good-soft: #e3f4e3;
+  --warn: #fab219;
+  --warn-ink: #7a5200;
+  --warn-soft: #fdf1d6;
+  --serious: #ec835a;
+  --bad: #d03b3b;
+  --bad-ink: #b02828;
+  --bad-soft: #fbe6e6;
+  --s1: #2a78d6;
+  --s2: #eb6834;
+  --s3: #1baf7a;
+  --s4: #eda100;
+  --s5: #e87ba4;
+  --s6: #008300;
+  --s7: #4a3aa7;
+  --s8: #e34948;
+  --deemph: #b8b7b0;
+  --seq-1: #cde2fb;
+  --seq-2: #9ec5f4;
+  --seq-3: #6da7ec;
+  --seq-4: #3987e5;
+  --seq-5: #256abf;
+  --seq-6: #184f95;
+  --seq-7: #0d366b;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 16px rgba(0, 0, 0, 0.04);
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --canvas: #0d0d0d;
+  --panel: #1a1a19;
+  --panel-2: #222220;
+  --panel-3: #2c2c2a;
+  --line: rgba(255, 255, 255, 0.1);
+  --line-strong: rgba(255, 255, 255, 0.18);
+  --grid: #2c2c2a;
+  --axis: #383835;
+  --ink: #ffffff;
+  --ink-2: #c3c2b7;
+  --ink-3: #9a998f;
+  --ink-inverse: #0b0b0b;
+  --accent: #3987e5;
+  --accent-hover: #5598e7;
+  --accent-soft: #16263a;
+  --good: #0ca30c;
+  --good-ink: #3ecf3e;
+  --good-soft: #10260f;
+  --warn: #fab219;
+  --warn-ink: #fab219;
+  --warn-soft: #2e2410;
+  --serious: #ec835a;
+  --bad: #e66767;
+  --bad-ink: #ff8a8a;
+  --bad-soft: #2f1616;
+  --s1: #3987e5;
+  --s2: #d95926;
+  --s3: #199e70;
+  --s4: #c98500;
+  --s5: #d55181;
+  --s6: #008300;
+  --s7: #9085e9;
+  --s8: #e66767;
+  --deemph: #4a4a46;
+  --seq-1: #184f95;
+  --seq-2: #1c5cab;
+  --seq-3: #256abf;
+  --seq-4: #2a78d6;
+  --seq-5: #3987e5;
+  --seq-6: #6da7ec;
+  --seq-7: #9ec5f4;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+
+@theme inline {
+  --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, monospace;
+  --color-canvas: var(--canvas);
+  --color-panel: var(--panel);
+  --color-panel-2: var(--panel-2);
+  --color-panel-3: var(--panel-3);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-ink-inverse: var(--ink-inverse);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-good: var(--good);
+  --color-good-ink: var(--good-ink);
+  --color-good-soft: var(--good-soft);
+  --color-warn: var(--warn);
+  --color-warn-ink: var(--warn-ink);
+  --color-warn-soft: var(--warn-soft);
+  --color-bad: var(--bad);
+  --color-bad-ink: var(--bad-ink);
+  --color-bad-soft: var(--bad-soft);
+  --shadow-card: var(--shadow);
+}
+
+@layer base {
+  html {
+    background: var(--canvas);
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    min-height: 100dvh;
+    background: var(--canvas);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.45;
+  }
+  ::selection {
+    background: var(--accent-soft);
+  }
+  /* Grid items shrink to their track instead of forcing it wider than the screen. */
+  .grid > * {
+    min-width: 0;
+  }
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  button,
+  [role='button'] {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+}
+
+/* Numbers that line up in columns use tabular figures; big standalone figures do not. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Privacy mode: every sensitive value is blurred for screen sharing. */
+[data-privacy='on'] .sensitive {
+  filter: blur(7px);
+  transition: filter 0.15s;
+}
+[data-privacy='on'] .sensitive:hover {
+  filter: blur(7px);
+}
+
+.chart-svg text {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  fill: var(--ink-3);
+}
+
+.scrollbar-thin {
+  scrollbar-width: thin;
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background: white;
+  }
+  .print-plain {
+    box-shadow: none !important;
+    border-color: #ddd !important;
+  }
+}

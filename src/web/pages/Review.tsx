@@ -1,0 +1,647 @@
+import { ArrowLeft, CircleAlert, CircleCheck, Copy, ExternalLink, Info, LoaderCircle, Maximize2, Minimize2, Pencil, RefreshCw, Trash2 } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router';
+import { ACCOUNT_TYPE_META } from '../../shared/accounts';
+import { formatDate } from '../../shared/dates';
+import { reconcile } from '../../shared/reconcile';
+import { FIGURE_KINDS, type CsvProfile, type Draft, type DraftSection, type DraftTransaction, type ImportRecord } from '../../shared/schema';
+import { AccountTypeSelect } from '../components/AccountForms';
+import { CategorySelect } from '../components/TransactionList';
+import { Badge, Button, Callout, Card, Checkbox, ErrorNote, Field, Input, KeyValue, Loading, Money, Select, StatusBadge, tableClasses, useToast } from '../components/ui';
+import { api, useApi, useApiMutation } from '../lib/api';
+import { useAppData } from '../lib/data';
+import { cn, fileSize, money, plural } from '../lib/format';
+import { importStatus } from './Import';
+
+type Rec = ImportRecord & { readiness?: { ready: boolean; reasons: string[] } };
+
+const DATE_SOURCE_LABEL: Record<string, string> = {
+  document: 'printed on the document',
+  exif: 'from photo metadata',
+  filename: 'from the file name',
+  'file-modified': 'from the file’s date',
+  upload: 'upload date: please check',
+  manual: 'entered by you',
+};
+
+function DocumentViewer({ rec }: { rec: Rec }) {
+  const [zoom, setZoom] = useState(false);
+  const url = `/api/imports/${rec.id}/file`;
+  const isText = !rec.document.mediaType.startsWith('image/') && rec.document.mediaType !== 'application/pdf';
+  const text = useApi<string>(['import-file', rec.id], isText ? `/imports/${rec.id}/file` : null);
+  return (
+    <div className="flex h-full flex-col overflow-hidden rounded-xl border border-line bg-panel">
+      <div className="flex items-center gap-2 border-b border-line px-3 py-2 text-[12.5px]">
+        <span className="min-w-0 flex-1 truncate font-medium text-ink">{rec.document.fileName}</span>
+        <span className="text-ink-3">{fileSize(rec.document.size)}</span>
+        {rec.document.mediaType.startsWith('image/') && (
+          <button className="rounded p-1 text-ink-3 hover:bg-panel-2" onClick={() => setZoom((z) => !z)} aria-label={zoom ? 'Fit to width' : 'Actual size'}>
+            {zoom ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+          </button>
+        )}
+        <a href={url} target="_blank" rel="noreferrer" className="rounded p-1 text-ink-3 hover:bg-panel-2" aria-label="Open in new tab">
+          <ExternalLink className="size-4" />
+        </a>
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto bg-panel-2">
+        {rec.document.mediaType.startsWith('image/') ? (
+          <img src={url} alt={rec.document.fileName} className={cn('sensitive mx-auto', zoom ? 'max-w-none' : 'w-full')} />
+        ) : rec.document.mediaType === 'application/pdf' ? (
+          <iframe src={`${url}#view=FitH`} title={rec.document.fileName} className="sensitive h-full min-h-[70dvh] w-full" />
+        ) : (
+          <pre className="sensitive p-3 font-mono text-[11.5px] leading-relaxed whitespace-pre text-ink-2">{typeof text.data === 'string' ? text.data.split('\n').slice(0, 400).join('\n') : 'Loading…'}</pre>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ReconcileBadge({ section }: { section: DraftSection }) {
+  const r = reconcile({ openingBalance: section.openingBalance, closingBalance: section.balance, transactions: section.transactions });
+  if (r.status === 'unknown') return null;
+  return (
+    <div className={cn('flex items-start gap-2 rounded-lg px-3 py-2 text-[12.5px]', r.status === 'ok' ? 'bg-good-soft' : 'bg-warn-soft')}>
+      {r.status === 'ok' ? <CircleCheck className="mt-0.5 size-4 shrink-0 text-good-ink" /> : <CircleAlert className="mt-0.5 size-4 shrink-0 text-warn-ink" />}
+      <div>
+        <div className="font-medium text-ink">{r.status === 'ok' ? 'Balances reconcile' : 'Balances don’t reconcile'}</div>
+        {r.checks.map((c) => (
+          <div key={c} className="sensitive text-ink-2">
+            {c}
+          </div>
+        ))}
+        {r.status === 'mismatch' && <div className="text-ink-3">Check for missing rows or a wrong sign against the original.</div>}
+      </div>
+    </div>
+  );
+}
+
+function TxRow({ t, onChange }: { t: DraftTransaction; onChange: (p: Partial<DraftTransaction>) => void }) {
+  const [editing, setEditing] = useState(false);
+  const muted = !t.include;
+  return (
+    <tr className={cn(muted ? 'opacity-55' : '', t.status === 'possible_duplicate' ? 'bg-warn-soft/60' : '')}>
+      <td className={cn(tableClasses.td, 'w-8')}>
+        <Checkbox checked={t.include} onChange={(v) => onChange({ include: v })} />
+      </td>
+      <td className={cn(tableClasses.td, 'whitespace-nowrap')}>
+        {editing ? <Input type="date" value={t.date} onChange={(e) => onChange({ date: e.target.value })} className="h-8 w-36" /> : <span className="tabular text-ink-2">{formatDate(t.date)}</span>}
+        {t.detail?.time && <div className="text-[11px] text-ink-3">{t.detail.time}</div>}
+      </td>
+      <td className={cn(tableClasses.td, 'min-w-[220px]')}>
+        {editing ? (
+          <Input value={t.description} onChange={(e) => onChange({ description: e.target.value })} className="h-8" />
+        ) : (
+          <>
+            <div className="text-[13px] font-medium text-ink">{t.payee ?? t.description}</div>
+            <div className="text-[12px] text-ink-3">{t.description}</div>
+          </>
+        )}
+        {t.status !== 'new' && (
+          <div className="mt-0.5">
+            <Badge tone={t.status === 'duplicate' ? 'muted' : 'warn'} icon={<Copy className="size-3" />}>
+              {t.status === 'duplicate' ? 'Already imported' : 'Possible duplicate'}
+            </Badge>
+          </div>
+        )}
+        {t.transferMatch && <div className="mt-0.5"><Badge tone="accent">Links to a transfer</Badge></div>}
+      </td>
+      <td className={cn(tableClasses.td, 'w-52')}>
+        <CategorySelect value={t.category} onChange={(v) => onChange({ category: v, categorisedBy: 'user' })} className="h-8 text-[12.5px]" />
+      </td>
+      <td className={cn(tableClasses.td, tableClasses.num)}>
+        {editing ? (
+          <Input value={String(t.amount)} onChange={(e) => onChange({ amount: Number(e.target.value) || 0 })} inputMode="decimal" className="h-8 w-28 text-right" />
+        ) : (
+          <Money value={t.amount} className={cn('font-medium', t.amount > 0 ? 'text-good-ink' : 'text-ink')} />
+        )}
+        {t.balanceAfter !== undefined && <div className="text-[11px] text-ink-3"><Money value={t.balanceAfter} /></div>}
+      </td>
+      <td className={cn(tableClasses.td, 'w-8')}>
+        <button className="rounded p-1 text-ink-3 hover:bg-panel-2" onClick={() => setEditing((e) => !e)} aria-label="Edit row">
+          <Pencil className="size-3.5" />
+        </button>
+      </td>
+    </tr>
+  );
+}
+
+function SectionEditor({ section, index, total, onChange }: { section: DraftSection; index: number; total: number; onChange: (s: DraftSection) => void }) {
+  const { data } = useAppData();
+  const [showDupes, setShowDupes] = useState(false);
+  const set = (patch: Partial<DraftSection>) => onChange({ ...section, ...patch });
+  const setTx = (key: string, patch: Partial<DraftTransaction>) => set({ transactions: section.transactions.map((t) => (t.key === key ? { ...t, ...patch } : t)) });
+  const target = section.target;
+  const targetValue = target.mode === 'existing' ? target.accountId : target.mode === 'new' ? '__new' : '__skip';
+  const counts = { new: 0, duplicate: 0, possible_duplicate: 0 };
+  for (const t of section.transactions) counts[t.status]++;
+  const visible = section.transactions.filter((t) => showDupes || t.status !== 'duplicate');
+  const type = target.mode === 'existing' ? data.accounts.find((a) => a.id === target.accountId)?.type : target.mode === 'new' ? target.account.type : undefined;
+  const market = type ? ACCOUNT_TYPE_META[type].balanceMode === 'market' : false;
+  const d = section.detected;
+
+  return (
+    <Card
+      title={total > 1 ? `Account ${index + 1} of ${total}` : 'Account'}
+      description={[d.institutionName, d.accountName, d.accountType ? ACCOUNT_TYPE_META[d.accountType].label : null, d.last4 ? `ending ${d.last4}` : null].filter(Boolean).join(' · ') || 'Details as read from the document'}
+    >
+      <div className="flex flex-col gap-4">
+        <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+          <Field label="Import into" hint={section.matchReason}>
+            <Select
+              value={targetValue}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === '__skip') set({ target: { mode: 'skip' } });
+                else if (v === '__new')
+                  set({
+                    target: {
+                      mode: 'new',
+                      account: target.mode === 'new' ? target.account : { id: `new-account-${index + 1}`, name: d.accountName ?? 'New account', type: d.accountType ?? 'current', currency: section.currency, ...(d.last4 ? { last4: d.last4 } : {}), ...(d.institutionName ? { institutionName: d.institutionName } : {}) },
+                    },
+                  });
+                else set({ target: { mode: 'existing', accountId: v } });
+              }}
+            >
+              <optgroup label="Your accounts">
+                {data.accounts
+                  .filter((a) => a.status === 'open')
+                  .map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name}
+                    </option>
+                  ))}
+              </optgroup>
+              <option value="__new">+ Create a new account</option>
+              <option value="__skip">Don’t import this account</option>
+            </Select>
+          </Field>
+        </div>
+        {target.mode === 'new' && (
+          <div className="grid gap-3 rounded-lg border border-line bg-panel-2 p-3 sm:grid-cols-2">
+            <Field label="New account name">
+              <Input value={target.account.name} onChange={(e) => set({ target: { ...target, account: { ...target.account, name: e.target.value } } })} />
+            </Field>
+            <Field label="Type">
+              <AccountTypeSelect value={target.account.type} onChange={(t) => set({ target: { ...target, account: { ...target.account, type: t } } })} />
+            </Field>
+            <Field label="Provider">
+              <Input value={target.account.institutionName ?? ''} onChange={(e) => set({ target: { ...target, account: { ...target.account, institutionName: e.target.value, institutionId: undefined } } })} />
+            </Field>
+            <Field label="Last 4 digits">
+              <Input value={target.account.last4 ?? ''} onChange={(e) => set({ target: { ...target, account: { ...target.account, last4: e.target.value.replace(/\D/g, '').slice(0, 6) || undefined } } })} />
+            </Field>
+          </div>
+        )}
+        {target.mode !== 'skip' && (
+          <>
+            <div className="rounded-lg border border-line p-3">
+              <Checkbox checked={section.recordBalance} onChange={(v) => set({ recordBalance: v })} label={<span className="font-medium text-ink">Record the {market ? 'value' : 'balance'}</span>} />
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <Field label={market ? 'Value' : 'Balance'} hint={type && ACCOUNT_TYPE_META[type].liability ? 'Money owed is negative' : undefined}>
+                  <Input value={section.balance ?? ''} onChange={(e) => set({ balance: e.target.value === '' ? undefined : Number(e.target.value) })} inputMode="decimal" placeholder={section.transactions.length ? 'Balance shown in your app' : ''} />
+                </Field>
+                <Field label="On" hint={section.balanceDateSource ? DATE_SOURCE_LABEL[section.balanceDateSource] : undefined} error={section.balanceDateSource === 'upload' ? 'The date could not be read; set the date the screenshot was taken' : undefined}>
+                  <Input type="date" value={section.balanceDate ?? ''} onChange={(e) => set({ balanceDate: e.target.value, balanceDateSource: 'manual' })} />
+                </Field>
+                {(['contributions', 'gain', 'bonusToDate', 'taxYearContributions', 'cash', 'availableBalance', 'creditLimit', 'annualIncome'] as const)
+                  .filter((k) => section[k] !== undefined)
+                  .map((k) => (
+                    <Field key={k} label={{ contributions: 'Total paid in', gain: 'Growth (as shown)', bonusToDate: 'LISA bonus received', taxYearContributions: 'Paid in this tax year', cash: 'Uninvested cash', availableBalance: 'Available', creditLimit: 'Credit limit', annualIncome: 'Income per year' }[k]}>
+                      <Input value={section[k] ?? ''} onChange={(e) => set({ [k]: e.target.value === '' ? undefined : Number(e.target.value) })} inputMode="decimal" />
+                    </Field>
+                  ))}
+              </div>
+              {section.transactions.length > 0 && section.balance === undefined && !market && (
+                <Callout tone="accent" className="mt-3">
+                  This export has no balance. Add the balance your app shows (and its date) so this account’s history can be rebuilt accurately.
+                </Callout>
+              )}
+            </div>
+            <ReconcileBadge section={section} />
+            {section.transactions.length > 0 && (
+              <div>
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-[13px] text-ink-2">
+                    <span className="font-semibold text-ink">{plural(counts.new, 'new transaction')}</span>
+                    {counts.duplicate > 0 && <span> · {counts.duplicate} already imported</span>}
+                    {counts.possible_duplicate > 0 && <span className="text-warn-ink"> · {counts.possible_duplicate} possible duplicates, check them</span>}
+                    {section.periodStart && section.periodEnd && <span className="text-ink-3"> · {formatDate(section.periodStart)} – {formatDate(section.periodEnd)}</span>}
+                  </div>
+                  <div className="flex gap-2">
+                    {counts.duplicate > 0 && <Checkbox checked={showDupes} onChange={setShowDupes} label="Show already imported" />}
+                  </div>
+                </div>
+                <div className="max-h-[60dvh] overflow-auto rounded-lg border border-line">
+                  <table className={tableClasses.table}>
+                    <thead className="sticky top-0 z-10 bg-panel">
+                      <tr>
+                        <th className={tableClasses.th}>
+                          <Checkbox
+                            checked={visible.every((t) => t.include)}
+                            indeterminate={visible.some((t) => t.include) && !visible.every((t) => t.include)}
+                            onChange={(v) => set({ transactions: section.transactions.map((t) => (visible.includes(t) ? { ...t, include: v } : t)) })}
+                          />
+                        </th>
+                        <th className={tableClasses.th}>Date</th>
+                        <th className={tableClasses.th}>Description</th>
+                        <th className={tableClasses.th}>Category</th>
+                        <th className={cn(tableClasses.th, 'text-right')}>Amount</th>
+                        <th className={tableClasses.th} />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {visible.map((t) => (
+                        <TxRow key={t.key} t={t} onChange={(p) => setTx(t.key, p)} />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+            {section.holdings.length > 0 && (
+              <div>
+                <Checkbox checked={section.recordHoldings} onChange={(v) => set({ recordHoldings: v })} label={<span className="font-medium text-ink">Record {plural(section.holdings.length, 'holding')}</span>} />
+                <table className={cn(tableClasses.table, 'mt-2')}>
+                  <thead>
+                    <tr>
+                      <th className={tableClasses.th}>Holding</th>
+                      <th className={cn(tableClasses.th, 'text-right')}>Units</th>
+                      <th className={cn(tableClasses.th, 'text-right')}>Value</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {section.holdings.map((h, i) => (
+                      <tr key={i}>
+                        <td className={tableClasses.td}>
+                          {h.name}
+                          <div className="text-[12px] text-ink-3">{[h.isin, h.ticker, h.assetClass].filter(Boolean).join(' · ')}</div>
+                        </td>
+                        <td className={cn(tableClasses.td, tableClasses.num)}>{h.units ?? '—'}</td>
+                        <td className={cn(tableClasses.td, tableClasses.num)}>
+                          <Money value={h.value} currency={h.currency} />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+function FiguresEditor({ draft, onChange }: { draft: Draft; onChange: (d: Draft) => void }) {
+  if (!draft.figures.length) return null;
+  const set = (key: string, patch: Partial<Draft['figures'][number]>) => onChange({ ...draft, figures: draft.figures.map((f) => (f.key === key ? { ...f, ...patch } : f)) });
+  return (
+    <Card title="Tax figures" description="Standalone figures for Self Assessment (P60, interest certificates, pension statements)">
+      <table className={tableClasses.table}>
+        <thead>
+          <tr>
+            <th className={tableClasses.th} />
+            <th className={tableClasses.th}>What</th>
+            <th className={tableClasses.th}>Label on document</th>
+            <th className={tableClasses.th}>Tax year</th>
+            <th className={cn(tableClasses.th, 'text-right')}>Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          {draft.figures.map((f) => (
+            <tr key={f.key} className={f.include ? '' : 'opacity-55'}>
+              <td className={tableClasses.td}>
+                <Checkbox checked={f.include} onChange={(v) => set(f.key, { include: v })} />
+              </td>
+              <td className={tableClasses.td}>
+                <Select value={f.kind} onChange={(e) => set(f.key, { kind: e.target.value as typeof f.kind })} className="h-8 text-[12.5px]">
+                  {FIGURE_KINDS.map((k) => (
+                    <option key={k} value={k}>
+                      {k.replace(/_/g, ' ')}
+                    </option>
+                  ))}
+                </Select>
+                {f.duplicateOf && <Badge tone="muted">already stored</Badge>}
+              </td>
+              <td className={tableClasses.td}>
+                {f.label}
+                {f.payer && <div className="text-[12px] text-ink-3">{f.payer}</div>}
+              </td>
+              <td className={tableClasses.td}>
+                <Input value={f.taxYear ?? ''} onChange={(e) => set(f.key, { taxYear: e.target.value || undefined })} placeholder="2025/26" className="h-8 w-24" />
+              </td>
+              <td className={cn(tableClasses.td, tableClasses.num)}>
+                <Input value={String(f.amount)} onChange={(e) => set(f.key, { amount: Number(e.target.value) || 0 })} inputMode="decimal" className="h-8 w-28 text-right" />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </Card>
+  );
+}
+
+const ROLE_LABELS: [keyof CsvProfile['columns'], string][] = [
+  ['date', 'Date'],
+  ['amount', 'Amount (signed)'],
+  ['debit', 'Money out'],
+  ['credit', 'Money in'],
+  ['balance', 'Balance'],
+  ['currency', 'Currency'],
+  ['category', 'Bank category'],
+  ['type', 'Type'],
+  ['reference', 'Reference'],
+  ['time', 'Time'],
+];
+
+function MappingEditor({ rec }: { rec: Rec }) {
+  const toast = useToast();
+  const mapping = rec.mapping!;
+  const [profile, setProfile] = useState<CsvProfile>(mapping.profile);
+  const [saveAs, setSaveAs] = useState('');
+  const apply = useApiMutation(() => api(`/imports/${rec.id}/mapping`, { body: { profile, ...(saveAs.trim() ? { saveAs: saveAs.trim() } : {}) } }), { onSuccess: () => toast({ tone: 'good', text: 'Mapping applied' }) });
+  const setCol = (role: keyof CsvProfile['columns'], value: string) => {
+    const columns = { ...profile.columns } as Record<string, unknown>;
+    if (role === 'description') columns.description = value ? [value] : [];
+    else if (value) columns[role] = value;
+    else delete columns[role];
+    setProfile({ ...profile, columns: columns as CsvProfile['columns'] });
+  };
+  return (
+    <Card title="Tell me what the columns mean" description="This CSV layout isn’t recognised. Map it once and save it; next time it imports automatically.">
+      <div className="mb-4 overflow-x-auto rounded-lg border border-line">
+        <table className={tableClasses.table}>
+          <thead>
+            <tr>
+              {mapping.headers.map((h, i) => (
+                <th key={i} className={tableClasses.th}>
+                  {h || `(column ${i + 1})`}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {mapping.sample.slice(0, 5).map((r, i) => (
+              <tr key={i}>
+                {r.map((c, j) => (
+                  <td key={j} className={cn(tableClasses.td, 'sensitive whitespace-nowrap')}>
+                    {c}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Field label="Description">
+          <Select value={profile.columns.description[0] ?? ''} onChange={(e) => setCol('description', e.target.value)}>
+            <option value="">—</option>
+            {mapping.headers.map((h) => (
+              <option key={h} value={h}>
+                {h}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        {ROLE_LABELS.map(([role, label]) => (
+          <Field key={role} label={label}>
+            <Select value={(profile.columns[role] as string | undefined) ?? ''} onChange={(e) => setCol(role, e.target.value)}>
+              <option value="">—</option>
+              {mapping.headers.map((h) => (
+                <option key={h} value={h}>
+                  {h}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        ))}
+        <Field label="Date format">
+          <Select value={profile.dateOrder} onChange={(e) => setProfile({ ...profile, dateOrder: e.target.value as CsvProfile['dateOrder'] })}>
+            <option value="DMY">Day/Month/Year (UK)</option>
+            <option value="MDY">Month/Day/Year (US)</option>
+            <option value="YMD">Year-Month-Day</option>
+            <option value="auto">Work it out</option>
+          </Select>
+        </Field>
+        <Field label="Amount signs">
+          <Select value={profile.amountSign} onChange={(e) => setProfile({ ...profile, amountSign: e.target.value as CsvProfile['amountSign'] })}>
+            <option value="normal">Money out is negative</option>
+            <option value="inverted">Money out is positive (card style)</option>
+          </Select>
+        </Field>
+        <Field label="Save as (optional)" hint="e.g. the bank’s name">
+          <Input value={saveAs} onChange={(e) => setSaveAs(e.target.value)} />
+        </Field>
+      </div>
+      {apply.error && <Callout tone="bad" className="mt-3">{apply.error.message}</Callout>}
+      <div className="mt-4 flex justify-end">
+        <Button variant="primary" loading={apply.isPending} disabled={!profile.columns.date || !profile.columns.description.length || !(profile.columns.amount || profile.columns.debit || profile.columns.credit)} onClick={() => apply.mutate(undefined)}>
+          Apply mapping
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
+function Retry({ rec }: { rec: Rec }) {
+  const [engine, setEngine] = useState('auto');
+  const [model, setModel] = useState('');
+  const retry = useApiMutation(() => api(`/imports/${rec.id}/reprocess`, { body: { engine, ...(model ? { model } : {}) } }));
+  const isDoc = rec.document.mediaType.startsWith('image/') || rec.document.mediaType === 'application/pdf';
+  return (
+    <div className="flex flex-wrap items-end gap-2">
+      {isDoc && (
+        <>
+          <Field label="Engine">
+            <Select value={engine} onChange={(e) => setEngine(e.target.value)} className="h-8 w-40 text-[13px]">
+              <option value="auto">Default</option>
+              <option value="claude-cli">Claude (CLI login)</option>
+              <option value="claude-api">Claude API</option>
+              <option value="ocr">Offline OCR</option>
+            </Select>
+          </Field>
+          <Field label="Model">
+            <Select value={model} onChange={(e) => setModel(e.target.value)} className="h-8 w-32 text-[13px]">
+              <option value="">Default</option>
+              <option value="opus">Opus</option>
+              <option value="sonnet">Sonnet</option>
+              <option value="fable">Fable</option>
+            </Select>
+          </Field>
+        </>
+      )}
+      <Button size="sm" icon={<RefreshCw className="size-3.5" />} loading={retry.isPending} onClick={() => retry.mutate(undefined)}>
+        {isDoc ? 'Read again' : 'Parse again'}
+      </Button>
+      {retry.error && <span className="text-[12px] text-bad-ink">{retry.error.message}</span>}
+    </div>
+  );
+}
+
+export default function Review() {
+  const { id = '' } = useParams();
+  const navigate = useNavigate();
+  const toast = useToast();
+  const q = useApi<Rec>(['import', id], `/imports/${id}`, { refetchInterval: 4000 });
+  const rec = q.data;
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const [dirty, setDirty] = useState(false);
+  useEffect(() => {
+    if (rec?.draft && (!draft || !dirty)) setDraft(rec.draft);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rec?.draft, rec?.updatedAt]);
+  const commit = useApiMutation(() => api<ImportRecord>(`/imports/${id}/commit`, { body: draft as unknown as Record<string, unknown> }), {
+    onSuccess: (r) => {
+      toast({ tone: 'good', text: `Committed: ${r.result?.transactionsAdded ?? 0} transactions${r.result?.balancesAdded ? ', balance' : ''}${r.result?.holdingsAdded ? ', holdings' : ''}` });
+      void navigate('/import');
+    },
+  });
+  const saveDraft = useApiMutation(() => api(`/imports/${id}/draft`, { method: 'PUT', body: draft as unknown as Record<string, unknown> }), { onSuccess: () => setDirty(false) });
+  const discard = useApiMutation(() => api(`/imports/${id}`, { method: 'DELETE' }), { onSuccess: () => void navigate('/import') });
+  const summary = useMemo(() => {
+    if (!draft) return '';
+    const n = draft.sections.filter((s) => s.target.mode !== 'skip').reduce((s, sec) => s + sec.transactions.filter((t) => t.include).length, 0);
+    const b = draft.sections.filter((s) => s.target.mode !== 'skip' && s.recordBalance && s.balance !== undefined).length;
+    const h = draft.sections.filter((s) => s.target.mode !== 'skip' && s.recordHoldings && s.holdings.length).length;
+    const f = draft.figures.filter((x) => x.include).length;
+    return [n ? plural(n, 'transaction') : '', b ? plural(b, 'balance') : '', h ? 'holdings' : '', f ? plural(f, 'tax figure') : ''].filter(Boolean).join(', ') || 'nothing';
+  }, [draft]);
+
+  if (q.error) return <ErrorNote error={q.error} />;
+  if (!rec) return <Loading />;
+  const committed = rec.status === 'committed';
+
+  return (
+    <div>
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <Link to="/import" className="inline-flex items-center gap-1 text-[13px] text-ink-3 hover:text-ink">
+          <ArrowLeft className="size-4" /> Import
+        </Link>
+      </div>
+      <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="truncate text-[20px] font-semibold text-ink">{rec.document.fileName}</h1>
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-[12.5px] text-ink-3">
+            {importStatus(rec)}
+            {rec.extraction.engine && <span>read by {rec.extraction.engine === 'csv' ? `CSV parser (${rec.extraction.detail})` : rec.extraction.engine}{rec.extraction.model ? ` · ${rec.extraction.model}` : ''}</span>}
+            {rec.extraction.durationMs !== undefined && <span>· {(rec.extraction.durationMs / 1000).toFixed(1)}s</span>}
+            {rec.extraction.costUsd !== undefined && <span>· ~${rec.extraction.costUsd.toFixed(3)}</span>}
+            {draft?.confidence && <Badge tone={draft.confidence === 'high' ? 'good' : draft.confidence === 'medium' ? 'neutral' : 'warn'}>{draft.confidence} confidence</Badge>}
+          </div>
+        </div>
+        {!committed && (
+          <div className="flex flex-wrap items-center gap-2">
+            <Retry rec={rec} />
+            <Button variant="danger" size="sm" icon={<Trash2 className="size-3.5" />} loading={discard.isPending} onClick={() => confirm('Discard this import? The file is removed from the work area.') && discard.mutate(undefined)}>
+              Discard
+            </Button>
+          </div>
+        )}
+      </div>
+
+      {(rec.status === 'processing' || rec.status === 'queued') && (
+        <Card>
+          <div className="flex items-center gap-3 py-6 text-[14px] text-ink-2">
+            <LoaderCircle className="size-5 animate-spin text-accent" />
+            Reading the document… This usually takes 10 to 60 seconds. You can leave this page; it will be waiting on the Import page.
+          </div>
+        </Card>
+      )}
+      {rec.status === 'failed' && (
+        <Callout tone="bad" title="Couldn’t read this file">
+          {rec.extraction.error}
+          <div className="mt-1 text-ink-3">Try reading it again, perhaps with another engine or model, or discard it.</div>
+        </Callout>
+      )}
+      {committed && rec.result && (
+        <Callout tone="good" title={`Committed ${rec.committedAt ? formatDate(rec.committedAt.slice(0, 10)) : ''}`}>
+          <KeyValue
+            items={[
+              ['Transactions added', `${rec.result.transactionsAdded} (${rec.result.transactionsSkipped} skipped)`],
+              ['Balances / holdings / figures', `${rec.result.balancesAdded} / ${rec.result.holdingsAdded} / ${rec.result.figuresAdded}`],
+              ['Accounts', rec.result.accountIds.map((a) => <Link key={a} to={`/accounts/${a}`} className="mr-2 text-accent hover:underline">{a}</Link>)],
+              ['Transactions', <Link to={`/transactions?source=${rec.id}&period=all`} className="text-accent hover:underline">View what was imported</Link>],
+            ]}
+          />
+        </Callout>
+      )}
+
+      {(rec.status === 'review' || rec.status === 'needs_mapping' || committed || rec.status === 'failed') && (
+        <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
+          <div className="lg:sticky lg:top-5 lg:h-[calc(100dvh-140px)]">
+            <DocumentViewer rec={rec} />
+          </div>
+          <div className="flex min-w-0 flex-col gap-4">
+            {rec.status === 'needs_mapping' && rec.mapping && <MappingEditor rec={rec} />}
+            {draft && (
+              <>
+                {draft.notes.length > 0 && (
+                  <Callout tone="neutral" title="Notes from reading the document">
+                    <ul className="list-disc pl-4">
+                      {draft.notes.map((n) => (
+                        <li key={n}>{n}</li>
+                      ))}
+                    </ul>
+                  </Callout>
+                )}
+                {draft.sections.length === 0 && !draft.figures.length && <Callout tone="warn">Nothing financial was found in this document.</Callout>}
+                {draft.sections.map((s, i) => (
+                  <SectionEditor
+                    key={s.key}
+                    section={s}
+                    index={i}
+                    total={draft.sections.length}
+                    onChange={(next) => {
+                      setDirty(true);
+                      setDraft({ ...draft, sections: draft.sections.map((x) => (x.key === next.key ? next : x)) });
+                    }}
+                  />
+                ))}
+                <FiguresEditor
+                  draft={draft}
+                  onChange={(d) => {
+                    setDirty(true);
+                    setDraft(d);
+                  }}
+                />
+                {draft.ocrText && (
+                  <details className="rounded-xl border border-line bg-panel p-4">
+                    <summary className="cursor-pointer text-[13px] font-medium text-ink-2">Recognised text (offline OCR)</summary>
+                    {draft.candidates && (
+                      <div className="mt-2 text-[12.5px] text-ink-3">
+                        Amounts found: {draft.candidates.amounts.slice(0, 20).map((a) => money(a)).join(', ')}
+                      </div>
+                    )}
+                    <pre className="sensitive mt-2 max-h-80 overflow-auto font-mono text-[11.5px] whitespace-pre-wrap text-ink-2">{draft.ocrText}</pre>
+                  </details>
+                )}
+                {!committed && rec.status === 'review' && (
+                  <div className="no-print sticky bottom-3 z-20 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-panel px-4 py-3 shadow-lg">
+                    <div className="text-[13px] text-ink-2">
+                      <Info className="mr-1 inline size-4 text-accent" />
+                      Will save <span className="font-semibold text-ink">{summary}</span>
+                    </div>
+                    <div className="flex gap-2">
+                      {dirty && (
+                        <Button size="sm" loading={saveDraft.isPending} onClick={() => saveDraft.mutate(undefined)}>
+                          Save for later
+                        </Button>
+                      )}
+                      <Button variant="primary" loading={commit.isPending} onClick={() => commit.mutate(undefined)}>
+                        Commit
+                      </Button>
+                    </div>
+                    {commit.error && <div className="w-full text-[12.5px] text-bad-ink">{commit.error.message}</div>}
+                  </div>
+                )}
+                {committed && <StatusBadge status="good">This import is committed; edit the data from the account or transaction pages.</StatusBadge>}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

@@ -1,0 +1,4 @@
+Transaction Date,Transaction Type,Sort Code,Account Number,Transaction Description,Debit Amount,Credit Amount,Balance
+05/09/2026,DD,'30-00-00,12345678,BRITISH GAS,60.00,,2940.00
+03/09/2026,BGC,'30-00-00,12345678,ACME LTD SALARY,,2000.00,3000.00
+01/09/2026,DEB,'30-00-00,12345678,TESCO STORES 3297,12.34,,1000.00

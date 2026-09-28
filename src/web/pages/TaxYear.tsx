@@ -1,0 +1,303 @@
+import { ChevronRight, CircleCheck, CircleDashed, Download, FileWarning, Printer, TriangleAlert } from 'lucide-react';
+import { useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router';
+import type { AllowanceLine, AllowancesResponse, SaItem, SelfAssessmentResponse } from '../../shared/api';
+import { formatDate } from '../../shared/dates';
+import { Meter } from '../components/charts/bars';
+import { Badge, Button, Callout, Card, KeyValue, Loading, Money, PageHeader, Select, StatusBadge, Tabs, tableClasses } from '../components/ui';
+import { qs, useApi } from '../lib/api';
+import { useAppData } from '../lib/data';
+import { cn, money } from '../lib/format';
+
+function Lines({ lines }: { lines: AllowanceLine[] }) {
+  const { accountName } = useAppData();
+  if (!lines.length) return null;
+  return (
+    <details className="mt-2 text-[12.5px]">
+      <summary className="cursor-pointer text-ink-3 hover:text-ink">What counts ({lines.length})</summary>
+      <table className={cn(tableClasses.table, 'mt-1')}>
+        <tbody>
+          {lines.map((l, i) => (
+            <tr key={i}>
+              <td className="py-1 pr-2 text-ink-2">
+                {l.accountId ? (
+                  <Link to={`/accounts/${l.accountId}`} className="hover:underline">
+                    {l.label || accountName(l.accountId)}
+                  </Link>
+                ) : (
+                  l.label
+                )}
+                <span className="ml-1.5 text-ink-3">{l.source === 'provider' ? '· reported by provider' : l.source === 'figure' ? '· from a document' : l.source === 'estimate' ? '· estimate' : ''}</span>
+              </td>
+              <td className="py-1 text-right">
+                <Money value={l.amount} className="tabular" />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </details>
+  );
+}
+
+function Notes({ notes }: { notes: string[] }) {
+  if (!notes.length) return null;
+  return (
+    <ul className="mt-2 flex flex-col gap-1 text-[12.5px] text-ink-3">
+      {notes.map((n) => (
+        <li key={n}>{n}</li>
+      ))}
+    </ul>
+  );
+}
+
+function Allowances({ a }: { a: AllowancesResponse }) {
+  return (
+    <div className="grid gap-5 lg:grid-cols-2">
+      <Card title="ISA allowance" description="All ISAs together, including the LISA">
+        <Meter label="Subscriptions" used={a.isa.used} limit={a.isa.allowance} />
+        {a.isa.cashLimit < a.isa.allowance && (
+          <div className="mt-4">
+            <Meter label="Of which cash ISAs" used={a.isa.cashUsed} limit={a.isa.cashLimit} />
+          </div>
+        )}
+        <Lines lines={a.isa.lines} />
+        <Notes notes={a.isa.notes} />
+      </Card>
+      {a.lisa ? (
+        <Card title="Lifetime ISA" description="Counts within the £20,000 ISA allowance">
+          <Meter label="Contributions" used={a.lisa.contributed} limit={a.lisa.allowance} />
+          <KeyValue
+            className="mt-3"
+            items={[
+              ['Bonus received this year', <Money value={a.lisa.bonusReceived} />],
+              ['Bonus due on contributions', <Money value={a.lisa.bonusExpected} />],
+            ]}
+          />
+          <Lines lines={a.lisa.lines} />
+          <Notes notes={a.lisa.notes} />
+        </Card>
+      ) : (
+        <Card title="Lifetime ISA">
+          <p className="text-[13px] text-ink-3">No LISA recorded. If you have one, upload a screenshot and it will be picked up.</p>
+        </Card>
+      )}
+      <Card title="Pension annual allowance" description="Your contributions (grossed up for tax relief) plus employer contributions">
+        <Meter label="Contributions" used={a.pension.total} limit={a.pension.annualAllowance} />
+        <KeyValue
+          className="mt-3"
+          items={[
+            ['You paid', <Money value={a.pension.personal} />],
+            ['With tax relief', <Money value={a.pension.personalGross} />],
+            ['Employer', <Money value={a.pension.employer} />],
+          ]}
+        />
+        {a.pension.carryForward.length > 0 && (
+          <div className="mt-3 text-[12.5px]">
+            <div className="mb-1 font-medium text-ink-2">Unused allowance you may be able to carry forward</div>
+            <ul>
+              {a.pension.carryForward.map((c) => (
+                <li key={c.taxYear} className="flex justify-between text-ink-3">
+                  <span>{c.taxYear}</span>
+                  <Money value={c.unused} decimals={0} />
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        <Lines lines={a.pension.lines} />
+        <Notes notes={a.pension.notes} />
+      </Card>
+      <Card title="Savings interest" description={`Interest outside ISAs vs your Personal Savings Allowance (${a.savings.band} rate)`}>
+        <Meter label="Interest earned" used={a.savings.interest} limit={a.savings.allowance} overLabel="Taxable" />
+        <Lines lines={a.savings.lines} />
+        <Notes notes={a.savings.notes} />
+        <div className="mt-4 border-t border-line pt-4">
+          <Meter label="Dividends outside ISAs" used={a.dividends.amount} limit={a.dividends.allowance} overLabel="Taxable" />
+          <Lines lines={a.dividends.lines} />
+        </div>
+      </Card>
+      {a.ruleNotes.length > 0 && (
+        <Callout tone="neutral" title="Rule changes around this tax year" className="lg:col-span-2">
+          <ul className="list-disc pl-4">
+            {a.ruleNotes.map((n) => (
+              <li key={n}>{n}</li>
+            ))}
+          </ul>
+        </Callout>
+      )}
+    </div>
+  );
+}
+
+function statusBadge(item: SaItem) {
+  switch (item.status) {
+    case 'ready':
+      return <StatusBadge status="good">Ready to check</StatusBadge>;
+    case 'check':
+      return <StatusBadge status="warn">Check carefully</StatusBadge>;
+    case 'missing':
+      return <StatusBadge status="bad">Missing</StatusBadge>;
+    default:
+      return <Badge tone="muted">Not applicable</Badge>;
+  }
+}
+
+function SelfAssessment({ sa, taxYear }: { sa: SelfAssessmentResponse; taxYear: string }) {
+  const [showNA, setShowNA] = useState(false);
+  return (
+    <div className="flex flex-col gap-5">
+      <div className="rounded-xl border-2 border-warn bg-warn-soft px-5 py-4" role="note">
+        <div className="flex items-center gap-2 text-[15px] font-semibold text-ink">
+          <FileWarning className="size-5 text-warn-ink" /> You must check everything before you submit
+        </div>
+        <p className="mt-1.5 text-[13px] text-ink-2">{sa.disclaimer}</p>
+      </div>
+      <div className="no-print flex flex-wrap items-center justify-between gap-3">
+        <div className="text-[13px] text-ink-2">
+          Online filing and payment deadline for {sa.taxYear.label}: <span className="font-semibold text-ink">{formatDate(sa.taxYear.filingDeadline)}</span>
+        </div>
+        <div className="flex gap-2">
+          <Button size="sm" icon={<Printer className="size-3.5" />} onClick={() => window.print()}>
+            Print
+          </Button>
+          <a href={`/api/self-assessment${qs({ taxYear, format: 'csv' })}`}>
+            <Button size="sm" icon={<Download className="size-3.5" />}>
+              Export CSV
+            </Button>
+          </a>
+        </div>
+      </div>
+
+      {sa.mayNeedToFile.length > 0 && (
+        <Card title="Why you might need to file" description="Hints only; check gov.uk/check-if-you-need-tax-return">
+          <ul className="flex flex-col gap-2 text-[13px]">
+            {sa.mayNeedToFile.map((m) => (
+              <li key={m.reason} className="flex gap-2">
+                <TriangleAlert className="mt-0.5 size-4 shrink-0 text-warn-ink" />
+                <span>
+                  <span className="font-medium text-ink">{m.reason}.</span> <span className="text-ink-3">{m.detail}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
+
+      {sa.sections.map((section) => {
+        const items = section.items.filter((i) => showNA || i.status !== 'not-applicable');
+        if (!items.length) return null;
+        return (
+          <Card key={section.id} title={section.title} description={section.description} padded={false}>
+            <ul className="divide-y divide-line border-t border-line">
+              {items.map((item) => (
+                <li key={item.id} className="px-5 py-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-[14px] font-semibold text-ink">{item.label}</div>
+                      <div className="mt-0.5 text-[12.5px] text-ink-3">{item.where}</div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      {statusBadge(item)}
+                      <div className="text-right text-[18px] font-semibold text-ink">{item.amount !== null ? <Money value={item.amount} /> : <span className="text-ink-3">—</span>}</div>
+                    </div>
+                  </div>
+                  <div className="mt-1 text-[12.5px] text-ink-2">Basis: {item.basis}</div>
+                  <Notes notes={item.notes} />
+                  {item.sources.length > 0 && (
+                    <details className="mt-2 text-[12.5px]">
+                      <summary className="cursor-pointer text-ink-3 hover:text-ink">Sources ({item.sources.length})</summary>
+                      <ul className="mt-1 flex flex-col gap-0.5">
+                        {item.sources.map((s) => (
+                          <li key={s.type + s.id} className="flex justify-between gap-3 text-ink-2">
+                            <span className="truncate">
+                              {s.date ? `${formatDate(s.date)} · ` : ''}
+                              {s.type === 'account' ? (
+                                <Link to={`/accounts/${s.id}`} className="hover:underline">
+                                  {s.label}
+                                </Link>
+                              ) : (
+                                s.label
+                              )}
+                            </span>
+                            {s.amount !== undefined && <Money value={s.amount} className="tabular" />}
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </Card>
+        );
+      })}
+      <div className="no-print">
+        <Button size="sm" variant="ghost" onClick={() => setShowNA((v) => !v)}>
+          {showNA ? 'Hide' : 'Show'} items that don’t apply
+        </Button>
+      </div>
+
+      <Card title="Before you file">
+        <ul className="flex flex-col gap-2 text-[13px]">
+          {sa.checklist.map((c) => (
+            <li key={c.id} className="flex gap-2">
+              {c.done ? <CircleCheck className="mt-0.5 size-4 shrink-0 text-good-ink" /> : <CircleDashed className="mt-0.5 size-4 shrink-0 text-ink-3" />}
+              <span>
+                <span className={cn('font-medium', c.done ? 'text-ink-2' : 'text-ink')}>{c.label}</span>
+                {c.detail && !c.done && <span className="block text-ink-3">{c.detail}</span>}
+              </span>
+            </li>
+          ))}
+        </ul>
+        <p className="mt-4 text-[12.5px] text-ink-3">
+          Add figures by hand (for example from a P60 you have on paper) in Settings → Tax documents, or upload the document on the <Link to="/import" className="text-accent hover:underline">Import</Link> page.
+        </p>
+      </Card>
+    </div>
+  );
+}
+
+export default function TaxYear() {
+  const { tab = 'allowances' } = useParams();
+  const navigate = useNavigate();
+  const years = useApi<string[]>(['tax-years'], '/tax-years');
+  const [year, setYear] = useState<string>('');
+  // Self Assessment is filed for a finished tax year, so default to the last completed one there.
+  const defaultYear = tab === 'self-assessment' ? (years.data?.[1] ?? years.data?.[0]) : years.data?.[0];
+  const ty = year || defaultYear || '';
+  const allowances = useApi<AllowancesResponse>(['allowances', ty], ty ? `/allowances${qs({ taxYear: ty })}` : null);
+  const sa = useApi<SelfAssessmentResponse>(['self-assessment', ty], ty && tab === 'self-assessment' ? `/self-assessment${qs({ taxYear: ty })}` : null);
+  return (
+    <div>
+      <PageHeader
+        title={`Tax year ${ty}`}
+        subtitle={allowances.data ? `${formatDate(allowances.data.taxYear.start)} – ${formatDate(allowances.data.taxYear.end)}${allowances.data.taxYear.daysLeft !== null ? ` · ${allowances.data.taxYear.daysLeft} days left` : ''}` : undefined}
+        actions={
+          <Select value={ty} onChange={(e) => setYear(e.target.value)} className="w-36" aria-label="Tax year">
+            {(years.data ?? []).map((y) => (
+              <option key={y} value={y}>
+                {y}
+              </option>
+            ))}
+          </Select>
+        }
+      />
+      <Tabs
+        value={tab}
+        onChange={(v) => navigate(v === 'allowances' ? '/tax' : `/tax/${v}`)}
+        tabs={[
+          { value: 'allowances', label: 'Allowances' },
+          { value: 'self-assessment', label: 'Self Assessment prep' },
+        ]}
+      />
+      {tab === 'self-assessment' ? sa.data ? <SelfAssessment sa={sa.data} taxYear={ty} /> : <Loading /> : allowances.data ? <Allowances a={allowances.data} /> : <Loading />}
+      {tab === 'allowances' && (
+        <Link to="/tax/self-assessment" className="no-print mt-6 inline-flex items-center gap-1 text-[13px] font-medium text-accent hover:underline">
+          Preparing a Self Assessment return? <ChevronRight className="size-4" />
+        </Link>
+      )}
+      <div className="sr-only">{money(0)}</div>
+    </div>
+  );
+}

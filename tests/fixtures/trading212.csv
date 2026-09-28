@@ -1,0 +1,5 @@
+Action,Time,ISIN,Ticker,Name,No. of shares,Price / share,Currency (Price / share),Exchange rate,Result,Currency (Result),Total,Currency (Total),ID
+Deposit,2026-09-01 09:00:00,,,,,,,,,,500.00,GBP,d-1
+Market buy,2026-09-01 09:05:00,IE00BK5BQT80,VWRP,Vanguard FTSE All-World,4.1,120.00,GBP,1.00,,,492.00,GBP,EOF123
+Dividend (Dividend),2026-09-15 10:00:00,IE00BK5BQT80,VWRP,Vanguard FTSE All-World,4.1,0.3,GBP,1.00,,,1.23,GBP,
+Interest on cash,2026-09-30 23:00:00,,,,,,,,,,0.45,GBP,ic-1

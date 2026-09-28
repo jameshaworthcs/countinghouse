@@ -1,0 +1,8 @@
+"Account Name:","FlexDirect ****12345"
+"Account Balance:","£2,940.00"
+"Available Balance: ","£2,940.00"
+
+"Date","Transaction type","Description","Paid out","Paid in","Balance"
+"01 Sep 2026","Visa purchase","TESCO STORES 3297","£12.34","","£1,000.00"
+"03 Sep 2026","Bank credit","ACME LTD SALARY","","£2,000.00","£3,000.00"
+"05 Sep 2026","Direct debit","BRITISH GAS","£60.00","","£2,940.00"
