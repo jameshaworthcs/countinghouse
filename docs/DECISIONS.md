@@ -456,3 +456,17 @@ needed a `fetch` loop pasted into the signed-in browser console.
 - **An emergency fund follows your spending.** Its target is months × the recent baseline's
   spending, so it stays true as spending changes. Until spending is known it has no amount.
 
+## 2026-09-29: Pay from payslips
+
+- **From what is read today; net pay from the bank (the owner's choice).** A net-pay figure on the
+  payslip would need a new reader version, and an eval run to check it. The owner chose not to spend
+  on that. The payment into the bank is the stronger evidence of what arrived anyway. Where the two
+  differ by more than £1, the difference shows as other deductions.
+- **A payment is matched to a payslip by the employer's name and date, not by amount.** The name
+  comes from the payee and description, reduced as for the tax band. The date is within 10 days of
+  the period's end or the pay date. Matching on amount alone would take one employer's pay for
+  another's.
+- **Pay not seen says whether the bank data could have shown it.** The first real payslips had one
+  month whose pay was not in the statements. That was because the statements stopped before the
+  pay date, not because the pay was missing.
+

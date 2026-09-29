@@ -80,6 +80,7 @@ async function main() {
     ['projections', '/projections'],
     ['investments', '/investments'],
     ['tax', '/tax'],
+    ['tax-pay', '/tax/pay'],
     ['self-assessment', '/tax/self-assessment'],
     ['assumptions', '/assumptions'],
     ['assumptions-research', '/assumptions#research'],

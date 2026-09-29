@@ -559,3 +559,28 @@ earliest likely month, and the p10 path the latest.
 **More a month:** to reach the target by its date *T* months away, at the median:
 *X* = (target − p50<sub>T</sub>) ÷ Σ<sub>t=0..T−1</sub> (1 + *g*)<sup>T−t</sup>, rounded up.
 *g* is the accounts' median monthly growth after charges, weighted by value.
+
+## 17. Pay (`analytics/pay.ts`)
+
+The Tax year page's **Pay** tab covers each employer in the year. A figure counts as a payslip's
+when its document was a payslip, or, failing that, when its period is under 200 days.
+
+- **A pay period** is an employer's payslip figures with one period, where two employers' names
+  match once reduced (`payerKey`: case, spaces and "Ltd" go).
+  - Its **gross**, **tax**, **NI**, **pension** and **student loan** are the figures of those
+    kinds. A printed £0 is a figure.
+  - **After these** = gross − tax − NI − pension − student loan (the deductions read).
+- **Into your bank** is the salary credit (category *salary*, money in) whose text names the
+  employer. It must fall between the period's end − 10 days and the later of the pay date and the
+  period's end + 10 days (`PAY_MATCH_DAYS`). The closest to *after these* is taken, and each
+  credit is used once.
+- **Status**, first that applies:
+  1. **paid**: the credit is within £1 of *after these*;
+  2. **differs**: it is not. The difference is other deductions the reader did not list (a cycle
+     scheme, say) or an adjustment;
+  3. **due**: the pay date has not come;
+  4. **not seen**: none was found. The note says whether your bank data covers those days.
+- Salary credits no payslip explains are listed under the employer their text names, as pay with
+  no payslip.
+- **Year so far** adds up each column. With a P60 for the year, its gross and tax are shown
+  beside the total, and a gap says payslips are missing.

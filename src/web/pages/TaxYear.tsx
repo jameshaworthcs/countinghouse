@@ -1,10 +1,11 @@
 import { ChevronRight, CircleCheck, CircleDashed, Download, FileWarning, Printer, TriangleAlert } from 'lucide-react';
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
-import type { AllowanceLine, AllowancesResponse, SaItem, SelfAssessmentResponse, TaxBandEstimate } from '../../shared/api';
+import type { AllowanceLine, AllowancesResponse, PayResponse, SaItem, SelfAssessmentResponse, TaxBandEstimate } from '../../shared/api';
 import { formatDate } from '../../shared/dates';
 import { Meter } from '../components/charts/bars';
 import { InsightsPanel } from '../components/Intel';
+import { PayView } from '../components/Pay';
 import { Badge, Button, Callout, Card, KeyValue, Loading, Money, PageHeader, Select, StatusBadge, Tabs, tableClasses } from '../components/ui';
 import { qs, useApi } from '../lib/api';
 import { useAppData } from '../lib/data';
@@ -337,6 +338,7 @@ export default function TaxYear() {
   const ty = year || defaultYear || '';
   const allowances = useApi<AllowancesResponse>(['allowances', ty], ty ? `/allowances${qs({ taxYear: ty })}` : null);
   const sa = useApi<SelfAssessmentResponse>(['self-assessment', ty], ty && tab === 'self-assessment' ? `/self-assessment${qs({ taxYear: ty })}` : null);
+  const payQ = useApi<PayResponse>(['pay', ty], ty && tab === 'pay' ? `/pay${qs({ taxYear: ty })}` : null);
   return (
     <div>
       <PageHeader
@@ -357,11 +359,12 @@ export default function TaxYear() {
         onChange={(v) => navigate(v === 'allowances' ? '/tax' : `/tax/${v}`)}
         tabs={[
           { value: 'allowances', label: 'Allowances' },
+          { value: 'pay', label: 'Pay' },
           { value: 'self-assessment', label: 'Self Assessment prep' },
         ]}
       />
       {tab === 'allowances' && <InsightsPanel page="tax" title="Claude’s notes on your allowances" className="my-5" />}
-      {tab === 'self-assessment' ? sa.data ? <SelfAssessment sa={sa.data} taxYear={ty} /> : <Loading /> : allowances.data ? <Allowances a={allowances.data} /> : <Loading />}
+      {tab === 'pay' ? payQ.data ? <PayView pay={payQ.data} /> : <Loading /> : tab === 'self-assessment' ? sa.data ? <SelfAssessment sa={sa.data} taxYear={ty} /> : <Loading /> : allowances.data ? <Allowances a={allowances.data} /> : <Loading />}
       {tab === 'allowances' && (
         <Link to="/tax/self-assessment" className="no-print mt-6 inline-flex items-center gap-1 text-[13px] font-medium text-accent hover:underline">
           Preparing a Self Assessment return? <ChevronRight className="size-4" />

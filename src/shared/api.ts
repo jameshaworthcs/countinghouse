@@ -685,3 +685,40 @@ export interface GoalsResponse {
   pace: string | null;
   notes: string[];
 }
+
+/** One pay period (a payslip), or a payment of pay with no payslip (GET /api/pay; FORMULAS §17). */
+export interface PayMonth {
+  periodStart: string | null;
+  periodEnd: string | null;
+  /** The payslip's date, or the day the pay arrived. */
+  payDate: string | null;
+  gross: number | null;
+  tax: number | null;
+  ni: number | null;
+  pension: number | null;
+  studentLoan: number | null;
+  /** Gross less the deductions read from the payslip. */
+  expectedNet: number | null;
+  /** The payment into your bank matched to it. */
+  paidIn: { amount: number; date: string; transactionId: string; accountId: string } | null;
+  /** What the payslip's other deductions come to: expected net less what arrived. */
+  otherDeductions: number | null;
+  status: 'paid' | 'differs' | 'not-seen' | 'due' | 'no-payslip';
+  note?: string;
+  figureIds: string[];
+}
+
+export interface PayEmployer {
+  key: string;
+  payer: string;
+  months: PayMonth[];
+  /** The year's P60, when there is one: the whole year, which the payslips should add up to. */
+  p60: { gross: number | null; tax: number | null } | null;
+  totals: { gross: number | null; tax: number | null; ni: number | null; pension: number | null; studentLoan: number | null; paidIn: number };
+}
+
+export interface PayResponse {
+  taxYear: { label: string; start: string; end: string };
+  employers: PayEmployer[];
+  notes: string[];
+}
