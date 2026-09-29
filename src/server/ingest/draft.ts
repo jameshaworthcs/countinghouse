@@ -23,7 +23,7 @@ import type {
 import { DraftSchema } from '../../shared/schema';
 import type { Store } from '../store';
 import { classifyDuplicates } from './dedup';
-import { identifies, matchAccount, proposeAccount, sameHolding } from './match';
+import { identifies, matchAccount, proposeAccount, sameHolding, type Detected } from './match';
 
 export interface DraftContext {
   store: Store;
@@ -31,6 +31,44 @@ export interface DraftContext {
   hintAccountId?: string | undefined;
   uploadedOn: string;
   warnings?: string[];
+  /** The account a screenshot taken and uploaded with this one shows (ImportService.batchEvidence). */
+  batch?: BatchEvidence | undefined;
+}
+
+/** Another screenshot of the same moment, on the same phone, that shows which account it is. */
+export interface BatchEvidence {
+  accountId: string;
+  importId: string;
+  fileName: string;
+  /** Whole minutes from that screenshot to this one: negative when this one was taken first. */
+  minutes: number;
+}
+
+/**
+ * Could this screen be of that account? Nothing on it may say otherwise: another number, provider,
+ * kind of account, currency or name. Screenshots uploaded together can span accounts.
+ */
+export function fitsAccount(detected: Detected, account: Account, institutions: { id: string; name: string }[]): boolean {
+  if (detected.last4 && account.last4 && detected.last4 !== account.last4) return false;
+  if (detected.accountType && detected.accountType !== account.type) return false;
+  if (detected.currency && detected.currency !== account.currency) return false;
+  const words = (s: string | undefined) => new Set((s ?? '').toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2));
+  const overlaps = (a: Set<string>, b: Set<string>) => [...a].some((w) => b.has(w));
+  if (detected.institutionName) {
+    const inst = findInstitution(detected.institutionName);
+    const own = institutions.find((i) => i.id === account.institutionId);
+    if (inst ? account.institutionId !== undefined && inst.id !== account.institutionId : !own || !overlaps(words(detected.institutionName), words(own.name))) return false;
+  }
+  if (detected.accountName) {
+    const named = words(detected.accountName);
+    if (named.size && ![account.name, ...account.aliases, ACCOUNT_TYPE_META[account.type].label].some((n) => overlaps(named, words(n)))) return false;
+  }
+  return true;
+}
+
+function batchReason(b: BatchEvidence, account: Account): string {
+  const when = b.minutes === 0 ? 'within a minute of' : `${Math.abs(b.minutes)} minute${Math.abs(b.minutes) === 1 ? '' : 's'} ${b.minutes > 0 ? 'after' : 'before'}`;
+  return `Nothing on this screen names the account. It was taken ${when} ${b.fileName}, which shows ${account.name}, on the same phone, and uploaded with it`;
 }
 
 /** A SEDOL: 7 characters, no vowels, a digit among the first six, a check digit. */
@@ -87,6 +125,7 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
   const takenTransfers = new Set<string>();
   const notes = [...extraction.notes, ...(ctx.warnings ?? [])];
   const liveView = isLiveView(extraction.documentType, ctx.document.mediaType);
+  let batchMatch: Draft['batchMatch'];
   // Each account's latest holdings: a fund's own page names no account, but the account holding it.
   const held = new Map(store.accounts.map((a) => [a.id, store.holdings(a.id).at(-1)?.holdings ?? []]));
 
@@ -109,7 +148,16 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
     if (typeFromRows) notes.push('The screen does not name the account, but its Lifetime ISA bonus rows say it is a Lifetime ISA.');
     const hint = extraction.accounts.length === 1 ? ctx.hintAccountId : undefined;
     const match = matchAccount({ ...detected, holdings: acc.holdings.map((h) => h.name) }, store.accounts, store.institutions, hint, held);
-    const existing: Account | undefined = match.accountId && match.score >= 50 ? store.account(match.accountId) : undefined;
+    let existing: Account | undefined = match.accountId && match.score >= 50 ? store.account(match.accountId) : undefined;
+    // A scrolled screen seldom names its account; one taken beside it on the same phone and uploaded
+    // with it usually does. Only when this screen has no confident match of its own, shows one
+    // account, and says nothing that contradicts that account.
+    const batchAccount = ctx.batch && !existing && !hint && extraction.accounts.length === 1 ? store.account(ctx.batch.accountId) : undefined;
+    const byBatch = Boolean(batchAccount && fitsAccount(detected, batchAccount, store.institutions));
+    if (byBatch) {
+      existing = batchAccount;
+      batchMatch = { accountId: batchAccount!.id, importId: ctx.batch!.importId };
+    }
     const provider = findInstitution(detected.institutionName);
     const investing = provider?.kind === 'investment_platform' || provider?.kind === 'pension_provider';
     const fallbackType: AccountType = acc.holdings.length || investing ? 'stocks_isa' : 'current';
@@ -301,7 +349,7 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
       key: `s${si}`,
       detected: Object.fromEntries(Object.entries(detected).filter(([, v]) => v !== undefined)),
       target,
-      matchReason: existing ? match.reason : anonymous ? 'Nothing on this screen says which account it is: choose it' : match.accountId ? `${match.reason}` : 'New account',
+      matchReason: byBatch ? batchReason(ctx.batch!, existing!) : existing ? match.reason : anonymous ? 'Nothing on this screen says which account it is: choose it' : match.accountId ? `${match.reason}` : 'New account',
       currency,
       recordBalance: balance !== undefined,
       balanceDate,
@@ -374,6 +422,7 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
     figures,
     notes,
     ...(extraction.nothingToRecord?.trim() ? { nothingToRecord: extraction.nothingToRecord.trim().slice(0, 300) } : {}),
+    ...(batchMatch && importable.some((s) => s.target.mode === 'existing' && s.target.accountId === batchMatch!.accountId) ? { batchMatch } : {}),
     confidence: extraction.confidence,
     ...(extraction.institutionName ? { institutionName: extraction.institutionName } : {}),
     ...(extraction.documentDate ? { documentDate: extraction.documentDate } : {}),

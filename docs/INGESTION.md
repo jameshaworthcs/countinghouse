@@ -219,6 +219,8 @@ read again.
   - A screen naming only the provider (a scrolled app screen) matches your only open account
     there.
   - A fund's own page matches the account whose latest holdings include that fund.
+  - A screen with no confident match of its own can take its account from a **screenshot taken
+    with it** (below).
   - With nothing on the screen to say which account it is, no new account is proposed: the
     section waits for you to choose. Uploading from an account's page or its capture-list row
     pins the account.
@@ -227,6 +229,24 @@ read again.
   - Below the threshold a new account is proposed.
   - An existing account set up without its number learns the last digits its first statement
     shows, so later statements match it by themselves. An account that has its number keeps it.
+- **Screenshots taken together.** Scrolled app screens rarely name their account; the one at the
+  top of the account usually does. Two screenshots were taken together when they were uploaded
+  within 2 minutes of each other, taken within 10 minutes (their capture times), and have the same
+  width in pixels (and the same device, when both name one).
+  - A screenshot *shows* an account when it is of one account, matched by what is on it (or by
+    you), not by this rule. Pending and committed screenshots both count, so one that created its
+    account on commit counts too.
+  - A section takes that account only when its screen shows one account, has no confident match
+    of its own and no account you pinned, and nothing on it says otherwise (another number,
+    provider, kind of account, currency or name). Being your only account of a kind does not
+    count as a confident match here, so such a screen no longer proposes a new account.
+  - The nearest screenshot before it and the nearest after that show an account must agree: a
+    batch can move from one account's screens to another's. With no agreement, you choose.
+  - The review page says why ("taken 1 minute before IMG_0102.PNG, which shows Premium Bonds, on the
+    same phone, and uploaded with it"), and the draft records which import it came from.
+  - When a screenshot of the batch is read, discarded or given its account by you, the others are
+    drafted again from their readings (nothing is read twice). A draft you have saved changes to is
+    never redrafted by itself.
 - **Accounts with nothing to import** (the account an interest certificate names, say) are left
   out of the draft.
 - **Foreign amounts** take the sign of the sterling amount; documents often print them unsigned.

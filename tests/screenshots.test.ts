@@ -6,13 +6,16 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { buildDraft, draftIsClean } from '../src/server/ingest/draft';
+import { loadConfig } from '../src/server/config';
+import { buildDraft, draftIsClean, type BatchEvidence } from '../src/server/ingest/draft';
+import { ImportService } from '../src/server/ingest/service';
+import { WorkArea } from '../src/server/ingest/workarea';
 import { captureDate } from '../src/server/ingest/images';
 import { extractionJsonSchema, PROMPT_VERSION, SYSTEM_PROMPT } from '../src/server/ingest/prompt';
 import { assessReading } from '../src/server/ingest/verify';
 import { Store } from '../src/server/store';
 import { sectionChecks } from '../src/shared/review';
-import { ExtractionSchema, type Account, type DocumentRef } from '../src/shared/schema';
+import { ExtractionSchema, type Account, type DocumentRef, type Extraction, type ImportRecord } from '../src/shared/schema';
 
 const stamp = '2026-01-01T00:00:00+00:00';
 const acct = (id: string, type: Account['type'], extra: Partial<Account> = {}): Account => ({ id, name: id, type, currency: 'GBP', status: 'open', aliases: [], includeInNetWorth: true, createdAt: stamp, updatedAt: stamp, ...extra });
@@ -32,7 +35,7 @@ let store: Store;
 beforeEach(async () => {
   dir = await mkdtemp(path.join(os.tmpdir(), 'finance-screens-'));
   store = await Store.open(path.join(dir, 'data'));
-  await store.setAccounts([acct('bonds', 'premium_bonds', { institutionId: 'ns-and-i' }), acct('current', 'current', { last4: '4821' })]);
+  await store.setAccounts([acct('bonds', 'premium_bonds', { name: 'Premium Bonds', institutionId: 'ns-and-i' }), acct('current', 'current', { last4: '4821' })]);
 });
 afterEach(async () => {
   store.stopWatching();
@@ -160,5 +163,117 @@ describe('the reader: views that are not the account’s movements', () => {
   it('a reading that finds nothing to record is read again before it is believed', () => {
     const empty = buildDraft(ExtractionSchema.parse({ documentType: 'other', nothingToRecord: 'A settings screen.' }), { store, document: doc(), uploadedOn: '2026-09-29' });
     expect(assessReading(empty, { accountTypeOf: () => undefined, latest: '2026-09-29', warnings: [] }).unconfirmed).toContain('Nothing to record');
+  });
+});
+
+describe('screenshots taken together share the account', () => {
+  const batch: BatchEvidence = { accountId: 'bonds', importId: 'imp_20260929_200900_4c3d', fileName: 'IMG_0102.PNG', minutes: -1 };
+  const scrolled = (account: Record<string, unknown> = {}) => ExtractionSchema.parse({ documentType: 'transactions_screenshot', accounts: [{ transactions: reinvestments, ...account }] });
+  const draw = (extraction: Extraction, extra: { batch?: BatchEvidence; hintAccountId?: string } = {}) => buildDraft(extraction, { store, document: doc({ capturedOn: '2026-09-29', capturedOnSource: 'exif' }), uploadedOn: '2026-09-29', ...extra });
+
+  it('a screen that names no account takes the one a screenshot beside it shows, and says why', () => {
+    expect(draw(scrolled()).sections[0]!.target).toEqual({ mode: 'skip' });
+    const draft = draw(scrolled(), { batch });
+    expect(draft.sections[0]!.target).toEqual({ mode: 'existing', accountId: 'bonds' });
+    expect(draft.sections[0]!.matchReason).toMatch(/taken 1 minute before IMG_0102\.PNG, which shows Premium Bonds, on the same phone, and uploaded with it/);
+    expect(draft.batchMatch).toEqual({ accountId: 'bonds', importId: batch.importId });
+  });
+
+  it('it fills a gap only: a screen that says what kind of account it is, but not which, is not a new account', () => {
+    expect(draw(scrolled({ accountType: 'premium_bonds' })).sections[0]!.target.mode).toBe('new');
+    expect(draw(scrolled({ accountType: 'premium_bonds' }), { batch }).sections[0]!.target).toEqual({ mode: 'existing', accountId: 'bonds' });
+  });
+
+  it('anything on the screen that says otherwise wins: number, kind, provider, currency, name', () => {
+    for (const other of [{ last4: '4821' }, { accountType: 'current' }, { institutionName: 'Monzo' }, { currency: 'EUR' }, { accountName: 'Flex Instant Saver' }]) {
+      const draft = draw(scrolled(other), { batch });
+      expect(draft.sections[0]!.target, JSON.stringify(other)).not.toEqual({ mode: 'existing', accountId: 'bonds' });
+      expect(draft.batchMatch).toBeUndefined();
+    }
+  });
+
+  it('a confident match on the screen itself, or your choice, always wins', () => {
+    expect(draw(scrolled({ last4: '4821', accountType: 'current' }), { batch }).sections[0]!.target).toEqual({ mode: 'existing', accountId: 'current' });
+    expect(draw(scrolled(), { batch, hintAccountId: 'current' }).sections[0]!.target).toEqual({ mode: 'existing', accountId: 'current' });
+  });
+
+  it('a screen of several accounts is not a scrolled screen of one', () => {
+    const home = ExtractionSchema.parse({ documentType: 'account_overview_screenshot', accounts: [{ closingBalance: 10 }, { closingBalance: 20 }] });
+    expect(draw(home, { batch }).sections.every((s) => s.target.mode === 'skip')).toBe(true);
+  });
+
+  describe('which screenshots were taken together', () => {
+    let svc: ImportService;
+    let work: WorkArea;
+    const make = async (id: string, opts: { at: string; created?: string; width?: number; extraction: Extraction; fileName?: string }): Promise<ImportRecord> => {
+      const record: ImportRecord = {
+        id,
+        status: 'review',
+        createdAt: opts.created ?? '2026-09-29T20:09:00+01:00',
+        updatedAt: '2026-09-29T20:09:00+01:00',
+        origin: 'upload',
+        document: doc({ fileName: opts.fileName ?? `${id.slice(-4)}.PNG`, capturedOn: '2026-09-29', capturedOnSource: 'exif', capturedAt: opts.at, image: { width: opts.width ?? 1206, height: 2622 } }),
+        extraction: { warnings: [], raw: opts.extraction },
+      };
+      await work.saveRecord(record);
+      return record;
+    };
+    const named = (accountType: Account['type'], extra: Record<string, unknown> = {}) => ExtractionSchema.parse({ documentType: 'account_overview_screenshot', accounts: [{ accountName: accountType === 'premium_bonds' ? 'Premium Bonds' : 'Current account', accountType, closingBalance: 100, ...extra }] });
+    const target = (id: string) => svc.getPending(id)!.draft!.sections[0]!.target;
+    const start = async () => {
+      svc = new ImportService(store, loadConfig({ FINANCE_DATA_DIR: path.join(dir, 'data'), FINANCE_WORK_DIR: path.join(dir, 'work'), FINANCE_WATCH: '0' }), work);
+      await svc.init();
+      for (const r of svc.listPending()) await svc.refreshDraft(r.id);
+    };
+    beforeEach(() => {
+      work = new WorkArea(path.join(dir, 'work'));
+    });
+
+    it('taken a minute apart on one phone and uploaded together: the scrolled one follows', async () => {
+      await make('imp_20260929_200900_aaaa', { at: '2026-09-29T20:07:40+01:00', extraction: scrolled() });
+      await make('imp_20260929_200900_bbbb', { at: '2026-09-29T20:08:33+01:00', extraction: named('premium_bonds'), fileName: 'IMG_0102.PNG' });
+      await start();
+      expect(target('imp_20260929_200900_aaaa')).toEqual({ mode: 'existing', accountId: 'bonds' });
+      expect(svc.getPending('imp_20260929_200900_aaaa')!.draft!.sections[0]!.matchReason).toMatch(/taken 1 minute before IMG_0102\.PNG/);
+    });
+
+    it('not when taken far apart, on another phone, or uploaded separately', async () => {
+      await make('imp_20260929_200900_bbbb', { at: '2026-09-29T20:08:33+01:00', extraction: named('premium_bonds') });
+      await make('imp_20260929_200900_c001', { at: '2026-09-29T19:40:00+01:00', extraction: scrolled() });
+      await make('imp_20260929_200900_c002', { at: '2026-09-29T20:08:00+01:00', width: 1179, extraction: scrolled() });
+      await make('imp_20260929_201500_c003', { at: '2026-09-29T20:08:00+01:00', created: '2026-09-29T20:15:00+01:00', extraction: scrolled() });
+      await start();
+      for (const id of ['imp_20260929_200900_c001', 'imp_20260929_200900_c002', 'imp_20260929_201500_c003']) expect(target(id), id).toEqual({ mode: 'skip' });
+    });
+
+    it('not between two accounts’ screens: the nearest before and after must agree', async () => {
+      await make('imp_20260929_200900_bbbb', { at: '2026-09-29T20:05:00+01:00', extraction: named('premium_bonds') });
+      await make('imp_20260929_200900_aaaa', { at: '2026-09-29T20:06:00+01:00', extraction: scrolled() });
+      await make('imp_20260929_200900_dddd', { at: '2026-09-29T20:07:00+01:00', extraction: named('current', { last4: '4821' }) });
+      await start();
+      expect(target('imp_20260929_200900_aaaa')).toEqual({ mode: 'skip' });
+    });
+
+    it('never from a screenshot that took its own account from the batch', async () => {
+      await make('imp_20260929_200900_bbbb', { at: '2026-09-29T20:00:00+01:00', extraction: named('premium_bonds') });
+      await make('imp_20260929_200900_aaaa', { at: '2026-09-29T20:05:00+01:00', extraction: scrolled() });
+      await make('imp_20260929_200900_eeee', { at: '2026-09-29T20:14:00+01:00', extraction: scrolled() });
+      await start();
+      expect(target('imp_20260929_200900_aaaa')).toEqual({ mode: 'existing', accountId: 'bonds' });
+      // Fourteen minutes from the named screen: its only neighbour in reach is one that borrowed.
+      expect(target('imp_20260929_200900_eeee')).toEqual({ mode: 'skip' });
+    });
+
+    it('dropping the screenshot it relied on sends it back to you; a draft you edited is left alone', async () => {
+      await make('imp_20260929_200900_bbbb', { at: '2026-09-29T20:08:33+01:00', extraction: named('premium_bonds') });
+      await make('imp_20260929_200900_aaaa', { at: '2026-09-29T20:07:40+01:00', extraction: scrolled() });
+      await make('imp_20260929_200900_ffff', { at: '2026-09-29T20:07:50+01:00', extraction: scrolled() });
+      await start();
+      const edited = svc.getPending('imp_20260929_200900_ffff')!;
+      await svc.updateDraft(edited.id, { ...edited.draft!, notes: [...edited.draft!.notes, 'checked'] });
+      await svc.discard('imp_20260929_200900_bbbb');
+      expect(target('imp_20260929_200900_aaaa')).toEqual({ mode: 'skip' });
+      expect(target('imp_20260929_200900_ffff')).toEqual({ mode: 'existing', accountId: 'bonds' });
+    });
   });
 });

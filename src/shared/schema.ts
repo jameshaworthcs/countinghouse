@@ -888,6 +888,8 @@ export const DraftSchema = z.object({
   notes: z.array(z.string()).default([]),
   /** The reader understood the document but found nothing to record: what it shows, in its words. */
   nothingToRecord: z.string().max(300).optional(),
+  /** The account was taken from a screenshot taken and uploaded with this one (that import's id). */
+  batchMatch: z.object({ accountId: SlugSchema, importId: z.string() }).optional(),
   confidence: z.enum(['high', 'medium', 'low']).optional(),
   /** OCR engine: recognised text and candidate values for the reviewer. */
   ocrText: z.string().optional(),
@@ -911,6 +913,8 @@ export const ImportRecordSchema = z.object({
   /** The account the user said this document belongs to (e.g. dropped onto that account). */
   hintAccountId: SlugSchema.optional(),
   document: DocumentRefSchema,
+  /** When you last saved changes to the draft: it is never drafted again by itself after that. */
+  draftEditedAt: TimestampSchema.optional(),
   /** CSV files in an unknown layout: the suggested column mapping awaiting confirmation. */
   mapping: z
     .object({

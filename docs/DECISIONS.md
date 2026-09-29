@@ -348,4 +348,10 @@ as holdings, and five views that added nothing looking like failures.
 - **Finding nothing is a reading that gets checked.** A reading with no accounts and no figures
   passed as "confirmed by its own figures" on Sonnet alone; it now needs a second reader to agree,
   since what it finds nothing in can be dismissed in one click.
+- **Screenshots taken together lend each other their account, conservatively.** "Together" is
+  uploaded within 2 minutes, taken within 10, same screen width (and device, when named): no upload
+  batch id was added, because the times already say it and they work for the inbox and for files
+  uploaded before this change. The nearest identified screenshots before and after must agree, a
+  borrowed account is never lent on, and anything on the screen that disagrees wins. The owner's
+  saved edits are never redrafted.
 

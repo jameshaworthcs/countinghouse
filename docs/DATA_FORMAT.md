@@ -171,7 +171,10 @@ Standalone figures from documents, used for Self Assessment:
   `statedTotals` (`{moneyIn, moneyOut}` printed on the statement) and a row `uncertain` (what the
   reader was unsure of). Both are optional and only used while reviewing. Since `extract-9` a
   draft can carry `nothingToRecord`: what a document the reader understood, but found nothing to
-  record in, shows (one sentence).
+  record in, shows (one sentence). `batchMatch` (`{accountId, importId}`) says a section's account
+  came from another screenshot taken and uploaded with it.
+- `draftEditedAt`: when you last saved changes to a pending draft; such a draft is never redrafted
+  by itself.
 - `result`: `{accountIds, accountsCreated, transactionsAdded, transactionsSkipped, balancesAdded, holdingsAdded, figuresAdded, sections}`.
   `sections` maps each draft section to the account it was committed to; with the sections'
   statement periods it gives each account's **coverage** (the days it has data for).

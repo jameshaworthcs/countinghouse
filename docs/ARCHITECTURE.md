@@ -126,7 +126,8 @@ The equations are in [FORMULAS.md](FORMULAS.md); the rules for writing these rec
    - The output is normalised (money to pence precision, dates repaired) into an `Extraction`.
 4. **Build the draft.**
    - Each extracted account is matched to one of yours by last 4 digits, provider, type and name
-     (an account you dropped the file onto wins).
+     (an account you dropped the file onto wins). A scrolled screen that names no account takes
+     the one a screenshot taken and uploaded with it shows, when nothing on it disagrees.
    - Each row is categorised: your rules, then own-account transfers, then wrapper flows, then the
      UK merchant list, then the bank's category, then Claude's suggestion.
    - Duplicates are found by bank id, then exact multiset match, then fuzzy match.

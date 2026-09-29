@@ -26,7 +26,7 @@ import { commitDraft } from './commit';
 import { CSV_ENGINE_VERSION, findProfile, parseWithProfile, readCsvRows, suggestMapping } from './csv';
 import { HOLDINGS_CSV_VERSION, parseHoldingsCsv } from './holdings-csv';
 import { decodeText, detectKind, MAX_UPLOAD_BYTES, mediaTypeFor } from './detect';
-import { buildDraft, draftIsClean } from './draft';
+import { buildDraft, draftIsClean, type BatchEvidence } from './draft';
 import { assessReading, chooseReading, compareReadings, shortModel } from './verify';
 import { detectEngines, pickEngine, type EngineResult } from './engines';
 import { captureDate, imageInfo, prepareImage } from './images';
@@ -50,6 +50,31 @@ export interface CreateImportInput {
 export interface CreateImportResult {
   record?: ImportRecord;
   duplicateOf?: ImportSummary | ImportRecord;
+}
+
+/** Screenshots uploaded within this long of each other were uploaded together. */
+const UPLOADED_TOGETHER_MS = 2 * 60_000;
+/** Screenshots taken within this long of each other, on one phone, were taken together. */
+const TAKEN_TOGETHER_MS = 10 * 60_000;
+
+/** Taken and uploaded together, on the same phone (docs/INGESTION.md, "Screenshots taken together"). */
+export function takenTogether(a: ImportRecord, b: ImportRecord): boolean {
+  const [x, y] = [a.document, b.document];
+  if (a.id === b.id || !x.capturedAt || !y.capturedAt || !x.image || !y.image) return false;
+  if (Math.abs(Date.parse(a.createdAt) - Date.parse(b.createdAt)) > UPLOADED_TOGETHER_MS) return false;
+  if (Math.abs(Date.parse(x.capturedAt) - Date.parse(y.capturedAt)) > TAKEN_TOGETHER_MS) return false;
+  return x.image.width === y.image.width && (!x.image.device || !y.image.device || x.image.device === y.image.device);
+}
+
+/** The one account a screenshot shows by itself (not by another screenshot's evidence), if any. */
+function accountShown(r: ImportRecord): string | undefined {
+  if (!r.draft || r.draft.batchMatch) return undefined;
+  const sections = r.draft.sections.filter((s) => s.target.mode !== 'skip');
+  if (sections.length !== 1) return undefined;
+  const s = sections[0]!;
+  // A committed screenshot may have created its account.
+  const committed = r.result?.sections?.find((x) => x.key === s.key)?.accountId;
+  return committed ?? (s.target.mode === 'existing' ? s.target.accountId : undefined);
 }
 
 export interface ProcessOptions {
@@ -164,6 +189,7 @@ export class ImportService extends EventEmitter {
     record.status = 'queued';
     record.extraction = { warnings: [] };
     delete record.draft;
+    delete record.draftEditedAt;
     delete record.mapping;
     await this.save(record);
     this.schedule(id, opts);
@@ -300,7 +326,7 @@ export class ImportService extends EventEmitter {
           engineVersion = PROMPT_VERSION;
           const verifyModel = opts.verifyModel !== undefined ? opts.verifyModel : settings.verifyModel;
           if (verifyModel && verifyModel !== model) {
-            const checked = await this.verifyReading(record, result, { model, verifyModel, readWith });
+            const checked = await this.verifyReading(record, result, { model, verifyModel, readWith, batch: await this.batchEvidence(record) });
             result = checked.result;
             verified = checked;
           }
@@ -311,7 +337,7 @@ export class ImportService extends EventEmitter {
         throw new Error('Unsupported file type');
       }
 
-      const draft = verified?.draft ?? this.draftOf(record, result);
+      const draft = verified?.draft ?? this.draftOf(record, result, kind === 'image' ? await this.batchEvidence(record) : undefined);
       if (result.ocrText) draft.ocrText = result.ocrText;
       if (result.candidates) draft.candidates = result.candidates;
       record.draft = draft;
@@ -331,6 +357,7 @@ export class ImportService extends EventEmitter {
       };
       record.status = 'review';
       await this.save(record);
+      if (kind === 'image') await this.refreshBatch(record);
     } catch (err) {
       if (!this.pending.has(id)) return; // discarded while running
       record.status = 'failed';
@@ -345,22 +372,84 @@ export class ImportService extends EventEmitter {
   async refreshDraft(id: string): Promise<ImportRecord> {
     const record = this.pending.get(id);
     if (!record?.extraction.raw) throw new StoreError('Nothing to refresh', 404);
-    record.draft = buildDraft(record.extraction.raw, {
-      store: this.store,
-      document: record.document,
-      hintAccountId: record.hintAccountId,
-      uploadedOn: record.createdAt.slice(0, 10),
-      warnings: record.extraction.warnings,
-    });
+    record.draft = this.rebuild(record, await this.batchEvidence(record));
+    delete record.draftEditedAt;
     await this.save(record);
+    if (record.document.image) await this.refreshBatch(record);
     return record;
+  }
+
+  /**
+   * The draft again from the stored reading, as it would be built now: the rows the two readings
+   * disagreed on are marked again, from the reading that was not kept.
+   */
+  private rebuild(record: ImportRecord, batch: BatchEvidence | undefined): Draft {
+    const raw = record.extraction.raw!;
+    const draft = this.draftOf(record, { extraction: raw, warnings: record.extraction.warnings }, batch);
+    const v = record.extraction.verification;
+    const other = record.extraction.alternative;
+    if (v?.method === 'second-reading' && v.secondModel && other) {
+      const otherDraft = this.draftOf(record, { extraction: other, warnings: [] }, batch);
+      const [first, second] = [shortModel(v.firstModel), shortModel(v.secondModel)];
+      markDisagreements(draft, compareReadings(otherDraft, draft, v.kept === 'second' ? { first, second } : { first: second, second: first }).rowNotes);
+    }
+    if (record.draft?.ocrText) draft.ocrText = record.draft.ocrText;
+    if (record.draft?.candidates) draft.candidates = record.draft.candidates;
+    return draft;
+  }
+
+  /**
+   * The account a screenshot taken and uploaded with this one shows, as evidence for matching
+   * (docs/INGESTION.md). The nearest such screenshots before and after it must agree: a batch can
+   * move from one account's screens to another's.
+   */
+  async batchEvidence(record: ImportRecord): Promise<BatchEvidence | undefined> {
+    const at = record.document.capturedAt ? Date.parse(record.document.capturedAt) : NaN;
+    if (Number.isNaN(at) || !record.document.image) return undefined;
+    const created = Date.parse(record.createdAt);
+    const committed = await Promise.all(
+      this.store.imports.filter((i) => i.mediaType.startsWith('image/') && Math.abs(Date.parse(i.createdAt) - created) <= UPLOADED_TOGETHER_MS).map((i) => this.store.readImport(i.id)),
+    );
+    const shown = [...[...this.pending.values()].filter((r) => r.status === 'review'), ...committed.filter((r): r is ImportRecord => r !== undefined)]
+      .filter((r) => takenTogether(record, r))
+      .flatMap((r) => {
+        const accountId = accountShown(r);
+        return accountId && this.store.account(accountId) ? [{ r, accountId, dt: Date.parse(r.document.capturedAt!) - at }] : [];
+      });
+    const before = shown.filter((x) => x.dt <= 0).sort((a, b) => b.dt - a.dt)[0];
+    const after = shown.filter((x) => x.dt > 0).sort((a, b) => a.dt - b.dt)[0];
+    if (before && after && before.accountId !== after.accountId) return undefined;
+    const nearest = [before, after].filter((x) => x !== undefined).sort((a, b) => Math.abs(a.dt) - Math.abs(b.dt))[0];
+    if (!nearest) return undefined;
+    return { accountId: nearest.accountId, importId: nearest.r.id, fileName: nearest.r.document.fileName, minutes: Math.round(-nearest.dt / 60_000) };
+  }
+
+  /**
+   * A screenshot was read (or dropped, or its account chosen): the screenshots taken with it that
+   * could use what it shows are drafted again. Never one you have edited.
+   */
+  private async refreshBatch(changed: ImportRecord): Promise<void> {
+    for (const r of this.pending.values()) {
+      if (r.status !== 'review' || !r.draft || !r.extraction.raw || r.draftEditedAt || !takenTogether(changed, r)) continue;
+      if (!r.draft.batchMatch && r.draft.sections.every((s) => s.target.mode === 'existing')) continue;
+      const evidence = await this.batchEvidence(r);
+      const now = r.draft.batchMatch;
+      if (evidence?.accountId === now?.accountId && (!evidence || evidence.importId === now?.importId)) continue;
+      const next = this.rebuild(r, evidence);
+      if (JSON.stringify(next) === JSON.stringify(r.draft)) continue;
+      r.draft = next;
+      await this.save(r);
+    }
   }
 
   async updateDraft(id: string, draft: Draft): Promise<ImportRecord> {
     const record = this.pending.get(id);
     if (!record || record.status !== 'review') throw new StoreError('This import is not awaiting review.', 409);
     record.draft = DraftSchema.parse(draft);
+    // Yours now: it is never drafted again by itself.
+    record.draftEditedAt = nowISO();
     await this.save(record);
+    await this.refreshBatch(record);
     return record;
   }
 
@@ -420,8 +509,8 @@ export class ImportService extends EventEmitter {
     return committed;
   }
 
-  private draftOf(record: ImportRecord, result: EngineResult): Draft {
-    return buildDraft(result.extraction, { store: this.store, document: record.document, hintAccountId: record.hintAccountId, uploadedOn: record.createdAt.slice(0, 10), warnings: result.warnings });
+  private draftOf(record: ImportRecord, result: Pick<EngineResult, 'extraction' | 'warnings'>, batch?: BatchEvidence): Draft {
+    return buildDraft(result.extraction, { store: this.store, document: record.document, hintAccountId: record.hintAccountId, uploadedOn: record.createdAt.slice(0, 10), warnings: result.warnings, batch });
   }
 
   private assess(record: ImportRecord, draft: Draft, warnings: string[]) {
@@ -438,8 +527,8 @@ export class ImportService extends EventEmitter {
    * checked against) the document is read again with the checking model, the two readings are
    * compared figure by figure, the better one is kept, and rows they disagree on are marked.
    */
-  private async verifyReading(record: ImportRecord, first: EngineResult, opts: { model: string; verifyModel: string; readWith: (m: string) => Promise<EngineResult> }) {
-    const firstDraft = this.draftOf(record, first);
+  private async verifyReading(record: ImportRecord, first: EngineResult, opts: { model: string; verifyModel: string; readWith: (m: string) => Promise<EngineResult>; batch?: BatchEvidence | undefined }) {
+    const firstDraft = this.draftOf(record, first, opts.batch);
     const a1 = this.assess(record, firstDraft, first.warnings);
     const firstModel = first.model ?? opts.model;
     if (!a1.problems.length && !a1.unconfirmed.length) {
@@ -453,18 +542,13 @@ export class ImportService extends EventEmitter {
       // Without a second reading the first stands; the review page says it is unchecked.
       return { result: first, draft: firstDraft, otherCostUsd: 0, alternative: undefined, verification: { method: 'second-reading' as const, firstModel, secondModel: opts.verifyModel, reasons, disagreements: [], kept: 'first' as const, error: (err as Error).message.slice(0, 300) } };
     }
-    const secondDraft = this.draftOf(record, second);
+    const secondDraft = this.draftOf(record, second, opts.batch);
     const a2 = this.assess(record, secondDraft, second.warnings);
     const kept = chooseReading(a1, a2);
     const names = { first: shortModel(firstModel), second: shortModel(second.model ?? opts.verifyModel) };
     const [keptResult, keptDraft, other, otherDraft] = kept === 'second' ? [second, secondDraft, first, firstDraft] : [first, firstDraft, second, secondDraft];
     const cmp = kept === 'second' ? compareReadings(otherDraft, keptDraft, { first: names.first, second: names.second }) : compareReadings(otherDraft, keptDraft, { first: names.second, second: names.first });
-    for (const s of keptDraft.sections) {
-      for (const t of s.transactions) {
-        const n = cmp.rowNotes.get(t.key);
-        if (n) t.uncertain = t.uncertain ? `${t.uncertain}; ${n}` : n;
-      }
-    }
+    markDisagreements(keptDraft, cmp.rowNotes);
     return {
       result: keptResult,
       draft: keptDraft,
@@ -514,6 +598,8 @@ export class ImportService extends EventEmitter {
     this.pending.delete(id);
     await this.work.remove(record, [...this.pending.values()]);
     this.emit('update', { ...record, status: 'discarded' });
+    // Screenshots that took their account from it no longer can.
+    await this.refreshBatch(record);
   }
 }
 
@@ -530,3 +616,14 @@ async function describeCapture(record: ImportRecord, bytes: Buffer): Promise<voi
   const info = await imageInfo(bytes);
   if (info) doc.image = info;
 }
+
+/** Mark the rows two readings disagreed on, so they are checked against the document. */
+function markDisagreements(draft: Draft, rowNotes: Map<string, string>): void {
+  for (const s of draft.sections) {
+    for (const t of s.transactions) {
+      const n = rowNotes.get(t.key);
+      if (n) t.uncertain = (t.uncertain ? `${t.uncertain}; ${n}` : n).slice(0, 300);
+    }
+  }
+}
+
