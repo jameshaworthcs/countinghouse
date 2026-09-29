@@ -24,6 +24,8 @@ const MONEY_KEYS = new Set([
   'annualIncome',
   'costBasis',
   'gain',
+  'statedMoneyIn',
+  'statedMoneyOut',
 ]);
 const DATE_KEYS = new Set(['date', 'transactionDate', 'periodStart', 'periodEnd', 'balanceDate', 'documentDate']);
 

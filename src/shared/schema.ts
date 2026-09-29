@@ -639,6 +639,8 @@ export const ExtractedTransactionSchema = z.object({
   merchant: MerchantDetailSchema.nullable().default(null),
   /** Row index in the source (for provenance). */
   row: z.number().int().nullable().default(null),
+  /** What the reader could not read with certainty on this row. */
+  uncertain: z.string().nullable().default(null),
 });
 export type ExtractedTransaction = z.infer<typeof ExtractedTransactionSchema>;
 
@@ -673,6 +675,9 @@ export const ExtractedAccountSchema = z.object({
   cashBalance: MoneySchema.nullable().default(null),
   annualIncome: MoneySchema.nullable().default(null),
   interestRate: z.number().nullable().default(null),
+  /** Totals of money in and money out printed on the statement, unsigned. */
+  statedMoneyIn: MoneySchema.nullable().default(null),
+  statedMoneyOut: MoneySchema.nullable().default(null),
   transactions: z.array(ExtractedTransactionSchema).default([]),
   holdings: z.array(ExtractedHoldingSchema).default([]),
 });

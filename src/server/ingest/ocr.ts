@@ -102,6 +102,7 @@ export function parseStatementText(text: string, year: number): ExtractedTransac
     attributes: null,
     merchant: null,
     row: i,
+    uncertain: null,
   }));
 }
 

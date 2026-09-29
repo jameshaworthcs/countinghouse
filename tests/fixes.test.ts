@@ -133,6 +133,34 @@ describe('pending rows, payees and corrections', () => {
     expect(store.transaction(t.id)!.payee).toBe('Corner Cafe (Tom’s)');
   });
 
+  it('drafts: foreign amounts take the payment’s sign, unsure notes and printed totals carry through, empty accounts are left out', async () => {
+    await store.setAccounts([acct('card', 'credit_card', { last4: '1005' })]);
+    // As the model returns it: strings for money, a lower-case currency.
+    const { extraction } = normaliseExtraction({
+      documentType: 'credit_card_statement',
+      accounts: [
+        {
+          accountType: 'credit_card',
+          last4: '1005',
+          statedMoneyIn: 612.4,
+          statedMoneyOut: '£1,080.22',
+          transactions: [
+            { date: '2026-08-21', description: 'LE COMPTOIR PARIS', amount: -38.92, originalAmount: 45, originalCurrency: 'eur' },
+            { date: '2026-08-22', description: 'SHELL', amount: -54.23, uncertain: 'amount partly cut off' },
+          ],
+        },
+        // The account an interest certificate mentions: nothing to import.
+        { accountType: 'savings', last4: '7733', accountName: 'Online Savings Account' },
+      ],
+    });
+    const draft = buildDraft(extraction, { store, document: { id: 'doc_0000000000000002', sha256: '2'.repeat(64), fileName: 's.pdf', mediaType: 'application/pdf', size: 1 }, uploadedOn: '2026-09-21' });
+    expect(draft.sections).toHaveLength(1);
+    const [s] = draft.sections;
+    expect(s!.statedTotals).toEqual({ moneyIn: 612.4, moneyOut: 1080.22 });
+    expect(s!.transactions[0]!.original).toEqual({ amount: -45, currency: 'EUR' });
+    expect(s!.transactions[1]!.uncertain).toBe('amount partly cut off');
+  });
+
   it('the model’s money strings go through the bank-amount parser', () => {
     const { extraction } = normaliseExtraction({ documentType: 'bank_statement', accounts: [{ closingBalance: '(1,234.56)', transactions: [{ date: '2026-09-01', description: 'X', amount: '12.30 DR' }] }] });
     expect(extraction.accounts[0]!.closingBalance).toBe(-1234.56);

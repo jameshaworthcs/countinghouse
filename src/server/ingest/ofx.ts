@@ -152,6 +152,7 @@ export function parseOfx(text: string): Extraction {
         attributes: null,
         merchant: null,
         row: i,
+        uncertain: null,
       });
     });
     txs.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
@@ -177,6 +178,8 @@ export function parseOfx(text: string): Extraction {
       cashBalance: null,
       annualIncome: null,
       interestRate: null,
+      statedMoneyIn: null,
+      statedMoneyOut: null,
       transactions: txs,
       holdings: [],
     });

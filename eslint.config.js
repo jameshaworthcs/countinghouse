@@ -5,11 +5,11 @@ import reactHooks from 'eslint-plugin-react-hooks';
 import globals from 'globals';
 
 export default tseslint.config(
-  { ignores: ['dist/**', 'node_modules/**', 'coverage/**', 'data/**', 'demo-data/**', 'schemas/**', '.work/**', 'screens/**'] },
+  { ignores: ['dist/**', 'node_modules/**', 'coverage/**', 'data/**', 'demo-data/**', 'demo-sparse/**', 'schemas/**', '.work/**', 'screens/**', 'eval/.out/**', 'eval/results/**'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    files: ['src/**/*.{ts,tsx}', 'scripts/**/*.ts', 'tests/**/*.ts'],
+    files: ['src/**/*.{ts,tsx}', 'scripts/**/*.ts', 'tests/**/*.ts', 'eval/**/*.ts'],
     extends: [...tseslint.configs.recommendedTypeChecked],
     languageOptions: {
       parserOptions: {
@@ -34,7 +34,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['src/server/**/*.ts', 'scripts/**/*.ts', 'tests/**/*.ts', '*.config.{js,ts}'],
+    files: ['src/server/**/*.ts', 'scripts/**/*.ts', 'tests/**/*.ts', 'eval/**/*.ts', '*.config.{js,ts}'],
     languageOptions: { globals: globals.node },
   },
   {

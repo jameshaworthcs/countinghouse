@@ -30,10 +30,12 @@ export interface ApiOptions {
   effort: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   timeoutMs: number;
   signal?: AbortSignal | undefined;
+  /** Tests only: stands in for the network. */
+  fetch?: typeof fetch;
 }
 
 export async function extractWithClaudeApi(opts: ApiOptions): Promise<EngineResult> {
-  const client = new Anthropic({ apiKey: opts.apiKey, timeout: opts.timeoutMs, maxRetries: 2 });
+  const client = new Anthropic({ apiKey: opts.apiKey, timeout: opts.timeoutMs, maxRetries: 2, ...(opts.fetch ? { fetch: opts.fetch } : {}) });
   const content: BetaContentBlockParam[] = [];
   for (const f of opts.files) {
     const data = (await readFile(f.path)).toString('base64');

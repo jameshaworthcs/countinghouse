@@ -706,6 +706,30 @@
                       "null"
                     ]
                   },
+                  "statedMoneyIn": {
+                    "default": null,
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "statedMoneyOut": {
+                    "default": null,
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "transactions": {
                     "default": [],
                     "type": "array",
@@ -969,6 +993,13 @@
                             {
                               "type": "null"
                             }
+                          ]
+                        },
+                        "uncertain": {
+                          "default": null,
+                          "type": [
+                            "string",
+                            "null"
                           ]
                         }
                       },

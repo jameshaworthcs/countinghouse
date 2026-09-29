@@ -1,0 +1,59 @@
+# Extraction evaluation
+
+How well the import pipeline reads documents, measured field by field on a fixed set of synthetic
+documents. Nothing here is real: names, numbers and references are invented, and the documents
+imitate layouts, not any bank's branding.
+
+```bash
+npm run eval                                  # every case; PDFs and screenshots go to Claude
+npm run eval -- --only pdf-amex-card          # some cases (comma-separated)
+npm run eval -- --tag card-signs              # cases with a tag
+npm run eval -- --render                      # write the documents to eval/.out/docs and stop
+npm run eval -- --model sonnet --effort medium --concurrency 3 --label try-sonnet
+```
+
+## What it runs
+
+- **The cases** are in `cases.ts`.
+  - The kinds of document: CSV exports, PDF statements and phone screenshots, across current,
+    card, savings, ISA, LISA, SIPP and workplace pension accounts, Premium Bonds, a P60 and an
+    interest certificate.
+  - The awkward ones are tagged: `multi-account`, `pending`, `refund`, `fx`, `overlap`,
+    `long-screenshot`, `card-signs`, `new-account`.
+  - Each case's expected result comes from the same data as its document.
+- **The pipeline** is the real one. Each case (or group of cases) gets a temporary store with the
+  accounts in `EVAL_ACCOUNTS`, and the file goes through `ImportService`, as an upload does:
+  - detection, CSV parsing, image tiling;
+  - the prompt and the logged-in `claude` CLI;
+  - normalising, drafting, account matching and duplicate detection.
+- **Groups** share a store: each document is committed before the next. This checks that an
+  overlapping statement or screenshot is recognised as already imported.
+
+## What it measures
+
+Every expected field is one point (`score.ts`):
+
+| Field | Point for |
+|---|---|
+| `account` | the account the rows are imported into |
+| `row` | each expected row found |
+| `noExtra` | each extracted row that is expected |
+| `date`, `sign`, `amount`, `description`, `pending` | each found row |
+| `balanceAfter` | each found row that prints a running balance |
+| `original` | each payment in a foreign currency |
+| `duplicate` | each row correctly marked (or not) as already imported |
+| `balance`, `period`, `balanceDate` | each statement or screen |
+| `wrapper` | contributions, bonus, allowance used and cash, on investment accounts |
+| `totals` | the money in and money out totals a statement prints |
+| `holding`, `holdingValue`, `holdingUnits`, `holdingIsin` | each holding |
+| `figure`, `figureYear` | each tax figure |
+
+Rows are aligned before scoring: an exact date and amount first, then near misses. So a sign or
+date error counts as that error, not as a missing row plus an extra one.
+
+## Results
+
+Each run writes `results/<time>_<prompt version>_<label>.json`: the totals by field, kind and tag,
+and each case's score, errors, cost and duration. The files are small and kept in git, so a prompt
+or parser change can be compared with the runs before it. PDFs and screenshots spend the Claude
+plan: a full run is about 22 extractions.

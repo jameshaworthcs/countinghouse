@@ -28,7 +28,8 @@
     "format": "prettier --write .",
     "check": "npm run typecheck && npm run lint && npm run test",
     "set-password": "tsx scripts/set-password.ts",
-    "records": "tsx scripts/records.ts"
+    "records": "tsx scripts/records.ts",
+    "eval": "tsx eval/run.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.129.0",

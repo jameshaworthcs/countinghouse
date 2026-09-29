@@ -169,8 +169,10 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
         ...(categorisedBy ? { categorisedBy } : {}),
         ...(cat.ruleId ? { ruleId: cat.ruleId } : {}),
         ...(t.balanceAfter !== null ? { balanceAfter: t.balanceAfter } : {}),
-        ...(t.originalAmount !== null && t.originalCurrency ? { original: { amount: t.originalAmount, currency: t.originalCurrency } } : {}),
+        // A foreign amount goes the same way as the sterling one; documents often print it unsigned.
+        ...(t.originalAmount !== null && t.originalCurrency ? { original: { amount: t.amount < 0 ? -Math.abs(t.originalAmount) : Math.abs(t.originalAmount), currency: t.originalCurrency.toUpperCase() } } : {}),
         ...(t.pending ? { pending: true } : {}),
+        ...(t.uncertain ? { uncertain: t.uncertain.slice(0, 300) } : {}),
         ...(counterpartyAccountId ? { counterpartyAccountId } : {}),
         ...(transferMatch ? { transferMatch } : {}),
         ...(t.row !== null ? { row: t.row } : { row: ti }),
@@ -217,6 +219,9 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
       ...(acc.taxYearContributions !== null ? { taxYearContributions: acc.taxYearContributions } : {}),
       ...(acc.annualIncome !== null ? { annualIncome: acc.annualIncome } : {}),
       ...(acc.interestRate !== null ? { interestRate: acc.interestRate } : {}),
+      ...(acc.statedMoneyIn !== null || acc.statedMoneyOut !== null
+        ? { statedTotals: { ...(acc.statedMoneyIn !== null ? { moneyIn: Math.abs(acc.statedMoneyIn) } : {}), ...(acc.statedMoneyOut !== null ? { moneyOut: Math.abs(acc.statedMoneyOut) } : {}) } }
+        : {}),
     };
     if (isScreenshot && isWrapperAccount(targetType) && transactions.length === 0 && balance === undefined) {
       notes.push(`${detected.accountName ?? 'An account'}: no value found on this screenshot.`);
@@ -253,9 +258,12 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
     };
   });
 
+  // An account the document only mentions (the account on an interest certificate, say) has
+  // nothing to import: leave it out rather than offer to create it.
+  const importable = sections.filter((s) => s.transactions.length || s.holdings.length || s.balance !== undefined || [s.contributions, s.bonusToDate, s.taxYearContributions, s.cash, s.annualIncome].some((v) => v !== undefined));
   return DraftSchema.parse({
     documentType: extraction.documentType,
-    sections,
+    sections: importable,
     figures,
     notes,
     confidence: extraction.confidence,

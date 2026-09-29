@@ -139,6 +139,17 @@ describe('account matching', () => {
     expect(matchAccount({ institutionName: 'Monzo', accountType: 'current', last4: '9999' }, accounts, []).accountId).toBeUndefined();
     expect(matchAccount({}, accounts, [], 'vanguard-isa').accountId).toBe('vanguard-isa');
   });
+
+  it('counts being your only account of a type as evidence, never as enough on its own', () => {
+    const mine = [...accounts, acct('lisa', 'lisa', { institutionId: 'moneybox' }), acct('saver-a', 'savings', { last4: '7733' }), acct('saver-b', 'savings')];
+    // An app screenshot that names no provider: the type and product name point at your only LISA.
+    expect(matchAccount({ accountType: 'lisa', accountName: 'Lifetime ISA' }, [...mine.slice(0, 2), { ...mine[2]!, name: 'Moneybox Lifetime ISA' }], []).accountId).toBe('lisa');
+    // The type alone is only a suggestion to confirm.
+    const typeOnly = matchAccount({ accountType: 'lisa' }, mine, []);
+    expect(typeOnly.score).toBeLessThan(50);
+    // With two accounts of the type, no bonus; a different number rules an account out.
+    expect(matchAccount({ accountType: 'savings', last4: '3310' }, mine, []).accountId).toBeUndefined();
+  });
 });
 
 describe('store, balances and analytics', () => {

@@ -143,7 +143,9 @@ Standalone figures from documents, used for Self Assessment:
 - `document`: `{id, sha256, fileName, mediaType, size, path, capturedOn, capturedOnSource}`.
 - `extraction`: `{engine, engineVersion, detail, model, durationMs, costUsd, warnings, raw}`.
   `raw` is the engine's complete output, kept for audit and re-derivation.
-- `draft`: exactly what you reviewed and committed.
+- `draft`: exactly what you reviewed and committed. Since `extract-4` a draft section can carry
+  `statedTotals` (`{moneyIn, moneyOut}` printed on the statement) and a row `uncertain` (what the
+  reader was unsure of). Both are optional and only used while reviewing.
 - `result`: `{accountIds, accountsCreated, transactionsAdded, transactionsSkipped, balancesAdded, holdingsAdded, figuresAdded, sections}`.
   `sections` maps each draft section to the account it was committed to; with the sections'
   statement periods it gives each account's **coverage** (the days it has data for).

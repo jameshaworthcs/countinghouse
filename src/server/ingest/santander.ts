@@ -66,6 +66,7 @@ export function parseSantanderTxt(text: string): Extraction {
       attributes: null,
       merchant: null,
       row: i,
+      uncertain: null,
     });
   });
   // Santander lists newest first; store chronologically.

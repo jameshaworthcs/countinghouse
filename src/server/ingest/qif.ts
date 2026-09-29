@@ -95,6 +95,7 @@ export function parseQif(text: string): Extraction {
       attributes: null,
       merchant: null,
       row: r.index,
+      uncertain: null,
     });
   }
   txs.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));

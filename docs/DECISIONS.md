@@ -189,3 +189,14 @@ as invariants.
   staleness window (90 days) is not started again by itself, even if it found nothing. Measured
   costs on the demo: refreshing assumptions took 7.7 minutes and 62 turns ($9.74 at API prices on
   Opus, high effort); researching one fund took 4.6 minutes ($1.56).
+- **Extraction is measured, not assumed.** `npm run eval` runs 28 synthetic documents through
+  the real pipeline and scores them field by field (`eval/`). The baseline on `extract-3` was
+  99.7%; the failures it found drove `extract-4`:
+  - prize lists paid to another account are not transactions;
+  - a sharper balance-date rule;
+  - relative dates flagged when the capture date is unknown;
+  - unsure rows and printed totals (for the review checks);
+  - foreign amounts signed like the payment, empty sections dropped, and being your only account
+    of a type counted as matching evidence.
+  - One case was corrected after the baseline. The Starling screenshot's "Today" could not be
+    dated without a capture date, so its feed now shows dates.

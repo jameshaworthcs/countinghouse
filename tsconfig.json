@@ -16,5 +16,5 @@
     "noEmit": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src/server", "src/shared", "scripts", "tests", "vite.config.ts", "vitest.config.ts"]
+  "include": ["src/server", "src/shared", "scripts", "tests", "eval", "vite.config.ts", "vitest.config.ts"]
 }

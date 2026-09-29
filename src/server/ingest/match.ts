@@ -25,6 +25,8 @@ function words(s: string | undefined): Set<string> {
 export function matchAccount(detected: Detected, accounts: Account[], institutions: Institution[], hintAccountId?: string): AccountMatch {
   const inst = findInstitution(detected.institutionName) ?? findInstitution(detected.accountName);
   let best: AccountMatch = { score: 0, reason: 'No existing account looked like this one' };
+  // Apps rarely show their own name on screen: being your only account of a type is evidence too.
+  const ofType = detected.accountType ? accounts.filter((a) => a.status !== 'closed' && a.type === detected.accountType).length : 0;
   for (const a of accounts) {
     if (a.status === 'closed') continue;
     let score = 0;
@@ -56,6 +58,10 @@ export function matchAccount(detected: Detected, accounts: Account[], institutio
       if (detected.accountType === a.type) {
         score += 25;
         reasons.push(`type (${ACCOUNT_TYPE_META[a.type].shortLabel})`);
+        if (ofType === 1) {
+          score += 15;
+          reasons.push(`your only ${ACCOUNT_TYPE_META[a.type].shortLabel}`);
+        }
       } else if (ACCOUNT_TYPE_META[detected.accountType].group !== ACCOUNT_TYPE_META[a.type].group) {
         score -= 30;
       }

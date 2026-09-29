@@ -12,6 +12,9 @@ screens/
 # work area: uploads and drafts that have not been reviewed and committed yet
 .work/
 
+# extraction evaluation: rendered documents (results in eval/results/ are kept)
+eval/.out/
+
 # demo datasets (regenerate with `npm run demo:reset` and `npm run demo:sparse`)
 demo-data/
 demo-sparse/

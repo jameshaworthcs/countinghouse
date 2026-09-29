@@ -85,6 +85,15 @@ on every import):
 - **Last 4 digits only.** A full account or card number is never output.
 - **Overlapping tiles.** Long scrolling screenshots are cut into overlapping tiles, and rows in the
   overlaps are reported once.
+- **Only this account's movements.** A list of prizes, interest or dividends paid out to another
+  account (Premium Bond prizes paid to your bank) is not a transaction of this one.
+- **What it was unsure of** (`extract-4`):
+  - each row it could not read with certainty carries a short note (`uncertain`), shown on the
+    review page;
+  - rows dated "Today" or "Yesterday" with no capture date are dated from the upload day and
+    flagged.
+- **The statement's own totals** of money in and money out, when printed (`statedMoneyIn`,
+  `statedMoneyOut`). The review checks compare the rows with them.
 
 Screenshot dates come from the first available of:
 
@@ -99,8 +108,14 @@ Screenshot dates come from the first available of:
 `src/server/ingest/draft.ts` does the following:
 
 - **Account matching** scores on last 4 digits (and a mismatch vetoes), provider, type, name
-  words and currency. An account you pinned the upload to always wins. Below the threshold a new
-  account is proposed.
+  words and currency.
+  - An account you pinned the upload to always wins.
+  - Being your only account of the detected type adds a little: apps rarely show their own name
+    on screen. It is never enough on its own.
+  - Below the threshold a new account is proposed.
+- **Accounts with nothing to import** (the account an interest certificate names, say) are left
+  out of the draft.
+- **Foreign amounts** take the sign of the sterling amount; documents often print them unsigned.
 - **Categorisation** follows `src/shared/categorise.ts`:
   1. your rules;
   2. transfers to your own accounts (by alias, or by provider name outside investment accounts);
@@ -120,6 +135,9 @@ Screenshot dates come from the first available of:
   pension becomes a `contribution`.
 - **Liabilities.** A credit-card balance printed as a positive "amount owed" is stored as
   negative, with a note.
+- **Review checks** (`shared/review.ts`, [FORMULAS.md §13](FORMULAS.md)) run on each account:
+  balances, printed totals, the statement period, future dates, card signs, unsure, repeated and
+  pending rows. A warning holds the import back from "Commit all ready".
 - **Pending rows** are shown in the draft but not included by default, and reconciliation leaves
   them out. Statement balances are of settled transactions, and the settled row arrives with the
   next statement. Include one only if you know it will never appear settled.
@@ -129,3 +147,9 @@ Screenshot dates come from the first available of:
 - **Funds on statements become instruments.** A holding with no matching instrument is recorded as
   one, with its name and identifiers exactly as printed, and researched by an agent job
   ([AGENTS.md](AGENTS.md)).
+
+## Measuring extraction
+
+`npm run eval` runs a fixed set of synthetic documents through this pipeline and scores the
+result field by field ([eval/README.md](../eval/README.md)). Run it before and after changing the
+prompt, a parser or the matching, and keep the results file it writes.

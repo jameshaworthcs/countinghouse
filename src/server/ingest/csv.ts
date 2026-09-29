@@ -234,6 +234,7 @@ export function parseWithProfile(rows: string[][], match: ProfileMatch): CsvPars
       attributes: null,
       merchant: Object.keys(merchant).length ? merchant : null,
       row: lineNo,
+      uncertain: null,
     };
     const groupValues: Record<string, string> = {};
     for (const c of profile.splitBy ?? []) groupValues[c] = col(c, row) ?? '';
@@ -303,6 +304,8 @@ export function parseWithProfile(rows: string[][], match: ProfileMatch): CsvPars
       cashBalance: null,
       annualIncome: null,
       interestRate: null,
+      statedMoneyIn: null,
+      statedMoneyOut: null,
       transactions: txs,
       holdings: [],
     });
