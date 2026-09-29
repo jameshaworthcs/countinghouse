@@ -225,6 +225,26 @@ describe('committing an import twice adds nothing twice', () => {
     expect(store.transactions('current')).toHaveLength(2);
     expect(store.balances('current')).toHaveLength(1);
   });
+
+  it('an account set up without its number learns it from its first statement', async () => {
+    await store.setAccounts([acct('card', 'credit_card'), acct('known', 'current', { last4: '1111' })]);
+    const workFile = path.join(dir, 'statement.pdf');
+    await writeFile(workFile, 'x');
+    const record: ImportRecord = {
+      id: 'imp_20260929_120000_abce',
+      status: 'review',
+      createdAt: stamp,
+      updatedAt: stamp,
+      origin: 'upload',
+      document: { id: 'doc_00000000000000ac', sha256: 'ac'.repeat(32), fileName: 'statement.pdf', mediaType: 'application/pdf', size: 1 },
+      extraction: { warnings: [] },
+    };
+    const section = (key: string, accountId: string, last4: string) => ({ key, detected: { last4 }, target: { mode: 'existing' as const, accountId }, currency: 'GBP', recordBalance: true, balance: -50, balanceDate: '2026-09-02', transactions: [], recordHoldings: false, holdings: [] });
+    await commitDraft(store, { record, draft: { documentType: 'credit_card_statement', sections: [section('s0', 'card', '4821'), section('s1', 'known', '9999')], figures: [], notes: [] }, workFile });
+    expect(store.account('card')!.last4).toBe('4821');
+    // An account that has its number keeps it: you chose where the statement went.
+    expect(store.account('known')!.last4).toBe('1111');
+  });
 });
 
 describe('UK rules', () => {

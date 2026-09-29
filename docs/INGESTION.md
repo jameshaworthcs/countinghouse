@@ -157,7 +157,11 @@ Screenshot dates come from the first available of:
   - An account you pinned the upload to always wins.
   - Being your only account of the detected type adds a little: apps rarely show their own name
     on screen. It is never enough on its own.
+  - Closed accounts still take their old statements, with a small penalty so an open account wins
+    a tie; the review page lists them separately.
   - Below the threshold a new account is proposed.
+  - An existing account set up without its number learns the last digits its first statement
+    shows, so later statements match it by themselves. An account that has its number keeps it.
 - **Accounts with nothing to import** (the account an interest certificate names, say) are left
   out of the draft.
 - **Foreign amounts** take the sign of the sterling amount; documents often print them unsigned.

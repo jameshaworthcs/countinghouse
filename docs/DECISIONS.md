@@ -220,3 +220,9 @@ as invariants.
   - A statement's interest is a transaction, not a figure.
   - The eval now costs a point for a figure the document does not state (a printed zero excepted),
     and the Nest and SIPP cases expect the figures they print.
+- **Accounts are set up from what the owner knows, and learn the rest from statements.**
+  - The credit report's account-number digits are kept in each account's notes, not as `last4`.
+    They are agreement numbers, not the card numbers statements print, and a wrong `last4` vetoes
+    a match.
+  - The first statement committed into an account teaches it its `last4`.
+  - Closed accounts take their old statements (they matched nothing before).

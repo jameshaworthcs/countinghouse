@@ -38,12 +38,17 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
   // 1. Accounts (and institutions) that need creating.
   const resolved = new Map<string, Account>();
   const toCreate: { account: Account; institution?: { id: string; name: string; kind: string; fscsGroup?: string } }[] = [];
+  // An existing account set up without its number learns the last digits its statement shows, so
+  // the next statement matches it by itself.
+  const toLearn: Account[] = [];
   for (const section of draft.sections) {
     if (section.target.mode === 'skip') continue;
     if (section.target.mode === 'existing') {
       const acc = store.account(section.target.accountId);
       if (!acc) throw new StoreError(`Account "${section.target.accountId}" no longer exists`, 409);
       resolved.set(section.key, acc);
+      const last4 = section.detected.last4;
+      if (!acc.last4 && last4 && /^\d{2,6}$/.test(last4) && !toLearn.some((a) => a.id === acc.id)) toLearn.push(AccountSchema.parse({ ...acc, last4, updatedAt: stamp }));
       continue;
     }
     const input = section.target.account;
@@ -194,6 +199,7 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
   for (const f of figures) FigureSchema.parse(f);
 
   // 4. Write.
+  for (const account of toLearn) await store.upsertAccount(account);
   for (const { account, institution } of toCreate) {
     if (institution && !store.institution(institution.id)) await store.upsertInstitution(institution as Parameters<Store['upsertInstitution']>[0]);
     if (!store.account(account.id)) await store.upsertAccount(account);

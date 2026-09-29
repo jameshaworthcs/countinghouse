@@ -236,6 +236,18 @@ function SectionEditor({ section, index, total, latest, periodFromRows, onChange
                     </option>
                   ))}
               </optgroup>
+              {data.accounts.some((a) => a.status === 'closed') && (
+                <optgroup label="Closed accounts (for their old statements)">
+                  {data.accounts
+                    .filter((a) => a.status === 'closed')
+                    .map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name}
+                        {a.closedOn ? ` (closed ${formatDate(a.closedOn)})` : ''}
+                      </option>
+                    ))}
+                </optgroup>
+              )}
               <option value="__new">+ Create a new account</option>
               <option value="__skip">Don’t import this account</option>
             </Select>

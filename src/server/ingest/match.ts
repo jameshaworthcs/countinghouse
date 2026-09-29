@@ -28,9 +28,10 @@ export function matchAccount(detected: Detected, accounts: Account[], institutio
   // Apps rarely show their own name on screen: being your only account of a type is evidence too.
   const ofType = detected.accountType ? accounts.filter((a) => a.status !== 'closed' && a.type === detected.accountType).length : 0;
   for (const a of accounts) {
-    if (a.status === 'closed') continue;
     let score = 0;
     const reasons: string[] = [];
+    // A closed account still takes its old statements, but an open one wins a tie.
+    if (a.status === 'closed') score -= 20;
     if (hintAccountId === a.id) {
       score += 100;
       reasons.push('your choice');

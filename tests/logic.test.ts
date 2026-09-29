@@ -150,6 +150,13 @@ describe('account matching', () => {
     // With two accounts of the type, no bonus; a different number rules an account out.
     expect(matchAccount({ accountType: 'savings', last4: '3310' }, mine, []).accountId).toBeUndefined();
   });
+
+  it('a closed account still takes its old statements, but an open one wins a tie', () => {
+    const closed = acct('old-lloyds', 'current', { institutionId: 'lloyds', last4: '2201', status: 'closed', closedOn: '2026-03-03' });
+    const open = acct('lloyds', 'current', { institutionId: 'lloyds' });
+    expect(matchAccount({ institutionName: 'Lloyds Bank', accountType: 'current', last4: '2201' }, [open, closed], []).accountId).toBe('old-lloyds');
+    expect(matchAccount({ institutionName: 'Lloyds Bank', accountType: 'current' }, [open, { ...closed, last4: undefined }] as Account[], []).accountId).toBe('lloyds');
+  });
 });
 
 describe('store, balances and analytics', () => {
