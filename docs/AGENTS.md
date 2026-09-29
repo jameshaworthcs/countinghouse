@@ -39,6 +39,7 @@ it is `src/server/records.ts` (validation and writing) and `src/server/agents/` 
 | Research (append-only) | `data/research.jsonl` |
 | Insights | `data/insights.jsonl` |
 | What the owner has told the app | `data/context.jsonl` (records), `data/notes.jsonl` (their words and proposals) |
+| The capture list (what to collect from each provider) | `data/capture.json` |
 | Accounts, transactions, balances, holdings | `data/accounts.json`, `data/transactions/`, `data/balances/`, `data/holdings/` |
 
 In-app analysis jobs do not read `data/`. They read a **digest**: the app's own computed figures,
@@ -120,7 +121,12 @@ Write a **batch**:
   - references to accounts, institutions, instruments or research that do not exist;
   - evidence ids that do not exist;
   - an agent's assumption without `evidence` or `basedOn`;
-  - research without a sourced URL.
+  - research without a sourced URL;
+  - a capture item whose asks check an account's data without naming the account, or repeat an
+    ask id.
+- **Capture items** (`"type": "capture"`, format in [DATA_FORMAT.md](DATA_FORMAT.md)) are keyed by
+  id. Writing one again replaces it but keeps the owner's ticks and skips; agents cannot tick or
+  skip.
 - **Assumptions are append-only.** To change a value, write a new record for the same key and
   scope; the history keeps every version. Set `reviewBy` so the app knows when it goes stale
   (about six months for market assumptions).

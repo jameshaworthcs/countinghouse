@@ -365,8 +365,34 @@ Deterministic rules with named thresholds (`SIGNAL_RULES` in `analytics/spending
 
 - Interest on taxable accounts: `interest` rows, replaced per account by interest-certificate
   figures.
-- Compared against the allowance for your tax band. With no band set, the basic-rate allowance
-  stands in, labelled as assumed.
+- Compared against the allowance for your tax band, which is worked out, not set (below).
+
+**Tax band** (`taxBandEstimate`, with the pure `taxBandFor` in `shared/uk.ts`):
+
+- Income for the year, in whole pounds:
+  - pay: the year's `gross_pay` figures (P60, payslips) plus `benefit_in_kind`;
+    - for the year in progress, a larger full-year estimate wins over payslips (pay to date): your
+      salary in Settings, else last year's P60;
+    - with no figures: that estimate for the year in progress, else the net salary received
+      (category `salary`) as a minimum;
+  - side income: turnover (`side-income` rows and `self_employment_income` figures) less the
+    trading allowance, when over it;
+  - interest and dividends: the amounts counted for the allowances above.
+- Band extension E = gross relief-at-source pension contributions (your part, relief included) +
+  Gift Aid paid ÷ (1 − basic rate).
+- Adjusted net income = total − E. Personal allowance = max(0, PA − ⌊max(0, ANI − £100,000) ÷ 2⌋).
+- Taxable = max(0, total − allowance). The band is the highest one taxable income reaches:
+  - none at 0;
+  - basic up to the basic-rate limit + E;
+  - higher up to the additional-rate threshold + E;
+  - additional above.
+- These are the UK bands that savings and dividends use everywhere. Scottish rates on pay are not
+  modelled, and the page says so.
+- **Basis:**
+  - `documents`: pay comes from the year's figures;
+  - `estimate`: pay comes from your salary or last year's P60;
+  - `minimum`: no gross pay is known, so the band may be higher.
+  The pages label the band with its basis.
 
 **Dividends:** dividends outside ISAs and pensions, plus vouchers, against the dividend allowance.
 

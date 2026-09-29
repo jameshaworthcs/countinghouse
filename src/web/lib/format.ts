@@ -1,5 +1,6 @@
 import { twMerge } from 'tailwind-merge';
 import { formatDate, formatMonth, relativeDays, today } from '../../shared/dates';
+import type { TaxBandEstimate } from '../../shared/api';
 import { formatMoney, formatPercent } from '../../shared/money';
 
 export { formatDate, formatMonth, formatMoney, formatPercent, relativeDays, today };
@@ -28,3 +29,10 @@ export function timeAgo(iso: string | undefined | null): string {
 
 /** Join class names; later Tailwind utilities override earlier conflicting ones (h-8 beats h-9). */
 export const cn = (...parts: (string | false | null | undefined)[]) => twMerge(parts.filter(Boolean).join(' '));
+
+/** A computed tax band in words, with how sure it is. */
+export function bandLabel(t: Pick<TaxBandEstimate, 'band' | 'basis'>): string {
+  if (t.band === 'none') return t.basis === 'minimum' ? 'no income tax found yet' : t.basis === 'estimate' ? 'no income tax, estimated' : 'no income tax';
+  const band = `${t.band} rate`;
+  return t.basis === 'documents' ? band : t.basis === 'estimate' ? `${band}, estimated` : `at least ${band}`;
+}

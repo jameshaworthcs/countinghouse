@@ -243,3 +243,17 @@ as invariants.
   check ran `refresh-assumptions` on the owner's plan: the demo turns agents off in its settings,
   but other copies did not. Jobs now start on their own only when the data is tracked in git, the
   same signal that decides a login is needed.
+- **The tax band is worked out, not set.** It comes from the year's income in the data (FORMULAS
+  §11):
+  - P60 and payslip pay, else your salary or last year's P60 for the year in progress;
+  - side income, interest and dividends;
+  - relief-at-source pensions and Gift Aid widen the bands.
+  The band carries its basis (from documents, estimated, or a minimum), and every page that shows
+  it says which. `profile.taxBand` is no longer read; old files keep it until the profile is next
+  saved, which drops it (an optional field, so no migration).
+- **A capture list for the first big import** (`data/capture.json`, written through `records.ts`).
+  - Each ask ticks itself off from the data where it can (statement coverage, a real valuation, a
+    tax figure); otherwise the owner ticks it.
+  - It sits above the monthly checklist on the Import page.
+  - While items remain, its Overview alert replaces the monthly one, which would name the same
+    accounts.

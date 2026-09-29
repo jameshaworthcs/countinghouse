@@ -9,7 +9,8 @@ Hono server  (Node 24, tsx; 127.0.0.1:4750 live, 4760 in development)
    ├─ routes/   auth · data (CRUD) · imports · analytics · records · jobs · system (SSE, git)
    ├─ Store ─────────────────► data/*.json(l)  (atomic writes, validation, quarantine, file watcher)
    │    └─ 'change' events ──► GitCommitter ──► git commit -- data/   (debounced, pathspec-limited, main only)
-   ├─ records.ts: the validated write path for assumptions, research, insights, context, instruments
+   ├─ records.ts: the validated write path for assumptions, research, insights, context, instruments,
+   │    the capture list
    │    (in-app jobs · POST /api/records · npm run records)
    ├─ JobRunner (agents/) ───► claude CLI, locked down, one job at a time; state in the work area
    │    ├─ research-instrument · research-provider · refresh-assumptions   (web tools, public inputs)
@@ -25,7 +26,7 @@ Hono server  (Node 24, tsx; 127.0.0.1:4750 live, 4760 in development)
         BalanceEngine · Coverage · estate · cashflow · spending (+ computed signals) · recurring
         params (per account and fund, from assumptions, research and statements) · model (pure
         projection, bands, retirement, fee drag) · projections · investments · allowances
-        selfassessment · monthly · health (+coverage, FSCS)
+        selfassessment · monthly · capture list · health (+coverage, FSCS)
 ```
 
 Source layout:

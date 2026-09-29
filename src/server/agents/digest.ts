@@ -84,7 +84,7 @@ export function buildDigest(store: Store, analytics: Analytics, opts: DigestOpti
     today: now,
     owner: {
       age: profile.dateOfBirth ? ageOn(profile.dateOfBirth, now) : null,
-      taxBand: profile.taxBand ?? null,
+      taxBand: { band: allow.taxBand.band, basis: allow.taxBand.basis },
       taxRegion: profile.taxRegion,
       retirementAge: profile.retirementAge,
       grossSalary: profile.grossSalary ?? null,

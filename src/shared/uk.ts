@@ -266,6 +266,46 @@ export function personalSavingsAllowance(ty: TaxYear, band: TaxBand | undefined)
   return taxYearParams(ty).personalSavingsAllowance[band ?? 'basic'];
 }
 
+export interface BandIncome {
+  /** Pay, pensions, self-employment profit and other income that is not savings or dividends. */
+  nonSavings: number;
+  /** Interest outside ISAs and pensions. */
+  savings: number;
+  /** Dividends outside ISAs and pensions. */
+  dividends: number;
+  /** Gross relief-at-source pension contributions plus gross Gift Aid: they widen the bands. */
+  bandExtension: number;
+}
+
+export interface TaxBandResult {
+  band: TaxBand;
+  total: number;
+  personalAllowance: number;
+  taxable: number;
+  /** Taxable income at which the higher and additional rates start, after any extension. */
+  higherFrom: number;
+  additionalFrom: number;
+}
+
+/**
+ * The highest income tax band any of a year's income reaches (England, Wales and Northern Ireland
+ * bands, which are also the bands savings and dividends use everywhere in the UK). The Personal
+ * Savings Allowance is set by this band. Whole pounds; FORMULAS.md §11.
+ */
+export function taxBandFor(ty: TaxYear, income: BandIncome): TaxBandResult {
+  const p = taxYearParams(ty);
+  const total = Math.max(0, income.nonSavings) + Math.max(0, income.savings) + Math.max(0, income.dividends);
+  const extension = Math.max(0, income.bandExtension);
+  const adjustedNet = total - extension;
+  const taper = Math.max(0, Math.floor((adjustedNet - p.personalAllowanceTaperThreshold) / 2));
+  const personalAllowance = Math.max(0, p.personalAllowance - taper);
+  const taxable = Math.max(0, total - personalAllowance);
+  const higherFrom = p.basicRateLimit + extension;
+  const additionalFrom = p.additionalRateThreshold + extension;
+  const band: TaxBand = taxable <= 0 ? 'none' : taxable <= higherFrom ? 'basic' : taxable <= additionalFrom ? 'higher' : 'additional';
+  return { band, total, personalAllowance, taxable, higherFrom, additionalFrom };
+}
+
 /** Normal minimum pension age on a date: 55, rising to 57 on 6 April 2028. */
 export function normalMinimumPensionAge(onDate: ISODate): number {
   return onDate >= '2028-04-06' ? 57 : 55;

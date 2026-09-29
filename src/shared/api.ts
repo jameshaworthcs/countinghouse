@@ -16,6 +16,7 @@ import type {
   Settings,
   Transaction,
 } from './schema';
+import type { TaxBand } from './uk';
 
 export interface Alert {
   id: string;
@@ -341,10 +342,29 @@ export interface AllowancesResponse {
     notes: string[];
     incomplete: string | null;
   };
-  /** `bandAssumed`: no tax band is set, so the basic-rate allowance stands in. */
-  savings: { interest: number; allowance: number; band: string; bandAssumed: boolean; remaining: number; lines: AllowanceLine[]; notes: string[]; incomplete: string | null };
+  /** The allowance follows the tax band worked out from the year's income (`taxBand`). */
+  savings: { interest: number; allowance: number; band: TaxBand; bandBasis: TaxBandEstimate['basis']; remaining: number; lines: AllowanceLine[]; notes: string[]; incomplete: string | null };
   dividends: { amount: number; allowance: number; remaining: number; lines: AllowanceLine[] };
+  taxBand: TaxBandEstimate;
   ruleNotes: string[];
+}
+
+/**
+ * The highest income tax band the year's income reaches, worked out from your data (FORMULAS.md §11).
+ * `basis`: `documents` when pay comes from P60 or payslip figures; `estimate` when it comes from
+ * your salary in Settings or last year's P60; `minimum` when no gross pay is known, so only the
+ * income found counts and the band may be higher.
+ */
+export interface TaxBandEstimate {
+  band: TaxBand;
+  basis: 'documents' | 'estimate' | 'minimum';
+  lines: { label: string; amount: number; kind: 'pay' | 'self-employment' | 'interest' | 'dividends' | 'extension' }[];
+  total: number;
+  personalAllowance: number;
+  taxable: number;
+  higherFrom: number;
+  additionalFrom: number;
+  notes: string[];
 }
 
 export interface SaSource {
@@ -454,6 +474,42 @@ export interface MonthlyChecklistResponse {
   items: MonthlyItem[];
   done: number;
   total: number;
+}
+
+export interface CaptureAskView {
+  id: string;
+  what: string;
+  how?: string;
+  why?: string;
+  /** `done` when your data shows it or you ticked it; `partial` when the data shows some of it. */
+  state: 'done' | 'partial' | 'todo';
+  /** The app ticks this ask off from your data; otherwise only you can. */
+  checkedByData: boolean;
+  tickedByYou: boolean;
+  /** What the data shows so far, e.g. which months are missing. */
+  progress?: string;
+}
+
+export interface CaptureItemView {
+  id: string;
+  title: string;
+  priority: 'high' | 'normal' | 'low';
+  note?: string;
+  accountId?: string;
+  institutionId?: string;
+  institutionName?: string;
+  asks: CaptureAskView[];
+  done: boolean;
+  skipped: boolean;
+}
+
+export interface CaptureResponse {
+  items: CaptureItemView[];
+  /** Asks on items you have not skipped, and how many are done. */
+  asks: number;
+  asksDone: number;
+  /** Items not skipped with something left to collect. */
+  open: number;
 }
 
 export interface DataHealthResponse {

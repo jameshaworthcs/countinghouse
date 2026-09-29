@@ -1,8 +1,9 @@
-import { ChevronRight, CircleCheck, FileImage, FileSpreadsheet, FileText, FolderInput, LoaderCircle, Sparkles, Trash2, TriangleAlert, Upload } from 'lucide-react';
-import { Link } from 'react-router';
-import type { ImportListResponse, MonthlyChecklistResponse, SystemResponse } from '../../shared/api';
+import { ChevronRight, CircleCheck, CircleDashed, FileImage, FileSpreadsheet, FileText, FolderInput, LoaderCircle, Sparkles, Trash2, TriangleAlert, Upload } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Link, useLocation } from 'react-router';
+import type { CaptureAskView, CaptureItemView, CaptureResponse, ImportListResponse, MonthlyChecklistResponse, SystemResponse } from '../../shared/api';
 import type { ImportRecord } from '../../shared/schema';
-import { Badge, Button, Callout, Card, EmptyState, Loading, PageHeader, StatusBadge, useToast } from '../components/ui';
+import { Badge, Button, Callout, Card, Checkbox, EmptyState, Loading, PageHeader, StatusBadge, useToast } from '../components/ui';
 import { DropZone, FilePickerButton } from '../components/Upload';
 import { api, useApi, useApiMutation } from '../lib/api';
 import { useAppData } from '../lib/data';
@@ -119,6 +120,120 @@ function EngineLine() {
   );
 }
 
+function CaptureAskRow({ itemId, ask }: { itemId: string; ask: CaptureAskView }) {
+  const tick = useApiMutation((done: boolean) => api(`/capture/${itemId}/asks/${ask.id}`, { method: 'PATCH', body: { done } }));
+  const byData = ask.state === 'done' && !ask.tickedByYou;
+  return (
+    <li className="flex items-start gap-2.5 py-1.5">
+      {byData ? (
+        <CircleCheck className="mt-0.5 size-4 shrink-0 text-good-ink" aria-label="Done: your data shows it" />
+      ) : (
+        <Checkbox className="mt-0.5" checked={ask.state === 'done'} disabled={tick.isPending} onChange={(v) => tick.mutate(v)} />
+      )}
+      <div className="min-w-0 flex-1 text-[13px]">
+        <div className={cn('text-ink', ask.state === 'done' && 'text-ink-3 line-through decoration-ink-3/40')}>{ask.what}</div>
+        {ask.state !== 'done' && ask.how && <div className="mt-0.5 text-[12.5px] text-ink-3">{ask.how}</div>}
+        {ask.state !== 'done' && ask.why && <div className="mt-0.5 text-[12.5px] text-ink-3">Why: {ask.why}</div>}
+        {ask.progress && <div className={cn('mt-0.5 text-[12px]', ask.state === 'partial' ? 'text-warn-ink' : 'text-ink-3')}>{ask.progress}</div>}
+        {ask.state !== 'done' && ask.checkedByData && <div className="mt-0.5 text-[11.5px] text-ink-3">Ticks itself once imported.</div>}
+      </div>
+    </li>
+  );
+}
+
+function CaptureItemRow({ item }: { item: CaptureItemView }) {
+  const skip = useApiMutation((skipped: boolean) => api(`/capture/${item.id}`, { method: 'PATCH', body: { skipped } }));
+  const left = item.asks.filter((a) => a.state !== 'done').length;
+  return (
+    <li className={cn('px-5 py-3.5', item.skipped && 'opacity-60')}>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        {item.done ? <CircleCheck className="size-4 shrink-0 text-good-ink" /> : <CircleDashed className="size-4 shrink-0 text-ink-3" />}
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            {item.accountId ? (
+              <Link to={`/accounts/${item.accountId}`} className="text-[14px] font-medium text-ink hover:underline">
+                {item.title}
+              </Link>
+            ) : (
+              <span className="text-[14px] font-medium text-ink">{item.title}</span>
+            )}
+            {item.priority === 'high' && !item.done && !item.skipped && <Badge tone="accent">first</Badge>}
+            {item.skipped && <Badge tone="muted">skipped</Badge>}
+            {!item.done && !item.skipped && <span className="text-[12px] text-ink-3">{plural(left, 'thing')} left</span>}
+          </div>
+          {item.note && !item.done && <div className="mt-0.5 text-[12.5px] text-ink-3">{item.note}</div>}
+        </div>
+        <div className="flex items-center gap-2">
+          {!item.done && !item.skipped && (
+            <FilePickerButton accountId={item.accountId} size="sm" icon={<Upload className="size-3.5" />}>
+              Upload
+            </FilePickerButton>
+          )}
+          {!item.done && (
+            <Button size="sm" variant="ghost" loading={skip.isPending} onClick={() => skip.mutate(!item.skipped)}>
+              {item.skipped ? 'Restore' : 'Skip'}
+            </Button>
+          )}
+        </div>
+      </div>
+      {!item.skipped && (
+        <ul className="mt-1.5 pl-6.5">
+          {item.asks.map((a) => (
+            <CaptureAskRow key={a.id} itemId={item.id} ask={a} />
+          ))}
+        </ul>
+      )}
+    </li>
+  );
+}
+
+/** What to collect from each provider for a big import; items come from data/capture.json. */
+function CaptureList() {
+  const q = useApi<CaptureResponse>(['capture'], '/capture');
+  const [showAll, setShowAll] = useState(false);
+  const location = useLocation();
+  const c = q.data;
+  const ready = Boolean(c?.items.length);
+  // The card renders after its data arrives, too late for the browser's own jump to #capture.
+  useEffect(() => {
+    if (ready && location.hash === '#capture') document.getElementById('capture')?.scrollIntoView({ block: 'start' });
+  }, [ready, location.hash]);
+  if (!c || !c.items.length) return null;
+  const open = c.items.filter((i) => !i.done && !i.skipped);
+  const rest = c.items.length - open.length;
+  const shown = showAll ? c.items : open;
+  return (
+    <Card
+      id="capture"
+      title="Capture list"
+      description={`${c.asksDone} of ${plural(c.asks, 'thing')} collected. Statements and valuations tick themselves once imported; tick the rest as you collect them.`}
+      padded={false}
+      actions={
+        rest > 0 ? (
+          <Button size="sm" variant="ghost" onClick={() => setShowAll(!showAll)}>
+            {showAll ? 'Hide done and skipped' : `Show done and skipped (${rest})`}
+          </Button>
+        ) : undefined
+      }
+    >
+      <div className="mx-5 mb-3 h-1.5 overflow-hidden rounded-full bg-panel-2" role="progressbar" aria-valuemin={0} aria-valuemax={c.asks} aria-valuenow={c.asksDone} aria-label="Collected">
+        <div className="h-full rounded-full bg-[var(--seq-5)]" style={{ width: `${c.asks ? (c.asksDone / c.asks) * 100 : 0}%` }} />
+      </div>
+      {shown.length ? (
+        <ul className="divide-y divide-line border-t border-line">
+          {shown.map((i) => (
+            <CaptureItemRow key={i.id} item={i} />
+          ))}
+        </ul>
+      ) : (
+        <div className="flex items-center gap-2 border-t border-line px-5 py-4 text-[13px] text-good-ink">
+          <CircleCheck className="size-4" /> Everything on the list is collected.
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function Monthly() {
   const q = useApi<MonthlyChecklistResponse>(['monthly'], '/monthly');
   const m = q.data;
@@ -186,6 +301,7 @@ export default function Import() {
             </ul>
           </Card>
         )}
+        <CaptureList />
         <Monthly />
         <Callout tone="neutral" title="Inbox folder" action={<FolderInput className="size-5 text-ink-3" />}>
           Files saved into <code className="rounded bg-panel px-1">{data.inboxDir}</code> are imported automatically. Point a Syncthing or cloud-sync folder that your phone saves screenshots to at it, and your monthly screenshots arrive here on their own.

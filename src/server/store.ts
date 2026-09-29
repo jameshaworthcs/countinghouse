@@ -21,6 +21,7 @@ import {
   ContextSchema,
   CsvProfileSchema,
   FigureSchema,
+  CaptureItemSchema,
   GoalSchema,
   HoldingsSnapshotSchema,
   ImportRecordSchema,
@@ -41,6 +42,7 @@ import {
   type ContextRecord,
   type CsvProfile,
   type Figure,
+  type CaptureItem,
   type Goal,
   type HoldingsSnapshot,
   type ImportRecord,
@@ -95,6 +97,7 @@ const ARRAY_FILES = {
   categories: { file: 'categories.json', key: 'categories', schema: CategorySchema },
   rules: { file: 'rules.json', key: 'rules', schema: RuleSchema },
   goals: { file: 'goals.json', key: 'goals', schema: GoalSchema },
+  capture: { file: 'capture.json', key: 'items', schema: CaptureItemSchema },
   csvProfiles: { file: 'csv-profiles.json', key: 'profiles', schema: CsvProfileSchema },
   instruments: { file: 'instruments.json', key: 'instruments', schema: InstrumentSchema },
 } as const;
@@ -117,6 +120,7 @@ interface State {
   categories: Category[];
   rules: Rule[];
   goals: Goal[];
+  capture: CaptureItem[];
   csvProfiles: CsvProfile[];
   instruments: Instrument[];
   /** Append-only: every version of every assumption, in file order. */
@@ -143,6 +147,7 @@ function emptyState(): State {
     categories: [],
     rules: [],
     goals: [],
+    capture: [],
     csvProfiles: [],
     instruments: [],
     assumptions: [],
@@ -502,6 +507,10 @@ export class Store extends EventEmitter {
   get goals(): Goal[] {
     return this.state.goals;
   }
+  /** The capture list: what to collect from each provider (docs/DATA_FORMAT.md). */
+  get capture(): CaptureItem[] {
+    return this.state.capture;
+  }
   get csvProfiles(): CsvProfile[] {
     return this.state.csvProfiles;
   }
@@ -631,6 +640,9 @@ export class Store extends EventEmitter {
   }
   setGoals(list: Goal[], message = 'goals: update'): Promise<void> {
     return this.setArray('goals', list, message);
+  }
+  setCapture(list: CaptureItem[], message = 'capture list: update'): Promise<void> {
+    return this.setArray('capture', list, message);
   }
   setCsvProfiles(list: CsvProfile[], message = 'csv profiles: update'): Promise<void> {
     return this.setArray('csvProfiles', list, message);

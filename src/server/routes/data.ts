@@ -1,4 +1,4 @@
-// CRUD over the data: accounts, balances, transactions, categories, rules, figures, goals,
+// CRUD over the data: accounts, balances, transactions, categories, rules, figures, goals, capture ticks,
 // profile and settings.
 
 import { Hono } from 'hono';
@@ -557,6 +557,32 @@ export function dataRoutes(ctx: AppContext): Hono {
     const stamp = nowISO();
     await store.setGoals(list.map((g) => ({ ...g, createdAt: g.createdAt ?? stamp, updatedAt: stamp })));
     return c.json(store.goals);
+  });
+
+  // ─── Capture list: your ticks and skips (items are written through records.ts) ─────────────────
+
+  app.patch('/capture/:id', async (c) => {
+    const body = await readJson(c, z.object({ skipped: z.boolean() }));
+    const item = store.capture.find((x) => x.id === c.req.param('id'));
+    if (!item) throw new StoreError('No such item on the capture list.', 404);
+    const { skippedAt: _s, ...rest } = item;
+    const next = { ...rest, ...(body.skipped ? { skippedAt: nowISO() } : {}), updatedAt: nowISO() };
+    await store.setCapture(store.capture.map((x) => (x.id === item.id ? next : x)), `capture list: ${body.skipped ? 'skip' : 'restore'} ${item.title}`);
+    return c.json({ ok: true });
+  });
+
+  app.patch('/capture/:id/asks/:askId', async (c) => {
+    const body = await readJson(c, z.object({ done: z.boolean() }));
+    const item = store.capture.find((x) => x.id === c.req.param('id'));
+    const ask = item?.asks.find((a) => a.id === c.req.param('askId'));
+    if (!item || !ask) throw new StoreError('No such item on the capture list.', 404);
+    const asks = item.asks.map((a) => {
+      if (a.id !== ask.id) return a;
+      const { doneAt: _d, ...rest } = a;
+      return body.done ? { ...rest, doneAt: nowISO() } : rest;
+    });
+    await store.setCapture(store.capture.map((x) => (x.id === item.id ? { ...item, asks, updatedAt: nowISO() } : x)), `capture list: ${body.done ? 'tick' : 'untick'} ${item.title}: ${ask.what}`);
+    return c.json({ ok: true });
   });
 
   // ─── Figures ─────────────────────────────────────────────────────────────────────────────────

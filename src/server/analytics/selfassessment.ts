@@ -9,7 +9,7 @@ import { formatMoney, fromMinor, toMinor } from '../../shared/money';
 import type { Figure, FigureKind } from '../../shared/schema';
 import { parseTaxYear, taxYearOf, taxYearParams, type TaxYear } from '../../shared/uk';
 import type { Store } from '../store';
-import { allowances, pensionTotals } from './allowances';
+import { allowances, giftAid, pensionTotals, reliefAtSource } from './allowances';
 
 export const SA_DISCLAIMER =
   'This page gathers figures from your own data to help you fill in your Self Assessment return. It is not tax advice and it can be incomplete or wrong: bank data shows net pay, may miss interest paid into accounts you have not imported, and cannot know which donations were Gift Aided. Check every figure against your P60, P11D, bank interest statements, pension and dividend statements before you submit. You are responsible for your return.';
@@ -146,21 +146,15 @@ export function selfAssessment(store: Store, label?: string): SelfAssessmentResp
 
   // ── Tax reliefs (SA100 TR 4) ──
   const pen = pensionTotals(store, ty);
-  const rasAccounts = store.accounts.filter((a) => a.type === 'sipp' || a.type === 'personal_pension' || a.pension?.method === 'relief_at_source');
-  const rasGross = rasAccounts.reduce((s, a) => {
-    const lines = pen.lines.filter((l) => l.accountId === a.id);
-    return s + lines.reduce((x, l) => x + toMinor(l.amount), 0);
-  }, 0);
-  const employerInRas = rasAccounts.reduce((s, a) => {
-    const emp = store.transactions(a.id).filter((t) => inYear(t.date, ty) && t.category === 'employer-contribution');
-    return s + emp.reduce((x, t) => x + toMinor(t.amount), 0);
-  }, 0);
-  const rasPersonalGross = fromMinor(rasGross - employerInRas);
-  const band = store.profile.taxBand;
-  const charityTx = store.transactions().filter((t) => inYear(t.date, ty) && t.category === 'charity' && t.amount < 0);
-  const giftAided = charityTx.filter((t) => t.tags?.some((tag) => tag.toLowerCase() === 'gift-aid'));
-  const giftFigures = figuresOf(store, ty, 'gift_aid_donation');
-  const giftTotal = fromMinor(-giftAided.reduce((s, t) => s + toMinor(t.amount), 0) + giftFigures.reduce((s, f) => s + toMinor(f.amount), 0));
+  const ras = reliefAtSource(store, ty, pen);
+  const rasAccounts = ras.accounts;
+  const rasPersonalGross = ras.personalGross;
+  const band = allow.taxBand.band;
+  const gift = giftAid(store, ty);
+  const charityTx = gift.charity;
+  const giftAided = gift.aided;
+  const giftFigures = gift.figures;
+  const giftTotal = gift.paid;
   const reliefs: SaItem[] = [
     {
       id: 'pension-ras',
@@ -269,7 +263,12 @@ export function selfAssessment(store: Store, label?: string): SelfAssessmentResp
     mayNeedToFile.push({ reason: 'Higher-rate relief on pension contributions', detail: 'Claim the extra relief on relief-at-source contributions via your return (or by contacting HMRC).' });
   }
   if (childBenefit.length) mayNeedToFile.push({ reason: 'Child Benefit received', detail: `You may owe the High Income Child Benefit Charge if your or your partner's income is over £${params.hicbc.threshold.toLocaleString('en-GB')}.` });
-  checklist.push({ id: 'band', done: Boolean(store.profile.taxBand), label: 'Tax band set in your profile', detail: 'Used for the Personal Savings Allowance and pension relief hints.' });
+  checklist.push({
+    id: 'band',
+    done: allow.taxBand.basis === 'documents',
+    label: `Tax band worked out from your pay (${allow.taxBand.band === 'none' ? 'no tax band' : `${allow.taxBand.band} rate`}${allow.taxBand.basis === 'documents' ? '' : allow.taxBand.basis === 'estimate' ? ', estimated' : ', at least'})`,
+    detail: 'Import your P60 so the band, the Personal Savings Allowance and the pension relief hints rest on your gross pay.',
+  });
 
   return {
     taxYear: {

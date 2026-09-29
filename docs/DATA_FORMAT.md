@@ -21,13 +21,14 @@ point at them with `"$schema"` so editors validate as you type.
 ```
 data/
   meta.json            format + version + base currency
-  profile.json         you: date of birth, tax band, region, salary, retirement age
+  profile.json         you: date of birth, region, salary, retirement age (the tax band is computed)
   settings.json        extraction engine/model, agents, git behaviour, stale threshold, FX rates
   institutions.json    { institutions: [...] }   banks, platforms, providers (+ FSCS group)
   accounts.json        { accounts: [...] }
   categories.json      { categories: [...] }     editable taxonomy (system ones drive calculations)
   rules.json           { rules: [...] }          your categorisation rules
   goals.json           { goals: [...] }
+  capture.json         { items: [...] }          what to collect from each provider (the capture list)
   csv-profiles.json    { profiles: [...] }       your saved CSV column mappings
   instruments.json     { instruments: [...] }    funds, ETFs and shares you hold
   assumptions.jsonl    every version of every modelling assumption (append-only)
@@ -270,6 +271,34 @@ One record per line, **append-only**, content-addressed (the same findings get t
 - `status` is one of `new` `interpreting` `proposed` `applied` `dismissed` `failed`.
 - `proposals` are records suggested from your words, each `{key, type: context|instrument, record,
   explanation, accepted?}`. Nothing is recorded until you accept it.
+
+## capture.json
+
+The capture list: what to collect from each provider for a big import. Items are written through
+`records.ts` (`npm run records`, type `capture`) with provenance. Writing an item with the same id
+replaces it but keeps what you ticked or skipped. It shows on the Import page, and on the Overview
+while anything is left.
+
+| Field | Type | Notes |
+|---|---|---|
+| `id`, `title` | slug, string | |
+| `accountId`, `institutionId` | slug? | The account the item is for; needed by `coverage` and `valuation` checks |
+| `priority` | `high` \| `normal` \| `low` | `high` shows as "first" |
+| `note` | string? | |
+| `asks` | array | Each has `id`, `what`, `how?`, `why?`, `check?`, `doneAt?` |
+| `skippedAt` | timestamp? | You chose not to collect it |
+| `provenance`, `createdAt`, `updatedAt` | | |
+
+`check` ticks an ask off from the data:
+
+- `{type: "coverage", from, to?}`: the account's imported statements cover the period. `to`
+  defaults to 35 days ago. Gaps of up to 4 days are ignored, and the period is clipped to the
+  account's opening and closing dates.
+- `{type: "valuation", since, holdings?}`: a balance that is not approximate, dated on or after
+  `since`, plus a holdings snapshot when `holdings` is true.
+- `{type: "figures", kinds, taxYear}`: a tax figure of one of those kinds for that year.
+
+An ask without a check is ticked by you (`doneAt`). Agents cannot set `doneAt` or `skippedAt`.
 
 ## Versions
 

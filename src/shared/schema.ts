@@ -512,9 +512,9 @@ export const ProfileSchema = z.object({
   /** Drives LISA age limits, cash-ISA cap exemption at 65 and pension access age. */
   dateOfBirth: ISODateSchema.optional(),
   taxRegion: z.enum(['england', 'wales', 'scotland', 'northern-ireland']).default('england'),
-  /** Highest income tax band you pay; drives the Personal Savings Allowance. */
-  taxBand: z.enum(['none', 'basic', 'higher', 'additional']).optional(),
-  /** Gross annual salary, optional; used for savings rate and pension headroom hints. */
+  // Format v2 files may still carry `taxBand`: it is now worked out from your income (FORMULAS.md
+  // §11) and is dropped when the profile is next saved.
+  /** Gross annual salary, optional: estimates your tax band before your P60 arrives, and pension headroom hints. */
   grossSalary: MoneySchema.optional(),
   /** When you plan to stop work: drives the retirement outlook. */
   retirementAge: z.number().int().min(50).max(80).default(67),
@@ -1328,6 +1328,58 @@ export const NoteSchema = z.object({
 });
 export type Note = z.infer<typeof NoteSchema>;
 
+// ─── Capture list ────────────────────────────────────────────────────────────────────────────────
+//
+// What to collect from each provider for a big import: which statements, screenshots and
+// documents, and why. The app ticks an ask off when the data shows it (`check`); you tick the rest.
+
+export const CaptureCheckSchema = z.discriminatedUnion('type', [
+  /** The account's imported statements cover `from`–`to` (to: about a month ago when omitted). */
+  z.object({ type: z.literal('coverage'), from: ISODateSchema, to: ISODateSchema.optional() }),
+  /** A balance or valuation that is not approximate, dated on or after `since`; with a holdings snapshot too when `holdings`. */
+  z.object({ type: z.literal('valuation'), since: ISODateSchema, holdings: z.boolean().default(false) }),
+  /** Tax figures of one of these kinds for the tax year (e.g. `gross_pay` from a P60). */
+  z.object({
+    type: z.literal('figures'),
+    kinds: z.array(z.enum(FIGURE_KINDS)).min(1),
+    taxYear: z.string().regex(/^\d{4}\/\d{2}$/),
+  }),
+]);
+export type CaptureCheck = z.infer<typeof CaptureCheckSchema>;
+
+export const CaptureAskSchema = z.object({
+  /** Unique within its item. */
+  id: SlugSchema,
+  /** What to capture, in a few words: "Statements from 6 April 2025 to now". */
+  what: z.string().min(1),
+  /** Where to find it, and in what form. */
+  how: z.string().optional(),
+  /** What the app does with it. */
+  why: z.string().optional(),
+  check: CaptureCheckSchema.optional(),
+  /** When you ticked it off yourself. */
+  doneAt: TimestampSchema.optional(),
+});
+export type CaptureAsk = z.infer<typeof CaptureAskSchema>;
+
+export const CaptureItemSchema = z.object({
+  id: SlugSchema,
+  /** The account or document to collect: "Santander current account", "P60 from your employer". */
+  title: z.string().min(1),
+  accountId: SlugSchema.optional(),
+  institutionId: SlugSchema.optional(),
+  priority: z.enum(['high', 'normal', 'low']).default('normal'),
+  /** One line of context for the whole item. */
+  note: z.string().optional(),
+  asks: z.array(CaptureAskSchema).min(1),
+  /** When you decided not to collect it. */
+  skippedAt: TimestampSchema.optional(),
+  provenance: ProvenanceSchema,
+  createdAt: TimestampSchema,
+  updatedAt: TimestampSchema,
+});
+export type CaptureItem = z.infer<typeof CaptureItemSchema>;
+
 // ─── On-disk file envelopes ──────────────────────────────────────────────────────────────────────
 
 export const AccountsFileSchema = z.object({ accounts: z.array(AccountSchema) });
@@ -1336,4 +1388,5 @@ export const InstitutionsFileSchema = z.object({ institutions: z.array(Instituti
 export const CategoriesFileSchema = z.object({ categories: z.array(CategorySchema) });
 export const RulesFileSchema = z.object({ rules: z.array(RuleSchema) });
 export const GoalsFileSchema = z.object({ goals: z.array(GoalSchema) });
+export const CaptureFileSchema = z.object({ items: z.array(CaptureItemSchema) });
 export const CsvProfilesFileSchema = z.object({ profiles: z.array(CsvProfileSchema) });

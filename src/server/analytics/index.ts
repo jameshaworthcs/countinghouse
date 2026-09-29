@@ -15,6 +15,7 @@ import { Coverage } from './coverage';
 import { accountSummary, estateKnownOn, estateOn, estateSeries, firstDataDate } from './estate';
 import { dataHealth } from './health';
 import { investments } from './investments';
+import { captureList } from './capture';
 import { monthlyChecklist } from './monthly';
 import { projections, type ProjectionOptions } from './projections';
 import { detectRecurring } from './recurring';
@@ -91,6 +92,10 @@ export class Analytics {
     return this.cached(`monthly:${today()}`, () => monthlyChecklist(this.store, this.engine));
   }
 
+  capture() {
+    return this.cached(`capture:${today()}`, () => captureList(this.store));
+  }
+
   health() {
     return this.cached(`health:${today()}`, () => ({ ...dataHealth(this.store, this.engine), coverage: this.coverage() }));
   }
@@ -140,9 +145,24 @@ export class Analytics {
         alerts.push({ id: 'review', level: 'info', title: `${importCounts.review} import${importCounts.review > 1 ? 's' : ''} waiting for review`, action: { label: 'Review', href: '/import' } });
       }
       if (importCounts.failed) alerts.push({ id: 'failed', level: 'warning', title: `${importCounts.failed} import${importCounts.failed > 1 ? 's' : ''} failed`, action: { label: 'See why', href: '/import' } });
+      // While the capture list has open items it is the to-do list, and the monthly nudge would name the same accounts.
+      const capture = this.capture();
+      if (capture.open) {
+        const next = capture.items.filter((i) => !i.skipped && !i.done);
+        alerts.push({
+          id: 'capture',
+          level: 'info',
+          title: `Capture list: ${capture.asksDone} of ${capture.asks} things collected`,
+          detail: `Next: ${next
+            .slice(0, 4)
+            .map((i) => i.title)
+            .join(', ')}${next.length > 4 ? ` and ${next.length - 4} more` : ''}`,
+          action: { label: 'Open the list', href: '/import#capture' },
+        });
+      }
       const monthly = this.monthly();
       const due = monthly.items.filter((i) => i.due);
-      if (due.length && this.store.accounts.length) {
+      if (due.length && this.store.accounts.length && !capture.open) {
         alerts.push({
           id: 'monthly',
           level: 'info',
@@ -166,10 +186,8 @@ export class Analytics {
           detail: f.over ? `Above the ${formatMoney(f.limit, { decimals: 0 })} FSCS limit for one banking licence.` : `Close to the ${formatMoney(f.limit, { decimals: 0 })} FSCS limit for one banking licence.`,
         });
       }
-      if (!this.store.profile.dateOfBirth || !this.store.profile.taxBand) {
-        const missing = [!this.store.profile.dateOfBirth && 'date of birth', !this.store.profile.taxBand && 'tax band'].filter(Boolean);
-        const uses = [!this.store.profile.dateOfBirth && 'LISA, cash-ISA and pension-age rules', !this.store.profile.taxBand && 'your savings allowance and tax figures'].filter(Boolean);
-        alerts.push({ id: 'profile', level: 'info', title: `Add your ${missing.join(' and ')}`, detail: `${missing.length > 1 ? 'They drive' : 'It drives'} ${uses.join(', and ')}.`, action: { label: 'Settings', href: '/settings' } });
+      if (!this.store.profile.dateOfBirth) {
+        alerts.push({ id: 'profile', level: 'info', title: 'Add your date of birth', detail: 'It drives LISA, cash-ISA and pension-age rules.', action: { label: 'Settings', href: '/settings' } });
       }
       const daysLeft = daysLeftInTaxYear(now);
       if (daysLeft <= 60) {

@@ -13,7 +13,7 @@ import { InsightsPanel } from '../components/Intel';
 import { DropZone } from '../components/Upload';
 import { qs, useApi } from '../lib/api';
 import { useAppData } from '../lib/data';
-import { cn, formatMonth, money, pct, timeAgo } from '../lib/format';
+import { bandLabel, cn, formatMonth, money, pct, timeAgo } from '../lib/format';
 import { accessColor, wrapperColor } from '../lib/groups';
 
 type Range = '6m' | '1y' | '3y' | 'all';
@@ -166,7 +166,7 @@ function TaxPanel() {
         <Meter label="ISA allowance" used={a.isa.used} limit={a.isa.allowance} atLeast={a.isa.incomplete !== null} />
         {a.lisa && <Meter label="Lifetime ISA" used={a.lisa.contributed} limit={a.lisa.allowance} atLeast={a.lisa.incomplete !== null} sub={<>Bonus <Money value={a.lisa.bonusExpected} decimals={0} /></>} />}
         <Meter label="Pension annual allowance" used={a.pension.total} limit={a.pension.annualAllowance} atLeast={a.pension.incomplete !== null} sub="Incl. employer and tax relief" />
-        <Meter label="Savings interest vs allowance" used={a.savings.interest} limit={a.savings.allowance} atLeast={a.savings.incomplete !== null} overLabel="Taxable" sub={`${a.savings.band} rate PSA${a.savings.bandAssumed ? ' (assumed)' : ''}`} />
+        <Meter label="Savings interest vs allowance" used={a.savings.interest} limit={a.savings.allowance} atLeast={a.savings.incomplete !== null} overLabel="Taxable" sub={`Tax band: ${bandLabel({ band: a.savings.band, basis: a.savings.bandBasis })}`} />
       </div>
     </Card>
   );

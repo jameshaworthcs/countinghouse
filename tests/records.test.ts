@@ -182,6 +182,105 @@ describe('the validated write path', () => {
   });
 });
 
+describe('the capture list', () => {
+  let dir: string;
+  let store: Store;
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), 'finance-capture-'));
+    store = await Store.open(path.join(dir, 'data'));
+    const acct = (id: string, type: 'current' | 'stocks_isa') => ({ id, name: id, type, currency: 'GBP', status: 'open' as const, aliases: [], includeInNetWorth: true, createdAt: stamp(0), updatedAt: stamp(0) });
+    await store.setAccounts([acct('bank', 'current'), acct('isa', 'stocks_isa')]);
+  });
+  afterEach(async () => {
+    store.stopWatching();
+    await rm(dir, { recursive: true, force: true });
+  });
+  const session = { setBy: 'agent' as const, session: 'claude-code' };
+  const batch = (asks: string[] = ['statements', 'letter']): RecordBatch => ({
+    provenance: session,
+    supersede: false,
+    records: [
+      {
+        type: 'capture',
+        record: {
+          id: 'bank',
+          title: 'Bank',
+          accountId: 'bank',
+          priority: 'high',
+          asks: [
+            { id: 'statements', what: 'Statements from 6 April 2026', check: { type: 'coverage' as const, from: '2026-04-06' } },
+            { id: 'letter', what: 'The overdraft letter' },
+          ].filter((a) => asks.includes(a.id)),
+        },
+      },
+      { type: 'capture', record: { id: 'isa', title: 'ISA', accountId: 'isa', priority: 'normal', asks: [{ id: 'value', what: 'Value and holdings', check: { type: 'valuation', since: '2026-09-01', holdings: true } }] } },
+      { type: 'capture', record: { id: 'p60', title: 'P60', priority: 'normal', asks: [{ id: 'p60', what: 'P60 for 2025/26', check: { type: 'figures', kinds: ['gross_pay'], taxYear: '2025/26' } }] } },
+    ],
+  });
+
+  it('rejects asks that check an account the item does not name, and unknown accounts', async () => {
+    const bad = batch();
+    bad.records.push({ type: 'capture', record: { id: 'x', title: 'X', priority: 'normal', asks: [{ id: 'a', what: 'a', check: { type: 'coverage', from: '2026-01-01' } }] } });
+    bad.records.push({ type: 'capture', record: { id: 'y', title: 'Y', accountId: 'nope', priority: 'normal', asks: [{ id: 'a', what: 'a' }, { id: 'a', what: 'b' }] } });
+    await expect(applyRecords(store, bad)).rejects.toThrow(/needs an accountId/);
+    await expect(applyRecords(store, bad)).rejects.toThrow(/unknown account "nope"/);
+    await expect(applyRecords(store, bad)).rejects.toThrow(/ask ids must be unique/);
+    // Agents cannot tick asks off or skip items: those fields are not part of their input.
+    const ticked = batch() as unknown as { records: { record: Record<string, unknown> & { asks: Record<string, unknown>[] } }[] };
+    ticked.records[0]!.record.asks[1]!.doneAt = stamp(1);
+    ticked.records[0]!.record.skippedAt = stamp(1);
+    await applyRecords(store, ticked);
+    expect(store.capture[0]!.asks[1]!.doneAt).toBeUndefined();
+    expect(store.capture[0]!.skippedAt).toBeUndefined();
+  });
+
+  it('ticks asks off from the data, and keeps your ticks when an agent rewrites the item', async () => {
+    await applyRecords(store, batch());
+    const { captureList } = await import('../src/server/analytics/capture');
+    let list = captureList(store, '2026-09-29');
+    expect(list).toMatchObject({ asks: 4, asksDone: 0, open: 3 });
+    expect(list.items[0]).toMatchObject({ id: 'bank', priority: 'high', done: false });
+
+    const tx = (date: string, n: number) => ({ id: `tx_${n.toString(16).padStart(16, '0')}`, accountId: 'bank', date, amount: -1, currency: 'GBP', description: 'x', source: {}, createdAt: stamp(0) });
+    await store.addTransactions([tx('2026-04-06', 1), tx('2026-05-31', 2)], 'test');
+    // "Up to now" is up to about a month ago (25 August), so rows to 31 May cover only part of it.
+    list = captureList(store, '2026-09-29');
+    expect(list.items.find((i) => i.id === 'bank')!.asks[0]).toMatchObject({ state: 'partial', progress: 'Missing 1 Jun 2026 to 25 Aug 2026.' });
+    await store.addTransactions([tx('2026-07-01', 3), tx('2026-08-28', 4)], 'test');
+    // The span of rows stands in for statement periods here (no import records), so it is covered through.
+    expect(captureList(store, '2026-09-29').items.find((i) => i.id === 'bank')!.asks[0]!.state).toBe('done');
+
+    // A valuation that is only approximate does not count; a real one without holdings is partial.
+    await store.addBalances([{ id: 'bal_0000000000000001', accountId: 'isa', date: '2026-09-10', balance: 1000, currency: 'GBP', kind: 'manual', approximate: true, source: {}, createdAt: stamp(0) }], 'test');
+    expect(captureList(store, '2026-09-29').items.find((i) => i.id === 'isa')!.asks[0]!.state).toBe('todo');
+    await store.addBalances([{ id: 'bal_0000000000000002', accountId: 'isa', date: '2026-09-12', balance: 1000, currency: 'GBP', kind: 'screenshot', source: {}, createdAt: stamp(0) }], 'test');
+    expect(captureList(store, '2026-09-29').items.find((i) => i.id === 'isa')!.asks[0]!.state).toBe('partial');
+
+    await store.addFigures([{ id: 'fig_0000000000000001', kind: 'gross_pay', label: 'Pay', amount: 30000, currency: 'GBP', taxYear: '2025/26', source: {}, createdAt: stamp(0) }], 'test');
+    expect(captureList(store, '2026-09-29').items.find((i) => i.id === 'p60')!.done).toBe(true);
+
+    // You tick the letter; a rewrite by an agent keeps it, and an ask it drops goes away.
+    const item = store.capture.find((i) => i.id === 'bank')!;
+    await store.setCapture(store.capture.map((i) => (i.id === 'bank' ? { ...item, asks: item.asks.map((a) => (a.id === 'letter' ? { ...a, doneAt: stamp(2) } : a)) } : i)));
+    expect(captureList(store, '2026-09-29').items.find((i) => i.id === 'bank')).toMatchObject({ done: true });
+    await applyRecords(store, batch());
+    expect(store.capture.find((i) => i.id === 'bank')!.asks.find((a) => a.id === 'letter')!.doneAt).toBe(stamp(2));
+    expect(store.capture).toHaveLength(3);
+    await applyRecords(store, batch(['statements']));
+    expect(store.capture.find((i) => i.id === 'bank')!.asks.map((a) => a.id)).toEqual(['statements']);
+  });
+
+  it('finds a gap between statement periods', async () => {
+    await applyRecords(store, batch());
+    const { captureList } = await import('../src/server/analytics/capture');
+    const summary = (from: string, to: string, n: number) => ({ id: `imp_${n}`, sections: [{ accountId: 'bank', from, to }] });
+    (store as unknown as { state: { imports: unknown[] } }).state.imports.push(summary('2026-04-05', '2026-05-04', 1), summary('2026-06-05', '2026-09-04', 2));
+    const ask = captureList(store, '2026-09-29').items.find((i) => i.id === 'bank')!.asks[0]!;
+    expect(ask.state).toBe('partial');
+    expect(ask.progress).toMatch(/Missing 5 May 2026 to 4 Jun 2026/);
+  });
+});
+
 describe('format v2 migration', () => {
   let dir: string;
   beforeEach(async () => {

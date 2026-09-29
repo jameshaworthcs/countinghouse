@@ -1,5 +1,5 @@
 // The validated write path for agent-maintained records: assumptions, research, insights, owner
-// context and instruments. In-app jobs, the /api/records endpoint and `npm run records` (for Claude
+// context, instruments and the capture list. In-app jobs, the /api/records endpoint and `npm run records` (for Claude
 // Code sessions) all go through `applyRecords`, so every record meets the same Zod schemas plus the
 // checks a schema cannot express: known keys and scopes, references that resolve, evidence that
 // exists, and agents never writing as the owner. See docs/AGENTS.md.
@@ -8,6 +8,8 @@ import { z } from 'zod';
 import { assumptionProblems, scopeKey } from '../shared/assumptions';
 import {
   AssumptionSchema,
+  CaptureAskSchema,
+  CaptureItemSchema,
   ContextSchema,
   InsightSchema,
   InstrumentSchema,
@@ -16,6 +18,7 @@ import {
   ResearchSchema,
   type Assumption,
   type AssumptionScope,
+  type CaptureItem,
   type ContextRecord,
   type Insight,
   type Instrument,
@@ -31,6 +34,10 @@ export const AssumptionInputSchema = AssumptionSchema.omit(omitAssigned);
 export const InsightInputSchema = InsightSchema.omit({ ...omitAssigned, status: true, feedback: true });
 export const ContextInputSchema = ContextSchema.omit({ id: true, createdAt: true, updatedAt: true });
 export const InstrumentInputSchema = InstrumentSchema.omit({ createdAt: true, updatedAt: true }).extend({ id: InstrumentSchema.shape.id.optional() });
+/** Ticking an ask off and skipping an item are the owner's, so an input carries neither. */
+export const CaptureInputSchema = CaptureItemSchema.omit({ createdAt: true, updatedAt: true, provenance: true, skippedAt: true }).extend({
+  asks: z.array(CaptureAskSchema.omit({ doneAt: true })).min(1),
+});
 
 export const RecordInputSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('assumption'), record: AssumptionInputSchema }),
@@ -38,6 +45,7 @@ export const RecordInputSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('insight'), record: InsightInputSchema }),
   z.object({ type: z.literal('context'), record: ContextInputSchema }),
   z.object({ type: z.literal('instrument'), record: InstrumentInputSchema }),
+  z.object({ type: z.literal('capture'), record: CaptureInputSchema }),
 ]);
 export type RecordInput = z.infer<typeof RecordInputSchema>;
 
@@ -155,6 +163,18 @@ export function checkRecords(store: Store, batch: RecordBatch): string[] {
         for (const id of d.accountIds ?? []) ref(where, 'account', id, accounts);
         break;
       }
+      case 'capture': {
+        const r = input.record;
+        ref(where, 'account', r.accountId, accounts);
+        ref(where, 'institution', r.institutionId, institutions);
+        const ids = r.asks.map((a) => a.id);
+        if (new Set(ids).size !== ids.length) problems.push(`${where}: ask ids must be unique within the item`);
+        for (const a of r.asks) {
+          if ((a.check?.type === 'coverage' || a.check?.type === 'valuation') && !r.accountId) problems.push(`${where}: ask "${a.id}" checks an account's data, so the item needs an accountId`);
+          if (a.check?.type === 'coverage' && a.check.to && a.check.to < a.check.from) problems.push(`${where}: ask "${a.id}" coverage ends before it starts`);
+        }
+        break;
+      }
       case 'instrument': {
         const r = input.record;
         if (r.isin) {
@@ -208,6 +228,30 @@ export async function applyRecords(store: Store, input: unknown): Promise<ApplyR
       result.written.push({ type: 'instrument', id });
     }
     await store.setInstruments(list, `instruments: ${instrumentInputs.length} by ${who}`);
+  }
+
+  // Capture items are keyed by id: a rewrite replaces the item but keeps what the owner ticked or skipped.
+  const captureInputs = batch.records.filter((r): r is Extract<RecordInput, { type: 'capture' }> => r.type === 'capture');
+  if (captureInputs.length) {
+    const list = [...store.capture];
+    for (const { record } of captureInputs) {
+      const existing = list.find((x) => x.id === record.id);
+      const next: CaptureItem = CaptureItemSchema.parse({
+        ...record,
+        asks: record.asks.map((a) => {
+          const doneAt = existing?.asks.find((x) => x.id === a.id)?.doneAt;
+          return doneAt ? { ...a, doneAt } : a;
+        }),
+        ...(existing?.skippedAt ? { skippedAt: existing.skippedAt } : {}),
+        provenance,
+        createdAt: existing?.createdAt ?? now,
+        updatedAt: now,
+      });
+      if (existing) list[list.indexOf(existing)] = next;
+      else list.push(next);
+      result.written.push({ type: 'capture', id: record.id });
+    }
+    await store.setCapture(list, `capture list: ${captureInputs.length} by ${who}`);
   }
 
   const assumptions: Assumption[] = [];

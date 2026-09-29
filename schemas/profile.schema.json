@@ -22,15 +22,6 @@
         "northern-ireland"
       ]
     },
-    "taxBand": {
-      "type": "string",
-      "enum": [
-        "none",
-        "basic",
-        "higher",
-        "additional"
-      ]
-    },
     "grossSalary": {
       "type": "number",
       "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."

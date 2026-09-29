@@ -19,6 +19,7 @@ import { WorkArea } from '../src/server/ingest/workarea';
 import { Store } from '../src/server/store';
 import { addDays, addMonths, endOfMonth, startOfMonth, today, weekday } from '../src/shared/dates';
 import { roundMoney } from '../src/shared/money';
+import { taxYearOf } from '../src/shared/uk';
 import type { Account, BalanceSnapshot, Figure, HoldingsSnapshot, Transaction } from '../src/shared/schema';
 
 const args = new Set(process.argv.slice(2));
@@ -80,7 +81,7 @@ async function main() {
   await rm(DIR, { recursive: true, force: true });
   await rm(WORK, { recursive: true, force: true });
   const store = await Store.open(DIR);
-  await store.setProfile({ name: 'Jo Bloggs', dateOfBirth: '1990-05-14', taxRegion: 'england', taxBand: 'higher', grossSalary: 115_000, retirementAge: 67 });
+  await store.setProfile({ name: 'Jo Bloggs', dateOfBirth: '1990-05-14', taxRegion: 'england', grossSalary: 115_000, retirementAge: 67 });
   // Demo data never starts agent jobs on its own (they would spend your Claude plan).
   await store.setSettings({ ...store.settings, agents: { ...store.settings.agents, enabled: false } });
   for (const inst of [
@@ -405,6 +406,19 @@ async function demoIntelligence(store: Store) {
   });
   const stampNote = nowISO();
   await store.upsertRecords('notes', [{ id: 'note_00000000000000d1', text: 'We are buying a flat in 2028 and I want six months of spending as an emergency fund (demo).', status: 'applied', proposals: [], createdAt: stampNote, updatedAt: stampNote }], 'demo: note');
+
+  // A capture list: one item ticked off by the data, one partly there, and documents to tick by hand.
+  const lastYear = taxYearOf(addMonths(END, -12)).label;
+  await applyRecords(store, {
+    provenance: demo,
+    supersede: false,
+    records: [
+      { type: 'capture', record: { id: 'p60', title: 'Pay from Acme Analytics', priority: 'high', note: 'Settles your tax band (demo).', asks: [{ id: 'p60', what: `P60 for ${lastYear}`, how: 'Payroll portal PDF, or a photo.', why: 'Gross pay and tax for your return.', check: { type: 'figures', kinds: ['gross_pay'], taxYear: lastYear } }, { id: 'payslip', what: 'Your latest payslip', how: 'Payroll portal PDF.' }] } },
+      { type: 'capture', record: { id: 'current-account', title: 'Example Bank current account', accountId: 'current-account', priority: 'high', asks: [{ id: 'statements', what: 'Transactions from three years ago to now', how: 'Your bank’s app → the account → Export transactions → CSV.', why: 'Spending history (demo).', check: { type: 'coverage', from: addMonths(START, -12) } }] } },
+      { type: 'capture', record: { id: 'stocks-isa', title: 'Example Invest Stocks & Shares ISA', accountId: 'stocks-isa', priority: 'normal', asks: [{ id: 'value', what: 'Screenshot of the value and holdings this month', check: { type: 'valuation', since: startOfMonth(END), holdings: true } }] } },
+      { type: 'capture', record: { id: 'student-loan', title: 'Student loan statement', priority: 'low', asks: [{ id: 'balance', what: 'Screenshot of the balance and repayments', how: 'gov.uk → sign in to manage your student loan.' }] } },
+    ],
+  });
 }
 
 await main();

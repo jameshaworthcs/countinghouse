@@ -11,6 +11,7 @@ import {
   pensionAccessDate,
   pensionAnnualAllowance,
   personalSavingsAllowance,
+  taxBandFor,
   taxYear,
   taxYearOf,
   taxYearParams,
@@ -130,6 +131,31 @@ describe('UK rules', () => {
     expect(fscsDepositLimit('2025-12-01')).toBe(120_000);
     expect(lisaPenaltyAdjustedValue(10_000, taxYear(2026))).toBe(7_500);
     expect(ageOn('1990-09-29', '2026-09-28')).toBe(35);
+  });
+});
+
+describe('tax band', () => {
+  const band = (nonSavings: number, savings = 0, dividends = 0, bandExtension = 0, year = 2026) => taxBandFor(taxYear(year), { nonSavings, savings, dividends, bandExtension });
+
+  it('places income in the band its highest pound reaches', () => {
+    expect(band(11_000).band).toBe('none');
+    expect(band(30_000)).toMatchObject({ band: 'basic', personalAllowance: 12_570, taxable: 17_430, higherFrom: 37_700 });
+    // Interest and dividends count: 45,000 + 6,000 is 38,430 taxable, over the 37,700 basic band.
+    expect(band(45_000, 6_000).band).toBe('higher');
+    expect(band(12_570, 0, 40_000).band).toBe('higher');
+  });
+
+  it('widens the bands by relief-at-source pension contributions and Gift Aid', () => {
+    expect(band(45_000, 6_000, 0, 1_000)).toMatchObject({ band: 'basic', higherFrom: 38_700, additionalFrom: 126_140 });
+  });
+
+  it('tapers the personal allowance above £100,000 and uses each year’s thresholds', () => {
+    expect(band(110_000)).toMatchObject({ band: 'higher', personalAllowance: 7_570, taxable: 102_430 });
+    expect(band(130_000)).toMatchObject({ band: 'additional', personalAllowance: 0 });
+    // Pension contributions lower adjusted net income, restoring allowance.
+    expect(band(110_000, 0, 0, 10_000).personalAllowance).toBe(12_570);
+    // Until 2022/23 the additional rate started at £150,000.
+    expect(band(140_000, 0, 0, 0, 2022).band).toBe('higher');
   });
 });
 

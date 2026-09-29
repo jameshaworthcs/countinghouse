@@ -1,14 +1,14 @@
 import { ChevronRight, CircleCheck, CircleDashed, Download, FileWarning, Printer, TriangleAlert } from 'lucide-react';
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
-import type { AllowanceLine, AllowancesResponse, SaItem, SelfAssessmentResponse } from '../../shared/api';
+import type { AllowanceLine, AllowancesResponse, SaItem, SelfAssessmentResponse, TaxBandEstimate } from '../../shared/api';
 import { formatDate } from '../../shared/dates';
 import { Meter } from '../components/charts/bars';
 import { InsightsPanel } from '../components/Intel';
 import { Badge, Button, Callout, Card, KeyValue, Loading, Money, PageHeader, Select, StatusBadge, Tabs, tableClasses } from '../components/ui';
 import { qs, useApi } from '../lib/api';
 import { useAppData } from '../lib/data';
-import { cn, money } from '../lib/format';
+import { bandLabel, cn, money } from '../lib/format';
 
 function Lines({ lines }: { lines: AllowanceLine[] }) {
   const { accountName } = useAppData();
@@ -59,6 +59,53 @@ function Incomplete({ note }: { note: string | null }) {
     <div className="mt-2 flex items-start gap-1.5 rounded-lg bg-warn-soft px-2.5 py-2 text-[12px] text-ink-2">
       <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-warn-ink" aria-hidden />
       <span>{note}</span>
+    </div>
+  );
+}
+
+/** How the tax band was worked out: the year's income, the allowance and where the bands start. */
+function TaxBandBreakdown({ t }: { t: TaxBandEstimate }) {
+  return (
+    <div className="mt-4 border-t border-line pt-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <div className="text-[13px] font-medium text-ink">Your tax band: {bandLabel(t)}</div>
+        <Badge tone="muted">{t.basis === 'documents' ? 'from your P60 and payslips' : t.basis === 'estimate' ? 'estimate' : 'minimum'}</Badge>
+      </div>
+      <p className="mt-1 text-[12.5px] text-ink-3">Worked out from the income in your data. It sets the Personal Savings Allowance.</p>
+      <details className="mt-2 text-[12.5px]">
+        <summary className="cursor-pointer text-ink-3 hover:text-ink">How it is worked out</summary>
+        <table className={cn(tableClasses.table, 'mt-1')}>
+          <tbody>
+            {t.lines.map((l) => (
+              <tr key={l.label}>
+                <td className="py-1 pr-2 text-ink-2">{l.label}</td>
+                <td className="py-1 text-right">
+                  <Money value={l.amount} className="tabular" />
+                </td>
+              </tr>
+            ))}
+            <tr>
+              <td className="py-1 pr-2 text-ink-2">Personal allowance</td>
+              <td className="py-1 text-right">
+                <Money value={t.personalAllowance} decimals={0} className="tabular" />
+              </td>
+            </tr>
+            <tr>
+              <td className="py-1 pr-2 font-medium text-ink">Taxable income</td>
+              <td className="py-1 text-right font-medium">
+                <Money value={t.taxable} decimals={0} className="tabular" />
+              </td>
+            </tr>
+            <tr>
+              <td className="py-1 pr-2 text-ink-3">Higher rate from / additional rate from</td>
+              <td className="py-1 text-right text-ink-3">
+                <Money value={t.higherFrom} decimals={0} className="tabular" /> / <Money value={t.additionalFrom} decimals={0} className="tabular" />
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </details>
+      <Notes notes={t.notes} />
     </div>
   );
 }
@@ -128,7 +175,7 @@ function Allowances({ a }: { a: AllowancesResponse }) {
         <Lines lines={a.pension.lines} />
         <Notes notes={a.pension.notes} />
       </Card>
-      <Card title="Savings interest" description={`Interest outside ISAs vs your Personal Savings Allowance (${a.savings.band} rate${a.savings.bandAssumed ? ', assumed' : ''})`}>
+      <Card title="Savings interest" description={`Interest outside ISAs vs your Personal Savings Allowance (${bandLabel(a.taxBand)})`}>
         <Meter label="Interest earned" used={a.savings.interest} limit={a.savings.allowance} atLeast={a.savings.incomplete !== null} overLabel="Taxable" />
         <Incomplete note={a.savings.incomplete} />
         <Lines lines={a.savings.lines} />
@@ -137,6 +184,7 @@ function Allowances({ a }: { a: AllowancesResponse }) {
           <Meter label="Dividends outside ISAs" used={a.dividends.amount} limit={a.dividends.allowance} overLabel="Taxable" />
           <Lines lines={a.dividends.lines} />
         </div>
+        <TaxBandBreakdown t={a.taxBand} />
       </Card>
       {a.ruleNotes.length > 0 && (
         <Callout tone="neutral" title="Rule changes around this tax year" className="lg:col-span-2">

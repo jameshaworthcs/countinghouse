@@ -1,7 +1,7 @@
 import { CircleAlert, CircleCheck, GitCommitHorizontal, Plus, RefreshCw, Trash2, Wand2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
-import type { DataHealthResponse, SystemResponse } from '../../shared/api';
+import type { AllowancesResponse, DataHealthResponse, SystemResponse } from '../../shared/api';
 import { formatDate, today } from '../../shared/dates';
 import { FIGURE_KINDS, type Category, type Figure, type Profile, type Rule, type Settings as SettingsT } from '../../shared/schema';
 import { taxYearOf } from '../../shared/uk';
@@ -10,9 +10,29 @@ import { CategorySelect } from '../components/TransactionList';
 import { Badge, Button, Callout, Card, Checkbox, Field, Input, KeyValue, Loading, Money, PageHeader, Select, StatusBadge, Switch, Tabs, tableClasses, useToast } from '../components/ui';
 import { api, useApi, useApiMutation } from '../lib/api';
 import { useAppData } from '../lib/data';
-import { cn, money, timeAgo } from '../lib/format';
+import { bandLabel, cn, money, timeAgo } from '../lib/format';
 
 type Section = 'profile' | 'extraction' | 'categories' | 'rules' | 'tax-documents' | 'data' | 'health';
+
+/** The tax band is computed, not set: show this year's and where it comes from. */
+function TaxBandLine() {
+  const q = useApi<AllowancesResponse>(['allowances', 'current'], '/allowances');
+  const t = q.data?.taxBand;
+  return (
+    <div className="flex min-h-9 flex-wrap items-center gap-2 text-[13.5px] text-ink">
+      {t ? (
+        <>
+          {bandLabel(t)}
+          <Link to="/tax" className="text-[12.5px] text-accent hover:underline">
+            How it is worked out
+          </Link>
+        </>
+      ) : (
+        <span className="text-ink-3">…</span>
+      )}
+    </div>
+  );
+}
 
 function ProfileForm() {
   const { data } = useAppData();
@@ -29,14 +49,8 @@ function ProfileForm() {
         <Field label="Date of birth">
           <Input type="date" value={p.dateOfBirth ?? ''} onChange={(e) => set({ dateOfBirth: e.target.value || undefined })} />
         </Field>
-        <Field label="Income tax band" hint="Your highest band this tax year">
-          <Select value={p.taxBand ?? ''} onChange={(e) => set({ taxBand: (e.target.value || undefined) as Profile['taxBand'] })}>
-            <option value="">Not set (basic assumed)</option>
-            <option value="none">Non-taxpayer</option>
-            <option value="basic">Basic rate</option>
-            <option value="higher">Higher rate</option>
-            <option value="additional">Additional rate</option>
-          </Select>
+        <Field label="Income tax band" hint="Worked out from your P60, salary, interest and dividends">
+          <TaxBandLine />
         </Field>
         <Field label="Where you pay tax">
           <Select value={p.taxRegion} onChange={(e) => set({ taxRegion: e.target.value as Profile['taxRegion'] })}>
@@ -46,7 +60,7 @@ function ProfileForm() {
             <option value="northern-ireland">Northern Ireland</option>
           </Select>
         </Field>
-        <Field label="Gross salary (optional)" hint="For pension taper warnings and savings-rate context">
+        <Field label="Gross salary (optional)" hint="Estimates your tax band until your P60 is imported; pension taper warnings">
           <Input value={p.grossSalary ?? ''} onChange={(e) => set({ grossSalary: e.target.value ? Number(e.target.value) : undefined })} inputMode="decimal" />
         </Field>
         <Field label="Retirement age">

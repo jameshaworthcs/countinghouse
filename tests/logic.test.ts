@@ -15,7 +15,7 @@ import { CategoryIndex, defaultCategories } from '../src/shared/categories';
 import { addDays } from '../src/shared/dates';
 import { Categoriser } from '../src/shared/categorise';
 import { cleanPayee, matchMerchant } from '../src/shared/merchants';
-import type { Account, Rule, Transaction } from '../src/shared/schema';
+import type { Account, Figure, Rule, Transaction } from '../src/shared/schema';
 
 const stamp = '2026-09-01T00:00:00+01:00';
 const acct = (id: string, type: Account['type'], extra: Partial<Account> = {}): Account => ({
@@ -304,6 +304,37 @@ describe('store, balances and analytics', () => {
       ['card', 'monthly'],
       ['current', 'monthly'],
     ]);
+  });
+
+  it('works out the tax band from P60s, salary, net pay, interest and dividends', async () => {
+    await store.setCategories(defaultCategories());
+    const fig = (id: string, kind: Figure['kind'], amount: number, taxYear: string): Figure => ({ id: `fig_${id.padStart(16, '0')}`, kind, label: kind, amount, currency: 'GBP', taxYear, source: {}, createdAt: stamp });
+    // Nothing known: only what is found counts, as a minimum.
+    let a = allowances(store, '2026/27', '2026-09-29');
+    expect(a.taxBand).toMatchObject({ band: 'none', basis: 'minimum' });
+    expect(a.savings.allowance).toBe(1_000);
+    // Net pay received is a floor.
+    await store.addTransactions([tx('current', '2026-05-28', 2500, 'ACME PAYROLL', { category: 'salary' })], 'test');
+    expect(allowances(store, '2026/27', '2026-09-29').taxBand).toMatchObject({ band: 'none', basis: 'minimum', total: 2500 });
+    // Last year's P60 stands in for the year in progress…
+    await store.addFigures([fig('1', 'gross_pay', 30_000, '2025/26')], 'test');
+    a = allowances(store, '2026/27', '2026-09-29');
+    expect(a.taxBand).toMatchObject({ band: 'basic', basis: 'estimate' });
+    expect(allowances(store, '2025/26', '2026-09-29').taxBand).toMatchObject({ band: 'basic', basis: 'documents' });
+    // …your salary in Settings is preferred over it…
+    await store.setProfile({ ...store.profile, grossSalary: 52_000 });
+    expect(allowances(store, '2026/27', '2026-09-29').taxBand).toMatchObject({ band: 'higher', basis: 'estimate' });
+    // …a payslip's pay to date below it does not replace it…
+    await store.addFigures([fig('4', 'gross_pay', 20_000, '2026/27')], 'test');
+    expect(allowances(store, '2026/27', '2026-09-29').taxBand).toMatchObject({ band: 'higher', basis: 'estimate' });
+    await store.setProfile({ ...store.profile, grossSalary: undefined });
+    // …and this year's own P60 or payslip figures settle it, with interest and dividends on top.
+    await store.addFigures([fig('2', 'gross_pay', 25_000, '2026/27'), fig('3', 'dividends_paid', 6_000, '2026/27')], 'test');
+    a = allowances(store, '2026/27', '2026-09-29');
+    expect(a.taxBand).toMatchObject({ band: 'higher', basis: 'documents', total: 51_000 });
+    expect(a.savings).toMatchObject({ band: 'higher', bandBasis: 'documents', allowance: 500 });
+    // A past year with no P60 and no pay found is not estimated from today's salary.
+    expect(allowances(store, '2024/25', '2026-09-29').taxBand).toMatchObject({ band: 'none', basis: 'minimum' });
   });
 
   it('counts ISA subscriptions, provider figures and one-sided transfers', async () => {

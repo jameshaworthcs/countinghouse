@@ -2,10 +2,10 @@
 // with carry-forward, Personal Savings Allowance and the dividend allowance.
 
 import { ACCOUNT_TYPE_META, balanceModeOf } from '../../shared/accounts';
-import type { AllowanceLine, AllowancesResponse } from '../../shared/api';
+import type { AllowanceLine, AllowancesResponse, TaxBandEstimate } from '../../shared/api';
 import { addDays, diffDays, formatDate, maxDate, minDate, today, type ISODate } from '../../shared/dates';
 import { fromMinor, toMinor } from '../../shared/money';
-import type { Account, Transaction } from '../../shared/schema';
+import type { Account, Figure, Transaction } from '../../shared/schema';
 import {
   ageOn,
   cashIsaLimit,
@@ -14,6 +14,7 @@ import {
   pensionAnnualAllowance,
   personalSavingsAllowance,
   RULE_NOTES,
+  taxBandFor,
   taxYear as makeTaxYear,
   taxYearOf,
   taxYearParams,
@@ -172,6 +173,82 @@ export function pensionTotals(store: Store, ty: TaxYear) {
   return { personal, personalGross, employer, relief, total: personalGross + employer, lines, notes, hasAccounts: pensionAccounts.length > 0 };
 }
 
+/** Relief-at-source pensions (SIPPs, personal pensions) and your gross contributions to them in the year. */
+export function reliefAtSource(store: Store, ty: TaxYear, pen: ReturnType<typeof pensionTotals> = pensionTotals(store, ty)) {
+  const accounts = store.accounts.filter((a) => a.type === 'sipp' || a.type === 'personal_pension' || a.pension?.method === 'relief_at_source');
+  let grossMinor = 0;
+  for (const a of accounts) {
+    grossMinor += pen.lines.filter((l) => l.accountId === a.id).reduce((x, l) => x + toMinor(l.amount), 0);
+    grossMinor -= store.transactions(a.id).filter((t) => inYear(t, ty) && t.category === 'employer-contribution').reduce((x, t) => x + toMinor(t.amount), 0);
+  }
+  return { accounts, personalGross: fromMinor(grossMinor) };
+}
+
+/** Charity payments in the year, the ones tagged "gift-aid", Gift Aid figures from documents, and what was paid under Gift Aid. */
+export function giftAid(store: Store, ty: TaxYear) {
+  const charity = store.transactions().filter((t) => inYear(t, ty) && t.category === 'charity' && t.amount < 0);
+  const aided = charity.filter((t) => t.tags?.some((tag) => tag.toLowerCase() === 'gift-aid'));
+  const figures = store.figures.filter((f) => f.kind === 'gift_aid_donation' && (f.taxYear === ty.label || (!f.taxYear && inYear({ date: f.periodEnd ?? f.date ?? '' }, ty))));
+  const paid = fromMinor(-aided.reduce((s, t) => s + toMinor(t.amount), 0) + figures.reduce((s, f) => s + toMinor(f.amount), 0));
+  return { charity, aided, figures, paid };
+}
+
+const figuresFor = (store: Store, ty: TaxYear, kind: Figure['kind']) =>
+  store.figures.filter((f) => f.kind === kind && (f.taxYear === ty.label || (!f.taxYear && inYear({ date: f.periodEnd ?? f.date ?? '' }, ty))));
+
+/**
+ * The tax band the year's income reaches, from your data: pay (P60 and payslip figures, else your
+ * salary in Settings or last year's P60 for the year in progress, else net pay received as a
+ * minimum), side income over the trading allowance, and the interest and dividends counted for the
+ * allowances. Relief-at-source pension contributions and Gift Aid widen the bands. FORMULAS.md §11.
+ */
+export function taxBandEstimate(store: Store, ty: TaxYear, now: ISODate, found: { interest: number; dividends: number }): TaxBandEstimate {
+  const params = taxYearParams(ty);
+  const lines: TaxBandEstimate['lines'] = [];
+  const notes: string[] = [];
+  const sum = (list: Figure[]) => fromMinor(list.reduce((s, f) => s + toMinor(f.amount), 0));
+  let basis: TaxBandEstimate['basis'];
+  const pay = figuresFor(store, ty, 'gross_pay');
+  const lastYearPay = figuresFor(store, makeTaxYear(ty.startYear - 1), 'gross_pay');
+  const inProgress = ty.end >= now;
+  // Payslips for the year in progress are pay to date: a larger full-year estimate wins over them.
+  const fullYear = inProgress ? (store.profile.grossSalary ?? (lastYearPay.length ? sum(lastYearPay) : 0)) : 0;
+  if (pay.length && sum(pay) >= fullYear) {
+    basis = 'documents';
+    lines.push({ label: `Pay (${pay.length === 1 ? 'P60 or payslip' : `${pay.length} P60 and payslip figures`})`, amount: sum(pay), kind: 'pay' });
+  } else if (inProgress && store.profile.grossSalary) {
+    basis = 'estimate';
+    lines.push({ label: 'Pay (your salary in Settings)', amount: store.profile.grossSalary, kind: 'pay' });
+  } else if (inProgress && lastYearPay.length) {
+    basis = 'estimate';
+    lines.push({ label: `Pay (last year’s P60, ${makeTaxYear(ty.startYear - 1).label})`, amount: sum(lastYearPay), kind: 'pay' });
+  } else {
+    basis = 'minimum';
+    const net = store.transactions().filter((t) => inYear(t, ty) && t.category === 'salary' && t.amount > 0);
+    if (net.length) lines.push({ label: `Pay (at least: ${net.length} salary payment${net.length === 1 ? '' : 's'} received, after tax)`, amount: fromMinor(net.reduce((s, t) => s + toMinor(t.amount), 0)), kind: 'pay' });
+    notes.push(`No gross pay is known for ${ty.label}, so only the income found counts and the band may be higher. Import your P60${inProgress ? ' or a recent payslip, or add your salary in Settings' : ''}.`);
+  }
+  const benefits = figuresFor(store, ty, 'benefit_in_kind');
+  if (benefits.length) lines.push({ label: 'Benefits in kind (P11D)', amount: sum(benefits), kind: 'pay' });
+  const side = store.transactions().filter((t) => inYear(t, ty) && t.category === 'side-income' && t.amount > 0);
+  const turnover = fromMinor(side.reduce((s, t) => s + toMinor(t.amount), 0) + figuresFor(store, ty, 'self_employment_income').reduce((s, f) => s + toMinor(f.amount), 0));
+  if (turnover > params.tradingAllowance) {
+    lines.push({ label: 'Side income over the trading allowance', amount: fromMinor(toMinor(turnover) - toMinor(params.tradingAllowance)), kind: 'self-employment' });
+    notes.push('Side income counts as turnover less the trading allowance; your expenses may make the profit lower.');
+  }
+  if (found.interest > 0) lines.push({ label: 'Interest outside ISAs', amount: found.interest, kind: 'interest' });
+  if (found.dividends > 0) lines.push({ label: 'Dividends outside ISAs', amount: found.dividends, kind: 'dividends' });
+  const ras = reliefAtSource(store, ty).personalGross;
+  const gift = giftAid(store, ty).paid;
+  const giftGross = fromMinor(Math.round(toMinor(gift) / (1 - params.reliefAtSourceRate)));
+  if (ras > 0) lines.push({ label: 'Pension contributions with relief at source (gross): widen the bands', amount: ras, kind: 'extension' });
+  if (giftGross > 0) lines.push({ label: 'Gift Aid donations (gross): widen the bands', amount: giftGross, kind: 'extension' });
+  const of = (kind: TaxBandEstimate['lines'][number]['kind']) => fromMinor(lines.filter((l) => l.kind === kind).reduce((s, l) => s + toMinor(l.amount), 0));
+  const r = taxBandFor(ty, { nonSavings: of('pay') + of('self-employment'), savings: of('interest'), dividends: of('dividends'), bandExtension: of('extension') });
+  if (store.profile.taxRegion === 'scotland') notes.push('Scottish rates on pay are not modelled; this uses the UK bands, which are the ones savings and dividends use.');
+  return { band: r.band, basis, lines, total: r.total, personalAllowance: r.personalAllowance, taxable: r.taxable, higherFrom: r.higherFrom, additionalFrom: r.additionalFrom, notes };
+}
+
 export function allowances(store: Store, label?: string, now: ISODate = today()): AllowancesResponse {
   const ty = (label ? parseTaxYear(label) : null) ?? taxYearOf(now);
   const params = taxYearParams(ty);
@@ -300,12 +377,6 @@ export function allowances(store: Store, label?: string, now: ISODate = today())
     now,
     'interest',
   );
-  const band = store.profile.taxBand ?? 'basic';
-  const psa = personalSavingsAllowance(ty, band);
-  const savingsNotes: string[] = [];
-  if (!store.profile.taxBand) savingsNotes.push('Assuming basic-rate tax. Set your tax band in Settings for the right allowance.');
-  savingsNotes.push('Premium Bond prizes and ISA interest are tax-free and not counted.');
-
   // Dividends outside ISAs and pensions.
   const ledger = store.accounts.filter((a) => !ACCOUNT_TYPE_META[a.type].taxFreeInterest && balanceModeOf(a) === 'ledger');
   const gias = store.accounts.filter((a) => a.type === 'gia');
@@ -313,6 +384,20 @@ export function allowances(store: Store, label?: string, now: ISODate = today())
   const divGia = sumCategory(store, gias, ty, 'investment-income', 1, /DIVIDEND|DISTRIBUTION/i);
   const divFigures = store.figures.filter((f) => f.taxYear === ty.label && f.kind === 'dividends_paid');
   const dividendsMinor = divLedger.minor + divGia.minor + divFigures.reduce((s, f) => s + toMinor(f.amount), 0);
+
+  // The band, and with it the Personal Savings Allowance, follows from the year's income.
+  const taxBand = taxBandEstimate(store, ty, now, { interest: fromMinor(interestMinor), dividends: fromMinor(dividendsMinor) });
+  const band = taxBand.band;
+  const psa = personalSavingsAllowance(ty, band);
+  const savingsNotes: string[] = [];
+  if (taxBand.basis !== 'documents') {
+    savingsNotes.push(
+      taxBand.basis === 'estimate'
+        ? `Your ${band === 'none' ? 'band' : `${band}-rate band`} is estimated from ${taxBand.lines.find((l) => l.kind === 'pay')?.label.replace(/^Pay \((.*)\)$/, '$1') ?? 'your income'}; your P60 settles it.`
+        : `Your band is worked out from the income found so far, so it may be higher. Import your P60 to settle it.`,
+    );
+  }
+  savingsNotes.push('Premium Bond prizes and ISA interest are tax-free and not counted.');
 
   const ruleNotes = RULE_NOTES.filter((n) => n.from > addYearsISO(ty.start, -1) && n.from <= addYearsISO(ty.end, 2)).map((n) => `${n.from}: ${n.text}`);
 
@@ -342,13 +427,14 @@ export function allowances(store: Store, label?: string, now: ISODate = today())
       notes: pensionNotes,
       incomplete: pensionIncomplete,
     },
-    savings: { interest: fromMinor(interestMinor), allowance: psa, band, bandAssumed: !store.profile.taxBand, remaining: fromMinor(Math.max(0, toMinor(psa) - interestMinor)), lines: interestLines, notes: savingsNotes, incomplete: interestIncomplete },
+    savings: { interest: fromMinor(interestMinor), allowance: psa, band, bandBasis: taxBand.basis, remaining: fromMinor(Math.max(0, toMinor(psa) - interestMinor)), lines: interestLines, notes: savingsNotes, incomplete: interestIncomplete },
     dividends: {
       amount: fromMinor(dividendsMinor),
       allowance: params.dividendAllowance,
       remaining: fromMinor(Math.max(0, toMinor(params.dividendAllowance) - dividendsMinor)),
       lines: [...divLedger.lines, ...divGia.lines, ...divFigures.map((f) => ({ label: `${f.payer ?? f.label} (voucher)`, amount: f.amount, source: 'figure' as const }))],
     },
+    taxBand,
     ruleNotes,
   };
 }

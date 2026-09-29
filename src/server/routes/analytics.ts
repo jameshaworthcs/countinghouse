@@ -61,6 +61,7 @@ export function analyticsRoutes(ctx: AppContext): Hono {
 
   app.get('/investments', (c) => c.json(a.investments()));
   app.get('/monthly', (c) => c.json(a.monthly()));
+  app.get('/capture', (c) => c.json(a.capture()));
   app.get('/data-health', (c) => c.json(a.health()));
 
   return app;

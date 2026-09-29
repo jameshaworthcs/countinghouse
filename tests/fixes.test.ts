@@ -138,7 +138,8 @@ describe('the Overview with a first snapshot', () => {
     expect(s.deltas.map((d) => d.change)).toEqual([null, null, null]);
     // With no transactions, this month's spending is unknown, not £0.
     expect(s.monthToDate.spending).toBeNull();
-    expect(s.alerts.find((a) => a.id === 'profile')).toMatchObject({ title: 'Add your tax band', detail: 'It drives your savings allowance and tax figures.' });
+    // The tax band is worked out from income, so with a date of birth there is nothing to ask for.
+    expect(s.alerts.find((a) => a.id === 'profile')).toBeUndefined();
   });
 
   it('an account opened since, with data from its opening, does not hold the comparison back', async () => {
