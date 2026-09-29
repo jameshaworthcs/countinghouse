@@ -1,0 +1,213 @@
+{"summary": {
+ "ranAt": "2026-09-29T20:16:37.033Z",
+ "promptVersion": "extract-9",
+ "label": "after-nsi-fixes",
+ "model": "app default",
+ "effort": "app default",
+ "verifyModel": "app default",
+ "readTwice": 23,
+ "confirmedByFigures": 9,
+ "withDisagreements": 1,
+ "cases": 36,
+ "minutes": 4.1,
+ "costUsd": 2.9,
+ "fieldAccuracy": 100,
+ "rows": {
+  "expected": 279,
+  "found": 279,
+  "extra": 0
+ },
+ "byField": {
+  "nothingNew": {
+   "correct": 35,
+   "total": 36,
+   "pct": 97.2
+  },
+  "account": {
+   "correct": 35,
+   "total": 35,
+   "pct": 100
+  },
+  "row": {
+   "correct": 279,
+   "total": 279,
+   "pct": 100
+  },
+  "date": {
+   "correct": 279,
+   "total": 279,
+   "pct": 100
+  },
+  "sign": {
+   "correct": 279,
+   "total": 279,
+   "pct": 100
+  },
+  "amount": {
+   "correct": 279,
+   "total": 279,
+   "pct": 100
+  },
+  "description": {
+   "correct": 279,
+   "total": 279,
+   "pct": 100
+  },
+  "pending": {
+   "correct": 279,
+   "total": 279,
+   "pct": 100
+  },
+  "duplicate": {
+   "correct": 279,
+   "total": 279,
+   "pct": 100
+  },
+  "original": {
+   "correct": 6,
+   "total": 6,
+   "pct": 100
+  },
+  "noExtra": {
+   "correct": 279,
+   "total": 279,
+   "pct": 100
+  },
+  "period": {
+   "correct": 20,
+   "total": 20,
+   "pct": 100
+  },
+  "balance": {
+   "correct": 40,
+   "total": 40,
+   "pct": 100
+  },
+  "balanceDate": {
+   "correct": 16,
+   "total": 16,
+   "pct": 100
+  },
+  "totals": {
+   "correct": 4,
+   "total": 4,
+   "pct": 100
+  },
+  "balanceAfter": {
+   "correct": 121,
+   "total": 121,
+   "pct": 100
+  },
+  "holding": {
+   "correct": 12,
+   "total": 12,
+   "pct": 100
+  },
+  "holdingValue": {
+   "correct": 12,
+   "total": 12,
+   "pct": 100
+  },
+  "holdingUnits": {
+   "correct": 8,
+   "total": 8,
+   "pct": 100
+  },
+  "figure": {
+   "correct": 12,
+   "total": 12,
+   "pct": 100
+  },
+  "figureYear": {
+   "correct": 12,
+   "total": 12,
+   "pct": 100
+  },
+  "wrapper": {
+   "correct": 11,
+   "total": 11,
+   "pct": 100
+  },
+  "holdingIsin": {
+   "correct": 8,
+   "total": 8,
+   "pct": 100
+  },
+  "noClaim": {
+   "correct": 5,
+   "total": 5,
+   "pct": 100
+  }
+ },
+ "byKind": {
+  "csv": 100,
+  "pdf": 100,
+  "png": 99.8
+ },
+ "byTag": {
+  "csv": 100,
+  "fx": 100,
+  "refund": 100,
+  "card-signs": 100,
+  "pending": 100,
+  "pdf": 100,
+  "statement": 100,
+  "overlap": 100,
+  "multi-page": 100,
+  "multi-account": 100,
+  "savings": 100,
+  "new-account": 100,
+  "overdraft": 100,
+  "pension": 100,
+  "holdings": 99.1,
+  "figures": 100,
+  "isa": 100,
+  "tax": 100,
+  "png": 99.8,
+  "long-screenshot": 100,
+  "lisa": 98.1,
+  "app-set": 99.3,
+  "cash-ledger": 100,
+  "capture-date": 100,
+  "batch": 100,
+  "nothing-new": 100
+ }
+},
+"results": [
+{"id":"csv-monzo-fx-refund","title":"Monzo CSV: a payment in euros and a refund","tags":["csv","fx","refund"],"kind":"csv","status":"review","engine":"csv","durationMs":35,"confidence":"high","warnings":[],"notes":[],"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"row":{"correct":21,"total":21},"date":{"correct":21,"total":21},"sign":{"correct":21,"total":21},"amount":{"correct":21,"total":21},"description":{"correct":21,"total":21},"pending":{"correct":21,"total":21},"duplicate":{"correct":21,"total":21},"original":{"correct":1,"total":1},"noExtra":{"correct":21,"total":21}},"rows":{"expected":21,"found":21,"extra":0},"errors":[],"score":1}},
+{"id":"csv-amex-signs","title":"Amex CSV: card signs inverted in the file","tags":["csv","card-signs","refund"],"kind":"csv","status":"review","engine":"csv","durationMs":38,"confidence":"high","warnings":[],"notes":[],"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"row":{"correct":20,"total":20},"date":{"correct":20,"total":20},"sign":{"correct":20,"total":20},"amount":{"correct":20,"total":20},"description":{"correct":20,"total":20},"pending":{"correct":20,"total":20},"duplicate":{"correct":20,"total":20},"noExtra":{"correct":20,"total":20}},"rows":{"expected":20,"found":20,"extra":0},"errors":[],"score":1}},
+{"id":"csv-revolut-pending","title":"Revolut CSV: pending and reverted rows are left out","tags":["csv","pending"],"kind":"csv","status":"review","engine":"csv","durationMs":27,"confidence":"high","warnings":[],"notes":["2 row(s) were skipped (filtered or unreadable)."],"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"row":{"correct":5,"total":5},"date":{"correct":5,"total":5},"sign":{"correct":5,"total":5},"amount":{"correct":5,"total":5},"description":{"correct":5,"total":5},"pending":{"correct":5,"total":5},"duplicate":{"correct":5,"total":5},"noExtra":{"correct":5,"total":5}},"rows":{"expected":5,"found":5,"extra":0},"errors":[],"score":1}},
+{"id":"pdf-lloyds-statement","title":"Lloyds PDF statement with a type column (first of an overlapping pair)","tags":["pdf","statement","overlap"],"kind":"pdf","status":"review","engine":"claude-cli","model":"claude-sonnet-5-5","durationMs":25590,"costUsd":0.1032,"confidence":"high","warnings":[],"notes":[],"verification":{"method":"checks","firstModel":"claude-sonnet-5-5","reasons":0,"disagreements":[],"kept":"first"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"period":{"correct":2,"total":2},"balance":{"correct":2,"total":2},"balanceDate":{"correct":1,"total":1},"totals":{"correct":2,"total":2},"row":{"correct":26,"total":26},"date":{"correct":26,"total":26},"sign":{"correct":26,"total":26},"amount":{"correct":26,"total":26},"description":{"correct":26,"total":26},"pending":{"correct":26,"total":26},"balanceAfter":{"correct":26,"total":26},"duplicate":{"correct":26,"total":26},"noExtra":{"correct":26,"total":26}},"rows":{"expected":26,"found":26,"extra":0},"errors":[],"score":1}},
+{"id":"csv-lloyds-overlap","title":"Lloyds CSV overlapping the statement already imported: the overlap is recognised","tags":["csv","overlap"],"kind":"csv","status":"review","engine":"csv","durationMs":3,"confidence":"high","warnings":[],"notes":[],"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"row":{"correct":24,"total":24},"date":{"correct":24,"total":24},"sign":{"correct":24,"total":24},"amount":{"correct":24,"total":24},"description":{"correct":24,"total":24},"pending":{"correct":24,"total":24},"balanceAfter":{"correct":24,"total":24},"duplicate":{"correct":24,"total":24},"noExtra":{"correct":24,"total":24}},"rows":{"expected":24,"found":24,"extra":0},"errors":[],"score":1}},
+{"id":"pdf-barclays-current","title":"Barclays-style statement: paid out / paid in columns, balance on every row","tags":["pdf","statement"],"kind":"pdf","status":"review","engine":"claude-cli","model":"claude-sonnet-5-5","durationMs":20451,"costUsd":0.0913,"confidence":"high","warnings":[],"notes":["Balances shown with 'OD' suffix are overdrawn and have been recorded as negative.","Statement does not print total money in/out."],"verification":{"method":"checks","firstModel":"claude-sonnet-5-5","reasons":0,"disagreements":[],"kept":"first"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"period":{"correct":2,"total":2},"balance":{"correct":2,"total":2},"balanceDate":{"correct":1,"total":1},"row":{"correct":19,"total":19},"date":{"correct":19,"total":19},"sign":{"correct":19,"total":19},"amount":{"correct":19,"total":19},"description":{"correct":19,"total":19},"pending":{"correct":19,"total":19},"balanceAfter":{"correct":19,"total":19},"duplicate":{"correct":19,"total":19},"noExtra":{"correct":19,"total":19}},"rows":{"expected":19,"found":19,"extra":0},"errors":[],"score":1}},
+{"id":"pdf-hsbc-long","title":"HSBC-style statement: 3 pages, dates once per day, end-of-day balances, brought forward lines","tags":["pdf","statement","multi-page"],"kind":"pdf","status":"review","engine":"claude-cli","model":"claude-sonnet-5-5","durationMs":42918,"costUsd":0.1241,"confidence":"high","warnings":[],"notes":["Running balance is printed only on the last row of each date group; other rows have balanceAfter null.","Balance brought/carried forward lines at the page break (15 Aug 26, 4,414.86) are not transactions.","Statement period from header is 19 July 2026 to 18 August 2026."],"verification":{"method":"checks","firstModel":"claude-sonnet-5-5","reasons":0,"disagreements":[],"kept":"first"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"period":{"correct":2,"total":2},"balance":{"correct":2,"total":2},"balanceDate":{"correct":1,"total":1},"totals":{"correct":2,"total":2},"row":{"correct":43,"total":43},"date":{"correct":43,"total":43},"sign":{"correct":43,"total":43},"amount":{"correct":43,"total":43},"description":{"correct":43,"total":43},"pending":{"correct":43,"total":43},"duplicate":{"correct":43,"total":43},"balanceAfter":{"correct":25,"total":25},"noExtra":{"correct":43,"total":43}},"rows":{"expected":43,"found":43,"extra":0},"errors":[],"score":1}},
+{"id":"pdf-nationwide-multi","title":"Nationwide-style combined statement: two accounts in one PDF","tags":["pdf","statement","multi-account"],"kind":"pdf","status":"review","engine":"claude-cli","model":"claude-sonnet-5-5","durationMs":13659,"costUsd":0.0431,"confidence":"high","warnings":[],"notes":["Header reads 'Nationwide-style Building Society'; institution recorded as Nationwide per file name and statement title.","FlexAccount was overdrawn (OD) between 2 Aug and 26 Aug; negative balances recorded accordingly."],"verification":{"method":"checks","firstModel":"claude-sonnet-5-5","reasons":0,"disagreements":[],"kept":"first"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":2,"total":2},"period":{"correct":4,"total":4},"balance":{"correct":4,"total":4},"row":{"correct":10,"total":10},"date":{"correct":10,"total":10},"sign":{"correct":10,"total":10},"amount":{"correct":10,"total":10},"description":{"correct":10,"total":10},"pending":{"correct":10,"total":10},"balanceAfter":{"correct":10,"total":10},"duplicate":{"correct":10,"total":10},"noExtra":{"correct":10,"total":10}},"rows":{"expected":10,"found":10,"extra":0},"errors":[],"score":1}},
+{"id":"pdf-amex-card","title":"Amex-style card statement: unsigned amounts with CR credits, spending in euros, a fee","tags":["pdf","card-signs","fx","refund"],"kind":"pdf","status":"review","engine":"claude-cli","model":"claude-sonnet-5-5","durationMs":18849,"costUsd":0.0503,"confidence":"high","warnings":[],"notes":["Minimum payment £10.87, payment due 6 October 2026.","Statement has no printed production date. Opening and closing balances are shown as amounts owed (negative).","The Le Comptoir row's amount is the sterling figure 38.92; the EUR 45.00 amount and rate 1.1562 are printed under the description."],"verification":{"method":"checks","firstModel":"claude-sonnet-5-5","reasons":0,"disagreements":[],"kept":"first"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"period":{"correct":2,"total":2},"balance":{"correct":2,"total":2},"row":{"correct":15,"total":15},"date":{"correct":15,"total":15},"sign":{"correct":15,"total":15},"amount":{"correct":15,"total":15},"description":{"correct":15,"total":15},"pending":{"correct":15,"total":15},"duplicate":{"correct":15,"total":15},"original":{"correct":1,"total":1},"noExtra":{"correct":15,"total":15}},"rows":{"expected":15,"found":15,"extra":0},"errors":[],"score":1}},
+{"id":"pdf-barclaycard","title":"Barclaycard-style statement: spending positive, payments negative in print","tags":["pdf","card-signs"],"kind":"pdf","status":"review","engine":"claude-cli","model":"claude-sonnet-5-5","durationMs":15842,"costUsd":0.0463,"confidence":"high","warnings":[],"notes":["Statement is headed 'Barclaycard-style'. Amounts were printed unsigned for purchases; the payment was printed as -300.00. Signs converted to the cardholder's view, so purchases are negative and the payment is positive.","Balances are shown as owed (negative)."],"verification":{"method":"checks","firstModel":"claude-sonnet-5-5","reasons":0,"disagreements":[],"kept":"first"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"period":{"correct":2,"total":2},"balance":{"correct":2,"total":2},"row":{"correct":13,"total":13},"date":{"correct":13,"total":13},"sign":{"correct":13,"total":13},"amount":{"correct":13,"total":13},"description":{"correct":13,"total":13},"pending":{"correct":13,"total":13},"duplicate":{"correct":13,"total":13},"noExtra":{"correct":13,"total":13}},"rows":{"expected":13,"found":13,"extra":0},"errors":[],"score":1}},
+{"id":"pdf-marcus-savings","title":"Savings statement for a quarter: deposits, a withdrawal and monthly interest","tags":["pdf","savings"],"kind":"pdf","status":"review","engine":"claude-cli","model":"claude-sonnet-5-5","durationMs":16655,"costUsd":0.0576,"confidence":"high","warnings":[],"notes":[],"verification":{"method":"checks","firstModel":"claude-sonnet-5-5","reasons":0,"disagreements":[],"kept":"first"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"period":{"correct":2,"total":2},"balance":{"correct":2,"total":2},"row":{"correct":7,"total":7},"date":{"correct":7,"total":7},"sign":{"correct":7,"total":7},"amount":{"correct":7,"total":7},"description":{"correct":7,"total":7},"pending":{"correct":7,"total":7},"balanceAfter":{"correct":7,"total":7},"duplicate":{"correct":7,"total":7},"noExtra":{"correct":7,"total":7}},"rows":{"expected":7,"found":7,"extra":0},"errors":[],"score":1}},
+{"id":"pdf-santander-new-overdrawn","title":"A statement for an account not set up yet, going overdrawn (OD balances)","tags":["pdf","statement","new-account","overdraft"],"kind":"pdf","status":"review","engine":"claude-cli","model":"claude-sonnet-5-5","durationMs":10169,"costUsd":0.0338,"confidence":"high","warnings":[],"notes":["Balances marked OD are overdrawn and shown as negative.","The account balance goes overdrawn after the rent payment on 01/08/2026."],"verification":{"method":"checks","firstModel":"claude-sonnet-5-5","reasons":0,"disagreements":[],"kept":"first"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"period":{"correct":2,"total":2},"balance":{"correct":2,"total":2},"row":{"correct":7,"total":7},"date":{"correct":7,"total":7},"sign":{"correct":7,"total":7},"amount":{"correct":7,"total":7},"description":{"correct":7,"total":7},"pending":{"correct":7,"total":7},"balanceAfter":{"correct":7,"total":7},"duplicate":{"correct":7,"total":7},"noExtra":{"correct":7,"total":7}},"rows":{"expected":7,"found":7,"extra":0},"errors":[],"score":1}},
+{"id":"pdf-aviva-pension-annual","title":"Workplace pension annual statement: value, contributions for the tax year, funds","tags":["pdf","pension","holdings","figures"],"kind":"pdf","status":"review","engine":"claude-cli","model":"claude-opus-5-5","durationMs":23216,"costUsd":0.0898,"confidence":"high","warnings":[],"notes":["The plan value summary shows investment growth of £2,380.52 and charges of -£174.77 for the statement year only. These are not recorded as gainLoss since the plan started.","The £3,900.00 of member contributions were made by salary sacrifice, so they are recorded as employer contributions. Total contributions in 2025/26 were £8,400.00.","Asset classes for the funds are inferred from the fund names."],"verification":{"method":"second-reading","firstModel":"claude-sonnet-5-5","secondModel":"claude-opus-5-5","reasons":2,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"balance":{"correct":1,"total":1},"balanceDate":{"correct":1,"total":1},"holding":{"correct":2,"total":2},"holdingValue":{"correct":2,"total":2},"holdingUnits":{"correct":2,"total":2},"figure":{"correct":2,"total":2},"figureYear":{"correct":2,"total":2}},"rows":{"expected":0,"found":0,"extra":0},"errors":[],"score":1}},
+{"id":"pdf-ajbell-sipp","title":"SIPP valuation: funds with ISINs, an ETF, cash, and contributions this tax year","tags":["pdf","pension","holdings"],"kind":"pdf","status":"review","engine":"claude-cli","model":"claude-opus-5-5","durationMs":21773,"costUsd":0.087,"confidence":"high","warnings":[],"notes":["taxYearContributions uses the printed gross contributions this tax year (£5,000.00): £4,000.00 personal plus £1,000.00 basic-rate relief.","Holdings plus cash (£412.08) add up to the printed total value of £25,478.33."],"verification":{"method":"second-reading","firstModel":"claude-sonnet-5-5","secondModel":"claude-opus-5-5","reasons":2,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"balance":{"correct":1,"total":1},"balanceDate":{"correct":1,"total":1},"wrapper":{"correct":2,"total":2},"holding":{"correct":3,"total":3},"holdingValue":{"correct":3,"total":3},"holdingUnits":{"correct":3,"total":3},"holdingIsin":{"correct":3,"total":3},"figure":{"correct":2,"total":2},"figureYear":{"correct":2,"total":2}},"rows":{"expected":0,"found":0,"extra":0},"errors":[],"score":1}},
+{"id":"pdf-vanguard-isa-quarter","title":"Stocks & Shares ISA quarterly statement: contributions, a fee, holdings, subscriptions used","tags":["pdf","isa","holdings"],"kind":"pdf","status":"review","engine":"claude-cli","model":"claude-opus-5-5","durationMs":22281,"costUsd":0.0891,"confidence":"high","warnings":[],"notes":["ISA subscriptions this tax year shown as £3,000.00 of £20,000.00 allowance.","No cash balance, book cost or growth figures are printed."],"verification":{"method":"second-reading","firstModel":"claude-sonnet-5-5","secondModel":"claude-opus-5-5","reasons":2,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"balance":{"correct":1,"total":1},"balanceDate":{"correct":1,"total":1},"wrapper":{"correct":1,"total":1},"row":{"correct":4,"total":4},"date":{"correct":4,"total":4},"sign":{"correct":4,"total":4},"amount":{"correct":4,"total":4},"description":{"correct":4,"total":4},"pending":{"correct":4,"total":4},"duplicate":{"correct":4,"total":4},"noExtra":{"correct":4,"total":4},"holding":{"correct":2,"total":2},"holdingValue":{"correct":2,"total":2},"holdingUnits":{"correct":2,"total":2},"holdingIsin":{"correct":2,"total":2}},"rows":{"expected":4,"found":4,"extra":0},"errors":[],"score":1}},
+{"id":"pdf-p60","title":"P60 for 2025/26: pay, tax, National Insurance and student loan","tags":["pdf","figures","tax"],"kind":"pdf","status":"review","engine":"claude-cli","model":"claude-opus-5-5","durationMs":15914,"costUsd":0.0729,"confidence":"high","warnings":[],"notes":["P60 for tax year to 5 April 2026; tax code 1257L; NIC letter A with earnings at LEL of £6,500.00 (not recorded as a figure). documentDate is the tax-year end printed on the certificate; no issue date is shown."],"verification":{"method":"second-reading","firstModel":"claude-sonnet-5-5","secondModel":"claude-opus-5-5","reasons":1,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"figure":{"correct":4,"total":4},"figureYear":{"correct":4,"total":4}},"rows":{"expected":0,"found":0,"extra":0},"errors":[],"score":1}},
+{"id":"pdf-interest-certificate","title":"Annual interest certificate for a savings account","tags":["pdf","figures","tax"],"kind":"pdf","status":"review","engine":"claude-cli","model":"claude-opus-5-5","durationMs":15225,"costUsd":0.0666,"confidence":"high","warnings":[],"notes":["Certificate shows tax deducted £0.00 and net interest paid £512.34; only the gross figure is recorded."],"verification":{"method":"second-reading","firstModel":"claude-sonnet-5-5","secondModel":"claude-opus-5-5","reasons":1,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"figure":{"correct":1,"total":1},"figureYear":{"correct":1,"total":1}},"rows":{"expected":0,"found":0,"extra":0},"errors":[],"score":1}},
+{"id":"png-monzo-pending-overlap","title":"Monzo-style feed screenshot: pending rows today, and days already imported from the CSV","tags":["png","pending","overlap"],"kind":"png","status":"review","engine":"claude-cli","model":"claude-opus-5-5","durationMs":30950,"costUsd":0.2088,"confidence":"high","warnings":[],"notes":["The screenshot does not name the provider. The institution (Monzo), the account type (current) and the last 4 digits (4821) come from the user's description.","Rows labelled 'Today' and 'Yesterday' are dated from the capture date, 2026-09-29.","The transaction list may continue below the visible area."],"verification":{"method":"second-reading","firstModel":"claude-sonnet-5-5","secondModel":"claude-opus-5-5","reasons":2,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"balance":{"correct":1,"total":1},"row":{"correct":7,"total":7},"date":{"correct":7,"total":7},"sign":{"correct":7,"total":7},"amount":{"correct":7,"total":7},"description":{"correct":7,"total":7},"pending":{"correct":7,"total":7},"duplicate":{"correct":7,"total":7},"noExtra":{"correct":7,"total":7}},"rows":{"expected":7,"found":7,"extra":0},"errors":[],"score":1}},
+{"id":"png-monzo-long-scroll","title":"Long scrolling screenshot (about 60 rows): read once, no rows lost or repeated at the joins","tags":["png","long-screenshot"],"kind":"png","status":"review","engine":"claude-cli","model":"claude-opus-5-5","durationMs":73180,"costUsd":0.3499,"confidence":"high","warnings":[],"notes":["The five images were treated as one long screenshot; rows repeated where the images overlap were counted once.","The rows under 'Today' and 'Yesterday' are dated 2026-09-14 and 2026-09-13, using the capture date from the filename. That fits the weekday headings, such as Saturday 12 September.","The provider's name and the account number do not appear on the screen. The heading reads only 'Personal account'. The user says this is their Monzo current account ending 4821."],"verification":{"method":"second-reading","firstModel":"claude-sonnet-5-5","secondModel":"claude-opus-5-5","reasons":1,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"balance":{"correct":1,"total":1},"row":{"correct":27,"total":27},"date":{"correct":27,"total":27},"sign":{"correct":27,"total":27},"amount":{"correct":27,"total":27},"description":{"correct":27,"total":27},"pending":{"correct":27,"total":27},"duplicate":{"correct":27,"total":27},"noExtra":{"correct":27,"total":27}},"rows":{"expected":27,"found":27,"extra":0},"errors":[],"score":1}},
+{"id":"png-amex-app","title":"Card app screenshot: pending section, purchases unsigned, credits with a minus","tags":["png","card-signs","pending","refund"],"kind":"png","status":"review","engine":"claude-cli","model":"claude-opus-5-5","durationMs":25129,"costUsd":0.0994,"confidence":"high","warnings":[],"notes":["Card provider is not named on the screen.","Rows show day and month only; I took the year 2026 from the capture date.","The app shows purchases as positive amounts and the refund as -£18.50 (in green). I flipped the signs so they are from the cardholder's point of view: purchases are negative and the refund is positive.","The current balance of £218.79 is recorded as owed (negative)."],"verification":{"method":"second-reading","firstModel":"claude-sonnet-5-5","secondModel":"claude-opus-5-5","reasons":1,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"balance":{"correct":1,"total":1},"row":{"correct":6,"total":6},"date":{"correct":6,"total":6},"sign":{"correct":6,"total":6},"amount":{"correct":6,"total":6},"description":{"correct":6,"total":6},"pending":{"correct":6,"total":6},"duplicate":{"correct":6,"total":6},"noExtra":{"correct":6,"total":6}},"rows":{"expected":6,"found":6,"extra":0},"errors":[],"score":1}},
+{"id":"png-revolut-fx","title":"Revolut-style screenshot: payments in euros shown with their sterling amounts","tags":["png","fx"],"kind":"png","status":"review","engine":"claude-cli","model":"claude-opus-5-5","durationMs":25251,"costUsd":0.0986,"confidence":"high","warnings":[],"notes":["'Today' and 'Yesterday' rows dated from the capture date 2026-09-27.","Account type inferred as current from 'Revolut · Main · GBP' / 'Personal'."],"verification":{"method":"second-reading","firstModel":"claude-sonnet-5-5","secondModel":"claude-opus-5-5","reasons":1,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"balance":{"correct":1,"total":1},"row":{"correct":5,"total":5},"date":{"correct":5,"total":5},"sign":{"correct":5,"total":5},"amount":{"correct":5,"total":5},"description":{"correct":5,"total":5},"pending":{"correct":5,"total":5},"original":{"correct":3,"total":3},"duplicate":{"correct":5,"total":5},"noExtra":{"correct":5,"total":5}},"rows":{"expected":5,"found":5,"extra":0},"errors":[],"score":1}},
+{"id":"png-starling-dark","title":"Dark-mode banking screenshot: a refund, a pending row and a payment in euros","tags":["png","refund","pending","fx"],"kind":"png","status":"review","engine":"claude-cli","model":"claude-opus-5-5","durationMs":27406,"costUsd":0.0999,"confidence":"high","warnings":[],"notes":["Headline figure is labelled 'Effective balance'; no as-at date shown.","Year not printed on row dates; 2026 taken from upload date (weekdays match 2026).","Account labelled 'Personal' at Starling; treated as a current account.","Nothing says when this screenshot was taken, so its balance is dated on the upload day. It was taken on or after 2026-09-27, its latest row: set the day it was taken."],"verification":{"method":"second-reading","firstModel":"claude-sonnet-5-5","secondModel":"claude-opus-5-5","reasons":1,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"balance":{"correct":1,"total":1},"row":{"correct":5,"total":5},"date":{"correct":5,"total":5},"sign":{"correct":5,"total":5},"amount":{"correct":5,"total":5},"description":{"correct":5,"total":5},"pending":{"correct":5,"total":5},"duplicate":{"correct":5,"total":5},"original":{"correct":1,"total":1},"noExtra":{"correct":5,"total":5}},"rows":{"expected":5,"found":5,"extra":0},"errors":[],"score":1}},
+{"id":"png-vanguard-isa","title":"ISA app overview: value, total invested, return, allowance used, holdings","tags":["png","isa","holdings"],"kind":"png","status":"review","engine":"claude-cli","model":"claude-opus-5-5","durationMs":17153,"costUsd":0.08,"confidence":"high","warnings":[],"notes":["Holding names are truncated on screen.","ISA allowance used 2026/27: £3,600.00 of £20,000.","Return shown as +£2,903.51 (9.3%)."],"verification":{"method":"second-reading","firstModel":"claude-sonnet-5-5","secondModel":"claude-opus-5-5","reasons":1,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"balance":{"correct":1,"total":1},"balanceDate":{"correct":1,"total":1},"wrapper":{"correct":2,"total":2},"holding":{"correct":3,"total":3},"holdingValue":{"correct":3,"total":3},"holdingIsin":{"correct":3,"total":3}},"rows":{"expected":0,"found":0,"extra":0},"errors":[],"score":1}},
+{"id":"png-moneybox-lisa","title":"LISA app: balance, government bonus, paid in this tax year","tags":["png","lisa"],"kind":"png","status":"review","engine":"claude-cli","model":"claude-opus-5-5","durationMs":19350,"costUsd":0.0815,"confidence":"high","warnings":[],"notes":["Header reads 'Moneybox-style · Lifetime ISA'; no definite provider name is shown, so institutionName is left null.","Holding name is truncated on screen ('Fidelity Index Worl...'); it is shown as 100% of the account.","Tax year allowance: £2,000.00 paid in of £4,000.00 allowance."],"verification":{"method":"second-reading","firstModel":"claude-sonnet-5-5","secondModel":"claude-opus-5-5","reasons":1,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"balance":{"correct":1,"total":1},"balanceDate":{"correct":1,"total":1},"wrapper":{"correct":3,"total":3}},"rows":{"expected":0,"found":0,"extra":0},"errors":[],"score":1}},
+{"id":"png-nest-pension","title":"Workplace pension app: pot value and contributions this tax year","tags":["png","pension"],"kind":"png","status":"review","engine":"claude-cli","model":"claude-opus-5-5","durationMs":19707,"costUsd":0.0835,"confidence":"high","warnings":[],"notes":["The provider is not named. The heading only says \"Nest-style pension\", so no institution was recorded.","The account type is inferred as a workplace pension from the \"From your employer\" contributions row.","The tax year 2026/27 is inferred from the capture date (20 Sep 2026) because \"this tax year\" is not dated on screen.","The screen shows a retirement date of 14 May 2061. It was not recorded."],"verification":{"method":"second-reading","firstModel":"claude-sonnet-5-5","secondModel":"claude-opus-5-5","reasons":3,"disagreements":["From you: tax year none in Sonnet, 2026/27 in Opus","From your employer: tax year none in Sonnet, 2026/27 in Opus","Tax relief: tax year none in Sonnet, 2026/27 in Opus"],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"balance":{"correct":1,"total":1},"balanceDate":{"correct":1,"total":1},"wrapper":{"correct":1,"total":1},"figure":{"correct":3,"total":3},"figureYear":{"correct":3,"total":3}},"rows":{"expected":0,"found":0,"extra":0},"errors":[],"score":1}},
+{"id":"png-premium-bonds","title":"Premium Bonds holding with a prize history","tags":["png","savings"],"kind":"png","status":"review","engine":"claude-cli","model":"claude-opus-5-5","durationMs":16974,"costUsd":0.075,"confidence":"high","warnings":[],"notes":["Header reads 'NS&I-style · Premium Bonds'; holder's number ending 2210.","The 'Recent prizes' list (September 2026 £25.00, July 2026 £50.00, both 'Paid to your bank account') and the prize summary (this month £25.00, last 12 months £275.00) are a prize history, not account movements, so they are not recorded as transactions."],"verification":{"method":"second-reading","firstModel":"claude-sonnet-5-5","secondModel":"claude-opus-5-5","reasons":1,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"balance":{"correct":1,"total":1},"balanceDate":{"correct":1,"total":1}},"rows":{"expected":0,"found":0,"extra":0},"errors":[],"score":1}},
+{"id":"png-nationwide-home-multi","title":"Banking app home screen listing three accounts, one of them new","tags":["png","multi-account","new-account","card-signs"],"kind":"png","status":"review","engine":"claude-cli","model":"claude-opus-5-5","durationMs":25008,"costUsd":0.0928,"confidence":"high","warnings":[],"notes":["Header reads 'Nationwide-style · Your accounts'; institution recorded as Nationwide.","FlexAccount type inferred as current account from name and sort code; not explicitly labelled.","Member Credit Card £312.44 shown as 'Balance owed', recorded as negative."],"verification":{"method":"second-reading","firstModel":"claude-sonnet-5-5","secondModel":"claude-opus-5-5","reasons":3,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":3,"total":3},"balance":{"correct":3,"total":3},"balanceDate":{"correct":3,"total":3}},"rows":{"expected":0,"found":0,"extra":0},"errors":[],"score":1}},
+{"id":"png-chase-saver-new","title":"Savings app screenshot for an account not set up yet","tags":["png","new-account","savings"],"kind":"png","status":"review","engine":"claude-cli","model":"claude-opus-5-5","durationMs":25222,"costUsd":0.0919,"confidence":"high","warnings":[],"notes":["The account is labelled only \"Chase-style Saver\" and no provider is named clearly, so institutionName is left null.","The \"Today\" row is dated 2026-09-28, the capture date. The other rows take their year from the capture date, and the weekdays match 2026.","The description \"Transfer from Barcl...\" is cut off on screen."],"verification":{"method":"second-reading","firstModel":"claude-sonnet-5-5","secondModel":"claude-opus-5-5","reasons":2,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"balance":{"correct":1,"total":1},"row":{"correct":3,"total":3},"date":{"correct":3,"total":3},"sign":{"correct":3,"total":3},"amount":{"correct":3,"total":3},"description":{"correct":3,"total":3},"pending":{"correct":3,"total":3},"duplicate":{"correct":3,"total":3},"noExtra":{"correct":3,"total":3}},"rows":{"expected":3,"found":3,"extra":0},"errors":[],"score":1}},
+{"id":"png-lisa-app-overview","title":"Investment LISA overview: value, cash, and only the first holding of the list","tags":["png","lisa","holdings","app-set"],"kind":"png","status":"review","engine":"claude-cli","model":"claude-opus-5-5","durationMs":19333,"costUsd":0.0768,"confidence":"medium","warnings":[],"notes":["No provider is named on the screen.","The account number ends in letters (MB7Q2XK), so last4 is null.","The investment change is shown only as a percentage (+21.40%), not as an amount, so gainLoss is null.","The fund name is cut off on screen: 'Fidelity Index World ...'.","The holding (£5,204.77) plus available cash (£612.30) comes to £5,817.07, which is less than the headline value of £9,418.62. The list of investments may not show everything in the account."],"verification":{"method":"second-reading","firstModel":"claude-sonnet-5-5","secondModel":"claude-opus-5-5","reasons":2,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"balance":{"correct":1,"total":1},"balanceDate":{"correct":1,"total":1},"wrapper":{"correct":1,"total":1},"holding":{"correct":1,"total":1},"holdingValue":{"correct":1,"total":1}},"rows":{"expected":0,"found":0,"extra":0},"errors":[],"score":1}},
+{"id":"png-lisa-app-activity","title":"Investment LISA activity, scrolled: the Balance column is the cash, not the value","tags":["png","lisa","cash-ledger","app-set"],"kind":"png","status":"review","engine":"claude-cli","model":"claude-sonnet-5-5","durationMs":9617,"costUsd":0.0317,"confidence":"high","warnings":[],"notes":["Running balance moves with cash only; no total account value is shown.","Account type inferred from the 'Lifetime isa government bonus' row; the account name is not shown as a heading.","Opening balance is from the '* BALANCE B/F *' row dated 30 August 2026.","The running balances on this screen are the uninvested cash, not the account’s value, so no value is recorded from it."],"verification":{"method":"checks","firstModel":"claude-sonnet-5-5","reasons":0,"disagreements":[],"kept":"first"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"period":{"correct":2,"total":2},"balance":{"correct":2,"total":2},"wrapper":{"correct":1,"total":1},"row":{"correct":3,"total":3},"date":{"correct":3,"total":3},"sign":{"correct":3,"total":3},"amount":{"correct":3,"total":3},"description":{"correct":3,"total":3},"pending":{"correct":3,"total":3},"balanceAfter":{"correct":3,"total":3},"duplicate":{"correct":3,"total":3},"noExtra":{"correct":3,"total":3}},"rows":{"expected":3,"found":3,"extra":0},"errors":[],"score":1}},
+{"id":"png-lisa-app-fund-page","title":"One fund’s own page: a holding with units and amount invested, not an account","tags":["png","lisa","holdings","app-set"],"kind":"png","status":"review","engine":"claude-cli","model":"claude-opus-5-5","durationMs":15381,"costUsd":0.0725,"confidence":"high","warnings":[],"notes":["The screen shows the details of one holding only. Account-level totals are not shown, and neither the platform nor the account type is named.","The screen shows the change since investing as 21.04%.","This screen shows one holding (Fidelity Index World Fund P Acc); its value is not the account’s, so only the holding is recorded, beside the others of that day."],"verification":{"method":"second-reading","firstModel":"claude-sonnet-5-5","secondModel":"claude-opus-5-5","reasons":1,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":0,"total":1},"account":{"correct":1,"total":1},"balance":{"correct":1,"total":1},"holding":{"correct":1,"total":1},"holdingValue":{"correct":1,"total":1},"holdingUnits":{"correct":1,"total":1}},"rows":{"expected":0,"found":0,"extra":0},"errors":["wrongly said to add nothing new"],"score":0.8333333333333334}},
+{"id":"png-nsi-transactions","title":"Savings app, Transactions tab: the holding with no date printed, and prizes reinvested","tags":["png","savings","app-set","capture-date"],"kind":"png","status":"review","engine":"claude-cli","model":"claude-opus-5-5","durationMs":24829,"costUsd":0.0947,"confidence":"high","warnings":[],"notes":["Transactions tab of a Premium Bonds account; the provider is not named on the screen.","The headline figure £12,350.00 is labelled 'Total holding' and has no date."],"verification":{"method":"second-reading","firstModel":"claude-sonnet-5-5","secondModel":"claude-opus-5-5","reasons":1,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"noClaim":{"correct":1,"total":1},"account":{"correct":1,"total":1},"balance":{"correct":1,"total":1},"balanceDate":{"correct":1,"total":1},"row":{"correct":5,"total":5},"date":{"correct":5,"total":5},"sign":{"correct":5,"total":5},"amount":{"correct":5,"total":5},"description":{"correct":5,"total":5},"pending":{"correct":5,"total":5},"duplicate":{"correct":5,"total":5},"noExtra":{"correct":5,"total":5}},"rows":{"expected":5,"found":5,"extra":0},"errors":[],"score":1}},
+{"id":"png-nsi-transactions-scrolled","title":"The same tab scrolled: older rows, and nothing on screen saying which account","tags":["png","savings","app-set","batch"],"kind":"png","status":"review","engine":"claude-cli","model":"claude-opus-5-5","durationMs":26969,"costUsd":0.0977,"confidence":"medium","warnings":[],"notes":["No institution, account name or balance is shown. The account is treated as Premium Bonds only because of the 'Auto prize reinvestment' rows.","The list shows four transactions, dated from 2 April 2026 to 2 June 2026."],"verification":{"method":"second-reading","firstModel":"claude-sonnet-5-5","secondModel":"claude-opus-5-5","reasons":1,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"noClaim":{"correct":1,"total":1},"account":{"correct":1,"total":1},"row":{"correct":4,"total":4},"date":{"correct":4,"total":4},"sign":{"correct":4,"total":4},"amount":{"correct":4,"total":4},"description":{"correct":4,"total":4},"pending":{"correct":4,"total":4},"duplicate":{"correct":4,"total":4},"noExtra":{"correct":4,"total":4}},"rows":{"expected":4,"found":4,"extra":0},"errors":[],"score":1}},
+{"id":"png-nsi-bond-record","title":"Bond record tab: blocks of bond numbers are neither transactions nor holdings","tags":["png","savings","app-set","nothing-new"],"kind":"png","status":"review","engine":"claude-cli","model":"claude-opus-5-5","durationMs":14754,"costUsd":0.0691,"confidence":"high","warnings":[],"notes":["The screen shows the Premium Bonds total holding (£12,350.00) above the 'Bond record' tab. That tab lists bond number ranges by draw eligibility (1 August, 1 September and 1 October 2026). These ranges are not transactions or holdings, so they were not recorded.","No provider name is shown on the screen."],"verification":{"method":"second-reading","firstModel":"claude-sonnet-5-5","secondModel":"claude-opus-5-5","reasons":1,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"noClaim":{"correct":1,"total":1},"account":{"correct":1,"total":1},"balance":{"correct":1,"total":1},"balanceDate":{"correct":1,"total":1}},"rows":{"expected":0,"found":0,"extra":0},"errors":[],"score":1}},
+{"id":"png-nsi-prize-history","title":"Prize history: the same prizes by bond number and month, not where they went","tags":["png","savings","app-set","nothing-new"],"kind":"png","status":"review","engine":"claude-cli","model":"claude-opus-5-5","durationMs":16838,"costUsd":0.0753,"confidence":"high","warnings":[],"notes":["Screen is a prize history (prizes by bond number and month, July–September 2026) for holder's number ending 3704; these are not account movements, so no transactions recorded.","No balance shown. Provider and product name are not printed; account type inferred from the prize history with bond numbers."],"verification":{"method":"second-reading","firstModel":"claude-sonnet-5-5","secondModel":"claude-opus-5-5","reasons":1,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"noClaim":{"correct":1,"total":1}},"rows":{"expected":0,"found":0,"extra":0},"errors":[],"score":1}},
+{"id":"png-nsi-prize-history-scrolled","title":"Prize history scrolled: older prizes, nothing to record","tags":["png","savings","app-set","nothing-new"],"kind":"png","status":"review","engine":"claude-cli","model":"claude-opus-5-5","durationMs":12113,"costUsd":0.0637,"confidence":"high","warnings":[],"notes":["The screen lists amounts grouped by month (June, May, April and February 2026), each against a bond-style number (e.g. 098TT418251). It looks like a prize history, not the account's own movements, so none of the rows are recorded as transactions.","The screen does not name an account or provider, and shows no balance."],"verification":{"method":"second-reading","firstModel":"claude-sonnet-5-5","secondModel":"claude-opus-5-5","reasons":1,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"noClaim":{"correct":1,"total":1}},"rows":{"expected":0,"found":0,"extra":0},"errors":[],"score":1}}
+]}

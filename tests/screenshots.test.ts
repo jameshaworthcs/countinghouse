@@ -376,6 +376,19 @@ describe('nothing new: understood, and adds nothing', () => {
     expect(svc.novelty().has(approximate)).toBe(false);
   });
 
+  it('a fund’s own page adds its units and amount invested to the overview’s value: that is new', async () => {
+    await store.setAccounts([...store.accounts, acct('lisa', 'lisa', { name: 'Lifetime ISA', institutionId: 'moneybox' })]);
+    await store.addHoldings([{ id: 'hld_0000000000000001', accountId: 'lisa', date: '2026-09-29', holdings: [{ name: 'Fidelity Index World Fund P Acc', value: 5204.77, currency: 'GBP' }], totalValue: 9418.62, source: {}, createdAt: stamp }], 'h');
+    const fund = { name: 'Fidelity Index World Fund P Acc', value: 5204.77 };
+    const page = (h: Record<string, unknown>) => ({ documentType: 'holding_detail_screenshot', accounts: [{ holdings: [{ ...fund, ...h }] }] });
+    const fuller = await make(page({ units: 1321.007, costBasis: 4300 }));
+    const same = await make(page({}), { created: '2026-09-29T20:09:59+01:00' });
+    await start();
+    expect(svc.getPending(fuller)!.draft!.sections[0]!.target).toEqual({ mode: 'existing', accountId: 'lisa' });
+    expect(svc.novelty().has(fuller)).toBe(false);
+    expect(svc.novelty().get(same)!.reason).toBe('Everything on it is already here: its holding is already recorded.');
+  });
+
   it('a section waiting for you to choose its account is never nothing new', async () => {
     const id = await make({ documentType: 'transactions_screenshot', accounts: [{ transactions: reinvestments }] }, { at: '2026-09-29T19:00:00+01:00' });
     await start();

@@ -1,0 +1,152 @@
+{"summary": {
+ "ranAt": "2026-09-29T20:18:11.515Z",
+ "promptVersion": "extract-9",
+ "label": "after-nsi-fixes-recheck",
+ "model": "app default",
+ "effort": "app default",
+ "verifyModel": "app default",
+ "readTwice": 7,
+ "confirmedByFigures": 1,
+ "withDisagreements": 0,
+ "cases": 8,
+ "minutes": 0.8,
+ "costUsd": 0.68,
+ "fieldAccuracy": 100,
+ "rows": {
+  "expected": 12,
+  "found": 12,
+  "extra": 0
+ },
+ "byField": {
+  "nothingNew": {
+   "correct": 8,
+   "total": 8,
+   "pct": 100
+  },
+  "account": {
+   "correct": 7,
+   "total": 7,
+   "pct": 100
+  },
+  "balance": {
+   "correct": 7,
+   "total": 7,
+   "pct": 100
+  },
+  "balanceDate": {
+   "correct": 4,
+   "total": 4,
+   "pct": 100
+  },
+  "wrapper": {
+   "correct": 3,
+   "total": 3,
+   "pct": 100
+  },
+  "figure": {
+   "correct": 3,
+   "total": 3,
+   "pct": 100
+  },
+  "figureYear": {
+   "correct": 3,
+   "total": 3,
+   "pct": 100
+  },
+  "holding": {
+   "correct": 2,
+   "total": 2,
+   "pct": 100
+  },
+  "holdingValue": {
+   "correct": 2,
+   "total": 2,
+   "pct": 100
+  },
+  "period": {
+   "correct": 2,
+   "total": 2,
+   "pct": 100
+  },
+  "row": {
+   "correct": 12,
+   "total": 12,
+   "pct": 100
+  },
+  "date": {
+   "correct": 12,
+   "total": 12,
+   "pct": 100
+  },
+  "sign": {
+   "correct": 12,
+   "total": 12,
+   "pct": 100
+  },
+  "amount": {
+   "correct": 12,
+   "total": 12,
+   "pct": 100
+  },
+  "description": {
+   "correct": 12,
+   "total": 12,
+   "pct": 100
+  },
+  "pending": {
+   "correct": 12,
+   "total": 12,
+   "pct": 100
+  },
+  "balanceAfter": {
+   "correct": 3,
+   "total": 3,
+   "pct": 100
+  },
+  "duplicate": {
+   "correct": 12,
+   "total": 12,
+   "pct": 100
+  },
+  "noExtra": {
+   "correct": 12,
+   "total": 12,
+   "pct": 100
+  },
+  "holdingUnits": {
+   "correct": 1,
+   "total": 1,
+   "pct": 100
+  },
+  "noClaim": {
+   "correct": 4,
+   "total": 4,
+   "pct": 100
+  }
+ },
+ "byKind": {
+  "png": 100
+ },
+ "byTag": {
+  "png": 100,
+  "pension": 100,
+  "lisa": 100,
+  "holdings": 100,
+  "app-set": 100,
+  "cash-ledger": 100,
+  "savings": 100,
+  "capture-date": 100,
+  "batch": 100,
+  "nothing-new": 100
+ }
+},
+"results": [
+{"id":"png-nest-pension","title":"Workplace pension app: pot value and contributions this tax year","tags":["png","pension"],"kind":"png","status":"review","engine":"claude-cli","model":"claude-opus-5-5","durationMs":20384,"costUsd":0.1252,"confidence":"high","warnings":[],"notes":["The screen is headed 'Nest-style pension' and does not name a provider, so institutionName is null.","I set accountType to workplace_pension because the screen shows contributions 'From your employer'.","The tax year for 'Contributions this tax year' is taken as 2026/27 from the capture date, 2026-09-20.","The retirement date of 14 May 2061 is shown but not recorded."],"verification":{"method":"second-reading","firstModel":"claude-sonnet-5-5","secondModel":"claude-opus-5-5","reasons":3,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"balance":{"correct":1,"total":1},"balanceDate":{"correct":1,"total":1},"wrapper":{"correct":1,"total":1},"figure":{"correct":3,"total":3},"figureYear":{"correct":3,"total":3}},"rows":{"expected":0,"found":0,"extra":0},"errors":[],"score":1}},
+{"id":"png-lisa-app-overview","title":"Investment LISA overview: value, cash, and only the first holding of the list","tags":["png","lisa","holdings","app-set"],"kind":"png","status":"review","engine":"claude-cli","model":"claude-opus-5-5","durationMs":18893,"costUsd":0.0907,"confidence":"high","warnings":[],"notes":["Provider is not named on the screen. 'Fidelity' is only the fund's name.","The account number (MB7Q2XK) ends in letters, so last4 is null.","The fund name is cut off on screen: 'Fidelity Index World ...'.","The investment change is shown only as a percentage (+21.40%), so gainLoss is null.","The one holding shown (£5,204.77) plus available cash (£612.30) does not add up to the headline value of £9,418.62. The screen does not explain the difference."],"verification":{"method":"second-reading","firstModel":"claude-sonnet-5-5","secondModel":"claude-opus-5-5","reasons":2,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"balance":{"correct":1,"total":1},"balanceDate":{"correct":1,"total":1},"wrapper":{"correct":1,"total":1},"holding":{"correct":1,"total":1},"holdingValue":{"correct":1,"total":1}},"rows":{"expected":0,"found":0,"extra":0},"errors":[],"score":1}},
+{"id":"png-lisa-app-activity","title":"Investment LISA activity, scrolled: the Balance column is the cash, not the value","tags":["png","lisa","cash-ledger","app-set"],"kind":"png","status":"review","engine":"claude-cli","model":"claude-sonnet-5-5","durationMs":7966,"costUsd":0.0297,"confidence":"high","warnings":[],"notes":["Running balance tracks cash in the account, not total account value; no total account value shown.","Balance B/F row of 364.31 dated 30 August 2026 recorded as opening balance.","The running balances on this screen are the uninvested cash, not the account’s value, so no value is recorded from it."],"verification":{"method":"checks","firstModel":"claude-sonnet-5-5","reasons":0,"disagreements":[],"kept":"first"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"period":{"correct":2,"total":2},"balance":{"correct":2,"total":2},"wrapper":{"correct":1,"total":1},"row":{"correct":3,"total":3},"date":{"correct":3,"total":3},"sign":{"correct":3,"total":3},"amount":{"correct":3,"total":3},"description":{"correct":3,"total":3},"pending":{"correct":3,"total":3},"balanceAfter":{"correct":3,"total":3},"duplicate":{"correct":3,"total":3},"noExtra":{"correct":3,"total":3}},"rows":{"expected":3,"found":3,"extra":0},"errors":[],"score":1}},
+{"id":"png-lisa-app-fund-page","title":"One fund’s own page: a holding with units and amount invested, not an account","tags":["png","lisa","holdings","app-set"],"kind":"png","status":"review","engine":"claude-cli","model":"claude-opus-5-5","durationMs":15092,"costUsd":0.0734,"confidence":"high","warnings":[],"notes":["Screen shows a single holding only; account total value, account type and the platform/provider are not shown. 'Fidelity' is the fund name and is not taken as the platform.","Change since invested shown as 21.04%.","This screen shows one holding (Fidelity Index World Fund P Acc); its value is not the account’s, so only the holding is recorded, beside the others of that day."],"verification":{"method":"second-reading","firstModel":"claude-sonnet-5-5","secondModel":"claude-opus-5-5","reasons":1,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"balance":{"correct":1,"total":1},"holding":{"correct":1,"total":1},"holdingValue":{"correct":1,"total":1},"holdingUnits":{"correct":1,"total":1}},"rows":{"expected":0,"found":0,"extra":0},"errors":[],"score":1}},
+{"id":"png-nsi-transactions","title":"Savings app, Transactions tab: the holding with no date printed, and prizes reinvested","tags":["png","savings","app-set","capture-date"],"kind":"png","status":"review","engine":"claude-cli","model":"claude-opus-5-5","durationMs":24494,"costUsd":0.1076,"confidence":"high","warnings":[],"notes":["Transactions tab of a Premium Bonds account; the provider is not named on the screen.","Headline 'Total holding' £12,350.00 has no as-at date, so balanceDate is null."],"verification":{"method":"second-reading","firstModel":"claude-sonnet-5-5","secondModel":"claude-opus-5-5","reasons":1,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"noClaim":{"correct":1,"total":1},"account":{"correct":1,"total":1},"balance":{"correct":1,"total":1},"balanceDate":{"correct":1,"total":1},"row":{"correct":5,"total":5},"date":{"correct":5,"total":5},"sign":{"correct":5,"total":5},"amount":{"correct":5,"total":5},"description":{"correct":5,"total":5},"pending":{"correct":5,"total":5},"duplicate":{"correct":5,"total":5},"noExtra":{"correct":5,"total":5}},"rows":{"expected":5,"found":5,"extra":0},"errors":[],"score":1}},
+{"id":"png-nsi-transactions-scrolled","title":"The same tab scrolled: older rows, and nothing on screen saying which account","tags":["png","savings","app-set","batch"],"kind":"png","status":"review","engine":"claude-cli","model":"claude-opus-5-5","durationMs":26710,"costUsd":0.1107,"confidence":"medium","warnings":[],"notes":["No account name, provider or balance is shown on the screen. The account type is inferred from the 'Auto prize reinvestment' rows, which are typical of Premium Bonds.","The list may continue below 2 April 2026; the screen shows no more rows."],"verification":{"method":"second-reading","firstModel":"claude-sonnet-5-5","secondModel":"claude-opus-5-5","reasons":1,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"noClaim":{"correct":1,"total":1},"account":{"correct":1,"total":1},"row":{"correct":4,"total":4},"date":{"correct":4,"total":4},"sign":{"correct":4,"total":4},"amount":{"correct":4,"total":4},"description":{"correct":4,"total":4},"pending":{"correct":4,"total":4},"duplicate":{"correct":4,"total":4},"noExtra":{"correct":4,"total":4}},"rows":{"expected":4,"found":4,"extra":0},"errors":[],"score":1}},
+{"id":"png-nsi-bond-record","title":"Bond record tab: blocks of bond numbers are neither transactions nor holdings","tags":["png","savings","app-set","nothing-new"],"kind":"png","status":"review","engine":"claude-cli","model":"claude-opus-5-5","durationMs":14043,"costUsd":0.0682,"confidence":"high","warnings":[],"notes":["Screen shows the Premium Bonds total holding above the 'Bond record' tab, which lists bond number ranges by draw eligibility (1 October, 1 September and 1 August 2026). The bond ranges are not transactions or holdings, so they were not recorded.","The provider is not named on the screen."],"verification":{"method":"second-reading","firstModel":"claude-sonnet-5-5","secondModel":"claude-opus-5-5","reasons":1,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"noClaim":{"correct":1,"total":1},"account":{"correct":1,"total":1},"balance":{"correct":1,"total":1},"balanceDate":{"correct":1,"total":1}},"rows":{"expected":0,"found":0,"extra":0},"errors":[],"score":1}},
+{"id":"png-nsi-prize-history","title":"Prize history: the same prizes by bond number and month, not where they went","tags":["png","savings","app-set","nothing-new"],"kind":"png","status":"review","engine":"claude-cli","model":"claude-opus-5-5","durationMs":18067,"costUsd":0.0769,"confidence":"high","warnings":[],"notes":["Screen is a prize history for holder's number ending 3704: prizes listed by bond number and month (September, August, July 2026). These are not recorded as transactions or holdings.","No balance, provider name or account name is shown; account type inferred from the prize-by-bond-number list."],"verification":{"method":"second-reading","firstModel":"claude-sonnet-5-5","secondModel":"claude-opus-5-5","reasons":1,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"noClaim":{"correct":1,"total":1}},"rows":{"expected":0,"found":0,"extra":0},"errors":[],"score":1}}
+]}

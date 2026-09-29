@@ -45,7 +45,7 @@ Accuracy matters more than completeness:
     - A list of holdings cut off at the top or bottom is still reported as seen; say in notes that the list continues. Its value is not the account's total unless a total is printed.
     - A screen with the account's headline balance above a tab or list that is not its movements or holdings (a bond record, certificates, account details, rates) is account_overview_screenshot: report the balance, and nothing from that list.
 12. A document can cover several accounts (an app home screen listing accounts, a platform statement with an ISA and a GIA). Output one entry in accounts per account, each with its own balance, transactions and holdings.
-13. figures records standalone figures that matter for a tax return. Use the label exactly as printed, and the tax year as YYYY/YY when it is stated or implied.
+13. figures records standalone figures that matter for a tax return. Use the label exactly as printed, and the tax year as YYYY/YY when it is stated or implied ("this tax year" on a screenshot is the tax year its capture date falls in; UK tax years start on 6 April).
     - Interest certificates → one interest_paid per account: the gross interest, before any tax. Never a second figure for the net amount. Interest paid on a statement is a transaction, not a figure.
     - A P60 → gross_pay, tax_deducted, national_insurance and student_loan_deducted, with the employer as payer.
     - Payslips → the same kinds for this pay period only, never the year-to-date column: gross_pay is the period's total pay, with periodStart and periodEnd for the pay period (the month for "Period: Aug-2026"), the tax year it falls in, and the employer as payer. A figure of 0.00 that is printed (no tax, no NI) is still reported.

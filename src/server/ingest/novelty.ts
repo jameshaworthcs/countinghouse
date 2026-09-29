@@ -61,22 +61,30 @@ function factsOf(record: ImportRecord, store: Store): Placed[] {
     }
     if (s.recordHoldings && s.balanceDate) {
       const day = stored ? store.holdings(stored).filter((h) => h.date === s.balanceDate) : [];
-      for (const h of s.holdings) out.push({ fact: { kind: 'holding', account, date: s.balanceDate, holding: h }, stored: day.some((snap) => snap.holdings.some((x) => sameHoldingFigures(h, x))) });
+      for (const h of s.holdings) out.push({ fact: { kind: 'holding', account, date: s.balanceDate, holding: h }, stored: day.some((snap) => snap.holdings.some((x) => holdingKnown(h, x))) });
     }
   }
   for (const f of draft.figures) if (f.include || f.duplicateOf) out.push({ fact: { kind: 'figure', figure: f }, stored: Boolean(f.duplicateOf) });
   return out;
 }
 
-function sameHoldingFigures(a: Holding, b: Holding): boolean {
-  return sameHolding(a, b) && sameMoney(a.value, b.value) && (a.units === undefined || b.units === undefined || Math.abs(a.units - b.units) < 0.0005);
+/**
+ * Does `known` already have everything `fresh` says about the holding? A fund's own page adds units
+ * and the amount invested to what an overview showed of it: that is new, even at the same value.
+ */
+function holdingKnown(fresh: Holding, known: Holding): boolean {
+  if (!sameHolding(fresh, known)) return false;
+  const money = (['value', 'price', 'costBasis', 'gain'] as const).every((k) => fresh[k] === undefined || sameMoney(fresh[k], known[k]));
+  const units = fresh.units === undefined || (known.units !== undefined && Math.abs(fresh.units - known.units) < 0.0005);
+  const ids = (['isin', 'sedol', 'ticker'] as const).every((k) => !fresh[k] || fresh[k].toUpperCase() === known[k]?.toUpperCase());
+  return money && units && ids;
 }
 
 /** Does `k`, a fact another import will record, record `f` too? */
 function covers(k: Fact, f: Fact): boolean {
   if (k.kind === 'row' && f.kind === 'row') return k.account === f.account && k.date === f.date && sameMoney(k.amount, f.amount) && sameText(k.description, f.description);
   if (k.kind === 'balance' && f.kind === 'balance') return k.account === f.account && k.date === f.date && BALANCE_FIELDS.every((x) => f.values[x] === undefined || sameMoney(f.values[x], k.values[x]));
-  if (k.kind === 'holding' && f.kind === 'holding') return k.account === f.account && k.date === f.date && sameHoldingFigures(f.holding, k.holding);
+  if (k.kind === 'holding' && f.kind === 'holding') return k.account === f.account && k.date === f.date && holdingKnown(f.holding, k.holding);
   if (k.kind === 'figure' && f.kind === 'figure') {
     const [a, b] = [k.figure, f.figure];
     return a.kind === b.kind && sameMoney(a.amount, b.amount) && (a.taxYear ?? '') === (b.taxYear ?? '') && (a.periodEnd ?? '') === (b.periodEnd ?? '') && (a.payer ?? '').toLowerCase() === (b.payer ?? '').toLowerCase();

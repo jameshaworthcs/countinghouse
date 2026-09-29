@@ -106,10 +106,13 @@ The import record keeps how it was checked (`extraction.verification`) and the r
 not kept (`extraction.alternative`).
 
 Measured on the evaluation set (`extract-5`, 28 documents; `extract-6` adds three investment-app
-LISA screens: an overview, an activity list and a fund's own page):
+LISA screens: an overview, an activity list and a fund's own page; the `extract-9` runs add five
+savings-app screens uploaded together, and score "nothing new" on every document):
 
 | Configuration | Field accuracy | Cost | Time |
 |---|---|---|---|
+| `extract-9`: Sonnet, checked by Opus, 36 documents with five savings-app screens uploaded together | 100% | $2.90 | 4.1 min |
+| `extract-8` on the same 36 (before): balance dated at the latest row, a new account for the scrolled tab, "prizes paid out to another account", nothing recognised as adding nothing new | 99.8% | $2.72 | 4.4 min |
 | `extract-6`: Sonnet, checked by Opus (the default), 31 documents | 100% | $2.52 | 4.1 min |
 | Sonnet, checked by Opus (the default) | 100% | $2.05 | 3.3 min |
 | Sonnet alone | 100% | $1.04 | 2.0 min |
