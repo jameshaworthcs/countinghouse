@@ -31,6 +31,7 @@ The same file twice (by SHA-256) is recognised as already imported.
 | HSBC CSV (no header) | `hsbc` | Matched by the shape of the first row |
 | first direct and other Date/Description/Amount CSVs | `date-description-amount` | |
 | Trading 212 CSV | `trading-212` | Buys and withdrawals are money out; deposits count as contributions |
+| Holdings exports (interactive investor's portfolio export, and any CSV with a name, quantity and value column but no dates) | `holdings-csv` | One holdings snapshot: units, price (pence or pounds), value, book cost and gain per holding, SEDOL or ticker from the symbol; the account's value is what the holdings are worth (cash is not in the file); the wrapper from the file name (`…-ISA.csv`, `…-SIPP.csv`) |
 | Anything else CSV | auto-detected mapping | Confident mappings import straight away (flagged); otherwise you map the columns once and save them as a profile |
 | OFX / QFX (1.x SGML and 2.x XML) | `ofx` | Bank and credit-card statements, FITID as id, ledger/available balance; foreign amounts per `<ORIGCURRENCY>` (already converted) or `<CURRENCY>` (converted at CURRATE) |
 | QIF | `qif` | Day/month order detected across the whole file |
@@ -138,6 +139,9 @@ on every import):
     come from a row alone (a platform's own charge).
 - **Last 4 digits only.** A full account or card number is never output. A number ending in
   letters has no last four digits.
+- **Statement dates.** A statement's balance is dated at the end of its period, never at its
+  "statement date" (the day it was produced); the draft corrects a balance dated after the period
+  when no rows run past it (`extract-7`).
 - **Tax figures** from P60s, payslips, P11Ds, interest certificates, pension and dividend
   statements. A payslip gives the figures for its own pay period, never its year-to-date column
   (`extract-6`); a P60 gives the year's. Two payslips of equal pay are two figures: a figure is a

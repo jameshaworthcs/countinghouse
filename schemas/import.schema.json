@@ -1049,6 +1049,13 @@
                             "null"
                           ]
                         },
+                        "sedol": {
+                          "default": null,
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
                         "units": {
                           "default": null,
                           "type": [
@@ -1935,6 +1942,13 @@
                             "null"
                           ]
                         },
+                        "sedol": {
+                          "default": null,
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
                         "units": {
                           "default": null,
                           "type": [
@@ -2679,6 +2693,9 @@
                       "type": "string"
                     },
                     "ticker": {
+                      "type": "string"
+                    },
+                    "sedol": {
                       "type": "string"
                     },
                     "units": {

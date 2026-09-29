@@ -313,3 +313,20 @@ describe('fund names cut short', () => {
     expect(matchInstrument({ name: 'HSBC FTSE All-World Index' }, list)).toBeUndefined();
   });
 });
+
+describe('statement dates', () => {
+  it('a statement’s balance is at the end of its period, not the day it was produced', async () => {
+    await store.setAccounts([...store.accounts, acct('card', 'credit_card', { last4: '1234' })]);
+    const d = draftOf({ documentType: 'credit_card_statement', accounts: [{ accountType: 'credit_card', last4: '1234', periodStart: '2026-02-03', periodEnd: '2026-03-02', balanceDate: '2026-03-03', closingBalance: -1312.4, transactions: [{ date: '2026-02-10', description: 'SHOP', amount: -20 }] }] });
+    expect(d.sections[0]!.balanceDate).toBe('2026-03-02');
+  });
+
+  it('Self Assessment does not look for interest from an account closed before the year', async () => {
+    await store.setAccounts([...store.accounts, acct('fixed', 'savings', { status: 'closed', openedOn: '2023-09-14', closedOn: '2025-09-14' })]);
+    await store.addTransactions([{ id: 'tx_0000000000000201', accountId: 'fixed', date: '2023-09-14', amount: 1000, currency: 'GBP', description: 'Deposit', category: 'transfer', source: {} }], 't');
+    const notes = (ty: string) => selfAssessment(store, ty).sections.find((x) => x.id === 'savings')!.items[0]!.notes.join(' ');
+    expect(notes('2026/27')).not.toMatch(/fixed/);
+    // It closed during 2025/26, so interest paid when it closed may be missing then.
+    expect(notes('2025/26')).toMatch(/fixed: transactions cover/);
+  });
+});

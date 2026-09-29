@@ -60,7 +60,11 @@ interface JobsView {
   enabled: boolean;
   jobs: JobView[];
   suggestions: { kind: string; params: Record<string, unknown>; label: string; reason: string; auto: boolean }[];
+  budget: { perDayUsd: number; perMonthUsd: number; spentTodayUsd: number; spentThisMonthUsd: number; open: boolean };
+  autoResearch: boolean;
 }
+
+const RESEARCH_JOB_KINDS = new Set(['research-instrument', 'research-provider', 'refresh-assumptions']);
 
 const TYPE_LABEL: Record<string, string> = { current: 'current accounts', savings: 'savings accounts', cash_isa: 'cash ISAs', premium_bonds: 'Premium Bonds' };
 const CLASS_LABEL: Record<string, string> = { equity: 'Shares', bond: 'Bonds', cash: 'Cash', property: 'Property', mixed: 'Mixed', commodity: 'Commodities', crypto: 'Crypto', other: 'Other' };
@@ -682,7 +686,12 @@ function JobsTab() {
   return (
     <div className="flex flex-col gap-5">
       {!d.enabled && <Callout tone="neutral">Agents are off: nothing starts by itself. You can still start jobs here. Turn them on in Settings → Agents.</Callout>}
-      <Card title="Due or stale" description="What needs researching, refreshing or reviewing. Research jobs send only public identifiers; jobs that read your data have no web access." padded={false}>
+      <Callout tone={d.budget.open ? 'neutral' : 'warn'} title={`Background budget: $${d.budget.spentTodayUsd.toFixed(2)} of $${d.budget.perDayUsd} today, $${d.budget.spentThisMonthUsd.toFixed(2)} of $${d.budget.perMonthUsd} this month`}>
+        {d.budget.open
+          ? 'Jobs the app starts by itself stop once either limit is reached; jobs you start are not limited. Costs are Claude usage at API prices.'
+          : `The ${d.budget.spentTodayUsd >= d.budget.perDayUsd ? 'daily' : 'monthly'} limit is reached, so queued jobs the app started wait for ${d.budget.spentTodayUsd >= d.budget.perDayUsd ? 'tomorrow' : 'next month'}. Run one now to start it anyway, or change the limits in Settings → Agents.`}
+      </Callout>
+      <Card title="Due or stale" description={`What needs researching, refreshing or reviewing.${d.autoResearch ? '' : ' Research runs only when you press Run now (Settings → Agents).'} Research jobs send only public identifiers; jobs that read your data have no web access.`} padded={false}>
         {!d.suggestions.length ? (
           <div className="px-5 py-4 text-[13px] text-ink-3">Everything is up to date.</div>
         ) : (
@@ -719,7 +728,7 @@ function JobsTab() {
                       {j.privacy === 'public' ? 'Web research, public identifiers only' : 'Reads your data, no web access'} · queued {timeAgo(j.createdAt)} · {j.trigger}
                     </div>
                   </td>
-                  <td className={tableClasses.td}>{j.status === 'running' ? <StatusBadge status="pending">Running</StatusBadge> : <Badge tone="neutral">Queued</Badge>}</td>
+                  <td className={tableClasses.td}>{j.status === 'running' ? <StatusBadge status="pending">Running</StatusBadge> : j.trigger !== 'owner' && !d.budget.open ? <Badge tone="muted">Waiting for budget</Badge> : j.trigger !== 'owner' && !d.autoResearch && RESEARCH_JOB_KINDS.has(j.kind) ? <Badge tone="muted">Waiting for you: Run now, or cancel</Badge> : <Badge tone="neutral">Queued</Badge>}</td>
                   <td className={cn(tableClasses.td, 'text-right')}>
                     <Button size="sm" variant="ghost" icon={<Square className="size-3.5" />} onClick={() => cancel.mutate(j.id)}>
                       Cancel

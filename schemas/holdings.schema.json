@@ -35,6 +35,9 @@
           "ticker": {
             "type": "string"
           },
+          "sedol": {
+            "type": "string"
+          },
           "units": {
             "type": "number"
           },

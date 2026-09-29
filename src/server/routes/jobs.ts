@@ -19,6 +19,8 @@ export function jobRoutes(ctx: AppContext): Hono {
       enabled: ctx.store.settings.agents.enabled,
       jobs: r.list().slice(0, 100),
       suggestions: r.suggestions(),
+      budget: r.budget(),
+      autoResearch: ctx.store.settings.agents.autoResearch,
       kinds: JOB_KINDS.map((k) => ({ kind: k, privacy: JOB_DEFS[k].privacy, tools: JOB_DEFS[k].tools, promptVersion: JOB_DEFS[k].promptVersion })),
     });
   });

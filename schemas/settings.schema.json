@@ -103,7 +103,10 @@
         "researchStaleAfterDays": 90,
         "insightsAfterImport": true,
         "monthlyReview": true,
-        "timeoutSeconds": 1200
+        "timeoutSeconds": 1200,
+        "autoResearch": false,
+        "backgroundBudgetPerDayUsd": 5,
+        "backgroundBudgetPerMonthUsd": 40
       },
       "type": "object",
       "properties": {
@@ -145,6 +148,22 @@
           "type": "integer",
           "minimum": 60,
           "maximum": 3600
+        },
+        "autoResearch": {
+          "default": false,
+          "type": "boolean"
+        },
+        "backgroundBudgetPerDayUsd": {
+          "default": 5,
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "backgroundBudgetPerMonthUsd": {
+          "default": 40,
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1000
         }
       }
     }

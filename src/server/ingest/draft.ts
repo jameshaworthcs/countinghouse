@@ -108,6 +108,13 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
     // Balance date: printed date, else statement end, else when the screenshot was taken.
     let balanceDate = acc.balanceDate ?? undefined;
     let balanceDateSource: DateSource | undefined = balanceDate ? 'document' : undefined;
+    // A statement's closing balance is at the end of its period, whatever date the statement was
+    // produced ("Statement date: 03 Mar" for a period ending 2 Mar); dating it later would count
+    // the next period's first rows twice.
+    if (balanceDate && acc.periodEnd && balanceDate > acc.periodEnd && acc.transactions.length && !acc.transactions.some((t) => t.date > acc.periodEnd!)) {
+      notes.push(`The balance was dated ${balanceDate}, after the statement period ends (${acc.periodEnd}); it is dated at the period's end.`);
+      balanceDate = acc.periodEnd;
+    }
     if (!balanceDate && acc.periodEnd) {
       balanceDate = acc.periodEnd;
       balanceDateSource = 'document';
@@ -237,6 +244,7 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
       currency: h.currency ?? currency,
       ...(h.isin ? { isin: h.isin } : {}),
       ...(h.ticker ? { ticker: h.ticker } : {}),
+      ...(h.sedol && /^[0-9BCDFGHJKLMNPQRSTVWXYZ]{6}\d$/.test(h.sedol.toUpperCase()) ? { sedol: h.sedol.toUpperCase() } : {}),
       ...(h.units !== null ? { units: h.units } : {}),
       ...(h.price !== null ? { price: h.price } : {}),
       ...(h.costBasis !== null ? { costBasis: h.costBasis } : {}),

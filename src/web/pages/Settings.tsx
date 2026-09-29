@@ -144,7 +144,8 @@ function ExtractionForm() {
       </Card>
       <Card title="Agents" description="Jobs that research what you hold, keep assumptions current and write insights, through the same Claude login. Research jobs send only public identifiers (fund names, ISINs, providers); jobs that read your data get no web access.">
         <div className="flex flex-col gap-3">
-          <Switch checked={s.agents.enabled} onChange={(v) => setS({ ...s, agents: { ...s.agents, enabled: v } })} label="Let agents start jobs by themselves" description="New funds and providers, stale research (at most three a day), assumptions on fallbacks (at most weekly). You can always start jobs yourself." />
+          <Switch checked={s.agents.enabled} onChange={(v) => setS({ ...s, agents: { ...s.agents, enabled: v } })} label="Let agents start jobs by themselves" description="Insights after imports and the month in review, within the budget below. You can always start any job yourself." />
+          <Switch checked={s.agents.autoResearch} onChange={(v) => setS({ ...s, agents: { ...s.agents, autoResearch: v } })} label="Research by itself too" description="Off: fund, provider and assumption research runs only when you press Run now on Assumptions & research → Agent jobs. On: new funds and providers, stale research (at most three a day) and assumptions on fallbacks (at most weekly) start within the budget." />
           <Switch checked={s.agents.insightsAfterImport} onChange={(v) => setS({ ...s, agents: { ...s.agents, insightsAfterImport: v } })} label="Insights after each import" />
           <Switch checked={s.agents.monthlyReview} onChange={(v) => setS({ ...s, agents: { ...s.agents, monthlyReview: v } })} label="A month in review once a month’s data is complete" />
           <div className="grid gap-3 sm:grid-cols-3">
@@ -165,6 +166,12 @@ function ExtractionForm() {
             </Field>
             <Field label="Refresh research after (days)">
               <Input type="number" min={7} max={730} value={s.agents.researchStaleAfterDays} onChange={(e) => setS({ ...s, agents: { ...s.agents, researchStaleAfterDays: Math.min(730, Math.max(7, Number(e.target.value) || 90)) } })} />
+            </Field>
+            <Field label="Background budget per day ($)" hint="Claude usage at API prices">
+              <Input type="number" min={0} max={100} step={1} value={s.agents.backgroundBudgetPerDayUsd} onChange={(e) => setS({ ...s, agents: { ...s.agents, backgroundBudgetPerDayUsd: Math.min(100, Math.max(0, Number(e.target.value) || 0)) } })} />
+            </Field>
+            <Field label="Background budget per month ($)">
+              <Input type="number" min={0} max={1000} step={5} value={s.agents.backgroundBudgetPerMonthUsd} onChange={(e) => setS({ ...s, agents: { ...s.agents, backgroundBudgetPerMonthUsd: Math.min(1000, Math.max(0, Number(e.target.value) || 0)) } })} />
             </Field>
           </div>
           <div className="text-[12.5px] text-ink-3">

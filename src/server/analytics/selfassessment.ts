@@ -4,7 +4,7 @@
 
 import { ACCOUNT_TYPE_META, balanceModeOf } from '../../shared/accounts';
 import type { SaItem, SaSection, SaSource, SelfAssessmentResponse } from '../../shared/api';
-import { addDays, formatDate, today } from '../../shared/dates';
+import { addDays, formatDate, maxDate, minDate, today } from '../../shared/dates';
 import { formatMoney, fromMinor, toMinor } from '../../shared/money';
 import type { Figure, FigureKind } from '../../shared/schema';
 import { parseTaxYear, taxYearOf, taxYearParams, type TaxYear } from '../../shared/uk';
@@ -101,6 +101,8 @@ export function selfAssessment(store: Store, label?: string): SelfAssessmentResp
   let interestStatus: SaItem['status'] = allow.savings.interest > 0 ? 'ready' : 'not-applicable';
   const taxable = store.accounts.filter((a) => !ACCOUNT_TYPE_META[a.type].taxFreeInterest && balanceModeOf(a) === 'ledger' && a.type !== 'credit_card' && a.type !== 'loan' && a.type !== 'mortgage');
   for (const a of taxable) {
+    // An account closed before the year, or opened after it, paid no interest in it.
+    if ((a.closedOn && a.closedOn < ty.start) || (a.openedOn && a.openedOn > ty.end)) continue;
     const txs = store.transactions(a.id);
     const hasInterest = txs.some((t) => t.category === 'interest');
     if (!hasInterest && a.type !== 'savings') continue;
@@ -109,8 +111,10 @@ export function selfAssessment(store: Store, label?: string): SelfAssessmentResp
     const first = txs[0]?.date;
     const last = txs[txs.length - 1]?.date;
     // For a tax year still in progress, coverage up to about a month ago is complete enough.
-    const needTo = ty.end < today() ? ty.end : addDays(today(), -35);
-    if (!first || first > ty.start || !last || last < needTo) {
+    // An account opened or closed during the year needs data only for the part it was open.
+    const needFrom = maxDate(ty.start, a.openedOn)!;
+    const needTo = minDate(ty.end < today() ? ty.end : addDays(today(), -35), a.closedOn)!;
+    if (!first || first > needFrom || !last || last < needTo) {
       interestStatus = 'check';
       interestItemNotes.push(
         `${a.name}: transactions ${first ? `cover ${formatDate(first)} to ${formatDate(last!)}` : 'are missing'}, not the whole tax year, so interest may be missing. The bank's annual interest statement is the reliable figure.`,

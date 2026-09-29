@@ -19,8 +19,9 @@ export interface Detected {
  * The same holding, named on two screens: by ISIN or ticker when both have one, else by name
  * (shared/funds.ts: a name cut short matches the full one it begins).
  */
-export function sameHolding(a: Pick<Holding, 'name' | 'isin' | 'ticker'>, b: Pick<Holding, 'name' | 'isin' | 'ticker'>): boolean {
+export function sameHolding(a: Pick<Holding, 'name' | 'isin' | 'ticker' | 'sedol'>, b: Pick<Holding, 'name' | 'isin' | 'ticker' | 'sedol'>): boolean {
   if (a.isin && b.isin) return a.isin.toUpperCase() === b.isin.toUpperCase();
+  if (a.sedol && b.sedol) return a.sedol.toUpperCase() === b.sedol.toUpperCase();
   if (a.ticker && b.ticker && a.ticker.toUpperCase() === b.ticker.toUpperCase()) return true;
   return sameFundName(a.name, b.name);
 }

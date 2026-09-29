@@ -13,7 +13,7 @@ import { BUILTIN_CSV_PROFILES } from './csv-profiles';
 export const CSV_ENGINE_VERSION = 'csv-1';
 
 export function readCsvRows(text: string): { rows: string[][]; delimiter: string } {
-  const result = Papa.parse<string[]>(text.replace(/^\uFEFF/, ''), {
+  const result = Papa.parse<string[]>(text.replace(/^\uFEFF+/, ''), {
     skipEmptyLines: 'greedy',
     delimitersToGuess: [',', ';', '\t', '|'],
   });
@@ -23,7 +23,7 @@ export function readCsvRows(text: string): { rows: string[][]; delimiter: string
 
 export function normHeader(h: string): string {
   return h
-    .replace(/^\uFEFF/, '')
+    .replace(/^\uFEFF+/, '')
     .replace(/^["']|["']$/g, '')
     .replace(/:$/, '')
     .replace(/\s+/g, ' ')

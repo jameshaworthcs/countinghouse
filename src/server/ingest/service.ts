@@ -24,6 +24,7 @@ import { extractWithClaudeApi } from './claude-api';
 import { extractWithClaudeCli } from './claude-cli';
 import { commitDraft } from './commit';
 import { CSV_ENGINE_VERSION, findProfile, parseWithProfile, readCsvRows, suggestMapping } from './csv';
+import { HOLDINGS_CSV_VERSION, parseHoldingsCsv } from './holdings-csv';
 import { decodeText, detectKind, MAX_UPLOAD_BYTES, mediaTypeFor } from './detect';
 import { buildDraft, draftIsClean } from './draft';
 import { assessReading, chooseReading, compareReadings, shortModel } from './verify';
@@ -195,7 +196,12 @@ export class ImportService extends EventEmitter {
       if (kind === 'csv') {
         const { rows } = readCsvRows(decodeText(bytes));
         const match = findProfile(rows, this.store.csvProfiles);
-        if (match) {
+        // A platform's portfolio export lists holdings, not transactions.
+        const holdings = match ? null : parseHoldingsCsv(rows, record.document.fileName);
+        if (holdings) {
+          result = { extraction: holdings, warnings: [], durationMs: Date.now() - started };
+          detail = 'holdings export';
+        } else if (match) {
           const parsed = parseWithProfile(rows, match);
           result = { extraction: parsed.extraction, warnings: [], durationMs: Date.now() - started };
           detail = match.profile.id;
@@ -219,7 +225,7 @@ export class ImportService extends EventEmitter {
           detail = 'auto-detected';
         }
         engine = 'csv';
-        engineVersion = CSV_ENGINE_VERSION;
+        engineVersion = holdings ? HOLDINGS_CSV_VERSION : CSV_ENGINE_VERSION;
       } else if (kind === 'ofx') {
         result = { extraction: parseOfx(decodeText(bytes)), warnings: [], durationMs: Date.now() - started };
         engine = 'ofx';

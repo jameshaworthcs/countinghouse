@@ -40,6 +40,12 @@ export function dateFromFileName(name: string): ISODate | null {
     const date = makeDate(Number(y), MONTHS.indexOf(mon.slice(0, 3)) + 1, Number(d));
     if (date && date <= latest) return date;
   }
+  // Day first with separators, as ii names exports: 29-09-2026.
+  const dmySep = /(?:^|[^\d])(\d{2})[-_.](\d{2})[-_.](20\d{2})(?:[^\d]|$)/.exec(base);
+  if (dmySep) {
+    const d = makeDate(Number(dmySep[3]), Number(dmySep[2]), Number(dmySep[1]));
+    if (d && d <= latest) return d;
+  }
   // Day first with no separators, as some banks name statements: 05072026 is 5 July 2026.
   const dmy = /(?:^|[^\d])(\d{2})(\d{2})(20\d{2})(?:[^\d]|$)/.exec(base);
   if (dmy) {

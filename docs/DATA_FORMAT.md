@@ -22,7 +22,7 @@ point at them with `"$schema"` so editors validate as you type.
 data/
   meta.json            format + version + base currency
   profile.json         you: date of birth, region, salary, retirement age (the tax band is computed)
-  settings.json        extraction engine/model, agents, git behaviour, stale threshold, FX rates
+  settings.json        extraction engine/model, agents (with the background budget), git behaviour, stale threshold, FX rates
   institutions.json    { institutions: [...] }   banks, platforms, providers (+ FSCS group)
   accounts.json        { accounts: [...] }
   categories.json      { categories: [...] }     editable taxonomy (system ones drive calculations)
@@ -125,7 +125,7 @@ A balance or valuation at the end of `date`:
 
 ## holdings/&lt;account&gt;.jsonl
 
-`{ id, accountId, date, holdings: [{ name, isin?, ticker?, units?, price?, value, currency, costBasis?, gain?, assetClass?, weight?, attributes? }], cash?, totalValue, source, createdAt }`
+`{ id, accountId, date, holdings: [{ name, isin?, ticker?, sedol?, units?, price?, value, currency, costBasis?, gain?, assetClass?, weight?, attributes? }], cash?, totalValue, source, createdAt }`
 
 One snapshot per account and day. A document showing only part of the holdings (a list split over
 screens, one fund's own page) merges into that day's snapshot when committed:

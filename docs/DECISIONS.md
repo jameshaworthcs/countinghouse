@@ -306,3 +306,18 @@ as invariants.
   session. The sign-in page then waits for a click instead of going straight back.
 - **`openid-client` (v6, with `jose`) does the protocol,** as in verifiedhandles, rather than
   hand-written JWT checks.
+- **Background agent jobs have a budget** ($5 a day, $40 a month by default, in Settings). The first
+  big import found many new funds and queued all their research at once, about $22 in a morning; the
+  three-a-day cap only covered stale research. Jobs the app starts wait for the budget; yours do not.
+- **Holdings exports are read as holdings.** interactive investor's portfolio CSV failed as "no date
+  column": it is a list of holdings, not transactions. It now gives one holdings snapshot (SEDOL or
+  ticker, pence or pounds), and several byte-order marks before the header no longer hide it.
+- **A statement's balance is at the end of its period.** Chase card statements print a "statement
+  date" the day after the period; read as the balance date, it made false balance gaps (the
+  next period's first day counted twice).
+- **An import is not empty because it added no transactions.** The analyst saw only transaction
+  counts and called value screenshots and payslips "files that added nothing"
+  (`insights-after-import-3`).
+- **Research runs only when the owner asks.** After the first import queued research for many funds
+  at once, the owner chose to start research by hand; "Research by itself" (off by default) brings
+  back the automatic behaviour, within the budget.

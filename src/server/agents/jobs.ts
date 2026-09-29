@@ -58,7 +58,31 @@ export interface Suggestion {
 }
 
 const MAX_KEPT = 300;
+/** Jobs that research on the web: they start by themselves only when Settings → Agents allows it. */
+const RESEARCH_KINDS = new Set(['research-instrument', 'research-provider', 'refresh-assumptions']);
 const MAX_STALE_REFRESH_PER_DAY = 3;
+
+/**
+ * What a job of each kind costs, measured (docs/AGENTS.md): it stands in for a job that ended
+ * without reporting its cost (failed, timed out, cancelled), which still used the plan.
+ */
+const TYPICAL_COST_USD: Record<string, number> = {
+  'refresh-assumptions': 8.5,
+  'research-instrument': 1.6,
+  'research-provider': 0.7,
+  'insights-after-import': 0.3,
+  'monthly-review': 0.25,
+  'interpret-note': 0.1,
+};
+
+export interface BackgroundBudget {
+  perDayUsd: number;
+  perMonthUsd: number;
+  spentTodayUsd: number;
+  spentThisMonthUsd: number;
+  /** Whether a job the app starts by itself may start now. */
+  open: boolean;
+}
 
 export class JobRunner extends EventEmitter implements JobQueue {
   private jobs = new Map<string, JobRecord>();
@@ -185,11 +209,39 @@ export class JobRunner extends EventEmitter implements JobQueue {
     this.importTimer.unref();
   }
 
+  /** What jobs started by the app itself have spent today and this month, against the budget. */
+  budget(on: string = today()): BackgroundBudget {
+    const settings = this.store.settings.agents;
+    let day = 0;
+    let month = 0;
+    for (const j of this.list()) {
+      if (j.trigger === 'owner' || j.status === 'queued') continue;
+      const when = (j.startedAt ?? j.createdAt).slice(0, 10);
+      if (when.slice(0, 7) !== on.slice(0, 7)) continue;
+      // A running job, or one that ended without a cost, counts at what its kind typically costs.
+      const cost = j.costUsd ?? (j.status === 'running' || j.status === 'failed' || (j.status === 'cancelled' && j.startedAt) ? (TYPICAL_COST_USD[j.kind] ?? 1) : 0);
+      month += cost;
+      if (when === on) day += cost;
+    }
+    const round = (v: number) => Math.round(v * 100) / 100;
+    return {
+      perDayUsd: settings.backgroundBudgetPerDayUsd,
+      perMonthUsd: settings.backgroundBudgetPerMonthUsd,
+      spentTodayUsd: round(day),
+      spentThisMonthUsd: round(month),
+      open: day < settings.backgroundBudgetPerDayUsd && month < settings.backgroundBudgetPerMonthUsd,
+    };
+  }
+
   private pump(): void {
     if (this.current || this.opts.paused) return;
-    const next = this.list()
+    // Jobs you started go first and are never held back; the app's own wait for the budget.
+    const queued = this.list()
       .filter((j) => j.status === 'queued')
-      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0];
+      .sort((a, b) => Number(b.trigger === 'owner') - Number(a.trigger === 'owner') || a.createdAt.localeCompare(b.createdAt));
+    const open = this.budget().open;
+    const autoResearch = this.store.settings.agents.autoResearch;
+    const next = queued.find((j) => j.trigger === 'owner' || (open && (autoResearch || !RESEARCH_KINDS.has(j.kind))));
     if (!next) return;
     const abort = new AbortController();
     this.current = { id: next.id, abort };
@@ -255,21 +307,22 @@ export class JobRunner extends EventEmitter implements JobQueue {
    * as they appear on the statement (a fact, not an inference), so research can follow.
    */
   async ensureInstrumentsFromHoldings(): Promise<number> {
-    const seen = new Map<string, { name: string; isin?: string; ticker?: string }>();
+    const seen = new Map<string, { name: string; isin?: string; ticker?: string; sedol?: string }>();
     // A fund first recorded under a name cut short takes the full name when a statement prints
     // it; the short one stays as an alias, so older holdings still match.
-    const renamed = new Map<string, { id: string; name: string; aliases: string[] }>();
+    const renamed = new Map<string, { id: string; name: string; aliases: string[]; sedol?: string }>();
     for (const a of this.store.accounts.filter((x) => x.status === 'open')) {
       const snap = this.store.holdings(a.id).at(-1);
       for (const h of snap?.holdings ?? []) {
         const known = matchInstrument(h, this.store.instruments);
         if (known) {
           const name = fullerName(renamed.get(known.id)?.name ?? known.name, h.name);
-          if (name !== known.name) renamed.set(known.id, { id: known.id, name, aliases: [known.name] });
+          const sedol = !known.sedol && h.sedol ? h.sedol : undefined;
+          if (name !== known.name || sedol) renamed.set(known.id, { id: known.id, name, aliases: name !== known.name ? [known.name] : [], ...(sedol ? { sedol } : {}) });
           continue;
         }
-        const key = h.isin?.toUpperCase() ?? h.ticker?.toUpperCase() ?? h.name.toLowerCase();
-        if (!seen.has(key)) seen.set(key, { name: h.name, ...(h.isin && /^[A-Z]{2}[A-Z0-9]{9}\d$/.test(h.isin.toUpperCase()) ? { isin: h.isin.toUpperCase() } : {}), ...(h.ticker ? { ticker: h.ticker } : {}) });
+        const key = h.isin?.toUpperCase() ?? h.sedol?.toUpperCase() ?? h.ticker?.toUpperCase() ?? h.name.toLowerCase();
+        if (!seen.has(key)) seen.set(key, { name: h.name, ...(h.isin && /^[A-Z]{2}[A-Z0-9]{9}\d$/.test(h.isin.toUpperCase()) ? { isin: h.isin.toUpperCase() } : {}), ...(h.ticker ? { ticker: h.ticker } : {}), ...(h.sedol ? { sedol: h.sedol } : {}) });
       }
     }
     if (!seen.size && !renamed.size) return 0;
@@ -333,6 +386,8 @@ export class JobRunner extends EventEmitter implements JobQueue {
 
   /** Start what is due: at most a few research refreshes a day, assumptions at most weekly. */
   async tick(on: string = today()): Promise<void> {
+    // Jobs held back yesterday by the budget may start today.
+    this.pump();
     if (!this.store.settings.agents.enabled || !this.opts.autoRun) return;
     try {
       await this.ensureInstrumentsFromHoldings();
@@ -344,6 +399,8 @@ export class JobRunner extends EventEmitter implements JobQueue {
     const staleDays = this.store.settings.agents.researchStaleAfterDays;
     for (const s of this.suggestions(on)) {
       if (!s.auto) continue;
+      // Research runs when you ask for it, unless you let it start by itself.
+      if (RESEARCH_KINDS.has(s.kind) && !this.store.settings.agents.autoResearch) continue;
       if (s.kind === 'refresh-assumptions' && this.list().some((j) => j.kind === 'refresh-assumptions' && j.createdAt.slice(0, 10) >= addDays(on, -7))) continue;
       // The same job ran successfully within the staleness window: it recorded what it could find,
       // and running it again by itself would only spend the plan (the owner can still rerun it).

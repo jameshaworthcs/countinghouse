@@ -161,6 +161,36 @@ describe('job outputs become records', () => {
 });
 
 describe('what is stale', () => {
+  it('jobs the app starts by itself stop at the background budget; yours do not count', async () => {
+    const config = loadConfig({ FINANCE_DATA_DIR: path.join(dir, 'data'), FINANCE_WORK_DIR: path.join(dir, 'work'), FINANCE_WATCH: '0' });
+    const first = new JobRunner(store, new Analytics(store), config, { autoRun: false });
+    await first.init();
+    const now = new Date().toISOString();
+    const job = (id: string, kind: string, trigger: string, status: string, costUsd?: number) => ({ id, kind, label: kind, params: { n: id }, status, trigger, privacy: 'public', promptVersion: 'test', createdAt: now, startedAt: now, finishedAt: now, ...(costUsd !== undefined ? { costUsd } : {}) });
+    await writeJobs(first.dir, [
+      job('job_b1', 'research-instrument', 'schedule', 'succeeded', 1.56),
+      job('job_b2', 'research-provider', 'schedule', 'succeeded', 0.66),
+      // Yours are not counted.
+      job('job_b3', 'refresh-assumptions', 'owner', 'succeeded', 7.54),
+      // A job that ended without a cost counts at its kind's typical cost.
+      job('job_b4', 'research-instrument', 'schedule', 'failed'),
+    ]);
+    first.stop();
+    const runner = new JobRunner(store, new Analytics(store), config, { autoRun: false });
+    await runner.init();
+    expect(runner.budget()).toMatchObject({ perDayUsd: 5, perMonthUsd: 40, spentTodayUsd: 3.82, open: true });
+    await writeJobs(runner.dir, [job('job_b5', 'research-instrument', 'schedule', 'succeeded', 1.6)]);
+    runner.stop();
+    const later = new JobRunner(store, new Analytics(store), config, { autoRun: false });
+    await later.init();
+    expect(later.budget()).toMatchObject({ spentTodayUsd: 5.42, open: false });
+    // Over the budget, a job the app queues waits rather than starting.
+    const queued = later.enqueue({ kind: 'research-provider', params: { institutionId: 'marcus' }, trigger: 'schedule' })!;
+    await new Promise((r) => setTimeout(r, 50));
+    expect(later.list().find((j) => j.id === queued.id)!.status).toBe('queued');
+    later.stop();
+  });
+
   it('a fund first recorded under a name cut short takes the full name when a statement prints it', async () => {
     const runner = new JobRunner(store, new Analytics(store), loadConfig({ FINANCE_DATA_DIR: path.join(dir, 'data'), FINANCE_WORK_DIR: path.join(dir, 'work'), FINANCE_WATCH: '0' }), { autoRun: false });
     await runner.init();
@@ -184,8 +214,21 @@ describe('what is stale', () => {
     runner.stop();
   });
 
-  it('does not start a job again by itself after it ran, even when it found nothing', async () => {
+  it('researches only when asked, unless research by itself is on', async () => {
     await store.setSettings({ ...store.settings, agents: { ...store.settings.agents, enabled: true } });
+    const config = loadConfig({ FINANCE_DATA_DIR: path.join(dir, 'data'), FINANCE_WORK_DIR: path.join(dir, 'work'), FINANCE_WATCH: '0' });
+    const runner = new JobRunner(store, new Analytics(store), config, { autoRun: true, paused: true });
+    await runner.init();
+    await runner.ensureInstrumentsFromHoldings();
+    // Research is due and offered, but nothing starts by itself.
+    expect(runner.suggestions('2026-09-29').map((s) => s.kind)).toContain('research-instrument');
+    await runner.tick('2026-09-29');
+    expect(runner.list().filter((j) => j.status === 'queued')).toEqual([]);
+    runner.stop();
+  });
+
+  it('does not start a job again by itself after it ran, even when it found nothing', async () => {
+    await store.setSettings({ ...store.settings, agents: { ...store.settings.agents, enabled: true, autoResearch: true } });
     const config = loadConfig({ FINANCE_DATA_DIR: path.join(dir, 'data'), FINANCE_WORK_DIR: path.join(dir, 'work'), FINANCE_WATCH: '0' });
     const first = new JobRunner(store, new Analytics(store), config, { autoRun: false });
     await first.init();

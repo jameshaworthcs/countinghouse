@@ -33,9 +33,13 @@ const norm = (s: string) =>
     .trim();
 
 /** The instrument a holding refers to: by ISIN, then ticker, then name or alias. */
-export function matchInstrument(holding: Pick<Holding, 'isin' | 'ticker' | 'name'>, instruments: Instrument[]): Instrument | undefined {
+export function matchInstrument(holding: Pick<Holding, 'isin' | 'ticker' | 'name'> & { sedol?: string | undefined }, instruments: Instrument[]): Instrument | undefined {
   if (holding.isin) {
     const hit = instruments.find((i) => i.isin === holding.isin?.toUpperCase());
+    if (hit) return hit;
+  }
+  if (holding.sedol) {
+    const hit = instruments.find((i) => i.sedol === holding.sedol?.toUpperCase());
     if (hit) return hit;
   }
   if (holding.ticker) {

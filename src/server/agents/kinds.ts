@@ -544,7 +544,7 @@ const refreshAssumptions: JobKindDef = {
 
 const insightsAfterImport: JobKindDef = {
   kind: 'insights-after-import',
-  promptVersion: 'insights-after-import-2',
+  promptVersion: 'insights-after-import-3',
   privacy: 'personal',
   tools: ['Read'],
   label: ({ params }) => `Insights from ${(params.importIds as string[] | undefined)?.length ?? 0} new import(s)`,
@@ -556,6 +556,7 @@ const insightsAfterImport: JobKindDef = {
       'Read ./digest.json with the Read tool.',
       'Imports were just committed (digest.focus.imports). Write up to 4 insights about what they show that you (the owner) would want to know now:',
       'unusual or new spending, a regular payment that changed or stopped, income that looks late or different, a large one-off, allowance progress, or anything that looks like a data problem.',
+      'Each import lists what it added (transactions, balances, holdings, figures). A screenshot of a value or holdings, a payslip or a voucher adds no transactions and is not empty; an import that added nothing at all was kept as a record of a document another import covers, not a failure.',
       'Pick the pages each belongs on (overview, spending, accounts, transactions, tax, investments, projections). Set expiresInDays to how long it stays useful. Return an empty list if nothing is notable.',
     ].join('\n');
   },

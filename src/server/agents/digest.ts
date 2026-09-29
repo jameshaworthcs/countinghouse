@@ -100,7 +100,15 @@ export function buildDigest(store: Store, analytics: Analytics, opts: DigestOpti
       spendingByCategory: spending,
       largestSpending: largest,
       income,
-      imports: importSummaries.map((i) => ({ id: i.id, file: i.fileName, sections: i.sections, added: i.result?.transactionsAdded ?? 0 })),
+      // Everything each import recorded: a screenshot of a value, holdings or a payslip adds no
+      // transactions and is not empty for that; one recording nothing was reviewed as covered by another.
+      imports: importSummaries.map((i) => ({
+        id: i.id,
+        file: i.fileName,
+        document: i.documentType ?? null,
+        sections: i.sections,
+        added: { transactions: i.result?.transactionsAdded ?? 0, balances: i.result?.balancesAdded ?? 0, holdings: i.result?.holdingsAdded ?? 0, figures: i.result?.figuresAdded ?? 0 },
+      })),
     },
     regularPayments: recurring,
     taxYear: {

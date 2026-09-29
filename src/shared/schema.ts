@@ -307,6 +307,8 @@ export const HoldingSchema = z.object({
   name: z.string().min(1),
   isin: z.string().optional(),
   ticker: z.string().optional(),
+  /** SEDOL, as UK platforms print for funds. */
+  sedol: z.string().optional(),
   units: z.number().optional(),
   /** Price per unit in `currency` (major units, any precision). */
   price: z.number().optional(),
@@ -568,8 +570,20 @@ export const SettingsSchema = z.object({
       /** Write a month in review once last month's data is in. */
       monthlyReview: z.boolean().default(true),
       timeoutSeconds: z.number().int().min(60).max(3600).default(1200),
+      /**
+       * What jobs the app starts by itself may spend, in US dollars of Claude usage (API prices; on
+       * a plan this is usage, not a bill). A job starts only while today's and this month's spend
+       * are under these; the rest wait. Jobs you start yourself are not limited.
+       */
+      /**
+       * Research (funds, providers, the modelling assumptions) starts only when you ask, unless
+       * this is on. Insights after imports and the month in review still follow the switches above.
+       */
+      autoResearch: z.boolean().default(false),
+      backgroundBudgetPerDayUsd: z.number().min(0).max(100).default(5),
+      backgroundBudgetPerMonthUsd: z.number().min(0).max(1000).default(40),
     })
-    .default({ enabled: true, model: 'opus', effort: 'high', researchStaleAfterDays: 90, insightsAfterImport: true, monthlyReview: true, timeoutSeconds: 1200 }),
+    .default({ enabled: true, model: 'opus', effort: 'high', researchStaleAfterDays: 90, insightsAfterImport: true, monthlyReview: true, timeoutSeconds: 1200, autoResearch: false, backgroundBudgetPerDayUsd: 5, backgroundBudgetPerMonthUsd: 40 }),
 });
 export type Settings = z.infer<typeof SettingsSchema>;
 
@@ -659,6 +673,7 @@ export const ExtractedHoldingSchema = z.object({
   name: z.string(),
   isin: z.string().nullable().default(null),
   ticker: z.string().nullable().default(null),
+  sedol: z.string().nullable().default(null),
   units: z.number().nullable().default(null),
   price: z.number().nullable().default(null),
   value: MoneySchema,

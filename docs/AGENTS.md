@@ -167,9 +167,9 @@ extraction:
 
 | Job | Reads | Tools | Writes | Starts by itself |
 |---|---|---|---|---|
-| `research-instrument` | public identifiers of one fund | WebSearch, WebFetch | instrument identity blanks, `instrument.facts`, `instrument.performance`, a fund insight | when a fund is new; when research is stale (≤ 3 a day) |
-| `research-provider` | a provider's name and the kinds of account held there | WebSearch, WebFetch | `provider.rates`, `provider.fees` | when a provider is new or stale |
-| `refresh-assumptions` | the asset classes held (no amounts) | WebSearch, WebFetch | `economy.indicator`, `market.outlook`, assumptions with `basedOn` | when assumptions are on fallbacks or past review (at most weekly) |
+| `research-instrument` | public identifiers of one fund | WebSearch, WebFetch | instrument identity blanks, `instrument.facts`, `instrument.performance`, a fund insight | only when you ask (or with "Research by itself" on: when a fund is new; when research is stale, ≤ 3 a day) |
+| `research-provider` | a provider's name and the kinds of account held there | WebSearch, WebFetch | `provider.rates`, `provider.fees` | only when you ask (or with "Research by itself" on: when a provider is new or stale) |
+| `refresh-assumptions` | the asset classes held (no amounts) | WebSearch, WebFetch | `economy.indicator`, `market.outlook`, assumptions with `basedOn` | only when you ask (or with "Research by itself" on: when assumptions are on fallbacks or past review, at most weekly) |
 | `insights-after-import` | the digest, focused on the new imports | Read (the digest only) | insights | 2 minutes after imports stop arriving |
 | `monthly-review` | the digest, focused on the last complete month | Read (the digest only) | a month in review, plus page insights (superseding the last run's) | once a month's data is complete for every account |
 | `interpret-note` | the owner's note, account and instrument names | none | proposals on the note | when a note is added |
@@ -185,6 +185,19 @@ Other behaviour:
 - **No repeats.** A job that succeeded for the same subject within the research staleness window
   (Settings → Agents, 90 days by default) is not started again by itself, even if it found nothing;
   a failed one waits a day. The owner can rerun either at any time.
+- **Research runs when you ask.** Fund, provider and assumption research (`research-instrument`,
+  `research-provider`, `refresh-assumptions`) never starts by itself unless Settings → Agents →
+  "Research by itself" is on (off by default). Assumptions & research → Agent jobs lists what is due,
+  with Run now. Insights after imports and the month in review still start by themselves.
+- **Background budget.** Jobs the app starts by itself (insights after imports, the month in review,
+  and research when allowed) start only while their spend today and this month is under Settings →
+  Agents → background budget ($5 a day and $40 a month by default).
+  The rest stay queued, marked "Waiting for budget", and start when the day or month turns over.
+  - A job that ended without reporting its cost (failed, timed out, cancelled while running)
+    counts at its kind's typical cost below.
+  - Jobs you start yourself are never held back and do not count.
+  - New funds are all queued at once but researched one at a time within the budget; stale
+    research is also capped at three a day.
 - **Cost.** Measured with Opus at high effort, at API prices (on a Claude plan this is usage, not a
   bill; choose a smaller model or lower effort in Settings → Agents):
 

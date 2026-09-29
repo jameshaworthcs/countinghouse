@@ -4,7 +4,7 @@
 
 import { ACCOUNT_TYPES, ASSET_CLASSES, EXTRACTION_DOC_TYPES, FIGURE_KINDS } from '../../shared/schema';
 
-export const PROMPT_VERSION = 'extract-6';
+export const PROMPT_VERSION = 'extract-7';
 
 export const SYSTEM_PROMPT = `You are the extraction engine of a private UK personal-finance tracker. You read one financial document — a bank, credit-card or savings statement; an investment, ISA, LISA, SIPP or pension statement; a P60, payslip, P11D or interest certificate; or a screenshot of a banking, savings, investment or pension app — and return its contents as JSON that matches the provided schema exactly.
 
@@ -21,7 +21,7 @@ Accuracy matters more than completeness:
 5. Transactions: one entry per printed row, in printed order. Do not merge, summarise, skip or deduplicate rows. Put "balance brought/carried forward", opening and closing balance lines into openingBalance/closingBalance, not transactions. Mark pending or uncleared items with pending: true.
    Only rows that moved this account's money are its transactions. A list of prizes, interest or dividends paid out to another account (Premium Bond prizes paid to a bank account, say) is not: mention it in notes instead.
 6. description is the transaction text exactly as printed. payee is a clean merchant or counterparty name when obvious ("Tesco"), otherwise null. category is the best id from the category list in the request, or null if unsure. type is the bank's transaction type/code if printed (e.g. "DD", "Card payment"); reference is a payment reference printed separately; time is HH:MM if shown.
-7. closingBalance is the balance or value at the end of the period, or the headline balance/value on a screenshot. balanceDate is the date it applies to: the statement end date, or an "as at" / "valued on" date printed with the balance. The dates of rows or list items are not it. On a screenshot with no such date, balanceDate is null (the app knows when the screenshot was taken). documentDate is any date printed on the document itself.
+7. closingBalance is the balance or value at the end of the period, or the headline balance/value on a screenshot. balanceDate is the date it applies to: the last day of the statement period, or an "as at" / "valued on" date printed with the balance. A "statement date" (the day the statement was produced, often the day after the period ends) is documentDate, not balanceDate. The dates of rows or list items are not it. On a screenshot with no such date, balanceDate is null (the app knows when the screenshot was taken). documentDate is any date printed on the document itself.
    Rows labelled "Today", "Yesterday" or only by weekday are dated from the capture date in the request. If the request gives no capture date, use the upload date and set uncertain on those rows to "date assumed from the upload day".
 8. For investment, ISA, LISA and pension documents, closingBalance is the total value of the whole account ("total account value", the headline figure). Also capture:
    - contributionsToDate ("total paid in", "net contributions")
@@ -29,7 +29,7 @@ Accuracy matters more than completeness:
    - governmentBonusToDate (LISA bonus received)
    - taxYearContributions ("allowance used", "paid in this tax year")
    - cashBalance (uninvested cash: "available cash to invest", "cash")
-   - every holding, with its name, ISIN or ticker if shown, units, price, value, costBasis ("book cost", "amount invested") and gain ("growth", "change since you invested", in money).
+   - every holding, with its name, ISIN, ticker or SEDOL if shown, units, price, value, costBasis ("book cost", "amount invested") and gain ("growth", "change since you invested", in money).
    runningBalanceOf says what a running Balance column tracks: "account" on a bank, card or savings statement; "cash" on an investment, ISA, LISA or pension account's activity or cash-transactions list, where the balance moves only with cash (payments in, purchases, charges, interest) and not with the value of the investments. When it is "cash": the latest running balance goes in cashBalance, a "BALANCE B/F" or brought-forward row goes in openingBalance, and closingBalance stays null unless a total account value is printed on the same screen. null when there is no running balance.
 9. accountType comes from what the document says, never from the look of an app. Use the account's name wherever it appears (a heading, an account selector or dropdown, a tab), then rows only one kind of account has (a "Lifetime ISA government bonus" row → lisa). When nothing says which kind of account it is, accountType is null. Clues:
    - "Lifetime ISA"/"LISA" → lisa; "Stocks and Shares ISA"/"Investment ISA" → stocks_isa; "Cash ISA" → cash_isa.
@@ -90,6 +90,7 @@ export function extractionJsonSchema(): Record<string, unknown> {
     name: str(),
     isin: nullable(str()),
     ticker: nullable(str()),
+    sedol: nullable(str('SEDOL, 7 characters, when printed')),
     units: nullable(num()),
     price: nullable(num('Price per unit')),
     value: num(),
