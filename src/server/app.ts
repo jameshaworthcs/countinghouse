@@ -8,6 +8,7 @@ import { ZodError } from 'zod';
 import { JobRunner } from './agents/jobs';
 import { Analytics } from './analytics';
 import { Auth, loadSessionSecret } from './auth';
+import { refreshPlaces } from './enrich';
 import type { Config } from './config';
 import type { AppContext } from './context';
 import { GitCommitter } from './git';
@@ -57,6 +58,12 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
   store.on('change', (e: ChangeEvent) => git.queue(e));
   if (migrated) await git.flush(`data: migrate format v${migrated.from} → v${migrated.to}`);
   if (store.created) await git.flush('data: initialise data directory');
+  // Enrichment that follows the code: tidy addresses are worked out again from the merchant fields.
+  try {
+    if (await refreshPlaces(store)) await git.flush();
+  } catch (err) {
+    console.warn(`[data] merchant addresses were not tidied: ${(err as Error).message}`);
+  }
 
   const analytics = new Analytics(store);
   const work = new WorkArea(config.workDir);

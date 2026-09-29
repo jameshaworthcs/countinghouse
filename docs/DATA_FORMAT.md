@@ -97,6 +97,7 @@ depend on).
 | Field | Notes |
 |---|---|
 | `payee` | clean name |
+| `place` | the merchant's address in one tidy line, worked out from `merchant` (`src/shared/places.ts`); the merchant fields keep what the document said |
 | `payeeSetBy` | `user` when you set the payee: re-running enrichment keeps it |
 | `category` | category id; absent = uncategorised |
 | `categorisedBy` | `user` (never overwritten), `rule`, `builtin`, `bank`, `ai`, `transfer` |

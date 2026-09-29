@@ -5,6 +5,7 @@ import { ACCOUNT_TYPE_META, slugify } from '../../shared/accounts';
 import { transferLegCategory } from '../../shared/categorise';
 import { fullerName } from '../../shared/funds';
 import { catalogInstitution, findInstitution } from '../../shared/institutions';
+import { tidyPlace } from '../../shared/places';
 import { formatMoney, fromMinor, toMinor } from '../../shared/money';
 import { taxYearOf } from '../../shared/uk';
 import type { Account, BalanceSnapshot, Draft, Figure, Holding, HoldingsSnapshot, ImportRecord, Transaction } from '../../shared/schema';
@@ -120,6 +121,7 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
         currency: section.currency,
         description: row.description,
         ...(row.detail ?? {}),
+        ...(tidyPlace(row.detail?.merchant) ? { place: tidyPlace(row.detail?.merchant) } : {}),
         ...(row.balanceAfter !== undefined ? { balanceAfter: row.balanceAfter } : {}),
         ...(row.original ? { original: row.original } : {}),
         ...(row.pending ? { pending: true } : {}),

@@ -235,6 +235,8 @@ export const TransactionSchema = z.object({
   // ── Enrichment: derived and recomputable (except where categorisedBy = "user"). ──
   /** Clean merchant or counterparty name. */
   payee: z.string().optional(),
+  /** The merchant's address tidied into one line, from `merchant` (shared/places.ts); worked out again when the rules improve. */
+  place: z.string().optional(),
   /** "user" when you set the payee yourself: re-running enrichment never changes it. */
   payeeSetBy: z.enum(['user']).optional(),
   /** Category id from categories.json. Absent = uncategorised. */

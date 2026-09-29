@@ -470,3 +470,15 @@ needed a `fetch` loop pasted into the signed-in browser console.
   month whose pay was not in the statements. That was because the statements stopped before the
   pay date, not because the pay was missing.
 
+## 2026-09-29: Tidy merchant addresses
+
+- **Fixed rules, not a model.** The plan allowed a local model on P360, but that is a new engine
+  under the privacy rules. A deterministic tidy handles the card exports seen so far: wrapped lines,
+  capitals, quoted towns, stray phone numbers, and postcodes missing their space.
+- **Enrichment beside the source, worked out again at every start.** `place` is a function of the
+  merchant fields, which stay as printed. Recomputing it when the app starts is the "back-clean":
+  the first start after this change tidied the stored history, as one data commit. Later rule
+  changes reach history the same way, with no migration or re-import.
+- **The UK is left out; other countries are kept.** Nearly every address is in the UK, so
+  "United Kingdom of GB and NI" is noise; a foreign country is information.
+

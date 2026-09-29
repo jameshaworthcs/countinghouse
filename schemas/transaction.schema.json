@@ -195,6 +195,9 @@
     "payee": {
       "type": "string"
     },
+    "place": {
+      "type": "string"
+    },
     "payeeSetBy": {
       "type": "string",
       "enum": [

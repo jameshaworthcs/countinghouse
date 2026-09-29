@@ -259,6 +259,16 @@ read again.
 - **Accounts with nothing to import** (the account an interest certificate names, say) are left
   out of the draft.
 - **Foreign amounts** take the sign of the sterling amount; documents often print them unsigned.
+- **Merchant addresses** are tidied into one line, `place` (`src/shared/places.ts`), by fixed rules.
+  Card exports print them in capitals, with lines wrapped mid-name, towns like `"NEWBURY, ENGLAND"`,
+  a phone number on a line of its own, and postcodes without their space.
+  - The rules join the lines, put back wrapped names, set the case (keeping "PO Box", "7th" and
+    "20B"), space full UK postcodes, and leave out the UK itself.
+  - The merchant fields stay exactly as printed.
+  - The app works every `place` out again when it starts, so better rules reach history without
+    re-importing. No model is involved.
+  - A local model could tidy harder cases, but it would be a new engine under the privacy rules.
+    It is not built.
 - **Categorisation** follows `src/shared/categorise.ts`:
   1. your rules;
   2. transfers to your own accounts (by alias, or by provider name outside investment accounts);

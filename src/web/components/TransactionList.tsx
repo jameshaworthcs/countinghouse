@@ -153,7 +153,8 @@ export function TransactionDrawer({ tx, onClose }: { tx: Transaction; onClose: (
   if (tx.type) detail.push(['Type', tx.type]);
   if (tx.reference) detail.push(['Reference', tx.reference]);
   if (tx.counterpartyName) detail.push(['Counterparty', tx.counterpartyName]);
-  if (tx.merchant && Object.keys(tx.merchant).length) detail.push(['Merchant', Object.values(tx.merchant).filter((v) => typeof v === 'string').join(', ')]);
+  if (tx.place) detail.push(['Where', tx.place]);
+  if (tx.merchant && Object.keys(tx.merchant).length) detail.push([tx.place ? 'Merchant, as printed' : 'Merchant', Object.values(tx.merchant).filter((v) => typeof v === 'string').join(' · ')]);
   if (tx.bankCategory) detail.push(["Bank's category", tx.bankCategory]);
   if (tx.original) detail.push(['Original amount', money(tx.original.amount, { currency: tx.original.currency })]);
   if (tx.fee) detail.push(['Fee', money(tx.fee)]);

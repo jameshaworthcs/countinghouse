@@ -6,6 +6,7 @@ import { CategoryIndex } from '../shared/categories';
 import { Categoriser, transferLegCategory } from '../shared/categorise';
 import { diffDays } from '../shared/dates';
 import { toMinor } from '../shared/money';
+import { tidyPlace } from '../shared/places';
 import type { Account, Transaction } from '../shared/schema';
 import { transferGroupId } from './ids';
 import type { Store } from './store';
@@ -15,6 +16,21 @@ const TRANSFERISH = new Set(['transfer', 'credit-card-payment', 'savings-transfe
 export interface EnrichResult {
   recategorised: number;
   transfersLinked: number;
+}
+
+/**
+ * Each transaction's tidy address (shared/places.ts), worked out again from its merchant fields,
+ * which stay as the document gave them. Run when the app starts, so improved rules reach history
+ * and transactions from before places existed get one. Returns how many changed.
+ */
+export async function refreshPlaces(store: Store): Promise<number> {
+  const updates: { id: string; patch: Partial<Transaction> }[] = [];
+  for (const t of store.transactions()) {
+    const place = tidyPlace(t.merchant);
+    if (place !== t.place) updates.push({ id: t.id, patch: { place } });
+  }
+  if (updates.length) await store.updateTransactions(updates, `data: tidy merchant addresses (${updates.length} transaction${updates.length === 1 ? '' : 's'})`);
+  return updates.length;
 }
 
 export async function enrich(store: Store, opts: { accountIds?: string[]; dryRun?: boolean } = {}): Promise<EnrichResult> {
@@ -35,6 +51,8 @@ export async function enrich(store: Store, opts: { accountIds?: string[]; dryRun
       payee: t.merchant?.name ?? t.counterpartyName,
     });
     const patch: Partial<Transaction> = {};
+    const place = tidyPlace(t.merchant);
+    if (place !== t.place) patch.place = place;
     if (res.payee !== t.payee && t.payeeSetBy !== 'user') patch.payee = res.payee;
     if (res.category !== t.category) patch.category = res.category;
     if (res.categorisedBy !== t.categorisedBy) patch.categorisedBy = res.categorisedBy;
