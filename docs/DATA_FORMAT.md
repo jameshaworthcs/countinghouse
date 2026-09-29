@@ -178,6 +178,8 @@ Standalone figures from documents, used for Self Assessment:
 - `result`: `{accountIds, accountsCreated, transactionsAdded, transactionsSkipped, balancesAdded, holdingsAdded, figuresAdded, sections}`.
   `sections` maps each draft section to the account it was committed to; with the sections'
   statement periods it gives each account's **coverage** (the days it has data for).
+  `nothingNew` (optional) is set when the import was dismissed as adding nothing new: why, in words.
+  Only the document and this record were written; the counts are all zero.
 
 ## categories.json, rules.json, csv-profiles.json
 

@@ -11,8 +11,9 @@ import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { loadConfig, PROJECT_ROOT } from '../src/server/config';
 import { enrich } from '../src/server/enrich';
-import { nowISO } from '../src/server/fsutil';
-import { balanceId, figureId, holdingsId, transactionId } from '../src/server/ids';
+import sharp from 'sharp';
+import { nowISO, sha256 } from '../src/server/fsutil';
+import { balanceId, documentId, figureId, holdingsId, transactionId } from '../src/server/ids';
 import { ImportService } from '../src/server/ingest/service';
 import { applyRecords, researchIdOf, setOwnerAssumption } from '../src/server/records';
 import { WorkArea } from '../src/server/ingest/workarea';
@@ -20,7 +21,7 @@ import { Store } from '../src/server/store';
 import { addDays, addMonths, endOfMonth, startOfMonth, today, weekday } from '../src/shared/dates';
 import { roundMoney } from '../src/shared/money';
 import { taxYearOf } from '../src/shared/uk';
-import type { Account, BalanceSnapshot, Figure, HoldingsSnapshot, Transaction } from '../src/shared/schema';
+import { ExtractionSchema, type Account, type BalanceSnapshot, type Figure, type HoldingsSnapshot, type ImportRecord, type Transaction } from '../src/shared/schema';
 
 const args = new Set(process.argv.slice(2));
 const option = (name: string) => [...args].find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3);
@@ -312,8 +313,11 @@ async function main() {
   // A pending import to review: this month's export from the bank, in Monzo's CSV layout, overlapping
   // what is already stored.
   const config = loadConfig({ ...process.env, FINANCE_DATA_DIR: DIR, FINANCE_WORK_DIR: WORK, FINANCE_WATCH: '0' });
-  const svc = new ImportService(store, config, new WorkArea(WORK));
+  const work = new WorkArea(WORK);
+  const prizes = await demoPrizeHistory(work);
+  const svc = new ImportService(store, config, work);
   await svc.init();
+  await svc.refreshDraft(prizes);
   const recent = txs.filter((t) => t.accountId === 'current-account' && t.date >= addDays(END, -12)).sort((a, b) => (a.date < b.date ? -1 : 1));
   const lines = ['Transaction ID,Date,Time,Type,Name,Emoji,Category,Amount,Currency,Local amount,Local currency,Notes and #tags,Address,Receipt,Description,Category split,Money Out,Money In'];
   recent.forEach((t, i) => {
@@ -328,6 +332,10 @@ async function main() {
   for (let i = 0; i < 50 && svc.getPending(record!.id)?.status !== 'review'; i++) await new Promise((r) => setTimeout(r, 100));
   await rm(file, { force: true });
   console.log(`demo: pending import ${record?.id} (${svc.getPending(record!.id)?.status})`);
+  // The same export again, without the new row: everything on it is already imported.
+  const again = await svc.create({ fileName: 'Example-Bank-export-again.csv', bytes: Buffer.from(lines.slice(0, -1).join('\n')), origin: 'upload', hintAccountId: 'current-account' });
+  for (let i = 0; i < 50 && svc.getPending(again.record!.id)?.status !== 'review'; i++) await new Promise((r) => setTimeout(r, 100));
+  console.log(`demo: nothing new ${[...svc.novelty().keys()].join(', ')}`);
   store.stopWatching();
 }
 
@@ -422,3 +430,57 @@ async function demoIntelligence(store: Store) {
 }
 
 await main();
+
+/**
+ * A savings app's prize history, as a screenshot already read: understood, with nothing to record
+ * (docs/INGESTION.md, "Nothing new"). Made up, and written straight into the work area so the demo
+ * never calls Claude. Returns the import's id.
+ */
+async function demoPrizeHistory(work: WorkArea): Promise<string> {
+  const rows: [string, [string, string][]][] = [
+    ['September 2026', [['117BQ204518', '£50.00'], ['117BQ204972', '£25.00'], ['121CR551433', '£25.00']]],
+    ['August 2026', [['121CR553107', '£25.00'], ['117BQ206120', '£25.00']]],
+    ['July 2026', [['117BQ205331', '£100.00'], ['121CR550824', '£25.00']]],
+  ];
+  let y = 150;
+  let body = '<text x="36" y="90" font-size="30" font-weight="700">Prize history</text><text x="36" y="124" font-size="20" fill="#666">Holder’s number ••••3704 (demo)</text>';
+  for (const [month, list] of rows) {
+    y += 50;
+    body += `<text x="36" y="${y}" font-size="20" font-weight="700" fill="#666">${month}</text>`;
+    for (const [bond, amount] of list) {
+      y += 52;
+      body += `<rect x="24" y="${y - 34}" width="702" height="48" rx="10" fill="#fff"/><text x="44" y="${y - 3}" font-size="22" font-weight="600">${bond}</text><text x="706" y="${y - 3}" font-size="22" font-weight="600" text-anchor="end">${amount}</text>`;
+    }
+  }
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="750" height="1334"><rect width="750" height="1334" fill="#f4f5f7"/><g font-family="DejaVu Sans, sans-serif" fill="#15171c">${body}</g></svg>`;
+  const bytes = await sharp(Buffer.from(svg)).png().toBuffer();
+  const sha = sha256(bytes);
+  const stamp = nowISO();
+  const record: ImportRecord = {
+    id: `imp_${END.replace(/-/g, '')}_070000_d3a0`,
+    status: 'review',
+    createdAt: stamp,
+    updatedAt: stamp,
+    origin: 'upload',
+    document: { id: documentId(sha), sha256: sha, fileName: 'IMG_0587.PNG', mediaType: 'image/png', size: bytes.length, capturedOn: END, capturedOnSource: 'exif', capturedAt: stamp, image: { width: 750, height: 1334 } },
+    extraction: {
+      engine: 'claude-cli',
+      engineVersion: 'extract-9',
+      model: 'claude-opus-5-5',
+      warnings: [],
+      raw: ExtractionSchema.parse({
+        documentType: 'other',
+        accounts: [{ accountType: 'premium_bonds', last4: '3704' }],
+        notes: ['The list continues below the screen.'],
+        nothingToRecord: 'A prize history: prizes won, by bond number and month. The account’s movements are on its Transactions tab.',
+        confidence: 'high',
+      }),
+      verification: { method: 'second-reading', firstModel: 'claude-sonnet-5-5', secondModel: 'claude-opus-5-5', reasons: ['Nothing on the document confirms: Nothing to record'], disagreements: [], kept: 'second' },
+    },
+  };
+  await work.init();
+  await work.saveFile(record.document, bytes);
+  await work.saveRecord(record);
+  return record.id;
+}
+

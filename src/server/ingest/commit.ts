@@ -20,6 +20,11 @@ export interface CommitInput {
   draft: Draft;
   /** Absolute path of the uploaded file in the work area. */
   workFile: string;
+  /**
+   * The import adds nothing new (./novelty.ts): the document is archived and the record says why,
+   * and nothing else is written, not even the last digits an account could learn from it.
+   */
+  nothingNew?: string | undefined;
 }
 
 function balanceKind(draft: Draft, mediaType: string): BalanceSnapshot['kind'] {
@@ -30,7 +35,7 @@ function balanceKind(draft: Draft, mediaType: string): BalanceSnapshot['kind'] {
 
 export async function commitDraft(store: Store, input: CommitInput): Promise<ImportRecord> {
   const draft = DraftSchema.parse(input.draft);
-  const { record } = input;
+  const { record, nothingNew } = input;
   const stamp = nowISO();
   const source = { importId: record.id, documentId: record.document.id };
   const accountsCreated: string[] = [];
@@ -51,7 +56,7 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
       if (!acc) throw new StoreError(`Account "${section.target.accountId}" no longer exists`, 409);
       resolved.set(section.key, acc);
       const last4 = section.detected.last4;
-      if (!acc.last4 && last4 && /^\d{2,6}$/.test(last4) && !toLearn.some((a) => a.id === acc.id)) toLearn.push(AccountSchema.parse({ ...acc, last4, updatedAt: stamp }));
+      if (!nothingNew && !acc.last4 && last4 && /^\d{2,6}$/.test(last4) && !toLearn.some((a) => a.id === acc.id)) toLearn.push(AccountSchema.parse({ ...acc, last4, updatedAt: stamp }));
       continue;
     }
     const input = section.target.account;
@@ -270,6 +275,7 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
       balancesAdded,
       holdingsAdded,
       figuresAdded,
+      ...(nothingNew ? { nothingNew: nothingNew.slice(0, 500) } : {}),
       sections: draft.sections.flatMap((s) => {
         const account = resolved.get(s.key);
         return account ? [{ key: s.key, accountId: account.id }] : [];
@@ -283,7 +289,8 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
     holdingsAdded ? 'holdings' : '',
     figuresAdded ? `${figuresAdded} figures` : '',
   ].filter(Boolean);
-  await store.saveImport(committed, `import: ${label} → ${names || 'figures'}${bits.length ? ` (${bits.join(', ')})` : ''}`, [docPath]);
+  const message = nothingNew ? `import: ${label} filed, nothing new` : `import: ${label} → ${names || 'figures'}${bits.length ? ` (${bits.join(', ')})` : ''}`;
+  await store.saveImport(committed, message, [docPath]);
   return committed;
 }
 

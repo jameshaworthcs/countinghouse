@@ -972,6 +972,8 @@ export const ImportRecordSchema = z.object({
       balancesAdded: z.number().int().nonnegative(),
       holdingsAdded: z.number().int().nonnegative(),
       figuresAdded: z.number().int().nonnegative().default(0),
+      /** Dismissed as adding nothing new: why. Only the document and this record were written. */
+      nothingNew: z.string().max(500).optional(),
       /** The account each draft section was committed to (new accounts get their final id). */
       sections: z.array(z.object({ key: z.string(), accountId: SlugSchema })).optional(),
     })

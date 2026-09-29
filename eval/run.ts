@@ -127,14 +127,14 @@ async function runGroup(cases: EvalCase[], files: Map<string, Buffer>, opts: { m
       for (const c of cases) ids.push((await svc.create({ fileName: c.file.name, bytes: files.get(c.id)!, origin: 'upload', hintAccountId: c.hintAccountId })).record!.id);
       const recs: (ImportRecord | undefined)[] = [];
       for (const id of ids) recs.push(await wait(id, started));
-      // The pipeline does not yet say when an import adds nothing new.
-      cases.forEach((c, i) => out.push(result(c, svc.getPending(ids[i]!) ?? recs[i], false)));
+      const nothingNew = svc.novelty();
+      cases.forEach((c, i) => out.push(result(c, svc.getPending(ids[i]!) ?? recs[i], nothingNew.has(ids[i]!))));
       return out;
     }
     for (const [n, c] of cases.entries()) {
       const { record } = await svc.create({ fileName: c.file.name, bytes: files.get(c.id)!, origin: 'upload', hintAccountId: c.hintAccountId });
       const rec = await wait(record!.id, Date.now());
-      out.push(result(c, rec, false));
+      out.push(result(c, rec, svc.novelty().has(record!.id)));
       // Later cases in a group see this one as already imported.
       if (n < cases.length - 1 && rec?.status === 'review') await svc.commit(rec.id);
     }

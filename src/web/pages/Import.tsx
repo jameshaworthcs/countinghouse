@@ -1,4 +1,4 @@
-import { ChevronRight, CircleCheck, CircleDashed, FileImage, FileSpreadsheet, FileText, FolderInput, LoaderCircle, Sparkles, Trash2, TriangleAlert, Upload } from 'lucide-react';
+import { Archive, ChevronRight, CircleCheck, CircleDashed, CopyCheck, FileImage, FileSpreadsheet, FileText, FolderInput, LoaderCircle, Sparkles, Trash2, TriangleAlert, Upload } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router';
 import type { CaptureAskView, CaptureItemView, CaptureResponse, ImportListResponse, MonthlyChecklistResponse, SystemResponse } from '../../shared/api';
@@ -16,7 +16,15 @@ export function FileIcon({ mediaType, className }: { mediaType: string; classNam
   return <Icon className={cn('size-5 shrink-0 text-ink-3', className)} aria-hidden />;
 }
 
-export function importStatus(r: Pick<ImportRecord, 'status'>) {
+export function importStatus(r: Pick<ImportRecord, 'status'> & { nothingNew?: unknown }) {
+  // Understood, and adds nothing: not a problem, and nothing to commit.
+  if (r.status === 'review' && r.nothingNew) {
+    return (
+      <Badge tone="neutral" icon={<CopyCheck className="size-3.5" aria-hidden />}>
+        Nothing new
+      </Badge>
+    );
+  }
   switch (r.status) {
     case 'queued':
       return <StatusBadge status="pending">Queued</StatusBadge>;
@@ -52,7 +60,9 @@ function QueueItem({ p }: { p: Pending }) {
   const toast = useToast();
   const commit = useApiMutation(() => api(`/imports/${p.id}/commit`, { method: 'POST' }), { onSuccess: () => toast({ tone: 'good', text: `${p.document.fileName} committed` }) });
   const discard = useApiMutation(() => api(`/imports/${p.id}`, { method: 'DELETE' }));
+  const dismiss = useApiMutation(() => api(`/imports/${p.id}/dismiss`, { method: 'POST' }), { onSuccess: () => toast({ tone: 'good', text: `${p.document.fileName} filed with your documents; nothing recorded` }) });
   const busy = p.status === 'processing' || p.status === 'queued';
+  const nothingNew = p.status === 'review' ? p.nothingNew : undefined;
   return (
     <li className="flex flex-col gap-2 px-5 py-3 sm:flex-row sm:items-center sm:gap-3">
       <div className="flex min-w-0 flex-1 items-start gap-3">
@@ -64,20 +74,28 @@ function QueueItem({ p }: { p: Pending }) {
           </Link>
           {importStatus(p)}
         </div>
-        <div className="truncate text-[12.5px] text-ink-3">
+        <div className={cn('text-[12.5px] text-ink-3', nothingNew ? 'line-clamp-2' : 'truncate')}>
           {busy
             ? `${fileSize(p.document.size)} · ${p.document.mediaType.startsWith('image/') || p.document.mediaType === 'application/pdf' ? 'being read by Claude, usually under a minute' : 'parsing'}`
             : p.status === 'failed'
               ? p.extraction.error
-              : describeDraft(p, accountName)}
+              : nothingNew
+                ? nothingNew.reason
+                : describeDraft(p, accountName)}
         </div>
-        {p.status === 'review' && p.readiness && !p.readiness.ready && <div className="text-[12px] text-ink-3">Needs a look: {p.readiness.reasons.join(', ')}</div>}
+        {p.status === 'review' && p.readiness && !p.readiness.ready && !nothingNew && <div className="text-[12px] text-ink-3">Needs a look: {p.readiness.reasons.join(', ')}</div>}
+        {dismiss.error && <div className="text-[12px] text-bad-ink">{dismiss.error.message}</div>}
       </div>
       </div>
       <div className="flex items-center justify-end gap-2">
         {p.status === 'review' && p.readiness?.ready && (
           <Button size="sm" variant="primary" loading={commit.isPending} onClick={() => commit.mutate(undefined)}>
             Commit
+          </Button>
+        )}
+        {nothingNew && (
+          <Button size="sm" icon={<Archive className="size-3.5" />} loading={dismiss.isPending} onClick={() => dismiss.mutate(undefined)}>
+            Dismiss
           </Button>
         )}
         {!busy && (
@@ -274,8 +292,12 @@ export default function Import() {
   const commitReady = useApiMutation(() => api<{ committed: string[]; skipped: { id: string }[] }>('/imports/commit-ready', { method: 'POST' }), {
     onSuccess: (r) => toast({ tone: 'good', text: `${plural(r.committed.length, 'import')} committed${r.skipped.length ? `, ${r.skipped.length} need a look` : ''}` }),
   });
+  const dismissAll = useApiMutation(() => api<{ dismissed: string[] }>('/imports/dismiss-nothing-new', { method: 'POST' }), {
+    onSuccess: (r) => toast({ tone: 'good', text: `${plural(r.dismissed.length, 'file')} with nothing new filed with your documents` }),
+  });
   const pending = q.data?.pending ?? [];
   const ready = pending.filter((p) => p.readiness?.ready).length;
+  const nothingNew = pending.filter((p) => p.status === 'review' && p.nothingNew).length;
   return (
     <div>
       <PageHeader title="Import" subtitle="Statements, exports and screenshots in; reviewed data out" />
@@ -287,10 +309,19 @@ export default function Import() {
             title="Waiting for you"
             padded={false}
             actions={
-              ready > 1 ? (
-                <Button size="sm" variant="primary" loading={commitReady.isPending} onClick={() => commitReady.mutate(undefined)}>
-                  Commit all ready ({ready})
-                </Button>
+              ready > 1 || nothingNew > 1 ? (
+                <div className="flex flex-wrap justify-end gap-2">
+                  {nothingNew > 1 && (
+                    <Button size="sm" icon={<Archive className="size-3.5" />} loading={dismissAll.isPending} onClick={() => dismissAll.mutate(undefined)}>
+                      Dismiss {nothingNew} with nothing new
+                    </Button>
+                  )}
+                  {ready > 1 && (
+                    <Button size="sm" variant="primary" loading={commitReady.isPending} onClick={() => commitReady.mutate(undefined)}>
+                      Commit all ready ({ready})
+                    </Button>
+                  )}
+                </div>
               ) : undefined
             }
           >
@@ -316,7 +347,7 @@ export default function Import() {
                     {c.fileName}
                   </Link>
                   <span className="hidden text-ink-3 sm:inline">
-                    {c.result ? [c.result.transactionsAdded ? `+${c.result.transactionsAdded} transactions` : '', c.result.balancesAdded ? 'balance' : '', c.result.holdingsAdded ? 'holdings' : '', c.result.figuresAdded ? `${c.result.figuresAdded} figures` : ''].filter(Boolean).join(', ') : ''}
+                    {c.result?.nothingNew ? 'filed, nothing new' : c.result ? [c.result.transactionsAdded ? `+${c.result.transactionsAdded} transactions` : '', c.result.balancesAdded ? 'balance' : '', c.result.holdingsAdded ? 'holdings' : '', c.result.figuresAdded ? `${c.result.figuresAdded} figures` : ''].filter(Boolean).join(', ') : ''}
                   </span>
                   <span className="w-24 text-right text-ink-3">{c.committedAt ? formatDate(c.committedAt.slice(0, 10)) : ''}</span>
                 </li>

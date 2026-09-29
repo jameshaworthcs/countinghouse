@@ -58,8 +58,11 @@ async function main() {
   // Pages share the default browser context, so they all use this session.
   const cookie = status.configured && login ? await signIn(browser, login) : '';
   if (cookie) console.log('✓ login');
-  const imports = (await (await fetch(`${base}/api/imports`, { headers: { host: '127.0.0.1', cookie } })).json()) as { pending: { id: string }[] };
-  const pendingId = imports.pending[0]?.id;
+  const imports = (await (await fetch(`${base}/api/imports`, { headers: { host: '127.0.0.1', cookie } })).json()) as { pending: { id: string; nothingNew?: unknown; draft?: { sections: unknown[] } }[] };
+  // An import to review, and the two kinds that add nothing new, when the data has them.
+  const pendingId = (imports.pending.find((p) => !p.nothingNew) ?? imports.pending[0])?.id;
+  const repeatsId = imports.pending.find((p) => p.nothingNew && p.draft?.sections.length)?.id;
+  const nothingId = imports.pending.find((p) => p.nothingNew && !p.draft?.sections.length)?.id;
   // Account pages from whatever data is being shot: the first current account and the first ISA.
   const boot = (await (await fetch(`${base}/api/bootstrap`, { headers: { host: '127.0.0.1', cookie } })).json()) as { accounts: { id: string; type: string }[] };
   const txs = (await (await fetch(`${base}/api/transactions?limit=1`, { headers: { host: '127.0.0.1', cookie } })).json()) as { total: number };
@@ -84,6 +87,8 @@ async function main() {
     ['assumptions-jobs', '/assumptions#jobs'],
     ['import', '/import'],
     ...(pendingId ? ([['review', `/import/${pendingId}`]] as [string, string][]) : []),
+    ...(repeatsId ? ([['review-already-here', `/import/${repeatsId}`]] as [string, string][]) : []),
+    ...(nothingId ? ([['review-nothing-to-record', `/import/${nothingId}`]] as [string, string][]) : []),
     ['settings', '/settings'],
     ['settings-extraction', '/settings#extraction'],
     ['settings-rules', '/settings#rules'],
@@ -135,10 +140,10 @@ async function main() {
   }
   if (!only) {
     if (txs.total > 0) await shoot('transaction-drawer', '/transactions', { width: 390, height: 844, theme: 'dark', mobile: true, act: openDrawer });
-    for (const [name, route] of [['overview', '/'], ['spending', '/spending'], ['projections', '/projections'], ['assumptions', '/assumptions'], ['review', pendingId ? `/import/${pendingId}` : '/import']] as [string, string][]) {
+    for (const [name, route] of [['overview', '/'], ['spending', '/spending'], ['projections', '/projections'], ['assumptions', '/assumptions'], ['review', pendingId ? `/import/${pendingId}` : '/import'], ...(nothingId ? [['review-nothing-to-record', `/import/${nothingId}`]] : [])] as [string, string][]) {
       await shoot(name, route, { width: 1440, height: 900, theme: 'dark' });
     }
-    for (const [name, route] of [['overview', '/'], ['import', '/import'], ['transactions', '/transactions'], ['projections', '/projections']] as [string, string][]) {
+    for (const [name, route] of [['overview', '/'], ['import', '/import'], ['transactions', '/transactions'], ['projections', '/projections'], ...(repeatsId ? [['review-already-here', `/import/${repeatsId}`]] : [])] as [string, string][]) {
       await shoot(name, route, { width: 390, height: 844, theme: 'light', mobile: true });
     }
   }

@@ -156,7 +156,9 @@ The equations are in [FORMULAS.md](FORMULAS.md); the rules for writing these rec
 - no possible duplicates;
 - a known balance date;
 - reconciling balances;
-- extraction confidence that isn't low (not offline OCR).
+- extraction confidence that isn't low (not offline OCR);
+- something new to add. An import that adds nothing new (INGESTION.md, "Nothing new") is dismissed
+  instead: its document is filed and nothing is recorded.
 
 ## Balance engine
 

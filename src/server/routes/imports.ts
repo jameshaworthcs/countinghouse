@@ -18,8 +18,12 @@ export function importRoutes(ctx: AppContext): Hono {
   const svc = ctx.imports;
 
   app.get('/', (c) => {
+    const novelty = svc.novelty();
     const body: ImportListResponse = {
-      pending: svc.listPending().map((r) => ({ ...r, readiness: svc.readiness(r) })),
+      pending: svc.listPending().map((r) => {
+        const nothingNew = novelty.get(r.id);
+        return { ...r, readiness: svc.readiness(r, nothingNew), ...(nothingNew ? { nothingNew } : {}) };
+      }),
       committed: ctx.store.imports.slice(0, 200).map((i) => ({
         id: i.id,
         createdAt: i.createdAt,
@@ -65,11 +69,15 @@ export function importRoutes(ctx: AppContext): Hono {
 
   app.post('/commit-ready', async (c) => c.json(await svc.commitReady()));
 
+  /** Dismiss every import that adds nothing new (their documents are filed, nothing recorded). */
+  app.post('/dismiss-nothing-new', async (c) => c.json({ dismissed: await svc.dismissNothingNew() }));
+
   app.get('/:id', async (c) => {
     const rec = await svc.get(c.req.param('id'));
     if (!rec) throw new StoreError('Unknown import', 404);
     const pending = svc.getPending(rec.id);
-    return c.json({ ...rec, ...(pending ? { readiness: svc.readiness(pending) } : {}) });
+    const nothingNew = pending ? svc.novelty().get(pending.id) : undefined;
+    return c.json({ ...rec, ...(pending ? { readiness: svc.readiness(pending, nothingNew) } : {}), ...(nothingNew ? { nothingNew } : {}) });
   });
 
   app.put('/:id/draft', async (c) => {
@@ -87,6 +95,8 @@ export function importRoutes(ctx: AppContext): Hono {
     }
     return c.json(await svc.commit(c.req.param('id'), draft));
   });
+
+  app.post('/:id/dismiss', async (c) => c.json(await svc.dismiss(c.req.param('id'))));
 
   app.post('/:id/reprocess', async (c) => {
     const body = await readJson(c, z.object({ engine: z.enum(EXTRACTION_ENGINES).optional(), model: z.string().max(80).optional(), verifyModel: z.string().max(80).optional() }));

@@ -1,7 +1,8 @@
-import { ArrowLeft, CircleCheck, Copy, ExternalLink, Info, ListChecks, LoaderCircle, Maximize2, Minimize2, Pencil, RefreshCw, Trash2, TriangleAlert } from 'lucide-react';
+import { Archive, ArrowLeft, CircleCheck, Copy, CopyCheck, ExternalLink, Info, ListChecks, LoaderCircle, Maximize2, Minimize2, Pencil, RefreshCw, Trash2, TriangleAlert } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { ACCOUNT_TYPE_META } from '../../shared/accounts';
+import type { NothingNewView } from '../../shared/api';
 import { formatDate } from '../../shared/dates';
 import { sectionChecks, type ReviewCheck } from '../../shared/review';
 import { FIGURE_KINDS, type CsvProfile, type Draft, type DraftSection, type DraftTransaction, type ImportRecord } from '../../shared/schema';
@@ -13,7 +14,45 @@ import { useAppData } from '../lib/data';
 import { cn, fileSize, money, plural } from '../lib/format';
 import { importStatus } from './Import';
 
-type Rec = ImportRecord & { readiness?: { ready: boolean; reasons: string[] } };
+type Rec = ImportRecord & { readiness?: { ready: boolean; reasons: string[] }; nothingNew?: NothingNewView };
+
+/**
+ * An import the reader understood that adds nothing: a view of what is already recorded, or of
+ * what another upload has. Said plainly, with the reason, and put away in one click.
+ */
+function NothingNewPanel({ nothingNew, onDismiss, dismissing, error }: { nothingNew: NothingNewView; onDismiss: () => void; dismissing: boolean; error?: Error | null }) {
+  return (
+    <div className="flex flex-col gap-3 rounded-xl border border-line bg-panel px-4 py-4">
+      <div className="flex items-start gap-3">
+        <CopyCheck className="mt-0.5 size-5 shrink-0 text-ink-3" aria-hidden />
+        <div className="min-w-0 flex-1">
+          <div className="text-[14.5px] font-semibold text-ink">Nothing new here</div>
+          <p className="mt-0.5 text-[13px] text-ink-2">{nothingNew.reason}</p>
+          {nothingNew.coveredBy.length > 0 && (
+            <p className="mt-1.5 text-[12.5px] text-ink-3">
+              Waiting beside it:{' '}
+              {nothingNew.coveredBy.map((c, i) => (
+                <span key={c.id}>
+                  {i > 0 && ', '}
+                  <Link to={`/import/${c.id}`} className="text-accent hover:underline">
+                    {c.fileName}
+                  </Link>
+                </span>
+              ))}
+            </p>
+          )}
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-line pt-3">
+        <Button variant="primary" size="sm" icon={<Archive className="size-3.5" />} loading={dismissing} onClick={onDismiss}>
+          Dismiss
+        </Button>
+        <span className="min-w-0 flex-1 text-[12.5px] text-ink-3">Files it with your documents and records nothing from it.</span>
+        {error && <span className="w-full text-[12.5px] text-bad-ink">{error.message}</span>}
+      </div>
+    </div>
+  );
+}
 
 const DATE_SOURCE_LABEL: Record<string, string> = {
   document: 'from the document',
@@ -34,6 +73,14 @@ function VerificationNote({ rec }: { rec: Rec }) {
     return (
       <Callout tone="good" title={`Read by ${first}; the document’s own figures confirm it`}>
         The balances, totals or holdings on the document add up with what was read.
+      </Callout>
+    );
+  }
+  // Nothing found is a reading like any other: both readers found nothing to record.
+  if (!rec.draft?.sections.length && !rec.draft?.figures.length && second && !v.error && !v.disagreements.length) {
+    return (
+      <Callout tone="good" title={`Read twice: ${first} and ${second} both found nothing to record`}>
+        A document with nothing to record is read by a second model before it is believed.
       </Callout>
     );
   }
@@ -583,6 +630,12 @@ export default function Review() {
   });
   const saveDraft = useApiMutation(() => api(`/imports/${id}/draft`, { method: 'PUT', body: draft as unknown as Record<string, unknown> }), { onSuccess: () => setDirty(false) });
   const discard = useApiMutation(() => api(`/imports/${id}`, { method: 'DELETE' }), { onSuccess: () => void navigate('/import') });
+  const dismiss = useApiMutation(() => api<ImportRecord>(`/imports/${id}/dismiss`, { method: 'POST' }), {
+    onSuccess: (r) => {
+      toast({ tone: 'good', text: `${r.document.fileName} filed with your documents; nothing recorded` });
+      void navigate('/import');
+    },
+  });
   const summary = useMemo(() => {
     if (!draft) return '';
     const n = draft.sections.filter((s) => s.target.mode !== 'skip').reduce((s, sec) => s + sec.transactions.filter((t) => t.include).length, 0);
@@ -595,6 +648,8 @@ export default function Review() {
   if (q.error) return <ErrorNote error={q.error} />;
   if (!rec) return <Loading />;
   const committed = rec.status === 'committed';
+  const filed = committed ? rec.result?.nothingNew : undefined;
+  const nothingNew = rec.status === 'review' ? rec.nothingNew : undefined;
 
   return (
     <div>
@@ -638,7 +693,12 @@ export default function Review() {
           <div className="mt-1 text-ink-3">Try reading it again, perhaps with another engine or model, or discard it.</div>
         </Callout>
       )}
-      {committed && rec.result && (
+      {filed && (
+        <Callout tone="neutral" title={`Filed ${rec.committedAt ? formatDate(rec.committedAt.slice(0, 10)) : ''}: nothing new`}>
+          {filed} The document is kept with your other documents; nothing was recorded from it.
+        </Callout>
+      )}
+      {committed && rec.result && !filed && (
         <Callout tone="good" title={`Committed ${rec.committedAt ? formatDate(rec.committedAt.slice(0, 10)) : ''}`}>
           <KeyValue
             items={[
@@ -651,6 +711,7 @@ export default function Review() {
         </Callout>
       )}
 
+      {nothingNew && <NothingNewPanel nothingNew={nothingNew} onDismiss={() => dismiss.mutate(undefined)} dismissing={dismiss.isPending} error={dismiss.error} />}
       {(rec.status === 'review' || rec.status === 'needs_mapping' || committed || rec.status === 'failed') && (
         <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
           <div className="lg:sticky lg:top-5 lg:h-[calc(100dvh-140px)]">
@@ -679,7 +740,11 @@ export default function Review() {
                     </ul>
                   </Callout>
                 )}
-                {draft.sections.length === 0 && !draft.figures.length && <Callout tone="warn">Nothing financial was found in this document.</Callout>}
+                {draft.sections.length === 0 && !draft.figures.length && !nothingNew && !filed && (
+                  <Callout tone="warn" title="Nothing was found to record">
+                    {draft.nothingToRecord ? `${draft.nothingToRecord} ` : ''}Check the document: if it does hold figures, read it again with another model; if not, discard it.
+                  </Callout>
+                )}
                 {draft.sections.map((s, i) => (
                   <SectionEditor
                     key={s.key}
@@ -712,7 +777,7 @@ export default function Review() {
                     <pre className="sensitive mt-2 max-h-80 overflow-auto font-mono text-[11.5px] whitespace-pre-wrap text-ink-2">{draft.ocrText}</pre>
                   </details>
                 )}
-                {!committed && rec.status === 'review' && (
+                {!committed && rec.status === 'review' && (!nothingNew || dirty) && (
                   <div className="no-print sticky bottom-3 z-20 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-panel px-4 py-3 shadow-lg">
                     <div className="text-[13px] text-ink-2">
                       <Info className="mr-1 inline size-4 text-accent" />

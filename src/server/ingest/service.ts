@@ -27,6 +27,7 @@ import { CSV_ENGINE_VERSION, findProfile, parseWithProfile, readCsvRows, suggest
 import { HOLDINGS_CSV_VERSION, parseHoldingsCsv } from './holdings-csv';
 import { decodeText, detectKind, MAX_UPLOAD_BYTES, mediaTypeFor } from './detect';
 import { buildDraft, draftIsClean, type BatchEvidence } from './draft';
+import { assessNovelty, type NothingNew } from './novelty';
 import { assessReading, chooseReading, compareReadings, shortModel } from './verify';
 import { detectEngines, pickEngine, type EngineResult } from './engines';
 import { captureDate, imageInfo, prepareImage } from './images';
@@ -558,9 +559,50 @@ export class ImportService extends EventEmitter {
     };
   }
 
+  /** The imports waiting for review that add nothing new, and why (./novelty.ts). */
+  novelty(): Map<string, NothingNew> {
+    return assessNovelty([...this.pending.values()], this.store);
+  }
+
+  /**
+   * Put away an import that adds nothing new: its document is archived with the other documents
+   * and its import record says why, and nothing else is written. It must still add nothing now.
+   */
+  async dismiss(id: string): Promise<ImportRecord> {
+    const record = this.pending.get(id);
+    if (!record?.draft || record.status !== 'review') throw new StoreError('Only an import waiting for review can be dismissed.', 409);
+    const nothing = this.novelty().get(id);
+    if (!nothing) throw new StoreError('This import has something new now: review it instead.', 409);
+    const draft: Draft = {
+      ...record.draft,
+      // Nothing is created either: a section that would have made a new account is left out.
+      sections: record.draft.sections.map((s) => ({ ...s, ...(s.target.mode === 'new' ? { target: { mode: 'skip' as const } } : {}), recordBalance: false, recordHoldings: false, transactions: s.transactions.map((t) => ({ ...t, include: false })) })),
+      figures: record.draft.figures.map((f) => ({ ...f, include: false })),
+    };
+    const filed = await commitDraft(this.store, { record, draft, workFile: this.work.filePath(record.document), nothingNew: nothing.reason });
+    this.pending.delete(id);
+    await this.work.remove(record, [...this.pending.values()]);
+    this.emit('update', filed);
+    return filed;
+  }
+
+  /** Dismiss every import that adds nothing new. The ones that cover them stay. */
+  async dismissNothingNew(): Promise<string[]> {
+    const done: string[] = [];
+    for (const id of this.novelty().keys()) {
+      if (this.novelty().has(id)) {
+        await this.dismiss(id);
+        done.push(id);
+      }
+    }
+    return done;
+  }
+
   /** Why an import is (not) safe to commit without review. */
-  readiness(record: ImportRecord): { ready: boolean; reasons: string[] } {
+  readiness(record: ImportRecord, nothingNew?: NothingNew): { ready: boolean; reasons: string[] } {
     if (record.status !== 'review' || !record.draft) return { ready: false, reasons: [record.status] };
+    // Nothing to commit: it is dismissed, not committed.
+    if (nothingNew) return { ready: false, reasons: ['nothing new'] };
     const { clean, reasons } = draftIsClean(record.draft);
     // Every check that asks for a look (the review page shows the same ones) holds the import back.
     for (const s of record.draft.sections) {
@@ -578,9 +620,10 @@ export class ImportService extends EventEmitter {
   async commitReady(): Promise<{ committed: string[]; skipped: { id: string; reasons: string[] }[] }> {
     const committed: string[] = [];
     const skipped: { id: string; reasons: string[] }[] = [];
+    const novelty = this.novelty();
     for (const record of this.listPending()) {
       if (record.status !== 'review') continue;
-      const r = this.readiness(record);
+      const r = this.readiness(record, novelty.get(record.id));
       if (!r.ready) {
         skipped.push({ id: record.id, reasons: r.reasons });
         continue;

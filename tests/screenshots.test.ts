@@ -2,11 +2,14 @@
 // screenshots taken together share what they show, and documents that add nothing new. All data
 // here is invented.
 
+import { existsSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/server/config';
+import { sha256 } from '../src/server/fsutil';
+import { documentId } from '../src/server/ids';
 import { buildDraft, draftIsClean, type BatchEvidence } from '../src/server/ingest/draft';
 import { ImportService } from '../src/server/ingest/service';
 import { WorkArea } from '../src/server/ingest/workarea';
@@ -275,5 +278,138 @@ describe('screenshots taken together share the account', () => {
       expect(target('imp_20260929_200900_aaaa')).toEqual({ mode: 'skip' });
       expect(target('imp_20260929_200900_ffff')).toEqual({ mode: 'existing', accountId: 'bonds' });
     });
+  });
+});
+
+describe('nothing new: understood, and adds nothing', () => {
+  let svc: ImportService;
+  let work: WorkArea;
+  let seq = 0;
+  const make = async (raw: Record<string, unknown>, opts: { at?: string; created?: string; verification?: ImportRecord['extraction']['verification'] } = {}): Promise<string> => {
+    const id = `imp_20260929_200900_${(++seq).toString(16).padStart(4, '0')}`;
+    const bytes = Buffer.from(`screenshot ${id}`);
+    const record: ImportRecord = {
+      id,
+      status: 'review',
+      createdAt: opts.created ?? `2026-09-29T20:09:0${seq % 10}+01:00`,
+      updatedAt: '2026-09-29T20:09:00+01:00',
+      origin: 'upload',
+      document: doc({ id: documentId(sha256(bytes)), sha256: sha256(bytes), fileName: `IMG_05${80 + seq}.PNG`, capturedOn: '2026-09-29', capturedOnSource: 'exif', capturedAt: opts.at ?? '2026-09-29T20:08:00+01:00', image: { width: 1206, height: 2622 } }),
+      extraction: { warnings: [], raw: ExtractionSchema.parse(raw), ...(opts.verification ? { verification: opts.verification } : {}) },
+    };
+    await work.init();
+    await work.saveFile(record.document, bytes);
+    await work.saveRecord(record);
+    return id;
+  };
+  const start = async () => {
+    svc = new ImportService(store, loadConfig({ FINANCE_DATA_DIR: path.join(dir, 'data'), FINANCE_WORK_DIR: path.join(dir, 'work'), FINANCE_WATCH: '0' }), work);
+    await svc.init();
+    for (const r of svc.listPending()) await svc.refreshDraft(r.id);
+  };
+  const tab = (extra: Record<string, unknown> = {}) => ({ documentType: 'transactions_screenshot', accounts: [{ accountName: 'Premium Bonds', accountType: 'premium_bonds', last4: '7302', closingBalance: 1250, transactions: reinvestments, ...extra }] });
+  const bondRecord = (extra: Record<string, unknown> = {}) => ({ documentType: 'account_overview_screenshot', accounts: [{ accountName: 'Premium Bonds', accountType: 'premium_bonds', last4: '7302', closingBalance: 1250, ...extra }] });
+  const prizeHistory = { documentType: 'other', accounts: [{ accountType: 'premium_bonds', last4: '7302' }], nothingToRecord: 'A prize history: prizes won, by bond number and month.' };
+  beforeEach(async () => {
+    work = new WorkArea(path.join(dir, 'work'));
+    await store.setAccounts([acct('bonds', 'premium_bonds', { name: 'Premium Bonds', institutionId: 'ns-and-i' }), acct('current', 'current', { last4: '4821' })]);
+  });
+
+  it('a view with nothing to record says what it is, in the reader’s words, and is not ready to commit', async () => {
+    const id = await make(prizeHistory);
+    await start();
+    const n = svc.novelty().get(id);
+    expect(n).toEqual({ reason: 'A prize history: prizes won, by bond number and month.', coveredBy: [] });
+    expect(svc.readiness(svc.getPending(id)!, n)).toEqual({ ready: false, reasons: ['nothing new'] });
+  });
+
+  it('a document the reader found nothing in and could not explain is not called empty', async () => {
+    const id = await make({ documentType: 'other' });
+    await start();
+    expect(svc.novelty().has(id)).toBe(false);
+  });
+
+  it('not when the reading itself needs a look: readers that disagreed, warnings, low confidence', async () => {
+    const disagreed = await make(prizeHistory, { verification: { method: 'second-reading', firstModel: 'sonnet', secondModel: 'opus', reasons: [], disagreements: ['Sonnet found 1 account(s), Opus 0'], kept: 'second' } });
+    const unsure = await make({ ...prizeHistory, confidence: 'low' });
+    await start();
+    expect(svc.novelty().has(disagreed)).toBe(false);
+    expect(svc.novelty().has(unsure)).toBe(false);
+  });
+
+  it('the same balance on two tabs: the screen with the rows is kept, the other has nothing new', async () => {
+    const bonds = await make(bondRecord(), { at: '2026-09-29T20:08:44+01:00' });
+    const rows = await make(tab(), { at: '2026-09-29T20:08:33+01:00' });
+    await start();
+    const novelty = svc.novelty();
+    expect(novelty.has(rows)).toBe(false);
+    const n = novelty.get(bonds)!;
+    expect(n.coveredBy).toEqual([{ id: rows, fileName: svc.getPending(rows)!.document.fileName }]);
+    expect(n.reason).toBe(`Everything on it is already here: its balance (£1,250.00 on 29 Sep 2026) is also on ${svc.getPending(rows)!.document.fileName}.`);
+  });
+
+  it('two copies of one screen: the earlier upload is kept', async () => {
+    const first = await make(bondRecord(), { created: '2026-09-29T20:09:00+01:00' });
+    const second = await make(bondRecord(), { created: '2026-09-29T20:09:05+01:00' });
+    await start();
+    expect([...svc.novelty().keys()]).toEqual([second]);
+    expect(svc.novelty().get(second)!.coveredBy[0]!.id).toBe(first);
+  });
+
+  it('anything more is something new: another day, another figure, one more row', async () => {
+    await make(tab(), { at: '2026-09-29T20:08:33+01:00' });
+    const otherValue = await make(bondRecord({ closingBalance: 28550 }));
+    const extraFigure = await make(bondRecord({ interestRate: 4.4 }));
+    const moreRows = await make(tab({ transactions: [...reinvestments, { date: '2026-06-02', description: 'Auto prize reinvestment', amount: 25 }] }));
+    await start();
+    for (const id of [otherValue, extraFigure, moreRows]) expect(svc.novelty().has(id), id).toBe(false);
+  });
+
+  it('what is already stored counts, however it got there', async () => {
+    await store.addBalances([{ id: 'bal_0000000000000001', accountId: 'bonds', date: '2026-09-29', balance: 1250, currency: 'GBP', kind: 'screenshot', source: {}, createdAt: stamp }], 'b');
+    const id = await make(bondRecord());
+    const approximate = await make(bondRecord({ closingBalance: 28000 }));
+    await store.addBalances([{ id: 'bal_0000000000000002', accountId: 'bonds', date: '2026-09-29', balance: 28000, currency: 'GBP', kind: 'manual', approximate: true, source: {}, createdAt: stamp }], 'b');
+    await start();
+    expect(svc.novelty().get(id)!.reason).toBe('Everything on it is already here: its balance (£1,250.00 on 29 Sep 2026) is already recorded.');
+    // A rough figure you gave is not a reading of the account.
+    expect(svc.novelty().has(approximate)).toBe(false);
+  });
+
+  it('a section waiting for you to choose its account is never nothing new', async () => {
+    const id = await make({ documentType: 'transactions_screenshot', accounts: [{ transactions: reinvestments }] }, { at: '2026-09-29T19:00:00+01:00' });
+    await start();
+    expect(svc.getPending(id)!.draft!.sections[0]!.target).toEqual({ mode: 'skip' });
+    expect(svc.novelty().has(id)).toBe(false);
+  });
+
+  it('dismissing files the document and records nothing else; it must still add nothing', async () => {
+    const rows = await make(tab(), { at: '2026-09-29T20:08:33+01:00' });
+    const bonds = await make(bondRecord(), { at: '2026-09-29T20:08:44+01:00' });
+    const prizes = await make(prizeHistory);
+    await start();
+    await expect(svc.dismiss(rows)).rejects.toThrow(/something new/);
+    const filed = await svc.dismiss(bonds);
+    expect(filed.status).toBe('committed');
+    expect(filed.result).toMatchObject({ transactionsAdded: 0, balancesAdded: 0, holdingsAdded: 0, figuresAdded: 0, accountIds: ['bonds'] });
+    expect(filed.result!.nothingNew).toMatch(/its balance/);
+    expect(existsSync(path.join(dir, 'data', filed.document.path!))).toBe(true);
+    expect(store.balances('bonds')).toEqual([]);
+    // Not even the account's last digits: nothing was recorded from it.
+    expect(store.account('bonds')!.last4).toBeUndefined();
+    expect(svc.getPending(bonds)).toBeUndefined();
+    // The same file again is recognised as already imported.
+    expect((await svc.create({ fileName: 'again.png', bytes: Buffer.from(`screenshot ${bonds}`), origin: 'upload' })).duplicateOf?.id).toBe(bonds);
+    expect(await svc.dismissNothingNew()).toEqual([prizes]);
+    expect(svc.listPending().map((r) => r.id)).toEqual([rows]);
+  });
+
+  it('a new account a dismissed document would have made is not created', async () => {
+    await make({ documentType: 'account_overview_screenshot', accounts: [{ institutionName: 'Chase', accountType: 'savings', last4: '3310', closingBalance: 5210.44 }] }, { created: '2026-09-29T20:09:00+01:00' });
+    const copy = await make({ documentType: 'account_overview_screenshot', accounts: [{ institutionName: 'Chase', accountType: 'savings', last4: '3310', closingBalance: 5210.44 }] }, { created: '2026-09-29T20:09:05+01:00' });
+    await start();
+    expect(svc.getPending(copy)!.draft!.sections[0]!.target.mode).toBe('new');
+    await svc.dismiss(copy);
+    expect(store.accounts.map((a) => a.id)).toEqual(['bonds', 'current']);
   });
 });

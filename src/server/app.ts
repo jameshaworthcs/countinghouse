@@ -24,6 +24,7 @@ import { jobRoutes } from './routes/jobs';
 import { recordRoutes } from './routes/records';
 import { systemRoutes } from './routes/system';
 import { authGate, csrfGuard, hostGuard, isPageRequest, securityHeaders } from './security';
+import type { ImportRecord } from '../shared/schema';
 import { Store, StoreError, type ChangeEvent } from './store';
 
 export interface CreateAppOptions {
@@ -86,8 +87,9 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
   // git), never in tests, scripts, the demo or a throwaway copy: they spend the owner's Claude plan.
   const runner = new JobRunner(store, analytics, config, { autoRun: config.watch && opts.inbox !== false && git.tracked });
   await runner.init();
-  imports.on('update', (r: { id: string; status: string }) => {
-    if (r.status === 'committed') runner.onImportCommitted(r.id);
+  imports.on('update', (r: ImportRecord) => {
+    // A document filed as adding nothing new has nothing for the analyst to look at.
+    if (r.status === 'committed' && !r.result?.nothingNew) runner.onImportCommitted(r.id);
   });
 
   let inbox: InboxWatcher | undefined;

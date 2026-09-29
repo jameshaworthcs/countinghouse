@@ -354,4 +354,16 @@ as holdings, and five views that added nothing looking like failures.
   uploaded before this change. The nearest identified screenshots before and after must agree, a
   borrowed account is never lent on, and anything on the screen that disagrees wins. The owner's
   saved edits are never redrafted.
+- **"Nothing new" is worked out, not stored, and dismissing it keeps the document.** Whether an
+  import adds anything depends on what else is committed or waiting, so it is recomputed each time
+  the list is shown rather than saved on the draft. Dismissing archives the document and writes an
+  import record with zero counts and the reason, rather than deleting the file:
+  - the document is the bottom layer of the data model: a prize history holds prizes recorded
+    nowhere else, and a better reader can return to it;
+  - the account it was about lists it, and uploading it again is recognised;
+  - it costs a few hundred kilobytes in `data/`, once. *Discard* remains for files you do not want
+    kept.
+  Considered and rejected: a new import status for dismissed files (every reader of `committed`
+  would need to learn it), and letting "Commit all ready" commit them (it would record the same
+  balance twice).
 

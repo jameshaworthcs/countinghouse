@@ -298,6 +298,37 @@ read again.
   - When a later statement prints the full name, the instrument takes it and keeps the short one
     as an alias. Holdings keep the names their documents printed.
 
+## Nothing new
+
+A document the reader understood can add nothing: a prize history that repeats the account's
+transactions, a second tab showing the same balance, the same screen uploaded twice. The import
+page and the review page say so plainly ("Nothing new", with the reason), and it is put away in one
+click, not left looking failed or stuck (`src/server/ingest/novelty.ts`).
+
+- **Nothing to record.** The reader understood it and says what it shows (`nothingToRecord`, in
+  its words), with no balance, rows, holdings or figures. A reading that found nothing and could not
+  say what the document is stays a document to look at ("Nothing was found to record").
+- **Already here.** Everything it would record is already stored (rows already imported, the same
+  balance and figures on the same day for that account, the same holdings, the same tax figures),
+  or is in another import waiting beside it. The reason says which: "its balance (£1,250.00 on 29
+  Sep 2026) is also on IMG_0102.PNG, and its 5 transactions are already imported".
+  - Of imports waiting together, the one with the most to add is kept and the others are checked
+    against it; of two identical ones, the earlier upload is kept.
+  - Everything counts: rows left unticked or pending, another day, one more figure (cash, rate,
+    paid in), a section still waiting for its account. A rough balance you gave covers nothing.
+- **Never for a reading that needs a look**: readers that disagreed, warnings, low confidence,
+  offline OCR.
+- It is worked out afresh whenever the import list is shown, so it follows what is committed,
+  discarded or edited.
+
+**Dismissing** (`POST /api/imports/:id/dismiss`, or all at once) files the document with your
+other documents and writes its import record, with the reason (`result.nothingNew`) and the
+reading. Nothing else is written: no rows, balances or holdings, no new account, not even an
+account's last digits. The account it was about lists the document; the same file uploaded again is
+recognised; and a later, better reader can go back to it. *Discard* still deletes a file instead.
+It must still add nothing when you click: otherwise it is refused and the page says to review it.
+No analyst job follows a dismissal.
+
 ## Measuring extraction
 
 `npm run eval` runs a fixed set of synthetic documents through this pipeline and scores the

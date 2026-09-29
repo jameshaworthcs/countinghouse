@@ -555,8 +555,17 @@ export interface TransactionsResponse {
   items: Transaction[];
 }
 
+/** An import waiting for review that adds nothing new (src/server/ingest/novelty.ts). */
+export interface NothingNewView {
+  reason: string;
+  /** Imports waiting beside it that already have what it shows. */
+  coveredBy: { id: string; fileName: string }[];
+}
+
+export type PendingImport = ImportRecord & { readiness?: { ready: boolean; reasons: string[] }; nothingNew?: NothingNewView };
+
 export interface ImportListResponse {
-  pending: (ImportRecord & { readiness?: { ready: boolean; reasons: string[] } })[];
+  pending: PendingImport[];
   committed: { id: string; createdAt: string; committedAt?: string; fileName: string; mediaType: string; documentId: string; engine?: string; result?: ImportRecord['result'] }[];
 }
 
