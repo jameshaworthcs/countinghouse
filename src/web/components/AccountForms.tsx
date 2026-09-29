@@ -146,6 +146,7 @@ export function BalanceDialog({ open, onOpenChange, account }: { open: boolean; 
   const [contributions, setContributions] = useState('');
   const [annualIncome, setAnnualIncome] = useState('');
   const [note, setNote] = useState('');
+  const [approximate, setApproximate] = useState(false);
   const save = useApiMutation(
     () =>
       api(`/accounts/${account.id}/balances`, {
@@ -155,6 +156,7 @@ export function BalanceDialog({ open, onOpenChange, account }: { open: boolean; 
           ...(contributions ? { contributions: Number(contributions) } : {}),
           ...(annualIncome ? { annualIncome: Number(annualIncome) } : {}),
           ...(note ? { note } : {}),
+          ...(approximate ? { approximate: true } : {}),
         },
       }),
     {
@@ -200,6 +202,9 @@ export function BalanceDialog({ open, onOpenChange, account }: { open: boolean; 
         <Field label="Note" className="sm:col-span-2">
           <Input value={note} onChange={(e) => setNote(e.target.value)} />
         </Field>
+        <div className="sm:col-span-2">
+          <Checkbox checked={approximate} onChange={setApproximate} label="A rough figure: use it only until statements or screenshots bring real data past this date" />
+        </div>
       </div>
       {save.error && <Callout tone="bad" className="mt-3">{save.error.message}</Callout>}
     </Dialog>

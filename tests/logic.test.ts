@@ -202,6 +202,30 @@ describe('store, balances and analytics', () => {
     expect(engine.balanceOn('isa', '2026-08-01')!.value).toBe(10_500);
   });
 
+  it('an approximate figure stands in only for what is newer than the real data', async () => {
+    const snap = (id: string, accountId: string, date: string, balance: number, extra: object = {}) => ({ id, accountId, date, balance, currency: 'GBP', kind: 'manual' as const, source: {}, createdAt: stamp, ...extra });
+    // On its own: it is the value, marked estimated, and not counted as data.
+    await store.addBalances([snap('bal_00000000000000f1', 'isa', '2026-09-29', 110_000, { approximate: true })], 'test');
+    let engine = new BalanceEngine(store);
+    expect(engine.balanceOn('isa', '2026-09-29')).toMatchObject({ value: 110_000, estimated: true });
+    expect(engine.lastDataDate('isa')).toBeNull();
+    // An older real valuation shapes history; the newer approximate figure is still today's value.
+    await store.addBalances([snap('bal_00000000000000f2', 'isa', '2026-04-22', 104_200, { kind: 'statement' })], 'test');
+    engine = new BalanceEngine(store);
+    expect(engine.balanceOn('isa', '2026-05-01')).toMatchObject({ value: 104_200, estimated: false });
+    expect(engine.balanceOn('isa', '2026-09-29')).toMatchObject({ value: 110_000, estimated: true });
+    // A real valuation newer than it replaces it.
+    await store.addBalances([snap('bal_00000000000000f3', 'isa', '2026-10-05', 111_050.4, { kind: 'screenshot' })], 'test');
+    engine = new BalanceEngine(store);
+    expect(engine.balanceOn('isa', '2026-09-29')).toMatchObject({ value: 104_200, estimated: false });
+    // On a ledger account it never shows as an unexplained gap.
+    await store.addTransactions([tx('current', '2026-09-10', -40, 'SHOP')], 'test');
+    await store.addBalances([snap('bal_00000000000000f4', 'current', '2026-09-01', 1000, { kind: 'statement' }), snap('bal_00000000000000f5', 'current', '2026-09-29', 1500, { approximate: true })], 'test');
+    engine = new BalanceEngine(store);
+    expect(engine.gaps('current')).toEqual([]);
+    expect(engine.balanceOn('current', '2026-09-29')).toMatchObject({ value: 1500, estimated: true });
+  });
+
   it('keeps invalid lines verbatim and reloads external edits', async () => {
     const file = path.join(dir, 'transactions/current/2026.jsonl');
     await store.addTransactions([tx('current', '2026-09-01', -10, 'A')], 'test');

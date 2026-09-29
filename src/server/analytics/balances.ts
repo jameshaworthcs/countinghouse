@@ -20,8 +20,11 @@ import type { Store } from '../store';
 interface Anchor {
   date: ISODate;
   minor: number;
-  /** Screenshot balances may be taken mid-day, so they are weaker evidence for gap checks. */
-  source: 'snapshot' | 'running' | 'screenshot';
+  /**
+   * Screenshot balances may be taken mid-day, so they are weaker evidence for gap checks. An
+   * approximate figure you gave is weaker still: it only stands in for what is newer than your data.
+   */
+  source: 'snapshot' | 'running' | 'screenshot' | 'approximate';
 }
 
 interface Series {
@@ -119,13 +122,19 @@ export class BalanceEngine {
           }
         }
       }
-      for (const s of snaps) anchors.set(s.date, { date: s.date, minor: toMinor(s.balance), source: s.kind === 'screenshot' ? 'screenshot' : 'snapshot' });
+      // An approximate figure you gave stands in only for what is newer than all of the account's
+      // real data (docs/FORMULAS.md §9); it never counts as data for staleness or gap checks.
+      const real = snaps.filter((s) => !s.approximate);
+      const lastReal = [txs[txs.length - 1]?.date, real[real.length - 1]?.date].filter(Boolean).sort().reverse()[0];
+      const placeholders = snaps.filter((s) => s.approximate && (!lastReal || s.date > lastReal));
+      for (const s of real) anchors.set(s.date, { date: s.date, minor: toMinor(s.balance), source: s.kind === 'screenshot' ? 'screenshot' : 'snapshot' });
+      for (const s of placeholders) if (!anchors.has(s.date)) anchors.set(s.date, { date: s.date, minor: toMinor(s.balance), source: 'approximate' });
       const sortedAnchors = [...anchors.values()].sort((a, b) => (a.date < b.date ? -1 : 1));
       const flows = txs.filter((t) => t.category && EXTERNAL_FLOW_CATEGORIES.has(t.category));
       const firstTx = txs[0]?.date ?? null;
       const lastTx = txs[txs.length - 1]?.date ?? null;
       const firstAnchor = sortedAnchors[0]?.date ?? null;
-      const lastSnapshot = snaps.length ? snaps[snaps.length - 1]!.date : null;
+      const lastSnapshot = real.length ? real[real.length - 1]!.date : null;
       const firstFlow = flows[0]?.date ?? null;
       const candidatesFirst = mode === 'ledger' ? [firstTx, firstAnchor] : [firstAnchor, firstFlow];
       const firstDate = candidatesFirst.filter(Boolean).sort()[0] ?? null;
@@ -173,11 +182,15 @@ export class BalanceEngine {
     let estimated = false;
     if (d.mode === 'ledger') {
       const a1 = lastAnchorOnOrBefore(d.anchors, date);
-      if (a1) minor = a1.minor + (sumTo(d.tx, date) - sumTo(d.tx, a1.date));
-      else {
+      if (a1) {
+        minor = a1.minor + (sumTo(d.tx, date) - sumTo(d.tx, a1.date));
+        estimated = a1.source === 'approximate';
+      } else {
         const a2 = firstAnchorAfter(d.anchors, date);
-        if (a2) minor = a2.minor - (sumTo(d.tx, a2.date) - sumTo(d.tx, date));
-        else {
+        if (a2) {
+          minor = a2.minor - (sumTo(d.tx, a2.date) - sumTo(d.tx, date));
+          estimated = a2.source === 'approximate';
+        } else {
           minor = sumTo(d.tx, date);
           estimated = true;
         }
@@ -186,6 +199,7 @@ export class BalanceEngine {
       const a1 = lastAnchorOnOrBefore(d.anchors, date);
       if (a1) {
         minor = a1.minor + (sumTo(d.flows, date) - sumTo(d.flows, a1.date));
+        estimated = a1.source === 'approximate';
       } else {
         const contributed = sumTo(d.flows, date);
         const a2 = firstAnchorAfter(d.anchors, date);
@@ -226,7 +240,7 @@ export class BalanceEngine {
     const d = this.data.get(accountId);
     if (!d || d.mode !== 'ledger' || d.tx.dates.length === 0) return [];
     const out: { from: ISODate; to: ISODate; difference: number }[] = [];
-    const strong = d.anchors.filter((a) => a.source !== 'screenshot');
+    const strong = d.anchors.filter((a) => a.source !== 'screenshot' && a.source !== 'approximate');
     for (let i = 1; i < strong.length; i++) {
       const a = strong[i - 1]!;
       const b = strong[i]!;

@@ -289,6 +289,11 @@ export const BalanceSnapshotSchema = z.object({
   annualIncome: MoneySchema.optional(),
   interestRate: z.number().optional(),
   note: z.string().optional(),
+  /**
+   * A figure you gave roughly (a starting snapshot, a range's middle). It stands in only for what
+   * is newer than the account's real data, and balances from it are marked estimated.
+   */
+  approximate: z.boolean().optional(),
   dateSource: z.enum(DATE_SOURCES).optional(),
   attributes: AttributesSchema.optional(),
   source: SourceRefSchema.default({}),

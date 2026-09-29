@@ -81,6 +81,9 @@
     "note": {
       "type": "string"
     },
+    "approximate": {
+      "type": "boolean"
+    },
     "dateSource": {
       "type": "string",
       "enum": [

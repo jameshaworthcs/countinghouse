@@ -119,6 +119,7 @@ A balance or valuation at the end of `date`:
 | `bonusToDate` | LISA government bonus received (optional) |
 | `taxYearContributions`, `taxYear` | provider-reported "allowance used this tax year" (optional) |
 | `annualIncome` | DB / State Pension forecast (optional) |
+| `approximate` | `true` for a rough figure you gave: it stands in only for what is newer than the account's real data (optional) |
 | `interestRate`, `note`, `attributes`, `source`, `createdAt` | |
 
 ## holdings/&lt;account&gt;.jsonl

@@ -90,6 +90,7 @@ const ManualBalance = z.object({
   annualIncome: MoneySchema.optional(),
   interestRate: z.number().optional(),
   note: z.string().max(500).optional(),
+  approximate: z.boolean().optional(),
 });
 
 const TxPatch = z.object({

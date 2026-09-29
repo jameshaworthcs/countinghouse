@@ -186,8 +186,9 @@ export default function AccountDetail() {
                     </td>
                     {market && <td className={cn(tableClasses.td, tableClasses.num)}>{b.contributions !== undefined ? <Money value={b.contributions} /> : '—'}</td>}
                     <td className={cn(tableClasses.td, 'text-ink-3')}>
-                      {b.kind}
+                      {b.approximate ? <Badge tone="muted">approximate</Badge> : b.kind}
                       {b.dateSource && b.dateSource !== 'document' && b.dateSource !== 'manual' ? ` · date from ${b.dateSource}` : ''}
+                      {b.note && <div className="text-[12px]">{b.note}</div>}
                       {b.source.importId && (
                         <Link to={`/import/${b.source.importId}`} className="ml-2 text-accent hover:underline">
                           import

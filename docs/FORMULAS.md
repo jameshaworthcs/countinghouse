@@ -254,9 +254,17 @@ years), both paths grow at the median:
   - further back, contributions + (growth at the first valuation) × elapsed fraction since the
     first flow, flagged estimated.
 
+**Approximate figures** (a balance you gave roughly, `approximate: true`):
+
+- used only when dated after all of the account's real data (its last transaction and last real
+  balance); dropped once real data reaches past them;
+- balances computed from one are marked estimated;
+- never counted as data for "last updated", staleness or gaps.
+
 **Gaps:**
 
-- Consecutive strong anchors (not screenshots) with anchor_b ≠ anchor_a + Σ tx in (a, b].
+- Consecutive strong anchors (not screenshots or approximate figures) with
+  anchor_b ≠ anchor_a + Σ tx in (a, b].
 - The difference is what is unexplained.
 
 **Estate value on D:**
