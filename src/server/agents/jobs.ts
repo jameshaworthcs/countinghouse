@@ -65,6 +65,7 @@ export class JobRunner extends EventEmitter implements JobQueue {
   private importIds: string[] = [];
   private importTimer?: NodeJS.Timeout | undefined;
   private timer?: NodeJS.Timeout | undefined;
+  private firstTick?: NodeJS.Timeout | undefined;
   readonly dir: string;
 
   constructor(
@@ -93,13 +94,20 @@ export class JobRunner extends EventEmitter implements JobQueue {
     if (this.opts.autoRun) {
       this.timer = setInterval(() => void this.tick(), 6 * 3600_000);
       this.timer.unref();
-      setTimeout(() => void this.tick(), 20_000).unref();
+      this.firstTick = setTimeout(() => void this.tick(), 20_000);
+      this.firstTick.unref();
     }
     this.pump();
   }
 
+  /** Whether due jobs start by themselves (a serving instance over real data). */
+  get startsJobs(): boolean {
+    return this.opts.autoRun;
+  }
+
   stop(): void {
     clearInterval(this.timer);
+    clearTimeout(this.firstTick);
     clearTimeout(this.importTimer);
     this.current?.abort.abort();
   }

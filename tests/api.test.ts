@@ -26,6 +26,33 @@ async function waitFor<T>(fn: () => Promise<T | undefined>, ms = 10_000): Promis
   }
 }
 
+describe('agent jobs on throwaway data', () => {
+  it('a serving instance over data not tracked in git never starts jobs by itself', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'finance-jobs-'));
+    try {
+      // The inbox is set explicitly: for a data directory called "data" it defaults to the project's own.
+      const config = loadConfig({ FINANCE_DATA_DIR: path.join(dir, 'data'), FINANCE_WORK_DIR: path.join(dir, 'work'), FINANCE_INBOX_DIR: path.join(dir, 'inbox'), FINANCE_WATCH: '1', FINANCE_ALLOWED_HOSTS: 'finance.example.test' });
+      config.webDist = path.join(dir, 'no-web');
+      const app = await createApp(config, { version: 'test', env: {} });
+      try {
+        const { git, store } = app.ctx;
+        const runner = app.ctx.runner!;
+        expect(git.tracked).toBe(false);
+        // Agents are on and research is due (none has been done), yet nothing starts by itself.
+        // (No tick is run here: if this ever failed, a tick would spend the owner's plan.)
+        expect(store.settings.agents.enabled).toBe(true);
+        expect(runner.suggestions().some((s) => s.auto)).toBe(true);
+        expect(runner.startsJobs).toBe(false);
+        expect(runner.list()).toEqual([]);
+      } finally {
+        await app.close();
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('API without login configured', () => {
   let ctx: { app: App; dir: string };
   beforeEach(async () => {

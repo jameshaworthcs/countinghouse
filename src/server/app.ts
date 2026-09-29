@@ -72,8 +72,9 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
     throw new Error(`${config.dataDir} holds real data (it is tracked in git), so a login is required. Run \`npm run set-password\`, or use the demo data (npm run dev / npm run demo).`);
   }
 
-  // Agent jobs start on their own only in a watching (serving) instance, never in tests or scripts.
-  const runner = new JobRunner(store, analytics, config, { autoRun: config.watch && opts.inbox !== false });
+  // Agent jobs start on their own only in a watching (serving) instance over real data (tracked in
+  // git), never in tests, scripts, the demo or a throwaway copy: they spend the owner's Claude plan.
+  const runner = new JobRunner(store, analytics, config, { autoRun: config.watch && opts.inbox !== false && git.tracked });
   await runner.init();
   imports.on('update', (r: { id: string; status: string }) => {
     if (r.status === 'committed') runner.onImportCommitted(r.id);

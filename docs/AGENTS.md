@@ -191,7 +191,9 @@ Other behaviour:
   | `monthly-review` | 61 s | $0.24 |
   | `interpret-note` | 15 s | $0.07 |
 - **The output's records** carry the job's id, model and prompt version.
-- **Demo data never starts jobs by itself.**
+- **Only real data starts jobs by itself.** Jobs start on their own only when the data directory
+  is tracked in git; the demo and throwaway copies never start them, though you can still start
+  one by hand.
 
 ## 7. Prompt versions
 

@@ -239,3 +239,7 @@ as invariants.
     and contributions summed from a few months of statements are not everything paid in.
   - The analyst is told which figures are estimates, and that a null is not zero
     (`insights-after-import-2`, `monthly-review-2`).
+- **Only real data starts agent jobs by itself.** A throwaway data directory made for a visual
+  check ran `refresh-assumptions` on the owner's plan: the demo turns agents off in its settings,
+  but other copies did not. Jobs now start on their own only when the data is tracked in git, the
+  same signal that decides a login is needed.
