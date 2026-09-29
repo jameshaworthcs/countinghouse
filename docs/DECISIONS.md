@@ -423,3 +423,19 @@ needed a `fetch` loop pasted into the signed-in browser console.
   nothing, so an agent's request is never mistaken for the owner's.
 - **Every use is logged, refused ones too**, in the work area, and Settings shows the latest 30.
 
+## 2026-09-29: Budgets
+
+- **Monthly, with no rollover (the owner's choice).** Unspent money does not carry into the next
+  month. A budget covers all spending, a group, or one category.
+- **The pace is measured against your usual month, not the calendar.** Rent on the 1st makes a
+  straight-line pace read as a month's bills gone in a day. So "on pace to go over" compares the
+  spending so far with the share usually spent by that day, from past complete months. With fewer
+  than two such months it falls back to the share of days gone. Nothing is judged before a quarter
+  of the usual month's spending would be done.
+- **Only data for every account counts towards the pace.** Spending after the last day that every
+  account covers may be incomplete. The page says so, as the Overview's "spent this month" does.
+- **Refunds stay in their own category.** A refund is not taken off the budget of what was refunded:
+  nothing links the two, and a guess would move figures that are computed.
+- **Suggestions are the median of recent complete months, rounded up.** The median resists one
+  unusual month, and rounding up gives a starting point, not a target.
+

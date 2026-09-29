@@ -481,3 +481,34 @@ A transaction counts as follows (`classifyFlow`):
   - Only pairs where both days have data for every account count.
   - It needs pairs for at least half the days so far (`SIGNAL_RULES.minCoverage`); otherwise a
     note says what is missing.
+
+## 15. Budgets (`analytics/budgets.ts`)
+
+A budget is a monthly amount you set (`data/budgets.json`). It can cover all spending, a group
+(every category in it) or one category. Spending is §14's: refunds count against their own category,
+**Refunds**, not against the budget of what was refunded.
+
+For a budget *B* and a month:
+
+- **Spent** *S* = Σ spending in the month so far, from all the data there is.
+- **Data to** *d*: the last day, counting from the 1st, with data for every account (§3). Spending
+  after *d* may be incomplete, and the page says so.
+- **Usual share by day *d*** *u*: over the past complete months (§3) in the 12 before, the share
+  of each month's spending in *B* that was spent by day *d* (the month's own last day if it is
+  shorter), averaged over the months with some spending there.
+  - It needs 2 such months (`BUDGET_RULES.paceMonths`).
+  - Without them, *u* = *d* ÷ days in the month.
+  - It is 1 for a month that is over.
+- **Heading for** *P* = *S*<sub>≤d</sub> ÷ *u*, where *S*<sub>≤d</sub> is spending up to day
+  *d*. It is judged only once *u* ≥ 25% (`paceFrom`); earlier, one bill decides it.
+- **Status**, first that applies:
+  1. **over**: *S* > *B*;
+  2. **on pace to go over**: *P* > *B* × 1.1 (`paceMargin`);
+  3. **nearly spent**: *S* ≥ 90% of *B* (`near`);
+  4. **fine**.
+- **Suggestion:** the median of the spending in *B* over the last 6 complete months (zeros
+  included), rounded up. It rounds to £5 steps under £100, £10 under £1,000, and £50 above.
+  Groups and all spending with no budget get one too.
+
+The Overview warns about each budget over, or on pace to go over, this month. These are computed
+signals, not insights.

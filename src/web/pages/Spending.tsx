@@ -6,6 +6,7 @@ import { addMonths, endOfMonth, formatMonth, startOfMonth, today } from '../../s
 import { taxYearOf } from '../../shared/uk';
 import { BarList, ColumnChart, Heatmap } from '../components/charts/bars';
 import { ChartFrame } from '../components/charts/common';
+import { BudgetsCard } from '../components/Budgets';
 import { InsightsPanel, SignalList } from '../components/Intel';
 import { TransactionList } from '../components/TransactionList';
 import { Badge, Callout, Card, EmptyState, Loading, Money, PageHeader, Segmented, Select, Stat, tableClasses } from '../components/ui';
@@ -101,6 +102,8 @@ export default function Spending() {
             <Stat label="Biggest category" value={s.groups[0]?.name ?? '—'} sub={s.groups[0] ? <span><Money value={s.groups[0].amount} decimals={0} /> · {pct(s.groups[0].share, 0)}</span> : undefined} />
             <Stat label="Regular payments" value={<Money value={recurring.reduce((x, r) => x + r.monthlyCost, 0)} decimals={0} />} sub={`a month across ${recurring.length}`} />
           </div>
+
+          <BudgetsCard />
 
           {s.coverage.days < s.coverage.totalDays && (
             <Callout tone="neutral" title={`Data covers ${s.coverage.days} of the ${s.coverage.totalDays} days in this period`}>

@@ -17,6 +17,7 @@ import {
   CurrencySchema,
   FIGURE_KINDS,
   GoalSchema,
+  BudgetSchema,
   ISODateSchema,
   MoneySchema,
   PensionDetailsSchema,
@@ -188,6 +189,7 @@ export function dataRoutes(ctx: AppContext): Hono {
       categories: store.categories,
       rules: store.rules,
       goals: store.goals,
+      budgets: store.budgets,
       csvProfiles: store.csvProfiles,
       user: ctx.auth.sessionFrom(c)?.user ?? null,
       dataDir: ctx.config.dataDir,
@@ -549,6 +551,29 @@ export function dataRoutes(ctx: AppContext): Hono {
     const body = await readJson(c, z.object({ accountId: SlugSchema, description: z.string(), amount: MoneySchema }));
     const categoriser = new Categoriser(store.rules, new CategoryIndex(store.categories), store.accounts, store.institutions);
     return c.json(categoriser.categorise(body));
+  });
+
+  // Budgets: yours to set; the list is replaced whole (docs/FORMULAS.md §15).
+  app.put('/budgets', async (c) => {
+    const list = await readJson(c, z.array(BudgetSchema.omit({ createdAt: true, updatedAt: true }).extend({ createdAt: z.string().optional() })));
+    const cats = new CategoryIndex(store.categories);
+    const seen = new Set<string>();
+    for (const b of list) {
+      const key = b.category ?? '*';
+      if (seen.has(key)) throw new StoreError(`${b.category ? cats.name(b.category) : 'All spending'} has two budgets.`);
+      seen.add(key);
+      if (b.category && cats.kindOf(b.category) !== 'expense') throw new StoreError(`"${b.category}" is not a spending category.`);
+    }
+    const stamp = nowISO();
+    const before = new Map(store.budgets.map((b) => [b.category ?? '*', b]));
+    await store.setBudgets(
+      list.map((b) => {
+        const prev = before.get(b.category ?? '*');
+        const same = prev && prev.monthly === b.monthly && prev.notes === b.notes;
+        return { ...b, createdAt: prev?.createdAt ?? b.createdAt ?? stamp, updatedAt: same ? prev.updatedAt : stamp };
+      }),
+    );
+    return c.json(store.budgets);
   });
 
   app.get('/goals', (c) => c.json(store.goals));

@@ -8,6 +8,7 @@ import type {
   CsvProfile,
   Figure,
   Goal,
+  Budget,
   HoldingsSnapshot,
   ImportRecord,
   Institution,
@@ -531,6 +532,7 @@ export interface BootstrapResponse {
   categories: Category[];
   rules: Rule[];
   goals: Goal[];
+  budgets: Budget[];
   csvProfiles: CsvProfile[];
   user: string | null;
   dataDir: string;
@@ -610,4 +612,43 @@ export interface TokensResponse {
   tokens: AgentTokenInfo[];
   uses: AgentTokenUse[];
   scopes: { id: string; label: string }[];
+}
+
+/** One budget against a month's spending (GET /api/budgets; docs/FORMULAS.md §15). */
+export interface BudgetLine {
+  /** The category or group; absent for all spending. */
+  category?: string;
+  name: string;
+  scope: 'total' | 'group' | 'category';
+  monthly: number;
+  /** Spending recorded in the month so far. */
+  spent: number;
+  /** What is left (negative when over). */
+  left: number;
+  /** Spent ÷ budget. */
+  share: number;
+  /** How much of a usual month's spending the data reaches (1 for a past month), or null. */
+  expectedShare: number | null;
+  /** Where the month is heading at its usual pace, once a pace can be judged. */
+  projected: number | null;
+  status: 'over' | 'pace' | 'near' | 'ok';
+  /** What the pace is measured against, in words. */
+  paceBasis: string | null;
+  /** The median of your recent complete months, rounded up: a starting point. */
+  suggested: number | null;
+  notes?: string;
+}
+
+export interface BudgetsResponse {
+  month: string;
+  /** The month is over. */
+  complete: boolean;
+  /** The last day, from the 1st, with data for every account. */
+  dataTo: string | null;
+  lines: BudgetLine[];
+  /** All spending and groups with no budget yet, with a suggestion from recent complete months. */
+  suggestions: { category?: string; name: string; scope: BudgetLine['scope']; suggested: number; typical: number; months: number }[];
+  /** Complete months in the year before, which the pace and suggestions come from. */
+  pastMonths: number;
+  note: string | null;
 }

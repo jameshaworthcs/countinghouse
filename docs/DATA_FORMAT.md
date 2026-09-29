@@ -28,6 +28,7 @@ data/
   categories.json      { categories: [...] }     editable taxonomy (system ones drive calculations)
   rules.json           { rules: [...] }          your categorisation rules
   goals.json           { goals: [...] }
+  budgets.json         { budgets: [...] }            monthly spending budgets
   capture.json         { items: [...] }          what to collect from each provider (the capture list)
   csv-profiles.json    { profiles: [...] }       your saved CSV column mappings
   instruments.json     { instruments: [...] }    funds, ETFs and shares you hold
@@ -180,6 +181,17 @@ Standalone figures from documents, used for Self Assessment:
   statement periods it gives each account's **coverage** (the days it has data for).
   `nothingNew` (optional) is set when the import was dismissed as adding nothing new: why, in words.
   Only the document and this record were written; the counts are all zero.
+
+## budgets.json
+
+A monthly spending budget, yours to set (Spending → Budgets). How it is measured is
+[FORMULAS.md §15](FORMULAS.md).
+
+| Field | Type | Notes |
+|---|---|---|
+| `category` | slug? | A category or group from `categories.json` (a group covers all its categories). Absent: all spending. At most one budget each |
+| `monthly` | money | Pounds a month, more than 0. Unspent money does not carry over |
+| `notes`, `createdAt`, `updatedAt` | | |
 
 ## categories.json, rules.json, csv-profiles.json
 

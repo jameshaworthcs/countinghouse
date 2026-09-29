@@ -427,6 +427,18 @@ async function demoIntelligence(store: Store) {
       { type: 'capture', record: { id: 'student-loan', title: 'Student loan statement', priority: 'low', asks: [{ id: 'balance', what: 'Screenshot of the balance and repayments', how: 'gov.uk → sign in to manage your student loan.' }] } },
     ],
   });
+
+  // Budgets: all spending, a group and two categories (Spending → Budgets).
+  const budgetStamp = nowISO();
+  await store.setBudgets(
+    [
+      { monthly: 4_300, createdAt: budgetStamp, updatedAt: budgetStamp },
+      { category: 'food', monthly: 650, createdAt: budgetStamp, updatedAt: budgetStamp },
+      { category: 'takeaway', monthly: 90, notes: 'Fridays add up (demo).', createdAt: budgetStamp, updatedAt: budgetStamp },
+      { category: 'shopping', monthly: 700, createdAt: budgetStamp, updatedAt: budgetStamp },
+    ],
+    'demo: budgets',
+  );
 }
 
 await main();

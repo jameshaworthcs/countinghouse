@@ -446,6 +446,21 @@ export const GoalSchema = z.object({
 });
 export type Goal = z.infer<typeof GoalSchema>;
 
+/**
+ * A monthly spending budget (docs/FORMULAS.md §15). For a category, for a group (all its
+ * categories), or with no category for all spending. Unspent money does not carry over.
+ */
+export const BudgetSchema = z.object({
+  /** A category or group id from categories.json; absent for all spending. */
+  category: SlugSchema.optional(),
+  /** How much a month, in pounds. */
+  monthly: MoneySchema.refine((v) => v > 0, { message: 'A budget is more than £0 a month' }),
+  notes: z.string().max(500).optional(),
+  createdAt: TimestampSchema,
+  updatedAt: TimestampSchema,
+});
+export type Budget = z.infer<typeof BudgetSchema>;
+
 // ─── CSV profiles ────────────────────────────────────────────────────────────────────────────────
 
 export const CsvProfileSchema = z.object({
@@ -1440,5 +1455,6 @@ export const InstitutionsFileSchema = z.object({ institutions: z.array(Instituti
 export const CategoriesFileSchema = z.object({ categories: z.array(CategorySchema) });
 export const RulesFileSchema = z.object({ rules: z.array(RuleSchema) });
 export const GoalsFileSchema = z.object({ goals: z.array(GoalSchema) });
+export const BudgetsFileSchema = z.object({ budgets: z.array(BudgetSchema) });
 export const CaptureFileSchema = z.object({ items: z.array(CaptureItemSchema) });
 export const CsvProfilesFileSchema = z.object({ profiles: z.array(CsvProfileSchema) });

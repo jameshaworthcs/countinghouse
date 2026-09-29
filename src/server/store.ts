@@ -23,6 +23,7 @@ import {
   FigureSchema,
   CaptureItemSchema,
   GoalSchema,
+  BudgetSchema,
   HoldingsSnapshotSchema,
   ImportRecordSchema,
   InsightSchema,
@@ -44,6 +45,7 @@ import {
   type Figure,
   type CaptureItem,
   type Goal,
+  type Budget,
   type HoldingsSnapshot,
   type ImportRecord,
   type Insight,
@@ -99,6 +101,7 @@ const ARRAY_FILES = {
   categories: { file: 'categories.json', key: 'categories', schema: CategorySchema },
   rules: { file: 'rules.json', key: 'rules', schema: RuleSchema },
   goals: { file: 'goals.json', key: 'goals', schema: GoalSchema },
+  budgets: { file: 'budgets.json', key: 'budgets', schema: BudgetSchema },
   capture: { file: 'capture.json', key: 'items', schema: CaptureItemSchema },
   csvProfiles: { file: 'csv-profiles.json', key: 'profiles', schema: CsvProfileSchema },
   instruments: { file: 'instruments.json', key: 'instruments', schema: InstrumentSchema },
@@ -122,6 +125,7 @@ interface State {
   categories: Category[];
   rules: Rule[];
   goals: Goal[];
+  budgets: Budget[];
   capture: CaptureItem[];
   csvProfiles: CsvProfile[];
   instruments: Instrument[];
@@ -149,6 +153,7 @@ function emptyState(): State {
     categories: [],
     rules: [],
     goals: [],
+    budgets: [],
     capture: [],
     csvProfiles: [],
     instruments: [],
@@ -233,6 +238,7 @@ export class Store extends EventEmitter {
       ['categories.json', { $schema: '../schemas/categories.schema.json', categories: defaultCategories() }],
       ['rules.json', { $schema: '../schemas/rules.schema.json', rules: [] }],
       ['goals.json', { $schema: '../schemas/goals.schema.json', goals: [] }],
+      ['budgets.json', { $schema: '../schemas/budgets.schema.json', budgets: [] }],
       ['csv-profiles.json', { $schema: '../schemas/csv-profiles.schema.json', profiles: [] }],
       ['instruments.json', { $schema: '../schemas/instruments.schema.json', instruments: [] }],
     ];
@@ -509,6 +515,10 @@ export class Store extends EventEmitter {
   get goals(): Goal[] {
     return this.state.goals;
   }
+  /** Monthly spending budgets (docs/FORMULAS.md §15). */
+  get budgets(): Budget[] {
+    return this.state.budgets;
+  }
   /** The capture list: what to collect from each provider (docs/DATA_FORMAT.md). */
   get capture(): CaptureItem[] {
     return this.state.capture;
@@ -642,6 +652,9 @@ export class Store extends EventEmitter {
   }
   setGoals(list: Goal[], message = 'goals: update'): Promise<void> {
     return this.setArray('goals', list, message);
+  }
+  setBudgets(list: Budget[], message = 'budgets: update'): Promise<void> {
+    return this.setArray('budgets', list, message);
   }
   setCapture(list: CaptureItem[], message = 'capture list: update'): Promise<void> {
     return this.setArray('capture', list, message);

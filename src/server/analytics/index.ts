@@ -2,12 +2,13 @@
 
 import { ACCESS_GROUP_LABELS, ACCESS_GROUPS, WRAPPER_GROUP_LABELS, WRAPPER_GROUPS } from '../../shared/accounts';
 import type { Alert, SummaryResponse } from '../../shared/api';
-import { addDays, addYears, today } from '../../shared/dates';
+import { addDays, addYears, monthKey, today } from '../../shared/dates';
 import { formatMoney } from '../../shared/money';
 import { daysLeftInTaxYear, taxYearOf } from '../../shared/uk';
 import type { Store } from '../store';
 import { allowances } from './allowances';
 import { BalanceEngine } from './balances';
+import { budgetAlerts, budgets } from './budgets';
 import { cashflow } from './cashflow';
 import { AssumptionSet } from '../../shared/assumptions';
 import { computeBaseline, standardPeriods } from './baseline';
@@ -70,6 +71,12 @@ export class Analytics {
 
   recurring() {
     return this.cached(`recurring:${today()}`, () => detectRecurring(this.store));
+  }
+
+  budgets(month?: string) {
+    const now = today();
+    const m = month && /^\d{4}-\d{2}$/.test(month) ? month : monthKey(now);
+    return this.cached(`budgets:${m}:${now}`, () => budgets(this.store, m, now, this.coverageIndex));
   }
 
   projections(opts: ProjectionOptions) {
@@ -172,6 +179,18 @@ export class Analytics {
             .map((d) => d.name)
             .join(', '),
           action: { label: 'Update', href: '/import' },
+        });
+      }
+      // Budgets over, or on pace to go over, this month (FORMULAS §15): computed, not inferred.
+      const hot = budgetAlerts(this.budgets());
+      if (hot.length) {
+        const say = (l: (typeof hot)[number]) => (l.status === 'over' ? `${l.name} is ${formatMoney(-l.left, { decimals: 0 })} over` : `${l.name} is heading for ${formatMoney(l.projected ?? l.spent, { decimals: 0 })} of ${formatMoney(l.monthly, { decimals: 0 })}`);
+        alerts.push({
+          id: 'budgets',
+          level: 'warning',
+          title: hot.length === 1 ? `${hot[0]!.name}: ${hot[0]!.status === 'over' ? 'over budget' : 'on pace to go over budget'}` : `${hot.length} budgets over or on pace to go over`,
+          detail: `${hot.slice(0, 3).map(say).join('; ')}.`,
+          action: { label: 'Budgets', href: '/spending#budgets' },
         });
       }
       if (health.gaps.length) {

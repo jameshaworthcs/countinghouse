@@ -294,6 +294,31 @@ export function Meter({ used, limit, label, sub, overLabel = 'Over the limit', a
   );
 }
 
+/**
+ * A budget against the month's spending. The tick marks how much of a usual month's spending is
+ * done by the day the data reaches; status colours only for status (over, on pace to go over, nearly
+ * spent).
+ */
+export function BudgetMeter({ spent, budget, expected, status, label, sub }: { spent: number; budget: number; expected: number | null; status: 'over' | 'pace' | 'near' | 'ok'; label: ReactNode; sub?: ReactNode }) {
+  const ratio = budget > 0 ? spent / budget : 0;
+  const fill = status === 'over' ? 'var(--bad)' : status === 'pace' || status === 'near' ? 'var(--serious)' : 'var(--seq-5)';
+  return (
+    <div>
+      <div className="mb-1.5 flex items-baseline justify-between gap-3">
+        <span className="min-w-0 truncate text-[13px] font-medium text-ink">{label}</span>
+        <span className="shrink-0 text-[12.5px] text-ink-3">
+          <span className="sensitive tabular font-semibold text-ink">{money(spent, { decimals: 0 })}</span> of <span className="sensitive tabular">{money(budget, { decimals: 0 })}</span>
+        </span>
+      </div>
+      <div className="relative h-2.5 rounded-full" style={{ background: 'var(--seq-1)' }} role="meter" aria-valuemin={0} aria-valuemax={budget} aria-valuenow={spent} aria-label={typeof label === 'string' ? label : undefined}>
+        <div className="h-full rounded-full" style={{ width: `${Math.min(100, ratio * 100)}%`, background: fill }} />
+        {expected !== null && expected > 0 && expected < 1 && <div className="absolute -top-0.5 -bottom-0.5 w-0.5 rounded-full bg-ink-2" style={{ left: `calc(${expected * 100}% - 1px)` }} title="Usual by now" aria-hidden />}
+      </div>
+      {sub && <div className="mt-1 text-[12px] text-ink-3">{sub}</div>}
+    </div>
+  );
+}
+
 // ─── Part-to-whole bar ───────────────────────────────────────────────────────────────────────────
 
 export function AllocationBar({ parts }: { parts: { id: string; label: string; value: number; color: string }[] }) {
