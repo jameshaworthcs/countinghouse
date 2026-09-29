@@ -29,6 +29,7 @@
     "check": "npm run typecheck && npm run lint && npm run test",
     "set-password": "tsx scripts/set-password.ts",
     "records": "tsx scripts/records.ts",
+    "api": "tsx scripts/api.ts",
     "eval": "tsx eval/run.ts"
   },
   "dependencies": {

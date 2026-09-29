@@ -32,7 +32,8 @@ export const JobRecordSchema = z.object({
   label: z.string(),
   params: z.record(z.string(), z.unknown()),
   status: z.enum(['queued', 'running', 'succeeded', 'failed', 'cancelled']),
-  trigger: z.enum(['owner', 'post-import', 'schedule', 'stale']),
+  /** Who started it: you, an agent's token (waits for the budget, like the app's own), or the app. */
+  trigger: z.enum(['owner', 'agent', 'post-import', 'schedule', 'stale']),
   privacy: z.enum(['public', 'personal']),
   promptVersion: z.string(),
   createdAt: z.string(),
@@ -189,10 +190,10 @@ export class JobRunner extends EventEmitter implements JobQueue {
     return this.jobs.get(id)!;
   }
 
-  rerun(id: string): JobRecord | undefined {
+  rerun(id: string, trigger: 'owner' | 'agent' = 'owner'): JobRecord | undefined {
     const job = this.jobs.get(id);
     if (!job) throw new Error('Unknown job');
-    return this.enqueue({ kind: job.kind, params: job.params, trigger: 'owner' });
+    return this.enqueue({ kind: job.kind, params: job.params, trigger });
   }
 
   /** An import was committed: insights follow once imports stop arriving for a while. */

@@ -391,3 +391,35 @@ would have added the whole holding to the estate a second time.
 - **"Auto prize reinvestment" is a Premium Bonds prize** (other income, from the built-in list).
   The reader's guess had filed one screen's prizes as savings interest.
 
+## 2026-09-29: Agent access to the live API
+
+The owner asked for agents to do API tasks without them: re-reading six pending NS&I imports had
+needed a `fetch` loop pasted into the signed-in browser console.
+
+- **Tokens the owner makes in Settings, not a jemedia-auth machine client (the owner's choice).**
+  - A client-credentials client would need admin setup at jemedia-auth, and support there, for one
+    user.
+  - App tokens are small and local, and are revoked in one click.
+- **Only a hash is kept, outside `data/` and git.**
+  - A token is `fin_<id>_<secret>`. The secret is 32 random bytes, and the work area keeps its
+    SHA-256.
+  - A plain hash is enough for a random 256-bit secret. A password-style slow hash would only slow
+    every request.
+- **Read everything; change only what a scope lists; never commit (the owner's choice).**
+  - Scopes: import upkeep (read again, draft again, choose an account, edit a draft), agent records,
+    and jobs.
+  - The routes are an explicit list, so a new route is closed to tokens until it is added.
+  - Committing, dismissing, discarding, uploading, source facts, accounts, settings and token
+    management stay with the owner.
+  - A new token has read and import upkeep ticked. Records and jobs must be ticked on purpose.
+  - A job an agent starts waits for the background budget, and is refused while agents are off,
+    because agent work stays off unless the owner turns it on.
+- **Reachable from P360 and the tailnet (the owner's choice).** The helper defaults to the loopback
+  service. Caddy passes tokens from other tailnet devices.
+- **The CSRF header is still required with a token.** A token is not a cookie, so CSRF cannot
+  forge it, but keeping one rule for every change is simpler to reason about. The helper sends the
+  header.
+- **A request with a token is judged by it alone.** A session cookie sent alongside counts for
+  nothing, so an agent's request is never mistaken for the owner's.
+- **Every use is logged, refused ones too**, in the work area, and Settings shows the latest 30.
+

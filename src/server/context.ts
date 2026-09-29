@@ -11,10 +11,16 @@ import type { InboxWatcher } from './ingest/inbox';
 import type { ImportService } from './ingest/service';
 import type { OidcClient } from './oidc';
 import { StoreError, type Store } from './store';
+import type { AgentTokens } from './tokens';
 
 /** What routes need from the agent job runner (src/server/agents/jobs.ts). */
 export interface JobQueue {
-  enqueue(input: { kind: string; params?: Record<string, unknown>; trigger: 'owner' | 'post-import' | 'schedule' | 'stale' }): unknown;
+  enqueue(input: { kind: string; params?: Record<string, unknown>; trigger: 'owner' | 'agent' | 'post-import' | 'schedule' | 'stale' }): unknown;
+}
+
+/** The agent token a request was made with (security.ts authGate), if it was not the owner's session. */
+export function agentTokenOf(c: Context): string | undefined {
+  return (c.get('agentToken' as never) as string | undefined) ?? undefined;
 }
 
 export interface AppContext {
@@ -29,6 +35,8 @@ export interface AppContext {
   inbox?: InboxWatcher | undefined;
   jobs?: JobQueue | undefined;
   runner?: JobRunner | undefined;
+  /** Agent access tokens (tokens.ts). */
+  tokens: AgentTokens;
   version: string;
 }
 

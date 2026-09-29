@@ -46,6 +46,16 @@ In-app analysis jobs do not read `data/`. They read a **digest**: the app's own 
 with the ids of the records behind them (`src/server/agents/digest.ts`). A Claude Code session may
 read `data/` directly, but should quote computed figures from the app rather than recompute them.
 
+**The live app's API** is open to an agent that holds a token the owner made (DEPLOY.md, "Agent
+access"): `npm run -s api -- GET /imports`.
+- It is how an agent does upkeep on imports waiting for review. It can read a document again, draft
+  it again, choose its account or edit its draft.
+- It can also write records (`POST /records`, the same batches as below) and start jobs, but only
+  if the token has those scopes.
+- Committing, dismissing and discarding stay with the owner.
+- Never sign in any other way: never forge a session from the server's secret, and never edit the
+  work area's files behind the app's back.
+
 ## 3. Researching
 
 Only for public subjects: a fund (name, ISIN, ticker), a provider (name, the kinds of account held

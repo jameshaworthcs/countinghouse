@@ -17,11 +17,11 @@ export function randomHex(bytes: number): string {
 }
 
 /** Write a file atomically: temp file in the same directory, then rename over the target. */
-export async function atomicWrite(file: string, content: string | Buffer): Promise<void> {
+export async function atomicWrite(file: string, content: string | Buffer, mode?: number): Promise<void> {
   await mkdir(path.dirname(file), { recursive: true });
   const tmp = `${file}.tmp-${process.pid}-${randomHex(4)}`;
   try {
-    await writeFile(tmp, content);
+    await writeFile(tmp, content, mode === undefined ? undefined : { mode });
     await rename(tmp, file);
   } catch (err) {
     await rm(tmp, { force: true });

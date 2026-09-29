@@ -5,6 +5,8 @@ import { getConnInfo } from '@hono/node-server/conninfo';
 import type { Context, MiddlewareHandler } from 'hono';
 import type { Auth } from './auth';
 import { isLoopbackHost } from './config';
+import { nowISO } from './fsutil';
+import { requiredScope, type AgentTokens } from './tokens';
 
 export interface SecurityOptions {
   allowedHosts: string[];
@@ -134,11 +136,31 @@ export function isPageRequest(c: Context): boolean {
 /**
  * Everything under /api requires a session, except sign-in, status and health. Static files (the SPA shell
  * and bundles) are public so the login page can render; they contain no data.
+ *
+ * An agent's bearer token (tokens.ts) stands in for a session, for what its scopes allow. A request
+ * that carries one is judged by it alone: cookies sent with it count for nothing.
  */
-export function authGate(auth: Auth): MiddlewareHandler {
+export function authGate(auth: Auth, tokens?: AgentTokens): MiddlewareHandler {
   return async (c, next) => {
     const path = c.req.path;
     if (!path.startsWith('/api/') || PUBLIC_API.has(path)) return next();
+    const authorization = c.req.header('authorization');
+    if (authorization !== undefined) {
+      const credential = /^Bearer\s+(\S+)$/i.exec(authorization)?.[1];
+      const token = credential && tokens ? tokens.verify(credential) : undefined;
+      if (!token || !tokens) return c.json({ error: 'The token is not valid: wrong, expired or revoked.', code: 'bad_token' }, 401);
+      const use = { tokenId: token.id, name: token.name, method: c.req.method, path, from: clientAddress(c) };
+      const scope = requiredScope(c.req.method, path);
+      if (!scope || !token.scopes.includes(scope)) {
+        await tokens.recordUse({ ...use, at: nowISO(), status: 403 });
+        return c.json({ error: scope ? `This token may not do that: it needs the "${scope}" scope.` : 'No token may do that: it is yours to do in the app.', code: 'token_scope' }, 403);
+      }
+      c.set('user' as never, `agent:${token.name}` as never);
+      c.set('agentToken' as never, token.id as never);
+      await next();
+      await tokens.recordUse({ ...use, at: nowISO(), status: c.res.status });
+      return;
+    }
     if (!auth.configured) {
       if (isDirectLocal(c)) return next();
       return c.json({ error: 'Login is not configured. Run `npm run set-password` on the server.', code: 'auth_not_configured' }, 403);

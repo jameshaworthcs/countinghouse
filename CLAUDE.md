@@ -36,6 +36,10 @@ for the map and [docs/DATA_FORMAT.md](docs/DATA_FORMAT.md) before touching data 
     are in `~/dev/finance-live/.env`; this checkout's `.env` has no production settings.
     - The screenshot run and the demo use a throwaway password login instead (no OIDC client set).
 - `npm run validate`: format check of `data/`.
+- `npm run -s api -- GET /imports` (any method and path): the live API with an agent token the owner
+  made in Settings → Agent access, kept in `~/.config/finance/token`. Tokens can read, and change
+  only what their scopes allow (import upkeep, agent records, jobs); never commit
+  ([docs/DEPLOY.md](docs/DEPLOY.md), "Agent access").
 - `npm run records -- keys | status | check <batch.json> | write <batch.json>`: the validated
   write path for assumptions, research, insights and instruments
   ([docs/AGENTS.md](docs/AGENTS.md)). Research and assumptions go through this, never by hand
@@ -89,7 +93,7 @@ for the map and [docs/DATA_FORMAT.md](docs/DATA_FORMAT.md) before touching data 
   - loopback bind;
   - Host allow-list (`FINANCE_ALLOWED_HOSTS`);
   - CSRF header + Origin check;
-  - auth gate on `/api/*`;
+  - auth gate on `/api/*` (a session, or an agent token within its scopes);
   - CSP in production;
   - documents served by id, never by path.
 - **UK rules are data.** Figures live in the dated tables in `src/shared/uk.ts` with sources in

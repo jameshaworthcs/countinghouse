@@ -221,6 +221,15 @@ and a card in credit counts as cash.
     the password hash, or the jemedia-auth issuer, client and allowed addresses. Changing either,
     or switching method, signs everyone out.
   - Client IP and `https` are trusted from `X-Forwarded-*` only when the peer is loopback (Caddy).
+- **Agent tokens** (`src/server/tokens.ts`; DEPLOY.md, "Agent access") let an agent use the API
+  without a session.
+  - The owner makes them in Settings. Each has scopes and an expiry, is shown once, and is kept only
+    as a SHA-256 hash in the work area.
+  - A bearer token can read everything. It can change only the routes its scopes list: import
+    upkeep, agent records and jobs.
+  - No token can commit, dismiss or discard an import, change source facts or settings, or manage
+    tokens. A request with a token ignores any cookie.
+  - Every use, refused ones included, is logged in the work area.
 - **Claude CLI extraction** runs with `--tools Read`, `--restricted` (file tools confined to the
   working directory), `--safe-mode` (no hooks, plugins, MCP or CLAUDE.md),
   `--no-session-persistence`, and non-essential traffic disabled, in a scratch directory holding

@@ -23,6 +23,8 @@ import { documentRoutes, importRoutes } from './routes/imports';
 import { jobRoutes } from './routes/jobs';
 import { recordRoutes } from './routes/records';
 import { systemRoutes } from './routes/system';
+import { tokenRoutes } from './routes/tokens';
+import { AgentTokens } from './tokens';
 import { authGate, csrfGuard, hostGuard, isPageRequest, securityHeaders } from './security';
 import type { ImportRecord } from '../shared/schema';
 import { Store, StoreError, type ChangeEvent } from './store';
@@ -98,14 +100,17 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
     await inbox.start();
   }
 
-  const ctx: AppContext = { config, store, analytics, imports, git, auth, oidc, inbox, jobs: runner, runner, version: opts.version };
+  const tokens = AgentTokens.forWorkDir(config.workDir);
+  await tokens.load();
+
+  const ctx: AppContext = { config, store, analytics, imports, git, auth, oidc, inbox, jobs: runner, runner, tokens, version: opts.version };
   const app = new Hono();
   const secOpts = { allowedHosts: config.allowedHosts, production: config.production };
 
   app.use('*', securityHeaders(secOpts));
   app.use('*', hostGuard(secOpts));
   app.use('/api/*', csrfGuard());
-  app.use('/api/*', authGate(auth));
+  app.use('/api/*', authGate(auth, tokens));
   // With jemedia-auth, opening any page signed out goes straight to it. (The SPA does the same for
   // the pages Vite serves in development.) /login stays reachable: it explains failed sign-ins.
   if (oidc) {
@@ -120,6 +125,7 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
   app.route('/api/auth', authRoutes(ctx));
   app.route('/api/imports', importRoutes(ctx));
   app.route('/api/jobs', jobRoutes(ctx));
+  app.route('/api/tokens', tokenRoutes(ctx));
   app.route('/api/documents', documentRoutes(ctx));
   app.route('/api', dataRoutes(ctx));
   app.route('/api', recordRoutes(ctx));

@@ -1,18 +1,18 @@
-import { CircleAlert, CircleCheck, GitCommitHorizontal, Plus, RefreshCw, Trash2, Wand2 } from 'lucide-react';
+import { CircleAlert, CircleCheck, Copy, GitCommitHorizontal, KeyRound, Plus, RefreshCw, Trash2, Wand2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
-import type { AllowancesResponse, DataHealthResponse, SystemResponse } from '../../shared/api';
+import type { AllowancesResponse, DataHealthResponse, SystemResponse, TokensResponse } from '../../shared/api';
 import { formatDate, today } from '../../shared/dates';
 import { FIGURE_KINDS, type Category, type Figure, type Profile, type Rule, type Settings as SettingsT } from '../../shared/schema';
 import { taxYearOf } from '../../shared/uk';
 import { CoverageGrid } from '../components/Coverage';
 import { CategorySelect } from '../components/TransactionList';
-import { Badge, Button, Callout, Card, Checkbox, Field, Input, KeyValue, Loading, Money, PageHeader, Select, StatusBadge, Switch, Tabs, tableClasses, useToast } from '../components/ui';
+import { Badge, Button, Callout, Card, Checkbox, Dialog, Field, Input, KeyValue, Loading, Money, PageHeader, Select, StatusBadge, Switch, Tabs, tableClasses, useToast } from '../components/ui';
 import { api, useApi, useApiMutation } from '../lib/api';
 import { useAppData } from '../lib/data';
 import { bandLabel, cn, money, timeAgo } from '../lib/format';
 
-type Section = 'profile' | 'extraction' | 'categories' | 'rules' | 'tax-documents' | 'data' | 'health';
+type Section = 'profile' | 'extraction' | 'categories' | 'rules' | 'tax-documents' | 'data' | 'access' | 'health';
 
 /** The tax band is computed, not set: show this year's and where it comes from. */
 function TaxBandLine() {
@@ -741,6 +741,159 @@ function Health() {
   );
 }
 
+const SCOPE_NAMES: Record<string, string> = { read: 'Read', imports: 'Import upkeep', records: 'Agent records', jobs: 'Jobs' };
+const whenTime = (iso: string) => `${formatDate(iso.slice(0, 10))} ${iso.slice(11, 16)}`;
+
+/** Tokens for agents (docs/DEPLOY.md, "Agent access"): made, seen and revoked only here. */
+function AgentAccess() {
+  const toast = useToast();
+  const q = useApi<TokensResponse>(['tokens'], '/tokens');
+  const [name, setName] = useState('Claude Code on P360');
+  const [scopes, setScopes] = useState<string[]>(['imports']);
+  const [days, setDays] = useState('90');
+  const [made, setMade] = useState<{ token: string; name: string } | null>(null);
+  const create = useApiMutation(() => api<{ token: string; view: { name: string } }>('/tokens', { body: { name, scopes, days: Number(days) } }), { onSuccess: (r) => setMade({ token: r.token, name: r.view.name }) });
+  const revoke = useApiMutation((id: string) => api(`/tokens/${id}/revoke`, { method: 'POST' }), { onSuccess: () => toast({ tone: 'good', text: 'Revoked: the token stops working now' }) });
+  const d = q.data;
+  const toggle = (id: string, on: boolean) => setScopes((s) => (on ? [...new Set([...s, id])] : s.filter((x) => x !== id)));
+  const copy = () => {
+    if (!made) return;
+    navigator.clipboard.writeText(made.token).then(
+      () => toast({ tone: 'good', text: 'Copied' }),
+      () => toast({ tone: 'bad', text: 'Could not copy: select the token and copy it' }),
+    );
+  };
+  if (!d) return q.error ? <Callout tone="bad">{q.error.message}</Callout> : <Loading />;
+  return (
+    <div className="flex flex-col gap-5">
+      <Card title="Agent access" description="A token lets an agent, such as a Claude Code session on this server, use the app’s API without signing in. Only a hash of it is kept, in the work area, never in your data or git, and every use is logged.">
+        <p className="mb-4 text-[13px] text-ink-2">
+          Every token can read everything, and change only what you tick. No token can commit, dismiss or discard an import, change transactions, balances, figures, accounts or settings, or make and revoke tokens.
+        </p>
+        <div className="grid gap-3 sm:grid-cols-[1fr_12rem]">
+          <Field label="Name">
+            <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={60} />
+          </Field>
+          <Field label="Expires after">
+            <Select value={days} onChange={(e) => setDays(e.target.value)}>
+              <option value="7">7 days</option>
+              <option value="30">30 days</option>
+              <option value="90">90 days</option>
+              <option value="365">1 year</option>
+            </Select>
+          </Field>
+        </div>
+        <div className="mt-3 flex flex-col gap-2 text-[13px]">
+          {d.scopes.map((s) => (
+            <Checkbox key={s.id} checked={s.id === 'read' || scopes.includes(s.id)} disabled={s.id === 'read'} onChange={(v) => toggle(s.id, v)} label={s.label} />
+          ))}
+        </div>
+        <div className="mt-4 flex justify-end">
+          <Button variant="primary" icon={<KeyRound className="size-4" />} loading={create.isPending} disabled={!name.trim()} onClick={() => create.mutate(undefined)}>
+            Create token
+          </Button>
+        </div>
+        {create.error && <Callout tone="bad" className="mt-3">{create.error.message}</Callout>}
+      </Card>
+      <Dialog
+        open={made !== null}
+        onOpenChange={(o) => !o && setMade(null)}
+        title="Your new token"
+        description={made?.name}
+        footer={
+          <Button variant="primary" onClick={() => setMade(null)}>
+            Done
+          </Button>
+        }
+      >
+        <div className="flex flex-col gap-3 text-[13px] text-ink-2">
+          <p>This is the only time it is shown. If it is lost, revoke it and make another.</p>
+          <code className="block rounded-lg bg-panel-2 p-3 font-mono text-[12px] break-all text-ink select-all">{made?.token}</code>
+          <div>
+            <Button size="sm" icon={<Copy className="size-3.5" />} onClick={copy}>
+              Copy
+            </Button>
+          </div>
+          <p>
+            For agents on P360, keep it where <code>npm run api</code> looks. Run this, paste the token, press Enter, then Ctrl-D:
+          </p>
+          <code className="block rounded-lg bg-panel-2 p-3 font-mono text-[12px] break-all text-ink">mkdir -p ~/.config/finance && (umask 077; cat &gt; ~/.config/finance/token)</code>
+        </div>
+      </Dialog>
+      <Card title="Tokens" padded={false}>
+        {d.tokens.length === 0 ? (
+          <p className="border-t border-line px-5 py-4 text-[13px] text-ink-3">No tokens yet.</p>
+        ) : (
+          <div className="overflow-x-auto border-t border-line">
+            <table className={tableClasses.table}>
+              <thead>
+                <tr>
+                  <th className={tableClasses.th}>Name</th>
+                  <th className={tableClasses.th}>Can</th>
+                  <th className={tableClasses.th}>Expires</th>
+                  <th className={tableClasses.th}>Last used</th>
+                  <th className={tableClasses.th} />
+                </tr>
+              </thead>
+              <tbody>
+                {d.tokens.map((t) => (
+                  <tr key={t.id}>
+                    <td className={tableClasses.td}>{t.name}</td>
+                    <td className={tableClasses.td}>{t.scopes.map((s) => SCOPE_NAMES[s] ?? s).join(', ')}</td>
+                    <td className={tableClasses.td}>{formatDate(t.expiresAt.slice(0, 10))}</td>
+                    <td className={tableClasses.td}>{t.lastUsedAt ? `${whenTime(t.lastUsedAt)}${t.lastUsedFrom ? ` from ${t.lastUsedFrom}` : ''}` : 'never'}</td>
+                    <td className={cn(tableClasses.td, 'text-right')}>
+                      {t.status === 'active' ? (
+                        <Button size="sm" loading={revoke.isPending && revoke.variables === t.id} onClick={() => revoke.mutate(t.id)}>
+                          Revoke
+                        </Button>
+                      ) : (
+                        <Badge tone="muted">{t.status === 'revoked' ? 'Revoked' : 'Expired'}</Badge>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+      <Card title="Recent uses" description="The latest 30 requests made with a token, including refused ones." padded={false}>
+        {d.uses.length === 0 ? (
+          <p className="border-t border-line px-5 py-4 text-[13px] text-ink-3">No token has been used yet.</p>
+        ) : (
+          <div className="overflow-x-auto border-t border-line">
+            <table className={tableClasses.table}>
+              <thead>
+                <tr>
+                  <th className={tableClasses.th}>When</th>
+                  <th className={tableClasses.th}>Token</th>
+                  <th className={tableClasses.th}>Request</th>
+                  <th className={tableClasses.th}>Answer</th>
+                  <th className={tableClasses.th}>From</th>
+                </tr>
+              </thead>
+              <tbody>
+                {d.uses.map((u, i) => (
+                  <tr key={`${u.at}-${i}`}>
+                    <td className={cn(tableClasses.td, 'whitespace-nowrap')}>{whenTime(u.at)}</td>
+                    <td className={tableClasses.td}>{u.name}</td>
+                    <td className={cn(tableClasses.td, 'font-mono text-[12px]')}>
+                      {u.method} {u.path}
+                    </td>
+                    <td className={tableClasses.td}>{u.status < 400 ? <StatusBadge status="good">{u.status}</StatusBadge> : <StatusBadge status="bad">{u.status}</StatusBadge>}</td>
+                    <td className={tableClasses.td}>{u.from}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
 export default function Settings() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -752,6 +905,7 @@ export default function Settings() {
     { value: 'rules', label: 'Rules' },
     { value: 'tax-documents', label: 'Tax documents' },
     { value: 'data', label: 'Data & git' },
+    { value: 'access', label: 'Agent access' },
     { value: 'health', label: 'Data health' },
   ];
   return (
@@ -764,6 +918,7 @@ export default function Settings() {
       {section === 'rules' && <RulesEditor />}
       {section === 'tax-documents' && <TaxDocuments />}
       {section === 'data' && <DataAndGit />}
+      {section === 'access' && <AgentAccess />}
       {section === 'health' && <Health />}
     </div>
   );

@@ -3,7 +3,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { JOB_DEFS, JOB_KINDS } from '../agents/kinds';
-import { readJson, type AppContext } from '../context';
+import { agentTokenOf, readJson, type AppContext } from '../context';
 import { StoreError } from '../store';
 
 export function jobRoutes(ctx: AppContext): Hono {
@@ -25,9 +25,14 @@ export function jobRoutes(ctx: AppContext): Hono {
     });
   });
 
+  // A job an agent's token starts waits for the background budget, and is refused while agents are
+  // off in Settings: only you can start one then.
+  const AGENTS_OFF = 'Agents are turned off in Settings, so an agent cannot start a job.';
+
   app.post('/', async (c) => {
     const body = await readJson(c, z.object({ kind: z.enum(JOB_KINDS), params: z.record(z.string(), z.unknown()).default({}) }));
-    const job = runner().enqueue({ kind: body.kind, params: body.params, trigger: 'owner' });
+    const job = runner().enqueue({ kind: body.kind, params: body.params, trigger: agentTokenOf(c) ? 'agent' : 'owner' });
+    if (!job) throw new StoreError(AGENTS_OFF, 409);
     return c.json(job, 201);
   });
 
@@ -37,7 +42,12 @@ export function jobRoutes(ctx: AppContext): Hono {
   });
 
   app.post('/:id/cancel', async (c) => c.json(await runner().cancel(c.req.param('id'))));
-  app.post('/:id/rerun', (c) => c.json(runner().rerun(c.req.param('id')) ?? null));
+  app.post('/:id/rerun', (c) => {
+    const agent = Boolean(agentTokenOf(c));
+    const job = runner().rerun(c.req.param('id'), agent ? 'agent' : 'owner');
+    if (!job && agent) throw new StoreError(AGENTS_OFF, 409);
+    return c.json(job ?? null);
+  });
 
   return app;
 }

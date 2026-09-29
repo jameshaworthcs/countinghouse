@@ -582,3 +582,32 @@ export interface SystemResponse {
   auth: { configured: boolean; method: 'oidc' | 'password' | null; user: string | null };
   counts: { accounts: number; transactions: number; balances: number; imports: number; figures: number };
 }
+
+/** Settings → Agent access (GET /api/tokens): tokens as you see them, never the token itself. */
+export interface AgentTokenInfo {
+  id: string;
+  name: string;
+  scopes: string[];
+  createdAt: string;
+  expiresAt: string;
+  revokedAt?: string;
+  lastUsedAt?: string;
+  lastUsedFrom?: string;
+  status: 'active' | 'expired' | 'revoked';
+}
+
+export interface AgentTokenUse {
+  at: string;
+  tokenId: string;
+  name: string;
+  method: string;
+  path: string;
+  status: number;
+  from: string;
+}
+
+export interface TokensResponse {
+  tokens: AgentTokenInfo[];
+  uses: AgentTokenUse[];
+  scopes: { id: string; label: string }[];
+}

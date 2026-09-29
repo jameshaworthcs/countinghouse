@@ -92,6 +92,7 @@ async function main() {
     ['settings', '/settings'],
     ['settings-extraction', '/settings#extraction'],
     ['settings-rules', '/settings#rules'],
+    ['settings-access', '/settings#access'],
     ['settings-health', '/settings#health'],
   ];
   const problems: string[] = [];
