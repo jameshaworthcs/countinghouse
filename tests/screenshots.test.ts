@@ -378,6 +378,21 @@ describe('rows another import recorded meanwhile', () => {
     expect(stored()).toEqual(['2026-04-02 100', '2026-06-02 25']);
   });
 
+  it('drafts waiting from before are drafted again when the app starts; ones you edited are not', async () => {
+    const plain = await make(tab([prize('2025-08-04', 50)]), '2026-09-29T22:06:32+01:00');
+    const edited = await make(tab([prize('2025-07-02', 25)]), '2026-09-29T22:06:36+01:00');
+    for (const [id, draftEditedAt] of [[plain, undefined], [edited, '2026-09-29T22:10:00+01:00']] as const) {
+      // As an older version drafted them: a new account for a Premium Bonds screen.
+      const record = (await work.loadAll()).find((r) => r.id === id)!;
+      await work.saveRecord({ ...record, draft: { documentType: 'transactions_screenshot', sections: [{ key: 's0', detected: { accountType: 'premium_bonds' }, target: { mode: 'new', account: { id: 'premium-bonds-2', name: 'Premium Bonds', type: 'premium_bonds', currency: 'GBP' } }, currency: 'GBP', recordBalance: false, recordHoldings: false, transactions: [], holdings: [] }], figures: [], notes: [] }, ...(draftEditedAt ? { draftEditedAt } : {}) });
+    }
+    svc = new ImportService(store, loadConfig({ FINANCE_DATA_DIR: path.join(dir, 'data'), FINANCE_WORK_DIR: path.join(dir, 'work'), FINANCE_WATCH: '0' }), work);
+    await svc.init();
+    expect(svc.getPending(plain)!.draft!.sections[0]!.target).toEqual({ mode: 'existing', accountId: 'bonds' });
+    expect(svc.getPending(edited)!.draft!.sections[0]!.target.mode).toBe('new');
+    expect((await work.loadAll()).find((r) => r.id === plain)!.draft!.sections[0]!.target).toEqual({ mode: 'existing', accountId: 'bonds' });
+  });
+
   it('a row that only looks like one recorded meanwhile waits for you, marked; then it commits', async () => {
     const a = await make(tab([prize('2026-06-02', 25)], { accountName: 'Premium Bonds' }), '2026-09-29T20:08:00+01:00');
     const b = await make(tab([{ date: '2026-06-03', description: 'Auto prize reinvestment June', amount: 25 }], { accountName: 'Premium Bonds' }), '2026-09-29T22:06:27+01:00');

@@ -308,6 +308,9 @@ read again.
   - A row that only looks like one (same amount, similar description, a few days apart) is marked,
     and the commit waits for you.
   - Only rows that were new and included are checked, so your own choices stand.
+- **Waiting drafts follow the app.** When the app starts, each draft you haven't edited is rebuilt
+  from its reading. Nothing is read again. A newer version's matching, categories and checks then
+  apply to imports already waiting.
 - **Funds on statements become instruments.** A holding with no matching instrument is recorded as
   one, with its name and identifiers exactly as printed, and researched by an agent job
   ([AGENTS.md](AGENTS.md)).

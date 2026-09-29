@@ -106,6 +106,26 @@ export class ImportService extends EventEmitter {
       this.pending.set(r.id, r);
       if (r.status === 'queued' || r.status === 'processing') this.schedule(r.id);
     }
+    await this.redraftWaiting();
+  }
+
+  /**
+   * Drafts you have not edited are drafted again from their readings when the app starts, so what a
+   * newer version matches, categorises or checks applies to imports already waiting. Nothing is read
+   * again, and a draft you saved changes to is left alone.
+   */
+  private async redraftWaiting(): Promise<void> {
+    const waiting = [...this.pending.values()].filter((r) => r.status === 'review' && r.draft && r.extraction.raw && !r.draftEditedAt).sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+    for (const r of waiting) {
+      try {
+        const next = this.rebuild(r, r.document.image ? await this.batchEvidence(r) : undefined);
+        if (JSON.stringify(next) === JSON.stringify(r.draft)) continue;
+        r.draft = next;
+        await this.save(r);
+      } catch (err) {
+        console.warn(`[imports] ${r.id} could not be drafted again: ${(err as Error).message}`);
+      }
+    }
   }
 
   // ─── Queries ─────────────────────────────────────────────────────────────────────────────────
