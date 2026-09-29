@@ -271,6 +271,22 @@ years), both paths grow at the median:
 
 - Σ over included accounts of balance(D) in GBP (manual FX).
 - A balance's sign decides assets or liabilities: an overdraft is a debt; a card in credit is cash.
+- Before an account's first data it adds nothing, so a total on D can leave accounts out.
+
+**Known on D** (`estateKnownOn`): every included account with data has data on or before D, or
+opened after D (`openedOn`), so it held nothing then. Accounts with no data at all don't count.
+
+**Changes on the Overview** (past 30 days, since the tax year began, past year):
+
+- change = estate(today) − estate(then); pct = change ÷ |estate(then)|, none when that is 0.
+- Only when the estate is known on *then*.
+  - Otherwise there is no figure: an account whose data starts later would show its arrival as
+    growth.
+  - An approximate figure given today leaves every change empty until older data arrives.
+
+**Complete from** (`completeFromDate`, the estate chart): the latest first-data date among
+accounts that were already open before their data starts. The chart marks the total before it as
+partial.
 
 **Stale accounts:** an open account whose latest data is more than `settings.staleAfterDays` old
 (default 35), or `YEARLY_STALE_AFTER_DAYS` = 400 for accounts updated once a year (pensions with

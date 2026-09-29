@@ -12,7 +12,7 @@ import { cashflow, flows } from './cashflow';
 import { AssumptionSet } from '../../shared/assumptions';
 import { computeBaseline, standardPeriods } from './baseline';
 import { Coverage } from './coverage';
-import { accountSummary, estateOn, estateSeries, firstDataDate } from './estate';
+import { accountSummary, estateKnownOn, estateOn, estateSeries, firstDataDate } from './estate';
 import { dataHealth } from './health';
 import { investments } from './investments';
 import { monthlyChecklist } from './monthly';
@@ -102,9 +102,11 @@ export class Analytics {
       const e = estateOn(this.store, engine, now);
       const accounts = this.accountSummaries();
       const ty = taxYearOf(now);
+      // A change is only measured from a day the estate is fully known: comparing with an estate
+      // that left some accounts out would show their arrival as growth.
+      const anyData = firstDataDate(this.store, engine) !== null;
       const compare = (id: string, label: string, since: string) => {
-        const first = firstDataDate(this.store, engine);
-        if (!first || first > since) return { id, label, since, change: null, pct: null };
+        if (!anyData || !estateKnownOn(this.store, engine, since)) return { id, label, since, change: null, pct: null };
         const then = estateOn(this.store, engine, since).total;
         const change = Math.round((e.total - then) * 100) / 100;
         return { id, label, since, change, pct: then !== 0 ? change / Math.abs(then) : null };
@@ -175,7 +177,9 @@ export class Analytics {
         });
       }
       if (!this.store.profile.dateOfBirth || !this.store.profile.taxBand) {
-        alerts.push({ id: 'profile', level: 'info', title: 'Add your date of birth and tax band', detail: 'They drive LISA, cash-ISA, pension-age and savings-allowance rules.', action: { label: 'Settings', href: '/settings' } });
+        const missing = [!this.store.profile.dateOfBirth && 'date of birth', !this.store.profile.taxBand && 'tax band'].filter(Boolean);
+        const uses = [!this.store.profile.dateOfBirth && 'LISA, cash-ISA and pension-age rules', !this.store.profile.taxBand && 'your savings allowance and tax figures'].filter(Boolean);
+        alerts.push({ id: 'profile', level: 'info', title: `Add your ${missing.join(' and ')}`, detail: `${missing.length > 1 ? 'They drive' : 'It drives'} ${uses.join(', and ')}.`, action: { label: 'Settings', href: '/settings' } });
       }
       const daysLeft = daysLeftInTaxYear(now);
       if (daysLeft <= 60) {

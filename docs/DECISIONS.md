@@ -226,3 +226,7 @@ as invariants.
     a match.
   - The first statement committed into an account teaches it its `last4`.
   - Closed accounts take their old statements (they matched nothing before).
+- **The Overview's changes compare only with a fully known estate.** The first real setup showed
+  a "Past 30 days" gain of thousands of per cent: the approximate figures given that day counted as growth.
+  A change is now shown only when every account with data had data on the earlier day, or had not
+  opened yet (FORMULAS §9). The profile alert asks only for what is missing.

@@ -14,6 +14,7 @@ import { parseOfx } from '../src/server/ingest/ofx';
 import { Store } from '../src/server/store';
 import { CategoryIndex, defaultCategories } from '../src/shared/categories';
 import { Categoriser } from '../src/shared/categorise';
+import { addDays, addYears, today } from '../src/shared/dates';
 import { isMoney } from '../src/shared/money';
 import { ExtractionSchema, type Account, type Figure, type ImportRecord, type Transaction } from '../src/shared/schema';
 import { grossUpReliefAtSource, statePensionDate, statePensionFullYearly, taxYear, taxYearParams } from '../src/shared/uk';
@@ -116,6 +117,46 @@ describe('allowances', () => {
     expect(cf[0]!.unused).toBeNull();
     expect(cf[1]!.unused).toBe(60_000 - 12 * 500);
     expect(cf[2]!.unused).toBe(60_000 - 12 * 500);
+  });
+});
+
+describe('the Overview with a first snapshot', () => {
+  it('does not show accounts arriving as growth, and asks only for what is missing', async () => {
+    const { Analytics } = await import('../src/server/analytics');
+    await store.setProfile({ ...store.profile, name: 'Sam', dateOfBirth: '2005-03-21' });
+    await store.setAccounts([acct('card', 'credit_card'), acct('isa', 'stocks_isa')]);
+    await store.addBalances(
+      [
+        { id: 'bal_00000000000000c1', accountId: 'card', date: '2026-06-30', balance: -1138, currency: 'GBP', kind: 'manual', source: {}, createdAt: stamp },
+        { id: 'bal_00000000000000c2', accountId: 'isa', date: today(), balance: 110000, currency: 'GBP', kind: 'manual', approximate: true, source: {}, createdAt: stamp },
+      ],
+      't',
+    );
+    const s = new Analytics(store).summary({});
+    expect(s.estate.value).toBe(108862);
+    // Thirty days ago the ISA had no data: that is not £110,000 of growth.
+    expect(s.deltas.map((d) => d.change)).toEqual([null, null, null]);
+    expect(s.alerts.find((a) => a.id === 'profile')).toMatchObject({ title: 'Add your tax band', detail: 'It drives your savings allowance and tax figures.' });
+  });
+
+  it('an account opened since, with data from its opening, does not hold the comparison back', async () => {
+    const { Analytics } = await import('../src/server/analytics');
+    const now = today();
+    const opened = addDays(now, -10);
+    await store.setAccounts([acct('current', 'current'), acct('saver', 'savings', { openedOn: opened })]);
+    await store.addBalances(
+      [
+        { id: 'bal_00000000000000d1', accountId: 'current', date: addYears(now, -2), balance: 2000, currency: 'GBP', kind: 'statement', source: {}, createdAt: stamp },
+        { id: 'bal_00000000000000d2', accountId: 'saver', date: opened, balance: 500, currency: 'GBP', kind: 'statement', source: {}, createdAt: stamp },
+      ],
+      't',
+    );
+    const s = new Analytics(store).summary({});
+    // Thirty days ago the saver had not opened: it held nothing, so the £500 is a real change.
+    expect(s.deltas.map((d) => d.change)).toEqual([500, 500, 500]);
+    // Without an opening date, its first balance could be years of history: no comparison.
+    await store.setAccounts([acct('current', 'current'), acct('saver', 'savings')]);
+    expect(new Analytics(store).summary({}).deltas.map((d) => d.change)).toEqual([null, null, null]);
   });
 });
 

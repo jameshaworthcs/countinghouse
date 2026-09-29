@@ -80,6 +80,32 @@ export function firstDataDate(store: Store, engine: BalanceEngine): ISODate | nu
   return first;
 }
 
+/**
+ * Whether the estate on a date is fully known: every included account with data has data by then,
+ * or had not opened yet (it held nothing). Accounts with no data at all are left out.
+ */
+export function estateKnownOn(store: Store, engine: BalanceEngine, date: ISODate): boolean {
+  return includedAccounts(store).every((a) => {
+    const first = engine.firstDataDate(a.id);
+    return !first || first <= date || (a.openedOn !== undefined && date < a.openedOn);
+  });
+}
+
+/**
+ * The date from which the estate is fully known every day: before it, some account that was already
+ * open has no data yet and the total leaves it out. An account whose data starts on or before its
+ * opening day never holds it back.
+ */
+export function completeFromDate(store: Store, engine: BalanceEngine): ISODate | null {
+  let complete: ISODate | null = null;
+  for (const a of includedAccounts(store)) {
+    const first = engine.firstDataDate(a.id);
+    if (!first || (a.openedOn !== undefined && a.openedOn >= first)) continue;
+    if (!complete || first > complete) complete = first;
+  }
+  return complete;
+}
+
 export function estateSeries(store: Store, engine: BalanceEngine, from: ISODate, to: ISODate, grouping: 'wrapper' | 'access'): EstateSeriesResponse {
   const dates = sampleDates(from, to);
   const keys = grouping === 'wrapper' ? WRAPPER_GROUPS : ACCESS_GROUPS;
@@ -99,11 +125,7 @@ export function estateSeries(store: Store, engine: BalanceEngine, from: ISODate,
     for (const k of keys) groupValues.get(k)!.push((src as Map<string, number>).get(k) ?? 0);
   }
   // Before every account's first data, the total leaves out the accounts not known yet.
-  let completeFrom: ISODate | null = null;
-  for (const a of includedAccounts(store)) {
-    const first = engine.firstDataDate(a.id);
-    if (first && (!completeFrom || first > completeFrom)) completeFrom = first;
-  }
+  const completeFrom = completeFromDate(store, engine);
   return {
     grouping,
     dates,
