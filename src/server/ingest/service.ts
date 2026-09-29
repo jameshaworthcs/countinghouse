@@ -26,6 +26,7 @@ import { commitDraft } from './commit';
 import { CSV_ENGINE_VERSION, findProfile, parseWithProfile, readCsvRows, suggestMapping } from './csv';
 import { decodeText, detectKind, MAX_UPLOAD_BYTES, mediaTypeFor } from './detect';
 import { buildDraft, draftIsClean } from './draft';
+import { assessReading, chooseReading, compareReadings, shortModel } from './verify';
 import { detectEngines, pickEngine, type EngineResult } from './engines';
 import { captureDate, prepareImage } from './images';
 import { extractWithOcr, OCR_ENGINE_VERSION } from './ocr';
@@ -53,6 +54,8 @@ export interface CreateImportResult {
 export interface ProcessOptions {
   engine?: ExtractionEnginePreference | undefined;
   model?: string | undefined;
+  /** The model that checks the reading; empty to skip the check. Defaults to the setting. */
+  verifyModel?: string | undefined;
 }
 
 export class ImportService extends EventEmitter {
@@ -188,6 +191,7 @@ export class ImportService extends EventEmitter {
       let engine: EngineId;
       let detail: string | undefined;
       let engineVersion: string;
+      let verified: Awaited<ReturnType<ImportService['verifyReading']>> | undefined;
       if (kind === 'csv') {
         const { rows } = readCsvRows(decodeText(bytes));
         const match = findProfile(rows, this.store.csvProfiles);
@@ -259,36 +263,45 @@ export class ImportService extends EventEmitter {
           accountHint: hint ? `${hint.name} (${hint.type}${hint.last4 ? `, ending ${hint.last4}` : ''})` : undefined,
         };
         const timeoutMs = settings.timeoutSeconds * 1000;
-        if (chosen === 'claude-cli') {
-          if (!claudeBin) throw new Error('claude CLI not found');
-          result = await extractWithClaudeCli({
-            bin: claudeBin,
-            cwd: scratch,
-            userPrompt: userPrompt({ ...promptCtx, files: files.map((f) => `./${path.basename(f.path)}`) }),
-            systemPrompt: SYSTEM_PROMPT,
-            schema: extractionJsonSchema(),
-            model,
-            effort: settings.effort,
-            timeoutMs,
-            signal: abort.signal,
-          });
-          engineVersion = PROMPT_VERSION;
-        } else if (chosen === 'claude-api') {
-          result = await extractWithClaudeApi({
+        const readWith = async (m: string): Promise<EngineResult> => {
+          if (chosen === 'claude-cli') {
+            if (!claudeBin) throw new Error('claude CLI not found');
+            return extractWithClaudeCli({
+              bin: claudeBin,
+              cwd: scratch,
+              userPrompt: userPrompt({ ...promptCtx, files: files.map((f) => `./${path.basename(f.path)}`) }),
+              systemPrompt: SYSTEM_PROMPT,
+              schema: extractionJsonSchema(),
+              model: m,
+              effort: settings.effort,
+              timeoutMs,
+              signal: abort.signal,
+            });
+          }
+          return extractWithClaudeApi({
             apiKey: this.config.anthropicApiKey!,
             files,
             userPrompt: userPrompt(promptCtx),
             systemPrompt: SYSTEM_PROMPT,
             schema: extractionJsonSchema(),
-            model,
+            model: m,
             effort: settings.effort,
             timeoutMs,
             signal: abort.signal,
           });
-          engineVersion = PROMPT_VERSION;
-        } else {
-          result = await extractWithOcr(kind === 'pdf' ? files[0]! : files[0]!, scratch, Number(today().slice(0, 4)));
+        };
+        if (chosen === 'ocr') {
+          result = await extractWithOcr(files[0]!, scratch, Number(today().slice(0, 4)));
           engineVersion = OCR_ENGINE_VERSION;
+        } else {
+          result = await readWith(model);
+          engineVersion = PROMPT_VERSION;
+          const verifyModel = opts.verifyModel !== undefined ? opts.verifyModel : settings.verifyModel;
+          if (verifyModel && verifyModel !== model) {
+            const checked = await this.verifyReading(record, result, { model, verifyModel, readWith });
+            result = checked.result;
+            verified = checked;
+          }
         }
         detail = result.model;
         await this.work.clearScratch(record.id);
@@ -296,13 +309,7 @@ export class ImportService extends EventEmitter {
         throw new Error('Unsupported file type');
       }
 
-      const draft = buildDraft(result.extraction, {
-        store: this.store,
-        document: record.document,
-        hintAccountId: record.hintAccountId,
-        uploadedOn: record.createdAt.slice(0, 10),
-        warnings: result.warnings,
-      });
+      const draft = verified?.draft ?? this.draftOf(record, result);
       if (result.ocrText) draft.ocrText = result.ocrText;
       if (result.candidates) draft.candidates = result.candidates;
       record.draft = draft;
@@ -316,7 +323,9 @@ export class ImportService extends EventEmitter {
         raw: result.extraction,
         ...(detail ? { detail } : {}),
         ...(result.model ? { model: result.model } : {}),
-        ...(result.costUsd !== undefined ? { costUsd: Math.round(result.costUsd * 10000) / 10000 } : {}),
+        ...(result.costUsd !== undefined || verified?.otherCostUsd ? { costUsd: Math.round(((result.costUsd ?? 0) + (verified?.otherCostUsd ?? 0)) * 10000) / 10000 } : {}),
+        ...(verified ? { verification: verified.verification } : {}),
+        ...(verified?.alternative ? { alternative: verified.alternative } : {}),
       };
       record.status = 'review';
       await this.save(record);
@@ -409,6 +418,60 @@ export class ImportService extends EventEmitter {
     return committed;
   }
 
+  private draftOf(record: ImportRecord, result: EngineResult): Draft {
+    return buildDraft(result.extraction, { store: this.store, document: record.document, hintAccountId: record.hintAccountId, uploadedOn: record.createdAt.slice(0, 10), warnings: result.warnings });
+  }
+
+  private assess(record: ImportRecord, draft: Draft, warnings: string[]) {
+    return assessReading(draft, {
+      accountTypeOf: (s) => (s.target.mode === 'existing' ? this.store.account(s.target.accountId)?.type : s.target.mode === 'new' ? s.target.account.type : undefined),
+      latest: record.createdAt.slice(0, 10),
+      warnings,
+    });
+  }
+
+  /**
+   * Check a model's reading (docs/INGESTION.md, "Checking every figure"). A reading the document's
+   * own arithmetic confirms is kept. Otherwise (a check failed, or some figures have nothing to be
+   * checked against) the document is read again with the checking model, the two readings are
+   * compared figure by figure, the better one is kept, and rows they disagree on are marked.
+   */
+  private async verifyReading(record: ImportRecord, first: EngineResult, opts: { model: string; verifyModel: string; readWith: (m: string) => Promise<EngineResult> }) {
+    const firstDraft = this.draftOf(record, first);
+    const a1 = this.assess(record, firstDraft, first.warnings);
+    const firstModel = first.model ?? opts.model;
+    if (!a1.problems.length && !a1.unconfirmed.length) {
+      return { result: first, draft: firstDraft, otherCostUsd: 0, alternative: undefined, verification: { method: 'checks' as const, firstModel, reasons: [], disagreements: [], kept: 'first' as const } };
+    }
+    const reasons = [...a1.problems, ...a1.unconfirmed.map((u) => `Nothing on the document confirms: ${u}`)];
+    let second: EngineResult;
+    try {
+      second = await opts.readWith(opts.verifyModel);
+    } catch (err) {
+      // Without a second reading the first stands; the review page says it is unchecked.
+      return { result: first, draft: firstDraft, otherCostUsd: 0, alternative: undefined, verification: { method: 'second-reading' as const, firstModel, secondModel: opts.verifyModel, reasons, disagreements: [], kept: 'first' as const, error: (err as Error).message.slice(0, 300) } };
+    }
+    const secondDraft = this.draftOf(record, second);
+    const a2 = this.assess(record, secondDraft, second.warnings);
+    const kept = chooseReading(a1, a2);
+    const names = { first: shortModel(firstModel), second: shortModel(second.model ?? opts.verifyModel) };
+    const [keptResult, keptDraft, other, otherDraft] = kept === 'second' ? [second, secondDraft, first, firstDraft] : [first, firstDraft, second, secondDraft];
+    const cmp = kept === 'second' ? compareReadings(otherDraft, keptDraft, { first: names.first, second: names.second }) : compareReadings(otherDraft, keptDraft, { first: names.second, second: names.first });
+    for (const s of keptDraft.sections) {
+      for (const t of s.transactions) {
+        const n = cmp.rowNotes.get(t.key);
+        if (n) t.uncertain = t.uncertain ? `${t.uncertain}; ${n}` : n;
+      }
+    }
+    return {
+      result: keptResult,
+      draft: keptDraft,
+      otherCostUsd: other.costUsd ?? 0,
+      alternative: other.extraction,
+      verification: { method: 'second-reading' as const, firstModel, secondModel: second.model ?? opts.verifyModel, reasons, disagreements: cmp.disagreements, kept },
+    };
+  }
+
   /** Why an import is (not) safe to commit without review. */
   readiness(record: ImportRecord): { ready: boolean; reasons: string[] } {
     if (record.status !== 'review' || !record.draft) return { ready: false, reasons: [record.status] };
@@ -420,6 +483,8 @@ export class ImportService extends EventEmitter {
       for (const c of sectionChecks(s, { accountType, latest: record.createdAt.slice(0, 10), periodFromRows: record.draft.documentType === 'csv_export' })) if (c.status === 'warn') reasons.push(c.title.toLowerCase());
     }
     if (record.extraction.warnings.length) reasons.push('warnings from reading the document');
+    if (record.extraction.verification?.disagreements.length) reasons.push('the two readings disagreed');
+    if (record.extraction.verification?.error) reasons.push('the figures could not be checked');
     if (record.extraction.engine === 'ocr') reasons.push('read with offline OCR');
     return { ready: clean && reasons.length === 0, reasons: [...new Set(reasons)] };
   }

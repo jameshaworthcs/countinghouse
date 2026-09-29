@@ -322,7 +322,11 @@ Deterministic rules with named thresholds (`SIGNAL_RULES` in `analytics/spending
 
 - Per account: personal contributions, grossed up for relief at source by 1/(1−r) when no relief
   rows are recorded; plus employer contributions and recorded relief.
-- Pension-statement figures win when larger.
+- Pension-statement figures win when larger. Documents state what you paid and the basic-rate
+  relief the provider added separately (`pension_contribution_employee`, `pension_tax_relief`);
+  their sum is your gross contribution. Salary sacrifice is an employer contribution.
+- **Not yet known** (`incomplete`) when a pension account's data does not cover the tax year so
+  far (±45 days) and no statement figures exist for it: the amount used is then a minimum.
 - Taper per the UK tables when income is given.
 - **Carry-forward** from each of the previous 3 years is **unknown** (not assumed) unless every
   pension account that existed then has statements covering that whole year (±45 days), or

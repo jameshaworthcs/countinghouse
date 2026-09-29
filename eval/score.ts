@@ -1,8 +1,9 @@
 // Field-level scoring of a draft against a case's expected result. Every expected field is one
 // point; a missing row loses its row point, an extra row costs a precision point.
 
-import type { Draft, DraftSection, DraftTransaction } from '../src/shared/schema';
-import type { Expected, ExpectedSection, ExpectedTx } from './cases';
+import { alignRows, sameMoney, sameText } from '../src/server/ingest/verify';
+import type { Draft, DraftSection } from '../src/shared/schema';
+import type { Expected, ExpectedSection } from './cases';
 
 export interface Tally {
   correct: number;
@@ -15,28 +16,8 @@ export interface CaseScore {
   score: number;
 }
 
-const norm = (s: string) =>
-  s
-    .toLowerCase()
-    .normalize('NFKD')
-    .replace(/[̀-ͯ]/g, '')
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim();
-/** The text as printed, allowing a bank code or location added or dropped. */
-export function sameText(expected: string, actual: string | undefined): boolean {
-  if (!actual) return false;
-  const a = norm(expected);
-  const b = norm(actual);
-  if (!a || !b) return false;
-  if (a === b || a.includes(b) || b.includes(a)) return true;
-  const ta = new Set(a.split(' '));
-  const tb = new Set(b.split(' '));
-  const common = [...ta].filter((t) => tb.has(t)).length;
-  return common / Math.max(ta.size, tb.size) >= 0.6;
-}
-const cents = (v: number | undefined | null) => (v === undefined || v === null ? null : Math.round(v * 100));
-const sameMoney = (a: number | undefined | null, b: number | undefined | null) => cents(a) !== null && cents(a) === cents(b);
-const dayGap = (a: string, b: string) => Math.abs(Date.parse(`${a}T00:00:00Z`) - Date.parse(`${b}T00:00:00Z`)) / 86_400_000;
+// Rows are aligned and text compared exactly as the live check does (src/server/ingest/verify.ts).
+export { sameText };
 
 class Scorer {
   fields: Record<string, Tally> = {};
@@ -54,30 +35,6 @@ function targetMatches(e: ExpectedSection, s: DraftSection): boolean {
   if (typeof e.account === 'string') return s.target.mode === 'existing' && s.target.accountId === e.account;
   if (s.target.mode !== 'new') return false;
   return s.target.account.type === e.account.new && (!e.account.last4 || s.target.account.last4 === e.account.last4);
-}
-
-/** One-to-one alignment of expected and extracted rows: exact first, then near misses. */
-function alignRows(expected: ExpectedTx[], actual: DraftTransaction[]): Map<number, number> {
-  const pairs = new Map<number, number>();
-  const used = new Set<number>();
-  const passes: ((e: ExpectedTx, a: DraftTransaction) => boolean)[] = [
-    (e, a) => e.date === a.date && sameMoney(e.amount, a.amount) && sameText(e.description, a.description),
-    (e, a) => e.date === a.date && sameMoney(e.amount, a.amount),
-    (e, a) => sameMoney(e.amount, a.amount) && dayGap(e.date, a.date) <= 3 && sameText(e.description, a.description),
-    (e, a) => e.date === a.date && sameMoney(Math.abs(e.amount), Math.abs(a.amount)) && sameText(e.description, a.description),
-    (e, a) => e.date === a.date && sameText(e.description, a.description),
-  ];
-  for (const pass of passes) {
-    expected.forEach((e, i) => {
-      if (pairs.has(i)) return;
-      const j = actual.findIndex((a, k) => !used.has(k) && pass(e, a));
-      if (j >= 0) {
-        pairs.set(i, j);
-        used.add(j);
-      }
-    });
-  }
-  return pairs;
 }
 
 function scoreSection(sc: Scorer, e: ExpectedSection, s: DraftSection | undefined, label: string) {
@@ -158,11 +115,22 @@ export function scoreCase(expected: Expected, draft: Draft | undefined): CaseSco
   sections.forEach((s, k) => {
     if (!used.has(k) && s.target.mode !== 'skip') sc.check('noExtraSection', false, `extra section: ${s.detected.accountName ?? s.detected.institutionName ?? s.key}`);
   });
+  const usedFigures = new Set<number>();
+  const figures = draft?.figures ?? [];
   for (const f of expected.figures ?? []) {
-    const found = (draft?.figures ?? []).find((x) => x.kind === f.kind && sameMoney(x.amount, f.amount)) ?? (draft?.figures ?? []).find((x) => x.kind === f.kind);
+    let i = figures.findIndex((x, n) => !usedFigures.has(n) && x.kind === f.kind && sameMoney(x.amount, f.amount));
+    if (i < 0) i = figures.findIndex((x, n) => !usedFigures.has(n) && x.kind === f.kind);
+    const found = i >= 0 ? figures[i] : undefined;
+    if (i >= 0) usedFigures.add(i);
     sc.check('figure', Boolean(found && sameMoney(found.amount, f.amount)), `figure ${f.kind} ${f.amount}: ${found ? `got ${found.amount}` : 'missing'}`);
     if (found && f.taxYear) sc.check('figureYear', found.taxYear === f.taxYear, `figure ${f.kind}: tax year ${found.taxYear ?? 'none'}`);
   }
+  // A figure the document does not state would be counted on the tax page (a net interest figure
+  // next to the gross one counts the interest twice).
+  // A printed zero ("Tax deducted £0.00") changes no total, so it costs nothing.
+  figures.forEach((x, n) => {
+    if (!usedFigures.has(n) && x.amount !== 0) sc.check('noExtraFigure', false, `extra figure: ${x.kind} ${x.amount} (${x.label})`);
+  });
   const all = Object.values(sc.fields);
   const correct = all.reduce((s, t) => s + t.correct, 0);
   const total = all.reduce((s, t) => s + t.total, 0);

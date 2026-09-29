@@ -50,3 +50,6 @@ system as built, and [DECISIONS.md](DECISIONS.md) records why it is the way it i
 
 - **Documents in git.** Original statements and screenshots are committed with the data (roughly
   0.1–1 MB each). If the repository grows heavy: Git LFS, or turning that off in Settings.
+- **Reading twice.** A second model reads a document again whenever its own arithmetic cannot
+  confirm the first reading ([INGESTION.md](INGESTION.md), "Checking every figure"). Worth revisiting
+  if the second reading rarely changes anything.

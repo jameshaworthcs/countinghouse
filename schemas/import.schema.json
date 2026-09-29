@@ -1223,6 +1223,852 @@
               ]
             }
           }
+        },
+        "verification": {
+          "type": "object",
+          "properties": {
+            "method": {
+              "type": "string",
+              "enum": [
+                "checks",
+                "second-reading"
+              ]
+            },
+            "firstModel": {
+              "type": "string"
+            },
+            "secondModel": {
+              "type": "string"
+            },
+            "reasons": {
+              "default": [],
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "disagreements": {
+              "default": [],
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "kept": {
+              "type": "string",
+              "enum": [
+                "first",
+                "second"
+              ]
+            },
+            "error": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "method",
+            "firstModel",
+            "kept"
+          ]
+        },
+        "alternative": {
+          "type": "object",
+          "properties": {
+            "documentType": {
+              "default": "other",
+              "type": "string",
+              "enum": [
+                "bank_statement",
+                "credit_card_statement",
+                "savings_statement",
+                "investment_statement",
+                "pension_statement",
+                "account_overview_screenshot",
+                "transactions_screenshot",
+                "holdings_screenshot",
+                "annual_summary",
+                "interest_certificate",
+                "payslip",
+                "p60",
+                "p11d",
+                "tax_document",
+                "csv_export",
+                "other"
+              ]
+            },
+            "institutionName": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "documentDate": {
+              "default": null,
+              "anyOf": [
+                {
+                  "type": "string",
+                  "description": "Calendar date, YYYY-MM-DD"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "accounts": {
+              "default": [],
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "institutionName": {
+                    "default": null,
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "accountName": {
+                    "default": null,
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "accountType": {
+                    "default": null,
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "current",
+                          "savings",
+                          "cash_isa",
+                          "stocks_isa",
+                          "lisa",
+                          "ifisa",
+                          "gia",
+                          "sipp",
+                          "workplace_pension",
+                          "personal_pension",
+                          "db_pension",
+                          "state_pension",
+                          "premium_bonds",
+                          "crypto",
+                          "property",
+                          "other_asset",
+                          "credit_card",
+                          "loan",
+                          "mortgage",
+                          "student_loan",
+                          "other_liability"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "last4": {
+                    "default": null,
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "currency": {
+                    "default": null,
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[A-Z]{3}$",
+                        "description": "ISO 4217 currency code"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "periodStart": {
+                    "default": null,
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "description": "Calendar date, YYYY-MM-DD"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "periodEnd": {
+                    "default": null,
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "description": "Calendar date, YYYY-MM-DD"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "openingBalance": {
+                    "default": null,
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "closingBalance": {
+                    "default": null,
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "balanceDate": {
+                    "default": null,
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "description": "Calendar date, YYYY-MM-DD"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "availableBalance": {
+                    "default": null,
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "creditLimit": {
+                    "default": null,
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "contributionsToDate": {
+                    "default": null,
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "gainLoss": {
+                    "default": null,
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "governmentBonusToDate": {
+                    "default": null,
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "taxYearContributions": {
+                    "default": null,
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "cashBalance": {
+                    "default": null,
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "annualIncome": {
+                    "default": null,
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "interestRate": {
+                    "default": null,
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "statedMoneyIn": {
+                    "default": null,
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "statedMoneyOut": {
+                    "default": null,
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "transactions": {
+                    "default": [],
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "date": {
+                          "type": "string",
+                          "description": "Calendar date, YYYY-MM-DD"
+                        },
+                        "description": {
+                          "type": "string"
+                        },
+                        "amount": {
+                          "type": "number",
+                          "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                        },
+                        "balanceAfter": {
+                          "default": null,
+                          "anyOf": [
+                            {
+                              "type": "number",
+                              "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "category": {
+                          "default": null,
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "payee": {
+                          "default": null,
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "pending": {
+                          "default": false,
+                          "type": "boolean"
+                        },
+                        "currency": {
+                          "default": null,
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^[A-Z]{3}$",
+                              "description": "ISO 4217 currency code"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "originalAmount": {
+                          "default": null,
+                          "anyOf": [
+                            {
+                              "type": "number",
+                              "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "originalCurrency": {
+                          "default": null,
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^[A-Z]{3}$",
+                              "description": "ISO 4217 currency code"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "transactionDate": {
+                          "default": null,
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "description": "Calendar date, YYYY-MM-DD"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "time": {
+                          "default": null,
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "sourceId": {
+                          "default": null,
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "type": {
+                          "default": null,
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "reference": {
+                          "default": null,
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "counterpartyName": {
+                          "default": null,
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "merchantLocation": {
+                          "default": null,
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "cardLast4": {
+                          "default": null,
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "bankCategory": {
+                          "default": null,
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "fee": {
+                          "default": null,
+                          "anyOf": [
+                            {
+                              "type": "number",
+                              "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "exchangeRate": {
+                          "default": null,
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "raw": {
+                          "default": null,
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "propertyNames": {
+                                "type": "string"
+                              },
+                              "additionalProperties": {
+                                "type": "string"
+                              }
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "attributes": {
+                          "default": null,
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "propertyNames": {
+                                "type": "string"
+                              },
+                              "additionalProperties": {
+                                "type": [
+                                  "string",
+                                  "number",
+                                  "boolean",
+                                  "null"
+                                ]
+                              },
+                              "description": "Extra detail from the source with no dedicated field yet (namespaced keys welcome)"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "merchant": {
+                          "default": null,
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "name": {
+                                  "type": "string"
+                                },
+                                "category": {
+                                  "type": "string"
+                                },
+                                "mcc": {
+                                  "type": "string"
+                                },
+                                "address": {
+                                  "type": "string"
+                                },
+                                "city": {
+                                  "type": "string"
+                                },
+                                "postcode": {
+                                  "type": "string"
+                                },
+                                "country": {
+                                  "type": "string"
+                                },
+                                "website": {
+                                  "type": "string"
+                                },
+                                "online": {
+                                  "type": "boolean"
+                                }
+                              }
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "row": {
+                          "default": null,
+                          "anyOf": [
+                            {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "uncertain": {
+                          "default": null,
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "date",
+                        "description",
+                        "amount"
+                      ]
+                    }
+                  },
+                  "holdings": {
+                    "default": [],
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "isin": {
+                          "default": null,
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "ticker": {
+                          "default": null,
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "units": {
+                          "default": null,
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "price": {
+                          "default": null,
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "value": {
+                          "type": "number",
+                          "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                        },
+                        "currency": {
+                          "default": null,
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^[A-Z]{3}$",
+                              "description": "ISO 4217 currency code"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "assetClass": {
+                          "default": null,
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "equity",
+                                "bond",
+                                "mixed",
+                                "property",
+                                "cash",
+                                "commodity",
+                                "crypto",
+                                "other"
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "name",
+                        "value"
+                      ]
+                    }
+                  }
+                }
+              }
+            },
+            "figures": {
+              "default": [],
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "interest_paid",
+                      "interest_tax_deducted",
+                      "dividends_paid",
+                      "gross_pay",
+                      "tax_deducted",
+                      "national_insurance",
+                      "pension_contribution_employee",
+                      "pension_contribution_employer",
+                      "pension_tax_relief",
+                      "student_loan_deducted",
+                      "benefit_in_kind",
+                      "gift_aid_donation",
+                      "child_benefit",
+                      "self_employment_income",
+                      "self_employment_expenses",
+                      "capital_gain",
+                      "capital_loss",
+                      "rental_income",
+                      "other_income",
+                      "other"
+                    ]
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "amount": {
+                    "type": "number",
+                    "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                  },
+                  "currency": {
+                    "default": null,
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[A-Z]{3}$",
+                        "description": "ISO 4217 currency code"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "periodStart": {
+                    "default": null,
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "description": "Calendar date, YYYY-MM-DD"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "periodEnd": {
+                    "default": null,
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "description": "Calendar date, YYYY-MM-DD"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "taxYear": {
+                    "default": null,
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "payer": {
+                    "default": null,
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "payerReference": {
+                    "default": null,
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "accountLast4": {
+                    "default": null,
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "kind",
+                  "label",
+                  "amount"
+                ]
+              }
+            },
+            "notes": {
+              "default": [],
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "confidence": {
+              "default": "medium",
+              "type": "string",
+              "enum": [
+                "high",
+                "medium",
+                "low"
+              ]
+            }
+          }
         }
       }
     },

@@ -89,7 +89,7 @@ export function importRoutes(ctx: AppContext): Hono {
   });
 
   app.post('/:id/reprocess', async (c) => {
-    const body = await readJson(c, z.object({ engine: z.enum(EXTRACTION_ENGINES).optional(), model: z.string().max(80).optional() }));
+    const body = await readJson(c, z.object({ engine: z.enum(EXTRACTION_ENGINES).optional(), model: z.string().max(80).optional(), verifyModel: z.string().max(80).optional() }));
     return c.json(await svc.reprocess(c.req.param('id'), body));
   });
 

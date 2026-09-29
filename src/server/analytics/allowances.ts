@@ -155,13 +155,15 @@ export function pensionTotals(store: Store, ty: TaxYear) {
       });
     }
   }
-  // Figures from pension statements / payslips take precedence when present.
+  // Figures from pension statements / payslips take precedence when present. Documents state what
+  // you paid and the basic-rate relief the provider added separately; together they are the gross.
   const figs = store.figures.filter((f) => f.taxYear === ty.label);
   const figEmployee = figs.filter((f) => f.kind === 'pension_contribution_employee').reduce((s, f) => s + toMinor(f.amount), 0);
+  const figRelief = figs.filter((f) => f.kind === 'pension_tax_relief').reduce((s, f) => s + toMinor(f.amount), 0);
   const figEmployer = figs.filter((f) => f.kind === 'pension_contribution_employer').reduce((s, f) => s + toMinor(f.amount), 0);
-  if (figEmployee && figEmployee > personalGross) {
-    personalGross = figEmployee;
-    lines.push({ label: 'Employee contributions (from documents)', amount: fromMinor(figEmployee), source: 'figure' });
+  if (figEmployee && figEmployee + figRelief > personalGross) {
+    personalGross = figEmployee + figRelief;
+    lines.push({ label: `Your contributions (from documents${figRelief ? ', with the tax relief added' : ''})`, amount: fromMinor(figEmployee + figRelief), source: 'figure' });
   }
   if (figEmployer && figEmployer > employer) {
     employer = figEmployer;

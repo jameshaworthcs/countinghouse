@@ -462,7 +462,14 @@ export function buildCases(): EvalCase[] {
           { heading: 'This tax year (2026/27)', rows: [['Your contributions', '£4,000.00'], ['Basic-rate tax relief claimed', '£1,000.00'], ['Gross contributions this tax year', '£5,000.00']] },
         ]),
       },
-      expected: { sections: [{ account: 'ajbell-sipp', balance: total, balanceDate: '2026-09-26', cash, taxYearContributions: 5000, holdings: holdings.map((h) => ({ name: h.name, isin: h.isin, units: h.units, value: h.value })) }] },
+      expected: {
+        sections: [{ account: 'ajbell-sipp', balance: total, balanceDate: '2026-09-26', cash, taxYearContributions: 5000, holdings: holdings.map((h) => ({ name: h.name, isin: h.isin, units: h.units, value: h.value })) }],
+        // The contributions stated for the tax year are figures too: what you paid, and the relief.
+        figures: [
+          { kind: 'pension_contribution_employee', amount: 4000, taxYear: '2026/27' },
+          { kind: 'pension_tax_relief', amount: 1000, taxYear: '2026/27' },
+        ],
+      },
     });
   }
   {
@@ -613,7 +620,7 @@ export function buildCases(): EvalCase[] {
       id: 'png-revolut-fx',
       title: 'Revolut-style screenshot: payments in euros shown with their sterling amounts',
       tags: ['png', 'fx'],
-      file: { name: 'Screenshot_20260927-201544.png', kind: 'png', html: appListHtml({ accent: '#191c1f', title: 'Revolut · Main · GBP', balance: gbp(balance), balanceLabel: 'Personal', groups: feed(rows, signed, (t) => (t.original ? `€${Math.abs(t.original.amount).toFixed(2)}` : 'Top-up'), '2026-09-27') }) },
+      file: { name: 'Screenshot_20260927-201544.png', kind: 'png', html: appListHtml({ accent: '#191c1f', title: 'Revolut · Main · GBP', balance: gbp(balance), balanceLabel: 'Personal', groups: feed(rows, signed, (t) => (t.original ? `€${Math.abs(t.original.amount).toFixed(2)}` : t.amount > 0 ? 'Top-up' : undefined), '2026-09-27') }) },
       expected: { sections: [{ account: 'revolut-current', balance, transactions: exp(rows, { description: (t) => t.name }) }] },
     });
   }
@@ -697,7 +704,15 @@ export function buildCases(): EvalCase[] {
       kind: 'png',
       html: appOverviewHtml({ accent: '#e5007e', title: 'Nest-style pension', value: '£42,065.55', valueLabel: 'Your pot', stats: [['Contributions this tax year', '£3,000.00'], ['From you', '£1,200.00'], ['From your employer', '£1,500.00'], ['Tax relief', '£300.00'], ['Retirement date', '14 May 2061']] }),
     },
-    expected: { sections: [{ account: 'nest-pension', balance: 42065.55, balanceDate: '2026-09-20', taxYearContributions: 3000 }] },
+    expected: {
+      sections: [{ account: 'nest-pension', balance: 42065.55, balanceDate: '2026-09-20', taxYearContributions: 3000 }],
+      // Contributions stated for the tax year, as printed: yours, your employer's, and the relief.
+      figures: [
+        { kind: 'pension_contribution_employee', amount: 1200, taxYear: '2026/27' },
+        { kind: 'pension_contribution_employer', amount: 1500, taxYear: '2026/27' },
+        { kind: 'pension_tax_relief', amount: 300, taxYear: '2026/27' },
+      ],
+    },
   });
   cases.push({
     id: 'png-premium-bonds',

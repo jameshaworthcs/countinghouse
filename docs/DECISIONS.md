@@ -204,3 +204,19 @@ as invariants.
   backup script writes the finance repository as its own `age`-encrypted file into a replicated
   backup tree, verified by cloning it and kept for 14 days. No third party holds a copy, even
   encrypted, and the repository keeps no remote. A restore drill passed on 29 September 2026.
+- **Sonnet reads, Opus checks, Opus analyses (the owner's choice).**
+  - Settings: `extraction.model` is Sonnet, `extraction.verifyModel` Opus, `agents.model` Opus.
+  - A reading is kept only when the document's own arithmetic confirms it. Otherwise Opus reads the
+    document again, and the two readings are compared figure by figure. Disagreements are marked
+    for review, and the stronger reading is kept.
+  - On the evaluation set, all three configurations score 100%. Checking costs about the same as
+    Opus alone there, because most of the set is screenshots; statements are mostly confirmed at
+    Sonnet's cost. In an earlier run the check caught a real Sonnet error: a net-interest figure
+    beside the gross one, which would have counted interest twice.
+- **Tax figures are copied as printed; the app does the sums (`extract-5`).** A pension document's
+  "you paid" and "tax relief" are separate figures, and the app adds them for the allowance.
+  Asking the model to add them contradicted "never compute a value" and made it inconsistent.
+  - Interest certificates give one gross figure.
+  - A statement's interest is a transaction, not a figure.
+  - The eval now costs a point for a figure the document does not state (a printed zero excepted),
+    and the Nest and SIPP cases expect the figures they print.

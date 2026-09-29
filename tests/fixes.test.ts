@@ -6,7 +6,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { allowances } from '../src/server/analytics/allowances';
 import { enrich } from '../src/server/enrich';
-import { transactionId } from '../src/server/ids';
+import { figureId, transactionId } from '../src/server/ids';
 import { commitDraft } from '../src/server/ingest/commit';
 import { buildDraft } from '../src/server/ingest/draft';
 import { normaliseExtraction } from '../src/server/ingest/normalise';
@@ -15,7 +15,7 @@ import { Store } from '../src/server/store';
 import { CategoryIndex, defaultCategories } from '../src/shared/categories';
 import { Categoriser } from '../src/shared/categorise';
 import { isMoney } from '../src/shared/money';
-import { ExtractionSchema, type Account, type ImportRecord, type Transaction } from '../src/shared/schema';
+import { ExtractionSchema, type Account, type Figure, type ImportRecord, type Transaction } from '../src/shared/schema';
 import { grossUpReliefAtSource, statePensionDate, statePensionFullYearly, taxYear, taxYearParams } from '../src/shared/uk';
 
 const stamp = '2026-01-01T00:00:00+00:00';
@@ -66,6 +66,14 @@ describe('allowances', () => {
     expect(cf).toHaveLength(3);
     for (const c of cf) expect(c.unused).toBeNull();
     expect(cf[0]!.basis).toMatch(/not fully known|No pension data/);
+  });
+
+  it('pension figures from documents: what you paid plus the relief shown is the gross', async () => {
+    await store.setAccounts([acct('sipp', 'sipp')]);
+    const fig = (kind: Figure['kind'], amount: number): Figure => ({ id: figureId(kind, amount, '2026/27', 'AJ Bell', kind), kind, label: kind, amount, currency: 'GBP', taxYear: '2026/27', payer: 'AJ Bell', source: {}, createdAt: stamp });
+    await store.addFigures([fig('pension_contribution_employee', 4000), fig('pension_tax_relief', 1000), fig('pension_contribution_employer', 1500)], 'f');
+    const p = allowances(store, '2026/27', '2026-09-29').pension;
+    expect(p).toMatchObject({ personalGross: 5000, employer: 1500, total: 6500 });
   });
 
   it('says an allowance is a minimum when the data starts after the tax year began', async () => {

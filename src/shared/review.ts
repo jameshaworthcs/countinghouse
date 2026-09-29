@@ -67,6 +67,24 @@ export function sectionChecks(section: DraftSection, ctx: CheckContext): ReviewC
     }
   }
 
+  // Holdings, with any uninvested cash, add up to the value shown. Rounding in what is displayed
+  // is allowed for: £1 or 0.1% of the value, whichever is more.
+  if (section.holdings.length && section.balance !== undefined && section.holdings.every((h) => !h.currency || h.currency === section.currency)) {
+    const held = section.holdings.reduce((s, h) => s + toMinor(h.value), 0) + toMinor(section.cash ?? 0);
+    const value = toMinor(section.balance);
+    const tolerance = Math.max(100, Math.round(Math.abs(value) * 0.001));
+    out.push(
+      Math.abs(value - held) <= tolerance
+        ? { id: 'holdings', status: 'ok', title: 'The holdings add up to the value' }
+        : {
+            id: 'holdings',
+            status: 'warn',
+            title: 'The holdings don’t add up to the value',
+            detail: `The holdings${section.cash !== undefined ? ' and cash' : ''} come to ${formatMoney(fromMinor(held))}; the value shown is ${formatMoney(section.balance)}. A holding may be missing or misread, or the screen may list only some of them.`,
+          },
+    );
+  }
+
   // Rows dated outside the period the statement says it covers: usually a misread year.
   if (section.periodStart && section.periodEnd && rows.length && !ctx.periodFromRows) {
     const outside = rows.filter((t) => t.date < section.periodStart! || t.date > section.periodEnd!);

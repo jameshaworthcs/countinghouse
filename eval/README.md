@@ -10,7 +10,11 @@ npm run eval -- --only pdf-amex-card          # some cases (comma-separated)
 npm run eval -- --tag card-signs              # cases with a tag
 npm run eval -- --render                      # write the documents to eval/.out/docs and stop
 npm run eval -- --model sonnet --effort medium --concurrency 3 --label try-sonnet
+npm run eval -- --verify-model off            # the reading model alone, without the check
 ```
+
+By default a run uses the app's own settings: Sonnet reads, and Opus checks anything the
+document's arithmetic cannot confirm (docs/INGESTION.md). Each case records how it was checked.
 
 ## What it runs
 
@@ -47,6 +51,7 @@ Every expected field is one point (`score.ts`):
 | `totals` | the money in and money out totals a statement prints |
 | `holding`, `holdingValue`, `holdingUnits`, `holdingIsin` | each holding |
 | `figure`, `figureYear` | each tax figure |
+| `noExtraFigure`, `noExtraSection` | each figure or account the document does not state (a point lost) |
 
 Rows are aligned before scoring: an exact date and amount first, then near misses. So a sign or
 date error counts as that error, not as a missing row plus an extra one.

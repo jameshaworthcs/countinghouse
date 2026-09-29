@@ -78,6 +78,7 @@ async function main() {
     ['import', '/import'],
     ...(pendingId ? ([['review', `/import/${pendingId}`]] as [string, string][]) : []),
     ['settings', '/settings'],
+    ['settings-extraction', '/settings#extraction'],
     ['settings-rules', '/settings#rules'],
     ['settings-health', '/settings#health'],
   ];

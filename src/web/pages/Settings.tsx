@@ -98,12 +98,20 @@ function ExtractionForm() {
               <option value="ocr">Offline OCR only</option>
             </Select>
           </Field>
-          <Field label="Model" hint="Opus is the most accurate; Sonnet is quicker">
+          <Field label="Reads every document" hint="Sonnet is quick and cheap; its reading is then checked">
             <Select value={ex.model} onChange={(e) => setEx({ model: e.target.value })}>
-              <option value="opus">Opus</option>
               <option value="sonnet">Sonnet</option>
+              <option value="opus">Opus</option>
               <option value="fable">Fable</option>
               <option value="haiku">Haiku</option>
+            </Select>
+          </Field>
+          <Field label="Checked by" hint="Reads a document again when the checks fail, or when nothing on it can confirm the figures">
+            <Select value={ex.verifyModel} onChange={(e) => setEx({ verifyModel: e.target.value })}>
+              <option value="opus">Opus</option>
+              <option value="fable">Fable</option>
+              <option value="sonnet">Sonnet</option>
+              <option value="">No second reading</option>
             </Select>
           </Field>
           <Field label="Effort">

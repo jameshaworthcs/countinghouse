@@ -141,8 +141,13 @@ Standalone figures from documents, used for Self Assessment:
 ## imports/&lt;yyyy&gt;/&lt;id&gt;.json
 
 - `document`: `{id, sha256, fileName, mediaType, size, path, capturedOn, capturedOnSource}`.
-- `extraction`: `{engine, engineVersion, detail, model, durationMs, costUsd, warnings, raw}`.
-  `raw` is the engine's complete output, kept for audit and re-derivation.
+- `extraction`: `{engine, engineVersion, detail, model, durationMs, costUsd, warnings, raw,
+  verification?, alternative?}`.
+  - `raw` is the engine's complete output, kept for audit and re-derivation.
+  - `verification` records how the reading was checked (docs/INGESTION.md, "Checking every
+    figure"): `{method: checks|second-reading, firstModel, secondModel?, reasons, disagreements,
+    kept: first|second, error?}`.
+  - `alternative` is the reading that was not kept.
 - `draft`: exactly what you reviewed and committed. Since `extract-4` a draft section can carry
   `statedTotals` (`{moneyIn, moneyOut}` printed on the statement) and a row `uncertain` (what the
   reader was unsure of). Both are optional and only used while reviewing.

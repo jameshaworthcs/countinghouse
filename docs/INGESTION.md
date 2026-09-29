@@ -66,8 +66,53 @@ ISA, LISA, SIPP or pension app go to the extraction engine chosen in Settings:
 | `claude-api` | When `ANTHROPIC_API_KEY` is set (or chosen) | Messages API with structured outputs (`output_config.format`), streaming, and `fallbacks: "default"` so a refusal is retried on the recommended fallback model |
 | `ocr` | Always available offline | tesseract / pdftotext; proposes the headline balance and candidate values, and parses statement-style lines using running balances to infer signs. Low confidence, so review carefully |
 
-The model defaults to Opus (most accurate for financial figures), with effort `high`. You can
-re-read any draft with a different engine or model from the review screen.
+Sonnet reads every document, with effort `high`, and its reading is checked (below): Opus reads the
+document again whenever a figure cannot be confirmed from the document itself. Both are set in
+Settings → Import & extraction. You can re-read any draft with a different engine or model from the
+review screen.
+
+### Checking every figure
+
+`src/server/ingest/verify.ts`, after each Claude reading:
+
+1. **The document's own arithmetic** confirms what it can, through the review checks
+   ([FORMULAS.md §13](FORMULAS.md)):
+   - rows and balances, when opening + rows = closing, running balances follow, or printed
+     totals match;
+   - holdings, when they (with cash) add up to the value.
+2. **A reading every check confirms is kept.** Typically a bank or card statement with balances.
+3. **Otherwise Opus reads the document again.** That is when a check failed (balances that don't
+   add up, wrong card signs, dates outside the period, rows the reader was unsure of, dropped
+   rows), or when some figures have nothing to be checked against:
+   - a feed screenshot with no balances;
+   - a balance on its own;
+   - contribution and allowance figures;
+   - tax figures.
+4. **The two readings are compared figure by figure:**
+   - each account's balances and dates;
+   - every row's date, amount, pending flag and running balance;
+   - each holding's value and units;
+   - each tax figure.
+
+   Wording may differ; figures may not.
+5. **The stronger reading (Opus's) is kept** unless the arithmetic finds more wrong with it. Rows
+   the readings disagree on are marked on the review page, the disagreements are listed, and the
+   import is held back from "Commit all ready".
+
+The import record keeps how it was checked (`extraction.verification`) and the reading that was
+not kept (`extraction.alternative`).
+
+Measured on the evaluation set (`extract-5`, 28 documents):
+
+| Configuration | Field accuracy | Cost | Time |
+|---|---|---|---|
+| Sonnet, checked by Opus (the default) | 100% | $2.05 | 3.3 min |
+| Sonnet alone | 100% | $1.04 | 2.0 min |
+| Opus alone | 100% | $1.86 | 2.6 min |
+
+With checking, 8 of the 24 documents Claude read were confirmed by their own figures and 16 were
+read twice. The set is heavy on screenshots and pension documents, which have nothing to check
+against. Months of bank and card statements are mostly confirmed, at Sonnet's cost.
 
 What the prompt asks for (`src/server/ingest/prompt.ts`, versioned as `PROMPT_VERSION` and recorded
 on every import):

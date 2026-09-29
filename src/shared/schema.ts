@@ -525,14 +525,19 @@ export const SettingsSchema = z.object({
   extraction: z
     .object({
       engine: z.enum(EXTRACTION_ENGINES).default('auto'),
-      /** "opus", "sonnet" or a full model id. */
-      model: z.string().default('opus'),
+      /** The model that reads every document: "sonnet", "opus" or a full model id. */
+      model: z.string().default('sonnet'),
+      /**
+       * The model that checks it: it reads the document again whenever the checks fail or the
+       * document has nothing to check its figures against. Empty turns checking off.
+       */
+      verifyModel: z.string().default('opus'),
       effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).default('high'),
       maxConcurrent: z.number().int().min(1).max(4).default(2),
       /** Seconds before an extraction is abandoned. */
       timeoutSeconds: z.number().int().min(30).max(3600).default(900),
     })
-    .default({ engine: 'auto', model: 'opus', effort: 'high', maxConcurrent: 2, timeoutSeconds: 900 }),
+    .default({ engine: 'auto', model: 'sonnet', verifyModel: 'opus', effort: 'high', maxConcurrent: 2, timeoutSeconds: 900 }),
   git: z
     .object({
       autoCommit: z.boolean().default(true),
@@ -886,6 +891,26 @@ export const ImportRecordSchema = z.object({
       warnings: z.array(z.string()).default([]),
       /** Raw engine output, kept for audit and re-processing. */
       raw: ExtractionSchema.optional(),
+      /**
+       * How the reading was checked: by the document's own arithmetic (balances that reconcile,
+       * printed totals, holdings that add up), or by a second reading with a stronger model.
+       */
+      verification: z
+        .object({
+          method: z.enum(['checks', 'second-reading']),
+          firstModel: z.string(),
+          secondModel: z.string().optional(),
+          /** Why a second reading was made. */
+          reasons: z.array(z.string()).default([]),
+          /** Figures the two readings did not agree on (the rows are marked). */
+          disagreements: z.array(z.string()).default([]),
+          kept: z.enum(['first', 'second']),
+          /** Why the second reading could not be made, if it could not. */
+          error: z.string().optional(),
+        })
+        .optional(),
+      /** The reading that was not kept, for audit. */
+      alternative: ExtractionSchema.optional(),
     })
     .default({ warnings: [] }),
   draft: DraftSchema.optional(),

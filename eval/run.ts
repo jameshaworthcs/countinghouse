@@ -5,6 +5,7 @@
 //   npm run eval -- --tag fx              cases with a tag
 //   npm run eval -- --render              write the documents to eval/.out/docs and stop
 //   npm run eval -- --model sonnet --effort medium --concurrency 3 --label note
+//   npm run eval -- --verify-model off    Sonnet's reading alone, without the second reading
 //
 // Each case (or group) gets a temporary store holding the accounts in cases.ts, so account
 // matching and duplicate detection are measured too. PDFs and screenshots go to Claude through
@@ -65,10 +66,12 @@ interface CaseResult {
   confidence?: string;
   warnings: string[];
   notes: string[];
+  /** How the reading was checked (docs/INGESTION.md). */
+  verification?: { method: string; firstModel: string; secondModel?: string; reasons: number; disagreements: string[]; kept: string };
   score: CaseScore;
 }
 
-async function runGroup(cases: EvalCase[], files: Map<string, Buffer>, opts: { model?: string; effort?: string }): Promise<CaseResult[]> {
+async function runGroup(cases: EvalCase[], files: Map<string, Buffer>, opts: { model?: string; effort?: string; verifyModel?: string }): Promise<CaseResult[]> {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'finance-eval-'));
   const store = await Store.open(path.join(dir, 'data'), { watch: false });
   const out: CaseResult[] = [];
@@ -79,7 +82,11 @@ async function runGroup(cases: EvalCase[], files: Map<string, Buffer>, opts: { m
     }
     const stamp = new Date().toISOString();
     await store.setAccounts(EVAL_ACCOUNTS.map((a) => ({ id: a.id, name: a.name, type: a.type, institutionId: a.institutionId, currency: 'GBP', status: 'open', aliases: [], includeInNetWorth: true, createdAt: stamp, updatedAt: stamp, ...(a.last4 ? { last4: a.last4 } : {}) })));
-    await store.setSettings({ ...store.settings, extraction: { ...store.settings.extraction, ...(opts.model ? { model: opts.model } : {}), ...(opts.effort ? { effort: opts.effort as 'high' } : {}) }, agents: { ...store.settings.agents, enabled: false } });
+    await store.setSettings({
+      ...store.settings,
+      extraction: { ...store.settings.extraction, ...(opts.model ? { model: opts.model } : {}), ...(opts.effort ? { effort: opts.effort as 'high' } : {}), ...(opts.verifyModel !== undefined ? { verifyModel: opts.verifyModel === 'off' ? '' : opts.verifyModel } : {}) },
+      agents: { ...store.settings.agents, enabled: false },
+    });
     const config = loadConfig({ FINANCE_DATA_DIR: path.join(dir, 'data'), FINANCE_WORK_DIR: path.join(dir, 'work'), FINANCE_WATCH: '0' });
     const svc = new ImportService(store, config, new WorkArea(path.join(dir, 'work')));
     await svc.init();
@@ -105,9 +112,14 @@ async function runGroup(cases: EvalCase[], files: Map<string, Buffer>, opts: { m
         ...(rec?.draft?.confidence ? { confidence: rec.draft.confidence } : {}),
         warnings: [...(rec?.extraction.warnings ?? []), ...(rec?.extraction.error ? [`error: ${rec.extraction.error}`] : [])],
         notes: rec?.draft?.notes ?? [],
+        ...(rec?.extraction.verification
+          ? { verification: { method: rec.extraction.verification.method, firstModel: rec.extraction.verification.firstModel, ...(rec.extraction.verification.secondModel ? { secondModel: rec.extraction.verification.secondModel } : {}), reasons: rec.extraction.verification.reasons.length, disagreements: rec.extraction.verification.disagreements, kept: rec.extraction.verification.kept } }
+          : {}),
         score,
       });
-      console.log(`${(score.score * 100).toFixed(1).padStart(6)}%  ${c.id}${rec?.status !== 'review' ? `  (${rec?.status}${rec?.extraction.error ? `: ${rec.extraction.error.slice(0, 120)}` : ''})` : ''}`);
+      const v = rec?.extraction.verification;
+      const how = !v ? '' : v.method === 'checks' ? '  [confirmed by its own figures]' : `  [read twice${v.disagreements.length ? `, ${v.disagreements.length} disagreement(s), kept ${v.kept}` : ', agreed'}]`;
+      console.log(`${(score.score * 100).toFixed(1).padStart(6)}%  ${c.id}${how}${rec?.status !== 'review' ? `  (${rec?.status}${rec?.extraction.error ? `: ${rec.extraction.error.slice(0, 120)}` : ''})` : ''}`);
       // Later cases in a group see this one as already imported.
       if (n < cases.length - 1 && rec?.status === 'review') await svc.commit(rec.id);
     }
@@ -141,7 +153,7 @@ async function main() {
     else groups.push([c]);
   }
   const concurrency = Number(arg('concurrency') ?? 3);
-  const opts = { model: arg('model'), effort: arg('effort') };
+  const opts = { model: arg('model'), effort: arg('effort'), verifyModel: arg('verify-model') };
   const results: CaseResult[] = [];
   let next = 0;
   const started = Date.now();
@@ -184,6 +196,10 @@ async function main() {
     label: arg('label') ?? null,
     model: opts.model ?? 'app default',
     effort: opts.effort ?? 'app default',
+    verifyModel: opts.verifyModel ?? 'app default',
+    readTwice: results.filter((r) => r.verification?.method === 'second-reading').length,
+    confirmedByFigures: results.filter((r) => r.verification?.method === 'checks').length,
+    withDisagreements: results.filter((r) => r.verification?.disagreements.length).length,
     cases: results.length,
     minutes: Math.round((Date.now() - started) / 6000) / 10,
     costUsd: Math.round(results.reduce((s, r) => s + (r.costUsd ?? 0), 0) * 100) / 100,
@@ -194,6 +210,7 @@ async function main() {
     byTag: group((r) => r.tags),
   };
   console.log(`\nField accuracy ${summary.fieldAccuracy}% over ${results.length} documents (${summary.rows.found}/${summary.rows.expected} rows found, ${summary.rows.extra} extra), ${summary.minutes} min, $${summary.costUsd}`);
+  console.log(`Checking: ${summary.confirmedByFigures} confirmed by their own figures, ${summary.readTwice} read twice (${summary.withDisagreements} with disagreements)`);
   console.log(`By field: ${Object.entries(summary.byField).map(([k, v]) => `${k} ${v.pct}%`).join(', ')}`);
   console.log(`By kind:  ${Object.entries(summary.byKind).map(([k, v]) => `${k} ${v}%`).join(', ')}`);
   console.log(`By tag:   ${Object.entries(summary.byTag).map(([k, v]) => `${k} ${v}%`).join(', ')}`);

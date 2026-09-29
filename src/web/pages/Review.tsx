@@ -24,6 +24,48 @@ const DATE_SOURCE_LABEL: Record<string, string> = {
   manual: 'entered by you',
 };
 
+/** How the figures were checked: by the document's own arithmetic, or by a second reading. */
+function VerificationNote({ rec }: { rec: Rec }) {
+  const v = rec.extraction.verification;
+  if (!v) return null;
+  const first = shortName(v.firstModel);
+  const second = v.secondModel ? shortName(v.secondModel) : undefined;
+  if (v.method === 'checks') {
+    return (
+      <Callout tone="good" title={`Read by ${first}; the document’s own figures confirm it`}>
+        The balances, totals or holdings on the document add up with what was read.
+      </Callout>
+    );
+  }
+  if (v.error) {
+    return (
+      <Callout tone="warn" title={`Read by ${first}; the second reading failed`}>
+        {v.error}. Check every figure against the document.
+      </Callout>
+    );
+  }
+  return (
+    <Callout tone={v.disagreements.length ? 'warn' : 'good'} title={v.disagreements.length ? `Read twice: ${first} and ${second} disagreed on ${plural(v.disagreements.length, 'figure')}` : `Read twice: ${first} and ${second} agreed on every figure`}>
+      <div className="text-ink-2">Why it was read twice: {v.reasons.slice(0, 3).join('; ')}{v.reasons.length > 3 ? '…' : ''}.</div>
+      {v.disagreements.length > 0 && (
+        <>
+          <div className="mt-1 text-ink-2">{v.kept === 'second' ? second : first}’s reading is shown; the rows they differed on are marked below.</div>
+          <ul className="sensitive mt-1 list-disc pl-4 text-ink-3">
+            {v.disagreements.slice(0, 8).map((d) => (
+              <li key={d}>{d}</li>
+            ))}
+          </ul>
+        </>
+      )}
+    </Callout>
+  );
+}
+
+const shortName = (model: string) => {
+  const m = /(opus|sonnet|haiku|fable)/i.exec(model);
+  return m ? m[1]!.charAt(0).toUpperCase() + m[1]!.slice(1).toLowerCase() : model;
+};
+
 function DocumentViewer({ rec }: { rec: Rec }) {
   const [zoom, setZoom] = useState(false);
   const url = `/api/imports/${rec.id}/file`;
@@ -600,6 +642,7 @@ export default function Review() {
             {rec.status === 'needs_mapping' && rec.mapping && <MappingEditor rec={rec} />}
             {draft && (
               <>
+                <VerificationNote rec={rec} />
                 {rec.extraction.warnings.length > 0 && (
                   <Callout tone="warn" title="While reading the document">
                     <ul className="list-disc pl-4">
