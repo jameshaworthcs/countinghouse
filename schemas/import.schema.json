@@ -440,6 +440,7 @@
                 "account_overview_screenshot",
                 "transactions_screenshot",
                 "holdings_screenshot",
+                "holding_detail_screenshot",
                 "annual_summary",
                 "interest_certificate",
                 "payslip",
@@ -724,6 +725,21 @@
                       {
                         "type": "number",
                         "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "runningBalanceOf": {
+                    "default": null,
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "account",
+                          "cash"
+                        ]
                       },
                       {
                         "type": "null"
@@ -1079,6 +1095,30 @@
                                 "crypto",
                                 "other"
                               ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "costBasis": {
+                          "default": null,
+                          "anyOf": [
+                            {
+                              "type": "number",
+                              "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "gain": {
+                          "default": null,
+                          "anyOf": [
+                            {
+                              "type": "number",
+                              "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
                             },
                             {
                               "type": "null"
@@ -1286,6 +1326,7 @@
                 "account_overview_screenshot",
                 "transactions_screenshot",
                 "holdings_screenshot",
+                "holding_detail_screenshot",
                 "annual_summary",
                 "interest_certificate",
                 "payslip",
@@ -1570,6 +1611,21 @@
                       {
                         "type": "number",
                         "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "runningBalanceOf": {
+                    "default": null,
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "account",
+                          "cash"
+                        ]
                       },
                       {
                         "type": "null"
@@ -1930,6 +1986,30 @@
                               "type": "null"
                             }
                           ]
+                        },
+                        "costBasis": {
+                          "default": null,
+                          "anyOf": [
+                            {
+                              "type": "number",
+                              "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "gain": {
+                          "default": null,
+                          "anyOf": [
+                            {
+                              "type": "number",
+                              "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         }
                       },
                       "required": [
@@ -2086,6 +2166,7 @@
             "account_overview_screenshot",
             "transactions_screenshot",
             "holdings_screenshot",
+            "holding_detail_screenshot",
             "annual_summary",
             "interest_certificate",
             "payslip",
@@ -2244,6 +2325,14 @@
                           "last4": {
                             "type": "string",
                             "pattern": "^\\d{2,6}$"
+                          },
+                          "openedOn": {
+                            "type": "string",
+                            "description": "Calendar date, YYYY-MM-DD"
+                          },
+                          "closedOn": {
+                            "type": "string",
+                            "description": "Calendar date, YYYY-MM-DD"
                           }
                         },
                         "required": [
@@ -2569,6 +2658,9 @@
                   ]
                 }
               },
+              "cashLedger": {
+                "type": "boolean"
+              },
               "recordHoldings": {
                 "default": true,
                 "type": "boolean"
@@ -2650,6 +2742,9 @@
                     "value"
                   ]
                 }
+              },
+              "holdingsPartial": {
+                "type": "boolean"
               }
             },
             "required": [

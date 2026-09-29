@@ -610,6 +610,7 @@ export const EXTRACTION_DOC_TYPES = [
   'account_overview_screenshot',
   'transactions_screenshot',
   'holdings_screenshot',
+  'holding_detail_screenshot',
   'annual_summary',
   'interest_certificate',
   'payslip',
@@ -663,6 +664,10 @@ export const ExtractedHoldingSchema = z.object({
   value: MoneySchema,
   currency: CurrencySchema.nullable().default(null),
   assetClass: z.enum(ASSET_CLASSES).nullable().default(null),
+  /** "Book cost", "amount invested". */
+  costBasis: MoneySchema.nullable().default(null),
+  /** "Growth", "change since you invested", in money. */
+  gain: MoneySchema.nullable().default(null),
 });
 
 export const ExtractedAccountSchema = z.object({
@@ -688,6 +693,8 @@ export const ExtractedAccountSchema = z.object({
   /** Totals of money in and money out printed on the statement, unsigned. */
   statedMoneyIn: MoneySchema.nullable().default(null),
   statedMoneyOut: MoneySchema.nullable().default(null),
+  /** What a running Balance column tracks: the account itself, or only its uninvested cash (an investment account's activity list). */
+  runningBalanceOf: z.enum(['account', 'cash']).nullable().default(null),
   transactions: z.array(ExtractedTransactionSchema).default([]),
   holdings: z.array(ExtractedHoldingSchema).default([]),
 });
@@ -776,6 +783,9 @@ export const NewAccountInputSchema = z.object({
     .string()
     .regex(/^\d{2,6}$/)
     .optional(),
+  openedOn: ISODateSchema.optional(),
+  /** Set when the account has already closed: it is created closed, worth nothing after this day. */
+  closedOn: ISODateSchema.optional(),
 });
 export type NewAccountInput = z.infer<typeof NewAccountInputSchema>;
 
@@ -818,8 +828,15 @@ export const DraftSectionSchema = z.object({
   annualIncome: MoneySchema.optional(),
   interestRate: z.number().optional(),
   transactions: z.array(DraftTransactionSchema).default([]),
+  /**
+   * The opening balance and running balances are the account's uninvested cash, not its value (an
+   * investment app's activity list). `cash` holds the closing cash; no value is recorded from it.
+   */
+  cashLedger: z.boolean().optional(),
   recordHoldings: z.boolean().default(true),
   holdings: z.array(HoldingSchema).default([]),
+  /** The document shows only some of the account's holdings; they join the others recorded that day. */
+  holdingsPartial: z.boolean().optional(),
 });
 export type DraftSection = z.infer<typeof DraftSectionSchema>;
 

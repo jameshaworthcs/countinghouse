@@ -130,6 +130,8 @@ The equations are in [FORMULAS.md](FORMULAS.md); the rules for writing these rec
      UK merchant list, then the bank's category, then Claude's suggestion.
    - Duplicates are found by bank id, then exact multiset match, then fuzzy match.
    - Opposite-amount rows in your other accounts are proposed as the other leg of a transfer.
+   - Investment app screens are read as the part of the account they show: an activity list's
+     running balance is its cash, a fund's own page is one holding (INGESTION.md).
    - The balance date and its provenance are resolved.
    - Tax figures (P60, interest certificates…) are matched to accounts and deduplicated.
 5. **Review.** The UI edits the draft; reconciliation runs live in the browser.
@@ -137,7 +139,8 @@ The equations are in [FORMULAS.md](FORMULAS.md); the rules for writing these rec
    - It creates accounts and institutions.
    - It assigns stable ids: a content hash plus occurrence, including the import id, so retrying
      a failed commit adds nothing twice.
-   - It links transfers on both legs, and writes balances, holdings and figures.
+   - It links transfers on both legs, and writes balances, holdings and figures. Holdings of one
+     account and day, from several screens, merge into one snapshot.
    - It archives the document and writes the import record, including the account each section
      went to, which gives coverage.
    - The result is a single git commit.

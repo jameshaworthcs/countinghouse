@@ -247,6 +247,26 @@ export function appOverviewHtml(opts: { accent: string; dark?: boolean; title: s
   return page(phoneCss(opts.accent, Boolean(opts.dark)), body);
 }
 
+/**
+ * An investment app's activity list, scrolled past the account selector: name and date, amount,
+ * and a Balance column that is the account's cash. Newest first, ending with a brought-forward row.
+ */
+export function appActivityHtml(opts: { accent: string; heading?: string; period: string; rows: { name: string; date: string; amount: string; balance: string; positive?: boolean }[] }): string {
+  let body = `<div class="status"><span>9:15</span><span>● ● ●</span></div><div class="top"><div class="big" style="font-size:22px">Your account activity</div>${opts.heading ? `<div class="meta">${esc(opts.heading)}</div>` : ''}</div>`;
+  body += `<div class="sect" style="text-align:center">${esc(opts.period)}</div><div class="card"><div class="row" style="opacity:.6;font-size:13px"><div class="mid">Name and date</div><div class="amt" style="font-weight:400">Amount</div><div class="amt" style="font-weight:400;width:92px;text-align:right">Balance</div></div>`;
+  for (const r of opts.rows) body += `<div class="row"><div class="mid"><div class="name" style="white-space:normal">${esc(r.name)}</div><div class="sub">${esc(r.date)}</div></div><div class="amt${r.positive ? ' pos' : ''}">${esc(r.amount)}</div><div class="amt" style="width:92px;text-align:right">${esc(r.balance)}</div></div>`;
+  body += '</div><div class="foot"></div>';
+  return page(phoneCss(opts.accent, false), body);
+}
+
+/** One fund's own page in an investment app: its figures only, and the nickname the app gave it. */
+export function appHoldingHtml(opts: { accent: string; fund: string; nickname: string; stats: [string, string][] }): string {
+  let body = `<div class="status"><span>9:16</span><span>● ● ●</span></div><div class="top"><div class="big" style="font-size:24px;line-height:1.2">${esc(opts.fund)}</div><div class="meta" style="font-weight:600;opacity:.8">${esc(opts.nickname)}</div><span class="pill">View investment info</span></div>`;
+  body += `<div class="stats">${opts.stats.map(([k, v]) => `<div><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('')}</div>`;
+  body += '<div class="foot"></div>';
+  return page(phoneCss(opts.accent, false), body);
+}
+
 // ─── Rendering ───────────────────────────────────────────────────────────────────────────────────
 
 export async function renderPdf(browser: Browser, html: string): Promise<Buffer> {

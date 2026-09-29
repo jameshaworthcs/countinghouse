@@ -1,7 +1,8 @@
 // Build the reviewable draft from an extraction: match each extracted account to one of yours (or
 // propose a new one), categorise, flag duplicates and transfers, resolve the balance date.
 
-import { ACCOUNT_TYPE_META } from '../../shared/accounts';
+import { ACCOUNT_TYPE_META, balanceModeOf } from '../../shared/accounts';
+import { findInstitution } from '../../shared/institutions';
 import { CategoryIndex } from '../../shared/categories';
 import { Categoriser, isWrapperAccount, transferLegCategory } from '../../shared/categorise';
 import { diffDays, today } from '../../shared/dates';
@@ -22,7 +23,7 @@ import type {
 import { DraftSchema } from '../../shared/schema';
 import type { Store } from '../store';
 import { classifyDuplicates } from './dedup';
-import { matchAccount, proposeAccount } from './match';
+import { identifies, matchAccount, proposeAccount, sameHolding } from './match';
 
 export interface DraftContext {
   store: Store;
@@ -31,6 +32,11 @@ export interface DraftContext {
   uploadedOn: string;
   warnings?: string[];
 }
+
+/** A row only a Lifetime ISA has. */
+const LISA_ROW = /\blifetime\s*isa\b.*\bbonus\b|\bgovernment\s+bonus\b/i;
+/** Rows that buy or sell investments: evidence that a running balance is cash beside holdings. */
+const TRADE_ROW = /\b(purchase|bought|buy|sale|sold|sell|redemption|switch)\b/i;
 
 const TRANSFER_CATEGORIES = new Set(['transfer', 'credit-card-payment', 'savings-transfer', 'investment-transfer', 'contribution', 'withdrawal']);
 
@@ -60,23 +66,42 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
   }
   const takenTransfers = new Set<string>();
   const notes = [...extraction.notes, ...(ctx.warnings ?? [])];
+  // Each account's latest holdings: a fund's own page names no account, but the account holding it.
+  const held = new Map(store.accounts.map((a) => [a.id, store.holdings(a.id).at(-1)?.holdings ?? []]));
 
   const sections: DraftSection[] = extraction.accounts.map((acc, si) => {
+    // A screen about one holding: its value, gain and amount invested are the holding's, not the
+    // account's, and the name at the top is the fund's (or the app's nickname for it).
+    const holdingDetail =
+      acc.holdings.length === 1 &&
+      acc.transactions.length === 0 &&
+      (extraction.documentType === 'holding_detail_screenshot' || (acc.accountName !== null && sameHolding({ name: acc.accountName }, { name: acc.holdings[0]!.name })));
+    // Scrolled app screens hide the account's name; a row only one kind of account has still says it.
+    const typeFromRows: AccountType | undefined = !acc.accountType && acc.transactions.some((t) => LISA_ROW.test(t.description)) ? 'lisa' : undefined;
     const detected = {
       institutionName: acc.institutionName ?? extraction.institutionName ?? undefined,
-      accountName: acc.accountName ?? undefined,
-      accountType: acc.accountType ?? undefined,
+      accountName: holdingDetail ? undefined : (acc.accountName ?? undefined),
+      accountType: acc.accountType ?? typeFromRows,
       last4: acc.last4 ?? undefined,
       currency: acc.currency ?? undefined,
     };
+    if (typeFromRows) notes.push('The screen does not name the account, but its Lifetime ISA bonus rows say it is a Lifetime ISA.');
     const hint = extraction.accounts.length === 1 ? ctx.hintAccountId : undefined;
-    const match = matchAccount(detected, store.accounts, store.institutions, hint);
+    const match = matchAccount({ ...detected, holdings: acc.holdings.map((h) => h.name) }, store.accounts, store.institutions, hint, held);
     const existing: Account | undefined = match.accountId && match.score >= 50 ? store.account(match.accountId) : undefined;
-    const fallbackType: AccountType = acc.holdings.length ? 'stocks_isa' : 'current';
+    const provider = findInstitution(detected.institutionName);
+    const investing = provider?.kind === 'investment_platform' || provider?.kind === 'pension_provider';
+    const fallbackType: AccountType = acc.holdings.length || investing ? 'stocks_isa' : 'current';
+    // With nothing on the screen saying which account it is, a new account would be a guess: ask.
+    // Funds can point at an account that holds them, but a list of funds alone does not say which
+    // account (or kind of account) a new one would be.
+    const anonymous = !existing && !hint && !identifies(detected);
     const target: DraftSection['target'] = existing
       ? { mode: 'existing', accountId: existing.id }
-      : { mode: 'new', account: proposeAccount(detected, store.accounts, fallbackType) };
-    const targetType: AccountType = existing?.type ?? (target.mode === 'new' ? target.account.type : fallbackType);
+      : anonymous
+        ? { mode: 'skip' }
+        : { mode: 'new', account: proposeAccount(detected, store.accounts, fallbackType) };
+    const targetType: AccountType = existing?.type ?? (target.mode === 'new' ? target.account.type : detected.accountType ?? fallbackType);
     const targetId = existing?.id ?? (target.mode === 'new' ? target.account.id : '');
     const currency = acc.currency ?? existing?.currency ?? 'GBP';
 
@@ -101,6 +126,31 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
     }
 
     let balance = acc.closingBalance ?? undefined;
+    let cash = acc.cashBalance ?? undefined;
+    // An investment account's activity list: its running balance is the uninvested cash, not the
+    // account's value, however the reader labelled it. Recording it as the value would make a
+    // whole account look like a few pounds.
+    const market = balanceModeOf(existing ?? { type: targetType }) === 'market';
+    const investmentEvidence =
+      investing ||
+      acc.holdings.length > 0 ||
+      acc.transactions.some((t) => TRADE_ROW.test(t.description)) ||
+      Boolean(existing && store.holdings(existing.id).length) ||
+      Boolean(existing && ['investment_platform', 'pension_provider'].includes(store.institution(existing.institutionId)?.kind ?? ''));
+    const closingIsRunning = balance !== undefined && acc.transactions.some((t) => t.balanceAfter !== null && toMinor(t.balanceAfter) === toMinor(balance!));
+    const cashLedger = market && acc.transactions.length > 0 && (acc.runningBalanceOf === 'cash' || (closingIsRunning && investmentEvidence));
+    if (cashLedger) {
+      if (closingIsRunning || acc.runningBalanceOf === 'cash') {
+        if (balance !== undefined && (closingIsRunning || cash === undefined)) cash = balance;
+        if (closingIsRunning) balance = undefined;
+      }
+      notes.push('The running balances on this screen are the uninvested cash, not the account’s value, so no value is recorded from it.');
+    }
+    if (holdingDetail) {
+      balance = undefined;
+      cash = undefined;
+      notes.push(`This screen shows one holding (${acc.holdings[0]!.name}); its value is not the account’s, so only the holding is recorded, beside the others of that day.`);
+    }
     if (balance !== undefined && ACCOUNT_TYPE_META[targetType].liability && balance > 0 && !acc.transactions.some((t) => t.balanceAfter !== null)) {
       balance = -balance;
       notes.push(`${detected.accountName ?? 'Account'}: the balance owed was shown as a positive number and has been stored as negative (money owed). Change it if the account is actually in credit.`);
@@ -189,8 +239,14 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
       ...(h.ticker ? { ticker: h.ticker } : {}),
       ...(h.units !== null ? { units: h.units } : {}),
       ...(h.price !== null ? { price: h.price } : {}),
+      ...(h.costBasis !== null ? { costBasis: h.costBasis } : {}),
+      ...(h.gain !== null ? { gain: h.gain } : {}),
       ...(h.assetClass ? { assetClass: h.assetClass } : {}),
     }));
+    // Holdings that do not reach the value shown (a list cut off by the screen), or with no value to
+    // check against, are part of the account's holdings: they join the others recorded that day.
+    const heldMinor = holdings.reduce((sum, h) => sum + toMinor(h.value), 0) + toMinor(cash ?? 0);
+    const holdingsPartial = holdings.length > 0 && (holdingDetail || balance === undefined || heldMinor < toMinor(balance) - Math.max(100, Math.round(Math.abs(toMinor(balance)) * 0.001)));
 
     // Screenshots of wrapper accounts rarely show a list of flows; statements do.
     const isScreenshot = /screenshot/.test(extraction.documentType) || ctx.document.mediaType.startsWith('image/');
@@ -198,13 +254,15 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
       key: `s${si}`,
       detected: Object.fromEntries(Object.entries(detected).filter(([, v]) => v !== undefined)),
       target,
-      matchReason: existing ? match.reason : match.accountId ? `${match.reason}` : 'New account',
+      matchReason: existing ? match.reason : anonymous ? 'Nothing on this screen says which account it is: choose it' : match.accountId ? `${match.reason}` : 'New account',
       currency,
       recordBalance: balance !== undefined,
       balanceDate,
       recordHoldings: holdings.length > 0,
       transactions,
       holdings,
+      ...(cashLedger ? { cashLedger: true } : {}),
+      ...(holdingsPartial ? { holdingsPartial: true } : {}),
       ...(balanceDateSource ? { balanceDateSource } : {}),
       ...(balance !== undefined ? { balance } : {}),
       ...(acc.periodStart ? { periodStart: acc.periodStart } : {}),
@@ -212,9 +270,9 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
       ...(acc.openingBalance !== null ? { openingBalance: acc.openingBalance } : {}),
       ...(acc.availableBalance !== null ? { availableBalance: acc.availableBalance } : {}),
       ...(acc.creditLimit !== null ? { creditLimit: acc.creditLimit } : {}),
-      ...(acc.contributionsToDate !== null ? { contributions: acc.contributionsToDate } : {}),
-      ...(acc.gainLoss !== null ? { gain: acc.gainLoss } : {}),
-      ...(acc.cashBalance !== null ? { cash: acc.cashBalance } : {}),
+      ...(acc.contributionsToDate !== null && !holdingDetail ? { contributions: acc.contributionsToDate } : {}),
+      ...(acc.gainLoss !== null && !holdingDetail ? { gain: acc.gainLoss } : {}),
+      ...(cash !== undefined ? { cash } : {}),
       ...(acc.governmentBonusToDate !== null ? { bonusToDate: acc.governmentBonusToDate } : {}),
       ...(acc.taxYearContributions !== null ? { taxYearContributions: acc.taxYearContributions } : {}),
       ...(acc.annualIncome !== null ? { annualIncome: acc.annualIncome } : {}),
@@ -223,7 +281,7 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
         ? { statedTotals: { ...(acc.statedMoneyIn !== null ? { moneyIn: Math.abs(acc.statedMoneyIn) } : {}), ...(acc.statedMoneyOut !== null ? { moneyOut: Math.abs(acc.statedMoneyOut) } : {}) } }
         : {}),
     };
-    if (isScreenshot && isWrapperAccount(targetType) && transactions.length === 0 && balance === undefined) {
+    if (isScreenshot && isWrapperAccount(targetType) && transactions.length === 0 && balance === undefined && !holdingDetail && !holdings.length) {
       notes.push(`${detected.accountName ?? 'An account'}: no value found on this screenshot.`);
     }
     return section;
@@ -277,7 +335,8 @@ export function draftIsClean(draft: Draft): { clean: boolean; reasons: string[] 
   const reasons: string[] = [];
   if (draft.confidence === 'low') reasons.push('low extraction confidence');
   for (const s of draft.sections) {
-    if (s.target.mode !== 'existing') reasons.push('creates a new account');
+    if (s.target.mode === 'new') reasons.push('creates a new account');
+    if (s.target.mode === 'skip') reasons.push('an account to choose or a section left out');
     if (s.transactions.some((t) => t.status === 'possible_duplicate')) reasons.push('possible duplicates to check');
     if (s.balanceDateSource === 'upload') reasons.push('balance date unknown');
   }

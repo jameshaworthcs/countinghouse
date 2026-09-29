@@ -6,7 +6,7 @@ import { CategoryIndex } from '../shared/categories';
 import { Categoriser, transferLegCategory } from '../shared/categorise';
 import { diffDays } from '../shared/dates';
 import { toMinor } from '../shared/money';
-import type { Transaction } from '../shared/schema';
+import type { Account, Transaction } from '../shared/schema';
 import { transferGroupId } from './ids';
 import type { Store } from './store';
 
@@ -63,14 +63,42 @@ export async function enrich(store: Store, opts: { accountIds?: string[]; dryRun
     const k = toMinor(t.amount);
     (byAmount.get(k) ?? byAmount.set(k, []).get(k)!).push(t);
   }
+  const pairs = pairTransfers(store, candidates, byAmount);
+  for (const [t, other, acc] of pairs.legs) {
+    const patch = { ...(patches.get(t.id) ?? {}), transferGroup: pairs.groupOf.get(t.id)!, counterpartyAccountId: other.id } as Partial<Transaction>;
+    if (t.categorisedBy !== 'user') {
+      patch.category = transferLegCategory(acc.type, other.type, t.amount);
+      patch.categorisedBy = 'transfer';
+    }
+    patches.set(t.id, patch);
+  }
+  const transfersLinked = pairs.count;
+
+  if (!opts.dryRun && patches.size) {
+    await store.updateTransactions(
+      [...patches.entries()].map(([id, patch]) => ({ id, patch })),
+      `enrich: ${recategorised} recategorised, ${transfersLinked} transfers linked`,
+    );
+  }
+  return { recategorised, transfersLinked };
+}
+
+/**
+ * Pair transfers: each money-out candidate with an opposite amount within 4 days in another of your
+ * accounts, where at least one side already looks like a transfer (or names the other account).
+ */
+function pairTransfers(store: Store, candidates: Transaction[], byAmount: Map<number, Transaction[]>) {
   const linked = new Set<string>();
-  let transfersLinked = 0;
-  for (const a of candidates) {
-    if (linked.has(a.id) || a.amount >= 0) continue;
+  const groupOf = new Map<string, string>();
+  const legs: [Transaction, Account, Account][] = [];
+  let count = 0;
+  const outgoing = [...candidates.filter((t) => t.amount < 0), ...candidates.filter((t) => t.amount > 0).flatMap((t) => (byAmount.get(-toMinor(t.amount)) ?? []).filter((o) => o.amount < 0 && !o.transferGroup))];
+  for (const a of outgoing) {
+    if (linked.has(a.id)) continue;
     const pool = byAmount.get(-toMinor(a.amount)) ?? [];
     let best: { t: Transaction; days: number } | undefined;
     for (const b of pool) {
-      if (b.accountId === a.accountId || linked.has(b.id)) continue;
+      if (b.accountId === a.accountId || linked.has(b.id) || b.transferGroup) continue;
       const days = Math.abs(diffDays(a.date, b.date));
       if (days > 4) continue;
       const hinted = (a.category && TRANSFERISH.has(a.category)) || (b.category && TRANSFERISH.has(b.category)) || a.counterpartyAccountId === b.accountId || b.counterpartyAccountId === a.accountId;
@@ -83,26 +111,38 @@ export async function enrich(store: Store, opts: { accountIds?: string[]; dryRun
     const accB = store.account(b.accountId);
     if (!accA || !accB) continue;
     const group = transferGroupId(a.id, b.id);
-    for (const [t, acc, other] of [
-      [a, accA, accB],
-      [b, accB, accA],
-    ] as const) {
-      const patch = { ...(patches.get(t.id) ?? {}), transferGroup: group, counterpartyAccountId: other.id } as Partial<Transaction>;
-      if (t.categorisedBy !== 'user') {
-        patch.category = transferLegCategory(acc.type, other.type, t.amount);
-        patch.categorisedBy = 'transfer';
-      }
-      patches.set(t.id, patch);
-      linked.add(t.id);
-    }
-    transfersLinked++;
+    groupOf.set(a.id, group);
+    groupOf.set(b.id, group);
+    legs.push([a, accB, accA], [b, accA, accB]);
+    linked.add(a.id);
+    linked.add(b.id);
+    count++;
   }
+  return { legs, groupOf, count };
+}
 
-  if (!opts.dryRun && patches.size) {
-    await store.updateTransactions(
-      [...patches.entries()].map(([id, patch]) => ({ id, patch })),
-      `enrich: ${recategorised} recategorised, ${transfersLinked} transfers linked`,
-    );
-  }
-  return { recategorised, transfersLinked };
+/**
+ * Link the transfers a commit's new rows complete: the other leg may have been committed earlier,
+ * from another account's statement. Only unlinked rows are touched, and a category you set stays.
+ */
+export async function linkTransfers(store: Store, ids: string[], message: string): Promise<number> {
+  if (!ids.length) return 0;
+  const want = new Set(ids);
+  const all = store.transactions().filter((t) => !t.transferGroup);
+  const byAmount = new Map<number, Transaction[]>();
+  for (const t of all) (byAmount.get(toMinor(t.amount)) ?? byAmount.set(toMinor(t.amount), []).get(toMinor(t.amount))!).push(t);
+  const pairs = pairTransfers(store, all.filter((t) => want.has(t.id)), byAmount);
+  if (!pairs.count) return 0;
+  await store.updateTransactions(
+    pairs.legs.map(([t, other, acc]) => ({
+      id: t.id,
+      patch: {
+        transferGroup: pairs.groupOf.get(t.id)!,
+        counterpartyAccountId: other.id,
+        ...(t.categorisedBy !== 'user' ? { category: transferLegCategory(acc.type, other.type, t.amount), categorisedBy: 'transfer' as const } : {}),
+      },
+    })),
+    message,
+  );
+  return pairs.count;
 }

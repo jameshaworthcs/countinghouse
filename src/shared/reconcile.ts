@@ -42,20 +42,33 @@ export function reconcile(input: ReconcileInput): ReconcileResult {
     }
   }
 
-  let prev: { minor: number } | null = null;
-  let checked = 0;
-  input.transactions.forEach((t, i) => {
-    if (t.balanceAfter === undefined) {
-      prev = null;
-      return;
+  // Statements list rows oldest first; apps usually newest first. Running balances are checked in
+  // whichever order they fit, so a correct newest-first screen is not reported as broken.
+  const walk = (order: number[]) => {
+    const breaks: number[] = [];
+    let prev: { minor: number } | null = null;
+    let n = 0;
+    for (const i of order) {
+      const t = input.transactions[i]!;
+      if (t.balanceAfter === undefined) {
+        prev = null;
+        continue;
+      }
+      const bal = toMinor(t.balanceAfter);
+      if (prev) {
+        n++;
+        if (prev.minor + toMinor(t.amount) !== bal) breaks.push(i);
+      }
+      prev = { minor: bal };
     }
-    const bal = toMinor(t.balanceAfter);
-    if (prev) {
-      checked++;
-      if (prev.minor + toMinor(t.amount) !== bal) runningBreaks.push(i);
-    }
-    prev = { minor: bal };
-  });
+    return { breaks, n };
+  };
+  const forward = input.transactions.map((_, i) => i);
+  const asPrinted = walk(forward);
+  const reversed = asPrinted.breaks.length ? walk([...forward].reverse()) : asPrinted;
+  const best = reversed.breaks.length < asPrinted.breaks.length ? reversed : asPrinted;
+  const checked = best.n;
+  runningBreaks.push(...best.breaks.sort((a, b) => a - b));
   if (checked > 0) {
     if (runningBreaks.length === 0) {
       checks.push(`Running balances agree on all ${checked + 1} rows.`);

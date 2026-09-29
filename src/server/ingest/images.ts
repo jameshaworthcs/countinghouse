@@ -16,15 +16,42 @@ export function dateFromFileName(name: string): ISODate | null {
     /(?:^|[^\d])(20\d{2})(\d{2})(\d{2})(?:[^\d]|$)/, // 20260926
     /(?:^|[^\d])(20\d{2})(\d{2})(\d{2})[-_ T]?\d{4,6}/, // 20260926-143012 / 20260926_143012
   ];
+  const latest = dateOf(Date.now() + 86_400_000);
   for (const re of patterns) {
     const m = re.exec(base);
     if (m) {
       const d = makeDate(Number(m[1]), Number(m[2]), Number(m[3]));
-      if (d && d <= dateOf(Date.now() + 86_400_000)) return d;
+      if (d && d <= latest) return d;
     }
+  }
+  // Dates written with the month's name: "5th_June_2024", "17th Apr 2026", "2025Sept18th", "June 3 2025".
+  const words = base.toLowerCase();
+  const day = '(\\d{1,2})(?:st|nd|rd|th)?';
+  const sep = '[\\s_.,-]*';
+  const named: [RegExp, (m: RegExpExecArray) => [string, string, string]][] = [
+    [new RegExp(`(?<![\\d])${day}${sep}${MONTH}${sep}(20\\d{2})(?!\\d)`), (m) => [m[3]!, m[2]!, m[1]!]],
+    [new RegExp(`(?<![\\d])(20\\d{2})${sep}${MONTH}${sep}${day}(?!\\d)`), (m) => [m[1]!, m[2]!, m[3]!]],
+    [new RegExp(`${MONTH}${sep}${day}${sep}(20\\d{2})(?!\\d)`), (m) => [m[3]!, m[1]!, m[2]!]],
+  ];
+  for (const [re, parts] of named) {
+    const m = re.exec(words);
+    if (!m) continue;
+    const [y, mon, d] = parts(m);
+    const date = makeDate(Number(y), MONTHS.indexOf(mon.slice(0, 3)) + 1, Number(d));
+    if (date && date <= latest) return date;
+  }
+  // Day first with no separators, as some banks name statements: 05072026 is 5 July 2026.
+  const dmy = /(?:^|[^\d])(\d{2})(\d{2})(20\d{2})(?:[^\d]|$)/.exec(base);
+  if (dmy) {
+    const d = makeDate(Number(dmy[3]), Number(dmy[2]), Number(dmy[1]));
+    if (d && d <= latest) return d;
   }
   return null;
 }
+
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+/** A month's name or abbreviation, not part of a longer word. */
+const MONTH = '(?<![a-z])(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)(?![a-z])';
 
 export interface CaptureDate {
   date: ISODate;

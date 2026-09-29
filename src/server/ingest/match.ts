@@ -2,7 +2,7 @@
 
 import { ACCOUNT_TYPE_META, slugify } from '../../shared/accounts';
 import { findInstitution } from '../../shared/institutions';
-import type { Account, AccountType, Institution, NewAccountInput } from '../../shared/schema';
+import type { Account, AccountType, Holding, Institution, NewAccountInput } from '../../shared/schema';
 
 export interface Detected {
   institutionName?: string | undefined;
@@ -10,6 +10,32 @@ export interface Detected {
   accountType?: AccountType | undefined;
   last4?: string | undefined;
   currency?: string | undefined;
+  /** Names of the holdings the document lists. */
+  holdings?: string[] | undefined;
+}
+
+/** A holding's name reduced to letters and digits, for comparing the same fund across screens. */
+export function holdingKey(name: string): string {
+  return name.toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]+/g, '');
+}
+
+/**
+ * The same holding, named on two screens: by ISIN or ticker when both have one, else by name. A name
+ * cut short on a narrow screen ("Legal & General Global") matches the full one it begins.
+ */
+export function sameHolding(a: Pick<Holding, 'name' | 'isin' | 'ticker'>, b: Pick<Holding, 'name' | 'isin' | 'ticker'>): boolean {
+  if (a.isin && b.isin) return a.isin.toUpperCase() === b.isin.toUpperCase();
+  if (a.ticker && b.ticker && a.ticker.toUpperCase() === b.ticker.toUpperCase()) return true;
+  const x = holdingKey(a.name);
+  const y = holdingKey(b.name);
+  if (x === y) return true;
+  const [short, long] = x.length <= y.length ? [x, y] : [y, x];
+  return short.length >= 12 && long.startsWith(short);
+}
+
+/** Does this document identify an account at all: a provider, kind, number, name or holdings? */
+export function identifies(detected: Detected): boolean {
+  return Boolean(detected.institutionName || detected.accountName || detected.accountType || detected.last4 || detected.holdings?.length);
 }
 
 export interface AccountMatch {
@@ -22,11 +48,13 @@ function words(s: string | undefined): Set<string> {
   return new Set((s ?? '').toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2));
 }
 
-export function matchAccount(detected: Detected, accounts: Account[], institutions: Institution[], hintAccountId?: string): AccountMatch {
+export function matchAccount(detected: Detected, accounts: Account[], institutions: Institution[], hintAccountId?: string, held?: Map<string, Pick<Holding, 'name' | 'isin' | 'ticker'>[]>): AccountMatch {
   const inst = findInstitution(detected.institutionName) ?? findInstitution(detected.accountName);
   let best: AccountMatch = { score: 0, reason: 'No existing account looked like this one' };
   // Apps rarely show their own name on screen: being your only account of a type is evidence too.
   const ofType = detected.accountType ? accounts.filter((a) => a.status !== 'closed' && a.type === detected.accountType).length : 0;
+  // A scrolled screen may name only the provider: being your only open account there is evidence.
+  const atProvider = inst ? accounts.filter((a) => a.status !== 'closed' && a.institutionId === inst.id).length : 0;
   for (const a of accounts) {
     let score = 0;
     const reasons: string[] = [];
@@ -49,6 +77,10 @@ export function matchAccount(detected: Detected, accounts: Account[], institutio
     if (inst && accountInst === inst.id) {
       score += 30;
       reasons.push(`provider (${inst.name})`);
+      if (!detected.accountType && atProvider === 1 && a.status !== 'closed') {
+        score += 20;
+        reasons.push(`your only ${inst.name} account`);
+      }
     } else if (inst && accountInst && accountInst !== inst.id) {
       score -= 40;
     } else if (detected.institutionName && instName && words(detected.institutionName).size && [...words(detected.institutionName)].some((w) => words(instName).has(w))) {
@@ -74,6 +106,13 @@ export function matchAccount(detected: Detected, accounts: Account[], institutio
       reasons.push('similar name');
     }
     if (detected.currency && detected.currency !== a.currency) score -= 50;
+    // An account already holding every fund the screen lists (a fund's own page names no account).
+    const funds = detected.holdings ?? [];
+    const has = held?.get(a.id) ?? [];
+    if (funds.length && has.length && funds.every((name) => has.some((h) => sameHolding({ name }, h)))) {
+      score += 50;
+      reasons.push(funds.length === 1 ? 'holds this fund' : 'holds these funds');
+    }
     if (score > best.score) best = { accountId: a.id, score, reason: `Matched by ${reasons.join(', ')}` };
   }
   if (best.accountId && best.score >= 50) return best;

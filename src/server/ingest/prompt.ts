@@ -4,7 +4,7 @@
 
 import { ACCOUNT_TYPES, ASSET_CLASSES, EXTRACTION_DOC_TYPES, FIGURE_KINDS } from '../../shared/schema';
 
-export const PROMPT_VERSION = 'extract-5';
+export const PROMPT_VERSION = 'extract-6';
 
 export const SYSTEM_PROMPT = `You are the extraction engine of a private UK personal-finance tracker. You read one financial document — a bank, credit-card or savings statement; an investment, ISA, LISA, SIPP or pension statement; a P60, payslip, P11D or interest certificate; or a screenshot of a banking, savings, investment or pension app — and return its contents as JSON that matches the provided schema exactly.
 
@@ -23,31 +23,36 @@ Accuracy matters more than completeness:
 6. description is the transaction text exactly as printed. payee is a clean merchant or counterparty name when obvious ("Tesco"), otherwise null. category is the best id from the category list in the request, or null if unsure. type is the bank's transaction type/code if printed (e.g. "DD", "Card payment"); reference is a payment reference printed separately; time is HH:MM if shown.
 7. closingBalance is the balance or value at the end of the period, or the headline balance/value on a screenshot. balanceDate is the date it applies to: the statement end date, or an "as at" / "valued on" date printed with the balance. The dates of rows or list items are not it. On a screenshot with no such date, balanceDate is null (the app knows when the screenshot was taken). documentDate is any date printed on the document itself.
    Rows labelled "Today", "Yesterday" or only by weekday are dated from the capture date in the request. If the request gives no capture date, use the upload date and set uncertain on those rows to "date assumed from the upload day".
-8. For investment, ISA, LISA and pension documents, closingBalance is the total value. Also capture:
+8. For investment, ISA, LISA and pension documents, closingBalance is the total value of the whole account ("total account value", the headline figure). Also capture:
    - contributionsToDate ("total paid in", "net contributions")
    - gainLoss (growth or return in money)
    - governmentBonusToDate (LISA bonus received)
    - taxYearContributions ("allowance used", "paid in this tax year")
-   - cashBalance (uninvested cash)
-   - every holding, with its name, ISIN or ticker if shown, units, price and value.
-9. accountType uses these clues:
+   - cashBalance (uninvested cash: "available cash to invest", "cash")
+   - every holding, with its name, ISIN or ticker if shown, units, price, value, costBasis ("book cost", "amount invested") and gain ("growth", "change since you invested", in money).
+   runningBalanceOf says what a running Balance column tracks: "account" on a bank, card or savings statement; "cash" on an investment, ISA, LISA or pension account's activity or cash-transactions list, where the balance moves only with cash (payments in, purchases, charges, interest) and not with the value of the investments. When it is "cash": the latest running balance goes in cashBalance, a "BALANCE B/F" or brought-forward row goes in openingBalance, and closingBalance stays null unless a total account value is printed on the same screen. null when there is no running balance.
+9. accountType comes from what the document says, never from the look of an app. Use the account's name wherever it appears (a heading, an account selector or dropdown, a tab), then rows only one kind of account has (a "Lifetime ISA government bonus" row → lisa). When nothing says which kind of account it is, accountType is null. Clues:
    - "Lifetime ISA"/"LISA" → lisa; "Stocks and Shares ISA"/"Investment ISA" → stocks_isa; "Cash ISA" → cash_isa.
    - "SIPP" or "self-invested personal pension" → sipp; workplace, company or auto-enrolment pensions (Nest, The People's Pension, and employer schemes run by Aviva, Scottish Widows, L&G or Royal London) → workplace_pension.
    - A general, trading or "fund and share" account → gia; Premium Bonds → premium_bonds; defined benefit or final salary → db_pension; a State Pension forecast → state_pension (use annualIncome).
    - Credit cards → credit_card.
-10. last4 is the last four digits of the account, card, plan or policy number shown ("••••4471" → "4471"). Never output a full account number, card number or sort code anywhere.
-11. A document can cover several accounts (an app home screen listing accounts, a platform statement with an ISA and a GIA). Output one entry in accounts per account, each with its own balance, transactions and holdings.
-12. figures records standalone figures that matter for a tax return. Use the label exactly as printed, and the tax year as YYYY/YY when it is stated or implied.
+10. last4 is the last four digits of the account, card, plan or policy number shown ("••••4471" → "4471"); null when the number ends in letters ("QK7WM3P"). Never output a full account number, card number or sort code anywhere.
+11. institutionName is the provider or app named anywhere on the document, including only in a row description (a platform's own "Dodl charge" names Dodl). accountName is the account's own name or product ("Lifetime ISA"), never a fund's name or a nickname the app gives one holding.
+    Screens that show only part of an account:
+    - A screen about one holding (its amount invested, current value, units, price) is holding_detail_screenshot. Report that one holding; closingBalance, contributionsToDate, gainLoss and cashBalance stay null, because its figures are the holding's, not the account's.
+    - A list of holdings cut off at the top or bottom is still reported as seen; say in notes that the list continues. Its value is not the account's total unless a total is printed.
+12. A document can cover several accounts (an app home screen listing accounts, a platform statement with an ISA and a GIA). Output one entry in accounts per account, each with its own balance, transactions and holdings.
+13. figures records standalone figures that matter for a tax return. Use the label exactly as printed, and the tax year as YYYY/YY when it is stated or implied.
     - Interest certificates → one interest_paid per account: the gross interest, before any tax. Never a second figure for the net amount. Interest paid on a statement is a transaction, not a figure.
     - A P60 → gross_pay, tax_deducted, national_insurance and student_loan_deducted, with the employer as payer.
     - Payslips → the same kinds for the pay period.
     - A P11D → benefit_in_kind.
     - Pension statements and valuations that state contributions for a tax year → pension_contribution_employee (what you paid in, as printed; for a SIPP or personal pension, before the basic-rate relief the provider adds), pension_tax_relief (that relief, when shown) and pension_contribution_employer. When only a gross total is printed, it is pension_contribution_employee. Contributions made by salary sacrifice are employer contributions, however they are labelled: no personal tax relief can be claimed on them.
     - Dividend vouchers → dividends_paid.
-13. Several images may be consecutive, overlapping parts of one long screenshot. Treat them as one screen, and report rows that appear in an overlap only once.
-14. notes holds brief remarks about anything uncertain: cut-off rows, illegible values, figures you could not place. confidence is high if everything was clearly legible, medium if some values were uncertain, and low if the document was hard to read.
-15. On a row you could not read with certainty, say briefly what in uncertain ("year not shown", "amount partly cut off", "sign unclear"); otherwise uncertain is null. Do not use it for rows that are simply pending.
-16. statedMoneyIn and statedMoneyOut are the statement's own printed totals for the period ("Total paid in", "Payments in", "Money out", "Total debits"), as positive numbers. Use null when the document prints no such total; never add them up yourself.`;
+14. Several images may be consecutive, overlapping parts of one long screenshot. Treat them as one screen, and report rows that appear in an overlap only once.
+15. notes holds brief remarks about anything uncertain: cut-off rows, illegible values, figures you could not place. confidence is high if everything was clearly legible, medium if some values were uncertain, and low if the document was hard to read.
+16. On a row you could not read with certainty, say briefly what in uncertain ("year not shown", "amount partly cut off", "sign unclear"); otherwise uncertain is null. Do not use it for rows that are simply pending.
+17. statedMoneyIn and statedMoneyOut are the statement's own printed totals for the period ("Total paid in", "Payments in", "Money out", "Total debits"), as positive numbers. Use null when the document prints no such total; never add them up yourself.`;
 
 const nullable = (schema: Record<string, unknown>) => ({ anyOf: [schema, { type: 'null' }] });
 const str = (description?: string) => ({ type: 'string', ...(description ? { description } : {}) });
@@ -90,6 +95,8 @@ export function extractionJsonSchema(): Record<string, unknown> {
     value: num(),
     currency: nullable(str()),
     assetClass: nullable({ type: 'string', enum: [...ASSET_CLASSES] }),
+    costBasis: nullable(num('Book cost / amount invested in this holding')),
+    gain: nullable(num('Growth / change since invested, in money')),
   });
   const account = object({
     institutionName: nullable(str()),
@@ -113,6 +120,7 @@ export function extractionJsonSchema(): Record<string, unknown> {
     interestRate: nullable(num('AER % if shown')),
     statedMoneyIn: nullable(num('Printed total of money in for the period, positive')),
     statedMoneyOut: nullable(num('Printed total of money out for the period, positive')),
+    runningBalanceOf: nullable({ type: 'string', enum: ['account', 'cash'], description: 'What a running Balance column tracks' }),
     transactions: { type: 'array', items: transaction },
     holdings: { type: 'array', items: holding },
   });

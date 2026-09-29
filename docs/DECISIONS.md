@@ -257,3 +257,17 @@ as invariants.
   - It sits above the monthly checklist on the Import page.
   - While items remain, its Overview alert replaces the monthly one, which would name the same
     accounts.
+- **Investment app screenshots are read as the parts of an account they are (`extract-6`).** The
+  first real import of a batch of LISA screenshots read each activity list's cash balance as the
+  LISA's value (a few pounds instead of the whole value), proposed a new account for every fund's own page and for scrolled
+  screens, and would have let each partial holdings list replace the others. Now:
+  - the reader says what a running balance tracks; the draft treats an investment account's
+    running balance as cash when the reader or the evidence says so;
+  - a fund's page is a holding, matched to the account that holds the fund; a screen naming only
+    the provider goes to your only account there; a screen naming nothing waits for you to choose;
+  - holdings of one account and day merge;
+  - running balances are checked newest first as well as oldest first.
+  Being your only LISA stays a suggestion, not a match: the screens that need it name the account
+  in their selector or the provider in a charge row.
+- **A number ending in letters has no last four digits.** "QK7WM3P" was being stored as "73" and
+  would have taught the account a wrong number.

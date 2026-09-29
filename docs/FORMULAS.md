@@ -430,8 +430,12 @@ known. It is marked when the value is an estimate.
 
 - **Opening and closing balance:** opening + Σ settled rows = closing.
 - **Running balances:** each row's running balance = the previous row's running balance + its
-  amount.
+  amount, in whichever order the rows fit. Statements list rows oldest first and apps newest
+  first; the order with fewer breaks is used.
 - Pending rows are excluded: statement and export balances are of settled transactions.
+- **An investment account's activity list** (`cashLedger`): the running balances and opening
+  balance are the uninvested cash, so the closing balance checked is the closing cash. No value is
+  recorded from it.
 
 **Review checks** run on each account in a draft, on the review page and for "Commit all ready".
 A warning holds an import back from bulk commit:
@@ -444,6 +448,9 @@ A warning holds an import back from bulk commit:
 | Future | a row is dated after the upload day |
 | Card signs | on a credit card with ≥ 3 settled rows, most are money in, or a payment to the card is money out |
 | Unsure | the reader marked a row as uncertain |
+| Holdings | the holdings and cash come to more than the value shown, or less when the list is not marked as part of the account's holdings; ±max(£1, 0.1%) |
+| Holdings, part of the list (information) | a screen lists only some holdings, or one fund's own page: they join that day's other holdings |
+| Cash (information) | the balances are an investment account's cash, not its value |
 | Repeated (information) | two rows share a date, amount and description |
 | Pending (information) | pending rows are left out unless ticked |
 

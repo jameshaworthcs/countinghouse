@@ -3,7 +3,7 @@
 // drift apart. Everything here is invented: names, numbers and references.
 
 import type { AccountType, FigureKind } from '../src/shared/schema';
-import { appListHtml, appOverviewHtml, dayName, fmtDate, gbp, simpleDocHtml, statementHtml, type AppRow, type Brand, type StatementSection } from './render';
+import { appActivityHtml, appHoldingHtml, appListHtml, appOverviewHtml, dayName, fmtDate, gbp, simpleDocHtml, statementHtml, type AppRow, type Brand, type StatementSection } from './render';
 
 export interface ExpectedTx {
   date: string;
@@ -32,6 +32,8 @@ export interface ExpectedSection {
   statedTotals?: { moneyIn: number; moneyOut: number };
   transactions?: ExpectedTx[];
   holdings?: { name: string; isin?: string; units?: number; value: number }[];
+  /** Nothing on the document is the account's value: none may be recorded. */
+  noValue?: boolean;
 }
 
 export interface Expected {
@@ -762,5 +764,85 @@ export function buildCases(): EvalCase[] {
       expected: { sections: [{ account: { new: 'savings', last4: '3310' }, balance: 5210.44, transactions: exp(rows, { description: (t) => t.name }) }] },
     });
   }
+  // An investment app's LISA, as three screens of one morning, committed in order: the overview
+  // (value, cash, the first holding of a list that continues), the activity list scrolled past its
+  // account selector (the running balance is the cash, the provider named only in its own charge),
+  // and one fund's own page (its figures, and a nickname, but no account).
+  cases.push({
+    id: 'png-lisa-app-overview',
+    title: 'Investment LISA overview: value, cash, and only the first holding of the list',
+    tags: ['png', 'lisa', 'holdings', 'app-set'],
+    group: 'lisa-app',
+    file: {
+      name: 'Screenshot 2026-09-29 at 09.13.40.png',
+      kind: 'png',
+      html: appOverviewHtml({
+        accent: '#1f5eff',
+        title: 'Lifetime ISA',
+        subtitle: 'Account number: MB7Q2XK',
+        value: '£9,418.62',
+        valueLabel: '+21.40% investment change',
+        stats: [['Available cash to invest', '£612.30'], ['Interest rate', '3.8% (AER variable)']],
+        sections: [{ title: 'Your investments', rows: [{ name: 'Fidelity Index World Fund P Acc', sub: 'Fund', amount: '£5,204.77' }] }],
+      }),
+    },
+    expected: { sections: [{ account: 'moneybox-lisa', balance: 9418.62, balanceDate: '2026-09-29', cash: 612.3, holdings: [{ name: 'Fidelity Index World Fund P Acc', value: 5204.77 }] }] },
+  });
+  {
+    const rows = [
+      { date: '2026-09-26', amount: 1000, name: 'Debit card payment', balance: 1612.3 },
+      { date: '2026-09-22', amount: -2.01, name: 'Moneybox charge - Aug 2026', balance: 612.3 },
+      { date: '2026-09-02', amount: 250, name: 'Lifetime isa government bonus', balance: 614.31 },
+    ];
+    const opening = 364.31;
+    cases.push({
+      id: 'png-lisa-app-activity',
+      title: 'Investment LISA activity, scrolled: the Balance column is the cash, not the value',
+      tags: ['png', 'lisa', 'cash-ledger', 'app-set'],
+      group: 'lisa-app',
+      file: {
+        name: 'Screenshot 2026-09-29 at 09.15.02.png',
+        kind: 'png',
+        html: appActivityHtml({
+          accent: '#1f5eff',
+          period: '2026 · 30 Aug - 29 Sep',
+          rows: [
+            ...rows.map((r) => ({ name: r.name, date: fmtDate(r.date, 'd-month-yyyy'), amount: r.amount > 0 ? `+${gbp(r.amount)}` : gbp(r.amount), balance: gbp(r.balance), positive: r.amount > 0 })),
+            { name: '* BALANCE B/F *', date: '30 August 2026', amount: `+${gbp(opening)}`, balance: gbp(opening), positive: true },
+          ],
+        }),
+      },
+      expected: {
+        sections: [
+          {
+            account: 'moneybox-lisa',
+            periodStart: '2026-08-30',
+            periodEnd: '2026-09-29',
+            openingBalance: opening,
+            cash: 1612.3,
+            noValue: true,
+            transactions: rows.map((r) => ({ date: r.date, amount: r.amount, description: r.name, balanceAfter: r.balance })),
+          },
+        ],
+      },
+    });
+  }
+  cases.push({
+    id: 'png-lisa-app-fund-page',
+    title: 'One fund’s own page: a holding with units and amount invested, not an account',
+    tags: ['png', 'lisa', 'holdings', 'app-set'],
+    group: 'lisa-app',
+    file: {
+      name: 'Screenshot 2026-09-29 at 09.16.21.png',
+      kind: 'png',
+      html: appHoldingHtml({
+        accent: '#1f5eff',
+        fund: 'Fidelity Index World Fund P Acc',
+        nickname: 'Around the world',
+        stats: [['Amount invested', '£4,300.00'], ['Current value', '£5,204.77'], ['Change since you invested', '£904.77'], ['Change since you invested (%)', '21.04 %'], ['Latest price per unit', '£3.94'], ['Number of units you own', '1,321.007']],
+      }),
+    },
+    expected: { sections: [{ account: 'moneybox-lisa', noValue: true, holdings: [{ name: 'Fidelity Index World Fund P Acc', units: 1321.007, value: 5204.77 }] }] },
+  });
   return cases;
 }

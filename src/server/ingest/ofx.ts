@@ -180,6 +180,7 @@ export function parseOfx(text: string): Extraction {
       interestRate: null,
       statedMoneyIn: null,
       statedMoneyOut: null,
+      runningBalanceOf: null,
       transactions: txs,
       holdings: [],
     });

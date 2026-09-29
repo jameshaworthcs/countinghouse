@@ -37,13 +37,23 @@ export function sectionChecks(section: DraftSection, ctx: CheckContext): ReviewC
   // Statements and exports total their settled rows; pending ones are shown separately.
   const settled = rows.filter((t) => !t.pending);
 
-  // Opening balance + rows = closing balance, and running balances follow the amounts.
-  const r = reconcile({ openingBalance: section.openingBalance, closingBalance: section.balance, transactions: settled });
+  // Opening balance + rows = closing balance, and running balances follow the amounts. On an
+  // investment account's activity list they are the cash, so the closing cash is what they reach.
+  const closing = section.cashLedger ? section.cash : section.balance;
+  const r = reconcile({ openingBalance: section.openingBalance, closingBalance: closing, transactions: settled });
+  if (section.cashLedger) {
+    out.push({
+      id: 'cash-ledger',
+      status: 'info',
+      title: 'The balances here are the account’s cash',
+      detail: `On an investment account’s activity list the running balance is the uninvested cash${section.cash !== undefined ? ` (${formatMoney(section.cash)} at the end)` : ''}, not what the account is worth. The rows are recorded; the account’s value comes from a screen or statement that shows its total.`,
+    });
+  }
   if (r.status !== 'unknown') {
     out.push({
       id: 'reconcile',
       status: r.status === 'ok' ? 'ok' : 'warn',
-      title: r.status === 'ok' ? 'Balances add up' : 'Balances don’t add up',
+      title: r.status === 'ok' ? (section.cashLedger ? 'The cash balances add up' : 'Balances add up') : section.cashLedger ? 'The cash balances don’t add up' : 'Balances don’t add up',
       detail: `${r.checks.join(' ')}${r.status === 'mismatch' ? ' Look for a missing row or a wrong sign against the original.' : ''}`,
       ...(r.runningBreaks.length ? { rows: r.runningBreaks.map((i) => settled[i]!.key) } : {}),
     });
@@ -76,13 +86,27 @@ export function sectionChecks(section: DraftSection, ctx: CheckContext): ReviewC
     out.push(
       Math.abs(value - held) <= tolerance
         ? { id: 'holdings', status: 'ok', title: 'The holdings add up to the value' }
-        : {
-            id: 'holdings',
-            status: 'warn',
-            title: 'The holdings don’t add up to the value',
-            detail: `The holdings${section.cash !== undefined ? ' and cash' : ''} come to ${formatMoney(fromMinor(held))}; the value shown is ${formatMoney(section.balance)}. A holding may be missing or misread, or the screen may list only some of them.`,
-          },
+        : held < value && section.holdingsPartial
+          ? {
+              id: 'holdings',
+              status: 'info',
+              title: 'Part of the holdings list',
+              detail: `The holdings${section.cash !== undefined ? ' and cash' : ''} shown come to ${formatMoney(fromMinor(held))} of the ${formatMoney(section.balance)} value: the screen lists only some of them. They join the other holdings recorded for this account on the same day, so screenshots of the rest of the list complete it.`,
+            }
+          : {
+              id: 'holdings',
+              status: 'warn',
+              title: 'The holdings don’t add up to the value',
+              detail: `The holdings${section.cash !== undefined ? ' and cash' : ''} come to ${formatMoney(fromMinor(held))}; the value shown is ${formatMoney(section.balance)}. ${held > value ? 'That is more than the account is worth, so a value is probably misread.' : 'A holding may be missing or misread, or the screen may list only some of them.'}`,
+            },
     );
+  } else if (section.holdings.length && section.holdingsPartial) {
+    out.push({
+      id: 'holdings',
+      status: 'info',
+      title: section.holdings.length === 1 ? 'One holding, without the account’s total' : 'Holdings, without the account’s total',
+      detail: 'This screen does not show what the whole account is worth. The holdings join the others recorded for this account on the same day; the value comes from a screen that shows the total.',
+    });
   }
 
   // Rows dated outside the period the statement says it covers: usually a misread year.

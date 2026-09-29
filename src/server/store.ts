@@ -889,10 +889,17 @@ export class Store extends EventEmitter {
     });
   }
 
-  addHoldings(snaps: HoldingsSnapshot[], message: string): Promise<number> {
+  /** Add holdings snapshots; `replaces` are snapshots they supersede (same account and day, merged into them). */
+  addHoldings(snaps: HoldingsSnapshot[], message: string, replaces: string[] = []): Promise<number> {
     return this.exclusive(async () => {
       const touched = new Set<string>();
       let added = 0;
+      for (const [accountId, list] of this.state.holdings) {
+        const kept = list.filter((h) => !replaces.includes(h.id));
+        if (kept.length === list.length) continue;
+        this.state.holdings.set(accountId, kept);
+        touched.add(accountId);
+      }
       for (const raw of snaps) {
         const s = HoldingsSnapshotSchema.parse(raw);
         const list = this.state.holdings.get(s.accountId) ?? [];
@@ -908,7 +915,7 @@ export class Store extends EventEmitter {
         await this.writeJsonl(rel, this.state.holdings.get(accountId)!);
         paths.push(rel);
       }
-      if (added) this.changed(message, paths);
+      if (added || paths.length) this.changed(message, paths);
       return added;
     });
   }

@@ -102,10 +102,12 @@ review screen.
 The import record keeps how it was checked (`extraction.verification`) and the reading that was
 not kept (`extraction.alternative`).
 
-Measured on the evaluation set (`extract-5`, 28 documents):
+Measured on the evaluation set (`extract-5`, 28 documents; `extract-6` adds three investment-app
+LISA screens: an overview, an activity list and a fund's own page):
 
 | Configuration | Field accuracy | Cost | Time |
 |---|---|---|---|
+| `extract-6`: Sonnet, checked by Opus (the default), 31 documents | 100% | $2.52 | 4.1 min |
 | Sonnet, checked by Opus (the default) | 100% | $2.05 | 3.3 min |
 | Sonnet alone | 100% | $1.04 | 2.0 min |
 | Opus alone | 100% | $1.86 | 2.6 min |
@@ -124,10 +126,20 @@ on every import):
 - **Account type** clues for LISA, S&S ISA, cash ISA, SIPP, workplace pension, GIA and Premium
   Bonds.
 - **Investment detail** where shown: total paid in, growth, LISA bonus, allowance used this tax
-  year, uninvested cash, and each holding with ISIN, units, price and value.
+  year, uninvested cash, and each holding with ISIN, units, price, value, amount invested and
+  growth.
+- **Investment apps' partial screens** (`extract-6`):
+  - An activity list's Balance column is the cash (`runningBalanceOf: "cash"`): it goes in
+    `cashBalance`, and the account's value is left out unless the screen prints a total.
+  - One fund's own page is `holding_detail_screenshot`: the holding only, never an account worth
+    that fund. A nickname the app gives the fund is not the account's name.
+  - The account's name is taken from the screen (a heading, a selector), or from rows only one
+    kind of account has (a Lifetime ISA bonus), never from the look of the app. The provider can
+    come from a row alone (a platform's own charge).
+- **Last 4 digits only.** A full account or card number is never output. A number ending in
+  letters has no last four digits.
 - **Tax figures** from P60s, payslips, P11Ds, interest certificates, pension and dividend
   statements.
-- **Last 4 digits only.** A full account or card number is never output.
 - **Overlapping tiles.** Long scrolling screenshots are cut into overlapping tiles, and rows in the
   overlaps are reported once.
 - **Only this account's movements.** A list of prizes, interest or dividends paid out to another
@@ -144,8 +156,9 @@ Screenshot dates come from the first available of:
 
 1. a date visible in the image;
 2. EXIF/XMP metadata;
-3. the file name (Android, macOS, iOS and GNOME patterns);
-4. the file's modified time;
+3. the file name: Android, macOS, iOS and GNOME patterns, day-first digits (`05072026`), and dates
+   with the month's name (`5th_June_2024`, `17th Apr 2026`, `2025Sept18th`);
+4. the file's modified time (`npm run import` keeps it when copying into the inbox);
 5. the upload date (flagged for you to fix).
 
 ## From extraction to draft
@@ -157,6 +170,12 @@ Screenshot dates come from the first available of:
   - An account you pinned the upload to always wins.
   - Being your only account of the detected type adds a little: apps rarely show their own name
     on screen. It is never enough on its own.
+  - A screen naming only the provider (a scrolled app screen) matches your only open account
+    there.
+  - A fund's own page matches the account whose latest holdings include that fund.
+  - With nothing on the screen to say which account it is, no new account is proposed: the
+    section waits for you to choose. Uploading from an account's page or its capture-list row
+    pins the account.
   - Closed accounts still take their old statements, with a small penalty so an open account wins
     a tie; the review page lists them separately.
   - Below the threshold a new account is proposed.
@@ -181,12 +200,24 @@ Screenshot dates come from the first available of:
      for you to decide.
 - **Transfers.** An opposite amount within ±4 days in another of your accounts is proposed as
   the other leg. On commit both legs get a `transferGroup`, and money arriving in an ISA or
-  pension becomes a `contribution`.
+  pension becomes a `contribution`. A commit also links its new rows to other legs already stored
+  (the other account's statement committed earlier), without recategorising anything else.
+- **Investment app screens.** On an investment, ISA, LISA or pension account:
+  - An activity list whose running balance is the cash (the reader says so, or the closing
+    balance is a running balance and there are trades, holdings or an investment provider) records
+    its rows and the closing cash, never the cash as the account's value.
+  - One fund's own page records that holding only; its value, gain and amount invested are the
+    fund's.
+  - Holdings that do not reach the value shown, or come with no value, are marked as part of the
+    list. On commit they merge into that day's holdings ([DATA_FORMAT.md](DATA_FORMAT.md)), so an
+    overview, a list scrolled over two screens and each fund's page make one set.
+- **New accounts** can be given the day they opened and, for an account already closed, the day it
+  closed: it is created closed and counts for nothing after that day.
 - **Liabilities.** A credit-card balance printed as a positive "amount owed" is stored as
   negative, with a note.
 - **Review checks** (`shared/review.ts`, [FORMULAS.md §13](FORMULAS.md)) run on each account:
-  balances, printed totals, the statement period, future dates, card signs, unsure, repeated and
-  pending rows. A warning holds the import back from "Commit all ready".
+  balances (in either row order; the cash on an activity list), printed totals, holdings, the
+  statement period, future dates, card signs, unsure, repeated and pending rows. A warning holds the import back from "Commit all ready".
 - **Pending rows** are shown in the draft but not included by default, and reconciliation leaves
   them out. Statement balances are of settled transactions, and the settled row arrives with the
   next statement. Include one only if you know it will never appear settled.

@@ -4,13 +4,15 @@
 import { ACCOUNT_TYPE_META, slugify } from '../../shared/accounts';
 import { transferLegCategory } from '../../shared/categorise';
 import { catalogInstitution, findInstitution } from '../../shared/institutions';
-import { formatMoney } from '../../shared/money';
+import { formatMoney, fromMinor, toMinor } from '../../shared/money';
 import { taxYearOf } from '../../shared/uk';
-import type { Account, BalanceSnapshot, Draft, Figure, HoldingsSnapshot, ImportRecord, Transaction } from '../../shared/schema';
+import type { Account, BalanceSnapshot, Draft, Figure, Holding, HoldingsSnapshot, ImportRecord, Transaction } from '../../shared/schema';
 import { AccountSchema, BalanceSnapshotSchema, DraftSchema, FigureSchema, HoldingsSnapshotSchema, TransactionSchema } from '../../shared/schema';
 import { nowISO, safeFileName } from '../fsutil';
 import { balanceId, figureId, holdingsId, transactionId, transferGroupId } from '../ids';
+import { linkTransfers } from '../enrich';
 import { StoreError, type Store } from '../store';
+import { sameHolding } from './match';
 
 export interface CommitInput {
   record: ImportRecord;
@@ -76,6 +78,8 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
       updatedAt: stamp,
       ...(institutionId ? { institutionId } : {}),
       ...(input.last4 ? { last4: input.last4 } : {}),
+      ...(input.openedOn ? { openedOn: input.openedOn } : {}),
+      ...(input.closedOn ? { status: 'closed' as const, closedOn: input.closedOn } : {}),
     };
     AccountSchema.parse(account);
     toCreate.push({ account, ...(institution ? { institution } : {}) });
@@ -132,6 +136,7 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
   // 3. Balances, holdings, figures.
   const balances: BalanceSnapshot[] = [];
   const holdings: HoldingsSnapshot[] = [];
+  const replacedHoldings: string[] = [];
   for (const section of draft.sections) {
     const account = resolved.get(section.key);
     if (!account || !section.balanceDate) continue;
@@ -160,16 +165,32 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
       });
     }
     if (section.recordHoldings && section.holdings.length) {
-      const total = section.balance ?? section.holdings.reduce((s, h) => s + h.value, 0) + (section.cash ?? 0);
+      // Screenshots of one account on one day (a list scrolled in parts, one fund's own page) are
+      // one set of holdings: they merge into what that day already has instead of replacing it.
+      const date = section.balanceDate;
+      const sameDay = [...store.holdings(account.id), ...holdings.filter((h) => h.accountId === account.id)].filter((h) => h.date === date);
+      const prior = sameDay.at(-1);
+      // A partial list adds to the day's holdings; a complete one replaces them, keeping only the
+      // extra figures the earlier screens had for the funds it still lists.
+      const list = !prior ? section.holdings : section.holdingsPartial ? mergeHoldings(prior.holdings, section.holdings) : mergeHoldings(prior.holdings.filter((h) => section.holdings.some((n) => sameHolding(h, n))), section.holdings);
+      const cash = section.cash ?? prior?.cash;
+      // The total is the value shown, else a value already recorded for that day, else what the holdings come to.
+      const dayValue = section.balance ?? [...balances, ...store.balances(account.id)].find((b) => b.accountId === account.id && b.date === date && !b.approximate)?.balance;
+      const total = dayValue ?? fromMinor(list.reduce((s, h) => s + toMinor(h.value), 0) + toMinor(cash ?? 0));
+      for (const h of sameDay) {
+        const i = holdings.indexOf(h);
+        if (i >= 0) holdings.splice(i, 1);
+        else replacedHoldings.push(h.id);
+      }
       holdings.push({
-        id: holdingsId(account.id, section.balanceDate, total, record.id),
+        id: holdingsId(account.id, date, total, record.id),
         accountId: account.id,
-        date: section.balanceDate,
-        holdings: section.holdings,
+        date,
+        holdings: list,
         totalValue: Math.round(total * 100) / 100,
         source,
         createdAt: stamp,
-        ...(section.cash !== undefined ? { cash: section.cash } : {}),
+        ...(cash !== undefined ? { cash } : {}),
       });
     }
   }
@@ -221,8 +242,14 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
       `import: link ${transferLinks.length} transfer(s)`,
     );
   }
+  // The other leg of a transfer may already be stored, from another account's statement: link it.
+  await linkTransfers(
+    store,
+    newTx.filter((t) => !t.transferGroup).map((t) => t.id),
+    `import: ${label} (transfers linked)`,
+  );
   const balancesAdded = balances.length ? await store.addBalances(balances, `import: ${label} balance`) : 0;
-  const holdingsAdded = holdings.length ? await store.addHoldings(holdings, `import: ${label} holdings`) : 0;
+  const holdingsAdded = holdings.length ? await store.addHoldings(holdings, `import: ${label} holdings`, replacedHoldings) : 0;
   const figuresAdded = figures.length ? await store.addFigures(figures, `import: ${label} figures`) : 0;
 
   const sha = record.document.sha256;
@@ -257,4 +284,25 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
   ].filter(Boolean);
   await store.saveImport(committed, `import: ${label} → ${names || 'figures'}${bits.length ? ` (${bits.join(', ')})` : ''}`, [docPath]);
   return committed;
+}
+
+/**
+ * Holdings of one account on one day, from several screens: each holding is matched across them
+ * (ISIN, ticker or name) and the later screen's figures win, while figures only the earlier one
+ * showed (units on a fund's own page, say) are kept.
+ */
+export function mergeHoldings(prior: Holding[], next: Holding[]): Holding[] {
+  const out = prior.map((h) => ({ ...h }));
+  for (const n of next) {
+    const i = out.findIndex((h) => sameHolding(h, n));
+    if (i < 0) {
+      out.push({ ...n });
+      continue;
+    }
+    const merged: Holding = { ...out[i]!, ...n };
+    // Keep the fuller name: a narrow screen cuts names short.
+    if (out[i]!.name.length > n.name.length) merged.name = out[i]!.name;
+    out[i] = merged;
+  }
+  return out;
 }

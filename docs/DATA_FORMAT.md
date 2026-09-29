@@ -127,6 +127,18 @@ A balance or valuation at the end of `date`:
 
 `{ id, accountId, date, holdings: [{ name, isin?, ticker?, units?, price?, value, currency, costBasis?, gain?, assetClass?, weight?, attributes? }], cash?, totalValue, source, createdAt }`
 
+One snapshot per account and day. A document showing only part of the holdings (a list split over
+screens, one fund's own page) merges into that day's snapshot when committed:
+
+- holdings are matched by ISIN, then ticker, then name (a name cut short matches the one it
+  begins);
+- the later document's figures win, and figures only the earlier one had (units, amount invested)
+  are kept.
+
+A document listing all the holdings replaces the day's snapshot, keeping only the extra figures for
+funds it still lists. `totalValue` is the value the document shows, else a value recorded for that
+day, else the holdings plus cash.
+
 ## figures.jsonl
 
 Standalone figures from documents, used for Self Assessment:

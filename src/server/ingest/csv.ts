@@ -306,6 +306,7 @@ export function parseWithProfile(rows: string[][], match: ProfileMatch): CsvPars
       interestRate: null,
       statedMoneyIn: null,
       statedMoneyOut: null,
+      runningBalanceOf: null,
       transactions: txs,
       holdings: [],
     });

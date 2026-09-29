@@ -267,6 +267,12 @@ function SectionEditor({ section, index, total, latest, periodFromRows, onChange
             <Field label="Last 4 digits">
               <Input value={target.account.last4 ?? ''} onChange={(e) => set({ target: { ...target, account: { ...target.account, last4: e.target.value.replace(/\D/g, '').slice(0, 6) || undefined } } })} />
             </Field>
+            <Field label="Opened on (optional)">
+              <Input type="date" value={target.account.openedOn ?? ''} onChange={(e) => set({ target: { ...target, account: { ...target.account, openedOn: e.target.value || undefined } } })} />
+            </Field>
+            <Field label="Closed on (if it has closed)" hint="Created as a closed account, worth nothing after this day">
+              <Input type="date" value={target.account.closedOn ?? ''} onChange={(e) => set({ target: { ...target, account: { ...target.account, closedOn: e.target.value || undefined } } })} />
+            </Field>
           </div>
         )}
         {target.mode !== 'skip' && (

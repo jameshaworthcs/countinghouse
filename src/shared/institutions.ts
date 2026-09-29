@@ -59,6 +59,7 @@ export const INSTITUTION_CATALOG: CatalogInstitution[] = [
   I('kroo', 'Kroo', 'bank', '\\bkroo\\b', undefined, true),
   I('atom', 'Atom bank', 'bank', '\\batom\\s*bank\\b'),
   I('zopa', 'Zopa', 'bank', '\\bzopa\\b'),
+  I('aldermore', 'Aldermore', 'bank', '\\baldermore\\b'),
   I('allica', 'Allica Bank', 'bank', '\\ballica\\b'),
   I('paragon', 'Paragon Bank', 'bank', '\\bparagon\\b'),
   I('shawbrook', 'Shawbrook Bank', 'bank', '\\bshawbrook\\b'),

@@ -48,6 +48,8 @@ function scoreSection(sc: Scorer, e: ExpectedSection, s: DraftSection | undefine
   scalar('period', e.periodEnd, s?.periodEnd);
   scalar('balance', e.openingBalance, s?.openingBalance);
   scalar('balance', e.balance, s?.balance);
+  // A screen whose figures are not the account's value (an activity list's cash, one fund's page).
+  if (e.noValue) sc.check('balance', Boolean(s) && (s!.balance === undefined || !s!.recordBalance), `${label}: recorded ${s?.balance} as the account's value`);
   scalar('balanceDate', e.balanceDate, s?.balanceDate);
   scalar('wrapper', e.contributions, s?.contributions);
   scalar('wrapper', e.bonusToDate, s?.bonusToDate);

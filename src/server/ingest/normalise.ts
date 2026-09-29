@@ -44,8 +44,11 @@ function fixValue(key: string, v: unknown): unknown {
     return /^[A-Z]{3}$/.test(c) ? c : c === '£' ? 'GBP' : null;
   }
   if ((key === 'last4' || key === 'cardLast4' || key === 'accountLast4') && typeof v === 'string') {
-    const digits = v.replace(/\D/g, '');
-    return digits.length >= 2 ? digits.slice(-4) : null;
+    // The number's own last characters: "••••4471" is 4471, but an account number that ends in
+    // letters ("QK7WM3P") has no last four digits, and its scattered digits must not stand in.
+    const chars = v.replace(/[^0-9A-Za-z]/g, '');
+    const tail = /(\d+)$/.exec(chars)?.[1] ?? '';
+    return tail.length >= 2 ? tail.slice(-4) : null;
   }
   return v;
 }

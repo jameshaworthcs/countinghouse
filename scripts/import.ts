@@ -3,7 +3,7 @@
 //
 //   npm run import -- ~/Downloads/statement.pdf ~/Pictures/Screenshot*.png
 
-import { copyFile, mkdir, stat } from 'node:fs/promises';
+import { copyFile, mkdir, stat, utimes } from 'node:fs/promises';
 import path from 'node:path';
 import { loadConfig, loadDotEnv } from '../src/server/config';
 import { ACCEPTED_EXTENSIONS } from '../src/server/ingest/detect';
@@ -26,7 +26,10 @@ for (const f of files) {
   try {
     const s = await stat(f);
     if (!s.isFile()) throw new Error('not a file');
-    await copyFile(f, path.join(config.inboxDir, path.basename(f)));
+    const dest = path.join(config.inboxDir, path.basename(f));
+    await copyFile(f, dest);
+    // Keep the file's own modified time: it is the capture date of last resort for a screenshot.
+    await utimes(dest, s.atime, s.mtime);
     queued++;
     console.log(`queued ${path.basename(f)}`);
   } catch (err) {
