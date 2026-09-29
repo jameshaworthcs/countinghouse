@@ -652,3 +652,36 @@ export interface BudgetsResponse {
   pastMonths: number;
   note: string | null;
 }
+
+/** A goal's progress (GET /api/goals/progress; docs/FORMULAS.md §16). */
+export interface GoalProgress {
+  id: string;
+  name: string;
+  kind: 'savings' | 'emergency-fund' | 'home-deposit';
+  /** The amount to reach, or null when it is not known yet (an emergency fund before spending is). */
+  target: number | null;
+  targetBasis: string;
+  targetDate: string | null;
+  /** What the accounts count for today (a LISA may count at 75%). */
+  current: number;
+  share: number | null;
+  /** Money coming in each month at the recent pace, as counted. */
+  monthly: number;
+  accounts: { accountId: string; name: string; value: number; counted: number; monthly: number; monthlyBasis: string; note?: string }[];
+  /** When the target is reached: early (the 90th percentile path), median, late (the 10th). Null past the horizon. */
+  reach: { early: string | null; median: string | null; late: string | null } | null;
+  /** The range on the target date. */
+  atTargetDate: { p10: number; p50: number; p90: number } | null;
+  /** More a month needed to reach it by the target date, at the median (0 when on track). */
+  neededMonthly: number | null;
+  status: 'reached' | 'on-track' | 'behind' | 'no-date' | 'unknown';
+  notes: string[];
+  ownerNotes?: string;
+}
+
+export interface GoalsResponse {
+  goals: GoalProgress[];
+  /** The period the pace comes from, e.g. "the last 3 months". */
+  pace: string | null;
+  notes: string[];
+}

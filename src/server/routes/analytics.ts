@@ -27,6 +27,7 @@ export function analyticsRoutes(ctx: AppContext): Hono {
 
   app.get('/recurring', (c) => c.json(a.recurring()));
   app.get('/budgets', (c) => c.json(a.budgets(c.req.query('month'))));
+  app.get('/goals/progress', (c) => c.json(a.goals()));
 
   app.get('/projections', (c) => {
     const months = Number(c.req.query('months') ?? 60);

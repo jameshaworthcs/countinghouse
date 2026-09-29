@@ -9,6 +9,7 @@ import type { Store } from '../store';
 import { allowances } from './allowances';
 import { BalanceEngine } from './balances';
 import { budgetAlerts, budgets } from './budgets';
+import { goalsProgress } from './goals';
 import { cashflow } from './cashflow';
 import { AssumptionSet } from '../../shared/assumptions';
 import { computeBaseline, standardPeriods } from './baseline';
@@ -71,6 +72,10 @@ export class Analytics {
 
   recurring() {
     return this.cached(`recurring:${today()}`, () => detectRecurring(this.store));
+  }
+
+  goals() {
+    return this.cached(`goals:${today()}`, () => goalsProgress(this.store, this.engine, today(), this.coverageIndex));
   }
 
   budgets(month?: string) {

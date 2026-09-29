@@ -434,10 +434,26 @@ export const RuleSchema = z.object({
 });
 export type Rule = z.infer<typeof RuleSchema>;
 
+export const GOAL_KINDS = ['savings', 'emergency-fund', 'home-deposit'] as const;
+
+/**
+ * Something you are saving towards, from the accounts that fund it (docs/FORMULAS.md §16).
+ * - savings: an amount, by a date if you like;
+ * - emergency-fund: a number of months of your spending (the amount follows your spending);
+ * - home-deposit: an amount for a first home; a Lifetime ISA counts in full only when the home's
+ *   price is within the LISA cap and the LISA is a year old by then.
+ */
 export const GoalSchema = z.object({
   id: SlugSchema,
   name: z.string().min(1),
-  targetAmount: MoneySchema,
+  /** Absent means savings (goals made before kinds existed). */
+  kind: z.enum(GOAL_KINDS).optional(),
+  /** The amount to reach; an emergency fund's comes from `months` instead. */
+  targetAmount: MoneySchema.optional(),
+  /** Emergency fund: how many months of spending. */
+  months: z.number().min(1).max(36).optional(),
+  /** Home deposit: the price of the home, for the LISA's price cap. */
+  propertyPrice: MoneySchema.optional(),
   targetDate: ISODateSchema.optional(),
   accountIds: z.array(SlugSchema).default([]),
   notes: z.string().optional(),

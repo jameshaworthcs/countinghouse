@@ -6,6 +6,7 @@ import { addMonths, formatDate, formatMonth, today } from '../../shared/dates';
 import { taxYearOf } from '../../shared/uk';
 import { ChartFrame, SERIES } from '../components/charts/common';
 import { TimeChart, type TimeSeries } from '../components/charts/TimeChart';
+import { GoalsCard } from '../components/Goals';
 import { AssumptionsLink, InsightsPanel, SourceTag } from '../components/Intel';
 import { Badge, Callout, Card, Field, Input, Loading, Money, PageHeader, Segmented, Select, Stat, tableClasses } from '../components/ui';
 import { qs, useApi } from '../lib/api';
@@ -296,6 +297,7 @@ export default function Projections() {
             </Card>
           </div>
 
+          <GoalsCard />
           <InsightsPanel page="projections" title="Claude’s notes on your plans" />
 
           <Card title="What this assumes" description={<>Every value, where it came from, and whether you have overridden it. Change any of them on <AssumptionsLink />.</>} padded={false}>

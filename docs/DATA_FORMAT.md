@@ -182,6 +182,22 @@ Standalone figures from documents, used for Self Assessment:
   `nothingNew` (optional) is set when the import was dismissed as adding nothing new: why, in words.
   Only the document and this record were written; the counts are all zero.
 
+## goals.json
+
+Something you are saving towards (Projections → Goals). How progress is measured is
+[FORMULAS.md §16](FORMULAS.md).
+
+| Field | Type | Notes |
+|---|---|---|
+| `id`, `name` | slug, string | |
+| `kind` | `savings` \| `emergency-fund` \| `home-deposit`? | absent means savings |
+| `targetAmount` | money? | the amount to reach (not for an emergency fund) |
+| `months` | number? | emergency fund: months of spending |
+| `propertyPrice` | money? | home deposit: the home's price, for the LISA price cap |
+| `targetDate` | date? | |
+| `accountIds` | slug[] | the accounts that fund it |
+| `notes`, `createdAt`, `updatedAt` | | |
+
 ## budgets.json
 
 A monthly spending budget, yours to set (Spending → Budgets). How it is measured is

@@ -21,7 +21,24 @@
             "type": "string",
             "minLength": 1
           },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "savings",
+              "emergency-fund",
+              "home-deposit"
+            ]
+          },
           "targetAmount": {
+            "type": "number",
+            "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+          },
+          "months": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 36
+          },
+          "propertyPrice": {
             "type": "number",
             "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
           },
@@ -59,7 +76,6 @@
         "required": [
           "id",
           "name",
-          "targetAmount",
           "createdAt",
           "updatedAt"
         ]

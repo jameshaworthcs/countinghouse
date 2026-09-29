@@ -428,6 +428,16 @@ async function demoIntelligence(store: Store) {
     ],
   });
 
+  // Goals: the flat in 2028 from the LISA and savings, and six months of spending set aside.
+  const goalStamp = nowISO();
+  await store.setGoals(
+    [
+      { id: 'flat-deposit', name: 'Flat deposit', kind: 'home-deposit', targetAmount: 135_000, propertyPrice: 450_000, targetDate: '2028-06-30', accountIds: ['lifetime-isa', 'easy-access'], createdAt: goalStamp, updatedAt: goalStamp },
+      { id: 'emergency-fund', name: 'Emergency fund', kind: 'emergency-fund', months: 6, accountIds: ['premium-bonds'], createdAt: goalStamp, updatedAt: goalStamp },
+    ],
+    'demo: goals',
+  );
+
   // Budgets: all spending, a group and two categories (Spending → Budgets).
   const budgetStamp = nowISO();
   await store.setBudgets(

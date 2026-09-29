@@ -439,3 +439,20 @@ needed a `fetch` loop pasted into the signed-in browser console.
 - **Suggestions are the median of recent complete months, rounded up.** The median resists one
   unusual month, and rounding up gives a starting point, not a target.
 
+## 2026-09-29: Goals
+
+- **A goal names its accounts, and each grows at its own rate.** Each account runs through the same
+  moment recursion as Projections, with its own return, charges or interest, and the money its
+  recent pace brings in. That money is a wrapper's contributions, bonus and relief, or a cash
+  account's net deposits. The estate projection has one cash pot, which cannot say when a named
+  savings account reaches an amount.
+- **The accounts' spreads are added, as if they moved together.** This errs wide. A correlation
+  model for two or three accounts would promise precision the inputs do not have.
+- **Pounds of the day, not today's money.** A deposit target is what the owner needs when they
+  buy. Projections keeps its choice of units.
+- **A LISA counts at 75% unless the goal is a qualifying first home.** A qualifying home is within
+  the £450,000 cap, with the LISA a year old by the date, or the owner is 60. Counting the charge
+  up front stops an emergency fund in a LISA from looking bigger than it is.
+- **An emergency fund follows your spending.** Its target is months × the recent baseline's
+  spending, so it stays true as spending changes. Until spending is known it has no amount.
+

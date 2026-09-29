@@ -512,3 +512,50 @@ For a budget *B* and a month:
 
 The Overview warns about each budget over, or on pace to go over, this month. These are computed
 signals, not insights.
+
+## 16. Goals (`analytics/goals.ts`)
+
+A goal is a target funded by accounts you choose (`data/goals.json`). There are three kinds:
+
+- **savings**: an amount;
+- **emergency fund**: *k* months of spending, target = *k* × the monthly spending of the recent
+  baseline (§3), so it follows your spending;
+- **home deposit**: an amount for a first home.
+
+**What the accounts count for:** each account's value today (§9) × its share *s*:
+
+- *s* = 1, except for a Lifetime ISA;
+- a LISA counts in full only for a home deposit. The home must be within the LISA price cap
+  (£450,000, `uk.ts`), and the LISA at least 12 months old by the target date (from its opening, or
+  its first data). The same holds from age 60. Otherwise *s* = 1 − the withdrawal charge (0.75).
+
+**Money coming in** *C* each month:
+
+- a wrapper's personal and outside money from the baseline (§3; the LISA bonus included);
+- a cash account's net movement in and out over the baseline's period, leaving out income rows
+  (interest, prizes), which its rate stands for;
+- counted at the same share *s*.
+
+**The path:** each account runs through the moment recursion (§6) with its own parameters (§4)
+and its *C*, for up to 40 years.
+
+- Market and pension accounts: expected return, volatility and charges.
+- Cash: its interest rate, with no spread.
+- The means add up. The standard deviations add up too, as if the accounts moved together; this
+  errs wide.
+- The p10, p50 and p90 at each month come from a lognormal fit (§6).
+- Amounts are in pounds of the day, not deflated. A target is the owner's amount when they reach it.
+
+**Reached:** the first month in which p50 ≥ target (the median date). The p90 path gives the
+earliest likely month, and the p10 path the latest.
+
+**Status:**
+
+1. **reached**: value counted ≥ target;
+2. **on track**: the median date is on or before the target date;
+3. **behind**: it is after, or beyond the horizon;
+4. with no target date, just the dates.
+
+**More a month:** to reach the target by its date *T* months away, at the median:
+*X* = (target − p50<sub>T</sub>) ÷ Σ<sub>t=0..T−1</sub> (1 + *g*)<sup>T−t</sup>, rounded up.
+*g* is the accounts' median monthly growth after charges, weighted by value.

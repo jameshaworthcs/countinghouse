@@ -579,8 +579,17 @@ export function dataRoutes(ctx: AppContext): Hono {
   app.get('/goals', (c) => c.json(store.goals));
   app.put('/goals', async (c) => {
     const list = await readJson(c, z.array(GoalSchema.omit({ createdAt: true, updatedAt: true }).extend({ createdAt: z.string().optional() })));
+    const ids = new Set<string>();
+    for (const g of list) {
+      if (ids.has(g.id)) throw new StoreError(`Two goals are called "${g.id}".`);
+      ids.add(g.id);
+      const missing = g.accountIds.find((id) => !store.account(id));
+      if (missing) throw new StoreError(`${g.name}: there is no account "${missing}".`);
+      if ((g.kind ?? 'savings') === 'emergency-fund' ? !g.months : g.targetAmount === undefined) throw new StoreError(g.kind === 'emergency-fund' ? `${g.name}: how many months of spending?` : `${g.name}: how much is the goal?`);
+    }
     const stamp = nowISO();
-    await store.setGoals(list.map((g) => ({ ...g, createdAt: g.createdAt ?? stamp, updatedAt: stamp })));
+    const before = new Map(store.goals.map((g) => [g.id, g]));
+    await store.setGoals(list.map((g) => ({ ...g, createdAt: before.get(g.id)?.createdAt ?? g.createdAt ?? stamp, updatedAt: stamp })));
     return c.json(store.goals);
   });
 

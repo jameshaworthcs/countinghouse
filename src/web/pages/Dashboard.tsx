@@ -9,6 +9,7 @@ import { ChartFrame, type LegendItem } from '../components/charts/common';
 import { TimeChart, type TimeSeries } from '../components/charts/TimeChart';
 import { TransactionList } from '../components/TransactionList';
 import { Badge, Button, Card, Callout, Delta, EmptyState, ErrorNote, Loading, Money, PageHeader, Segmented, Stat } from '../components/ui';
+import { GoalsPanel } from '../components/Goals';
 import { InsightsPanel } from '../components/Intel';
 import { DropZone } from '../components/Upload';
 import { qs, useApi } from '../lib/api';
@@ -344,6 +345,7 @@ export default function Dashboard() {
             <AccountsPanel accounts={s.accounts} />
             <div className="flex flex-col gap-5">
               <MonthlyPanel />
+              <GoalsPanel />
               <TaxPanel />
             </div>
           </section>

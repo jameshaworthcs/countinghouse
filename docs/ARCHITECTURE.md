@@ -23,7 +23,7 @@ Hono server  (Node 24, tsx; 127.0.0.1:4750 live, 4760 in development)
    │    └─ commitDraft → Store (+ document archived, import record written)
    ├─ InboxWatcher: inbox/ → ImportService
    └─ Analytics (cached per store version)
-        BalanceEngine · Coverage · estate · cashflow · spending (+ computed signals) · recurring · budgets
+        BalanceEngine · Coverage · estate · cashflow · spending (+ computed signals) · recurring · budgets · goals
         params (per account and fund, from assumptions, research and statements) · model (pure
         projection, bands, retirement, fee drag) · projections · investments · allowances
         selfassessment · monthly · capture list · health (+coverage, FSCS)
