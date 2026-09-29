@@ -95,6 +95,8 @@ duckdb -c "select category, sum(amount) from read_json('data/transactions/*/*.js
 ```
 
 The app commits every change to `data/` automatically, so git history is a complete audit log.
+Every night the whole repository is backed up, encrypted, off the machine (docs/DEPLOY.md,
+Operations).
 Format changes are handled by versioned migrations, and derived fields (payees, categories,
 transfer links) can be recomputed from stored source fields at any time. You never need to
 re-import old documents. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).

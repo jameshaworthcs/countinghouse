@@ -200,3 +200,7 @@ as invariants.
     of a type counted as matching evidence.
   - One case was corrected after the baseline. The Starling screenshot's "Today" could not be
     dated without a capture date, so its feed now shows dates.
+- **Backups ride the host's encrypted nightly backup (the owner chose option A).** The host's
+  backup script writes the finance repository as its own `age`-encrypted file into a replicated
+  backup tree, verified by cloning it and kept for 14 days. No third party holds a copy, even
+  encrypted, and the repository keeps no remote. A restore drill passed on 29 September 2026.
