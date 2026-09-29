@@ -285,8 +285,13 @@ opened after D (`openedOn`), so it held nothing then. Accounts with no data at a
   - An approximate figure given today leaves every change empty until older data arrives.
 
 **Complete from** (`completeFromDate`, the estate chart): the latest first-data date among
-accounts that were already open before their data starts. The chart marks the total before it as
-partial.
+accounts that were already open before their data starts.
+
+- The chart marks the total before it as partial.
+- It draws a history only with at least two sampled dates from then on; otherwise it says from
+  when every account has data.
+- The headline says how much of today's value comes from estimated balances, and from how many
+  accounts.
 
 **Stale accounts:** an open account whose latest data is more than `settings.staleAfterDays` old
 (default 35), or `YEARLY_STALE_AFTER_DAYS` = 400 for accounts updated once a year (pensions with
@@ -360,14 +365,37 @@ Deterministic rules with named thresholds (`SIGNAL_RULES` in `analytics/spending
 
 - Interest on taxable accounts: `interest` rows, replaced per account by interest-certificate
   figures.
-- Compared against the allowance for your tax band.
+- Compared against the allowance for your tax band. With no band set, the basic-rate allowance
+  stands in, labelled as assumed.
 
 **Dividends:** dividends outside ISAs and pensions, plus vouchers, against the dividend allowance.
 
-## 12. Money-weighted return (XIRR)
+## 12. Paid in, growth and money-weighted return (`analytics/investments.ts`)
 
-- Flows: the first recorded value as money put in, later external flows, and today's value as
+**Paid in** (per account), the first that applies:
+
+- the total paid in on the latest valuation that states one;
+  - approximate figures count only when you entered a total with them;
+- Σ external flows (contributions, employer, relief, bonus, withdrawals, transfers), only when they
+  go back to the start;
+  - every valuation before the first flow is nothing, and there is one;
+  - or the first flow comes within 31 days of `openedOn`;
+- otherwise not known: a few months of statements are not everything paid in.
+
+**Growth** = value − (paid in + a LISA bonus the provider reports separately), only with both
+known. It is marked when the value is an estimate.
+
+**Totals:**
+
+- Paid in and growth are summed over the accounts where both are known, with the rest counted as
+  not known.
+- An unknown paid in never turns an account's value into growth.
+
+**Money-weighted return (XIRR):**
+
+- Flows: the first real valuation as money put in, later external flows, and the end value as
   money out.
+  - The end value is today's value, or the last real valuation when today's is an estimate.
 - Solve Σ F_i / (1+r)^(t_i) = 0 with t in years (days/365.25).
 - Newton's method, with bisection on [−0.99, 5] as a fallback.
 - Undefined for spans under a month.
@@ -406,3 +434,13 @@ A transaction counts as follows (`classifyFlow`):
 - **Income:** an income category (refunds excepted).
 - **Spending:** an expense category, or refunds, which count as negative spending.
 - **Uncategorised:** by sign.
+
+**Spent this month** (the Overview, `monthToDate`):
+
+- Σ spending from the 1st to today.
+- Unknown (not £0) until some day of the month has data for every account (§3, joint coverage).
+- The change is like for like: day *n* of this month against day *n* of last month, while last
+  month has one.
+  - Only pairs where both days have data for every account count.
+  - It needs pairs for at least half the days so far (`SIGNAL_RULES.minCoverage`); otherwise a
+    note says what is missing.

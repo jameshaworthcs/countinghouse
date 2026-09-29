@@ -33,7 +33,10 @@ function EstateChart() {
   const d = q.data;
   const color = grouping === 'wrapper' ? wrapperColor : accessColor;
   // Before every account has data the total leaves some out: no total line there, only what is known.
-  const partialBefore = d?.completeFrom ? d.dates.findIndex((x) => x >= d.completeFrom!) : -1;
+  const firstComplete = d?.completeFrom ? d.dates.findIndex((x) => x >= d.completeFrom!) : 0;
+  const partialBefore = d && firstComplete < 0 ? d.dates.length : firstComplete;
+  // A history needs at least two days on which every account has data.
+  const history = d ? d.dates.length - partialBefore >= 2 : false;
   const series: TimeSeries[] = d
     ? [
         ...d.groups.map((g) => ({ id: g.id, label: g.label, color: color(g.id), values: g.values, kind: 'area' as const, stack: true })),
@@ -46,7 +49,7 @@ function EstateChart() {
     <ChartFrame
       title="Estate value over time"
       subtitle={`${grouping === 'wrapper' ? 'By tax wrapper; debts below the line' : 'By when you could spend it'}${d && requested && d.dates[0]! > requested ? `. Your data starts on ${formatDate(d.dates[0]!)}` : ''}`}
-      legend={legend}
+      legend={history ? legend : undefined}
       loading={q.isFetching}
       actions={
         <>
@@ -75,10 +78,12 @@ function EstateChart() {
       }
     >
       {d ? (
-        d.dates.length > 1 ? (
+        history ? (
           <TimeChart dates={d.dates} series={series} height={280} partialBefore={partialBefore} partialLabel={d.completeFrom ? `Not every account has data before ${formatDate(d.completeFrom, { year: false })}` : undefined} ariaLabel="Estate value over time" />
         ) : (
-          <div className="py-12 text-center text-sm text-ink-3">Not enough history yet.</div>
+          <div className="py-12 text-center text-sm text-ink-3">
+            {d.completeFrom ? `Every account has data only from ${formatDate(d.completeFrom)}. Older statements or balances will draw the history.` : 'Not enough history yet.'}
+          </div>
         )
       ) : (
         <Loading />
@@ -161,7 +166,7 @@ function TaxPanel() {
         <Meter label="ISA allowance" used={a.isa.used} limit={a.isa.allowance} atLeast={a.isa.incomplete !== null} />
         {a.lisa && <Meter label="Lifetime ISA" used={a.lisa.contributed} limit={a.lisa.allowance} atLeast={a.lisa.incomplete !== null} sub={<>Bonus <Money value={a.lisa.bonusExpected} decimals={0} /></>} />}
         <Meter label="Pension annual allowance" used={a.pension.total} limit={a.pension.annualAllowance} atLeast={a.pension.incomplete !== null} sub="Incl. employer and tax relief" />
-        <Meter label="Savings interest vs allowance" used={a.savings.interest} limit={a.savings.allowance} atLeast={a.savings.incomplete !== null} overLabel="Taxable" sub={`${a.savings.band} rate PSA`} />
+        <Meter label="Savings interest vs allowance" used={a.savings.interest} limit={a.savings.allowance} atLeast={a.savings.incomplete !== null} overLabel="Taxable" sub={`${a.savings.band} rate PSA${a.savings.bandAssumed ? ' (assumed)' : ''}`} />
       </div>
     </Card>
   );
@@ -208,12 +213,7 @@ function Kpis({ summary }: { summary: SummaryResponse }) {
   );
   return (
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-      <Stat
-        label="Spent this month"
-        value={<Money value={m.spending} decimals={0} />}
-        delta={m.previous !== null ? <Delta value={m.spending - m.previous} upIsGood={false} label="vs last month so far" /> : undefined}
-        sub={m.previous === null ? `no data for ${formatDate(m.previousFrom, { year: false })} – ${formatDate(m.previousTo, { year: false })} to compare` : undefined}
-      />
+      <Stat label="Spent this month" value={<Money value={m.spending} decimals={0} />} delta={m.change !== null ? <Delta value={m.change} upIsGood={false} label="vs last month so far" /> : undefined} sub={m.note ?? undefined} />
       <Stat label="Savings rate" value={pct(k.savingsRate, 0)} sub={k.monthlySaving !== null ? <span>{money(k.monthlySaving, { decimals: 0 })} a month saved · {basis}</span> : basis} />
       <Stat label="Cash runway" value={k.runwayMonths !== null ? `${k.runwayMonths.toFixed(1)} months` : '—'} sub={k.runwayMonths !== null ? 'accessible cash ÷ monthly spending' : basis} />
       <Stat label="Pensions" value={<Money value={pensions} decimals={0} />} sub={<Link to="/investments" className="text-accent hover:underline">Retirement outlook</Link>} />
@@ -270,6 +270,7 @@ export default function Dashboard() {
   if (q.error) return <ErrorNote error={q.error} />;
   if (!s) return <Loading />;
   const first = data.profile.name ? `, ${data.profile.name.split(' ')[0]}` : '';
+  const estimates = s.accounts.filter((a) => a.includeInNetWorth && a.estimated && a.balanceGBP);
   return (
     <div>
       <PageHeader title={`Overview${first}`} subtitle={formatDate(s.asOf)} actions={s.hasData ? <Link to="/import"><Button variant="primary" icon={<Upload className="size-4" />}>Import</Button></Link> : undefined} />
@@ -306,6 +307,11 @@ export default function Dashboard() {
               <div className="mt-1.5 text-[12.5px] text-ink-3">
                 Everything you hold, minus <Money value={Math.abs(s.estate.liabilities)} decimals={0} /> you owe
               </div>
+              {estimates.length > 0 && (
+                <div className="mt-1 text-[12.5px] text-ink-3">
+                  Includes estimates for {estimates.length} account{estimates.length > 1 ? 's' : ''}: <Money value={estimates.reduce((sum, a) => sum + (a.balanceGBP ?? 0), 0)} decimals={0} />
+                </div>
+              )}
               <ul className="mt-4 flex flex-col gap-1.5 border-t border-line pt-3">
                 {s.deltas.map((d) => (
                   <li key={d.id} className="flex items-center justify-between gap-2 text-[13px]">
@@ -313,6 +319,7 @@ export default function Dashboard() {
                     <Delta value={d.change} percent={d.pct} />
                   </li>
                 ))}
+                {s.deltas.every((d) => d.change === null) && <li className="text-[12px] text-ink-3">Changes show once every account has data from before then.</li>}
               </ul>
               <ul className="mt-4 flex flex-col gap-1 border-t border-line pt-3 text-[12.5px]">
                 {groups.map((g) => (

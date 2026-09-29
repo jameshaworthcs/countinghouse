@@ -71,7 +71,13 @@ export function investments(store: Store, engine: BalanceEngine): InvestmentsRes
   const accounts: InvestmentAccountSummary[] = [];
   const allocation = new Map<string, number>();
   let totalValue = 0;
-  let totalContrib = 0;
+  // Paid in and growth only over accounts where both the value and what went in are known: an
+  // account whose contributions are not known yet would otherwise count its whole value as growth.
+  let knownContrib = 0;
+  let knownInvested = 0;
+  let knownGrowth = 0;
+  let known = 0;
+  let paidInUnknown = 0;
   let pensions = 0;
   let isas = 0;
   let annualCharges = 0;
@@ -80,15 +86,24 @@ export function investments(store: Store, engine: BalanceEngine): InvestmentsRes
   for (const a of store.accounts.filter((x) => x.status === 'open' && isInvestmentAccount(x))) {
     const meta = ACCOUNT_TYPE_META[a.type];
     const latest = engine.latest(a.id, now);
-    const snaps = store.balances(a.id);
-    const lastSnap = snaps[snaps.length - 1];
+    // Approximate figures stand in for the value only: they are not history, and they give the
+    // total paid in only when you entered one with them.
+    const all = store.balances(a.id);
+    const snaps = all.filter((b) => !b.approximate);
+    const lastSnap = all.findLast((b) => !b.approximate || b.contributions !== undefined);
     const flowsTx = store.transactions(a.id).filter((t) => t.category && EXTERNAL_FLOW_CATEGORIES.has(t.category));
+    // Summed contributions are what went in only when they go back to the start: every valuation
+    // before the first of them is nothing, and there is one, or the first comes within a month of
+    // the account's opening. Otherwise they are only what went in since the data starts.
+    const firstFlow = flowsTx.reduce<string | null>((m, t) => (m === null || t.date < m ? t.date : m), null);
+    const before = firstFlow ? snaps.filter((b) => b.date < firstFlow) : [];
+    const fromStart = firstFlow !== null && before.every((b) => Math.abs(b.balance) < 1) && (before.length > 0 || (a.openedOn !== undefined && diffDays(a.openedOn, firstFlow) <= 31));
     let contributions: number | null = null;
     let contributionsSource: InvestmentAccountSummary['contributionsSource'] = null;
     if (lastSnap?.contributions !== undefined) {
       contributions = lastSnap.contributions;
       contributionsSource = 'provider';
-    } else if (flowsTx.length) {
+    } else if (flowsTx.length && fromStart) {
       contributions = fromMinor(flowsTx.reduce((s, t) => s + toMinor(t.amount), 0));
       contributionsSource = 'transactions';
     }
@@ -99,16 +114,19 @@ export function investments(store: Store, engine: BalanceEngine): InvestmentsRes
     const invested = contributions !== null ? roundMoney(contributions + bonusSeparate) : null;
     const growth = value !== null && invested !== null ? subMoney(value, invested) : null;
     // Money-weighted return over the period with valuations: the first recorded value as if
-    // invested then, later external flows, and today's value.
+    // invested then, later external flows, and today's value, or the last valuation when today's
+    // value is only an estimate.
     const firstSnap = snaps[0];
-    const cashFlows = firstSnap ? [{ date: firstSnap.date, amount: -firstSnap.balance }, ...flowsTx.filter((t) => t.date > firstSnap.date).map((t) => ({ date: t.date, amount: -t.amount }))] : [];
-    const irr = value !== null && firstSnap && firstSnap.balance > 0 ? xirr([...cashFlows, { date: now, amount: value }]) : null;
+    const lastReal = snaps[snaps.length - 1];
+    const end = value !== null && !latest?.estimated ? { date: now, amount: value } : lastReal && lastReal !== firstSnap ? { date: lastReal.date, amount: lastReal.balance } : null;
+    const cashFlows = firstSnap && end ? [{ date: firstSnap.date, amount: -firstSnap.balance }, ...flowsTx.filter((t) => t.date > firstSnap.date && t.date <= end.date).map((t) => ({ date: t.date, amount: -t.amount }))] : [];
+    const irr = end && firstSnap && firstSnap.balance > 0 ? xirr([...cashFlows, end]) : null;
 
     let cumulative = 0;
     const flowIdx = [...flowsTx];
     const history = snaps.map((s) => {
       while (flowIdx.length && flowIdx[0]!.date <= s.date) cumulative += toMinor(flowIdx.shift()!.amount);
-      return { date: s.date, value: s.balance, contributions: s.contributions ?? (flowsTx.length ? fromMinor(cumulative) : null) };
+      return { date: s.date, value: s.balance, contributions: s.contributions ?? (fromStart ? fromMinor(cumulative) : null) };
     });
     const holdingsList = store.holdings(a.id);
     const holdings = holdingsList[holdingsList.length - 1] ?? null;
@@ -132,6 +150,7 @@ export function investments(store: Store, engine: BalanceEngine): InvestmentsRes
       type: a.type,
       typeLabel: meta.label,
       value,
+      estimated: latest?.estimated ?? false,
       asOf: engine.lastDataDate(a.id),
       contributions,
       contributionsSource,
@@ -159,7 +178,14 @@ export function investments(store: Store, engine: BalanceEngine): InvestmentsRes
       if (meta.pension) pensions += toMinor(value);
       if (meta.isa) isas += toMinor(value);
     }
-    if (contributions !== null && a.includeInNetWorth) totalContrib += toMinor(contributions);
+    if (value !== null && a.includeInNetWorth) {
+      if (growth !== null && contributions !== null && invested !== null) {
+        known++;
+        knownContrib += toMinor(contributions);
+        knownInvested += toMinor(invested);
+        knownGrowth += toMinor(growth);
+      } else paidInUnknown++;
+    }
   }
 
   // Retirement outlook.
@@ -217,8 +243,10 @@ export function investments(store: Store, engine: BalanceEngine): InvestmentsRes
   return {
     totals: {
       value: fromMinor(totalValue),
-      contributions: fromMinor(totalContrib),
-      growth: fromMinor(totalValue - totalContrib),
+      contributions: known ? fromMinor(knownContrib) : null,
+      growth: known ? fromMinor(knownGrowth) : null,
+      growthPct: known && knownInvested ? knownGrowth / knownInvested : null,
+      paidInUnknown,
       pensions: fromMinor(pensions),
       isas: fromMinor(isas),
       annualCharges: fromMinor(annualCharges),

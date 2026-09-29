@@ -2,13 +2,13 @@
 
 import { ACCESS_GROUP_LABELS, ACCESS_GROUPS, WRAPPER_GROUP_LABELS, WRAPPER_GROUPS } from '../../shared/accounts';
 import type { Alert, SummaryResponse } from '../../shared/api';
-import { addDays, addYears, startOfMonth, today } from '../../shared/dates';
-import { formatMoney, fromMinor } from '../../shared/money';
+import { addDays, addYears, today } from '../../shared/dates';
+import { formatMoney } from '../../shared/money';
 import { daysLeftInTaxYear, taxYearOf } from '../../shared/uk';
 import type { Store } from '../store';
 import { allowances } from './allowances';
 import { BalanceEngine } from './balances';
-import { cashflow, flows } from './cashflow';
+import { cashflow } from './cashflow';
 import { AssumptionSet } from '../../shared/assumptions';
 import { computeBaseline, standardPeriods } from './baseline';
 import { Coverage } from './coverage';
@@ -19,7 +19,7 @@ import { monthlyChecklist } from './monthly';
 import { projections, type ProjectionOptions } from './projections';
 import { detectRecurring } from './recurring';
 import { selfAssessment } from './selfassessment';
-import { previousPeriod, SIGNAL_RULES, spending } from './spending';
+import { monthToDate as monthToDateSpending, spending } from './spending';
 
 export class Analytics {
   private cache = new Map<string, { version: number; value: unknown }>();
@@ -128,17 +128,7 @@ export class Analytics {
             basis: b.basis.kind === 'months' ? `${b.basis.months.length} complete month${b.basis.months.length > 1 ? 's' : ''}` : `${b.basis.days} covered days`,
           }
         : { savingsRate: null, monthlySaving: null, monthlySpending: null, runwayMonths: null, confidence: 'low' as const, basis: b.reason ?? 'Not enough data yet' };
-      // This month so far against the same days last month, when last month has the data.
-      const monthStart = startOfMonth(now);
-      const prevMonth = previousPeriod(monthStart, now);
-      const spent = (from: string, to: string) => fromMinor(flows(this.store, from, to).reduce((s, f) => s + (f.cls === 'spending' ? f.minor : 0), 0));
-      const prevCovered = this.coverageIndex.joint(prevMonth.from, prevMonth.to);
-      const monthToDate = {
-        spending: spent(monthStart, now),
-        previous: prevCovered.days >= SIGNAL_RULES.minCoverage * prevCovered.totalDays ? spent(prevMonth.from, prevMonth.to) : null,
-        previousFrom: prevMonth.from,
-        previousTo: prevMonth.to,
-      };
+      const monthToDate = monthToDateSpending(this.store, this.coverageIndex, now);
       const cov = this.coverageIndex.summary(3, now);
       const alerts: Alert[] = [];
       const health = this.health();

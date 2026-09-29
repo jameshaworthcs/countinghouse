@@ -128,7 +128,7 @@ function Allowances({ a }: { a: AllowancesResponse }) {
         <Lines lines={a.pension.lines} />
         <Notes notes={a.pension.notes} />
       </Card>
-      <Card title="Savings interest" description={`Interest outside ISAs vs your Personal Savings Allowance (${a.savings.band} rate)`}>
+      <Card title="Savings interest" description={`Interest outside ISAs vs your Personal Savings Allowance (${a.savings.band} rate${a.savings.bandAssumed ? ', assumed' : ''})`}>
         <Meter label="Interest earned" used={a.savings.interest} limit={a.savings.allowance} atLeast={a.savings.incomplete !== null} overLabel="Taxable" />
         <Incomplete note={a.savings.incomplete} />
         <Lines lines={a.savings.lines} />

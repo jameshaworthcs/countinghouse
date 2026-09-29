@@ -342,7 +342,7 @@ export function allowances(store: Store, label?: string, now: ISODate = today())
       notes: pensionNotes,
       incomplete: pensionIncomplete,
     },
-    savings: { interest: fromMinor(interestMinor), allowance: psa, band, remaining: fromMinor(Math.max(0, toMinor(psa) - interestMinor)), lines: interestLines, notes: savingsNotes, incomplete: interestIncomplete },
+    savings: { interest: fromMinor(interestMinor), allowance: psa, band, bandAssumed: !store.profile.taxBand, remaining: fromMinor(Math.max(0, toMinor(psa) - interestMinor)), lines: interestLines, notes: savingsNotes, incomplete: interestIncomplete },
     dividends: {
       amount: fromMinor(dividendsMinor),
       allowance: params.dividendAllowance,

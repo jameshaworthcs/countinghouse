@@ -74,8 +74,12 @@ export interface SummaryResponse {
     confidence: 'high' | 'medium' | 'low';
     basis: string;
   };
-  /** Spending this month so far; `previous` is the same days last month, null when those days lack data. */
-  monthToDate: { spending: number; previous: number | null; previousFrom: string; previousTo: string };
+  /**
+   * Spending this month so far: null until some day of it has data for every account. `change` is
+   * against the same days last month, over the days both months have data; `note` says why a
+   * figure is missing.
+   */
+  monthToDate: { spending: number | null; change: number | null; note: string | null };
   coverage: { lastCompleteMonth: string | null; jointTo: string | null; limiting: { accountId: string; name: string; missingDays: number }[] };
 }
 
@@ -337,7 +341,8 @@ export interface AllowancesResponse {
     notes: string[];
     incomplete: string | null;
   };
-  savings: { interest: number; allowance: number; band: string; remaining: number; lines: AllowanceLine[]; notes: string[]; incomplete: string | null };
+  /** `bandAssumed`: no tax band is set, so the basic-rate allowance stands in. */
+  savings: { interest: number; allowance: number; band: string; bandAssumed: boolean; remaining: number; lines: AllowanceLine[]; notes: string[]; incomplete: string | null };
   dividends: { amount: number; allowance: number; remaining: number; lines: AllowanceLine[] };
   ruleNotes: string[];
 }
@@ -383,7 +388,10 @@ export interface InvestmentAccountSummary {
   type: Account['type'];
   typeLabel: string;
   value: number | null;
+  /** The value is an estimate: an approximate figure you gave, or one rolled back from data. */
+  estimated: boolean;
   asOf: string | null;
+  /** Total paid in: as the provider reports it, or summed from contributions that go back to the start. */
   contributions: number | null;
   contributionsSource: 'provider' | 'transactions' | null;
   growth: number | null;
@@ -399,7 +407,11 @@ export interface InvestmentAccountSummary {
 }
 
 export interface InvestmentsResponse {
-  totals: { value: number; contributions: number; growth: number; pensions: number; isas: number; annualCharges: number };
+  /**
+   * `contributions` (paid in) and `growth` cover only the accounts where both the value and what
+   * went in are known, null when none are; `paidInUnknown` counts the accounts left out.
+   */
+  totals: { value: number; contributions: number | null; growth: number | null; growthPct: number | null; paidInUnknown: number; pensions: number; isas: number; annualCharges: number };
   accounts: InvestmentAccountSummary[];
   allocation: { assetClass: string; value: number; share: number }[];
   retirement: {

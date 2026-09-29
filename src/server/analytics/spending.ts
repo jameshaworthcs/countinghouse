@@ -1,8 +1,8 @@
 // Spending habits: where the money goes, how that is changing, and patterns worth knowing about.
 
-import type { Signal, SpendingResponse } from '../../shared/api';
+import type { Signal, SpendingResponse, SummaryResponse } from '../../shared/api';
 import { CategoryIndex } from '../../shared/categories';
-import { addDays, addMonths, diffDays, endOfMonth, monthKey, startOfMonth, today, weekday, eachMonth } from '../../shared/dates';
+import { addDays, addMonths, diffDays, endOfMonth, formatDate, monthKey, startOfMonth, today, weekday, eachMonth, type ISODate } from '../../shared/dates';
 import { cleanPayee } from '../../shared/merchants';
 import { formatMoney, formatPercent, fromMinor } from '../../shared/money';
 import { taxYearOf } from '../../shared/uk';
@@ -53,6 +53,44 @@ export function previousPeriod(from: string, to: string): { from: string; to: st
   const days = diffDays(from, to) + 1;
   const previousTo = addDays(from, -1);
   return { from: addDays(previousTo, -(days - 1)), to: previousTo };
+}
+
+/**
+ * Spending this month so far, and how it compares with the same days last month (FORMULAS §14).
+ * Unknown until some day of the month has data for every account. The change is like for like:
+ * only days with data for every account in both months count, and they must be at least half the
+ * days so far.
+ */
+export function monthToDate(store: Store, coverage: Coverage, now: ISODate): SummaryResponse['monthToDate'] {
+  const from = startOfMonth(now);
+  const prev = previousPeriod(from, now);
+  const cov = coverage.joint(from, now);
+  const prevCov = coverage.joint(prev.from, prev.to);
+  const covered = (c: JointCoverage, d: ISODate) => c.intervals.some((i) => i.from <= d && d <= i.to);
+  const byDay = new Map<ISODate, number>();
+  for (const f of flows(store, prev.from, now)) if (f.cls === 'spending') byDay.set(f.t.date, (byDay.get(f.t.date) ?? 0) + f.minor);
+  let spent = 0;
+  for (const [d, minor] of byDay) if (d >= from) spent += minor;
+  // Day n of this month against day n of last month, while last month has one.
+  let compared = 0;
+  let current = 0;
+  let previous = 0;
+  for (let d = from, p = prev.from; d <= now && p <= prev.to; d = addDays(d, 1), p = addDays(p, 1)) {
+    if (!covered(cov, d) || !covered(prevCov, p)) continue;
+    compared++;
+    current += byDay.get(d) ?? 0;
+    previous += byDay.get(p) ?? 0;
+  }
+  const comparable = compared >= SIGNAL_RULES.minCoverage * cov.totalDays;
+  const note =
+    cov.days === 0
+      ? 'no day this month has data for every account yet'
+      : comparable
+        ? null
+        : cov.days < SIGNAL_RULES.minCoverage * cov.totalDays
+          ? `only ${cov.days} of ${cov.totalDays} days so far have data for every account`
+          : `not enough data for ${formatDate(prev.from, { year: false })} – ${formatDate(prev.to, { year: false })} to compare`;
+  return { spending: cov.days > 0 ? fromMinor(spent) : null, change: comparable ? fromMinor(current - previous) : null, note };
 }
 
 export function spending(store: Store, from: string, to: string, coverage: Coverage = new Coverage(store)): SpendingResponse {

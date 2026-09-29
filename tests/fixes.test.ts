@@ -136,6 +136,8 @@ describe('the Overview with a first snapshot', () => {
     expect(s.estate.value).toBe(108862);
     // Thirty days ago the ISA had no data: that is not £110,000 of growth.
     expect(s.deltas.map((d) => d.change)).toEqual([null, null, null]);
+    // With no transactions, this month's spending is unknown, not £0.
+    expect(s.monthToDate.spending).toBeNull();
     expect(s.alerts.find((a) => a.id === 'profile')).toMatchObject({ title: 'Add your tax band', detail: 'It drives your savings allowance and tax figures.' });
   });
 
@@ -157,6 +159,42 @@ describe('the Overview with a first snapshot', () => {
     // Without an opening date, its first balance could be years of history: no comparison.
     await store.setAccounts([acct('current', 'current'), acct('saver', 'savings')]);
     expect(new Analytics(store).summary({}).deltas.map((d) => d.change)).toEqual([null, null, null]);
+  });
+});
+
+describe('spending this month so far', () => {
+  const now = '2026-09-29';
+  const month = async (rows: Transaction[]) => {
+    const { monthToDate } = await import('../src/server/analytics/spending');
+    const { Coverage } = await import('../src/server/analytics/coverage');
+    await store.setAccounts([acct('current', 'current')]);
+    if (rows.length) await store.addTransactions(rows, 't');
+    return monthToDate(store, new Coverage(store), now);
+  };
+
+  it('is unknown, not £0, before any day of the month has data', async () => {
+    expect(await month([])).toEqual({ spending: null, change: null, note: 'no day this month has data for every account yet' });
+  });
+
+  it('compares like for like: the same days last month, where both months have data', async () => {
+    const m = await month([
+      tx('current', '2026-08-01', -30, 'TESCO'),
+      tx('current', '2026-08-15', -20, 'PRET'),
+      tx('current', '2026-08-31', -99, 'RENT'), // after 29 August: not one of the days compared
+      tx('current', '2026-09-01', -80, 'TESCO'),
+      tx('current', '2026-09-29', 1, 'INTEREST'),
+    ]);
+    expect(m).toEqual({ spending: 80, change: 30, note: null });
+  });
+
+  it('makes no comparison on a sliver of the month, or without last month’s data', async () => {
+    const early = await month([tx('current', '2026-08-01', -30, 'TESCO'), tx('current', '2026-09-01', -80, 'TESCO'), tx('current', '2026-09-05', -5, 'PRET')]);
+    expect(early).toEqual({ spending: 85, change: null, note: 'only 5 of 29 days so far have data for every account' });
+  });
+
+  it('says when last month has no data to compare with', async () => {
+    const m = await month([tx('current', '2026-09-01', -80, 'TESCO'), tx('current', '2026-09-29', -5, 'PRET')]);
+    expect(m).toEqual({ spending: 85, change: null, note: 'not enough data for 1 Aug – 29 Aug to compare' });
   });
 });
 

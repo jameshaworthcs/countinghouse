@@ -73,6 +73,7 @@ const ANALYSIS_SYSTEM = `You are the analyst of a private UK personal-finance ap
 - UK context: tax years run 6 April to 5 April; ISA, LISA and pension allowances; the Personal Savings Allowance.
 - Not regulated advice: say what the data shows and what may be worth considering. Never recommend specific products or providers.
 - Respect coverage: where completeData is false or an account's data is missing, say so or avoid the conclusion.
+- A balance or value marked estimated is a rough figure (often one the owner gave), not a statement figure: draw nothing from its precision. A null figure is not known; never read it as zero.
 - One to three sentences each, British English, plain words, no hype, no exclamation marks. Address the owner as "you".
 - Do not repeat earlier insights (in the digest) unless something changed; weigh the owner's feedback on them.
 - Confidence "high" only when the data clearly shows it. Return fewer insights, or none, rather than weak ones.`;
@@ -543,7 +544,7 @@ const refreshAssumptions: JobKindDef = {
 
 const insightsAfterImport: JobKindDef = {
   kind: 'insights-after-import',
-  promptVersion: 'insights-after-import-1',
+  promptVersion: 'insights-after-import-2',
   privacy: 'personal',
   tools: ['Read'],
   label: ({ params }) => `Insights from ${(params.importIds as string[] | undefined)?.length ?? 0} new import(s)`,
@@ -569,7 +570,7 @@ const insightsAfterImport: JobKindDef = {
 
 const monthlyReview: JobKindDef = {
   kind: 'monthly-review',
-  promptVersion: 'monthly-review-1',
+  promptVersion: 'monthly-review-2',
   privacy: 'personal',
   tools: ['Read'],
   label: ({ params }) => `Month in review: ${String(params.month)}`,

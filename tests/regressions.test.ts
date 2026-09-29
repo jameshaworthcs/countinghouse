@@ -102,6 +102,51 @@ describe('investment returns', () => {
   });
 });
 
+describe('paid in and growth are only what is known', () => {
+  let dir: string;
+  let store: Store;
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), 'finance-inv-'));
+    store = await Store.open(dir);
+    await store.setCategories(defaultCategories());
+  });
+  afterEach(async () => {
+    store.stopWatching();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('an account whose paid in is not known adds its value, not growth', async () => {
+    await store.setAccounts([acct('isa', 'stocks_isa'), acct('lisa', 'lisa')]);
+    await store.addBalances([bal('isa', '2026-09-29', 60_000, { kind: 'manual', approximate: true }), bal('lisa', '2026-06-30', 9_000, { contributions: 8_000 })], 'test');
+    const inv = investments(store, new BalanceEngine(store));
+    expect(inv.totals).toMatchObject({ value: 69_000, contributions: 8_000, growth: 1_000, growthPct: 0.125, paidInUnknown: 1 });
+    expect(inv.accounts.find((a) => a.id === 'isa')).toMatchObject({ contributions: null, growth: null, estimated: true, xirr: null, history: [] });
+  });
+
+  it('contributions summed from transactions are paid in only when they go back to the start', async () => {
+    await store.setAccounts([acct('late', 'stocks_isa'), { ...acct('opened', 'stocks_isa'), openedOn: '2026-01-05' }, acct('empty', 'stocks_isa')]);
+    await store.addBalances([bal('late', '2025-10-31', 50_000), bal('empty', '2025-12-31', 0)], 'test');
+    await store.addTransactions(
+      ['late', 'opened', 'empty'].flatMap((id) => [tx(id, '2026-01-10', 500, 'Contribution', { category: 'contribution' }), tx(id, '2026-02-10', 500, 'Contribution', { category: 'contribution' })]),
+      'test',
+    );
+    const inv = investments(store, new BalanceEngine(store));
+    const paidIn = Object.fromEntries(inv.accounts.map((a) => [a.id, a.contributions]));
+    // Years of an ISA before its first statement are not £1,000 paid in.
+    expect(paidIn).toEqual({ late: null, opened: 1_000, empty: 1_000 });
+  });
+
+  it('a newer approximate figure neither hides the provider’s paid in nor sets the return', async () => {
+    await store.setAccounts([acct('isa', 'stocks_isa')]);
+    await store.addBalances([bal('isa', '2025-09-15', 80_000, { contributions: 75_000 }), bal('isa', '2026-09-15', 100_000, { contributions: 90_000 }), bal('isa', '2026-09-29', 110_000, { kind: 'manual', approximate: true })], 'test');
+    const a = investments(store, new BalanceEngine(store)).accounts[0]!;
+    expect(a).toMatchObject({ value: 110_000, estimated: true, contributions: 90_000, growth: 20_000 });
+    // From the first valuation to the last real one: 80,000 to 100,000 in a year.
+    expect(a.xirr!).toBeCloseTo(0.25, 2);
+    expect(a.history.map((h) => h.value)).toEqual([80_000, 100_000]);
+  });
+});
+
 describe('payees for generic merchant matches', () => {
   it('uses the cleaned description rather than a generic label', () => {
     const c = new Categoriser([], new CategoryIndex(defaultCategories()), [acct('current', 'current')], []);

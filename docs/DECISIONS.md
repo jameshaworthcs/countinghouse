@@ -230,3 +230,12 @@ as invariants.
   a "Past 30 days" gain of thousands of per cent: the approximate figures given that day counted as growth.
   A change is now shown only when every account with data had data on the earlier day, or had not
   opened yet (FORMULAS §9). The profile alert asks only for what is missing.
+- **A first snapshot reads as one.** Seen on the live site after the setup from `tmp.json`:
+  - This month's spending is unknown, not £0, until some day of the month has data for every
+    account. Its change compares the same days of both months, where both have data.
+  - The estate chart draws a history only from two days on which every account has data.
+  - The headline says how much of the estate is estimated.
+  - Paid in and growth count only what is known. A value whose paid in is unknown is not growth,
+    and contributions summed from a few months of statements are not everything paid in.
+  - The analyst is told which figures are estimates, and that a null is not zero
+    (`insights-after-import-2`, `monthly-review-2`).

@@ -49,8 +49,8 @@ export default function Investments() {
       <PageHeader title="Investments & pensions" subtitle="ISAs, LISA, general accounts and pensions" />
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-5">
         <Stat label="Invested value" value={<Money value={d.totals.value} decimals={0} />} />
-        <Stat label="Paid in" value={<Money value={d.totals.contributions} decimals={0} />} sub="as reported or from your contributions" />
-        <Stat label="Growth" value={<Money value={d.totals.growth} decimals={0} />} sub={d.totals.contributions ? pct(d.totals.growth / d.totals.contributions, 1, true) : undefined} />
+        <Stat label="Paid in" value={<Money value={d.totals.contributions} decimals={0} />} sub={d.totals.paidInUnknown ? `not known yet for ${d.totals.paidInUnknown} account${d.totals.paidInUnknown > 1 ? 's' : ''}` : 'as reported or from your contributions'} />
+        <Stat label="Growth" value={<Money value={d.totals.growth} decimals={0} />} sub={d.totals.growthPct !== null ? `${pct(d.totals.growthPct, 1, true)}${d.totals.paidInUnknown ? ' on the accounts with paid in known' : ''}` : 'needs what you paid in'} />
         <Stat label="Pensions" value={<Money value={d.totals.pensions} decimals={0} />} sub={<>ISAs <Money value={d.totals.isas} decimals={0} /></>} />
         <Stat label="Charges this year" value={<Money value={d.totals.annualCharges} decimals={0} />} sub={d.totals.value ? `${pct(d.totals.annualCharges / d.totals.value, 2)} of the value` : undefined} />
       </div>
@@ -81,6 +81,7 @@ export default function Investments() {
                   </td>
                   <td className={cn(tableClasses.td, tableClasses.num, 'font-medium')}>
                     <Money value={a.value} decimals={0} />
+                    {a.estimated && <div className="text-[11px] font-normal text-ink-3">estimated</div>}
                   </td>
                   <td className={cn(tableClasses.td, tableClasses.num)}>
                     <Money value={a.contributions} decimals={0} />
@@ -90,6 +91,7 @@ export default function Investments() {
                       <>
                         <Money value={a.growth} decimals={0} />
                         <span className="ml-1 text-ink-3">{pct(a.growthPct, 1, true)}</span>
+                        {a.estimated && <div className="text-[11px] text-ink-3">from an estimate</div>}
                       </>
                     ) : (
                       '—'
@@ -144,7 +146,7 @@ export default function Investments() {
               ariaLabel={`${current.name} value and contributions`}
             />
           ) : (
-            <div className="py-10 text-center text-[13px] text-ink-3">One valuation so far. Upload a screenshot each month to build the history.</div>
+            <div className="py-10 text-center text-[13px] text-ink-3">{current.history.length ? 'One valuation so far. Upload a screenshot each month to build the history.' : 'No valuations yet. Upload a statement or screenshot to start the history.'}</div>
           )}
         </ChartFrame>
         <Card title="What you own" description="From the latest holdings of each account; accounts whose holdings are not known yet are shown apart">

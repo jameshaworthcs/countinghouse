@@ -60,11 +60,18 @@ async function main() {
   if (cookie) console.log('✓ login');
   const imports = (await (await fetch(`${base}/api/imports`, { headers: { host: '127.0.0.1', cookie } })).json()) as { pending: { id: string }[] };
   const pendingId = imports.pending[0]?.id;
+  // Account pages from whatever data is being shot: the first current account and the first ISA.
+  const boot = (await (await fetch(`${base}/api/bootstrap`, { headers: { host: '127.0.0.1', cookie } })).json()) as { accounts: { id: string; type: string }[] };
+  const txs = (await (await fetch(`${base}/api/transactions?limit=1`, { headers: { host: '127.0.0.1', cookie } })).json()) as { total: number };
+  const accountPage = (name: string, type: string): [string, string][] => {
+    const id = boot.accounts.find((a) => a.type === type)?.id;
+    return id ? [[name, `/accounts/${id}`]] : [];
+  };
   const pages: [string, string][] = [
     ['overview', '/'],
     ['accounts', '/accounts'],
-    ['account-current', '/accounts/current-account'],
-    ['account-isa', '/accounts/stocks-isa'],
+    ...accountPage('account-current', 'current'),
+    ...accountPage('account-isa', 'stocks_isa'),
     ['transactions', '/transactions'],
     ['spending', '/spending'],
     ['projections', '/projections'],
@@ -121,12 +128,13 @@ async function main() {
     await page.waitForSelector('[role="dialog"]', { timeout: 5_000 });
     await page.click('[role="dialog"] summary::-p-text(Correct a misread)');
   };
-  if (!only || 'transaction-drawer'.includes(only)) {
+  // Only with a transaction to open: a fresh data directory has none.
+  if (txs.total > 0 && (!only || 'transaction-drawer'.includes(only))) {
     await shoot('transaction-drawer', '/transactions', { width: 1440, height: 1500, theme: 'light', act: openDrawer });
     console.log('✓ transaction-drawer');
   }
   if (!only) {
-    await shoot('transaction-drawer', '/transactions', { width: 390, height: 844, theme: 'dark', mobile: true, act: openDrawer });
+    if (txs.total > 0) await shoot('transaction-drawer', '/transactions', { width: 390, height: 844, theme: 'dark', mobile: true, act: openDrawer });
     for (const [name, route] of [['overview', '/'], ['spending', '/spending'], ['projections', '/projections'], ['assumptions', '/assumptions'], ['review', pendingId ? `/import/${pendingId}` : '/import']] as [string, string][]) {
       await shoot(name, route, { width: 1440, height: 900, theme: 'dark' });
     }

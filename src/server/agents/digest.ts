@@ -25,7 +25,7 @@ export function buildDigest(store: Store, analytics: Analytics, opts: DigestOpti
   const summary = analytics.summary({});
   const coverage = analytics.coverage();
   const profile = store.profile;
-  const accounts = summary.accounts.map((a) => ({ id: a.id, name: a.name, type: a.type, institution: a.institutionName ?? null, balance: a.balanceGBP, asOf: a.asOf, stale: a.stale, inEstate: a.includeInNetWorth }));
+  const accounts = summary.accounts.map((a) => ({ id: a.id, name: a.name, type: a.type, institution: a.institutionName ?? null, balance: a.balanceGBP, estimated: a.estimated, asOf: a.asOf, stale: a.stale, inEstate: a.includeInNetWorth }));
   const cf = analytics.cashflow(startOfMonth(addMonths(now, -12)), now);
   const complete = new Set(coverage.completeMonths);
 
@@ -115,7 +115,7 @@ export function buildDigest(store: Store, analytics: Analytics, opts: DigestOpti
     },
     investments: {
       totals: inv.totals,
-      accounts: inv.accounts.map((a) => ({ id: a.id, name: a.name, type: a.type, value: a.value, chargesRate: r2(a.charges.rate * 10_000) / 10_000, chargesPerYear: a.charges.annual, expectedReturn: a.params.expectedReturn.value, expectedReturnSource: a.params.expectedReturn.source, holdings: a.params.holdings.map((h) => ({ name: h.name, value: Math.round(h.value), fundCharge: h.fundFee.value, fundChargeSource: h.fundFee.source })) })),
+      accounts: inv.accounts.map((a) => ({ id: a.id, name: a.name, type: a.type, value: a.value, estimated: a.estimated, paidIn: a.contributions, growth: a.growth, chargesRate: r2(a.charges.rate * 10_000) / 10_000, chargesPerYear: a.charges.annual, expectedReturn: a.params.expectedReturn.value, expectedReturnSource: a.params.expectedReturn.source, holdings: a.params.holdings.map((h) => ({ name: h.name, value: Math.round(h.value), fundCharge: h.fundFee.value, fundChargeSource: h.fundFee.source })) })),
       retirement: { potToday: inv.retirement.potToday, potAtRetirement: inv.retirement.pot, incomeAtRetirement: inv.retirement.income, withdrawalRate: inv.retirement.withdrawalRate.value, statePension: inv.retirement.statePension },
     },
     projection: recent?.available ? { basis: recent.basis, monthlyIncome: recent.monthly.income, monthlySpending: recent.monthly.spending, monthlyNet: recent.monthly.net, confidence: recent.confidence } : null,
