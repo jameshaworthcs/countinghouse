@@ -8,7 +8,7 @@ import { sectionChecks } from '../../shared/review';
 import type { AccountType, Draft, DraftSection } from '../../shared/schema';
 
 /** Checks whose failure means a figure was probably misread. */
-const READING_CHECKS = new Set(['reconcile', 'totals', 'period', 'future', 'card-signs', 'uncertain', 'holdings']);
+const READING_CHECKS = new Set(['reconcile', 'totals', 'period', 'future', 'balance-date', 'card-signs', 'uncertain', 'holdings']);
 
 const norm = (s: string) =>
   s

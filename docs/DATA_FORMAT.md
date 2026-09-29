@@ -154,7 +154,12 @@ Standalone figures from documents, used for Self Assessment:
 
 ## imports/&lt;yyyy&gt;/&lt;id&gt;.json
 
-- `document`: `{id, sha256, fileName, mediaType, size, path, capturedOn, capturedOnSource}`.
+- `document`: `{id, sha256, fileName, mediaType, size, path, capturedOn, capturedOnSource,
+  capturedAt?, image?}`.
+  - `capturedAt` is when a screenshot was taken, to the second, when its source gives a time
+    (same provenance as `capturedOn`).
+  - `image` is `{width, height, device?}`: the size in pixels, upright, and the make and model its
+    metadata names. With `capturedAt`, it tells which screenshots were taken together.
 - `extraction`: `{engine, engineVersion, detail, model, durationMs, costUsd, warnings, raw,
   verification?, alternative?}`.
   - `raw` is the engine's complete output, kept for audit and re-derivation.

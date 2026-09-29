@@ -609,6 +609,10 @@ export const DocumentRefSchema = z.object({
   /** Best-known capture date for screenshots and its provenance. */
   capturedOn: ISODateSchema.optional(),
   capturedOnSource: z.enum(DATE_SOURCES).optional(),
+  /** When a screenshot was taken, to the second, when its source gives a time (same provenance). */
+  capturedAt: TimestampSchema.optional(),
+  /** An image's size in pixels (upright) and the device named in its metadata, if any. */
+  image: z.object({ width: z.number().int().positive(), height: z.number().int().positive(), device: z.string().max(80).optional() }).optional(),
   /** Browser-reported last-modified time of the uploaded file. */
   lastModified: TimestampSchema.optional(),
 });

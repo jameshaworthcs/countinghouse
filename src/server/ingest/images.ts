@@ -7,6 +7,7 @@ import exifr from 'exifr';
 import sharp, { type Metadata } from 'sharp';
 import { dateOf, makeDate, type ISODate } from '../../shared/dates';
 import type { DateSource } from '../../shared/schema';
+import { nowISO } from '../fsutil';
 
 /** Dates in screenshot / photo file names from iOS, Android, macOS, Windows, GNOME and apps. */
 export function dateFromFileName(name: string): ISODate | null {
@@ -62,6 +63,20 @@ const MONTH = '(?<![a-z])(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|j
 export interface CaptureDate {
   date: ISODate;
   source: DateSource;
+  /** When it was taken, to the second (local time with offset), when the source gives a time. */
+  at?: string;
+}
+
+/** A time printed after the date in a screenshot's file name: "… at 14.30.12", "20260926-143012". */
+const NAME_TIME = /(20\d{2})[-_.]?(\d{2})[-_.]?(\d{2})(?: at |[ _T-])(\d{2})[.:-]?(\d{2})[.:-]?(\d{2})(?!\d{3,})/;
+
+function timeFromFileName(name: string, date: ISODate): string | undefined {
+  const m = NAME_TIME.exec(path.basename(name));
+  if (!m || makeDate(Number(m[1]), Number(m[2]), Number(m[3])) !== date) return undefined;
+  const [h, min, sec] = [Number(m[4]), Number(m[5]), Number(m[6])];
+  if (h > 23 || min > 59 || sec > 59) return undefined;
+  // Phones and desktops name screenshots in local time.
+  return nowISO(new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), h, min, sec));
 }
 
 /** Best-known capture date: embedded metadata, then file name, then the file's modified time. */
@@ -74,7 +89,8 @@ export async function captureDate(bytes: Buffer, fileName: string, lastModified?
       exif: true,
     })) as Record<string, unknown> | undefined;
     const v = meta?.DateTimeOriginal ?? meta?.CreateDate ?? meta?.DateCreated ?? meta?.ModifyDate;
-    if (v instanceof Date && !Number.isNaN(v.getTime())) return { date: dateOf(v), source: 'exif' };
+    // exifr reads EXIF's zone-less time as this machine's local time, which is the phone's (UK).
+    if (v instanceof Date && !Number.isNaN(v.getTime())) return { date: dateOf(v), source: 'exif', at: nowISO(v) };
     if (typeof v === 'string') {
       const m = /(\d{4})[:-](\d{2})[:-](\d{2})/.exec(v);
       const d = m ? makeDate(Number(m[1]), Number(m[2]), Number(m[3])) : null;
@@ -84,12 +100,45 @@ export async function captureDate(bytes: Buffer, fileName: string, lastModified?
     // No or unreadable metadata.
   }
   const fromName = dateFromFileName(fileName);
-  if (fromName) return { date: fromName, source: 'filename' };
+  if (fromName) {
+    const at = timeFromFileName(fileName, fromName);
+    return { date: fromName, source: 'filename', ...(at ? { at } : {}) };
+  }
   if (lastModified) {
     const t = Date.parse(lastModified);
-    if (!Number.isNaN(t)) return { date: dateOf(t), source: 'file-modified' };
+    if (!Number.isNaN(t)) return { date: dateOf(t), source: 'file-modified', at: nowISO(new Date(t)) };
   }
   return null;
+}
+
+export interface ImageInfo {
+  /** Pixels, upright. Screenshots from one phone share a width. */
+  width: number;
+  height: number;
+  /** Make and model from the metadata, when the device wrote them (screenshots often do not). */
+  device?: string;
+}
+
+/** The image's size and the device that made it, as evidence that screenshots came from one phone. */
+export async function imageInfo(bytes: Buffer): Promise<ImageInfo | null> {
+  let meta: Metadata;
+  try {
+    meta = await sharp(bytes, { failOn: 'none', limitInputPixels: 200_000_000 }).metadata();
+  } catch {
+    return null;
+  }
+  const width = meta.autoOrient?.width ?? meta.width;
+  const height = meta.autoOrient?.height ?? meta.height;
+  if (!width || !height) return null;
+  let device: string | undefined;
+  try {
+    const exif = (await exifr.parse(bytes, { pick: ['Make', 'Model'], tiff: true })) as { Make?: unknown; Model?: unknown } | undefined;
+    const parts = [exif?.Make, exif?.Model].filter((x): x is string => typeof x === 'string' && x.trim() !== '').map((x) => x.trim());
+    if (parts.length) device = parts.join(' ').slice(0, 80);
+  } catch {
+    // No metadata.
+  }
+  return { width, height, ...(device ? { device } : {}) };
 }
 
 export interface PreparedImages {

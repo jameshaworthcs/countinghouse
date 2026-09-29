@@ -119,6 +119,16 @@ export function sectionChecks(section: DraftSection, ctx: CheckContext): ReviewC
     );
   }
 
+  // A balance is what the account held after every row the document shows it with: a settled row
+  // dated later means a misread date, or a screenshot dated wrongly. (A statement's rows past its
+  // period are the period check's.)
+  if (section.balance !== undefined && section.recordBalance && section.balanceDate && !section.periodEnd) {
+    const later = settled.filter((t) => t.date > section.balanceDate!);
+    if (later.length) {
+      out.push({ id: 'balance-date', status: 'warn', title: `${rowsWord(later.length)} dated after the balance`, detail: `The balance is dated ${formatDate(section.balanceDate)}, but ${later.length === 1 ? 'this row is' : 'these rows are'} later. A settled row cannot come after the screen or document showing the balance: check the dates against the original.`, rows: later.map((t) => t.key) });
+    }
+  }
+
   const future = rows.filter((t) => t.date > ctx.latest);
   if (future.length) {
     out.push({ id: 'future', status: 'warn', title: `${rowsWord(future.length)} dated after the upload day`, detail: 'A row cannot be later than the day the document was uploaded. Check the dates, especially the year.', rows: future.map((t) => t.key) });

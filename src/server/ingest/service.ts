@@ -29,7 +29,7 @@ import { decodeText, detectKind, MAX_UPLOAD_BYTES, mediaTypeFor } from './detect
 import { buildDraft, draftIsClean } from './draft';
 import { assessReading, chooseReading, compareReadings, shortModel } from './verify';
 import { detectEngines, pickEngine, type EngineResult } from './engines';
-import { captureDate, prepareImage } from './images';
+import { captureDate, imageInfo, prepareImage } from './images';
 import { extractWithOcr, OCR_ENGINE_VERSION } from './ocr';
 import { OFX_ENGINE_VERSION, parseOfx } from './ofx';
 import { extractionJsonSchema, PROMPT_VERSION, SYSTEM_PROMPT, userPrompt } from './prompt';
@@ -145,13 +145,7 @@ export class ImportService extends EventEmitter {
       extraction: { warnings: [] },
       ...(input.hintAccountId && this.store.account(input.hintAccountId) ? { hintAccountId: input.hintAccountId } : {}),
     };
-    if (kind === 'image') {
-      const cap = await captureDate(input.bytes, input.fileName, input.lastModified);
-      if (cap) {
-        record.document.capturedOn = cap.date;
-        record.document.capturedOnSource = cap.source;
-      }
-    }
+    if (kind === 'image') await describeCapture(record, input.bytes);
     await this.work.saveFile(record.document, input.bytes);
     await this.save(record);
     this.schedule(record.id);
@@ -188,6 +182,8 @@ export class ImportService extends EventEmitter {
     try {
       const bytes = await this.work.readFile(record.document);
       const kind = detectKind(record.document.fileName, bytes);
+      // Screenshots uploaded before the capture time and screen size were kept get them now.
+      if (kind === 'image' && !record.document.image) await describeCapture(record, bytes);
       let result: EngineResult & { ocrText?: string; candidates?: { amounts: number[]; dates: string[] } };
       let engine: EngineId;
       let detail: string | undefined;
@@ -519,4 +515,18 @@ export class ImportService extends EventEmitter {
     await this.work.remove(record, [...this.pending.values()]);
     this.emit('update', { ...record, status: 'discarded' });
   }
+}
+
+/** When a screenshot was taken, and on what screen: its date for the balance, the rest for batches. */
+async function describeCapture(record: ImportRecord, bytes: Buffer): Promise<void> {
+  const doc = record.document;
+  const cap = await captureDate(bytes, doc.fileName, doc.lastModified);
+  if (cap) {
+    doc.capturedOn = cap.date;
+    doc.capturedOnSource = cap.source;
+    if (cap.at) doc.capturedAt = cap.at;
+    else delete doc.capturedAt;
+  }
+  const info = await imageInfo(bytes);
+  if (info) doc.image = info;
 }

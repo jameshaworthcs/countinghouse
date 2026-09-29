@@ -113,8 +113,9 @@ The equations are in [FORMULAS.md](FORMULAS.md); the rules for writing these rec
 
 1. **Hash and dedupe the file.** The SHA-256 is computed and the file is checked against committed
    and pending imports.
-2. **Capture date.** Screenshots get a capture date from EXIF/XMP, then the file name, then the
-   file's modified time.
+2. **Capture date.** Screenshots get a capture date (and time, when known) from EXIF/XMP, then
+   the file name, then the file's modified time, with the image's size and device. An app screen's
+   balance is dated then, unless a date is printed beside it.
 3. **Queue.** Processing runs in a concurrency-limited queue:
    - CSV: header signature → profile (yours first, then built-in). Unknown layouts are
      auto-mapped when confident, otherwise marked `needs_mapping`.

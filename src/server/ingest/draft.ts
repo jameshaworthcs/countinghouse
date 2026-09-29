@@ -41,6 +41,23 @@ const LISA_ROW = /\blifetime\s*isa\b.*\bbonus\b|\bgovernment\s+bonus\b/i;
 /** Rows that buy or sell investments: evidence that a running balance is cash beside holdings. */
 const TRADE_ROW = /\b(purchase|bought|buy|sale|sold|sell|redemption|switch)\b/i;
 
+/**
+ * A screen of an app as it was when captured, not a picture of a dated document: its headline
+ * figures are as at the moment it was taken. A photo or screenshot of a statement is a statement.
+ */
+export function isLiveView(documentType: Extraction['documentType'], mediaType: string): boolean {
+  return documentType.endsWith('_screenshot') || (documentType === 'other' && mediaType.startsWith('image/'));
+}
+
+const DATE_SOURCE_WORDS: Record<DateSource, string> = {
+  document: 'from the document',
+  exif: 'from its metadata',
+  filename: 'from its file name',
+  'file-modified': 'from the file’s date',
+  upload: 'the upload day',
+  manual: 'as you set it',
+};
+
 const TRANSFER_CATEGORIES = new Set(['transfer', 'credit-card-payment', 'savings-transfer', 'investment-transfer', 'contribution', 'withdrawal']);
 
 /** Candidate other leg of a transfer: opposite amount, within ±4 days, in another own account. */
@@ -69,6 +86,7 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
   }
   const takenTransfers = new Set<string>();
   const notes = [...extraction.notes, ...(ctx.warnings ?? [])];
+  const liveView = isLiveView(extraction.documentType, ctx.document.mediaType);
   // Each account's latest holdings: a fund's own page names no account, but the account holding it.
   const held = new Map(store.accounts.map((a) => [a.id, store.holdings(a.id).at(-1)?.holdings ?? []]));
 
@@ -108,7 +126,8 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
     const targetId = existing?.id ?? (target.mode === 'new' ? target.account.id : '');
     const currency = acc.currency ?? existing?.currency ?? 'GBP';
 
-    // Balance date: printed date, else statement end, else when the screenshot was taken.
+    // Balance date: a printed date, else the statement's end, else (an app screen) when it was
+    // taken, else (a statement) its latest row or its own date.
     let balanceDate = acc.balanceDate ?? undefined;
     let balanceDateSource: DateSource | undefined = balanceDate ? 'document' : undefined;
     // A statement's closing balance is at the end of its period, whatever date the statement was
@@ -122,7 +141,23 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
       balanceDate = acc.periodEnd;
       balanceDateSource = 'document';
     }
-    if (!balanceDate && acc.transactions.length && acc.closingBalance !== null) {
+    // An app screen shows its figures as they were when it was taken, so with no date printed beside
+    // them that is their date: a holding seen on 29 Sep is not the holding on 2 Sep, the day of the
+    // last row it lists. Only a statement's balance is the balance after its latest row.
+    const latestSettled = acc.transactions.filter((t) => !t.pending).reduce<string | undefined>((m, t) => (!m || t.date > m ? t.date : m), undefined);
+    if (!balanceDate && liveView) {
+      const { capturedOn, capturedOnSource } = ctx.document;
+      if (capturedOn && capturedOnSource && capturedOnSource !== 'upload') {
+        balanceDate = capturedOn;
+        balanceDateSource = capturedOnSource;
+        // A settled row cannot be later than the screen showing it: the row's date is the doubtful
+        // one (misread, or a payment the app lists ahead of time). The review check marks it.
+        if (latestSettled && latestSettled > capturedOn) notes.push(`This screenshot was taken on ${capturedOn} (${DATE_SOURCE_WORDS[capturedOnSource]}), but it lists a row dated ${latestSettled}. Check that row's date against the screenshot.`);
+      } else if (latestSettled && !extraction.documentDate) {
+        notes.push(`Nothing says when this screenshot was taken, so its balance is dated on the upload day. It was taken on or after ${latestSettled}, its latest row: set the day it was taken.`);
+      }
+    }
+    if (!balanceDate && !liveView && acc.transactions.length && acc.closingBalance !== null) {
       balanceDate = acc.transactions.reduce((m, t) => (t.date > m ? t.date : m), acc.transactions[0]!.date);
       balanceDateSource = 'document';
     }

@@ -321,3 +321,21 @@ as invariants.
 - **Research runs only when the owner asks.** After the first import queued research for many funds
   at once, the owner chose to start research by hand; "Research by itself" (off by default) brings
   back the automatic behaviour, within the budget.
+
+## 2026-09-29: Screenshots from a phone
+
+Six NS&I screenshots taken a minute apart and uploaded together went wrong four ways: the balance
+dated at the last prize, a prize history read as "paid out to another account", bond numbers read
+as holdings, and five views that added nothing looking like failures.
+
+- **An app screen's balance is dated when it was taken, not at its latest row.** The latest-row
+  rule is right for a statement (its closing balance follows its last row) and stays there. On an
+  app the headline is what the account held when you looked, which for a market account, or any
+  account whose list is not every movement, can differ from the day of its last row.
+  - A photo or screenshot of a statement is a statement: the reader's document type decides, not
+    the file type.
+  - With nothing to say when it was taken, it is dated on the upload day and flagged, instead of
+    at its latest row labelled "from the document": that was a guess presented as a fact.
+  - A settled row later than the capture date keeps the capture date and marks the row. The
+    alternative, trusting the row, would let one misread date move the balance.
+

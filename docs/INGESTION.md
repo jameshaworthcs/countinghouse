@@ -168,6 +168,31 @@ Screenshot dates come from the first available of:
 4. the file's modified time (`npm run import` keeps it when copying into the inbox);
 5. the upload date (flagged for you to fix).
 
+The time it was taken is kept too when the source gives one (metadata, a name like `Screenshot
+2026-09-24 at 19.42.10`, the file's modified time), with the image's size in pixels and the device
+its metadata names. They say which screenshots were taken together (below).
+
+### When a balance applies
+
+The balance on a document is dated by the first of:
+
+1. a date printed beside it ("as at", "valued on");
+2. the end of the statement's period (a balance dated after the period, with no rows past it, is
+   moved back to the period's end);
+3. **on an app screen, when it was taken** (the screenshot dates above, without the upload day). An
+   app shows its figures as they are when you look: a holding seen on 29 September is not the
+   holding on 2 September, the day of the last prize it lists. An app screen is a screenshot the
+   reader recognised as one (`…_screenshot`), or an image it could not classify; a photo or
+   screenshot of a statement is a statement;
+4. on a statement, the day of its latest row, then the date printed on it;
+5. the upload day, flagged: nothing says when it applies. On an app screen with rows, a note gives
+   the earliest day it can be (its latest row).
+
+A settled row dated after the balance it is shown with cannot be right: on a screenshot, it is later
+than the moment the screen was captured. The capture date stands (the phone's clock is the better
+witness), the row is marked for you to check (the *balance date* review check), and the document is
+read again.
+
 ## From extraction to draft
 
 `src/server/ingest/draft.ts` does the following:
