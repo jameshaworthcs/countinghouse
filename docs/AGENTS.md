@@ -183,6 +183,7 @@ extraction:
 | `insights-after-import` | the digest, focused on the new imports | Read (the digest only) | insights | 2 minutes after imports stop arriving |
 | `monthly-review` | the digest, focused on the last complete month | Read (the digest only) | a month in review, plus page insights (superseding the last run's) | once a month's data is complete for every account |
 | `interpret-note` | the owner's note, account and instrument names | none | proposals on the note | when a note is added |
+| receipt reading (not a job) | one receipt file, the payment's amount, date and payee, the category names | Read (the receipt only) | a reading on the receipt: proposed split lines | when a receipt is attached, only with "Read receipts with Claude" on (off by default) |
 
 Other behaviour:
 

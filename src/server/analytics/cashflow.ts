@@ -29,17 +29,32 @@ export interface FlowTx {
   minor: number;
 }
 
+/**
+ * The parts of a transaction for income and spending: its split lines when you split it (each with
+ * its own category and amount), else the transaction itself. What the lines do not account for stays
+ * in the transaction's own category. A transfer is never split.
+ */
+export function categoryLines(t: Transaction): Transaction[] {
+  if (!t.splits?.length || t.transferGroup) return [t];
+  const lines: Transaction[] = t.splits.map((s) => ({ ...t, amount: s.amount, category: s.category }));
+  const rest = toMinor(t.amount) - t.splits.reduce((sum, s) => sum + toMinor(s.amount), 0);
+  if (rest !== 0) lines.push({ ...t, amount: fromMinor(rest) });
+  return lines;
+}
+
 export function flows(store: Store, from: string, to: string, accountIds?: Set<string>): FlowTx[] {
   const cats = new CategoryIndex(store.categories);
   const accounts = new Map(store.accounts.map((a) => [a.id, a]));
   const out: FlowTx[] = [];
-  for (const t of store.transactions()) {
-    if (t.date < from || t.date > to) continue;
-    if (accountIds && !accountIds.has(t.accountId)) continue;
-    const cls = classifyFlow(t, cats, accounts.get(t.accountId));
-    if (cls === 'excluded') continue;
-    const minor = cls === 'income' ? toMinor(t.amount) : -toMinor(t.amount);
-    out.push({ t, cls, minor });
+  for (const whole of store.transactions()) {
+    if (whole.date < from || whole.date > to) continue;
+    if (accountIds && !accountIds.has(whole.accountId)) continue;
+    for (const t of categoryLines(whole)) {
+      const cls = classifyFlow(t, cats, accounts.get(t.accountId));
+      if (cls === 'excluded') continue;
+      const minor = cls === 'income' ? toMinor(t.amount) : -toMinor(t.amount);
+      out.push({ t, cls, minor });
+    }
   }
   return out;
 }

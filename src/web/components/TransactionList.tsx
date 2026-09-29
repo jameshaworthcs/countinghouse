@@ -7,6 +7,7 @@ import { api, useApi, useApiMutation } from '../lib/api';
 import { useAppData } from '../lib/data';
 import { cn, formatDate, money } from '../lib/format';
 import { Badge, Button, Callout, Checkbox, Drawer, Field, Input, KeyValue, Money, Select, Textarea, useToast } from './ui';
+import { ReceiptsSection, SplitSection, type SplitLineDraft } from './SplitReceipts';
 
 export function CategorySelect({ value, onChange, allowEmpty = true, className, placeholder = 'Uncategorised', id }: { value: string | undefined; onChange: (v: string | undefined) => void; allowEmpty?: boolean; className?: string; placeholder?: string; id?: string }) {
   const { cats } = useAppData();
@@ -32,6 +33,7 @@ export function CategorySelect({ value, onChange, allowEmpty = true, className, 
 }
 
 export function categoryBadge(t: Transaction, name: string): ReactNode {
+  if (t.splits?.length && !t.transferGroup) return <Badge tone="neutral">Split: {t.splits.length} categories</Badge>;
   if (!t.category) return <Badge tone="warn">Uncategorised</Badge>;
   return (
     <Badge tone={t.transferGroup ? 'accent' : 'neutral'} icon={t.transferGroup ? <ArrowLeftRight className="size-3" /> : undefined}>
@@ -121,6 +123,7 @@ export function TransactionDrawer({ tx, onClose }: { tx: Transaction; onClose: (
   const [notes, setNotes] = useState(tx.notes ?? '');
   const [tags, setTags] = useState((tx.tags ?? []).join(', '));
   const [showRule, setShowRule] = useState(false);
+  const [proposal, setProposal] = useState<SplitLineDraft[] | null>(null);
   const save = useApiMutation(
     () =>
       api<Transaction>(`/transactions/${tx.id}`, {
@@ -199,6 +202,8 @@ export function TransactionDrawer({ tx, onClose }: { tx: Transaction; onClose: (
           </div>
         </form>
         {showRule && <RuleFromTransaction tx={tx} category={category} onDone={onClose} />}
+        <SplitSection tx={tx} proposal={proposal} onProposalUsed={() => setProposal(null)} />
+        <ReceiptsSection tx={tx} onPropose={setProposal} />
         <section>
           <h3 className="mb-2 flex items-center gap-1.5 text-[13px] font-semibold text-ink">
             <Tag className="size-4 text-ink-3" /> Source details

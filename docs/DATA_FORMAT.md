@@ -22,7 +22,7 @@ point at them with `"$schema"` so editors validate as you type.
 data/
   meta.json            format + version + base currency
   profile.json         you: date of birth, region, salary, retirement age (the tax band is computed)
-  settings.json        extraction engine/model, agents (with the background budget), git behaviour, stale threshold, FX rates
+  settings.json        extraction engine/model (and reading receipts, off by default), agents (with the background budget), git behaviour, stale threshold, FX rates
   institutions.json    { institutions: [...] }   banks, platforms, providers (+ FSCS group)
   accounts.json        { accounts: [...] }
   categories.json      { categories: [...] }     editable taxonomy (system ones drive calculations)
@@ -37,6 +37,7 @@ data/
   insights.jsonl       Claude's inferences, with evidence and provenance
   context.jsonl        what you have told the app about yourself and your plans
   notes.jsonl          your words, and the records proposed from them
+  receipts.jsonl       receipts attached to transactions, and what Claude read on them (when turned on)
   figures.jsonl        one tax figure per line (P60, interest certificates, …)
   transactions/<account-id>/<yyyy>.jsonl    one transaction per line, by posting date
   balances/<account-id>.jsonl               balance / valuation snapshots
@@ -105,6 +106,7 @@ depend on).
 | `transferGroup` | shared by both legs of a transfer between your accounts |
 | `counterpartyAccountId` | the other account |
 | `notes`, `tags` | yours; tag Gift Aided donations `gift-aid` |
+| `splits` | yours: `[{amount, category, note?}]`, two or more lines adding up to `amount`, each signed like it, in spending or income categories. Spending, income and budgets count the lines ([FORMULAS.md §14](FORMULAS.md)). A transfer is never split, and correcting the amount so the lines no longer add up removes the split |
 
 **Provenance**: `source{importId, documentId, row}`, `createdAt`, `updatedAt`.
 
@@ -324,6 +326,19 @@ One record per line, **append-only**, content-addressed (the same findings get t
 - `status` is one of `new` `interpreting` `proposed` `applied` `dismissed` `failed`.
 - `proposals` are records suggested from your words, each `{key, type: context|instrument, record,
   explanation, accepted?}`. Nothing is recorded until you accept it.
+
+## receipts.jsonl
+
+A receipt you attached to a transaction (the transaction drawer → Receipts). One record per line.
+
+| Field | Notes |
+|---|---|
+| `id` | `rct_` + 16 hex, from the transaction and the file: the same file on the same payment is one receipt |
+| `transactionId` | the payment it belongs to |
+| `document` | as an import's (`{id, sha256, fileName, mediaType, size, path}`). The file is kept under `data/documents/` with your statements and served by id |
+| `status` | `attached`, `read`, `failed` (`reading` while it is read) |
+| `reading` | only when reading receipts with Claude is on: `{model, promptVersion, at, costUsd, merchant, date, total, lines: [{description, amount, category}], notes}`. Lines are signed like the payment, and a category is one of yours or null. It is a proposal: the transaction's `splits` change only when you save them |
+| `error`, `createdAt`, `updatedAt` | |
 
 ## capture.json
 

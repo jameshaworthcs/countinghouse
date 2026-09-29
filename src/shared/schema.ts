@@ -173,6 +173,13 @@ export const MerchantDetailSchema = z.object({
   online: z.boolean().optional(),
 });
 
+export const SplitLineSchema = z.object({
+  amount: MoneySchema,
+  category: z.string().min(1).max(64),
+  note: z.string().max(200).optional(),
+});
+export type SplitLine = z.infer<typeof SplitLineSchema>;
+
 export const TransactionSchema = z.object({
   id: z.string().regex(/^tx_[0-9a-f]{16}$/),
   accountId: SlugSchema,
@@ -243,6 +250,12 @@ export const TransactionSchema = z.object({
   category: z.string().optional(),
   categorisedBy: z.enum(CATEGORISED_BY).optional(),
   ruleId: z.string().optional(),
+  /**
+   * Yours: the payment split across categories, lines adding up to the amount (a supermarket shop
+   * that was groceries and household). Spending, income and budgets count the lines. A line
+   * shortfall (after a correction to the amount, say) stays in the transaction's own category.
+   */
+  splits: z.array(SplitLineSchema).min(2).max(30).optional(),
   /** Shared by both legs of a transfer between your own accounts. */
   transferGroup: z.string().optional(),
   /** Your own account on the other side of this transfer, when known. */
@@ -576,8 +589,10 @@ export const SettingsSchema = z.object({
       maxConcurrent: z.number().int().min(1).max(4).default(2),
       /** Seconds before an extraction is abandoned. */
       timeoutSeconds: z.number().int().min(30).max(3600).default(900),
+      /** Read receipts you attach with Claude, to propose split lines. Off until you turn it on. */
+      readReceipts: z.boolean().default(false),
     })
-    .default({ engine: 'auto', model: 'sonnet', verifyModel: 'opus', effort: 'high', maxConcurrent: 2, timeoutSeconds: 900 }),
+    .default({ engine: 'auto', model: 'sonnet', verifyModel: 'opus', effort: 'high', maxConcurrent: 2, timeoutSeconds: 900, readReceipts: false }),
   git: z
     .object({
       autoCommit: z.boolean().default(true),
@@ -1408,6 +1423,38 @@ export const NoteSchema = z.object({
   updatedAt: TimestampSchema,
 });
 export type Note = z.infer<typeof NoteSchema>;
+
+// ─── Receipts ────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A receipt you attached to a transaction: the document (kept with your other documents, served by
+ * id) and, when reading receipts with Claude is on, what it read, proposed as split lines that you
+ * accept or edit. Nothing about the transaction changes until you do.
+ */
+export const ReceiptSchema = z.object({
+  id: z.string().regex(/^rct_[0-9a-f]{16}$/),
+  transactionId: z.string().regex(/^tx_[0-9a-f]{16}$/),
+  document: DocumentRefSchema,
+  status: z.enum(['attached', 'reading', 'read', 'failed']).default('attached'),
+  reading: z
+    .object({
+      model: z.string(),
+      promptVersion: z.string(),
+      at: TimestampSchema,
+      costUsd: z.number().nonnegative().optional(),
+      merchant: z.string().nullable().default(null),
+      date: ISODateSchema.nullable().default(null),
+      total: MoneySchema.nullable().default(null),
+      /** Lines as printed, signed like the payment (money out negative), with a suggested category. */
+      lines: z.array(z.object({ description: z.string().max(200), amount: MoneySchema, category: z.string().nullable().default(null) })).max(200),
+      notes: z.array(z.string().max(300)).default([]),
+    })
+    .optional(),
+  error: z.string().max(500).optional(),
+  createdAt: TimestampSchema,
+  updatedAt: TimestampSchema,
+});
+export type Receipt = z.infer<typeof ReceiptSchema>;
 
 // ─── Capture list ────────────────────────────────────────────────────────────────────────────────
 //

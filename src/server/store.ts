@@ -31,6 +31,7 @@ import {
   InstrumentSchema,
   MetaSchema,
   NoteSchema,
+  ReceiptSchema,
   ProfileSchema,
   ResearchSchema,
   RuleSchema,
@@ -53,6 +54,7 @@ import {
   type Instrument,
   type Meta,
   type Note,
+  type Receipt,
   type Profile,
   type Research,
   type Rule,
@@ -114,6 +116,7 @@ const JSONL_FILES = {
   insights: { file: 'insights.jsonl', schema: InsightSchema },
   context: { file: 'context.jsonl', schema: ContextSchema },
   notes: { file: 'notes.jsonl', schema: NoteSchema },
+  receipts: { file: 'receipts.jsonl', schema: ReceiptSchema },
 } as const;
 
 interface State {
@@ -136,6 +139,7 @@ interface State {
   insights: Insight[];
   context: ContextRecord[];
   notes: Note[];
+  receipts: Receipt[];
   transactions: Map<string, Transaction[]>;
   balances: Map<string, BalanceSnapshot[]>;
   holdings: Map<string, HoldingsSnapshot[]>;
@@ -162,6 +166,7 @@ function emptyState(): State {
     insights: [],
     context: [],
     notes: [],
+    receipts: [],
     transactions: new Map(),
     balances: new Map(),
     holdings: new Map(),
@@ -548,6 +553,10 @@ export class Store extends EventEmitter {
   get notes(): Note[] {
     return this.state.notes;
   }
+  /** Receipts attached to transactions. */
+  get receipts(): Receipt[] {
+    return this.state.receipts;
+  }
   get imports(): ImportSummary[] {
     return this.state.imports;
   }
@@ -700,7 +709,21 @@ export class Store extends EventEmitter {
   }
 
   /** Insert or replace records by id in a rewritable collection (insights, context, notes). */
-  upsertRecords<K extends 'insights' | 'context' | 'notes'>(name: K, records: State[K], message: string): Promise<void> {
+  /** Remove records by id from a JSONL collection that is not append-only (receipts). */
+  removeRecords<K extends 'receipts'>(name: K, ids: string[], message: string): Promise<number> {
+    return this.exclusive(async () => {
+      const def = JSONL_FILES[name];
+      const before = this.state[name] as unknown as { id: string }[];
+      const list = before.filter((r) => !ids.includes(r.id));
+      if (list.length === before.length) return 0;
+      await this.writeJsonl(def.file, list);
+      (this.state as unknown as Record<string, unknown>)[name] = list;
+      this.changed(message, [def.file]);
+      return before.length - list.length;
+    });
+  }
+
+  upsertRecords<K extends 'insights' | 'context' | 'notes' | 'receipts'>(name: K, records: State[K], message: string): Promise<void> {
     return this.exclusive(async () => {
       const def = JSONL_FILES[name];
       const list = [...(this.state[name] as unknown as { id: string }[])];

@@ -140,11 +140,15 @@ export function importRoutes(ctx: AppContext): Hono {
 export function documentRoutes(ctx: AppContext): Hono {
   const app = new Hono();
   app.get('/:docId', async (c) => {
-    const summary = ctx.store.imports.find((i) => i.documentId === c.req.param('docId'));
-    if (!summary?.documentPath) throw new StoreError('Unknown document', 404);
-    const bytes = await readFile(ctx.store.documentAbsPath(summary.documentPath));
-    const mediaType = summary.mediaType.startsWith('image/') || summary.mediaType === 'application/pdf' ? summary.mediaType : 'text/plain; charset=utf-8';
-    return new Response(bytes, { headers: { 'Content-Type': mediaType, 'Content-Disposition': contentDisposition(summary.fileName), 'Cache-Control': 'private, max-age=3600' } });
+    // A statement or screenshot an import filed, or a receipt on a transaction: by id, never by path.
+    const id = c.req.param('docId');
+    const summary = ctx.store.imports.find((i) => i.documentId === id);
+    const receipt = summary ? undefined : ctx.store.receipts.find((r) => r.document.id === id);
+    const doc = summary?.documentPath ? { path: summary.documentPath, mediaType: summary.mediaType, fileName: summary.fileName } : receipt?.document.path ? { path: receipt.document.path, mediaType: receipt.document.mediaType, fileName: receipt.document.fileName } : undefined;
+    if (!doc) throw new StoreError('Unknown document', 404);
+    const bytes = await readFile(ctx.store.documentAbsPath(doc.path));
+    const mediaType = doc.mediaType.startsWith('image/') || doc.mediaType === 'application/pdf' ? doc.mediaType : 'text/plain; charset=utf-8';
+    return new Response(bytes, { headers: { 'Content-Type': mediaType, 'Content-Disposition': contentDisposition(doc.fileName), 'Cache-Control': 'private, max-age=3600' } });
   });
   return app;
 }

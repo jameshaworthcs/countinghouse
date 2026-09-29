@@ -471,6 +471,9 @@ A transaction counts as follows (`classifyFlow`):
 - **Income:** an income category (refunds excepted).
 - **Spending:** an expense category, or refunds, which count as negative spending.
 - **Uncategorised:** by sign.
+- **A split payment** counts as its lines, each in its own category and with its own amount
+  (`categoryLines`). What the lines do not add up to stays in the transaction's own category. A
+  transfer is never split.
 
 **Spent this month** (the Overview, `monthToDate`):
 

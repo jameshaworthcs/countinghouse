@@ -12,7 +12,8 @@
         "verifyModel": "opus",
         "effort": "high",
         "maxConcurrent": 2,
-        "timeoutSeconds": 900
+        "timeoutSeconds": 900,
+        "readReceipts": false
       },
       "type": "object",
       "properties": {
@@ -56,6 +57,10 @@
           "type": "integer",
           "minimum": 30,
           "maximum": 3600
+        },
+        "readReceipts": {
+          "default": false,
+          "type": "boolean"
         }
       }
     },

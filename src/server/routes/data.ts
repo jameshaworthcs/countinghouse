@@ -18,6 +18,7 @@ import {
   FIGURE_KINDS,
   GoalSchema,
   BudgetSchema,
+  SplitLineSchema,
   ISODateSchema,
   MoneySchema,
   PensionDetailsSchema,
@@ -30,6 +31,7 @@ import {
   type Figure,
   type Rule,
   type Transaction,
+  type SplitLine,
 } from '../../shared/schema';
 import { SYSTEM_CATEGORY_IDS } from '../../shared/categories';
 import { csvCell, queryDate, readJson, type AppContext } from '../context';
@@ -105,6 +107,8 @@ const TxPatch = z.object({
   amount: MoneySchema.optional(),
   description: z.string().max(500).optional(),
   correctionNote: z.string().max(500).optional(),
+  /** Split across categories (null removes the split). */
+  splits: z.array(SplitLineSchema).min(2).max(30).optional().nullable(),
 });
 
 const NewTx = z.object({
@@ -135,6 +139,21 @@ const FigureBody = z.object({
 });
 
 /** `null` in a patch clears the field. */
+/**
+ * Split lines must add up to the payment, each with its sign, in spending or income categories. A
+ * transfer between your accounts is not split.
+ */
+export function checkSplits(lines: SplitLine[], amount: number, t: Pick<Transaction, 'transferGroup'>, cats: CategoryIndex): void {
+  if (t.transferGroup) throw new StoreError('A transfer between your accounts cannot be split.');
+  for (const l of lines) {
+    const kind = cats.kindOf(l.category);
+    if (kind !== 'expense' && kind !== 'income') throw new StoreError(`"${cats.name(l.category)}" is not a spending or income category.`);
+    if (l.amount === 0 || Math.sign(l.amount) !== Math.sign(amount)) throw new StoreError('Each line has an amount, signed like the payment.');
+  }
+  const sum = lines.reduce((s, l) => s + toMinor(l.amount), 0);
+  if (sum !== toMinor(amount)) throw new StoreError(`The lines add up to ${fromMinor(sum).toFixed(2)}, not ${amount.toFixed(2)}.`);
+}
+
 function applyNulls<T extends Record<string, unknown>>(patch: T): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(patch)) out[k] = v === null ? undefined : v;
@@ -156,9 +175,9 @@ export function filterTransactions(ctx: AppContext, q: Record<string, string | u
     if (to && t.date > to) return false;
     if (accounts && !accounts.has(t.accountId)) return false;
     if (categories) {
-      const id = t.category ?? 'uncategorised';
-      const group = cats.groupOf(t.category)?.id;
-      if (!categories.has(id) && !(group && categories.has(group))) return false;
+      // A split payment is in each of its lines' categories.
+      const ids = [t.category ?? 'uncategorised', ...(t.splits ?? []).map((l) => l.category)];
+      if (!ids.some((id) => categories.has(id) || categories.has(cats.groupOf(id)?.id ?? ''))) return false;
     }
     if (q.direction === 'in' && t.amount < 0) return false;
     if (q.direction === 'out' && t.amount >= 0) return false;
@@ -421,6 +440,9 @@ export function dataRoutes(ctx: AppContext): Hono {
     const current = store.transaction(c.req.param('id'));
     if (!current) throw new StoreError('Unknown transaction', 404);
     const patch = applyNulls(body) as Partial<Transaction>;
+    if (body.splits) checkSplits(body.splits, body.amount ?? current.amount, current, new CategoryIndex(store.categories));
+    // A corrected amount the lines no longer add up to takes the split away: split it again.
+    if (body.amount !== undefined && body.splits === undefined && current.splits && current.splits.reduce((s, l) => s + toMinor(l.amount), 0) !== toMinor(body.amount)) patch.splits = undefined;
     if ('category' in body) patch.categorisedBy = body.category ? 'user' : undefined;
     if ('category' in body) patch.ruleId = undefined;
     if ('payee' in body) patch.payeeSetBy = body.payee ? 'user' : undefined;

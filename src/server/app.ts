@@ -23,6 +23,7 @@ import { dataRoutes } from './routes/data';
 import { documentRoutes, importRoutes } from './routes/imports';
 import { jobRoutes } from './routes/jobs';
 import { recordRoutes } from './routes/records';
+import { receiptRoutes } from './routes/receipts';
 import { systemRoutes } from './routes/system';
 import { tokenRoutes } from './routes/tokens';
 import { AgentTokens } from './tokens';
@@ -136,6 +137,7 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
   app.route('/api/documents', documentRoutes(ctx));
   app.route('/api', dataRoutes(ctx));
   app.route('/api', recordRoutes(ctx));
+  app.route('/api', receiptRoutes(ctx));
   app.route('/api', analyticsRoutes(ctx));
   app.route('/api', systemRoutes(ctx));
   app.all('/api/*', (c) => c.json({ error: 'Not found' }, 404));

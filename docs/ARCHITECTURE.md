@@ -234,6 +234,10 @@ and a card in credit counts as cash.
   working directory), `--safe-mode` (no hooks, plugins, MCP or CLAUDE.md),
   `--no-session-persistence`, and non-essential traffic disabled, in a scratch directory holding
   only that document.
+- **Receipts** (`src/server/receipts.ts`) are read by Claude only when Settings → Import &
+  extraction → "Read receipts with Claude" is on (off by default). They run the same way: `Read`
+  only, in a scratch directory holding just the receipt. The prompt carries the payment's amount,
+  date and payee, and your category names. What comes back is a proposal of split lines.
 - **Agent jobs** run the same way, with the tools their privacy class allows:
   - research gets WebSearch and WebFetch, with a prompt built only from public identifiers;
   - analysis gets Read of a digest in its scratch directory, or no tools.

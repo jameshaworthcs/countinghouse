@@ -482,3 +482,22 @@ needed a `fetch` loop pasted into the signed-in browser console.
 - **The UK is left out; other countries are kept.** Nearly every address is in the UK, so
   "United Kingdom of GB and NI" is noise; a foreign country is information.
 
+## 2026-09-29: Split transactions and receipts
+
+- **A split lives on the transaction, as yours, like a category you set.** Lines must add up to
+  the payment when saved. Reports count the lines through one place, `categoryLines`, used by cash
+  flow, spending, budgets and the baselines.
+  - A correction to the amount that breaks the sum removes the split rather than leaving it
+    inconsistent.
+  - Lines short of the amount in a file edited by hand put the rest in the transaction's category.
+    Invalid data should never quarantine a real payment.
+- **Receipts are their own records, `receipts.jsonl`, not import records.** A receipt adds nothing
+  to the ledger and has no draft to review. Keeping it out of the import pipeline keeps "Commit all
+  ready", coverage and "nothing new" unaware of it. The file sits with the statements and is served
+  by id, as documents are.
+- **Reading receipts is built but off (the owner's instruction).** When on, a receipt is read as it
+  is attached, in the same sandbox as extraction, with `Read` only. What Claude reads is a proposal
+  of lines grouped by category, and nothing changes until the owner saves the split. A receipt
+  whose total differs from the payment (a tip, cashback) leaves the difference in the payment's own
+  category.
+

@@ -141,6 +141,9 @@ function ExtractionForm() {
             <Input type="number" min={1} max={4} value={ex.maxConcurrent} onChange={(e) => setEx({ maxConcurrent: Math.min(4, Math.max(1, Number(e.target.value) || 1)) })} />
           </Field>
         </div>
+        <div className="mt-4">
+          <Switch checked={ex.readReceipts} onChange={(v) => setEx({ readReceipts: v })} label="Read receipts with Claude" description="When you attach a receipt to a transaction, Claude reads its lines (with the model above, about $0.05 each) and suggests how to split the payment. Nothing changes until you save the split. Off: receipts are only kept." />
+        </div>
       </Card>
       <Card title="Agents" description="Jobs that research what you hold, keep assumptions current and write insights, through the same Claude login. Research jobs send only public identifiers (fund names, ISINs, providers); jobs that read your data get no web access.">
         <div className="flex flex-col gap-3">

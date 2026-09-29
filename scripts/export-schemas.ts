@@ -25,6 +25,7 @@ import {
   MetaSchema,
   NoteSchema,
   ProfileSchema,
+  ReceiptSchema,
   ResearchSchema,
   RulesFileSchema,
   SettingsSchema,
@@ -56,6 +57,7 @@ const schemas: [string, z.ZodType, string][] = [
   ['insight', InsightSchema, 'one line of data/insights.jsonl'],
   ['context', ContextSchema, 'one line of data/context.jsonl'],
   ['note', NoteSchema, 'one line of data/notes.jsonl'],
+  ['receipt', ReceiptSchema, 'one line of data/receipts.jsonl'],
 ];
 await mkdir(out, { recursive: true });
 for (const [name, schema, describes] of schemas) {

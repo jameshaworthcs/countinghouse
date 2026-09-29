@@ -221,6 +221,33 @@
     "ruleId": {
       "type": "string"
     },
+    "splits": {
+      "minItems": 2,
+      "maxItems": 30,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "amount": {
+            "type": "number",
+            "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+          },
+          "category": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "amount",
+          "category"
+        ]
+      }
+    },
     "transferGroup": {
       "type": "string"
     },
