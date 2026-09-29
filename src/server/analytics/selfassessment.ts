@@ -9,7 +9,7 @@ import { formatMoney, fromMinor, toMinor } from '../../shared/money';
 import type { Figure, FigureKind } from '../../shared/schema';
 import { parseTaxYear, taxYearOf, taxYearParams, type TaxYear } from '../../shared/uk';
 import type { Store } from '../store';
-import { allowances, giftAid, pensionTotals, reliefAtSource } from './allowances';
+import { allowances, giftAid, payByEmployer, pensionTotals, reliefAtSource } from './allowances';
 
 export const SA_DISCLAIMER =
   'This page gathers figures from your own data to help you fill in your Self Assessment return. It is not tax advice and it can be incomplete or wrong: bank data shows net pay, may miss interest paid into accounts you have not imported, and cannot know which donations were Gift Aided. Check every figure against your P60, P11D, bank interest statements, pension and dividend statements before you submit. You are responsible for your return.';
@@ -37,8 +37,13 @@ export function selfAssessment(store: Store, label?: string): SelfAssessmentResp
   const mayNeedToFile: SelfAssessmentResponse['mayNeedToFile'] = [];
 
   // ── Employment (SA102) ──
-  const pay = figuresOf(store, ty, 'gross_pay');
-  const tax = figuresOf(store, ty, 'tax_deducted');
+  // Each employer's P60, else its payslips so far: never both, so nothing counts twice.
+  const byEmployer = payByEmployer(store, ty);
+  const taxByEmployer = payByEmployer(store, ty, 'tax_deducted');
+  const pay = byEmployer.flatMap((e) => e.figures);
+  const tax = taxByEmployer.flatMap((e) => e.figures);
+  const payslipsOnly = byEmployer.filter((e) => !e.fromP60);
+  const payslipNotes = payslipsOnly.map((e) => `${e.payer || 'An employer'}: ${e.figures.length} payslip${e.figures.length === 1 ? '' : 's'} so far (${formatMoney(e.amount)}). Its P60 for ${ty.label} gives the year's figure.`);
   const bik = figuresOf(store, ty, 'benefit_in_kind');
   const slDeducted = figuresOf(store, ty, 'student_loan_deducted');
   const salaryTx = store.transactions().filter((t) => inYear(t.date, ty) && t.category === 'salary' && t.amount > 0);
@@ -48,10 +53,10 @@ export function selfAssessment(store: Store, label?: string): SelfAssessmentResp
       label: 'Pay from employment',
       where: 'SA102 Employment: pay from this employment (from your P60/P45)',
       amount: pay.length ? sumFigures(pay) : null,
-      status: pay.length ? 'ready' : salaryTx.length ? 'missing' : 'not-applicable',
-      basis: pay.length ? 'P60 / payslip figures' : 'No P60 imported',
+      status: pay.length ? (payslipsOnly.length ? 'check' : 'ready') : salaryTx.length ? 'missing' : 'not-applicable',
+      basis: pay.length ? (payslipsOnly.length ? (payslipsOnly.length === byEmployer.length ? 'Payslips so far' : 'P60 and payslips so far') : 'P60 figures') : 'No P60 imported',
       notes: pay.length
-        ? ['Use one SA102 per employer. The figure should match box "Pay" on your P60.']
+        ? ['Use one SA102 per employer. The figure should match box "Pay" on your P60.', ...payslipNotes]
         : salaryTx.length
           ? [`${salaryTx.length} salary payments were found in your bank data, but those are net of tax. Upload your ${ty.label} P60 to get the gross figure.`]
           : [],
@@ -62,8 +67,8 @@ export function selfAssessment(store: Store, label?: string): SelfAssessmentResp
       label: 'UK tax taken off pay',
       where: 'SA102 Employment: UK tax taken off pay',
       amount: tax.length ? sumFigures(tax) : null,
-      status: tax.length ? 'ready' : pay.length || salaryTx.length ? 'missing' : 'not-applicable',
-      basis: tax.length ? 'P60 figures' : 'Not found',
+      status: tax.length ? (taxByEmployer.some((e) => !e.fromP60) ? 'check' : 'ready') : pay.length || salaryTx.length ? 'missing' : 'not-applicable',
+      basis: tax.length ? (taxByEmployer.some((e) => !e.fromP60) ? 'Payslips so far' : 'P60 figures') : 'Not found',
       notes: [],
       sources: figureSources(tax),
     },
@@ -89,7 +94,7 @@ export function selfAssessment(store: Store, label?: string): SelfAssessmentResp
     },
   ];
   sections.push({ id: 'employment', title: 'Employment', description: 'From your P60 (and P11D if you have benefits).', items: employment });
-  checklist.push({ id: 'p60', done: pay.length > 0, label: `P60 for ${ty.label} imported`, detail: 'Drop the PDF on the Import page; the pay and tax figures are extracted.' });
+  checklist.push({ id: 'p60', done: byEmployer.length > 0 && !payslipsOnly.length, label: `P60 for ${ty.label} imported`, detail: 'Drop the PDF on the Import page; the pay and tax figures are extracted.' });
 
   // ── Savings and investment income (SA100 TR 3) ──
   const interestItemNotes: string[] = [];

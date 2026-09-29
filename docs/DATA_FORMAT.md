@@ -274,7 +274,7 @@ One record per line, **append-only**, content-addressed (the same findings get t
 | `statement` | one plain sentence |
 | `detail` | optional `{accountId, institutionId, instrumentId, event, amount, annualAmount, rate, date, from, to, accountIds, attributes}` |
 | `status` | `active` `done` `retired` |
-| `origin` | `{kind: form}`, or `{kind: note, noteId, interpretedBy}` |
+| `origin` | `{kind: form}`, `{kind: note, noteId, interpretedBy}`, or `{kind: document, document, interpretedBy}` for a fact read from a document you gave (an email, a letter) that has nothing to import |
 | `createdAt`, `updatedAt` | |
 
 **Notes** are what you told the app in your own words:
@@ -308,7 +308,9 @@ while anything is left.
   account's opening and closing dates.
 - `{type: "valuation", since, holdings?}`: a balance that is not approximate, dated on or after
   `since`, plus a holdings snapshot when `holdings` is true.
-- `{type: "figures", kinds, taxYear}`: a tax figure of one of those kinds for that year.
+- `{type: "figures", kinds, taxYear, from?, payer?}`: a tax figure of one of those kinds for that
+  year; `from` limits it to a P60's (`p60`) or a payslip's (`payslip`) figures, and `payer` to one
+  employer's.
 
 An ask without a check is ticked by you (`doneAt`). Agents cannot set `doneAt` or `skippedAt`.
 

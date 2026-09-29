@@ -3,6 +3,7 @@
 
 import { ACCOUNT_TYPE_META, slugify } from '../../shared/accounts';
 import { transferLegCategory } from '../../shared/categorise';
+import { fullerName } from '../../shared/funds';
 import { catalogInstitution, findInstitution } from '../../shared/institutions';
 import { formatMoney, fromMinor, toMinor } from '../../shared/money';
 import { taxYearOf } from '../../shared/uk';
@@ -301,7 +302,7 @@ export function mergeHoldings(prior: Holding[], next: Holding[]): Holding[] {
     }
     const merged: Holding = { ...out[i]!, ...n };
     // Keep the fuller name: a narrow screen cuts names short.
-    if (out[i]!.name.length > n.name.length) merged.name = out[i]!.name;
+    merged.name = fullerName(out[i]!.name, n.name);
     out[i] = merged;
   }
   return out;

@@ -370,11 +370,14 @@ Deterministic rules with named thresholds (`SIGNAL_RULES` in `analytics/spending
 **Tax band** (`taxBandEstimate`, with the pure `taxBandFor` in `shared/uk.ts`):
 
 - Income for the year, in whole pounds:
-  - pay: the year's `gross_pay` figures (P60, payslips) plus `benefit_in_kind`;
-    - for the year in progress, a larger full-year estimate wins over payslips (pay to date): your
-      salary in Settings, else last year's P60;
-    - with no figures: that estimate for the year in progress, else the net salary received
-      (category `salary`) as a minimum;
+  - pay, employer by employer (figures grouped by payer): its P60 for the year, else its payslips
+    added up (pay so far), never both. A figure is a payslip's when its document was a payslip,
+    else when its period is under 200 days;
+    - salary received (category `salary`, after tax) from employers no figure names counts as a
+      floor; figures naming no employer are taken to cover all salary received;
+    - for the year in progress, a larger full-year estimate wins: your salary in Settings, else
+      last year's P60s;
+  - benefits in kind (`benefit_in_kind`);
   - side income: turnover (`side-income` rows and `self_employment_income` figures) less the
     trading allowance, when over it;
   - interest and dividends: the amounts counted for the allowances above.
@@ -389,9 +392,9 @@ Deterministic rules with named thresholds (`SIGNAL_RULES` in `analytics/spending
 - These are the UK bands that savings and dividends use everywhere. Scottish rates on pay are not
   modelled, and the page says so.
 - **Basis:**
-  - `documents`: pay comes from the year's figures;
+  - `documents`: every employer's pay comes from its P60, and no salary is unaccounted for;
   - `estimate`: pay comes from your salary or last year's P60;
-  - `minimum`: no gross pay is known, so the band may be higher.
+  - `minimum`: pay is known only so far (payslips, or salary after tax), so the band may be higher.
   The pages label the band with its basis.
 
 **Dividends:** dividends outside ISAs and pensions, plus vouchers, against the dividend allowance.

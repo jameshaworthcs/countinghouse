@@ -14,6 +14,7 @@ import { z } from 'zod';
 import { ACCOUNT_TYPE_META } from '../../shared/accounts';
 import { assumptionDef, AssumptionSet } from '../../shared/assumptions';
 import { addDays, diffDays, today } from '../../shared/dates';
+import { fullerName } from '../../shared/funds';
 import type { Analytics } from '../analytics';
 import { latestResearch, matchInstrument } from '../analytics/research';
 import type { Config } from '../config';
@@ -255,16 +256,31 @@ export class JobRunner extends EventEmitter implements JobQueue {
    */
   async ensureInstrumentsFromHoldings(): Promise<number> {
     const seen = new Map<string, { name: string; isin?: string; ticker?: string }>();
+    // A fund first recorded under a name cut short takes the full name when a statement prints
+    // it; the short one stays as an alias, so older holdings still match.
+    const renamed = new Map<string, { id: string; name: string; aliases: string[] }>();
     for (const a of this.store.accounts.filter((x) => x.status === 'open')) {
       const snap = this.store.holdings(a.id).at(-1);
       for (const h of snap?.holdings ?? []) {
-        if (matchInstrument(h, this.store.instruments)) continue;
+        const known = matchInstrument(h, this.store.instruments);
+        if (known) {
+          const name = fullerName(renamed.get(known.id)?.name ?? known.name, h.name);
+          if (name !== known.name) renamed.set(known.id, { id: known.id, name, aliases: [known.name] });
+          continue;
+        }
         const key = h.isin?.toUpperCase() ?? h.ticker?.toUpperCase() ?? h.name.toLowerCase();
         if (!seen.has(key)) seen.set(key, { name: h.name, ...(h.isin && /^[A-Z]{2}[A-Z0-9]{9}\d$/.test(h.isin.toUpperCase()) ? { isin: h.isin.toUpperCase() } : {}), ...(h.ticker ? { ticker: h.ticker } : {}) });
       }
     }
-    if (!seen.size) return 0;
-    await applyRecords(this.store, { provenance: { setBy: 'system', session: 'holdings' }, supersede: false, records: [...seen.values()].map((r) => ({ type: 'instrument' as const, record: { ...r, aliases: [] } })) });
+    if (!seen.size && !renamed.size) return 0;
+    await applyRecords(this.store, {
+      provenance: { setBy: 'system', session: 'holdings' },
+      supersede: false,
+      records: [
+        ...[...seen.values()].map((r) => ({ type: 'instrument' as const, record: { ...r, aliases: [] } })),
+        ...[...renamed.values()].map((r) => ({ type: 'instrument' as const, record: r })),
+      ],
+    });
     return seen.size;
   }
 

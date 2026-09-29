@@ -139,7 +139,10 @@ on every import):
 - **Last 4 digits only.** A full account or card number is never output. A number ending in
   letters has no last four digits.
 - **Tax figures** from P60s, payslips, P11Ds, interest certificates, pension and dividend
-  statements.
+  statements. A payslip gives the figures for its own pay period, never its year-to-date column
+  (`extract-6`); a P60 gives the year's. Two payslips of equal pay are two figures: a figure is a
+  duplicate only for the same payer, amount, tax year and period. For the tax band and Self
+  Assessment, an employer's P60 replaces its payslips rather than adding to them.
 - **Overlapping tiles.** Long scrolling screenshots are cut into overlapping tiles, and rows in the
   overlaps are reported once.
 - **Only this account's movements.** A list of prizes, interest or dividends paid out to another
@@ -227,6 +230,10 @@ Screenshot dates come from the first available of:
 - **Funds on statements become instruments.** A holding with no matching instrument is recorded as
   one, with its name and identifiers exactly as printed, and researched by an agent job
   ([AGENTS.md](AGENTS.md)).
+  - A name cut short on screen ("HSBC FTSE 100 Index Accum…") matches the full name it begins, when
+    only one instrument fits (`shared/funds.ts`).
+  - When a later statement prints the full name, the instrument takes it and keeps the short one
+    as an alias. Holdings keep the names their documents printed.
 
 ## Measuring extraction
 

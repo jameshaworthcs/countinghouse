@@ -645,7 +645,7 @@ function AboutTab() {
                 <div className="min-w-0 flex-1 text-[13px]">
                   <div className="text-ink">{c.statement}</div>
                   <div className="text-[11.5px] text-ink-3">
-                    {c.origin.kind === 'note' ? 'From something you told the app' : 'Added by you'} · {timeAgo(c.updatedAt)}
+                    {c.origin.kind === 'note' ? 'From something you told the app' : c.origin.kind === 'document' ? `From ${c.origin.document ?? 'a document you gave'}` : 'Added by you'} · {timeAgo(c.updatedAt)}
                     {c.status !== 'active' && ` · ${c.status}`}
                   </div>
                 </div>

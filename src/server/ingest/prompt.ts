@@ -45,7 +45,7 @@ Accuracy matters more than completeness:
 13. figures records standalone figures that matter for a tax return. Use the label exactly as printed, and the tax year as YYYY/YY when it is stated or implied.
     - Interest certificates → one interest_paid per account: the gross interest, before any tax. Never a second figure for the net amount. Interest paid on a statement is a transaction, not a figure.
     - A P60 → gross_pay, tax_deducted, national_insurance and student_loan_deducted, with the employer as payer.
-    - Payslips → the same kinds for the pay period.
+    - Payslips → the same kinds for this pay period only, never the year-to-date column: gross_pay is the period's total pay, with periodStart and periodEnd for the pay period (the month for "Period: Aug-2026"), the tax year it falls in, and the employer as payer. A figure of 0.00 that is printed (no tax, no NI) is still reported.
     - A P11D → benefit_in_kind.
     - Pension statements and valuations that state contributions for a tax year → pension_contribution_employee (what you paid in, as printed; for a SIPP or personal pension, before the basic-rate relief the provider adds), pension_tax_relief (that relief, when shown) and pension_contribution_employer. When only a gross total is printed, it is pension_contribution_employee. Contributions made by salary sacrifice are employer contributions, however they are labelled: no personal tax relief can be claimed on them.
     - Dividend vouchers → dividends_paid.

@@ -296,7 +296,9 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
       (x) =>
         x.kind === f.kind &&
         toMinor(x.amount) === toMinor(f.amount) &&
+        // The same tax year and, for a payslip, the same pay period: two months' equal pay are two figures.
         (x.taxYear ?? x.periodEnd ?? '') === (f.taxYear ?? f.periodEnd ?? '') &&
+        (x.periodEnd ?? '') === (f.periodEnd ?? '') &&
         (x.payer ?? '').toLowerCase() === (f.payer ?? '').toLowerCase(),
     );
     return {

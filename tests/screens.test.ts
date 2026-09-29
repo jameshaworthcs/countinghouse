@@ -6,14 +6,18 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { allowances } from '../src/server/analytics/allowances';
+import { matchInstrument } from '../src/server/analytics/research';
+import { selfAssessment } from '../src/server/analytics/selfassessment';
 import { commitDraft, mergeHoldings } from '../src/server/ingest/commit';
 import { buildDraft, draftIsClean } from '../src/server/ingest/draft';
 import { dateFromFileName } from '../src/server/ingest/images';
 import { normaliseExtraction } from '../src/server/ingest/normalise';
 import { Store } from '../src/server/store';
 import { defaultCategories } from '../src/shared/categories';
+import { cutShort, fullerName, sameFundName } from '../src/shared/funds';
 import { sectionChecks } from '../src/shared/review';
-import { ExtractionSchema, type Account, type Draft, type ImportRecord } from '../src/shared/schema';
+import { ExtractionSchema, type Account, type Draft, type Figure, type ImportRecord, type Instrument } from '../src/shared/schema';
 
 const stamp = '2026-09-01T00:00:00+01:00';
 const acct = (id: string, type: Account['type'], extra: Partial<Account> = {}): Account => ({ id, name: id, type, currency: 'GBP', status: 'open', aliases: [], includeInNetWorth: true, createdAt: stamp, updatedAt: stamp, ...extra });
@@ -238,5 +242,74 @@ describe('small things a screenshot import got wrong', () => {
       },
     });
     expect(store.account('fixed')).toMatchObject({ status: 'closed', openedOn: '2023-09-14', closedOn: '2025-09-14' });
+  });
+});
+
+describe('payslips and P60s', () => {
+  const fig = (n: number, kind: Figure['kind'], amount: number, payer: string, period?: [string, string]): Figure => ({ id: `fig_${n.toString(16).padStart(16, '0')}`, kind, label: kind, amount, currency: 'GBP', taxYear: '2026/27', payer, source: {}, createdAt: stamp, ...(period ? { periodStart: period[0], periodEnd: period[1] } : {}) });
+  const payslips = [fig(1, 'gross_pay', 812.4, 'LARCHWOOD DATA LTD', ['2026-07-01', '2026-07-31']), fig(2, 'gross_pay', 1105.25, 'LARCHWOOD DATA LTD', ['2026-08-01', '2026-08-31']), fig(3, 'gross_pay', 1105.25, 'LARCHWOOD DATA LTD', ['2026-09-01', '2026-09-30'])];
+
+  it('counts each employer once: its P60, else its payslips so far, and salary from others as a floor', async () => {
+    await store.addFigures(payslips, 't');
+    await store.addTransactions(
+      [
+        { id: 'tx_0000000000000101', accountId: 'current', date: '2026-07-28', amount: 812.4, currency: 'GBP', description: 'FASTER PAYMENTS RECEIPT REF.LarchwoodData July', category: 'salary', source: {} },
+        { id: 'tx_0000000000000102', accountId: 'current', date: '2026-08-25', amount: 1310.18, currency: 'GBP', description: 'BANK GIRO CREDIT REF OAKFIELD ENGINEERING', category: 'salary', source: {} },
+      ],
+      't',
+    );
+    let band = allowances(store, '2026/27', '2026-09-29').taxBand;
+    expect(band.lines.filter((l) => l.kind === 'pay')).toEqual([
+      { label: 'Pay from LARCHWOOD DATA LTD (3 payslips, so far)', amount: 3022.9, kind: 'pay' },
+      // LarchwoodData's own salary payment is covered by its payslips; Oakfield's is not.
+      { label: 'Other pay (at least: 1 salary payment received, after tax)', amount: 1310.18, kind: 'pay' },
+    ]);
+    expect(band.basis).toBe('minimum');
+    // A P60 from the same employer replaces its payslips rather than adding to them.
+    await store.addFigures([fig(4, 'gross_pay', 9000, 'Larchwood Data Ltd'), fig(5, 'gross_pay', 30000, 'Oakfield Engineering Ltd')], 't');
+    band = allowances(store, '2026/27', '2026-09-29').taxBand;
+    expect(band.lines.filter((l) => l.kind === 'pay').map((l) => [l.label, l.amount])).toEqual([
+      ['Pay from Larchwood Data Ltd (P60)', 9000],
+      ['Pay from Oakfield Engineering Ltd (P60)', 30000],
+    ]);
+    expect(band.basis).toBe('documents');
+    const sa = selfAssessment(store, '2026/27');
+    expect(sa.sections[0]!.items.find((i) => i.id === 'pay')).toMatchObject({ amount: 39000, status: 'ready' });
+  });
+
+  it('Self Assessment shows payslips as pay so far, to be settled by the P60', async () => {
+    await store.addFigures(payslips, 't');
+    const item = selfAssessment(store, '2026/27').sections[0]!.items.find((i) => i.id === 'pay')!;
+    expect(item).toMatchObject({ amount: 3022.9, status: 'check', basis: 'Payslips so far' });
+    expect(item.notes.join(' ')).toMatch(/3 payslips so far/);
+  });
+
+  it('two months of equal pay are two figures, not a duplicate', async () => {
+    await store.addFigures([payslips[1]!], 't');
+    const d = draftOf({ documentType: 'payslip', accounts: [], figures: [{ kind: 'gross_pay', label: 'Basic Pay', amount: 1105.25, taxYear: '2026/27', periodStart: '2026-09-01', periodEnd: '2026-09-30', payer: 'LARCHWOOD DATA LTD' }] });
+    expect(d.figures[0]).toMatchObject({ include: true });
+    expect(d.figures[0]!.duplicateOf).toBeUndefined();
+    const again = draftOf({ documentType: 'payslip', accounts: [], figures: [{ kind: 'gross_pay', label: 'Basic Pay', amount: 1105.25, taxYear: '2026/27', periodStart: '2026-08-01', periodEnd: '2026-08-31', payer: 'LARCHWOOD DATA LTD' }] });
+    expect(again.figures[0]).toMatchObject({ include: false, duplicateOf: payslips[1]!.id });
+  });
+});
+
+describe('fund names cut short', () => {
+  it('match the full name they begin, and give way to it', () => {
+    expect(cutShort('HSBC FTSE 100 Index Accum…')).toBe('hsbcftse100indexaccum');
+    expect(sameFundName('HSBC FTSE 100 Index Accum…', 'HSBC FTSE 100 Index Accumulation C')).toBe(true);
+    // The app's type label after the cut does not stop the match.
+    expect(sameFundName('Fidelity Index Emerging Mar… Accumulation Fund', 'Fidelity Index Emerging Markets P Acc')).toBe(true);
+    expect(sameFundName('HSBC FTSE 100 Index Accum…', 'HSBC FTSE 250 Index C Acc')).toBe(false);
+    expect(fullerName('iShares Core MSCI World ETF …', 'iShares Core MSCI World UCITS ETF USD (Acc)')).toBe('iShares Core MSCI World UCITS ETF USD (Acc)');
+    expect(fullerName('iShares Core MSCI World UCITS ETF USD (Acc)', 'iShares Core MSCI World ETF …')).toBe('iShares Core MSCI World UCITS ETF USD (Acc)');
+  });
+
+  it('an instrument recorded under a cut name is found by the full one, when only one fits', () => {
+    const inst = (id: string, name: string): Instrument => ({ id, name, aliases: [], createdAt: stamp, updatedAt: stamp });
+    const list = [inst('hsbc-100', 'HSBC FTSE 100 Index Accum…'), inst('hsbc-250', 'HSBC FTSE 250 Index C Acc')];
+    expect(matchInstrument({ name: 'HSBC FTSE 100 Index Accumulation C' }, list)?.id).toBe('hsbc-100');
+    expect(matchInstrument({ name: 'HSBC FTSE 250 Index C Acc' }, list)?.id).toBe('hsbc-250');
+    expect(matchInstrument({ name: 'HSBC FTSE All-World Index' }, list)).toBeUndefined();
   });
 });

@@ -161,6 +161,20 @@ describe('job outputs become records', () => {
 });
 
 describe('what is stale', () => {
+  it('a fund first recorded under a name cut short takes the full name when a statement prints it', async () => {
+    const runner = new JobRunner(store, new Analytics(store), loadConfig({ FINANCE_DATA_DIR: path.join(dir, 'data'), FINANCE_WORK_DIR: path.join(dir, 'work'), FINANCE_WATCH: '0' }), { autoRun: false });
+    await runner.init();
+    const snap = (id: string, date: string, name: string) => ({ id, accountId: 'isa', date, holdings: [{ name, units: 10, value: 100, currency: 'GBP' }], totalValue: 100, source: {}, createdAt: stamp });
+    await store.addHoldings([snap('hld_00000000000000b1', '2026-09-10', 'HSBC FTSE 100 Index Accum…')], 'h');
+    await runner.ensureInstrumentsFromHoldings();
+    expect(store.instruments.map((i) => i.name)).toEqual(['HSBC FTSE 100 Index Accum…']);
+    await store.addHoldings([snap('hld_00000000000000b2', '2026-09-20', 'HSBC FTSE 100 Index Accumulation C')], 'h');
+    expect(await runner.ensureInstrumentsFromHoldings()).toBe(0);
+    expect(store.instruments).toHaveLength(1);
+    expect(store.instruments[0]).toMatchObject({ name: 'HSBC FTSE 100 Index Accumulation C', aliases: ['HSBC FTSE 100 Index Accum…'] });
+    runner.stop();
+  });
+
   it('suggests research for new funds and providers, and assumptions still on fallbacks', async () => {
     const runner = new JobRunner(store, new Analytics(store), loadConfig({ FINANCE_DATA_DIR: path.join(dir, 'data'), FINANCE_WORK_DIR: path.join(dir, 'work'), FINANCE_WATCH: '0' }), { autoRun: false });
     await runner.init();

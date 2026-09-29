@@ -193,6 +193,48 @@ export function giftAid(store: Store, ty: TaxYear) {
   return { charity, aided, figures, paid };
 }
 
+/**
+ * A payslip's figure (one pay period) rather than a P60's (the whole year): by the document it came
+ * from, else by a period much shorter than a year.
+ */
+export function isPayslipFigure(store: Store, f: Figure): boolean {
+  const doc = f.source.importId ? store.imports.find((i) => i.id === f.source.importId)?.documentType : undefined;
+  if (doc) return doc === 'payslip';
+  return Boolean(f.periodStart && f.periodEnd && diffDays(f.periodStart, f.periodEnd) < 200);
+}
+
+/** An employer's name reduced for comparing: "Larchwood Data Ltd" and "LARCHWOODDATA" are one. */
+export const payerKey = (name: string | undefined) =>
+  (name ?? '')
+    .toLowerCase()
+    .replace(/\b(ltd|limited|plc|llp|uk)\b/g, '')
+    .replace(/[^a-z0-9]/g, '');
+
+/**
+ * Each employer's pay (or tax, or other payroll figure) for a tax year: its P60, which is the whole
+ * year, else its payslips added up, which are pay so far. Never both, so nothing counts twice.
+ */
+export function payByEmployer(store: Store, ty: TaxYear, kind: Figure['kind'] = 'gross_pay') {
+  const groups = new Map<string, { payer: string; p60: Figure[]; payslips: Figure[] }>();
+  for (const f of figuresFor(store, ty, kind)) {
+    const key = payerKey(f.payer);
+    const g = groups.get(key) ?? groups.set(key, { payer: f.payer ?? '', p60: [], payslips: [] }).get(key)!;
+    (isPayslipFigure(store, f) ? g.payslips : g.p60).push(f);
+  }
+  return [...groups.values()].map((g) => {
+    const figures = g.p60.length ? g.p60 : g.payslips;
+    return { payer: figures[0]?.payer ?? g.payer, fromP60: g.p60.length > 0, figures, amount: fromMinor(figures.reduce((s, f) => s + toMinor(f.amount), 0)) };
+  });
+}
+
+/** Salary received in the year from employers the figures do not cover (after tax: a floor). */
+export function unexplainedSalary(store: Store, ty: TaxYear, employers: { payer: string }[]): Transaction[] {
+  // Figures that name no employer cannot be told apart: take them to cover the salary received.
+  if (employers.some((e) => !payerKey(e.payer))) return [];
+  const keys = employers.map((e) => payerKey(e.payer).slice(0, 8)).filter((k) => k.length >= 4);
+  return store.transactions().filter((t) => inYear(t, ty) && t.category === 'salary' && t.amount > 0 && !keys.some((k) => payerKey(`${t.description} ${t.payee ?? ''}`).includes(k)));
+}
+
 const figuresFor = (store: Store, ty: TaxYear, kind: Figure['kind']) =>
   store.figures.filter((f) => f.kind === kind && (f.taxYear === ty.label || (!f.taxYear && inYear({ date: f.periodEnd ?? f.date ?? '' }, ty))));
 
@@ -208,25 +250,36 @@ export function taxBandEstimate(store: Store, ty: TaxYear, now: ISODate, found: 
   const notes: string[] = [];
   const sum = (list: Figure[]) => fromMinor(list.reduce((s, f) => s + toMinor(f.amount), 0));
   let basis: TaxBandEstimate['basis'];
-  const pay = figuresFor(store, ty, 'gross_pay');
-  const lastYearPay = figuresFor(store, makeTaxYear(ty.startYear - 1), 'gross_pay');
   const inProgress = ty.end >= now;
-  // Payslips for the year in progress are pay to date: a larger full-year estimate wins over them.
-  const fullYear = inProgress ? (store.profile.grossSalary ?? (lastYearPay.length ? sum(lastYearPay) : 0)) : 0;
-  if (pay.length && sum(pay) >= fullYear) {
-    basis = 'documents';
-    lines.push({ label: `Pay (${pay.length === 1 ? 'P60 or payslip' : `${pay.length} P60 and payslip figures`})`, amount: sum(pay), kind: 'pay' });
-  } else if (inProgress && store.profile.grossSalary) {
+  // Each employer's pay: its P60 for the year, else its payslips so far. Salary received from an
+  // employer with neither counts too, after tax, as a floor.
+  const employers = payByEmployer(store, ty);
+  const net = unexplainedSalary(store, ty, employers);
+  const netTotal = fromMinor(net.reduce((s, t) => s + toMinor(t.amount), 0));
+  const documented = fromMinor(employers.reduce((s, e) => s + toMinor(e.amount), 0) + toMinor(netTotal));
+  const lastYearP60 = payByEmployer(store, makeTaxYear(ty.startYear - 1)).filter((e) => e.fromP60);
+  // For the year in progress a full-year estimate wins over pay to date when it is larger.
+  const fullYear = inProgress ? (store.profile.grossSalary ?? fromMinor(lastYearP60.reduce((s, e) => s + toMinor(e.amount), 0))) : 0;
+  if (fullYear > 0 && fullYear > documented) {
     basis = 'estimate';
-    lines.push({ label: 'Pay (your salary in Settings)', amount: store.profile.grossSalary, kind: 'pay' });
-  } else if (inProgress && lastYearPay.length) {
-    basis = 'estimate';
-    lines.push({ label: `Pay (last year’s P60, ${makeTaxYear(ty.startYear - 1).label})`, amount: sum(lastYearPay), kind: 'pay' });
+    lines.push(
+      store.profile.grossSalary
+        ? { label: 'Pay (your salary in Settings)', amount: store.profile.grossSalary, kind: 'pay' }
+        : { label: `Pay (last year’s P60, ${makeTaxYear(ty.startYear - 1).label})`, amount: fullYear, kind: 'pay' },
+    );
   } else {
-    basis = 'minimum';
-    const net = store.transactions().filter((t) => inYear(t, ty) && t.category === 'salary' && t.amount > 0);
-    if (net.length) lines.push({ label: `Pay (at least: ${net.length} salary payment${net.length === 1 ? '' : 's'} received, after tax)`, amount: fromMinor(net.reduce((s, t) => s + toMinor(t.amount), 0)), kind: 'pay' });
-    notes.push(`No gross pay is known for ${ty.label}, so only the income found counts and the band may be higher. Import your P60${inProgress ? ' or a recent payslip, or add your salary in Settings' : ''}.`);
+    for (const e of employers) {
+      lines.push({ label: `Pay from ${e.payer || 'your employer'} (${e.fromP60 ? 'P60' : `${e.figures.length} payslip${e.figures.length === 1 ? '' : 's'}, so far`})`, amount: e.amount, kind: 'pay' });
+    }
+    if (net.length) lines.push({ label: `Other pay (at least: ${net.length} salary payment${net.length === 1 ? '' : 's'} received, after tax)`, amount: netTotal, kind: 'pay' });
+    basis = employers.length && employers.every((e) => e.fromP60) && !net.length ? 'documents' : 'minimum';
+    if (basis === 'minimum') {
+      notes.push(
+        employers.length
+          ? `Pay for ${ty.label} is known only so far${net.length ? ', and some of it only after tax' : ''}, so the band may be higher. Each employer’s P60 settles it.`
+          : `No gross pay is known for ${ty.label}, so only the income found counts and the band may be higher. Import your P60${inProgress ? ' or your payslips, or add your salary in Settings' : ''}.`,
+      );
+    }
   }
   const benefits = figuresFor(store, ty, 'benefit_in_kind');
   if (benefits.length) lines.push({ label: 'Benefits in kind (P11D)', amount: sum(benefits), kind: 'pay' });

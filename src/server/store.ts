@@ -78,6 +78,8 @@ export interface ImportSummary {
   documentPath?: string | undefined;
   engine?: string | undefined;
   detail?: string | undefined;
+  /** What the document was (a P60, a payslip, a statement…), as read. */
+  documentType?: string | undefined;
   result?: ImportRecord['result'];
   /** The period each account's section covered (statement period, or the span of its rows). */
   sections: { accountId: string; from: string; to: string }[];
@@ -1045,6 +1047,7 @@ function summarise(r: ImportRecord, rel: string): ImportSummary {
     documentPath: r.document.path,
     engine: r.extraction.engine,
     detail: r.extraction.detail,
+    documentType: r.draft?.documentType,
     result: r.result,
     path: rel,
   };

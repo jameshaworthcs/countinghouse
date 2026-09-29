@@ -1313,8 +1313,8 @@ export const ContextSchema = z.object({
     })
     .default({}),
   status: z.enum(['active', 'done', 'retired']).default('active'),
-  /** Where it came from: typed in a form, or interpreted from one of your notes. */
-  origin: z.object({ kind: z.enum(['form', 'note']), noteId: z.string().optional(), interpretedBy: ProvenanceSchema.optional() }),
+  /** Where it came from: typed in a form, interpreted from one of your notes, or read from a document you gave (named). */
+  origin: z.object({ kind: z.enum(['form', 'note', 'document']), noteId: z.string().optional(), document: z.string().max(200).optional(), interpretedBy: ProvenanceSchema.optional() }),
   createdAt: TimestampSchema,
   updatedAt: TimestampSchema,
 });
@@ -1360,6 +1360,10 @@ export const CaptureCheckSchema = z.discriminatedUnion('type', [
     type: z.literal('figures'),
     kinds: z.array(z.enum(FIGURE_KINDS)).min(1),
     taxYear: z.string().regex(/^\d{4}\/\d{2}$/),
+    /** Only figures from a P60 (the whole year) or only from payslips (a pay period). */
+    from: z.enum(['p60', 'payslip']).optional(),
+    /** Only this employer's or payer's figures. */
+    payer: z.string().optional(),
   }),
 ]);
 export type CaptureCheck = z.infer<typeof CaptureCheckSchema>;

@@ -124,11 +124,16 @@
           "type": "string",
           "enum": [
             "form",
-            "note"
+            "note",
+            "document"
           ]
         },
         "noteId": {
           "type": "string"
+        },
+        "document": {
+          "type": "string",
+          "maxLength": 200
         },
         "interpretedBy": {
           "type": "object",

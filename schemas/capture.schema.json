@@ -153,6 +153,16 @@
                         "taxYear": {
                           "type": "string",
                           "pattern": "^\\d{4}\\/\\d{2}$"
+                        },
+                        "from": {
+                          "type": "string",
+                          "enum": [
+                            "p60",
+                            "payslip"
+                          ]
+                        },
+                        "payer": {
+                          "type": "string"
                         }
                       },
                       "required": [

@@ -1,6 +1,7 @@
 // Which of your accounts does an extracted account belong to?
 
 import { ACCOUNT_TYPE_META, slugify } from '../../shared/accounts';
+import { sameFundName } from '../../shared/funds';
 import { findInstitution } from '../../shared/institutions';
 import type { Account, AccountType, Holding, Institution, NewAccountInput } from '../../shared/schema';
 
@@ -14,23 +15,14 @@ export interface Detected {
   holdings?: string[] | undefined;
 }
 
-/** A holding's name reduced to letters and digits, for comparing the same fund across screens. */
-export function holdingKey(name: string): string {
-  return name.toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]+/g, '');
-}
-
 /**
- * The same holding, named on two screens: by ISIN or ticker when both have one, else by name. A name
- * cut short on a narrow screen ("Legal & General Global") matches the full one it begins.
+ * The same holding, named on two screens: by ISIN or ticker when both have one, else by name
+ * (shared/funds.ts: a name cut short matches the full one it begins).
  */
 export function sameHolding(a: Pick<Holding, 'name' | 'isin' | 'ticker'>, b: Pick<Holding, 'name' | 'isin' | 'ticker'>): boolean {
   if (a.isin && b.isin) return a.isin.toUpperCase() === b.isin.toUpperCase();
   if (a.ticker && b.ticker && a.ticker.toUpperCase() === b.ticker.toUpperCase()) return true;
-  const x = holdingKey(a.name);
-  const y = holdingKey(b.name);
-  if (x === y) return true;
-  const [short, long] = x.length <= y.length ? [x, y] : [y, x];
-  return short.length >= 12 && long.startsWith(short);
+  return sameFundName(a.name, b.name);
 }
 
 /** Does this document identify an account at all: a provider, kind, number, name or holdings? */

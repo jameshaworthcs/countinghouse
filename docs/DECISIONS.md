@@ -271,3 +271,12 @@ as invariants.
   in their selector or the provider in a charge row.
 - **A number ending in letters has no last four digits.** "QK7WM3P" was being stored as "73" and
   would have taught the account a wrong number.
+- **Payslips are pay so far; a P60 is the year.** Figures record where they came from (the import's
+  document type), and pay is taken employer by employer: the P60, else the payslips added up, never
+  both. Salary received from an employer with no figures still counts, after tax, as a floor.
+  Payslips gave the same amount two months running, so a figure is a duplicate only for the same
+  period too. Capture-list checks can ask for a P60 specifically.
+- **Fund names cut short on screen match the full name**, and an instrument takes the full name when
+  one arrives. Holdings keep what their documents printed.
+- **A fact read from a document with nothing to import** (an email about pay not received) is a
+  context record with `origin.kind: "document"`, not an import that can never be committed.

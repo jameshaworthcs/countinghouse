@@ -2,6 +2,7 @@
 // matching holdings to instruments.
 
 import { diffDays, today } from '../../shared/dates';
+import { sameFundName } from '../../shared/funds';
 import { normaliseDescription } from '../../shared/merchants';
 import type { Holding, Instrument, Research, ResearchKind } from '../../shared/schema';
 import type { Store } from '../store';
@@ -44,5 +45,10 @@ export function matchInstrument(holding: Pick<Holding, 'isin' | 'ticker' | 'name
   }
   const n = norm(holding.name);
   if (!n) return undefined;
-  return instruments.find((i) => norm(i.name) === n || i.aliases.some((a) => norm(a) === n));
+  const exact = instruments.find((i) => norm(i.name) === n || i.aliases.some((a) => norm(a) === n));
+  if (exact) return exact;
+  // A name cut short on one statement and printed in full on another is one fund, when only one
+  // instrument fits.
+  const close = instruments.filter((i) => [i.name, ...i.aliases].some((a) => sameFundName(a, holding.name)));
+  return close.length === 1 ? close[0] : undefined;
 }
