@@ -246,6 +246,7 @@ function SectionEditor({ section, index, total, latest, periodFromRows, onChange
   const type = target.mode === 'existing' ? data.accounts.find((a) => a.id === target.accountId)?.type : target.mode === 'new' ? target.account.type : undefined;
   const market = type ? ACCOUNT_TYPE_META[type].balanceMode === 'market' : false;
   const d = section.detected;
+  const suggested = section.suggestedAccountId ? data.accounts.find((a) => a.id === section.suggestedAccountId) : undefined;
   const checks = target.mode === 'skip' ? [] : sectionChecks(section, { accountType: type, latest, periodFromRows });
   // Rows a check is about carry its title, so the problem is visible where it is.
   const flags = new Map<string, string[]>();
@@ -299,6 +300,11 @@ function SectionEditor({ section, index, total, latest, periodFromRows, onChange
               <option value="__skip">Don’t import this account</option>
             </Select>
           </Field>
+          {target.mode === 'skip' && suggested && (
+            <Button size="sm" variant="primary" onClick={() => set({ target: { mode: 'existing', accountId: suggested.id } })}>
+              Import into {suggested.name}
+            </Button>
+          )}
         </div>
         {target.mode === 'new' && (
           <div className="grid gap-3 rounded-lg border border-line bg-panel-2 p-3 sm:grid-cols-2">
@@ -626,6 +632,10 @@ export default function Review() {
     onSuccess: (r) => {
       toast({ tone: 'good', text: `Committed: ${r.result?.transactionsAdded ?? 0} transactions${r.result?.balancesAdded ? ', balance' : ''}${r.result?.holdingsAdded ? ', holdings' : ''}` });
       void navigate('/import');
+    },
+    // Rows another import recorded meanwhile are marked on the server's copy: show that one.
+    onError: (e) => {
+      if (e.status === 409) setDirty(false);
     },
   });
   const saveDraft = useApiMutation(() => api(`/imports/${id}/draft`, { method: 'PUT', body: draft as unknown as Record<string, unknown> }), { onSuccess: () => setDirty(false) });

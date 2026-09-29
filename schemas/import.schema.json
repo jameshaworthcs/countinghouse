@@ -2427,6 +2427,13 @@
               "matchReason": {
                 "type": "string"
               },
+              "suggestedAccountId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+              },
               "currency": {
                 "default": "GBP",
                 "type": "string",

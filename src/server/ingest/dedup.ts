@@ -9,7 +9,7 @@
 import { diffDays } from '../../shared/dates';
 import { descriptionKey } from '../../shared/merchants';
 import { toMinor } from '../../shared/money';
-import type { Transaction } from '../../shared/schema';
+import type { Draft, Transaction } from '../../shared/schema';
 
 export interface DedupCandidate {
   date: string;
@@ -103,4 +103,41 @@ export function classifyDuplicates(incoming: DedupCandidate[], existing: Transac
     }
   });
   return results;
+}
+
+/**
+ * A draft's rows were checked against what was stored when it was made. Before it is committed
+ * another import may have added some of them (screenshots of one list, scrolled, overlap by a row),
+ * and a section given its account by hand was never checked against that account. So the rows it
+ * would add are checked again at commit, against the stored rows the draft has not already matched:
+ * - a row now stored exactly (the same bank id, or the same date, amount and description) is left
+ *   out;
+ * - a row that now looks like a stored one (same amount, similar description, a few days apart) is
+ *   marked and left out, and the commit waits for you to check it.
+ * Only rows that were new and included are looked at, so your own choices stand.
+ */
+export function recheckDraft(draft: Draft, stored: (accountId: string) => Transaction[]): { draft: Draft; alreadyStored: number; toCheck: string[] } {
+  const next: Draft = structuredClone(draft);
+  let alreadyStored = 0;
+  const toCheck: string[] = [];
+  for (const section of next.sections) {
+    if (section.target.mode !== 'existing') continue;
+    const claimed = new Set(section.transactions.flatMap((t) => (t.status !== 'new' && t.duplicateOf ? [t.duplicateOf] : [])));
+    const rows = section.transactions.filter((t) => t.status === 'new' && t.include);
+    if (!rows.length) continue;
+    const results = classifyDuplicates(
+      rows.map((t) => ({ date: t.date, amount: t.amount, description: t.description, sourceId: t.detail?.sourceId })),
+      stored(section.target.accountId).filter((t) => !claimed.has(t.id)),
+    );
+    rows.forEach((t, i) => {
+      const r = results[i]!;
+      if (r.status === 'new') return;
+      t.status = r.status;
+      t.include = false;
+      if (r.duplicateOf) t.duplicateOf = r.duplicateOf;
+      if (r.status === 'duplicate') alreadyStored++;
+      else toCheck.push(t.key);
+    });
+  }
+  return { draft: next, alreadyStored, toCheck };
 }

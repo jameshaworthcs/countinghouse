@@ -50,6 +50,13 @@ export interface AccountTypeMeta {
   expectsTransactions: boolean;
   /** How often new data is expected: monthly statements/screenshots, or a yearly figure. */
   cadence?: 'monthly' | 'yearly';
+  /**
+   * A person can hold only one (NS&I allows one Premium Bonds holding per person): a screen of this
+   * kind is your only account of it, unless something on the screen says otherwise.
+   */
+  onePerPerson?: boolean;
+  /** The only provider of this kind of account (institution catalog id). */
+  issuer?: string;
   description: string;
 }
 
@@ -219,6 +226,8 @@ export const ACCOUNT_TYPE_META: Record<AccountType, AccountTypeMeta> = {
     taxFreeInterest: true,
     defaultInNetWorth: true,
     expectsTransactions: false,
+    onePerPerson: true,
+    issuer: 'ns-and-i',
     description: 'NS&I Premium Bonds. Prizes are tax-free; 100% Treasury-backed.',
   },
   crypto: {

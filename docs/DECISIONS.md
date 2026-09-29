@@ -367,3 +367,27 @@ as holdings, and five views that added nothing looking like failures.
   would need to learn it), and letting "Commit all ready" commit them (it would record the same
   balance twice).
 
+## 2026-09-29: Premium Bonds screens, and rows recorded twice
+
+Four scrolled screenshots of the NS&I Transactions tab showed no provider, name or number. Each
+proposed a new account, `premium-bonds-2`. Committed, it would have had no balance, so its rows
+would have added the whole holding to the estate a second time.
+
+- **A Premium Bonds screen is your Premium Bonds (the owner's choice).** NS&I allows one holding
+  per person, so being your only Premium Bonds decides it, unless the screen shows another number,
+  provider or name. Being your only LISA stays a suggestion: people can hold several.
+- **A screen that shows only the kind of account never proposes a new account while you have one
+  of that kind.** The reader had named the kind, so the screen counted as identified, and a new
+  account was proposed while the reason named the existing one. It now asks which, and offers your
+  only one in one click.
+- **Rows are checked again at commit.** The last row of one scrolled screen was the first of the
+  next. Each draft had been checked only against what was stored when it was made, so committing
+  both would have recorded that row twice.
+  - Exact repeats are now left out, with a note.
+  - Rows that only look the same wait for the owner.
+  - Considered: checking waiting drafts against each other. Rejected: the check at commit also
+    covers a section given its account by hand, and the set of waiting drafts changes under the
+    review page.
+- **"Auto prize reinvestment" is a Premium Bonds prize** (other income, from the built-in list).
+  The reader's guess had filed one screen's prizes as savings interest.
+

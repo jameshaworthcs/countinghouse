@@ -23,7 +23,9 @@ import type {
 import { DraftSchema } from '../../shared/schema';
 import type { Store } from '../store';
 import { classifyDuplicates } from './dedup';
-import { identifies, matchAccount, proposeAccount, sameHolding, type Detected } from './match';
+import { fitsAccount, identifies, matchAccount, onlyKind, proposeAccount, sameHolding } from './match';
+
+export { fitsAccount } from './match';
 
 export interface DraftContext {
   store: Store;
@@ -42,28 +44,6 @@ export interface BatchEvidence {
   fileName: string;
   /** Whole minutes from that screenshot to this one: negative when this one was taken first. */
   minutes: number;
-}
-
-/**
- * Could this screen be of that account? Nothing on it may say otherwise: another number, provider,
- * kind of account, currency or name. Screenshots uploaded together can span accounts.
- */
-export function fitsAccount(detected: Detected, account: Account, institutions: { id: string; name: string }[]): boolean {
-  if (detected.last4 && account.last4 && detected.last4 !== account.last4) return false;
-  if (detected.accountType && detected.accountType !== account.type) return false;
-  if (detected.currency && detected.currency !== account.currency) return false;
-  const words = (s: string | undefined) => new Set((s ?? '').toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2));
-  const overlaps = (a: Set<string>, b: Set<string>) => [...a].some((w) => b.has(w));
-  if (detected.institutionName) {
-    const inst = findInstitution(detected.institutionName);
-    const own = institutions.find((i) => i.id === account.institutionId);
-    if (inst ? account.institutionId !== undefined && inst.id !== account.institutionId : !own || !overlaps(words(detected.institutionName), words(own.name))) return false;
-  }
-  if (detected.accountName) {
-    const named = words(detected.accountName);
-    if (named.size && ![account.name, ...account.aliases, ACCOUNT_TYPE_META[account.type].label].some((n) => overlaps(named, words(n)))) return false;
-  }
-  return true;
 }
 
 function batchReason(b: BatchEvidence, account: Account): string {
@@ -165,9 +145,12 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
     // Funds can point at an account that holds them, but a list of funds alone does not say which
     // account (or kind of account) a new one would be.
     const anonymous = !existing && !hint && !identifies(detected);
+    // A screen that says only the kind of account (a scrolled list of a LISA's rows) is one of your
+    // accounts of that kind, not a new one: ask which, and suggest it when you have only one.
+    const sameKind = !existing && !hint && !anonymous && onlyKind(detected) ? store.accounts.filter((a) => a.status !== 'closed' && fitsAccount(detected, a, store.institutions)) : [];
     const target: DraftSection['target'] = existing
       ? { mode: 'existing', accountId: existing.id }
-      : anonymous
+      : anonymous || sameKind.length
         ? { mode: 'skip' }
         : { mode: 'new', account: proposeAccount(detected, store.accounts, fallbackType) };
     const targetType: AccountType = existing?.type ?? (target.mode === 'new' ? target.account.type : detected.accountType ?? fallbackType);
@@ -349,7 +332,20 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
       key: `s${si}`,
       detected: Object.fromEntries(Object.entries(detected).filter(([, v]) => v !== undefined)),
       target,
-      matchReason: byBatch ? batchReason(ctx.batch!, existing!) : existing ? match.reason : anonymous ? 'Nothing on this screen says which account it is: choose it' : match.accountId ? `${match.reason}` : 'New account',
+      matchReason: byBatch
+        ? batchReason(ctx.batch!, existing!)
+        : existing
+          ? match.reason
+          : anonymous
+            ? 'Nothing on this screen says which account it is: choose it'
+            : sameKind.length === 1
+              ? `Nothing on this screen names the account, only that it is ${ACCOUNT_TYPE_META[sameKind[0]!.type].label}. It looks like your ${sameKind[0]!.name}: choose it`
+              : sameKind.length
+                ? `Nothing on this screen names the account, only that it is ${ACCOUNT_TYPE_META[sameKind[0]!.type].label}, and you have ${sameKind.length}: choose it`
+                : match.accountId
+                  ? `${match.reason}`
+                  : 'New account',
+      ...(sameKind.length === 1 ? { suggestedAccountId: sameKind[0]!.id } : {}),
       currency,
       recordBalance: balance !== undefined,
       balanceDate,

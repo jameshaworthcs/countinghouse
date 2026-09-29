@@ -30,7 +30,7 @@ export const MERCHANTS: MerchantDef[] = [
   ['LIGHTYEAR', 'Lightyear', 'investment-transfer', 'out'],
   ['WEALTHIFY', 'Wealthify', 'investment-transfer', 'out'],
   ['PREMIUM BONDS? (PURCHASE|DD|BUY)|NS&I.*(PURCHASE|DEPOSIT)|NSANDI', 'NS&I', 'savings-transfer', 'out'],
-  ['PREMIUM BOND PRIZE|NS&I.*PRIZE|NSANDI.*PRIZE', 'NS&I Premium Bonds prize', 'other-income', 'in'],
+  ['PREMIUM BOND PRIZE|NS&I.*PRIZE|NSANDI.*PRIZE|AUTO PRIZE REINVEST', 'NS&I Premium Bonds prize', 'other-income', 'in'],
   ['SAVINGS POT|TRANSFER (TO|FROM) POT|\\bPOT TRANSFER|FROM SAVINGS POT|ROUND ?UP|SAVING SPACE|SPACE TRANSFER|\\bTO SAVINGS\\b|\\bFROM SAVINGS\\b', 'Savings', 'savings-transfer'],
   ['CASH WITHDRAWAL|\\bATM\\b|CASH MACHINE|CASHPOINT|\\bLINK\\b.*CASH|^CASH\\b|CASH CD\\b|CSH WDL', 'Cash withdrawal', 'cash-withdrawal', 'out'],
 

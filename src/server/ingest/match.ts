@@ -2,7 +2,7 @@
 
 import { ACCOUNT_TYPE_META, slugify } from '../../shared/accounts';
 import { sameFundName } from '../../shared/funds';
-import { findInstitution } from '../../shared/institutions';
+import { catalogInstitution, findInstitution } from '../../shared/institutions';
 import type { Account, AccountType, Holding, Institution, NewAccountInput } from '../../shared/schema';
 
 export interface Detected {
@@ -29,6 +29,32 @@ export function sameHolding(a: Pick<Holding, 'name' | 'isin' | 'ticker' | 'sedol
 /** Does this document identify an account at all: a provider, kind, number, name or holdings? */
 export function identifies(detected: Detected): boolean {
   return Boolean(detected.institutionName || detected.accountName || detected.accountType || detected.last4 || detected.holdings?.length);
+}
+
+/** The screen says only what kind of account it is: no provider, name, number or holdings. */
+export function onlyKind(detected: Detected): boolean {
+  return Boolean(detected.accountType) && !detected.institutionName && !detected.accountName && !detected.last4 && !detected.holdings?.length;
+}
+
+/**
+ * Could this screen be of that account? Nothing on it may say otherwise: another number, provider,
+ * kind of account, currency or name. Screenshots uploaded together can span accounts.
+ */
+export function fitsAccount(detected: Detected, account: Account, institutions: { id: string; name: string }[]): boolean {
+  if (detected.last4 && account.last4 && detected.last4 !== account.last4) return false;
+  if (detected.accountType && detected.accountType !== account.type) return false;
+  if (detected.currency && detected.currency !== account.currency) return false;
+  const overlaps = (a: Set<string>, b: Set<string>) => [...a].some((w) => b.has(w));
+  if (detected.institutionName) {
+    const inst = findInstitution(detected.institutionName);
+    const own = institutions.find((i) => i.id === account.institutionId);
+    if (inst ? account.institutionId !== undefined && inst.id !== account.institutionId : !own || !overlaps(words(detected.institutionName), words(own.name))) return false;
+  }
+  if (detected.accountName) {
+    const named = words(detected.accountName);
+    if (named.size && ![account.name, ...account.aliases, ACCOUNT_TYPE_META[account.type].label].some((n) => overlaps(named, words(n)))) return false;
+  }
+  return true;
 }
 
 export interface AccountMatch {
@@ -87,6 +113,12 @@ export function matchAccount(detected: Detected, accounts: Account[], institutio
         if (ofType === 1) {
           score += 15;
           reasons.push(`your only ${ACCOUNT_TYPE_META[a.type].shortLabel}`);
+          // Being your only LISA is a suggestion; being your only Premium Bonds is the account, since
+          // a person holds only one. Unless the screen names another number, provider or name.
+          if (ACCOUNT_TYPE_META[a.type].onePerPerson && a.status !== 'closed' && fitsAccount(detected, a, institutions)) {
+            score += 20;
+            reasons.push('a person holds only one');
+          }
         }
       } else if (ACCOUNT_TYPE_META[detected.accountType].group !== ACCOUNT_TYPE_META[a.type].group) {
         score -= 30;
@@ -114,8 +146,10 @@ export function matchAccount(detected: Detected, accounts: Account[], institutio
 
 /** A sensible new-account proposal for something we could not match. */
 export function proposeAccount(detected: Detected, accounts: Account[], fallbackType: AccountType = 'current'): NewAccountInput {
-  const inst = findInstitution(detected.institutionName) ?? findInstitution(detected.accountName);
   const type = detected.accountType ?? fallbackType;
+  // Only NS&I issues Premium Bonds: the provider follows from the kind.
+  const issuer = ACCOUNT_TYPE_META[type].issuer;
+  const inst = findInstitution(detected.institutionName) ?? findInstitution(detected.accountName) ?? (issuer ? catalogInstitution(issuer) : undefined);
   const label = ACCOUNT_TYPE_META[type].label;
   const instName = inst?.name ?? detected.institutionName ?? undefined;
   const name =

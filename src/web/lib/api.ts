@@ -58,7 +58,7 @@ export function useApi<T>(key: QueryKey, path: string | null, opts: { refetchInt
 }
 
 /** Mutation that refreshes everything afterwards (data changes ripple through every view). */
-export function useApiMutation<TVars, TResult = unknown>(fn: (vars: TVars) => Promise<TResult>, opts: { onSuccess?: (r: TResult, v: TVars) => void } = {}) {
+export function useApiMutation<TVars, TResult = unknown>(fn: (vars: TVars) => Promise<TResult>, opts: { onSuccess?: (r: TResult, v: TVars) => void; onError?: (e: ApiError, v: TVars) => void } = {}) {
   const qc = useQueryClient();
   return useMutation<TResult, ApiError, TVars>({
     mutationFn: fn,
@@ -66,5 +66,13 @@ export function useApiMutation<TVars, TResult = unknown>(fn: (vars: TVars) => Pr
       void qc.invalidateQueries();
       opts.onSuccess?.(r, v);
     },
+    ...(opts.onError
+      ? {
+          onError: (e: ApiError, v: TVars) => {
+            void qc.invalidateQueries();
+            opts.onError?.(e, v);
+          },
+        }
+      : {}),
   });
 }

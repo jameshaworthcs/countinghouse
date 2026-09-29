@@ -828,6 +828,8 @@ export const DraftSectionSchema = z.object({
   }),
   target: DraftTargetSchema,
   matchReason: z.string().optional(),
+  /** The screen says only what kind of account it is, and you have one of that kind: offered in one click. */
+  suggestedAccountId: SlugSchema.optional(),
   currency: CurrencySchema.default('GBP'),
   periodStart: ISODateSchema.optional(),
   periodEnd: ISODateSchema.optional(),

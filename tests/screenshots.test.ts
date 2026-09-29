@@ -183,8 +183,8 @@ describe('screenshots taken together share the account', () => {
   });
 
   it('it fills a gap only: a screen that says what kind of account it is, but not which, is not a new account', () => {
-    expect(draw(scrolled({ accountType: 'premium_bonds' })).sections[0]!.target.mode).toBe('new');
-    expect(draw(scrolled({ accountType: 'premium_bonds' }), { batch }).sections[0]!.target).toEqual({ mode: 'existing', accountId: 'bonds' });
+    expect(draw(scrolled({ accountType: 'current' })).sections[0]!.target).toEqual({ mode: 'skip' });
+    expect(draw(scrolled({ accountType: 'current' }), { batch: { ...batch, accountId: 'current' } }).sections[0]!.target).toEqual({ mode: 'existing', accountId: 'current' });
   });
 
   it('anything on the screen that says otherwise wins: number, kind, provider, currency, name', () => {
@@ -278,6 +278,117 @@ describe('screenshots taken together share the account', () => {
       expect(target('imp_20260929_200900_aaaa')).toEqual({ mode: 'skip' });
       expect(target('imp_20260929_200900_ffff')).toEqual({ mode: 'existing', accountId: 'bonds' });
     });
+  });
+});
+
+describe('a screen that says only what kind of account it is', () => {
+  const scrolled = (account: Record<string, unknown> = {}) => ExtractionSchema.parse({ documentType: 'transactions_screenshot', accounts: [{ transactions: reinvestments, ...account }] });
+  const draw = (extraction: Extraction) => buildDraft(extraction, { store, document: doc({ capturedOn: '2026-09-29', capturedOnSource: 'exif' }), uploadedOn: '2026-09-29' });
+
+  it('Premium Bonds: a person holds only one, so the screen is yours', () => {
+    const [s] = draw(scrolled({ accountType: 'premium_bonds' })).sections;
+    expect(s!.target).toEqual({ mode: 'existing', accountId: 'bonds' });
+    expect(s!.matchReason).toBe('Matched by type (Premium Bonds), your only Premium Bonds, a person holds only one');
+    // The rows are then checked against the account's own: the prizes were recorded before.
+    expect(s!.transactions.map((t) => t.category)).toEqual(['other-income', 'other-income', 'other-income']);
+  });
+
+  it('unless the screen says otherwise, or you hold two (a child’s, say)', async () => {
+    await store.setAccounts([...store.accounts.map((a) => (a.id === 'bonds' ? { ...a, last4: '7302' } : a))]);
+    expect(draw(scrolled({ accountType: 'premium_bonds', last4: '7730' })).sections[0]!.target.mode).toBe('new');
+    await store.setAccounts([...store.accounts, acct('ada-bonds', 'premium_bonds', { name: 'Ada’s Premium Bonds', institutionId: 'ns-and-i' })]);
+    const [s] = draw(scrolled({ accountType: 'premium_bonds' })).sections;
+    expect(s!.target).toEqual({ mode: 'skip' });
+    expect(s!.matchReason).toMatch(/only that it is Premium Bonds, and you have 2: choose it/);
+    expect(s!.suggestedAccountId).toBeUndefined();
+  });
+
+  it('any other kind: one of yours, so it asks which and suggests your only one, never a new account', async () => {
+    await store.setAccounts([...store.accounts, acct('lisa', 'lisa', { name: 'Lifetime ISA' })]);
+    const [s] = draw(scrolled({ accountType: 'lisa' })).sections;
+    expect(s!.target).toEqual({ mode: 'skip' });
+    expect(s!.suggestedAccountId).toBe('lisa');
+    expect(s!.matchReason).toBe('Nothing on this screen names the account, only that it is Lifetime ISA. It looks like your Lifetime ISA: choose it');
+    expect(draftIsClean(draw(scrolled({ accountType: 'lisa' }))).reasons).toContain('an account to choose or a section left out');
+  });
+
+  it('a kind you have none of is a new account, with its only provider', async () => {
+    await store.setAccounts(store.accounts.filter((a) => a.id !== 'bonds'));
+    const [s] = draw(scrolled({ accountType: 'premium_bonds' })).sections;
+    expect(s!.target).toMatchObject({ mode: 'new', account: { type: 'premium_bonds', institutionId: 'ns-and-i', name: 'NS&I Premium Bonds' } });
+  });
+});
+
+describe('rows another import recorded meanwhile', () => {
+  let svc: ImportService;
+  let work: WorkArea;
+  let seq = 0;
+  const make = async (raw: Record<string, unknown>, at: string): Promise<string> => {
+    const id = `imp_20260929_220730_${(++seq).toString(16).padStart(4, '0')}`;
+    const bytes = Buffer.from(`screenshot ${id}`);
+    const record: ImportRecord = {
+      id,
+      status: 'review',
+      createdAt: '2026-09-29T22:07:30+01:00',
+      updatedAt: '2026-09-29T22:07:30+01:00',
+      origin: 'upload',
+      document: doc({ id: documentId(sha256(bytes)), sha256: sha256(bytes), fileName: `IMG_05${90 + seq}.PNG`, capturedOn: '2026-09-29', capturedOnSource: 'exif', capturedAt: at, image: { width: 1206, height: 2622 } }),
+      extraction: { warnings: [], raw: ExtractionSchema.parse(raw) },
+    };
+    await work.init();
+    await work.saveFile(record.document, bytes);
+    await work.saveRecord(record);
+    return id;
+  };
+  const start = async () => {
+    svc = new ImportService(store, loadConfig({ FINANCE_DATA_DIR: path.join(dir, 'data'), FINANCE_WORK_DIR: path.join(dir, 'work'), FINANCE_WATCH: '0' }), work);
+    await svc.init();
+    for (const r of svc.listPending()) await svc.refreshDraft(r.id);
+  };
+  const prize = (date: string, amount: number) => ({ date, description: 'Auto prize reinvestment', amount });
+  const tab = (transactions: unknown[], extra: Record<string, unknown> = {}) => ({ documentType: 'transactions_screenshot', accounts: [{ accountType: 'premium_bonds', transactions, ...extra }] });
+  const stored = () => store.transactions('bonds').map((t) => `${t.date} ${t.amount}`).sort();
+  beforeEach(() => {
+    work = new WorkArea(path.join(dir, 'work'));
+  });
+
+  it('two scrolled screens of one list share a row: it is recorded once, and the second says so', async () => {
+    // The bottom row of the first is the first of three on 2 December on the second.
+    const top = await make(tab([prize('2026-01-05', 100), prize('2025-12-02', 25)]), '2026-09-29T22:06:27+01:00');
+    const next = await make(tab([prize('2025-12-02', 25), prize('2025-12-02', 25), prize('2025-12-02', 100), prize('2025-11-04', 50)]), '2026-09-29T22:06:32+01:00');
+    await start();
+    await svc.commit(top);
+    const committed = await svc.commit(next);
+    expect(stored()).toEqual(['2025-11-04 50', '2025-12-02 100', '2025-12-02 25', '2025-12-02 25', '2026-01-05 100']);
+    expect(committed.result).toMatchObject({ transactionsAdded: 3, transactionsSkipped: 1 });
+    expect(committed.draft!.notes.at(-1)).toMatch(/^1 row was already recorded when this was committed/);
+  });
+
+  it('a section you pointed at an account is checked against that account’s rows', async () => {
+    await store.setAccounts([...store.accounts, acct('bonds-2', 'premium_bonds', { name: 'Other bonds' })]);
+    const first = await make(tab([prize('2026-06-02', 25)], { accountName: 'Premium Bonds', last4: '7302' }), '2026-09-29T20:08:00+01:00');
+    await store.setAccounts(store.accounts.map((a) => (a.id === 'bonds' ? { ...a, last4: '7302' } : a)));
+    const later = await make(tab([prize('2026-06-02', 25), prize('2026-04-02', 100)]), '2026-09-29T22:06:27+01:00');
+    await start();
+    await svc.commit(first);
+    const pending = svc.getPending(later)!;
+    expect(pending.draft!.sections[0]!.target.mode).toBe('skip');
+    const chosen = { ...pending.draft!, sections: pending.draft!.sections.map((s) => ({ ...s, target: { mode: 'existing' as const, accountId: 'bonds' } })) };
+    await svc.commit(later, chosen);
+    expect(stored()).toEqual(['2026-04-02 100', '2026-06-02 25']);
+  });
+
+  it('a row that only looks like one recorded meanwhile waits for you, marked; then it commits', async () => {
+    const a = await make(tab([prize('2026-06-02', 25)], { accountName: 'Premium Bonds' }), '2026-09-29T20:08:00+01:00');
+    const b = await make(tab([{ date: '2026-06-03', description: 'Auto prize reinvestment June', amount: 25 }], { accountName: 'Premium Bonds' }), '2026-09-29T22:06:27+01:00');
+    await start();
+    await svc.commit(a);
+    expect(svc.getPending(b)!.draft!.sections[0]!.transactions[0]!.status).toBe('new');
+    expect((await svc.commitReady()).skipped).toEqual([{ id: b, reasons: ['possible duplicates to check'] }]);
+    const marked = svc.getPending(b)!.draft!.sections[0]!.transactions[0]!;
+    expect(marked).toMatchObject({ status: 'possible_duplicate', include: false });
+    await expect(svc.commit(b)).resolves.toMatchObject({ status: 'committed', result: { transactionsAdded: 0 } });
+    // Had you ticked it again, it would be yours to keep.
   });
 });
 

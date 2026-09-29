@@ -23,6 +23,7 @@ import { StoreError, type ImportSummary, type Store } from '../store';
 import { extractWithClaudeApi } from './claude-api';
 import { extractWithClaudeCli } from './claude-cli';
 import { commitDraft } from './commit';
+import { recheckDraft } from './dedup';
 import { CSV_ENGINE_VERSION, findProfile, parseWithProfile, readCsvRows, suggestMapping } from './csv';
 import { HOLDINGS_CSV_VERSION, parseHoldingsCsv } from './holdings-csv';
 import { decodeText, detectKind, MAX_UPLOAD_BYTES, mediaTypeFor } from './detect';
@@ -503,7 +504,20 @@ export class ImportService extends EventEmitter {
     if (record.status !== 'review') throw new StoreError(`Cannot commit an import that is ${record.status}.`, 409);
     const finalDraft = draft ? DraftSchema.parse(draft) : record.draft;
     if (!finalDraft) throw new StoreError('Nothing to commit', 409);
-    const committed = await commitDraft(this.store, { record, draft: finalDraft, workFile: this.work.filePath(record.document) });
+    // Rows another import has recorded since this draft was made are not recorded twice.
+    const checked = recheckDraft(finalDraft, (accountId) => this.store.transactions(accountId));
+    if (checked.toCheck.length) {
+      record.draft = checked.draft;
+      if (draft) record.draftEditedAt = nowISO();
+      await this.save(record);
+      const n = checked.toCheck.length;
+      throw new StoreError(`${n} row${n === 1 ? '' : 's'} may already be recorded: another import added similar ${n === 1 ? 'one' : 'ones'} after this draft was made. ${n === 1 ? 'It is' : 'They are'} marked and left out; check, then commit.`, 409);
+    }
+    if (checked.alreadyStored) {
+      const n = checked.alreadyStored;
+      checked.draft.notes.push(`${n} row${n === 1 ? ' was' : 's were'} already recorded when this was committed (by another import, after this draft was made), so ${n === 1 ? 'it was' : 'they were'} left out.`);
+    }
+    const committed = await commitDraft(this.store, { record, draft: checked.draft, workFile: this.work.filePath(record.document) });
     this.pending.delete(id);
     await this.work.remove(record, [...this.pending.values()]);
     this.emit('update', committed);
@@ -628,8 +642,14 @@ export class ImportService extends EventEmitter {
         skipped.push({ id: record.id, reasons: r.reasons });
         continue;
       }
-      await this.commit(record.id);
-      committed.push(record.id);
+      try {
+        await this.commit(record.id);
+        committed.push(record.id);
+      } catch (err) {
+        // Rows another import recorded meanwhile, to check: it waits for you like any other.
+        if (!(err instanceof StoreError) || err.status !== 409) throw err;
+        skipped.push({ id: record.id, reasons: ['possible duplicates to check'] });
+      }
     }
     return { committed, skipped };
   }

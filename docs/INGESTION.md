@@ -219,6 +219,12 @@ read again.
   - An account you pinned the upload to always wins.
   - Being your only account of the detected type adds a little: apps rarely show their own name
     on screen. It is never enough on its own.
+  - Premium Bonds are the exception. A person can hold only one, so a Premium Bonds screen is your
+    Premium Bonds unless it shows another number, provider or name. Only NS&I issues them, so a new
+    Premium Bonds account gets NS&I as its provider.
+  - A screen that shows only what kind of account it is (a scrolled list of a LISA's rows) is
+    one of your accounts of that kind, never a new one. The section waits for you to choose, and
+    offers your only account of that kind in one click.
   - A screen naming only the provider (a scrolled app screen) matches your only open account
     there.
   - A fund's own page matches the account whose latest holdings include that fund.
@@ -293,6 +299,15 @@ read again.
 - **Figures** are matched to an account by last 4 digits only when exactly one account has them.
 - **Committing is safe to retry.** Everything is validated before the first write. Transaction ids
   include the import id, so committing the same import again adds nothing twice.
+- **Rows recorded meanwhile.** A draft's rows are checked against what was stored when it was
+  drafted. At commit they are checked again against the account's rows, which catches two cases:
+  another import recorded them since (scrolled screens of one list share a row or two), or you
+  chose the account by hand.
+  - An exact match (same bank id, or same date, amount and description) is left out, and the
+    draft's notes say so.
+  - A row that only looks like one (same amount, similar description, a few days apart) is marked,
+    and the commit waits for you.
+  - Only rows that were new and included are checked, so your own choices stand.
 - **Funds on statements become instruments.** A holding with no matching instrument is recorded as
   one, with its name and identifiers exactly as printed, and researched by an agent job
   ([AGENTS.md](AGENTS.md)).
