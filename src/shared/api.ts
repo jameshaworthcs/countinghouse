@@ -722,3 +722,37 @@ export interface PayResponse {
   employers: PayEmployer[];
   notes: string[];
 }
+
+/** A stored document read again with the current reader, compared with what its import recorded. */
+export interface RereadRow {
+  key: string;
+  /** same: recorded as read; changed: recorded with another date, amount or description; added: read now, not recorded; missing: recorded, not read now. */
+  kind: 'same' | 'changed' | 'added' | 'missing';
+  stored?: { id: string; date: string; amount: number; description: string };
+  read?: { date: string; amount: number; description: string };
+  changes?: ('date' | 'amount' | 'description')[];
+  applied?: boolean;
+}
+
+export interface RereadSection {
+  accountId: string;
+  accountName: string;
+  rows: RereadRow[];
+  balance: { stored: { id: string; date: string; balance: number } | null; read: { date: string; balance: number } | null; changed: boolean; applied?: boolean } | null;
+}
+
+export interface Reread {
+  importId: string;
+  status: 'running' | 'done' | 'failed';
+  startedAt: string;
+  finishedAt?: string;
+  engine?: string;
+  model?: string;
+  engineVersion?: string;
+  /** The reader version that made the import. */
+  previousVersion?: string;
+  costUsd?: number;
+  sections: RereadSection[];
+  notes: string[];
+  error?: string;
+}

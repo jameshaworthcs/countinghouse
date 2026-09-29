@@ -360,6 +360,34 @@ recognised; and a later, better reader can go back to it. *Discard* still delete
 It must still add nothing when you click: otherwise it is refused and the page says to review it.
 No analyst job follows a dismissal.
 
+## Reading a stored document again
+
+The reader improves (`PROMPT_VERSION`: `extract-4` … `extract-9`), and a document read by an earlier
+version may hold something it missed or misread. A committed PDF or screenshot can be read again
+with the current reader, and its check, from its page (Import → History → the document → *Read it
+again*). The Import page lists the documents an earlier reader read.
+
+- **It is off until you turn it on** (Settings → Import & extraction → *Read stored documents
+  again*). A reading costs what an upload does. Nothing reads by itself.
+- **The new reading is compared with what the import recorded**, account by account
+  (`src/server/ingest/reread.ts`). Each row is:
+  - **the same**: same date, amount and description, whichever import recorded it;
+  - **read differently**: a row of this import with the same amount and description a few days
+    apart (its date), the same date and description (its amount), or the same date and amount with
+    a similar description;
+  - **read now, not recorded**;
+  - **recorded, not read now**.
+
+  The balance is compared too.
+- **Nothing changes until you apply a difference**, one at a time. The actions don't delete: a row
+  missing from the new reading is yours to look at. Each is recorded as the new reader's:
+  - a row read differently is corrected, and its `corrections` keep what was recorded, noting the
+    reader;
+  - a row read now is added, with the import's provenance;
+  - a balance takes the new reading, and its note keeps the old figure.
+- The comparison waits in the work area (`rereads/`), never in `data/`, until you put it away.
+  Files parsed on this machine (CSV, OFX, QIF) have no reader to improve, and are not read again.
+
 ## Measuring extraction
 
 `npm run eval` runs a fixed set of synthetic documents through this pipeline and scores the

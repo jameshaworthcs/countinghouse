@@ -6,6 +6,7 @@ import { z } from 'zod';
 import type { ImportListResponse } from '../../shared/api';
 import { CsvProfileSchema, DraftSchema, EXTRACTION_ENGINES, SlugSchema } from '../../shared/schema';
 import { readJson, type AppContext } from '../context';
+import { PROMPT_VERSION } from '../ingest/prompt';
 import { StoreError } from '../store';
 
 function contentDisposition(fileName: string): string {
@@ -67,6 +68,17 @@ export function importRoutes(ctx: AppContext): Hono {
     return c.json({ results }, 201);
   });
 
+  /** Committed documents read by an older version of the reader, and any re-reading of them. */
+  app.get('/rereads', (c) =>
+    c.json({
+      current: PROMPT_VERSION,
+      enabled: ctx.store.settings.extraction.rereadDocuments,
+      older: ctx.store.imports
+        .filter((i) => (i.engine === 'claude-cli' || i.engine === 'claude-api') && i.engineVersion !== PROMPT_VERSION && !i.result?.nothingNew)
+        .map((i) => ({ id: i.id, fileName: i.fileName, engineVersion: i.engineVersion ?? null, committedAt: i.committedAt ?? null, reread: svc.getReread(i.id)?.status ?? null })),
+      rereads: svc.listRereads(),
+    }),
+  );
   app.post('/commit-ready', async (c) => c.json(await svc.commitReady()));
 
   /** Dismiss every import that adds nothing new (their documents are filed, nothing recorded). */
@@ -97,6 +109,19 @@ export function importRoutes(ctx: AppContext): Hono {
   });
 
   app.post('/:id/dismiss', async (c) => c.json(await svc.dismiss(c.req.param('id'))));
+
+  // ─── Reading a stored document again (docs/INGESTION.md): yours only, and off unless turned on ──
+
+  app.get('/:id/reread', (c) => c.json(svc.getReread(c.req.param('id')) ?? null));
+  app.post('/:id/reread', async (c) => c.json(await svc.startReread(c.req.param('id')), 202));
+  app.post('/:id/reread/apply', async (c) => {
+    const body = await readJson(c, z.object({ key: z.string().min(1).max(80) }));
+    return c.json(await svc.applyReread(c.req.param('id'), body.key));
+  });
+  app.delete('/:id/reread', async (c) => {
+    await svc.forgetReread(c.req.param('id'));
+    return c.json({ ok: true });
+  });
 
   app.post('/:id/reprocess', async (c) => {
     const body = await readJson(c, z.object({ engine: z.enum(EXTRACTION_ENGINES).optional(), model: z.string().max(80).optional(), verifyModel: z.string().max(80).optional() }));

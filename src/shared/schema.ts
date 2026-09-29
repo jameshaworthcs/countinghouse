@@ -591,8 +591,10 @@ export const SettingsSchema = z.object({
       timeoutSeconds: z.number().int().min(30).max(3600).default(900),
       /** Read receipts you attach with Claude, to propose split lines. Off until you turn it on. */
       readReceipts: z.boolean().default(false),
+      /** Read stored documents again with the current reader, to compare with what was recorded. Off until you turn it on. */
+      rereadDocuments: z.boolean().default(false),
     })
-    .default({ engine: 'auto', model: 'sonnet', verifyModel: 'opus', effort: 'high', maxConcurrent: 2, timeoutSeconds: 900, readReceipts: false }),
+    .default({ engine: 'auto', model: 'sonnet', verifyModel: 'opus', effort: 'high', maxConcurrent: 2, timeoutSeconds: 900, readReceipts: false, rereadDocuments: false }),
   git: z
     .object({
       autoCommit: z.boolean().default(true),

@@ -13,6 +13,7 @@ import { api, useApi, useApiMutation } from '../lib/api';
 import { useAppData } from '../lib/data';
 import { cn, fileSize, money, plural } from '../lib/format';
 import { importStatus } from './Import';
+import { ReadAgainCard } from '../components/ReadAgain';
 
 type Rec = ImportRecord & { readiness?: { ready: boolean; reasons: string[] }; nothingNew?: NothingNewView };
 
@@ -621,6 +622,7 @@ export default function Review() {
   const navigate = useNavigate();
   const toast = useToast();
   const q = useApi<Rec>(['import', id], `/imports/${id}`, { refetchInterval: 4000 });
+  const rereads = useApi<{ current: string }>(['rereads'], '/imports/rereads');
   const rec = q.data;
   const [draft, setDraft] = useState<Draft | null>(null);
   const [dirty, setDirty] = useState(false);
@@ -721,6 +723,11 @@ export default function Review() {
         </Callout>
       )}
 
+      {committed && !filed && (rec.extraction.engine === 'claude-cli' || rec.extraction.engine === 'claude-api') && (
+        <div className="mt-4">
+          <ReadAgainCard rec={rec} currentVersion={rereads.data?.current ?? null} />
+        </div>
+      )}
       {nothingNew && <NothingNewPanel nothingNew={nothingNew} onDismiss={() => dismiss.mutate(undefined)} dismissing={dismiss.isPending} error={dismiss.error} />}
       {(rec.status === 'review' || rec.status === 'needs_mapping' || committed || rec.status === 'failed') && (
         <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">

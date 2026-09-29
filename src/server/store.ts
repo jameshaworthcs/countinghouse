@@ -81,6 +81,8 @@ export interface ImportSummary {
   documentId: string;
   documentPath?: string | undefined;
   engine?: string | undefined;
+  /** The reader or parser version that made it (e.g. "extract-9"). */
+  engineVersion?: string | undefined;
   detail?: string | undefined;
   /** What the document was (a P60, a payslip, a statement…), as read. */
   documentType?: string | undefined;
@@ -1082,6 +1084,7 @@ function summarise(r: ImportRecord, rel: string): ImportSummary {
     documentId: r.document.id,
     documentPath: r.document.path,
     engine: r.extraction.engine,
+    engineVersion: r.extraction.engineVersion,
     detail: r.extraction.detail,
     documentType: r.draft?.documentType,
     result: r.result,

@@ -501,3 +501,18 @@ needed a `fetch` loop pasted into the signed-in browser console.
   whose total differs from the payment (a tip, cashback) leaves the difference in the payment's own
   category.
 
+## 2026-09-29: Reading stored documents again
+
+- **Compare, then apply by hand; never replace.** A new reading is not trusted over the old one
+  just for being newer. Each difference is shown with both values, and applying one goes through
+  the same correction trail an edit uses.
+- **No deletions.** A row the new reading misses may be a row it failed to see. Removing it stays a
+  deliberate edit on the transaction.
+- **Rows from other imports count as the same row.** Overlapping statements record a row once. The
+  new reading of either should not call the shared row new.
+- **The reader was moved out of `process` into `readDocument`**, so an upload and a re-reading run
+  the same engines, prompt and check. The re-reading pins the upload to the account the import went
+  to.
+- **Off by default (the owner's instruction), and never automatic.** The Import page lists what an
+  earlier reader read, but only the owner starts a reading.
+

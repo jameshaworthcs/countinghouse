@@ -1,10 +1,12 @@
 // The import pipeline: upload → (queue) → parse or extract → draft → review → commit.
 
 import { EventEmitter } from 'node:events';
-import { copyFile } from 'node:fs/promises';
+import { copyFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { slugify } from '../../shared/accounts';
+import type { Reread } from '../../shared/api';
 import { CategoryIndex } from '../../shared/categories';
+import { Categoriser } from '../../shared/categorise';
 import { today } from '../../shared/dates';
 import { sectionChecks } from '../../shared/review';
 import {
@@ -15,15 +17,17 @@ import {
   type EngineId,
   type ExtractionEnginePreference,
   type ImportRecord,
+  type Transaction,
 } from '../../shared/schema';
 import type { Config } from '../config';
 import { Limiter, nowISO, sha256 } from '../fsutil';
-import { documentId, importId } from '../ids';
+import { balanceId, documentId, importId, transactionId } from '../ids';
 import { StoreError, type ImportSummary, type Store } from '../store';
 import { extractWithClaudeApi } from './claude-api';
 import { extractWithClaudeCli } from './claude-cli';
 import { commitDraft } from './commit';
 import { recheckDraft } from './dedup';
+import { compareReading } from './reread';
 import { CSV_ENGINE_VERSION, findProfile, parseWithProfile, readCsvRows, suggestMapping } from './csv';
 import { HOLDINGS_CSV_VERSION, parseHoldingsCsv } from './holdings-csv';
 import { decodeText, detectKind, MAX_UPLOAD_BYTES, mediaTypeFor } from './detect';
@@ -88,6 +92,8 @@ export interface ProcessOptions {
 
 export class ImportService extends EventEmitter {
   private pending = new Map<string, ImportRecord>();
+  /** Stored documents read again: the latest reading of each, kept in the work area. */
+  private rereads = new Map<string, Reread>();
   private readonly limiter: Limiter;
   private readonly aborts = new Map<string, AbortController>();
 
@@ -105,6 +111,10 @@ export class ImportService extends EventEmitter {
     for (const r of await this.work.loadAll()) {
       this.pending.set(r.id, r);
       if (r.status === 'queued' || r.status === 'processing') this.schedule(r.id);
+    }
+    for (const r of await this.work.loadRereads()) {
+      // A reading the app stopped in the middle of is not coming back.
+      this.rereads.set(r.importId, r.status === 'running' ? { ...r, status: 'failed', error: 'Stopped when the app restarted: read it again.' } : r);
     }
     await this.redraftWaiting();
   }
@@ -283,78 +293,9 @@ export class ImportService extends EventEmitter {
         engine = 'santander-txt';
         engineVersion = SANTANDER_ENGINE_VERSION;
       } else if (kind === 'pdf' || kind === 'image') {
-        const settings = this.store.settings.extraction;
-        const { engines, claudeBin } = await detectEngines({ apiKey: this.config.anthropicApiKey });
-        const chosen = pickEngine(opts.engine ?? settings.engine, engines);
-        if (!chosen) throw new Error('No extraction engine is available for PDFs and images. See Settings → Extraction.');
-        engine = chosen;
-        const model = opts.model ?? settings.model;
-        const scratch = await this.work.scratch(record.id);
-        const source = this.work.filePath(record.document);
-        let files: { path: string; mediaType: string }[];
-        let tiled = false;
-        if (kind === 'image') {
-          const prepared = await prepareImage(bytes, scratch, 'page');
-          files = prepared.files.map((p) => ({ path: p, mediaType: 'image/png' }));
-          tiled = prepared.tiled;
-        } else {
-          const p = path.join(scratch, 'document.pdf');
-          await copyFile(source, p);
-          files = [{ path: p, mediaType: 'application/pdf' }];
-        }
-        const hint = record.hintAccountId ? this.store.account(record.hintAccountId) : undefined;
-        const promptCtx = {
-          fileName: record.document.fileName,
-          tiled,
-          capturedOn: record.document.capturedOn,
-          capturedOnSource: record.document.capturedOnSource,
-          uploadedOn: record.createdAt.slice(0, 10),
-          categoryIds: new CategoryIndex(this.store.categories).list.filter((c) => c.parent).map((c) => c.id),
-          accountHint: hint ? `${hint.name} (${hint.type}${hint.last4 ? `, ending ${hint.last4}` : ''})` : undefined,
-        };
-        const timeoutMs = settings.timeoutSeconds * 1000;
-        const readWith = async (m: string): Promise<EngineResult> => {
-          if (chosen === 'claude-cli') {
-            if (!claudeBin) throw new Error('claude CLI not found');
-            return extractWithClaudeCli({
-              bin: claudeBin,
-              cwd: scratch,
-              userPrompt: userPrompt({ ...promptCtx, files: files.map((f) => `./${path.basename(f.path)}`) }),
-              systemPrompt: SYSTEM_PROMPT,
-              schema: extractionJsonSchema(),
-              model: m,
-              effort: settings.effort,
-              timeoutMs,
-              signal: abort.signal,
-            });
-          }
-          return extractWithClaudeApi({
-            apiKey: this.config.anthropicApiKey!,
-            files,
-            userPrompt: userPrompt(promptCtx),
-            systemPrompt: SYSTEM_PROMPT,
-            schema: extractionJsonSchema(),
-            model: m,
-            effort: settings.effort,
-            timeoutMs,
-            signal: abort.signal,
-          });
-        };
-        if (chosen === 'ocr') {
-          result = await extractWithOcr(files[0]!, scratch, Number(today().slice(0, 4)));
-          engineVersion = OCR_ENGINE_VERSION;
-        } else {
-          result = await readWith(model);
-          engineVersion = PROMPT_VERSION;
-          const verifyModel = opts.verifyModel !== undefined ? opts.verifyModel : settings.verifyModel;
-          if (verifyModel && verifyModel !== model) {
-            const checked = await this.verifyReading(record, result, { model, verifyModel, readWith, batch: await this.batchEvidence(record) });
-            result = checked.result;
-            verified = checked;
-          }
-        }
+        const read = await this.readDocument(record, kind, bytes, this.work.filePath(record.document), opts, abort.signal);
+        ({ result, engine, engineVersion, verified } = read);
         detail = result.model;
-        await this.work.clearScratch(record.id);
       } else {
         throw new Error('Unsupported file type');
       }
@@ -388,6 +329,214 @@ export class ImportService extends EventEmitter {
     } finally {
       this.aborts.delete(id);
     }
+  }
+
+  /**
+   * Read a PDF or image with the chosen engine, checked by a second reading when the settings ask
+   * for one (docs/INGESTION.md, "Checking every figure"). For an upload, and for reading a stored
+   * document again (the scratch directory is named by `scratchId`).
+   */
+  private async readDocument(
+    record: ImportRecord,
+    kind: 'pdf' | 'image',
+    bytes: Buffer,
+    source: string,
+    opts: ProcessOptions,
+    signal: AbortSignal,
+    scratchId: string = record.id,
+  ): Promise<{ result: EngineResult & { ocrText?: string; candidates?: { amounts: number[]; dates: string[] } }; engine: EngineId; engineVersion: string; verified?: Awaited<ReturnType<ImportService['verifyReading']>> | undefined }> {
+    let result: EngineResult & { ocrText?: string; candidates?: { amounts: number[]; dates: string[] } };
+    let engineVersion: string;
+    let verified: Awaited<ReturnType<ImportService['verifyReading']>> | undefined;
+    const settings = this.store.settings.extraction;
+    const { engines, claudeBin } = await detectEngines({ apiKey: this.config.anthropicApiKey });
+    const chosen = pickEngine(opts.engine ?? settings.engine, engines);
+    if (!chosen) throw new Error('No extraction engine is available for PDFs and images. See Settings → Extraction.');
+    const model = opts.model ?? settings.model;
+    const scratch = await this.work.scratch(scratchId);
+    let files: { path: string; mediaType: string }[];
+    let tiled = false;
+    if (kind === 'image') {
+      const prepared = await prepareImage(bytes, scratch, 'page');
+      files = prepared.files.map((p) => ({ path: p, mediaType: 'image/png' }));
+      tiled = prepared.tiled;
+    } else {
+      const p = path.join(scratch, 'document.pdf');
+      await copyFile(source, p);
+      files = [{ path: p, mediaType: 'application/pdf' }];
+    }
+    const hint = record.hintAccountId ? this.store.account(record.hintAccountId) : undefined;
+    const promptCtx = {
+      fileName: record.document.fileName,
+      tiled,
+      capturedOn: record.document.capturedOn,
+      capturedOnSource: record.document.capturedOnSource,
+      uploadedOn: record.createdAt.slice(0, 10),
+      categoryIds: new CategoryIndex(this.store.categories).list.filter((c) => c.parent).map((c) => c.id),
+      accountHint: hint ? `${hint.name} (${hint.type}${hint.last4 ? `, ending ${hint.last4}` : ''})` : undefined,
+    };
+    const timeoutMs = settings.timeoutSeconds * 1000;
+    const readWith = async (m: string): Promise<EngineResult> => {
+      if (chosen === 'claude-cli') {
+        if (!claudeBin) throw new Error('claude CLI not found');
+        return extractWithClaudeCli({
+          bin: claudeBin,
+          cwd: scratch,
+          userPrompt: userPrompt({ ...promptCtx, files: files.map((f) => `./${path.basename(f.path)}`) }),
+          systemPrompt: SYSTEM_PROMPT,
+          schema: extractionJsonSchema(),
+          model: m,
+          effort: settings.effort,
+          timeoutMs,
+          signal,
+        });
+      }
+      return extractWithClaudeApi({
+        apiKey: this.config.anthropicApiKey!,
+        files,
+        userPrompt: userPrompt(promptCtx),
+        systemPrompt: SYSTEM_PROMPT,
+        schema: extractionJsonSchema(),
+        model: m,
+        effort: settings.effort,
+        timeoutMs,
+        signal,
+      });
+    };
+    if (chosen === 'ocr') {
+      result = await extractWithOcr(files[0]!, scratch, Number(today().slice(0, 4)));
+      engineVersion = OCR_ENGINE_VERSION;
+    } else {
+      result = await readWith(model);
+      engineVersion = PROMPT_VERSION;
+      const verifyModel = opts.verifyModel !== undefined ? opts.verifyModel : settings.verifyModel;
+      if (verifyModel && verifyModel !== model) {
+        const checked = await this.verifyReading(record, result, { model, verifyModel, readWith, batch: await this.batchEvidence(record) });
+        result = checked.result;
+        verified = checked;
+      }
+    }
+    await this.work.clearScratch(scratchId);
+    return { result, engine: chosen, engineVersion, verified };
+  }
+
+  // ─── Reading a stored document again (docs/INGESTION.md, "Reading a stored document again") ──
+
+  /** A stored document's latest re-reading, if one was made. */
+  getReread(importId: string): Reread | undefined {
+    return this.rereads.get(importId);
+  }
+
+  listRereads(): Reread[] {
+    return [...this.rereads.values()].sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+  }
+
+  /**
+   * Read a committed PDF or screenshot again with the current reader (and its check), and compare
+   * the reading with what the import recorded. Runs in the background; only while reading stored
+   * documents again is turned on. Nothing in the data changes.
+   */
+  async startReread(importId: string): Promise<Reread> {
+    if (!this.store.settings.extraction.rereadDocuments) throw new StoreError('Reading stored documents again is off: turn it on in Settings → Import & extraction.', 409);
+    const record = await this.store.readImport(importId);
+    if (!record || record.status !== 'committed' || !record.document.path) throw new StoreError('Only a committed import’s document can be read again.', 404);
+    if (record.result?.nothingNew) throw new StoreError('This document was filed as adding nothing new: there is nothing recorded to compare with.', 409);
+    if (!['claude-cli', 'claude-api', 'ocr'].includes(record.extraction.engine ?? '')) throw new StoreError('Files parsed on this machine (CSV, OFX, QIF) are not read by Claude, so there is no newer reader to read them.', 409);
+    if (this.rereads.get(importId)?.status === 'running') throw new StoreError('It is being read again already.', 409);
+    const reread: Reread = { importId, status: 'running', startedAt: nowISO(), sections: [], notes: [], ...(record.extraction.engineVersion ? { previousVersion: record.extraction.engineVersion } : {}) };
+    await this.saveReread(reread);
+    void this.limiter.run(() => this.runReread(record, reread));
+    return reread;
+  }
+
+  private async runReread(record: ImportRecord, reread: Reread): Promise<void> {
+    const abort = new AbortController();
+    try {
+      const file = this.store.documentAbsPath(record.document.path!);
+      const bytes = await readFile(file);
+      const kind = detectKind(record.document.fileName, bytes);
+      if (kind !== 'pdf' && kind !== 'image') throw new Error('Only PDFs and screenshots are read again.');
+      // The account it went to, as if you had pinned the upload to it.
+      const accountIds = record.result?.accountIds ?? [];
+      const ctx: ImportRecord = { ...record, ...(accountIds.length === 1 ? { hintAccountId: accountIds[0] } : {}) };
+      const read = await this.readDocument(ctx, kind, bytes, file, {}, abort.signal, `reread-${record.id}`);
+      const draft = read.verified?.draft ?? this.draftOf(ctx, read.result);
+      const { sections, notes } = compareReading(this.store, record, draft);
+      await this.saveReread({
+        ...reread,
+        status: 'done',
+        finishedAt: nowISO(),
+        engine: read.engine,
+        ...(read.result.model ? { model: read.result.model } : {}),
+        engineVersion: read.engineVersion,
+        costUsd: Math.round(((read.result.costUsd ?? 0) + (read.verified?.otherCostUsd ?? 0)) * 1000) / 1000,
+        sections,
+        notes: [...notes, ...read.result.warnings, ...(read.verified?.verification.disagreements.length ? [`The two readings disagreed: ${read.verified.verification.disagreements.join('; ')}`] : [])],
+      });
+    } catch (err) {
+      await this.saveReread({ ...reread, status: 'failed', finishedAt: nowISO(), error: (err as Error).message.slice(0, 500) });
+    }
+  }
+
+  /**
+   * Apply one difference a re-reading found, as you chose: a changed row is corrected (what was
+   * recorded is kept in its corrections), a row read now is added, a balance is set to the new
+   * reading. Never a deletion: a row missing from the new reading is yours to look at.
+   */
+  async applyReread(importId: string, key: string): Promise<Reread> {
+    const reread = this.rereads.get(importId);
+    if (!reread || reread.status !== 'done') throw new StoreError('Nothing read again to apply.', 404);
+    const record = await this.store.readImport(importId);
+    if (!record) throw new StoreError('Unknown import', 404);
+    const note = `Read again with ${reread.engineVersion ?? 'the current reader'}${reread.model ? ` (${shortModel(reread.model)})` : ''}`;
+    const at = nowISO();
+    for (const section of reread.sections) {
+      if (key === `balance:${section.accountId}` && section.balance?.read && section.balance.changed && !section.balance.applied) {
+        const b = section.balance;
+        if (b.stored) await this.store.updateBalance(b.stored.id, { balance: b.read!.balance, date: b.read!.date, note: `${note}: was ${b.stored.balance.toFixed(2)} on ${b.stored.date}` }, `balance: ${section.accountName} read again`);
+        else await this.store.addBalances([{ id: balanceId(section.accountId, b.read!.date, b.read!.balance, 'reread', importId), accountId: section.accountId, date: b.read!.date, balance: b.read!.balance, currency: this.store.account(section.accountId)?.currency ?? 'GBP', kind: record.document.mediaType.startsWith('image/') ? 'screenshot' : 'statement', dateSource: 'document', note, source: { importId, documentId: record.document.id }, createdAt: at }], `balance: ${section.accountName} read again`);
+        b.applied = true;
+        await this.saveReread(reread);
+        return reread;
+      }
+      const row = section.rows.find((r) => r.key === key);
+      if (!row || row.applied) continue;
+      if (row.kind === 'changed' && row.stored && row.read) {
+        const current = this.store.transaction(row.stored.id);
+        if (!current) throw new StoreError('That transaction no longer exists.', 409);
+        const fields = row.changes ?? [];
+        const patch: Partial<Transaction> = { corrections: [...(current.corrections ?? []), ...fields.map((f) => ({ field: f, from: current[f], to: row.read![f], at, note }))] };
+        for (const f of fields) (patch as Record<string, unknown>)[f] = row.read[f];
+        await this.store.updateTransactions([{ id: current.id, patch }], `transaction: corrected from ${record.document.fileName} read again`);
+      } else if (row.kind === 'added' && row.read) {
+        const account = this.store.account(section.accountId)!;
+        const categoriser = new Categoriser(this.store.rules, new CategoryIndex(this.store.categories), this.store.accounts, this.store.institutions);
+        const cat = categoriser.categorise({ accountId: account.id, description: row.read.description, amount: row.read.amount });
+        let occurrence = 0;
+        let id = transactionId(account.id, row.read.date, row.read.amount, row.read.description, occurrence, `${importId}:reread`);
+        while (this.store.transaction(id)) id = transactionId(account.id, row.read.date, row.read.amount, row.read.description, ++occurrence, `${importId}:reread`);
+        await this.store.addTransactions(
+          [{ id, accountId: account.id, date: row.read.date, amount: row.read.amount, currency: account.currency, description: row.read.description, ...(cat.payee ? { payee: cat.payee } : {}), ...(cat.category ? { category: cat.category } : {}), ...(cat.categorisedBy ? { categorisedBy: cat.categorisedBy } : {}), notes: note, source: { importId, documentId: record.document.id }, createdAt: at }],
+          `transaction: added from ${record.document.fileName} read again`,
+        );
+      } else {
+        throw new StoreError('Only a changed row, a row read now, or a changed balance can be applied.', 409);
+      }
+      row.applied = true;
+      await this.saveReread(reread);
+      return reread;
+    }
+    throw new StoreError('Nothing to apply there.', 404);
+  }
+
+  async forgetReread(importId: string): Promise<void> {
+    this.rereads.delete(importId);
+    await this.work.removeReread(importId);
+  }
+
+  private async saveReread(reread: Reread): Promise<void> {
+    this.rereads.set(reread.importId, reread);
+    await this.work.saveReread(reread);
   }
 
   /** Rebuild the draft from the stored extraction (after adding accounts, rules, etc.). */

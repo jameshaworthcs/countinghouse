@@ -22,7 +22,7 @@ point at them with `"$schema"` so editors validate as you type.
 data/
   meta.json            format + version + base currency
   profile.json         you: date of birth, region, salary, retirement age (the tax band is computed)
-  settings.json        extraction engine/model (and reading receipts, off by default), agents (with the background budget), git behaviour, stale threshold, FX rates
+  settings.json        extraction engine/model (and reading receipts or stored documents again, both off by default), agents (with the background budget), git behaviour, stale threshold, FX rates
   institutions.json    { institutions: [...] }   banks, platforms, providers (+ FSCS group)
   accounts.json        { accounts: [...] }
   categories.json      { categories: [...] }     editable taxonomy (system ones drive calculations)

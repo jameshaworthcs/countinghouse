@@ -8,6 +8,7 @@ import { DropZone, FilePickerButton } from '../components/Upload';
 import { api, useApi, useApiMutation } from '../lib/api';
 import { useAppData } from '../lib/data';
 import { cn, fileSize, formatDate, formatMonth, money, plural, timeAgo } from '../lib/format';
+import { OlderReadings } from '../components/ReadAgain';
 
 type Pending = ImportListResponse['pending'][number];
 
@@ -357,6 +358,7 @@ export default function Import() {
             <EmptyState title="Nothing imported yet" />
           )}
         </Card>
+        <OlderReadings />
       </div>
     </div>
   );

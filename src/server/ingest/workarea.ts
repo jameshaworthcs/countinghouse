@@ -4,6 +4,7 @@
 
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import type { Reread } from '../../shared/api';
 import { ImportRecordSchema, type DocumentRef, type ImportRecord } from '../../shared/schema';
 import { atomicWrite } from '../fsutil';
 
@@ -11,15 +12,44 @@ export class WorkArea {
   readonly filesDir: string;
   readonly importsDir: string;
   readonly extractDir: string;
+  /** Stored documents read again, and how the reading compares (never committed). */
+  readonly rereadsDir: string;
 
   constructor(readonly dir: string) {
     this.filesDir = path.join(dir, 'files');
     this.importsDir = path.join(dir, 'imports');
     this.extractDir = path.join(dir, 'extract');
+    this.rereadsDir = path.join(dir, 'rereads');
   }
 
   async init(): Promise<void> {
-    for (const d of [this.filesDir, this.importsDir, this.extractDir]) await mkdir(d, { recursive: true, mode: 0o700 });
+    for (const d of [this.filesDir, this.importsDir, this.extractDir, this.rereadsDir]) await mkdir(d, { recursive: true, mode: 0o700 });
+  }
+
+  async saveReread(reread: Reread): Promise<void> {
+    await atomicWrite(path.join(this.rereadsDir, `${reread.importId}.json`), JSON.stringify(reread, null, 2), 0o600);
+  }
+
+  async removeReread(importId: string): Promise<void> {
+    await rm(path.join(this.rereadsDir, `${importId}.json`), { force: true });
+  }
+
+  async loadRereads(): Promise<Reread[]> {
+    let files: string[] = [];
+    try {
+      files = (await readdir(this.rereadsDir)).filter((f) => f.endsWith('.json'));
+    } catch {
+      return [];
+    }
+    const out: Reread[] = [];
+    for (const f of files) {
+      try {
+        out.push(JSON.parse(await readFile(path.join(this.rereadsDir, f), 'utf8')) as Reread);
+      } catch {
+        console.warn(`[work] ignoring unreadable re-reading ${f}`);
+      }
+    }
+    return out;
   }
 
   filePath(doc: Pick<DocumentRef, 'sha256' | 'fileName'>): string {

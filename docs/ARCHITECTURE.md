@@ -21,6 +21,7 @@ Hono server  (Node 24, tsx; 127.0.0.1:4750 live, 4760 in development)
    │    ├─ engines: claude-cli · claude-api · ocr (tesseract/pdftotext)
    │    ├─ normalise → buildDraft (match accounts, categorise, dedup, transfers)
    │    └─ commitDraft → Store (+ document archived, import record written)
+   │    └─ read a stored document again → compare with what was recorded → apply what you choose
    ├─ InboxWatcher: inbox/ → ImportService
    └─ Analytics (cached per store version)
         BalanceEngine · Coverage · estate · cashflow · spending (+ computed signals) · recurring · budgets · goals · pay
