@@ -135,6 +135,12 @@ function AccountRow({ a }: { a: AccountParamsSummary }) {
   );
 }
 
+/** "If the last 3 months continued" → "Last 3 months", for column headings. */
+function shortLabel(label: string): string {
+  const core = label.replace(/^If (the )?/, '').replace(/ (continued|repeated)$/, '');
+  return core.charAt(0).toUpperCase() + core.slice(1);
+}
+
 export default function Projections() {
   const [months, setMonths] = useState<string>('120');
   const [adjust, setAdjust] = useState(0);
@@ -227,11 +233,12 @@ export default function Projections() {
             </ChartFrame>
           ) : (
             <Callout tone="neutral" title="Not enough data to project yet">
-              A projection needs at least two weeks in which every account has data. Import statements or exports for all your accounts covering the same period.
+              A projection needs a month in which every account has data, so it sees a payday and the monthly bills. Import statements or exports for all your accounts covering the same month.
             </Callout>
           )}
 
-          <div className="grid gap-5 lg:grid-cols-[1.2fr_1fr]">
+          <div className={cn('grid gap-5', p.series.length ? 'lg:grid-cols-[1.2fr_1fr]' : '')}>
+            {p.series.length > 0 && (
             <Card title="Milestones" description="Median, with the 80% range below it" padded={false}>
               <div className="overflow-x-auto">
                 <table className={tableClasses.table}>
@@ -240,7 +247,7 @@ export default function Projections() {
                       <th className={tableClasses.th}>In</th>
                       {p.series.map((s) => (
                         <th key={s.id} className={cn(tableClasses.th, 'text-right')}>
-                          {s.id === 'recent' ? 'Last 3 months' : s.id === 'year' ? 'Last 12 months' : 'Chosen period'}
+                          {shortLabel(s.label)}
                         </th>
                       ))}
                     </tr>
@@ -278,6 +285,7 @@ export default function Projections() {
                 </table>
               </div>
             </Card>
+            )}
             <Card title="Today’s position">
               <div className="grid grid-cols-2 gap-3">
                 <Stat label="Cash (net of cards)" value={<Money value={p.start.cash} decimals={0} />} />

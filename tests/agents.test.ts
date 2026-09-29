@@ -1,7 +1,7 @@
 // Agent jobs without calling Claude: the privacy boundary of the prompts, and how each job's
 // output becomes records through the validated write path.
 
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -169,4 +169,33 @@ describe('what is stale', () => {
     expect(kinds).toEqual(['refresh-assumptions', 'research-instrument', 'research-provider', 'research-provider']);
     runner.stop();
   });
+
+  it('does not start a job again by itself after it ran, even when it found nothing', async () => {
+    await store.setSettings({ ...store.settings, agents: { ...store.settings.agents, enabled: true } });
+    const config = loadConfig({ FINANCE_DATA_DIR: path.join(dir, 'data'), FINANCE_WORK_DIR: path.join(dir, 'work'), FINANCE_WATCH: '0' });
+    const first = new JobRunner(store, new Analytics(store), config, { autoRun: false });
+    await first.init();
+    await first.ensureInstrumentsFromHoldings();
+    const due = first.suggestions('2026-09-29');
+    expect(due).toHaveLength(4);
+    first.stop();
+    // Each job ran and succeeded without writing anything, so every suggestion is still there.
+    await writeJobs(
+      first.dir,
+      due.map((s, i) => ({ id: `job_done${i}`, kind: s.kind, label: s.label, params: s.params, status: 'succeeded', trigger: 'schedule', privacy: 'public', promptVersion: 'test', createdAt: '2026-09-29T10:00:00+01:00', finishedAt: '2026-09-29T10:05:00+01:00', summary: 'Nothing found' })),
+    );
+    const runner = new JobRunner(store, new Analytics(store), config, { autoRun: true, paused: true });
+    await runner.init();
+    expect(runner.suggestions('2026-10-01')).toHaveLength(4);
+    await runner.tick('2026-10-01');
+    expect(runner.list().filter((j) => j.status === 'queued')).toEqual([]);
+    // Once the research is stale (90 days by default), it is due again.
+    await runner.tick('2027-01-05');
+    expect(runner.list().filter((j) => j.status === 'queued').map((j) => j.kind)).toContain('research-instrument');
+    runner.stop();
+  });
 });
+
+async function writeJobs(jobsDir: string, jobs: object[]) {
+  for (const j of jobs) await writeFile(path.join(jobsDir, `${(j as { id: string }).id}.json`), JSON.stringify(j));
+}

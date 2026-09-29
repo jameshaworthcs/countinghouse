@@ -16,6 +16,7 @@
     "demo:dev": "npm run dev",
     "deploy": "bash scripts/deploy.sh",
     "demo:reset": "tsx scripts/demo-data.ts --force",
+    "demo:sparse": "tsx scripts/demo-data.ts --force --months=1 --dir=demo-sparse",
     "import": "tsx scripts/import.ts",
     "validate": "tsx scripts/validate-data.ts",
     "schemas": "tsx scripts/export-schemas.ts",

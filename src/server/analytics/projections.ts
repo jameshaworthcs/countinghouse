@@ -6,7 +6,7 @@
 import { assumptionDef, type AssumptionSet } from '../../shared/assumptions';
 import type { AccountParamsSummary, AssumptionInUse, ProjectionPoint, ProjectionResponse, ProjectionScenario } from '../../shared/api';
 import { CategoryIndex } from '../../shared/categories';
-import { addMonths, today, type ISODate } from '../../shared/dates';
+import { addMonths, formatMonth, today, type ISODate } from '../../shared/dates';
 import { birthdayAt } from '../../shared/uk';
 import type { Store } from '../store';
 import type { BalanceEngine } from './balances';
@@ -110,9 +110,9 @@ export function projections(store: Store, engine: BalanceEngine, opts: Projectio
 
   const g = (key: string) => set.resolve(key).value;
   const inflation = g('inflation');
-  const defs: { id: string; label: string; from: ISODate; to: ISODate }[] = standardPeriods(start);
+  const defs: { id: string; label: string; from: ISODate; to: ISODate }[] = standardPeriods(start, coverage);
   if (opts.pastFrom && opts.pastTo && opts.pastFrom < opts.pastTo) {
-    defs.push({ id: 'past', label: `If ${opts.pastFrom.slice(0, 7)} to ${opts.pastTo.slice(0, 7)} repeated`, from: opts.pastFrom, to: opts.pastTo });
+    defs.push({ id: 'past', label: `If ${formatMonth(opts.pastFrom)} to ${formatMonth(opts.pastTo)} repeated`, from: opts.pastFrom, to: opts.pastTo });
   }
 
   const scenarios: ProjectionScenario[] = [];
@@ -205,7 +205,7 @@ export function projections(store: Store, engine: BalanceEngine, opts: Projectio
   notes.push('Property grows at its assumed rate; loans and mortgages are held flat (repayments stay in spending).');
   if (retirement) notes.push(`Your retirement (${retirement.date}) falls within this horizon; the scenarios assume today's pattern carries on regardless.`);
   if (adj) notes.push(`Spending adjusted by ${adj > 0 ? '+' : ''}${Math.round(adj * 100)}% in every scenario.`);
-  if (!scenarios.some((s) => s.available)) notes.push('Import at least two weeks of statements for every account to unlock projections.');
+  if (!scenarios.some((s) => s.available)) notes.push('Import a month of statements for every account to unlock projections.');
 
   return {
     startDate: start,

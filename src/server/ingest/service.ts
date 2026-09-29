@@ -6,7 +6,7 @@ import path from 'node:path';
 import { slugify } from '../../shared/accounts';
 import { CategoryIndex } from '../../shared/categories';
 import { today } from '../../shared/dates';
-import { reconcile } from '../../shared/reconcile';
+import { sectionChecks } from '../../shared/review';
 import {
   CsvProfileSchema,
   DraftSchema,
@@ -413,10 +413,13 @@ export class ImportService extends EventEmitter {
   readiness(record: ImportRecord): { ready: boolean; reasons: string[] } {
     if (record.status !== 'review' || !record.draft) return { ready: false, reasons: [record.status] };
     const { clean, reasons } = draftIsClean(record.draft);
+    // Every check that asks for a look (the review page shows the same ones) holds the import back.
     for (const s of record.draft.sections) {
-      const r = reconcile({ openingBalance: s.openingBalance, closingBalance: s.balance, transactions: s.transactions });
-      if (r.status === 'mismatch') reasons.push('balances do not reconcile');
+      if (s.target.mode === 'skip') continue;
+      const accountType = s.target.mode === 'existing' ? this.store.account(s.target.accountId)?.type : s.target.account.type;
+      for (const c of sectionChecks(s, { accountType, latest: record.createdAt.slice(0, 10), periodFromRows: record.draft.documentType === 'csv_export' })) if (c.status === 'warn') reasons.push(c.title.toLowerCase());
     }
+    if (record.extraction.warnings.length) reasons.push('warnings from reading the document');
     if (record.extraction.engine === 'ocr') reasons.push('read with offline OCR');
     return { ready: clean && reasons.length === 0, reasons: [...new Set(reasons)] };
   }

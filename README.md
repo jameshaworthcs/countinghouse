@@ -72,6 +72,7 @@ engine, and the [`claude`](https://claude.com/claude-code) CLI logged in (or `AN
 | `npm start` | Build the UI and serve this checkout on `127.0.0.1:4760` (`PORT` to change; real data needs a login) |
 | `npm run dev` | Demo data, API with reload on :4760, Vite UI on :4761 (`FINANCE_DATA_DIR` to change) |
 | `npm run demo` / `npm run demo:reset` | Serve on :4770 / regenerate the synthetic dataset in `demo-data/` |
+| `npm run demo:sparse` | One month of synthetic data in `demo-sparse/`, as after a first import |
 | `npm run deploy` | Deploy `main` (or `-- <ref>`) to the live service, with rollback; `-- --status` shows what is live |
 | `npm run import -- <files…>` | Queue files for import from the terminal (copies them to `inbox/`) |
 | `npm run records -- keys \| status \| check \| write` | The validated write path for assumptions, research and insights ([docs/AGENTS.md](docs/AGENTS.md)) |

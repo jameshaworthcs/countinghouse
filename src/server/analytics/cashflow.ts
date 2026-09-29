@@ -4,10 +4,11 @@
 import { balanceModeOf } from '../../shared/accounts';
 import type { CashflowMonth, CashflowResponse, CategoryAmount } from '../../shared/api';
 import { CategoryIndex } from '../../shared/categories';
-import { eachMonth, monthKey } from '../../shared/dates';
+import { eachMonth, endOfMonth, maxDate, minDate, monthKey } from '../../shared/dates';
 import { fromMinor, toMinor } from '../../shared/money';
 import type { Account, Transaction } from '../../shared/schema';
 import type { Store } from '../store';
+import { Coverage } from './coverage';
 
 export type FlowClass = 'income' | 'spending' | 'excluded';
 
@@ -108,7 +109,7 @@ export function categoryBreakdown(list: FlowTx[], cats: CategoryIndex, cls: 'inc
   return { categories: build(agg(list, leafKey), prevLeaf, false), groups: build(agg(list, groupKey), prevGroup, true) };
 }
 
-export function cashflow(store: Store, from: string, to: string): CashflowResponse {
+export function cashflow(store: Store, from: string, to: string, coverage: Coverage = new Coverage(store)): CashflowResponse {
   const cats = new CategoryIndex(store.categories);
   const list = flows(store, from, to);
   const byMonth = new Map<string, { income: number; spending: number }>();
@@ -125,13 +126,17 @@ export function cashflow(store: Store, from: string, to: string): CashflowRespon
       spending += f.minor;
     }
   }
-  const months: CashflowMonth[] = [...byMonth.entries()].map(([month, e]) => ({
-    month,
-    income: fromMinor(e.income),
-    spending: fromMinor(e.spending),
-    net: fromMinor(e.income - e.spending),
-    savingsRate: e.income > 0 ? (e.income - e.spending) / e.income : null,
-  }));
+  const months: CashflowMonth[] = [...byMonth.entries()].map(([month, e]) => {
+    const joint = coverage.joint(maxDate(`${month}-01`, from)!, minDate(endOfMonth(`${month}-01`), to)!);
+    return {
+      month,
+      income: fromMinor(e.income),
+      spending: fromMinor(e.spending),
+      net: fromMinor(e.income - e.spending),
+      savingsRate: e.income > 0 ? (e.income - e.spending) / e.income : null,
+      covered: joint.totalDays ? joint.days / joint.totalDays : 0,
+    };
+  });
   const { categories, groups } = categoryBreakdown(list, cats, 'spending');
   return {
     from,

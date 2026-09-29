@@ -3,7 +3,7 @@
 
 import { ACCOUNT_TYPE_META, balanceModeOf } from '../../shared/accounts';
 import { AssumptionSet } from '../../shared/assumptions';
-import { addMonths, diffDays, eachMonth, endOfMonth, maxDate, minDate, type ISODate } from '../../shared/dates';
+import { addMonths, diffDays, eachMonth, endOfMonth, formatMonth, maxDate, minDate, type ISODate } from '../../shared/dates';
 import { fromMinor, toMinor } from '../../shared/money';
 import type { Account } from '../../shared/schema';
 import { taxYearOf, taxYearParams } from '../../shared/uk';
@@ -12,6 +12,12 @@ import { flows, type FlowTx } from './cashflow';
 import { covers, coveredDays, type Coverage, type Interval } from './coverage';
 
 export const DAYS_PER_MONTH = 365.25 / 12;
+/**
+ * Fewest days every account has data for before a baseline is given without a complete month (at
+ * low confidence): a month's cycle, so it holds a payday and the monthly bills. Fewer days can miss
+ * the salary altogether and show a monthly loss.
+ */
+export const MIN_BASELINE_DAYS = 28;
 
 export interface WrapperFlow {
   accountId: string;
@@ -69,9 +75,13 @@ export function computeBaseline(store: Store, coverage: Coverage, from: ISODate,
     netSdBasis: '',
     flows: [],
   };
-  if (!useMonths && joint.days < 14) {
+  if (!useMonths && joint.days < MIN_BASELINE_DAYS) {
     const who = joint.limiting.slice(0, 3).map((l) => l.name);
-    return { ...empty, reason: joint.days === 0 ? `No period in ${from.slice(0, 7)} – ${to.slice(0, 7)} has data for every account${who.length ? ` (missing: ${who.join(', ')})` : ''}` : `Only ${joint.days} days in this period have data for every account; at least 14 are needed` };
+    const span = from.slice(0, 7) === to.slice(0, 7) ? formatMonth(from) : `${formatMonth(from)} – ${formatMonth(to)}`;
+    return {
+      ...empty,
+      reason: joint.days === 0 ? `No day in ${span} has data for every account${who.length ? ` (missing: ${who.join(', ')})` : ''}` : `Only ${joint.days} days in ${span} have data for every account; at least ${MIN_BASELINE_DAYS} are needed`,
+    };
   }
 
   const inCovered = (d: ISODate) => covers(covered, d);
@@ -173,13 +183,23 @@ export function computeBaseline(store: Store, coverage: Coverage, from: ISODate,
   };
 }
 
-/** Standard periods: the last 3 and 12 full months before `on`. */
-export function standardPeriods(on: ISODate): { id: 'recent' | 'year'; label: string; from: ISODate; to: ISODate }[] {
+/**
+ * Standard periods: the last 3 and 12 full months before `on`. When the last 3 full months have too
+ * little data for every account (as after a first import), the recent period runs up to `on`, so
+ * the covered days of this month count, at low confidence.
+ */
+export function standardPeriods(on: ISODate, coverage?: Coverage): { id: 'recent' | 'year'; label: string; from: ISODate; to: ISODate }[] {
   const lastFullMonthEnd = endOfMonth(addMonths(on, -1));
-  return [
-    { id: 'recent', label: 'If the last 3 months continued', from: `${addMonths(lastFullMonthEnd, -2).slice(0, 7)}-01`, to: lastFullMonthEnd },
-    { id: 'year', label: 'If the last 12 months continued', from: `${addMonths(lastFullMonthEnd, -11).slice(0, 7)}-01`, to: lastFullMonthEnd },
-  ];
+  const recent = { id: 'recent' as const, label: 'If the last 3 months continued', from: `${addMonths(lastFullMonthEnd, -2).slice(0, 7)}-01`, to: lastFullMonthEnd };
+  const year = { id: 'year' as const, label: 'If the last 12 months continued', from: `${addMonths(lastFullMonthEnd, -11).slice(0, 7)}-01`, to: lastFullMonthEnd };
+  if (coverage) {
+    const full = coverage.joint(recent.from, recent.to);
+    if (!full.completeMonths.length && full.days < MIN_BASELINE_DAYS) {
+      const soFar = coverage.joint(recent.from, on);
+      if (soFar.days >= MIN_BASELINE_DAYS) return [{ ...recent, label: `If the ${soFar.days} days of data so far continued`, to: on }, year];
+    }
+  }
+  return [recent, year];
 }
 
 export { coveredDays };

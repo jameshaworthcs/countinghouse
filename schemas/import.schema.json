@@ -1416,6 +1416,19 @@
                 "type": "number",
                 "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
               },
+              "statedTotals": {
+                "type": "object",
+                "properties": {
+                  "moneyIn": {
+                    "type": "number",
+                    "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                  },
+                  "moneyOut": {
+                    "type": "number",
+                    "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                  }
+                }
+              },
               "recordBalance": {
                 "default": true,
                 "type": "boolean"
@@ -1567,6 +1580,10 @@
                       "type": "integer",
                       "minimum": -9007199254740991,
                       "maximum": 9007199254740991
+                    },
+                    "uncertain": {
+                      "type": "string",
+                      "maxLength": 300
                     },
                     "detail": {
                       "type": "object",

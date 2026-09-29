@@ -46,7 +46,7 @@ describe('allowances', () => {
       ],
       't',
     );
-    const a = allowances(store, '2026/27');
+    const a = allowances(store, '2026/27', '2026-09-29');
     expect(a.pension.personal).toBe(800);
     expect(a.pension.personalGross).toBe(1000);
   });
@@ -54,7 +54,7 @@ describe('allowances', () => {
   it('without the SIPP’s own statement the bank payment still counts', async () => {
     await store.setAccounts([acct('current', 'current'), acct('sipp', 'sipp')]);
     await store.addTransactions([tx('current', '2026-05-01', -800, 'AJ BELL SIPP', { category: 'investment-transfer', counterpartyAccountId: 'sipp' })], 't');
-    const a = allowances(store, '2026/27');
+    const a = allowances(store, '2026/27', '2026-09-29');
     expect(a.pension.personal).toBe(800);
     expect(a.pension.personalGross).toBe(grossUpReliefAtSource(800, taxYear(2026)));
   });
@@ -62,10 +62,39 @@ describe('allowances', () => {
   it('carry-forward is unknown, not £60,000, when a year’s contributions are not known', async () => {
     await store.setAccounts([acct('pension', 'workplace_pension', { openedOn: '2020-01-01' })]);
     await store.addTransactions([tx('pension', '2026-05-28', 500, 'Employer', { category: 'employer-contribution' })], 't');
-    const cf = allowances(store, '2026/27').pension.carryForward;
+    const cf = allowances(store, '2026/27', '2026-09-29').pension.carryForward;
     expect(cf).toHaveLength(3);
     for (const c of cf) expect(c.unused).toBeNull();
     expect(cf[0]!.basis).toMatch(/not fully known|No pension data/);
+  });
+
+  it('says an allowance is a minimum when the data starts after the tax year began', async () => {
+    await store.setAccounts([acct('isa', 'stocks_isa'), acct('lisa', 'lisa'), acct('new-isa', 'stocks_isa', { openedOn: '2026-09-01' })]);
+    await store.addTransactions(
+      [
+        // Only September's statement: April to August are not in the data.
+        tx('isa', '2026-09-01', 600, 'Subscription', { category: 'contribution' }),
+        tx('isa', '2026-09-20', 5, 'Interest', { category: 'investment-income' }),
+        // Opened in September: covered from its opening.
+        tx('new-isa', '2026-09-02', 100, 'Subscription', { category: 'contribution' }),
+      ],
+      't',
+    );
+    // The LISA provider's "paid in this tax year" figure is complete by itself.
+    await store.addBalances([{ id: 'bal_00000000000000aa', accountId: 'lisa', date: '2026-09-20', balance: 9000, currency: 'GBP', kind: 'screenshot', taxYearContributions: 2000, taxYear: '2026/27', source: {}, createdAt: stamp }], 't');
+    const a = allowances(store, '2026/27', '2026-09-29');
+    expect(a.isa.used).toBe(2700);
+    expect(a.isa.incomplete).toMatch(/^Not counted yet: subscriptions before your data starts, for isa \(data from 1 Sep 2026\)/);
+    expect(a.isa.incomplete).not.toContain('new-isa');
+    expect(a.lisa!.incomplete).toBeNull();
+  });
+
+  it('a tax year covered from its start is complete', async () => {
+    await store.setAccounts([acct('isa', 'stocks_isa')]);
+    const months = ['2026-04-10', '2026-05-10', '2026-06-10', '2026-07-10', '2026-08-10', '2026-09-10'];
+    await store.addTransactions(months.map((d) => tx('isa', d, 500, 'Subscription', { category: 'contribution' })), 't');
+    const a = allowances(store, '2026/27', '2026-09-29');
+    expect(a.isa).toMatchObject({ used: 3000, incomplete: null });
   });
 
   it('carry-forward is counted for a year the data covers from start to end', async () => {
@@ -74,7 +103,7 @@ describe('allowances', () => {
     // 2023/24 only from January, so it stays unknown.
     const months = Array.from({ length: 33 }, (_, i) => `${2024 + Math.floor(i / 12)}-${String((i % 12) + 1).padStart(2, '0')}-28`);
     await store.addTransactions(months.map((d) => tx('pension', d, 500, 'Employer', { category: 'employer-contribution' })), 't');
-    const cf = allowances(store, '2026/27').pension.carryForward;
+    const cf = allowances(store, '2026/27', '2026-09-29').pension.carryForward;
     expect(cf.map((c) => c.taxYear)).toEqual(['2023/24', '2024/25', '2025/26']);
     expect(cf[0]!.unused).toBeNull();
     expect(cf[1]!.unused).toBe(60_000 - 12 * 500);

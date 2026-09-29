@@ -126,13 +126,16 @@ export default function Spending() {
           {cf.data && (
             <ChartFrame
               title="Income and spending by month"
-              subtitle="Last 12 months. Transfers between your accounts and investments are excluded; refunds reduce spending."
+              subtitle="Last 12 months. Transfers between your accounts and investments are excluded; refunds reduce spending. What was left over is shown for months every account has data for."
               legend={[
                 { label: 'Income', color: 'var(--s1)', kind: 'bar' },
                 { label: 'Spending', color: 'var(--s2)', kind: 'bar' },
                 { label: 'Left over', color: 'var(--ink-2)', kind: 'dot' },
               ]}
-              table={{ columns: ['Month', 'Income', 'Spending', 'Left over', 'Savings rate'], rows: cf.data.months.map((m) => [formatMonth(m.month), money(m.income), money(m.spending), money(m.net), pct(m.savingsRate, 0)]) }}
+              table={{
+                columns: ['Month', 'Income', 'Spending', 'Left over', 'Savings rate', 'Data'],
+                rows: cf.data.months.map((m) => [formatMonth(m.month), money(m.income), money(m.spending), m.covered >= 0.9 ? money(m.net) : '—', m.covered >= 0.9 ? pct(m.savingsRate, 0) : '—', m.covered >= 0.9 ? 'complete' : m.covered > 0 ? `${Math.round(m.covered * 100)}% of days` : 'none']),
+              }}
             >
               <ColumnChart
                 labels={cf.data.months.map((m) => formatMonth(m.month, { short: true }).split(' ')[0]!)}
@@ -141,7 +144,7 @@ export default function Spending() {
                   { id: 'spending', label: 'Spending', color: 'var(--s2)', values: cf.data.months.map((m) => m.spending) },
                 ]}
                 mode="diverging"
-                marker={{ label: 'Left over', color: 'var(--ink-2)', values: cf.data.months.map((m) => m.net) }}
+                marker={{ label: 'Left over', color: 'var(--ink-2)', values: cf.data.months.map((m) => (m.covered >= 0.9 ? m.net : null)) }}
                 height={260}
                 ariaLabel="Monthly income and spending"
                 onSelect={(i) => {
@@ -155,7 +158,7 @@ export default function Spending() {
           <div className="grid gap-5 lg:grid-cols-2">
             <Card
               title="Where it went"
-              description={`Compared with ${formatDate(s.previousFrom)} – ${formatDate(s.previousTo)}, the same stretch of the previous period`}
+              description={s.coverage.previousDays ? `Compared with ${formatDate(s.previousFrom)} – ${formatDate(s.previousTo)}, the same stretch of the previous period` : `No data for ${formatDate(s.previousFrom)} – ${formatDate(s.previousTo)} to compare with`}
               actions={<Segmented size="sm" value={level} onChange={setLevel} options={[{ value: 'groups', label: 'Groups' }, { value: 'categories', label: 'Categories' }]} />}
             >
               <BarList

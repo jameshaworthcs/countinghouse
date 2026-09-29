@@ -65,7 +65,7 @@ export interface SummaryResponse {
   imports: Record<string, number>;
   taxYear: { label: string; daysLeft: number; start: string; end: string };
   hasData: boolean;
-  /** From the last 3 full months, counting covered time only. */
+  /** From the last 3 full months (or the days so far, after a first import), counting covered time only. */
   kpis: {
     savingsRate: number | null;
     monthlySaving: number | null;
@@ -74,6 +74,8 @@ export interface SummaryResponse {
     confidence: 'high' | 'medium' | 'low';
     basis: string;
   };
+  /** Spending this month so far; `previous` is the same days last month, null when those days lack data. */
+  monthToDate: { spending: number; previous: number | null; previousFrom: string; previousTo: string };
   coverage: { lastCompleteMonth: string | null; jointTo: string | null; limiting: { accountId: string; name: string; missingDays: number }[] };
 }
 
@@ -86,6 +88,8 @@ export interface EstateSeriesResponse {
   groups: { id: string; label: string; values: number[] }[];
   /** Dates where at least one included account's value was estimated. */
   estimated: boolean[];
+  /** From this date every included account has data; before it the total is incomplete. */
+  completeFrom: string | null;
 }
 
 export interface CategoryAmount {
@@ -107,6 +111,8 @@ export interface CashflowMonth {
   spending: number;
   net: number;
   savingsRate: number | null;
+  /** Share of the month's days (within the period) that every account has data for. */
+  covered: number;
 }
 
 export interface CashflowResponse {
@@ -311,8 +317,12 @@ export interface AllowanceLine {
 
 export interface AllowancesResponse {
   taxYear: { label: string; start: string; end: string; daysLeft: number | null; current: boolean };
-  isa: { allowance: number; used: number; remaining: number; cashLimit: number; cashUsed: number; lines: AllowanceLine[]; notes: string[] };
-  lisa: { allowance: number; contributed: number; remaining: number; bonusReceived: number; bonusExpected: number; lines: AllowanceLine[]; notes: string[] } | null;
+  /**
+   * `incomplete` (here and below): which accounts' data does not cover the tax year, so the amount
+   * used is a minimum and what is left a maximum. Null when the year is covered.
+   */
+  isa: { allowance: number; used: number; remaining: number; cashLimit: number; cashUsed: number; lines: AllowanceLine[]; notes: string[]; incomplete: string | null };
+  lisa: { allowance: number; contributed: number; remaining: number; bonusReceived: number; bonusExpected: number; lines: AllowanceLine[]; notes: string[]; incomplete: string | null } | null;
   pension: {
     annualAllowance: number;
     personal: number;
@@ -325,8 +335,9 @@ export interface AllowancesResponse {
     carryForward: { taxYear: string; unused: number | null; basis: string }[];
     lines: AllowanceLine[];
     notes: string[];
+    incomplete: string | null;
   };
-  savings: { interest: number; allowance: number; band: string; remaining: number; lines: AllowanceLine[]; notes: string[] };
+  savings: { interest: number; allowance: number; band: string; remaining: number; lines: AllowanceLine[]; notes: string[]; incomplete: string | null };
   dividends: { amount: number; allowance: number; remaining: number; lines: AllowanceLine[] };
   ruleNotes: string[];
 }
@@ -398,6 +409,8 @@ export interface InvestmentsResponse {
     /** Monthly into pensions: from your cash, and from payroll, employer and relief. */
     monthlyPersonal: number;
     monthlyExternal: number;
+    /** False when there is too little data to know them: the pots then grow with nothing paid in. */
+    contributionsKnown: boolean;
     /** Pension pots at retirement and the yearly income they sustain, today's money. */
     pot: Band | null;
     income: Band | null;

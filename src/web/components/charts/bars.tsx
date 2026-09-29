@@ -42,7 +42,8 @@ export function ColumnChart({
   series: ColumnSeries[];
   /** grouped: side by side; diverging: first series up, second series down (shown as negative). */
   mode?: 'grouped' | 'diverging';
-  marker?: { label: string; color: string; values: number[] };
+  /** A dot per column; null leaves the column without one. */
+  marker?: { label: string; color: string; values: (number | null)[] };
   height?: number;
   ariaLabel: string;
   format?: (v: number) => string;
@@ -110,7 +111,7 @@ export function ColumnChart({
                 ) : (
                   series.map((s, si) => <path key={s.id} d={barPath(x0 + si * (barW + gap), barW, y(0), y(s.values[i] ?? 0))} fill={s.color} />)
                 )}
-                {marker && <circle cx={x0 + totalW / 2} cy={y(marker.values[i] ?? 0)} r={4.5} fill={marker.color} stroke="var(--panel)" strokeWidth={2} />}
+                {marker && marker.values[i] !== null && marker.values[i] !== undefined && <circle cx={x0 + totalW / 2} cy={y(marker.values[i])} r={4.5} fill={marker.color} stroke="var(--panel)" strokeWidth={2} />}
                 {i % labelEvery === 0 && (
                   <text x={(band(i) ?? 0) + groupW / 2} y={innerH + 18} textAnchor="middle">
                     {l}
@@ -142,7 +143,7 @@ export function ColumnChart({
           {series.map((s) => (
             <TooltipRow key={s.id} color={s.color} kind="bar" label={s.label} value={format(s.values[hover] ?? 0)} />
           ))}
-          {marker && <TooltipRow color={marker.color} kind="dot" label={marker.label} value={format(marker.values[hover] ?? 0)} />}
+          {marker && marker.values[hover] !== null && marker.values[hover] !== undefined && <TooltipRow color={marker.color} kind="dot" label={marker.label} value={format(marker.values[hover])} />}
         </ChartTooltip>
       )}
     </div>
@@ -259,7 +260,8 @@ export function Sparkline({ values, width = 96, height = 28, color = 'var(--deem
 // ─── Meter ───────────────────────────────────────────────────────────────────────────────────────
 
 /** A single ratio against a limit. The track is a lighter step of the same ramp. */
-export function Meter({ used, limit, label, sub, overLabel = 'Over the limit' }: { used: number; limit: number; label: ReactNode; sub?: ReactNode; overLabel?: string }) {
+/** Use of an allowance. `atLeast`: the data does not cover the whole period, so `used` is a minimum. */
+export function Meter({ used, limit, label, sub, overLabel = 'Over the limit', atLeast = false }: { used: number; limit: number; label: ReactNode; sub?: ReactNode; overLabel?: string; atLeast?: boolean }) {
   const ratio = limit > 0 ? used / limit : 0;
   const over = used > limit;
   const near = !over && ratio >= 0.9;
@@ -268,6 +270,7 @@ export function Meter({ used, limit, label, sub, overLabel = 'Over the limit' }:
       <div className="mb-1.5 flex items-baseline justify-between gap-3">
         <span className="text-[13px] font-medium text-ink">{label}</span>
         <span className="text-[12.5px] text-ink-3">
+          {atLeast && 'at least '}
           <span className="sensitive tabular font-semibold text-ink">{money(used, { decimals: 0 })}</span> of <span className="sensitive tabular">{money(limit, { decimals: 0 })}</span>
         </span>
       </div>
@@ -282,7 +285,8 @@ export function Meter({ used, limit, label, sub, overLabel = 'Over the limit' }:
           </span>
         ) : (
           <span>
-            <span className="sensitive tabular">{money(Math.max(0, limit - used), { decimals: 0 })}</span> left · {pct(ratio, 0)}
+            {atLeast && 'up to '}
+            <span className="sensitive tabular">{money(Math.max(0, limit - used), { decimals: 0 })}</span> left{atLeast ? '' : ` · ${pct(ratio, 0)}`}
           </span>
         )}
       </div>

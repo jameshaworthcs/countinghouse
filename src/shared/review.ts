@@ -1,0 +1,119 @@
+// Checks shown while reviewing an import, before anything is saved: does what was read add up, and
+// does it look like what such a document says? Pure, so the server's "ready to commit" follows the
+// same rules as the review page (docs/FORMULAS.md §13).
+
+import { formatDate } from './dates';
+import { formatMoney, fromMinor, toMinor } from './money';
+import { reconcile } from './reconcile';
+import type { AccountType, DraftSection } from './schema';
+
+export interface ReviewCheck {
+  id: string;
+  /** ok: passed. warn: look at it before committing. info: worth knowing. */
+  status: 'ok' | 'warn' | 'info';
+  title: string;
+  detail?: string;
+  /** Keys of the draft rows the check is about. */
+  rows?: string[];
+}
+
+export interface CheckContext {
+  /** The type of the account the rows go into, or were detected as. */
+  accountType?: AccountType | undefined;
+  /** The latest date a row can have: the day the document was uploaded. */
+  latest: string;
+  /** An export's period is its first and last rows, so checking rows against it proves nothing. */
+  periodFromRows?: boolean;
+}
+
+/** Descriptions of a payment to a card, which is money in on the card's own statement. */
+const PAYMENT_TO_CARD = /\b(payment received|thank you|direct debit (payment|received)|payment - thank|card payment received|dd payment)\b/i;
+
+const rowsWord = (n: number) => (n === 1 ? '1 row' : `${n} rows`);
+
+export function sectionChecks(section: DraftSection, ctx: CheckContext): ReviewCheck[] {
+  const out: ReviewCheck[] = [];
+  const rows = section.transactions;
+  // Statements and exports total their settled rows; pending ones are shown separately.
+  const settled = rows.filter((t) => !t.pending);
+
+  // Opening balance + rows = closing balance, and running balances follow the amounts.
+  const r = reconcile({ openingBalance: section.openingBalance, closingBalance: section.balance, transactions: settled });
+  if (r.status !== 'unknown') {
+    out.push({
+      id: 'reconcile',
+      status: r.status === 'ok' ? 'ok' : 'warn',
+      title: r.status === 'ok' ? 'Balances add up' : 'Balances don’t add up',
+      detail: `${r.checks.join(' ')}${r.status === 'mismatch' ? ' Look for a missing row or a wrong sign against the original.' : ''}`,
+      ...(r.runningBreaks.length ? { rows: r.runningBreaks.map((i) => settled[i]!.key) } : {}),
+    });
+  }
+
+  // The totals printed on the statement ("money in", "money out").
+  if (section.statedTotals && settled.length) {
+    const inMinor = settled.reduce((s, t) => s + Math.max(0, toMinor(t.amount)), 0);
+    const outMinor = settled.reduce((s, t) => s + Math.max(0, -toMinor(t.amount)), 0);
+    const parts: { label: string; read: number; stated: number }[] = [];
+    if (section.statedTotals.moneyIn !== undefined) parts.push({ label: 'Money in', read: inMinor, stated: toMinor(section.statedTotals.moneyIn) });
+    if (section.statedTotals.moneyOut !== undefined) parts.push({ label: 'Money out', read: outMinor, stated: toMinor(Math.abs(section.statedTotals.moneyOut)) });
+    const wrong = parts.filter((p) => p.read !== p.stated);
+    if (parts.length) {
+      out.push({
+        id: 'totals',
+        status: wrong.length ? 'warn' : 'ok',
+        title: wrong.length ? 'The rows don’t match the statement’s totals' : 'The rows match the statement’s totals',
+        detail: parts.map((p) => `${p.label}: ${formatMoney(fromMinor(p.read))} read${p.read === p.stated ? '' : `, ${formatMoney(fromMinor(p.stated))} on the statement`}.`).join(' '),
+      });
+    }
+  }
+
+  // Rows dated outside the period the statement says it covers: usually a misread year.
+  if (section.periodStart && section.periodEnd && rows.length && !ctx.periodFromRows) {
+    const outside = rows.filter((t) => t.date < section.periodStart! || t.date > section.periodEnd!);
+    out.push(
+      outside.length
+        ? { id: 'period', status: 'warn', title: `${rowsWord(outside.length)} dated outside the statement period`, detail: `The statement covers ${formatDate(section.periodStart)} to ${formatDate(section.periodEnd)}. Check the dates, especially the year.`, rows: outside.map((t) => t.key) }
+        : { id: 'period', status: 'ok', title: 'Every row is within the statement period' },
+    );
+  }
+
+  const future = rows.filter((t) => t.date > ctx.latest);
+  if (future.length) {
+    out.push({ id: 'future', status: 'warn', title: `${rowsWord(future.length)} dated after the upload day`, detail: 'A row cannot be later than the day the document was uploaded. Check the dates, especially the year.', rows: future.map((t) => t.key) });
+  }
+
+  // Credit cards: purchases are money out (negative), payments to the card money in.
+  if (ctx.accountType === 'credit_card' && settled.length >= 3) {
+    const positive = settled.filter((t) => t.amount > 0).length;
+    const paymentsAsSpending = settled.filter((t) => t.amount < 0 && PAYMENT_TO_CARD.test(t.description));
+    if (positive > settled.length - positive) {
+      out.push({ id: 'card-signs', status: 'warn', title: 'Most rows are money in, which is unusual for a card', detail: 'On a credit card, purchases should be negative and payments to the card positive. The signs may be the wrong way round: check against the statement.' });
+    } else if (paymentsAsSpending.length) {
+      out.push({ id: 'card-signs', status: 'warn', title: `${rowsWord(paymentsAsSpending.length)} look like payments to the card but are money out`, detail: 'A payment to the card reduces what you owe, so it should be positive.', rows: paymentsAsSpending.map((t) => t.key) });
+    } else {
+      out.push({ id: 'card-signs', status: 'ok', title: 'Signs look right for a credit card' });
+    }
+  }
+
+  // The same row twice: genuine (two identical coffees) or read twice where screenshots overlap.
+  const seen = new Map<string, string[]>();
+  for (const t of rows) {
+    const k = `${t.date}|${toMinor(t.amount)}|${t.description.trim().toLowerCase()}`;
+    (seen.get(k) ?? seen.set(k, []).get(k)!).push(t.key);
+  }
+  const repeated = [...seen.values()].filter((keys) => keys.length > 1).flat();
+  if (repeated.length) {
+    out.push({ id: 'repeated', status: 'info', title: `${rowsWord(repeated.length)} appear more than once`, detail: 'They may be genuine, or one row read twice where the parts of a long screenshot overlap. Check each against the original.', rows: repeated });
+  }
+
+  const unsure = rows.filter((t) => t.uncertain);
+  if (unsure.length) {
+    out.push({ id: 'uncertain', status: 'warn', title: `${rowsWord(unsure.length)} the reader was unsure of`, detail: unsure.map((t) => `${formatDate(t.date)} ${t.description}: ${t.uncertain}`).join('; '), rows: unsure.map((t) => t.key) });
+  }
+
+  const pending = rows.filter((t) => t.pending);
+  if (pending.length) {
+    out.push({ id: 'pending', status: 'info', title: `${rowsWord(pending.length)} still pending`, detail: 'Pending rows are left out unless you tick them: the settled row arrives with a later statement or export, sometimes with a different amount.', rows: pending.map((t) => t.key) });
+  }
+  return out;
+}

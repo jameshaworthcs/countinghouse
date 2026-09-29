@@ -21,6 +21,9 @@ for the map and [docs/DATA_FORMAT.md](docs/DATA_FORMAT.md) before touching data 
       FINANCE_DATA_DIR=demo-data PORT=4770 npm run serve &
     npm run screens -- --base http://127.0.0.1:4770
     ```
+  - When a change touches what a page shows with little data, repeat it on one month of data:
+    `npm run demo:sparse`, serve `FINANCE_DATA_DIR=demo-sparse` on another port, and pass
+    `--out <dir>` to `npm run screens`.
 - **The live site runs from its own worktree**, `~/dev/finance-live`, at the commit last deployed
   (`finance.service` on P360; see [docs/DEPLOY.md](docs/DEPLOY.md)).
   - Nothing here reaches it until `npm run deploy` (main by default; it rolls back on failure).

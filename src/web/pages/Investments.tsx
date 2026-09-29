@@ -221,15 +221,19 @@ export default function Investments() {
             <Stat label="Pension pots today" value={<Money value={r.potToday} decimals={0} />} />
             <Stat
               label="Going in each month"
-              value={<Money value={r.monthlyPersonal + r.monthlyExternal} decimals={0} />}
+              value={r.contributionsKnown ? <Money value={r.monthlyPersonal + r.monthlyExternal} decimals={0} /> : 'Not known yet'}
               sub={
-                <span>
-                  <Money value={r.monthlyPersonal} decimals={0} /> from your bank · <Money value={r.monthlyExternal} decimals={0} /> from pay, employer and relief
-                </span>
+                r.contributionsKnown ? (
+                  <span>
+                    <Money value={r.monthlyPersonal} decimals={0} /> from your bank · <Money value={r.monthlyExternal} decimals={0} /> from pay, employer and relief
+                  </span>
+                ) : (
+                  'needs a month of data for every account'
+                )
               }
             />
             <Stat
-              label="Pots at retirement"
+              label={r.contributionsKnown ? 'Pots at retirement' : 'Pots at retirement, with nothing more paid in'}
               value={r.pot ? <Money value={r.pot.p50} decimals={0} /> : '—'}
               sub={r.pot ? <span className="sensitive">range {money(r.pot.p10, { decimals: 0 })} – {money(r.pot.p90, { decimals: 0 })}</span> : 'add your date of birth'}
             />

@@ -2,13 +2,13 @@
 
 import { ACCESS_GROUP_LABELS, ACCESS_GROUPS, WRAPPER_GROUP_LABELS, WRAPPER_GROUPS } from '../../shared/accounts';
 import type { Alert, SummaryResponse } from '../../shared/api';
-import { addDays, addYears, today } from '../../shared/dates';
-import { formatMoney } from '../../shared/money';
+import { addDays, addYears, startOfMonth, today } from '../../shared/dates';
+import { formatMoney, fromMinor } from '../../shared/money';
 import { daysLeftInTaxYear, taxYearOf } from '../../shared/uk';
 import type { Store } from '../store';
 import { allowances } from './allowances';
 import { BalanceEngine } from './balances';
-import { cashflow } from './cashflow';
+import { cashflow, flows } from './cashflow';
 import { AssumptionSet } from '../../shared/assumptions';
 import { computeBaseline, standardPeriods } from './baseline';
 import { Coverage } from './coverage';
@@ -19,7 +19,7 @@ import { monthlyChecklist } from './monthly';
 import { projections, type ProjectionOptions } from './projections';
 import { detectRecurring } from './recurring';
 import { selfAssessment } from './selfassessment';
-import { spending } from './spending';
+import { previousPeriod, SIGNAL_RULES, spending } from './spending';
 
 export class Analytics {
   private cache = new Map<string, { version: number; value: unknown }>();
@@ -53,12 +53,14 @@ export class Analytics {
 
   estateSeries(from?: string, to?: string, grouping: 'wrapper' | 'access' = 'wrapper') {
     const end = to ?? today();
-    const start = from ?? firstDataDate(this.store, this.engine) ?? addDays(end, -365);
+    // Never before the first data: an empty stretch would read as an estate of £0.
+    const first = firstDataDate(this.store, this.engine);
+    const start = from && first && from < first ? first : (from ?? first ?? addDays(end, -365));
     return this.cached(`estate:${start}:${end}:${grouping}`, () => estateSeries(this.store, this.engine, start, end, grouping));
   }
 
   cashflow(from: string, to: string) {
-    return this.cached(`cashflow:${from}:${to}`, () => cashflow(this.store, from, to));
+    return this.cached(`cashflow:${from}:${to}`, () => cashflow(this.store, from, to, this.coverageIndex));
   }
 
   spending(from: string, to: string) {
@@ -108,9 +110,10 @@ export class Analytics {
         return { id, label, since, change, pct: then !== 0 ? change / Math.abs(then) : null };
       };
       const deltas = [compare('30d', 'Past 30 days', addDays(now, -30)), compare('tax-year', `Since ${ty.label} began`, ty.start), compare('1y', 'Past year', addYears(now, -1))];
-      // Saving and runway from the last 3 full months, using covered time only.
+      // Saving and runway from the last 3 full months (or, after a first import, the days so far),
+      // using covered time only.
       const set = new AssumptionSet(this.store.assumptions, now);
-      const [recent] = standardPeriods(now);
+      const [recent] = standardPeriods(now, this.coverageIndex);
       const b = computeBaseline(this.store, this.coverageIndex, recent!.from, recent!.to, set);
       const accessible = [...e.access.entries()].filter(([k]) => k === 'now').reduce((s, [, v]) => s + v, 0);
       const kpis = b.available
@@ -123,6 +126,17 @@ export class Analytics {
             basis: b.basis.kind === 'months' ? `${b.basis.months.length} complete month${b.basis.months.length > 1 ? 's' : ''}` : `${b.basis.days} covered days`,
           }
         : { savingsRate: null, monthlySaving: null, monthlySpending: null, runwayMonths: null, confidence: 'low' as const, basis: b.reason ?? 'Not enough data yet' };
+      // This month so far against the same days last month, when last month has the data.
+      const monthStart = startOfMonth(now);
+      const prevMonth = previousPeriod(monthStart, now);
+      const spent = (from: string, to: string) => fromMinor(flows(this.store, from, to).reduce((s, f) => s + (f.cls === 'spending' ? f.minor : 0), 0));
+      const prevCovered = this.coverageIndex.joint(prevMonth.from, prevMonth.to);
+      const monthToDate = {
+        spending: spent(monthStart, now),
+        previous: prevCovered.days >= SIGNAL_RULES.minCoverage * prevCovered.totalDays ? spent(prevMonth.from, prevMonth.to) : null,
+        previousFrom: prevMonth.from,
+        previousTo: prevMonth.to,
+      };
       const cov = this.coverageIndex.summary(3, now);
       const alerts: Alert[] = [];
       const health = this.health();
@@ -180,6 +194,7 @@ export class Analytics {
         taxYear: { label: ty.label, daysLeft, start: ty.start, end: ty.end },
         hasData: this.store.accounts.length > 0,
         kpis,
+        monthToDate,
         coverage: { lastCompleteMonth: cov.lastCompleteMonth, jointTo: cov.jointTo, limiting: b.basis.limiting.slice(0, 5) },
       };
     });

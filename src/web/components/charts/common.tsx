@@ -90,11 +90,12 @@ export function ChartFrame({
   return (
     <figure className={cn('print-plain m-0 min-w-0 rounded-xl border border-line bg-panel px-5 pt-4 pb-4 shadow-card', className)}>
       <figcaption className="mb-3 flex flex-wrap items-start justify-between gap-2">
-        <div className="min-w-0">
+        {/* Takes the room beside the actions, and wraps below them only when under 16rem is left. */}
+        <div className="min-w-0 flex-[1_1_16rem]">
           {title && <div className="text-[15px] font-semibold text-ink">{title}</div>}
           {subtitle && <div className="mt-0.5 text-[13px] text-ink-3">{subtitle}</div>}
         </div>
-        <div className="no-print flex items-center gap-2">
+        <div className="no-print flex shrink-0 items-center gap-2">
           {actions}
           {table && (
             <button

@@ -276,7 +276,7 @@ describe('store, balances and analytics', () => {
       'test',
     );
     await store.addBalances([{ id: 'bal_0000000000000002', accountId: 'lisa', date: '2026-09-01', balance: 5000, currency: 'GBP', kind: 'screenshot', taxYearContributions: 2000, taxYear: '2026/27', source: {}, createdAt: stamp }], 'test');
-    const a = allowances(store, '2026/27');
+    const a = allowances(store, '2026/27', '2026-09-29');
     expect(a.isa.used).toBe(10_000);
     expect(a.isa.remaining).toBe(10_000);
     expect(a.isa.cashUsed).toBe(3000);

@@ -98,6 +98,12 @@ export function estateSeries(store: Store, engine: BalanceEngine, from: ISODate,
     const src = grouping === 'wrapper' ? e.wrapper : e.access;
     for (const k of keys) groupValues.get(k)!.push((src as Map<string, number>).get(k) ?? 0);
   }
+  // Before every account's first data, the total leaves out the accounts not known yet.
+  let completeFrom: ISODate | null = null;
+  for (const a of includedAccounts(store)) {
+    const first = engine.firstDataDate(a.id);
+    if (first && (!completeFrom || first > completeFrom)) completeFrom = first;
+  }
   return {
     grouping,
     dates,
@@ -105,6 +111,7 @@ export function estateSeries(store: Store, engine: BalanceEngine, from: ISODate,
     assets,
     liabilities,
     estimated,
+    completeFrom: completeFrom && completeFrom > from ? completeFrom : null,
     groups: keys
       .map((k) => ({ id: k, label: labels[k]!, values: groupValues.get(k)! }))
       .filter((g) => g.values.some((v) => v !== 0)),

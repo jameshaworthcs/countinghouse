@@ -3,7 +3,7 @@
 
 import { ACCOUNT_TYPE_META, balanceModeOf } from '../../shared/accounts';
 import type { AllowanceLine, AllowancesResponse } from '../../shared/api';
-import { addDays, diffDays, today } from '../../shared/dates';
+import { addDays, diffDays, formatDate, maxDate, minDate, today, type ISODate } from '../../shared/dates';
 import { fromMinor, toMinor } from '../../shared/money';
 import type { Account, Transaction } from '../../shared/schema';
 import {
@@ -23,6 +23,29 @@ import type { Store } from '../store';
 import { covers, mergeIntervals, type Interval } from './coverage';
 
 const inYear = (t: { date: string }, ty: TaxYear) => t.date >= ty.start && t.date <= ty.end;
+
+/** Slack when deciding whether an account's data covers a stretch: statements arrive on their own dates. */
+export const COVERAGE_SLACK_DAYS = 45;
+
+/**
+ * Accounts whose data does not cover the tax year (up to `on` for the current one): what they show
+ * for the year is a minimum. Returns a sentence saying which, or null when every account is covered.
+ */
+export function yearCoverageGap(store: Store, accounts: Account[], ty: TaxYear, on: ISODate, what: string): string | null {
+  const end = minDate(ty.end, on)!;
+  const short: { name: string; from: ISODate | null }[] = [];
+  for (const a of accounts) {
+    if (a.closedOn && a.closedOn < ty.start) continue;
+    const start = maxDate(ty.start, a.openedOn) ?? ty.start;
+    if (start > end) continue;
+    const span = wrapperDataSpan(store, a);
+    if (span.some((i) => diffDays(start, i.from) <= COVERAGE_SLACK_DAYS && diffDays(i.to, end) <= COVERAGE_SLACK_DAYS)) continue;
+    short.push({ name: a.name, from: span.find((i) => i.to >= start)?.from ?? null });
+  }
+  if (!short.length) return null;
+  const who = short.map((x) => (x.from && x.from > ty.start ? `${x.name} (data from ${formatDate(x.from)})` : x.name)).join(', ');
+  return `Not counted yet: ${what} before your data starts, for ${who}. Import statements from ${formatDate(ty.start)}, or set an account's opening date if it opened later.`;
+}
 const TRANSFER_OUT = new Set(['savings-transfer', 'investment-transfer', 'transfer']);
 
 /**
@@ -147,8 +170,7 @@ export function pensionTotals(store: Store, ty: TaxYear) {
   return { personal, personalGross, employer, relief, total: personalGross + employer, lines, notes, hasAccounts: pensionAccounts.length > 0 };
 }
 
-export function allowances(store: Store, label?: string): AllowancesResponse {
-  const now = today();
+export function allowances(store: Store, label?: string, now: ISODate = today()): AllowancesResponse {
   const ty = (label ? parseTaxYear(label) : null) ?? taxYearOf(now);
   const params = taxYearParams(ty);
   const dob = store.profile.dateOfBirth;
@@ -180,6 +202,9 @@ export function allowances(store: Store, label?: string): AllowancesResponse {
     }
   }
   if (isaAccounts.length && !isaLines.length) isaNotes.push('No ISA subscriptions found for this tax year. Import ISA statements or the transfers from your current account.');
+  // A provider's "paid in this tax year" figure is complete; otherwise the transactions must cover the year.
+  const isaIncomplete = yearCoverageGap(store, isaAccounts.filter((a) => providerFigure(store, a.id, ty) === null), ty, now, 'subscriptions');
+  const lisaIncomplete = yearCoverageGap(store, isaAccounts.filter((a) => a.type === 'lisa' && providerFigure(store, a.id, ty) === null), ty, now, 'contributions');
   isaNotes.push('Transfers between ISAs do not use allowance; they are excluded when recorded as transfers.');
 
   const cashLimit = cashIsaLimit(ty, dob);
@@ -211,6 +236,7 @@ export function allowances(store: Store, label?: string): AllowancesResponse {
       bonusExpected: fromMinor(Math.round(Math.min(lisaUsed, allowance) * params.lisaBonusRate)),
       lines: [...lisaLines, ...bonus.lines.map((l) => ({ ...l, label: `${l.label}: bonus received` }))],
       notes,
+      incomplete: lisaIncomplete,
     };
   }
 
@@ -240,6 +266,8 @@ export function allowances(store: Store, label?: string): AllowancesResponse {
     const used = pensionTotals(store, prev).total;
     carryForward.push({ taxYear: prev.label, unused: fromMinor(Math.max(0, toMinor(pensionAnnualAllowance(prev)) - used)), basis: figures ? 'From pension statement totals' : 'From statements covering the whole year' });
   }
+  const pensionFigures = store.figures.some((f) => f.taxYear === ty.label && (f.kind === 'pension_contribution_employee' || f.kind === 'pension_contribution_employer'));
+  const pensionIncomplete = pensionFigures ? null : yearCoverageGap(store, pensionAccounts, ty, now, 'contributions');
   const pensionNotes = [...pen.notes];
   if ((store.profile.grossSalary ?? 0) > params.pensionTaperThresholdIncome) {
     pensionNotes.push(`Your salary is above £${params.pensionTaperThresholdIncome.toLocaleString('en-GB')}, so the tapered annual allowance may apply (down to £${params.pensionTaperMinimum.toLocaleString('en-GB')}).`);
@@ -262,6 +290,14 @@ export function allowances(store: Store, label?: string): AllowancesResponse {
       interestLines.push({ label: `${f.payer ?? f.label} (interest statement)`, amount: f.amount, source: 'figure', ...(f.accountId ? { accountId: f.accountId } : {}) });
     }
   }
+  // Interest statements for the year are complete; otherwise the accounts' data must cover it.
+  const interestIncomplete = yearCoverageGap(
+    store,
+    taxable.filter((a) => balanceModeOf(a) === 'ledger' && !ACCOUNT_TYPE_META[a.type].liability && !interestFigures.some((f) => f.accountId === a.id)),
+    ty,
+    now,
+    'interest',
+  );
   const band = store.profile.taxBand ?? 'basic';
   const psa = personalSavingsAllowance(ty, band);
   const savingsNotes: string[] = [];
@@ -288,6 +324,7 @@ export function allowances(store: Store, label?: string): AllowancesResponse {
       cashUsed: fromMinor(cashUsed),
       lines: isaLines,
       notes: isaNotes,
+      incomplete: isaIncomplete,
     },
     lisa,
     pension: {
@@ -301,8 +338,9 @@ export function allowances(store: Store, label?: string): AllowancesResponse {
       carryForward,
       lines: pen.lines,
       notes: pensionNotes,
+      incomplete: pensionIncomplete,
     },
-    savings: { interest: fromMinor(interestMinor), allowance: psa, band, remaining: fromMinor(Math.max(0, toMinor(psa) - interestMinor)), lines: interestLines, notes: savingsNotes },
+    savings: { interest: fromMinor(interestMinor), allowance: psa, band, remaining: fromMinor(Math.max(0, toMinor(psa) - interestMinor)), lines: interestLines, notes: savingsNotes, incomplete: interestIncomplete },
     dividends: {
       amount: fromMinor(dividendsMinor),
       allowance: params.dividendAllowance,

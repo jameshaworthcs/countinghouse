@@ -140,8 +140,10 @@ as invariants.
     as equations. Monte Carlo stays in the tests as the oracle.
   - The uncertainty in the saving estimate grows linearly and is combined root-sum-square.
 - **Coverage drives every average.**
-  - Baselines use complete months where every account has data, else at least 14 jointly covered
+  - Baselines use complete months where every account has data, else at least 28 jointly covered
     days (low confidence). An account counts from its opening or first data until it closes.
+  - The minimum was 14 days until the one-month demo showed 23 days before payday reading as a
+    £3,700 monthly loss: a baseline needs a month's cycle of pay and bills.
   - The alternative, dividing by calendar months, understated a 12-month projection threefold with
     four months of data.
 - **Withdrawal-rate fallback is 3.5%, not 4%.** UK studies put a 30-year sustainable rate nearer
@@ -171,3 +173,19 @@ as invariants.
 - **Owner corrections keep what was read.** Correcting a transaction's date, amount or
   description records the previous value in `corrections`, and saving other fields no longer
   marks the payee as set by the owner.
+- **Pages say what they do not know.** Checked against a one-month demo (`npm run demo:sparse`):
+  - allowances say "at least" and "up to" when an account's data does not cover the tax year, and
+    name the accounts;
+  - the estate chart starts when the data does, and washes out the stretch before every account
+    has data;
+  - "vs last month" and "Where it went" compare only with periods that have data;
+  - contributions to pensions are "not known yet" rather than £0;
+  - "left over" shows only for months every account covers.
+- **Review checks are shared code.** The review page and "Commit all ready" run the same checks
+  (`shared/review.ts`): balances, printed totals, the statement period, future dates, card signs,
+  unsure rows, repeated and pending rows. Warnings from reading the document are shown and hold an
+  import back.
+- **Agents do not repeat themselves.** A job that succeeded for the same subject within the research
+  staleness window (90 days) is not started again by itself, even if it found nothing. Measured
+  costs on the demo: refreshing assumptions took 7.7 minutes and 62 turns ($9.74 at API prices on
+  Opus, high effort); researching one fund took 4.6 minutes ($1.56).

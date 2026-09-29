@@ -3,6 +3,8 @@
 //
 //   npm run demo:reset          regenerate
 //   tsx scripts/demo-data.ts --if-missing
+//   npm run demo:sparse         one month of data in demo-sparse/, as after a first import
+//   tsx scripts/demo-data.ts --months=N --dir=<dir>
 
 import { existsSync } from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
@@ -19,9 +21,13 @@ import { addDays, addMonths, endOfMonth, startOfMonth, today, weekday } from '..
 import { roundMoney } from '../src/shared/money';
 import type { Account, BalanceSnapshot, Figure, HoldingsSnapshot, Transaction } from '../src/shared/schema';
 
-const DIR = path.join(PROJECT_ROOT, 'demo-data');
-const WORK = path.join(PROJECT_ROOT, '.work', 'demo-data');
 const args = new Set(process.argv.slice(2));
+const option = (name: string) => [...args].find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3);
+/** Months of history: 24 by default; 1 gives this month only, as after a first import. */
+const MONTHS = Math.max(1, Number(option('months') ?? 24));
+const SPARSE = MONTHS <= 1;
+const DIR = path.resolve(PROJECT_ROOT, option('dir') ?? 'demo-data');
+const WORK = path.join(PROJECT_ROOT, '.work', path.basename(DIR));
 
 if (args.has('--if-missing') && existsSync(path.join(DIR, 'meta.json'))) {
   console.log('demo-data/ already exists (npm run demo:reset to regenerate)');
@@ -44,7 +50,7 @@ const gauss = () => Math.sqrt(-2 * Math.log(rand() || 1e-9)) * Math.cos(2 * Math
 
 const stamp = nowISO();
 const END = today();
-const START = startOfMonth(addMonths(END, -24));
+const START = SPARSE ? startOfMonth(END) : startOfMonth(addMonths(END, -MONTHS));
 
 const acct = (id: string, name: string, type: Account['type'], institutionId: string | undefined, extra: Partial<Account> = {}): Account => ({
   id,
@@ -189,6 +195,13 @@ async function main() {
   runLedger('current-account', 12_000);
   runLedger('rewards-card', -905.6);
   runLedger('easy-access', 43_500);
+  if (SPARSE) {
+    // A first import: this month's card statement and a savings screenshot give today's balances.
+    for (const [accountId, opening] of [['rewards-card', -905.6], ['easy-access', 43_500]] as const) {
+      const bal = txs.filter((t) => t.accountId === accountId).reduce((sum: number, t) => roundMoney(sum + t.amount), opening);
+      snapshots.push({ id: balanceId(accountId, END, bal, 'screenshot'), accountId, date: END, balance: bal, currency: 'GBP', kind: 'screenshot', dateSource: 'exif', source: {}, createdAt: stamp });
+    }
+  }
   snapshots.push({ id: balanceId('premium-bonds', END, pbBal, 'screenshot'), accountId: 'premium-bonds', date: addDays(END, -12), balance: roundMoney(pbBal), currency: 'GBP', kind: 'screenshot', dateSource: 'exif', source: {}, createdAt: stamp });
   snapshots.push({ id: balanceId('premium-bonds', START, 50_000, 'manual'), accountId: 'premium-bonds', date: START, balance: 50_000, currency: 'GBP', kind: 'manual', source: {}, createdAt: stamp });
 
@@ -292,7 +305,8 @@ async function main() {
   );
   const res = await enrich(store);
   console.log(`demo: ${txs.length} transactions, ${snapshots.length} balances; enrich: ${res.recategorised} categorised, ${res.transfersLinked} transfers linked`);
-  await demoIntelligence(store);
+  // A first import has no research or insights yet: the agents have not run.
+  if (!SPARSE) await demoIntelligence(store);
 
   // A pending import to review: this month's export from the bank, in Monzo's CSV layout, overlapping
   // what is already stored.

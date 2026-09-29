@@ -134,16 +134,23 @@ describe('coverage-aware baselines', () => {
     expect(joint.completeMonths).toEqual(['2026-07']);
   });
 
-  it('with one partial month, uses covered days at low confidence', async () => {
+  it('with less than a month of data, says so rather than guess', async () => {
     await store.addTransactions([tx('current', '2026-09-02', -50, 'LUNCH'), tx('current', '2026-09-20', -50, 'LUNCH'), tx('card', '2026-09-03', -100, 'SHOP'), tx('card', '2026-09-20', -40, 'SHOP')], 'test');
     const b = computeBaseline(store, new Coverage(store), '2026-09-01', '2026-09-30', new AssumptionSet([], '2026-09-28'));
+    // 19 covered days (2–20 Sept; the card counts from its first data on the 3rd): too few for a
+    // month's cycle of pay and bills.
+    expect(b.available).toBe(false);
+    expect(b.reason).toBe('Only 19 days in Sep 2026 have data for every account; at least 28 are needed');
+  });
+
+  it('with a month’s cycle but no complete month, uses covered days at low confidence', async () => {
+    // 10 Sept to 12 Oct: 33 covered days, neither month 90% covered.
+    await store.addTransactions([tx('current', '2026-09-10', -50, 'LUNCH'), tx('current', '2026-09-20', -50, 'LUNCH'), tx('current', '2026-10-12', -50, 'LUNCH'), tx('card', '2026-09-10', -100, 'SHOP'), tx('card', '2026-10-12', -40, 'SHOP')], 'test');
+    const b = computeBaseline(store, new Coverage(store), '2026-09-01', '2026-10-31', new AssumptionSet([], '2026-10-28'));
     expect(b.available).toBe(true);
-    expect(b.basis.kind).toBe('days');
+    expect(b.basis).toMatchObject({ kind: 'days', days: 33 });
     expect(b.confidence).toBe('low');
-    // 240 spent over 19 covered days (2–20 Sept; the card counts from its first data on the 3rd),
-    // per 30.44-day month.
-    expect(b.basis.days).toBe(19);
-    expect(b.monthly.spending).toBeCloseTo((240 / 19) * (365.25 / 12), 1);
+    expect(b.monthly.spending).toBeCloseTo((290 / 33) * (365.25 / 12), 1);
     expect(b.netSdBasis).toMatch(/fewer than 3 complete months/);
   });
 

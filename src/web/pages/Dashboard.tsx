@@ -2,8 +2,8 @@ import { ArrowRight, CircleAlert, Info, ListChecks, TriangleAlert, Upload } from
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { WRAPPER_GROUP_LABELS, WRAPPER_GROUPS } from '../../shared/accounts';
-import type { AccountSummary, AllowancesResponse, CashflowResponse, EstateSeriesResponse, MonthlyChecklistResponse, SummaryResponse, TransactionsResponse } from '../../shared/api';
-import { addDays, addMonths, endOfMonth, formatDate, startOfMonth, today } from '../../shared/dates';
+import type { AccountSummary, AllowancesResponse, EstateSeriesResponse, MonthlyChecklistResponse, SummaryResponse, TransactionsResponse } from '../../shared/api';
+import { addMonths, formatDate, today } from '../../shared/dates';
 import { Meter, Sparkline } from '../components/charts/bars';
 import { ChartFrame, type LegendItem } from '../components/charts/common';
 import { TimeChart, type TimeSeries } from '../components/charts/TimeChart';
@@ -32,17 +32,20 @@ function EstateChart() {
   const q = useApi<EstateSeriesResponse>(['estate', range, grouping], `/estate${qs({ from: rangeFrom(range), grouping })}`);
   const d = q.data;
   const color = grouping === 'wrapper' ? wrapperColor : accessColor;
+  // Before every account has data the total leaves some out: no total line there, only what is known.
+  const partialBefore = d?.completeFrom ? d.dates.findIndex((x) => x >= d.completeFrom!) : -1;
   const series: TimeSeries[] = d
     ? [
         ...d.groups.map((g) => ({ id: g.id, label: g.label, color: color(g.id), values: g.values, kind: 'area' as const, stack: true })),
-        { id: 'total', label: 'Estate value', color: 'var(--ink-2)', values: d.total, kind: 'line' as const },
+        { id: 'total', label: 'Estate value', color: 'var(--ink-2)', values: d.total.map((v, i) => (i < partialBefore ? null : v)), kind: 'line' as const },
       ]
     : [];
+  const requested = rangeFrom(range);
   const legend: LegendItem[] = d ? [...d.groups.map((g) => ({ label: g.label, color: color(g.id), kind: 'area' as const })), { label: 'Estate value', color: 'var(--ink-2)', kind: 'line' as const }] : [];
   return (
     <ChartFrame
       title="Estate value over time"
-      subtitle={grouping === 'wrapper' ? 'By tax wrapper; debts below the line' : 'By when you could spend it'}
+      subtitle={`${grouping === 'wrapper' ? 'By tax wrapper; debts below the line' : 'By when you could spend it'}${d && requested && d.dates[0]! > requested ? `. Your data starts on ${formatDate(d.dates[0]!)}` : ''}`}
       legend={legend}
       loading={q.isFetching}
       actions={
@@ -66,12 +69,20 @@ function EstateChart() {
         d
           ? {
               columns: ['Date', ...d.groups.map((g) => g.label), 'Estate value'],
-              rows: d.dates.map((date, i) => [formatDate(date), ...d.groups.map((g) => money(g.values[i])), money(d.total[i])]).reverse(),
+              rows: d.dates.map((date, i) => [formatDate(date), ...d.groups.map((g) => money(g.values[i])), i < partialBefore ? `${money(d.total[i])} (incomplete)` : money(d.total[i])]).reverse(),
             }
           : undefined
       }
     >
-      {d ? d.dates.length > 1 ? <TimeChart dates={d.dates} series={series} height={280} ariaLabel="Estate value over time" /> : <div className="py-12 text-center text-sm text-ink-3">Not enough history yet.</div> : <Loading />}
+      {d ? (
+        d.dates.length > 1 ? (
+          <TimeChart dates={d.dates} series={series} height={280} partialBefore={partialBefore} partialLabel={d.completeFrom ? `Not every account has data before ${formatDate(d.completeFrom, { year: false })}` : undefined} ariaLabel="Estate value over time" />
+        ) : (
+          <div className="py-12 text-center text-sm text-ink-3">Not enough history yet.</div>
+        )
+      ) : (
+        <Loading />
+      )}
     </ChartFrame>
   );
 }
@@ -147,10 +158,10 @@ function TaxPanel() {
       actions={<Link to="/tax" className="text-[13px] font-medium text-accent hover:underline">Details</Link>}
     >
       <div className="flex flex-col gap-4">
-        <Meter label="ISA allowance" used={a.isa.used} limit={a.isa.allowance} />
-        {a.lisa && <Meter label="Lifetime ISA" used={a.lisa.contributed} limit={a.lisa.allowance} sub={<>Bonus <Money value={a.lisa.bonusExpected} decimals={0} /></>} />}
-        <Meter label="Pension annual allowance" used={a.pension.total} limit={a.pension.annualAllowance} sub="Incl. employer and tax relief" />
-        <Meter label="Savings interest vs allowance" used={a.savings.interest} limit={a.savings.allowance} overLabel="Taxable" sub={`${a.savings.band} rate PSA`} />
+        <Meter label="ISA allowance" used={a.isa.used} limit={a.isa.allowance} atLeast={a.isa.incomplete !== null} />
+        {a.lisa && <Meter label="Lifetime ISA" used={a.lisa.contributed} limit={a.lisa.allowance} atLeast={a.lisa.incomplete !== null} sub={<>Bonus <Money value={a.lisa.bonusExpected} decimals={0} /></>} />}
+        <Meter label="Pension annual allowance" used={a.pension.total} limit={a.pension.annualAllowance} atLeast={a.pension.incomplete !== null} sub="Incl. employer and tax relief" />
+        <Meter label="Savings interest vs allowance" used={a.savings.interest} limit={a.savings.allowance} atLeast={a.savings.incomplete !== null} overLabel="Taxable" sub={`${a.savings.band} rate PSA`} />
       </div>
     </Card>
   );
@@ -186,18 +197,9 @@ function MonthlyPanel() {
 }
 
 function Kpis({ summary }: { summary: SummaryResponse }) {
-  const t = today();
-  const from = startOfMonth(t);
-  const cf = useApi<CashflowResponse>(['cashflow', from, t], `/cashflow${qs({ from, to: t })}`);
-  const thisMonth = cf.data?.months[cf.data.months.length - 1];
-  // Compare this month so far with the same number of days last month.
-  const dayOfMonth = Number(t.slice(8, 10));
-  const lastMonthEnd = endOfMonth(addMonths(t, -1));
-  const lastMonthSameDay = addDays(startOfMonth(lastMonthEnd), Math.min(dayOfMonth, Number(lastMonthEnd.slice(8, 10))) - 1);
-  const prevSoFar = useApi<CashflowResponse>(['cashflow', startOfMonth(lastMonthEnd), lastMonthSameDay], `/cashflow${qs({ from: startOfMonth(lastMonthEnd), to: lastMonthSameDay })}`);
   const k = summary.kpis;
+  const m = summary.monthToDate;
   const pensions = summary.groups.find((g) => g.id === 'pensions')?.value ?? 0;
-  const prevSpend = prevSoFar.data?.totals.spending;
   const basis = (
     <span className="inline-flex flex-wrap items-center gap-1">
       {k.basis}
@@ -208,8 +210,9 @@ function Kpis({ summary }: { summary: SummaryResponse }) {
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
       <Stat
         label="Spent this month"
-        value={<Money value={thisMonth?.spending ?? 0} decimals={0} />}
-        delta={prevSpend !== undefined && thisMonth ? <Delta value={thisMonth.spending - prevSpend} upIsGood={false} label="vs last month so far" /> : undefined}
+        value={<Money value={m.spending} decimals={0} />}
+        delta={m.previous !== null ? <Delta value={m.spending - m.previous} upIsGood={false} label="vs last month so far" /> : undefined}
+        sub={m.previous === null ? `no data for ${formatDate(m.previousFrom, { year: false })} – ${formatDate(m.previousTo, { year: false })} to compare` : undefined}
       />
       <Stat label="Savings rate" value={pct(k.savingsRate, 0)} sub={k.monthlySaving !== null ? <span>{money(k.monthlySaving, { decimals: 0 })} a month saved · {basis}</span> : basis} />
       <Stat label="Cash runway" value={k.runwayMonths !== null ? `${k.runwayMonths.toFixed(1)} months` : '—'} sub={k.runwayMonths !== null ? 'accessible cash ÷ monthly spending' : basis} />

@@ -52,11 +52,23 @@ function Notes({ notes }: { notes: string[] }) {
   );
 }
 
+/** Says which accounts' data does not cover the tax year, so the figure above is a minimum. */
+function Incomplete({ note }: { note: string | null }) {
+  if (!note) return null;
+  return (
+    <div className="mt-2 flex items-start gap-1.5 rounded-lg bg-warn-soft px-2.5 py-2 text-[12px] text-ink-2">
+      <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-warn-ink" aria-hidden />
+      <span>{note}</span>
+    </div>
+  );
+}
+
 function Allowances({ a }: { a: AllowancesResponse }) {
   return (
     <div className="grid gap-5 lg:grid-cols-2">
       <Card title="ISA allowance" description="All ISAs together, including the LISA">
-        <Meter label="Subscriptions" used={a.isa.used} limit={a.isa.allowance} />
+        <Meter label="Subscriptions" used={a.isa.used} limit={a.isa.allowance} atLeast={a.isa.incomplete !== null} />
+        <Incomplete note={a.isa.incomplete} />
         {a.isa.cashLimit < a.isa.allowance && (
           <div className="mt-4">
             <Meter label="Of which cash ISAs" used={a.isa.cashUsed} limit={a.isa.cashLimit} />
@@ -67,7 +79,8 @@ function Allowances({ a }: { a: AllowancesResponse }) {
       </Card>
       {a.lisa ? (
         <Card title="Lifetime ISA" description="Counts within the £20,000 ISA allowance">
-          <Meter label="Contributions" used={a.lisa.contributed} limit={a.lisa.allowance} />
+          <Meter label="Contributions" used={a.lisa.contributed} limit={a.lisa.allowance} atLeast={a.lisa.incomplete !== null} />
+          <Incomplete note={a.lisa.incomplete} />
           <KeyValue
             className="mt-3"
             items={[
@@ -84,7 +97,8 @@ function Allowances({ a }: { a: AllowancesResponse }) {
         </Card>
       )}
       <Card title="Pension annual allowance" description="Your contributions (grossed up for tax relief) plus employer contributions">
-        <Meter label="Contributions" used={a.pension.total} limit={a.pension.annualAllowance} />
+        <Meter label="Contributions" used={a.pension.total} limit={a.pension.annualAllowance} atLeast={a.pension.incomplete !== null} />
+        <Incomplete note={a.pension.incomplete} />
         <KeyValue
           className="mt-3"
           items={[
@@ -115,7 +129,8 @@ function Allowances({ a }: { a: AllowancesResponse }) {
         <Notes notes={a.pension.notes} />
       </Card>
       <Card title="Savings interest" description={`Interest outside ISAs vs your Personal Savings Allowance (${a.savings.band} rate)`}>
-        <Meter label="Interest earned" used={a.savings.interest} limit={a.savings.allowance} overLabel="Taxable" />
+        <Meter label="Interest earned" used={a.savings.interest} limit={a.savings.allowance} atLeast={a.savings.incomplete !== null} overLabel="Taxable" />
+        <Incomplete note={a.savings.incomplete} />
         <Lines lines={a.savings.lines} />
         <Notes notes={a.savings.notes} />
         <div className="mt-4 border-t border-line pt-4">

@@ -176,6 +176,12 @@ Other behaviour:
   (`setBy: system`, identifiers exactly as printed), so research can follow.
 - **Job state** lives in the work area, not `data/`. Assumptions & research → Agent jobs shows
   what is due, queued, running and finished, with rerun and cancel.
+- **No repeats.** A job that succeeded for the same subject within the research staleness window
+  (Settings → Agents, 90 days by default) is not started again by itself, even if it found nothing;
+  a failed one waits a day. The owner can rerun either at any time.
+- **Cost.** Measured on the demo: refreshing assumptions took about 8 minutes and 62 turns ($9.74
+  at API prices, Opus with high effort); researching one fund about 5 minutes ($1.56). On a Claude
+  plan this is usage, not a bill; choose a smaller model or lower effort in Settings → Agents.
 - **The output's records** carry the job's id, model and prompt version.
 - **Demo data never starts jobs by itself.**
 

@@ -729,6 +729,8 @@ export const DraftTransactionSchema = z.object({
   /** An existing transaction in another of your accounts that is the other leg of this transfer. */
   transferMatch: z.string().optional(),
   row: z.number().int().optional(),
+  /** What the reader was unsure of on this row ("year not shown", "amount partly hidden"). */
+  uncertain: z.string().max(300).optional(),
   /** Source detail carried through to the stored transaction untouched. */
   detail: TransactionSchema.pick({
     sourceId: true,
@@ -784,6 +786,8 @@ export const DraftSectionSchema = z.object({
   periodStart: ISODateSchema.optional(),
   periodEnd: ISODateSchema.optional(),
   openingBalance: MoneySchema.optional(),
+  /** Totals printed on the statement, for checking the rows against. Money out is positive. */
+  statedTotals: z.object({ moneyIn: MoneySchema.optional(), moneyOut: MoneySchema.optional() }).optional(),
   /** Whether to record the balance snapshot below. */
   recordBalance: z.boolean().default(true),
   balance: MoneySchema.optional(),

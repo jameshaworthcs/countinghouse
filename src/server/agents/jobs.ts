@@ -71,7 +71,8 @@ export class JobRunner extends EventEmitter implements JobQueue {
     private readonly store: Store,
     private readonly analytics: Analytics,
     private readonly config: Config,
-    private readonly opts: { autoRun: boolean } = { autoRun: true },
+    /** autoRun: start due jobs by themselves. paused: queue jobs without running them (tests). */
+    private readonly opts: { autoRun: boolean; paused?: boolean } = { autoRun: true },
   ) {
     super();
     this.dir = path.join(config.workDir, 'jobs');
@@ -176,7 +177,7 @@ export class JobRunner extends EventEmitter implements JobQueue {
   }
 
   private pump(): void {
-    if (this.current) return;
+    if (this.current || this.opts.paused) return;
     const next = this.list()
       .filter((j) => j.status === 'queued')
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0];
@@ -316,9 +317,14 @@ export class JobRunner extends EventEmitter implements JobQueue {
     }
     const recent = this.list().filter((j) => j.createdAt.slice(0, 10) >= addDays(on, -1) && j.trigger !== 'owner');
     let refreshBudget = MAX_STALE_REFRESH_PER_DAY - recent.filter((j) => j.trigger === 'stale').length;
+    const staleDays = this.store.settings.agents.researchStaleAfterDays;
     for (const s of this.suggestions(on)) {
       if (!s.auto) continue;
       if (s.kind === 'refresh-assumptions' && this.list().some((j) => j.kind === 'refresh-assumptions' && j.createdAt.slice(0, 10) >= addDays(on, -7))) continue;
+      // The same job ran successfully within the staleness window: it recorded what it could find,
+      // and running it again by itself would only spend the plan (the owner can still rerun it).
+      const last = this.list().find((j) => j.kind === s.kind && JSON.stringify(j.params) === JSON.stringify(s.params));
+      if (last?.status === 'succeeded' && diffDays((last.finishedAt ?? last.createdAt).slice(0, 10), on) < staleDays) continue;
       const neverDone = /Never|No .* researched/.test(s.reason);
       if (!neverDone && s.kind !== 'monthly-review') {
         if (refreshBudget <= 0) continue;

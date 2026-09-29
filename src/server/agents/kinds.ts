@@ -511,7 +511,8 @@ const refreshAssumptions: JobKindDef = {
         skipped++;
         continue;
       }
-      const publishers = [...new Set(a.basedOn.map((b) => (b.type === 'indicator' ? out.indicators[b.index]?.publisher : out.outlooks[b.index]?.publisher)).filter(Boolean))];
+      // Who the value rests on: the research it cites, then its own sources.
+      const publishers = [...new Set([...a.basedOn.map((b) => (b.type === 'indicator' ? out.indicators[b.index]?.publisher : out.outlooks[b.index]?.publisher)), ...evidence.map((e) => e.publisher)].filter(Boolean))];
       records.push({
         type: 'assumption',
         record: {

@@ -18,7 +18,7 @@ const arg = (name: string, fallback: string) => {
   return i >= 0 && argv[i + 1] ? argv[i + 1]! : fallback;
 };
 const base = arg('base', 'http://127.0.0.1:4770');
-const out = path.join(PROJECT_ROOT, 'screens');
+const out = path.resolve(PROJECT_ROOT, arg('out', 'screens'));
 const chrome = process.env.CHROME_BIN ?? '/usr/bin/google-chrome';
 const only = arg('only', '');
 const login = process.env.SCREENS_USER && process.env.SCREENS_PASSWORD ? { user: process.env.SCREENS_USER, password: process.env.SCREENS_PASSWORD } : null;

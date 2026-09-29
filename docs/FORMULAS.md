@@ -73,10 +73,17 @@ A month is **complete** when it lies inside the period and ≥ 90% of its days a
   - monthly income = Σ income on those days ÷ number of complete months;
   - likewise spending and net.
   - Confidence is high with ≥ 3 complete months, medium with 1–2.
-- **Else, if jointly covered days ≥ 14:** use those days.
+- **Else, if jointly covered days ≥ 28** (`MIN_BASELINE_DAYS`, a month's cycle of pay and bills):
+  use those days.
   - monthly x = Σ x on covered days ÷ (covered days ÷ 30.4375).
   - Confidence is low.
+  - Fewer days can miss a payday altogether: 20 days of June before the salary on the 25th
+    read as a monthly loss.
 - **Else:** unavailable, with the limiting accounts named.
+
+**Standard periods** (`standardPeriods`): the last 3 and the last 12 full months. When the last 3
+full months have neither a complete month nor 28 covered days (after a first import), the recent
+period runs up to today instead, so this month's covered days count.
 
 Income and spending classification is §14.
 
@@ -337,12 +344,28 @@ Deterministic rules with named thresholds (`SIGNAL_RULES` in `analytics/spending
 - Newton's method, with bisection on [−0.99, 5] as a fallback.
 - Undefined for spans under a month.
 
-## 13. Reconciliation (`shared/reconcile.ts`)
+## 13. Reconciliation and review checks (`shared/reconcile.ts`, `shared/review.ts`)
 
 - **Opening and closing balance:** opening + Σ settled rows = closing.
 - **Running balances:** each row's running balance = the previous row's running balance + its
   amount.
 - Pending rows are excluded: statement and export balances are of settled transactions.
+
+**Review checks** run on each account in a draft, on the review page and for "Commit all ready".
+A warning holds an import back from bulk commit:
+
+| Check | Warns when |
+|---|---|
+| Balances | the reconciliation above fails (the rows breaking a running balance are marked) |
+| Totals | Σ settled money in or money out ≠ the totals printed on the statement, to the penny |
+| Period | a row is dated outside the statement's printed period (not for exports, whose period is their first and last rows) |
+| Future | a row is dated after the upload day |
+| Card signs | on a credit card with ≥ 3 settled rows, most are money in, or a payment to the card is money out |
+| Unsure | the reader marked a row as uncertain |
+| Repeated (information) | two rows share a date, amount and description |
+| Pending (information) | pending rows are left out unless ticked |
+
+Warnings from reading the document (rows dropped as unreadable) also hold an import back.
 
 ## 14. Income and spending
 

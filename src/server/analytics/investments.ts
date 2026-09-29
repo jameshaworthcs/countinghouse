@@ -61,7 +61,7 @@ export function investments(store: Store, engine: BalanceEngine): InvestmentsRes
   const coverage = new Coverage(store);
   const inflation = set.resolve('inflation').value;
   // Contributions going forward: the last 12 months where covered, else the last 3.
-  const [recentPeriod, yearPeriod] = standardPeriods(now);
+  const [recentPeriod, yearPeriod] = standardPeriods(now, coverage);
   const yearBaseline = computeBaseline(store, coverage, yearPeriod!.from, yearPeriod!.to, set);
   const baseline = yearBaseline.available ? yearBaseline : computeBaseline(store, coverage, recentPeriod!.from, recentPeriod!.to, set);
   const flowFor = new Map(baseline.wrappers.map((w) => [w.accountId, w]));
@@ -184,7 +184,11 @@ export function investments(store: Store, engine: BalanceEngine): InvestmentsRes
     pot = { p10: Math.round(result.pot.p10), p50: Math.round(result.pot.p50), p90: Math.round(result.pot.p90) };
     income = { p10: Math.round(result.income.p10), p50: Math.round(result.income.p50), p90: Math.round(result.income.p90) };
     notes.push(`Pension pots grow at their own expected returns after charges, with ${fmtPct(inflation)} inflation taken off to show today's money. The range is the 10th to 90th percentile.`);
-    notes.push(`Contributions carry on at ${Math.round(monthlyPersonal + monthlyExternal).toLocaleString('en-GB')} a month (${baseline.available ? `from ${baseline.basis.kind === 'months' ? `${baseline.basis.months.length} complete month${baseline.basis.months.length > 1 ? 's' : ''}` : `${baseline.basis.days} days`} of data` : 'no recent data'}), rising with the contribution-growth assumption, until you retire.`);
+    notes.push(
+      baseline.available
+        ? `Contributions carry on at ${Math.round(monthlyPersonal + monthlyExternal).toLocaleString('en-GB')} a month (from ${baseline.basis.kind === 'months' ? `${baseline.basis.months.length} complete month${baseline.basis.months.length > 1 ? 's' : ''}` : `${baseline.basis.days} days`} of data), rising with the contribution-growth assumption, until you retire.`
+        : 'Contributions are not known yet (they need a month of data for every account), so the pots grow from today’s values with nothing more paid in: a floor, not a forecast.',
+    );
     notes.push(`Income is the pots × a ${fmtPct(withdrawal.value)} sustainable withdrawal rate (${withdrawal.source === 'fallback' ? 'fallback' : withdrawal.source === 'owner' ? 'your figure' : 'researched'}), rising with inflation.`);
     if (ageOn(dob, now) >= store.profile.retirementAge) notes.push('You are at or past your retirement age in Settings; the figures are for today.');
   } else notes.push('Add your date of birth in Settings to see a retirement outlook.');
@@ -227,6 +231,7 @@ export function investments(store: Store, engine: BalanceEngine): InvestmentsRes
       potToday: fromMinor(pensions),
       monthlyPersonal: Math.round(monthlyPersonal * 100) / 100,
       monthlyExternal: Math.round(monthlyExternal * 100) / 100,
+      contributionsKnown: baseline.available,
       pot,
       income,
       withdrawalRate: withdrawal,

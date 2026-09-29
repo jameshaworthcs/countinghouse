@@ -1,9 +1,9 @@
-import { ArrowLeft, CircleAlert, CircleCheck, Copy, ExternalLink, Info, LoaderCircle, Maximize2, Minimize2, Pencil, RefreshCw, Trash2 } from 'lucide-react';
+import { ArrowLeft, CircleCheck, Copy, ExternalLink, Info, ListChecks, LoaderCircle, Maximize2, Minimize2, Pencil, RefreshCw, Trash2, TriangleAlert } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { ACCOUNT_TYPE_META } from '../../shared/accounts';
 import { formatDate } from '../../shared/dates';
-import { reconcile } from '../../shared/reconcile';
+import { sectionChecks, type ReviewCheck } from '../../shared/review';
 import { FIGURE_KINDS, type CsvProfile, type Draft, type DraftSection, type DraftTransaction, type ImportRecord } from '../../shared/schema';
 import { AccountTypeSelect } from '../components/AccountForms';
 import { CategorySelect } from '../components/TransactionList';
@@ -16,7 +16,7 @@ import { importStatus } from './Import';
 type Rec = ImportRecord & { readiness?: { ready: boolean; reasons: string[] } };
 
 const DATE_SOURCE_LABEL: Record<string, string> = {
-  document: 'printed on the document',
+  document: 'from the document',
   exif: 'from photo metadata',
   filename: 'from the file name',
   'file-modified': 'from the file’s date',
@@ -56,30 +56,43 @@ function DocumentViewer({ rec }: { rec: Rec }) {
   );
 }
 
-function ReconcileBadge({ section }: { section: DraftSection }) {
-  const r = reconcile({ openingBalance: section.openingBalance, closingBalance: section.balance, transactions: section.transactions });
-  if (r.status === 'unknown') return null;
+const CHECK_ICON = {
+  ok: <CircleCheck className="mt-0.5 size-4 shrink-0 text-good-ink" aria-label="Passed" />,
+  warn: <TriangleAlert className="mt-0.5 size-4 shrink-0 text-warn-ink" aria-label="Check this" />,
+  info: <Info className="mt-0.5 size-4 shrink-0 text-ink-3" aria-label="For information" />,
+};
+
+/** What was checked on this account's rows, problems first. */
+function ChecksPanel({ checks }: { checks: ReviewCheck[] }) {
+  if (!checks.length) return null;
+  const order = { warn: 0, info: 1, ok: 2 };
+  const sorted = [...checks].sort((a, b) => order[a.status] - order[b.status]);
+  const warnings = checks.filter((c) => c.status === 'warn').length;
   return (
-    <div className={cn('flex items-start gap-2 rounded-lg px-3 py-2 text-[12.5px]', r.status === 'ok' ? 'bg-good-soft' : 'bg-warn-soft')}>
-      {r.status === 'ok' ? <CircleCheck className="mt-0.5 size-4 shrink-0 text-good-ink" /> : <CircleAlert className="mt-0.5 size-4 shrink-0 text-warn-ink" />}
-      <div>
-        <div className="font-medium text-ink">{r.status === 'ok' ? 'Balances reconcile' : 'Balances don’t reconcile'}</div>
-        {r.checks.map((c) => (
-          <div key={c} className="sensitive text-ink-2">
-            {c}
-          </div>
-        ))}
-        {r.status === 'mismatch' && <div className="text-ink-3">Check for missing rows or a wrong sign against the original.</div>}
+    <div className={cn('rounded-lg border px-3 py-2.5', warnings ? 'border-warn-ink/30 bg-warn-soft/50' : 'border-line bg-panel-2')}>
+      <div className="mb-1.5 flex items-center gap-1.5 text-[12.5px] font-semibold text-ink">
+        <ListChecks className="size-4 text-ink-3" /> {warnings ? `${warnings} thing${warnings > 1 ? 's' : ''} to check against the original` : 'Checks passed'}
       </div>
+      <ul className="flex flex-col gap-1.5">
+        {sorted.map((c) => (
+          <li key={c.id} className="flex items-start gap-2 text-[12.5px]">
+            {CHECK_ICON[c.status]}
+            <div className="min-w-0">
+              <div className="text-ink">{c.title}</div>
+              {c.detail && <div className="sensitive text-ink-3">{c.detail}</div>}
+            </div>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
 
-function TxRow({ t, onChange }: { t: DraftTransaction; onChange: (p: Partial<DraftTransaction>) => void }) {
+function TxRow({ t, flags, onChange }: { t: DraftTransaction; flags?: string[] | undefined; onChange: (p: Partial<DraftTransaction>) => void }) {
   const [editing, setEditing] = useState(false);
   const muted = !t.include;
   return (
-    <tr className={cn(muted ? 'opacity-55' : '', t.status === 'possible_duplicate' ? 'bg-warn-soft/60' : '')}>
+    <tr className={cn(muted ? 'opacity-55' : '', t.status === 'possible_duplicate' || flags?.length ? 'bg-warn-soft/60' : '')}>
       <td className={cn(tableClasses.td, 'w-8')}>
         <Checkbox checked={t.include} onChange={(v) => onChange({ include: v })} />
       </td>
@@ -104,6 +117,12 @@ function TxRow({ t, onChange }: { t: DraftTransaction; onChange: (p: Partial<Dra
           </div>
         )}
         {t.transferMatch && <div className="mt-0.5"><Badge tone="accent">Links to a transfer</Badge></div>}
+        {t.pending && <div className="mt-0.5"><Badge tone="muted">Pending</Badge></div>}
+        {flags?.map((f) => (
+          <div key={f} className="mt-0.5 flex items-center gap-1 text-[11.5px] text-warn-ink">
+            <TriangleAlert className="size-3" /> {f}
+          </div>
+        ))}
       </td>
       <td className={cn(tableClasses.td, 'w-52')}>
         <CategorySelect value={t.category} onChange={(v) => onChange({ category: v, categorisedBy: 'user' })} className="h-8 text-[12.5px]" />
@@ -125,7 +144,7 @@ function TxRow({ t, onChange }: { t: DraftTransaction; onChange: (p: Partial<Dra
   );
 }
 
-function SectionEditor({ section, index, total, onChange }: { section: DraftSection; index: number; total: number; onChange: (s: DraftSection) => void }) {
+function SectionEditor({ section, index, total, latest, periodFromRows, onChange }: { section: DraftSection; index: number; total: number; latest: string; periodFromRows: boolean; onChange: (s: DraftSection) => void }) {
   const { data } = useAppData();
   const [showDupes, setShowDupes] = useState(false);
   const set = (patch: Partial<DraftSection>) => onChange({ ...section, ...patch });
@@ -138,6 +157,10 @@ function SectionEditor({ section, index, total, onChange }: { section: DraftSect
   const type = target.mode === 'existing' ? data.accounts.find((a) => a.id === target.accountId)?.type : target.mode === 'new' ? target.account.type : undefined;
   const market = type ? ACCOUNT_TYPE_META[type].balanceMode === 'market' : false;
   const d = section.detected;
+  const checks = target.mode === 'skip' ? [] : sectionChecks(section, { accountType: type, latest, periodFromRows });
+  // Rows a check is about carry its title, so the problem is visible where it is.
+  const flags = new Map<string, string[]>();
+  for (const c of checks) if (c.status === 'warn') for (const k of c.rows ?? []) flags.set(k, [...(flags.get(k) ?? []), c.title]);
 
   return (
     <Card
@@ -217,7 +240,7 @@ function SectionEditor({ section, index, total, onChange }: { section: DraftSect
                 </Callout>
               )}
             </div>
-            <ReconcileBadge section={section} />
+            <ChecksPanel checks={checks} />
             {section.transactions.length > 0 && (
               <div>
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -251,7 +274,7 @@ function SectionEditor({ section, index, total, onChange }: { section: DraftSect
                     </thead>
                     <tbody>
                       {visible.map((t) => (
-                        <TxRow key={t.key} t={t} onChange={(p) => setTx(t.key, p)} />
+                        <TxRow key={t.key} t={t} flags={flags.get(t.key)} onChange={(p) => setTx(t.key, p)} />
                       ))}
                     </tbody>
                   </table>
@@ -577,6 +600,15 @@ export default function Review() {
             {rec.status === 'needs_mapping' && rec.mapping && <MappingEditor rec={rec} />}
             {draft && (
               <>
+                {rec.extraction.warnings.length > 0 && (
+                  <Callout tone="warn" title="While reading the document">
+                    <ul className="list-disc pl-4">
+                      {rec.extraction.warnings.map((w) => (
+                        <li key={w}>{w}</li>
+                      ))}
+                    </ul>
+                  </Callout>
+                )}
                 {draft.notes.length > 0 && (
                   <Callout tone="neutral" title="Notes from reading the document">
                     <ul className="list-disc pl-4">
@@ -593,6 +625,8 @@ export default function Review() {
                     section={s}
                     index={i}
                     total={draft.sections.length}
+                    latest={rec.createdAt.slice(0, 10)}
+                    periodFromRows={draft.documentType === 'csv_export'}
                     onChange={(next) => {
                       setDirty(true);
                       setDraft({ ...draft, sections: draft.sections.map((x) => (x.key === next.key ? next : x)) });
