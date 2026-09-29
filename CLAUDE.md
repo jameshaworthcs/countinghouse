@@ -32,8 +32,9 @@ for the map and [docs/DATA_FORMAT.md](docs/DATA_FORMAT.md) before touching data 
     auto-commits are held while it is on another branch.
   - Commit code with explicit paths, never `git add -A`, so a pending data change is not swept
     into a code commit.
-  - The live login is in `~/dev/finance-live/.env`; this checkout's `.env` has no production
-    settings.
+  - The live site signs in through jemedia-auth (OIDC; password sign-in is off there). Its settings
+    are in `~/dev/finance-live/.env`; this checkout's `.env` has no production settings.
+    - The screenshot run and the demo use a throwaway password login instead (no OIDC client set).
 - `npm run validate`: format check of `data/`.
 - `npm run records -- keys | status | check <batch.json> | write <batch.json>`: the validated
   write path for assumptions, research, insights and instruments
@@ -61,7 +62,8 @@ for the map and [docs/DATA_FORMAT.md](docs/DATA_FORMAT.md) before touching data 
   write extracted data straight to `data/`.
 - **Privacy.**
   - Nothing may call third-party services except Claude, the engine the owner chose (CLI or API),
-    for extraction and agent jobs.
+    for extraction and agent jobs, and jemedia-auth (`auth.jemedia.xyz`), the owner's own identity
+    provider, for sign-in. Only the OIDC protocol goes there, never financial data.
   - Research sends only public, non-personal queries: fund names, ISINs, provider product pages.
     No balances, transactions or personal details ever go into one.
     - Research jobs get the web tools and are built only from public identifiers.

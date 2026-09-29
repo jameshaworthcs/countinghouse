@@ -24,7 +24,7 @@ export function systemRoutes(ctx: AppContext): Hono {
       selectedEngine: pickEngine(ctx.store.settings.extraction.engine, engines),
       git: { ...git, ...(ctx.git.lastError ? { lastError: ctx.git.lastError } : {}) },
       inbox: { dir: ctx.config.inboxDir, ...(ctx.inbox?.lastError ? { lastError: ctx.inbox.lastError } : {}) },
-      auth: { configured: ctx.auth.configured, user: ctx.auth.sessionFrom(c)?.user ?? null },
+      auth: { configured: ctx.auth.configured, method: ctx.auth.method, user: ctx.auth.sessionFrom(c)?.user ?? null },
       counts: {
         accounts: ctx.store.accounts.length,
         transactions: ctx.store.transactionCount(),

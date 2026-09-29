@@ -198,11 +198,24 @@ and a card in credit counts as cash.
 - **Host guard.** Unknown `Host` headers get a 421 (DNS rebinding).
 - **CSRF.** Mutating `/api` calls require the `x-finance-csrf: 1` header, and `Origin` must match
   `Host`. The session cookie is `SameSite=Strict`.
-- **Auth.**
-  - The password is a scrypt hash in `.env`.
-  - The session cookie is an HMAC-signed `v1.user.expiry.sig`, keyed by a secret plus a
-    password-hash epoch (changing the password logs everyone out).
-  - Logins are throttled at 10 failures per client and 50 in total per 15 minutes.
+- **Auth.** One user (`FINANCE_USERNAME`), signed in one of two ways; a server uses exactly one.
+  - **jemedia-auth** (`src/server/oidc.ts`, when `FINANCE_OIDC_CLIENT_ID` is set; the live site):
+    - authorization code flow with PKCE (S256), state and nonce, through `openid-client`;
+    - the ES256 ID token is checked against the provider's JWKS (issuer, audience, expiry, nonce);
+    - who may reach the client at all is jemedia-auth's tenant membership; the app then admits only
+      a verified address on `FINANCE_OIDC_ALLOWED_EMAILS`, as `FINANCE_USERNAME`;
+    - state, nonce and verifier ride in a signed, 10-minute, `SameSite=Lax` cookie scoped to
+      `/api/auth/oidc` (Lax, because the callback arrives from the provider's site);
+    - the callback answers with a page that moves on by meta refresh, so the Strict session cookie
+      is sent with the next request (a redirect would still count as cross-site);
+    - a signed-out page load is redirected to the provider by the server; `/login` stays reachable
+      to explain a failed sign-in, and after signing out it waits for a click;
+    - password sign-in is refused.
+  - **Password** otherwise: a scrypt hash in `.env`, throttled at 10 failures per client and 50 in
+    total per 15 minutes.
+  - The session cookie is an HMAC-signed `v1.user.expiry.sig`, keyed by a secret plus an epoch:
+    the password hash, or the jemedia-auth issuer, client and allowed addresses. Changing either,
+    or switching method, signs everyone out.
   - Client IP and `https` are trusted from `X-Forwarded-*` only when the peer is loopback (Caddy).
 - **Claude CLI extraction** runs with `--tools Read`, `--restricted` (file tools confined to the
   working directory), `--safe-mode` (no hooks, plugins, MCP or CLAUDE.md),

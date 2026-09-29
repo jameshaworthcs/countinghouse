@@ -94,7 +94,7 @@ export function Layout() {
 
   const logout = async () => {
     await api('/auth/logout', { method: 'POST' });
-    window.location.assign('/login');
+    window.location.assign('/login?signedout=1');
   };
 
   return (

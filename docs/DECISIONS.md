@@ -39,7 +39,8 @@ Newest last. Each entry says what was decided, what else was considered, and why
 - **Git auto-commit of `data/` only (pathspec-limited, debounced).** Every change becomes a commit,
   and the owner's code changes are never swept in. Original documents are committed by default
   because the owner wants everything in the repo; Settings can turn that off.
-- **Login is username/password now, OIDC later.** Sessions are independent of how you logged in,
+- **Login is username/password now, OIDC later** (superseded on 2026-09-29: see "Sign-in through
+  jemedia-auth"). Sessions are independent of how you logged in,
   so a jemedia-auth OIDC login can issue the same session cookie later (DEPLOY.md). No login
   configured means local-only access, so a mis-deployment fails closed.
 - **Charts are hand-built SVG, not a charting library.** This was the way to meet the data-viz
@@ -280,3 +281,28 @@ as invariants.
   one arrives. Holdings keep what their documents printed.
 - **A fact read from a document with nothing to import** (an email about pay not received) is a
   context record with `origin.kind: "document"`, not an import that can never be committed.
+
+## 2026-09-29: Sign-in through jemedia-auth
+
+- **jemedia-auth replaces the password on the live site, at the owner's request.**
+  - An OIDC client in its own jemedia-auth tenant, whose only member is the owner. Membership is
+    what jemedia-auth checks before it will sign anyone in to the client.
+  - The app checks again: only the owner's email address, verified, gets in, and it maps to the existing
+    user `james`, so nothing keyed on the user changes.
+  - A signed-out visit goes straight to jemedia-auth. Password sign-in is refused while OIDC is
+    configured, with no break-glass: a password beside SSO is a second way in to guard. If
+    jemedia-auth is down, the way back is to unset `FINANCE_OIDC_CLIENT_ID` and set a password
+    in the live `.env`.
+  - The demo and the screenshot run keep the password login, since they have no client.
+- **The site stays tailnet-only.** Only the browser visits `auth.jemedia.xyz`; the callback comes
+  back to the tailnet name. The server's own calls to the provider (discovery, token exchange,
+  signing keys) are outbound HTTPS from P360.
+- **jemedia-auth is the one other service the server may call.** The privacy invariant in
+  CLAUDE.md now names it next to Claude. Only the OIDC protocol goes there, never financial data.
+- **The session cookie stays `SameSite=Strict`.** The callback ends a navigation that started on
+  another site, so it returns a page that moves on by meta refresh (the CSP allows no inline
+  script) rather than a redirect, and the cookie is sent with the next request.
+- **Signing out of Finance does not sign you out of jemedia-auth.** That would end every JEMEDIA
+  session. The sign-in page then waits for a click instead of going straight back.
+- **`openid-client` (v6, with `jose`) does the protocol,** as in verifiedhandles, rather than
+  hand-written JWT checks.

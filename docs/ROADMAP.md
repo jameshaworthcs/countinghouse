@@ -16,9 +16,9 @@ system as built, and [DECISIONS.md](DECISIONS.md) records why it is the way it i
    Categories, payees and transfer links are derived and can be worked out again at any time.
    Format changes are versioned migrations; nothing ever needs importing again.
 5. **Local and private.** The server binds to loopback and sits behind a login, reached on your own
-   machine or private network. The only third party is Claude, through the engine you choose, for
-   reading documents and for agent jobs. Research sends public queries only: fund names, ISINs,
-   provider product pages.
+   machine or private network. The only third parties are Claude, through the engine you choose, for
+   reading documents and for agent jobs, and the identity provider you configure for sign-in.
+   Research sends public queries only: fund names, ISINs, provider product pages.
 6. **UK-native.** The tax year runs from 6 April to 5 April. ISA, LISA, pension, Personal Savings
    Allowance and FSCS rules are dated tables with sources ([UK_RULES.md](UK_RULES.md)).
 7. **Deterministic where possible, AI where necessary, verified always.** CSV, OFX, QIF and text

@@ -3,7 +3,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { serveStatic } from '@hono/node-server/serve-static';
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { ZodError } from 'zod';
 import { JobRunner } from './agents/jobs';
 import { Analytics } from './analytics';
@@ -15,14 +15,15 @@ import { InboxWatcher } from './ingest/inbox';
 import { ImportService } from './ingest/service';
 import { WorkArea } from './ingest/workarea';
 import { runMigrations } from './migrations';
+import { LOGIN_PATH, OidcClient, oidcSettingsFromEnv } from './oidc';
 import { analyticsRoutes } from './routes/analytics';
-import { authRoutes } from './routes/auth';
+import { authRoutes, safeNext } from './routes/auth';
 import { dataRoutes } from './routes/data';
 import { documentRoutes, importRoutes } from './routes/imports';
 import { jobRoutes } from './routes/jobs';
 import { recordRoutes } from './routes/records';
 import { systemRoutes } from './routes/system';
-import { authGate, csrfGuard, hostGuard, securityHeaders } from './security';
+import { authGate, csrfGuard, hostGuard, isPageRequest, securityHeaders } from './security';
 import { Store, StoreError, type ChangeEvent } from './store';
 
 export interface CreateAppOptions {
@@ -59,9 +60,18 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
   const imports = new ImportService(store, config, work);
   await imports.init();
 
+  let oidcSettings: ReturnType<typeof oidcSettingsFromEnv>;
+  try {
+    oidcSettings = oidcSettingsFromEnv(env, config.allowedHosts);
+  } catch (err) {
+    store.stopWatching();
+    throw err;
+  }
+  const oidc = oidcSettings ? new OidcClient(oidcSettings) : undefined;
   const auth = new Auth({
     username: env.FINANCE_USERNAME,
     passwordHash: env.FINANCE_PASSWORD_HASH,
+    oidcIdentity: oidcSettings ? [oidcSettings.issuer, oidcSettings.clientId, ...oidcSettings.allowedEmails].join(' ') : undefined,
     secret: await loadSessionSecret(env, config.workDir),
   });
   // Local access without a login is for throwaway data only (demo-data, temporary directories).
@@ -86,7 +96,7 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
     await inbox.start();
   }
 
-  const ctx: AppContext = { config, store, analytics, imports, git, auth, inbox, jobs: runner, runner, version: opts.version };
+  const ctx: AppContext = { config, store, analytics, imports, git, auth, oidc, inbox, jobs: runner, runner, version: opts.version };
   const app = new Hono();
   const secOpts = { allowedHosts: config.allowedHosts, production: config.production };
 
@@ -94,6 +104,15 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
   app.use('*', hostGuard(secOpts));
   app.use('/api/*', csrfGuard());
   app.use('/api/*', authGate(auth));
+  // With jemedia-auth, opening any page signed out goes straight to it. (The SPA does the same for
+  // the pages Vite serves in development.) /login stays reachable: it explains failed sign-ins.
+  if (oidc) {
+    app.use('*', async (c: Context, next) => {
+      if (!isPageRequest(c) || c.req.path === '/login' || auth.sessionFrom(c)) return next();
+      const url = new URL(c.req.url);
+      return c.redirect(`${LOGIN_PATH}?next=${encodeURIComponent(safeNext(url.pathname + url.search))}`, 302);
+    });
+  }
 
   app.get('/api/health', (c) => c.json({ ok: true, version: opts.version, ...(opts.commit ? { commit: opts.commit } : {}) }));
   app.route('/api/auth', authRoutes(ctx));

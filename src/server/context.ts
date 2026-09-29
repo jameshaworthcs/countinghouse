@@ -9,6 +9,7 @@ import type { Config } from './config';
 import type { GitCommitter } from './git';
 import type { InboxWatcher } from './ingest/inbox';
 import type { ImportService } from './ingest/service';
+import type { OidcClient } from './oidc';
 import { StoreError, type Store } from './store';
 
 /** What routes need from the agent job runner (src/server/agents/jobs.ts). */
@@ -23,6 +24,8 @@ export interface AppContext {
   imports: ImportService;
   git: GitCommitter;
   auth: Auth;
+  /** Sign-in through jemedia-auth, when configured (it then replaces the password). */
+  oidc?: OidcClient | undefined;
   inbox?: InboxWatcher | undefined;
   jobs?: JobQueue | undefined;
   runner?: JobRunner | undefined;

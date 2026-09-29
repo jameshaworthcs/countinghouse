@@ -80,7 +80,7 @@ setup() {
     say "Creating $LIVE_DIR/.env from $REPO/.env plus the live paths (values are not printed)…"
     umask 077
     {
-      grep -E '^(FINANCE_USERNAME|FINANCE_PASSWORD_HASH|FINANCE_SESSION_SECRET|FINANCE_ALLOWED_HOSTS|ANTHROPIC_API_KEY)=' "$REPO/.env" || true
+      grep -E '^(FINANCE_USERNAME|FINANCE_PASSWORD_HASH|FINANCE_OIDC_[A-Z_]+|FINANCE_SESSION_SECRET|FINANCE_ALLOWED_HOSTS|ANTHROPIC_API_KEY)=' "$REPO/.env" || true
       printf 'HOST=127.0.0.1\nPORT=4750\n'
       printf 'FINANCE_DATA_DIR=%s/data\nFINANCE_INBOX_DIR=%s/inbox\nFINANCE_WORK_DIR=%s/.work/live\nFINANCE_DATA_BRANCH=main\n' "$REPO" "$REPO" "$REPO"
     } >"$LIVE_DIR/.env"

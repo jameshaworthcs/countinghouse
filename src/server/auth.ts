@@ -1,12 +1,15 @@
 // Authentication.
 //
-// Today: a single username + password (scrypt hash in .env, set with `npm run set-password`) and a
-// signed, HttpOnly session cookie. The session layer is deliberately independent of how the user
-// proved who they are, so an OIDC login against jemedia-auth can be added later as another way to
-// obtain the same session (see docs/DEPLOY.md → "Adding jemedia-auth SSO").
+// One user (FINANCE_USERNAME) and a signed, HttpOnly session cookie. The session doesn't care how
+// the user proved who they are; there are two ways, and a server uses exactly one:
 //
-// Without credentials configured the app only answers direct local requests (Host: localhost and
-// no proxy headers), which keeps development frictionless and a misconfigured deployment closed.
+// - jemedia-auth (OIDC, oidc.ts) when FINANCE_OIDC_CLIENT_ID is set. This is the live site's.
+//   Password sign-in is then refused outright.
+// - Otherwise a password (scrypt hash in .env, set with `npm run set-password`): the demo, the
+//   screenshot run and any server without an OIDC client.
+//
+// Without either the app only answers direct local requests (Host: localhost and no proxy headers),
+// which keeps development frictionless and a misconfigured deployment closed.
 
 import { createHmac, randomBytes, scrypt as scryptCb, timingSafeEqual, type ScryptOptions } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -49,9 +52,16 @@ export async function verifyPassword(password: string, encoded: string): Promise
 export const SESSION_COOKIE = 'finance_session';
 const SESSION_DAYS = 30;
 
+export type AuthMethod = 'oidc' | 'password';
+
 export interface AuthConfig {
   username?: string | undefined;
   passwordHash?: string | undefined;
+  /**
+   * Set when sign-in goes through jemedia-auth: what identifies that setup (issuer, client and the
+   * allowed addresses). Changing any of it signs every session out, as a new password does.
+   */
+  oidcIdentity?: string | undefined;
   secret: Buffer;
 }
 
@@ -82,13 +92,28 @@ export class Auth {
 
   constructor(private readonly cfg: AuthConfig) {}
 
-  get configured(): boolean {
-    return Boolean(this.cfg.username && this.cfg.passwordHash);
+  /** How this server signs people in, or null when it has no login (local access only). */
+  get method(): AuthMethod | null {
+    if (!this.cfg.username) return null;
+    if (this.cfg.oidcIdentity) return 'oidc';
+    return this.cfg.passwordHash ? 'password' : null;
   }
 
-  /** Changing the password changes this, which invalidates every existing session. */
+  get configured(): boolean {
+    return this.method !== null;
+  }
+
+  get username(): string | undefined {
+    return this.cfg.username;
+  }
+
+  /**
+   * Changing the password, or the jemedia-auth setup, changes this, which invalidates every existing
+   * session. Switching between the two methods does too.
+   */
   private get epoch(): string {
-    return createHmac('sha256', this.cfg.secret).update(this.cfg.passwordHash ?? 'none').digest('hex').slice(0, 12);
+    const basis = this.method === 'oidc' ? `oidc:${this.cfg.oidcIdentity}` : (this.cfg.passwordHash ?? 'none');
+    return createHmac('sha256', this.cfg.secret).update(basis).digest('hex').slice(0, 12);
   }
 
   private sign(payload: string): string {
@@ -132,8 +157,9 @@ export class Auth {
     this.globalFailures.push(now);
   }
 
-  async login(username: string, password: string, clientKey: string): Promise<'ok' | 'invalid' | 'throttled' | 'not-configured'> {
-    if (!this.configured) return 'not-configured';
+  async login(username: string, password: string, clientKey: string): Promise<'ok' | 'invalid' | 'throttled' | 'not-configured' | 'use-oidc'> {
+    if (this.method === 'oidc') return 'use-oidc';
+    if (this.method !== 'password') return 'not-configured';
     if (this.isThrottled(clientKey)) return 'throttled';
     const userOk = timingSafeEqualStr(username, this.cfg.username!);
     const passOk = await verifyPassword(password, this.cfg.passwordHash!);
@@ -157,6 +183,31 @@ export class Auth {
 
   clearSessionCookie(c: Context, secure: boolean): void {
     deleteCookie(c, SESSION_COOKIE, { path: '/', secure, sameSite: 'Strict', httpOnly: true });
+  }
+
+  /**
+   * A signed, expiring value for a short-lived cookie (the OIDC flow's state, nonce and PKCE
+   * verifier). Tamper-proof, not secret: it stays in the browser that started the sign-in.
+   */
+  seal(value: unknown, ttlSeconds: number, now = Date.now()): string {
+    const payload = `s1.${Buffer.from(JSON.stringify(value)).toString('base64url')}.${Math.floor(now / 1000) + ttlSeconds}`;
+    return `${payload}.${this.sign(payload)}`;
+  }
+
+  unseal(token: string | undefined, now = Date.now()): unknown {
+    if (!token) return null;
+    const parts = token.split('.');
+    if (parts.length !== 4 || parts[0] !== 's1') return null;
+    const payload = parts.slice(0, 3).join('.');
+    const given = Buffer.from(parts[3]!, 'base64url');
+    const expected = Buffer.from(this.sign(payload), 'base64url');
+    if (given.length !== expected.length || !timingSafeEqual(given, expected)) return null;
+    if (!(Number(parts[2]) * 1000 >= now)) return null;
+    try {
+      return JSON.parse(Buffer.from(parts[1]!, 'base64url').toString('utf8'));
+    } catch {
+      return null;
+    }
   }
 
   sessionFrom(c: Context): Session | null {

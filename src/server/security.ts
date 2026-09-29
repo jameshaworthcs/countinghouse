@@ -121,10 +121,18 @@ export function securityHeaders(opts: SecurityOptions): MiddlewareHandler {
   };
 }
 
-const PUBLIC_API = new Set(['/api/health', '/api/auth/login', '/api/auth/status']);
+const PUBLIC_API = new Set(['/api/health', '/api/auth/login', '/api/auth/status', '/api/auth/oidc/login', '/api/auth/oidc/callback']);
+
+/** A browser opening one of the app's pages (not the API, and not a file such as a bundle or icon). */
+export function isPageRequest(c: Context): boolean {
+  if (c.req.method !== 'GET' && c.req.method !== 'HEAD') return false;
+  const p = c.req.path;
+  if (p.startsWith('/api/') || p.startsWith('/assets/')) return false;
+  return !p.slice(p.lastIndexOf('/') + 1).includes('.');
+}
 
 /**
- * Everything under /api requires a session, except login/status/health. Static files (the SPA shell
+ * Everything under /api requires a session, except sign-in, status and health. Static files (the SPA shell
  * and bundles) are public so the login page can render; they contain no data.
  */
 export function authGate(auth: Auth): MiddlewareHandler {

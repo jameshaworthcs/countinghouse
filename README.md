@@ -25,7 +25,8 @@ structured, validated, git-versioned data in [`data/`](data/), and shows you the
   are computed from your data and which are inferred.
 
 Everything you import is a draft until you've reviewed it against the original document side by
-side. Only two things leave the machine, both through your own Claude login:
+side. Apart from signing in through jemedia-auth, only two things leave the machine, both through
+your own Claude login:
 
 - PDFs and screenshots, which Claude reads. That call is shown on every import; CSV, OFX and QIF
   files are parsed locally.
@@ -76,7 +77,7 @@ engine, and the [`claude`](https://claude.com/claude-code) CLI logged in (or `AN
 | `npm run deploy` | Deploy `main` (or `-- <ref>`) to the live service, with rollback; `-- --status` shows what is live |
 | `npm run import -- <files…>` | Queue files for import from the terminal (copies them to `inbox/`) |
 | `npm run records -- keys \| status \| check \| write` | The validated write path for assumptions, research and insights ([docs/AGENTS.md](docs/AGENTS.md)) |
-| `npm run set-password` | Set the login (scrypt hash into `.env`) |
+| `npm run set-password` | Set a password login (scrypt hash into `.env`); not used where jemedia-auth is set up |
 | `npm run validate` | Check `data/` against the format (same checks as start-up) |
 | `npm run schemas` | Regenerate the JSON Schemas in `schemas/` |
 | `npm run check` | Typecheck + lint + tests |
@@ -106,9 +107,11 @@ re-import old documents. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 - **Network exposure.** The server binds to `127.0.0.1` only. On P360, Caddy exposes it to the
   to a private network such as a tailnet. There is no public exposure; see
   [docs/DEPLOY.md](docs/DEPLOY.md).
-- **Login.** Username and password: a scrypt hash in `.env`, a signed HttpOnly/Secure/SameSite=Strict
-  cookie, and login throttling. Without a login configured, the app answers only direct local
-  requests.
+- **Login.** The live site signs in through jemedia-auth (OpenID Connect with PKCE), and only a
+  verified address on `FINANCE_OIDC_ALLOWED_EMAILS` gets in. Elsewhere (the demo, screenshots) it
+  is a username and password, with a scrypt hash in `.env` and login throttling. Either way the
+  session is a signed HttpOnly/Secure/SameSite=Strict cookie. Without a login configured, the app
+  answers only direct local requests.
 - **Request guards.** A Host allow-list blocks DNS rebinding, a CSRF header plus Origin check
   protects writes, a strict CSP applies, and there are no third-party origins.
 - **What's stored.** Account numbers are kept as last 4 digits only. Original documents are

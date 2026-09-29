@@ -570,6 +570,6 @@ export interface SystemResponse {
   selectedEngine: string | null;
   git: { enabled: boolean; branch?: string; dirty: number; ahead?: number; behind?: number; remote?: string; lastCommit?: { hash: string; date: string; subject: string }; lastError?: string };
   inbox: { dir: string; lastError?: string };
-  auth: { configured: boolean; user: string | null };
+  auth: { configured: boolean; method: 'oidc' | 'password' | null; user: string | null };
   counts: { accounts: number; transactions: number; balances: number; imports: number; figures: number };
 }

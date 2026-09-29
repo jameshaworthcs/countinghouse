@@ -13,8 +13,8 @@ loadDotEnv();
 const config = loadConfig();
 const version = (JSON.parse(readFileSync(path.join(PROJECT_ROOT, 'package.json'), 'utf8')) as { version: string }).version;
 
-const passwordConfigured = Boolean(process.env.FINANCE_USERNAME && process.env.FINANCE_PASSWORD_HASH);
-if (!isLoopbackHost(config.host) && !passwordConfigured) {
+const loginMethod = !process.env.FINANCE_USERNAME ? null : process.env.FINANCE_OIDC_CLIENT_ID ? 'jemedia-auth' : process.env.FINANCE_PASSWORD_HASH ? 'password' : null;
+if (!isLoopbackHost(config.host) && !loginMethod) {
   console.error(`Refusing to listen on ${config.host} without a login. Run \`npm run set-password\` first, or keep HOST=127.0.0.1.`);
   process.exit(1);
 }
@@ -40,7 +40,7 @@ const server = serve({ fetch: app.fetch.bind(app), hostname: config.host, port: 
   console.log(`finance ${version}${commit ? ` (${commit})` : ''} listening on ${url}`);
   console.log(`  data:   ${config.dataDir}${ctx.git.enabled ? ' (git auto-commit on)' : ' (not committed to git)'}`);
   console.log(`  inbox:  ${config.inboxDir}`);
-  console.log(`  login:  ${passwordConfigured ? `required (user ${process.env.FINANCE_USERNAME})` : 'not configured: only direct local access is allowed'}`);
+  console.log(`  login:  ${loginMethod ? `required (user ${process.env.FINANCE_USERNAME}, ${loginMethod})` : 'not configured: only direct local access is allowed'}`);
   if (config.allowedHosts.length) console.log(`  hosts:  ${config.allowedHosts.join(', ')}`);
   if (ctx.store.issues.length) console.log(`  ⚠ ${ctx.store.issues.length} data issue(s); see Settings → Data health`);
 });

@@ -21,6 +21,7 @@ const Assumptions = lazy(() => import('./pages/Assumptions'));
 
 interface AuthStatus {
   configured: boolean;
+  method: 'oidc' | 'password' | null;
   user: string | null;
   localAccess: boolean;
 }
