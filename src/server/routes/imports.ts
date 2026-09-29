@@ -6,7 +6,9 @@ import { z } from 'zod';
 import type { ImportListResponse } from '../../shared/api';
 import { CsvProfileSchema, DraftSchema, EXTRACTION_ENGINES, SlugSchema } from '../../shared/schema';
 import { readJson, type AppContext } from '../context';
+import { detectKind } from '../ingest/detect';
 import { PROMPT_VERSION } from '../ingest/prompt';
+import { sheetRows } from '../ingest/xlsx';
 import { StoreError } from '../store';
 
 function contentDisposition(fileName: string): string {
@@ -145,6 +147,19 @@ export function importRoutes(ctx: AppContext): Hono {
     return c.json({ ok: true });
   });
 
+  /** A spreadsheet's table, as the import reads it, for side-by-side review. */
+  app.get('/:id/table', async (c) => {
+    const rec = await svc.get(c.req.param('id'));
+    if (!rec) throw new StoreError('Unknown import', 404);
+    const pending = svc.getPending(rec.id);
+    const file = pending ? svc.workFile(pending) : rec.document.path ? ctx.store.documentAbsPath(rec.document.path) : null;
+    if (!file) throw new StoreError('Document not available', 404);
+    const bytes = await readFile(file);
+    if (detectKind(rec.document.fileName, bytes) !== 'xlsx') throw new StoreError('Not a spreadsheet', 404);
+    const { rows, sheet, sheets } = sheetRows(bytes);
+    return c.json({ sheet, sheets, rows: rows.slice(0, 500), total: rows.length });
+  });
+
   /** The original document, for side-by-side review. */
   app.get('/:id/file', async (c) => {
     const rec = await svc.get(c.req.param('id'));
@@ -172,7 +187,7 @@ export function documentRoutes(ctx: AppContext): Hono {
     const doc = summary?.documentPath ? { path: summary.documentPath, mediaType: summary.mediaType, fileName: summary.fileName } : receipt?.document.path ? { path: receipt.document.path, mediaType: receipt.document.mediaType, fileName: receipt.document.fileName } : undefined;
     if (!doc) throw new StoreError('Unknown document', 404);
     const bytes = await readFile(ctx.store.documentAbsPath(doc.path));
-    const mediaType = doc.mediaType.startsWith('image/') || doc.mediaType === 'application/pdf' ? doc.mediaType : 'text/plain; charset=utf-8';
+    const mediaType = doc.mediaType.startsWith('image/') || doc.mediaType === 'application/pdf' || /spreadsheet|ms-excel/.test(doc.mediaType) ? doc.mediaType : 'text/plain; charset=utf-8';
     return new Response(bytes, { headers: { 'Content-Type': mediaType, 'Content-Disposition': contentDisposition(doc.fileName), 'Cache-Control': 'private, max-age=3600' } });
   });
   return app;

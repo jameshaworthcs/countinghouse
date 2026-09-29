@@ -9,7 +9,7 @@ import { api } from '../lib/api';
 import { cn } from '../lib/format';
 import { Button, useToast } from './ui';
 
-export const ACCEPT = '.csv,.tsv,.txt,.ofx,.qfx,.qif,.pdf,.png,.jpg,.jpeg,.webp,.gif,.heic,image/*,application/pdf,text/csv';
+export const ACCEPT = '.csv,.tsv,.txt,.xlsx,.xls,.xlsm,.ofx,.qfx,.qif,.pdf,.png,.jpg,.jpeg,.webp,.gif,.heic,image/*,application/pdf,text/csv';
 
 interface UploadResult {
   fileName: string;

@@ -2,7 +2,7 @@
 
 import path from 'node:path';
 
-export type FileKind = 'csv' | 'ofx' | 'qif' | 'santander-txt' | 'pdf' | 'image' | 'unsupported';
+export type FileKind = 'csv' | 'xlsx' | 'ofx' | 'qif' | 'santander-txt' | 'pdf' | 'image' | 'unsupported';
 
 export const MEDIA_TYPES: Record<string, string> = {
   '.csv': 'text/csv',
@@ -19,7 +19,15 @@ export const MEDIA_TYPES: Record<string, string> = {
   '.gif': 'image/gif',
   '.heic': 'image/heic',
   '.heif': 'image/heif',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.xlsm': 'application/vnd.ms-excel.sheet.macroEnabled.12',
+  '.xls': 'application/vnd.ms-excel',
 };
+
+/** An old Excel workbook (and other OLE2 files) starts with this. */
+const OLE2 = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];
+/** A ZIP file, as an .xlsx is. */
+const ZIP = [0x50, 0x4b, 0x03, 0x04];
 
 export const ACCEPTED_EXTENSIONS = Object.keys(MEDIA_TYPES);
 export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
@@ -57,6 +65,8 @@ export function detectKind(fileName: string, bytes: Uint8Array): FileKind {
   if (mt === 'application/pdf') return 'pdf';
   if (mt.startsWith('image/')) return 'image';
   const ext = path.extname(fileName).toLowerCase();
+  // Spreadsheets: by their bytes, or by name for the HTML tables some banks save as .xls.
+  if (startsWith(bytes, OLE2) || (startsWith(bytes, ZIP) && (ext === '.xlsx' || ext === '.xlsm')) || ext === '.xls' || ext === '.xlsx' || ext === '.xlsm') return 'xlsx';
   const head = decodeText(bytes.subarray(0, 4096));
   if (/<OFX>|OFXHEADER|<\?OFX/i.test(head)) return 'ofx';
   if (/^\s*!(Type|Account|Option)/im.test(head)) return 'qif';

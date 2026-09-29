@@ -117,8 +117,10 @@ const shortName = (model: string) => {
 function DocumentViewer({ rec }: { rec: Rec }) {
   const [zoom, setZoom] = useState(false);
   const url = `/api/imports/${rec.id}/file`;
-  const isText = !rec.document.mediaType.startsWith('image/') && rec.document.mediaType !== 'application/pdf';
+  const isSheet = /spreadsheet|ms-excel/.test(rec.document.mediaType);
+  const isText = !isSheet && !rec.document.mediaType.startsWith('image/') && rec.document.mediaType !== 'application/pdf';
   const text = useApi<string>(['import-file', rec.id], isText ? `/imports/${rec.id}/file` : null);
+  const sheet = useApi<{ sheet: string; sheets: string[]; rows: string[][]; total: number }>(['import-table', rec.id], isSheet ? `/imports/${rec.id}/table` : null);
   return (
     <div className="flex h-full flex-col overflow-hidden rounded-xl border border-line bg-panel">
       <div className="flex items-center gap-2 border-b border-line px-3 py-2 text-[12.5px]">
@@ -138,6 +140,32 @@ function DocumentViewer({ rec }: { rec: Rec }) {
           <img src={url} alt={rec.document.fileName} className={cn('sensitive mx-auto', zoom ? 'max-w-none' : 'w-full')} />
         ) : rec.document.mediaType === 'application/pdf' ? (
           <iframe src={`${url}#view=FitH`} title={rec.document.fileName} className="sensitive h-full min-h-[70dvh] w-full" />
+        ) : isSheet ? (
+          <div className="sensitive p-2">
+            {sheet.data ? (
+              <>
+                <div className="px-1 pb-2 text-[11.5px] text-ink-3">
+                  Sheet “{sheet.data.sheet}”{sheet.data.sheets.length > 1 ? ` (the first with a table, of ${sheet.data.sheets.length})` : ''}
+                  {sheet.data.total > sheet.data.rows.length ? `; the first ${sheet.data.rows.length} of ${sheet.data.total} rows` : ''}
+                </div>
+                <table className="border-collapse font-mono text-[11.5px] text-ink-2">
+                  <tbody>
+                    {sheet.data.rows.map((row, i) => (
+                      <tr key={i} className={i === 0 ? 'font-semibold text-ink' : undefined}>
+                        {row.map((cell, j) => (
+                          <td key={j} className="border border-line px-1.5 py-0.5 whitespace-nowrap">
+                            {cell}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </>
+            ) : (
+              <span className="text-ink-3">{sheet.error ? sheet.error.message : 'Loading…'}</span>
+            )}
+          </div>
         ) : (
           <pre className="sensitive p-3 font-mono text-[11.5px] leading-relaxed whitespace-pre text-ink-2">{typeof text.data === 'string' ? text.data.split('\n').slice(0, 400).join('\n') : 'Loading…'}</pre>
         )}

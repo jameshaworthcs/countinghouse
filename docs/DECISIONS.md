@@ -516,3 +516,17 @@ needed a `fetch` loop pasted into the signed-in browser console.
 - **Off by default (the owner's instruction), and never automatic.** The Import page lists what an
   earlier reader read, but only the owner starts a reading.
 
+## 2026-09-29: Spreadsheet exports
+
+- **SheetJS 0.20.3, from its own tarball.** The `xlsx` package on npm stopped at 0.18.5, which has
+  published advisories. SheetJS now publishes to `cdn.sheetjs.com`. The lockfile pins the tarball
+  by integrity hash. It is a build-time dependency: the app still calls nothing at runtime.
+- **A spreadsheet is a table of rows for the CSV profiles, not a new importer.** Profiles,
+  holdings detection, auto-mapping and saved mappings all apply unchanged. The engine is recorded
+  as `csv`, with the reader version `xlsx-1+…` and the sheet's name in the detail.
+- **Text cells stay text (`raw`).** SheetJS otherwise guesses dates in HTML tables in US order.
+  One test caught "01/09/2026" read as 9 January. Real date cells are converted from their serial
+  value, so they need no guessing.
+- **The first sheet with a table.** Exports put a summary or notes sheet first surprisingly often.
+  The review page names the sheet it read.
+

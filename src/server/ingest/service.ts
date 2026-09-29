@@ -42,6 +42,7 @@ import { extractionJsonSchema, PROMPT_VERSION, SYSTEM_PROMPT, userPrompt } from 
 import { parseQif, QIF_ENGINE_VERSION } from './qif';
 import { parseSantanderTxt, SANTANDER_ENGINE_VERSION } from './santander';
 import { WorkArea } from './workarea';
+import { sheetRows, XLSX_ENGINE_VERSION } from './xlsx';
 
 export interface CreateImportInput {
   fileName: string;
@@ -247,8 +248,10 @@ export class ImportService extends EventEmitter {
       let detail: string | undefined;
       let engineVersion: string;
       let verified: Awaited<ReturnType<ImportService['verifyReading']>> | undefined;
-      if (kind === 'csv') {
-        const { rows } = readCsvRows(decodeText(bytes));
+      if (kind === 'csv' || kind === 'xlsx') {
+        // A spreadsheet's first table goes through the same profiles and mapping as a CSV.
+        const table = kind === 'xlsx' ? sheetRows(bytes) : undefined;
+        const { rows } = table ?? readCsvRows(decodeText(bytes));
         const match = findProfile(rows, this.store.csvProfiles);
         // A platform's portfolio export lists holdings, not transactions.
         const holdings = match ? null : parseHoldingsCsv(rows, record.document.fileName);
@@ -280,6 +283,10 @@ export class ImportService extends EventEmitter {
         }
         engine = 'csv';
         engineVersion = holdings ? HOLDINGS_CSV_VERSION : CSV_ENGINE_VERSION;
+        if (table) {
+          engineVersion = `${XLSX_ENGINE_VERSION}+${engineVersion}`;
+          detail = `sheet “${table.sheet}”${detail ? `, ${detail}` : ''}`;
+        }
       } else if (kind === 'ofx') {
         result = { extraction: parseOfx(decodeText(bytes)), warnings: [], durationMs: Date.now() - started };
         engine = 'ofx';
@@ -639,7 +646,7 @@ export class ImportService extends EventEmitter {
     if (!record) throw new StoreError('Unknown import', 404);
     const profile = CsvProfileSchema.parse(profileInput);
     const bytes = await this.work.readFile(record.document);
-    const { rows } = readCsvRows(decodeText(bytes));
+    const { rows } = detectKind(record.document.fileName, bytes) === 'xlsx' ? sheetRows(bytes) : readCsvRows(decodeText(bytes));
     const headerIndex = record.mapping?.headerIndex ?? 0;
     const parsed = parseWithProfile(rows, { profile, headerIndex, headerless: false });
     if (!parsed.rowCount) throw new StoreError('No rows could be read with this mapping; check the date and amount columns.');

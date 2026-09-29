@@ -16,7 +16,7 @@ Hono server  (Node 24, tsx; 127.0.0.1:4750 live, 4760 in development)
    │    ├─ research-instrument · research-provider · refresh-assumptions   (web tools, public inputs)
    │    └─ insights-after-import · monthly-review · interpret-note          (the owner's data, no web)
    ├─ ImportService (queue) ─► work area .work/<data-dir>/   (uploads + drafts, never committed)
-   │    ├─ detect → csv profiles · ofx · qif · santander-txt   (deterministic, local)
+   │    ├─ detect → csv profiles (and spreadsheets' first table) · ofx · qif · santander-txt   (deterministic, local)
    │    ├─ images: capture date (EXIF/filename/mtime), tiling of long screenshots
    │    ├─ engines: claude-cli · claude-api · ocr (tesseract/pdftotext)
    │    ├─ normalise → buildDraft (match accounts, categorise, dedup, transfers)
