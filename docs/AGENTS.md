@@ -179,9 +179,17 @@ Other behaviour:
 - **No repeats.** A job that succeeded for the same subject within the research staleness window
   (Settings → Agents, 90 days by default) is not started again by itself, even if it found nothing;
   a failed one waits a day. The owner can rerun either at any time.
-- **Cost.** Measured on the demo: refreshing assumptions took about 8 minutes and 62 turns ($9.74
-  at API prices, Opus with high effort); researching one fund about 5 minutes ($1.56). On a Claude
-  plan this is usage, not a bill; choose a smaller model or lower effort in Settings → Agents.
+- **Cost.** Measured with Opus at high effort, at API prices (on a Claude plan this is usage, not a
+  bill; choose a smaller model or lower effort in Settings → Agents):
+
+  | Job | Time | Cost |
+  |---|---|---|
+  | `refresh-assumptions` | 7–8 min, about 60 turns | $7.50–9.75 |
+  | `research-instrument` (one fund) | 4.6 min | $1.56 |
+  | `research-provider` (one provider) | 47 s | $0.66 |
+  | `insights-after-import` | 25 s | $0.17 |
+  | `monthly-review` | 61 s | $0.24 |
+  | `interpret-note` | 15 s | $0.07 |
 - **The output's records** carry the job's id, model and prompt version.
 - **Demo data never starts jobs by itself.**
 
