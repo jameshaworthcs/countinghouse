@@ -32,6 +32,9 @@ document's arithmetic cannot confirm (docs/INGESTION.md). Each case records how 
   - normalising, drafting, account matching and duplicate detection.
 - **Groups** share a store: each document is committed before the next. This checks that an
   overlapping statement or screenshot is recognised as already imported.
+- **Groups uploaded together** (`together`) are what a phone sends: every file is uploaded at
+  once, read side by side and judged together, and none is committed. This checks screenshots that
+  lean on each other: the account a scrolled screen belongs to, and views that add nothing new.
 
 ## What it measures
 
@@ -52,6 +55,9 @@ Every expected field is one point (`score.ts`):
 | `holding`, `holdingValue`, `holdingUnits`, `holdingIsin` | each holding |
 | `figure`, `figureYear` | each tax figure |
 | `noExtraFigure`, `noExtraSection` | each figure or account the document does not state (a point lost) |
+| `noExtraHolding` | each holding read from a document that shows none, or other ones (a point lost) |
+| `nothingNew` | every case: recognised as adding nothing new when it adds nothing, and never otherwise |
+| `noClaim` | a note that states what the document does not say, such as where money went (a point lost) |
 
 Rows are aligned before scoring: an exact date and amount first, then near misses. So a sign or
 date error counts as that error, not as a missing row plus an extra one.

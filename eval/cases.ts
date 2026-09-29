@@ -3,7 +3,7 @@
 // drift apart. Everything here is invented: names, numbers and references.
 
 import type { AccountType, FigureKind } from '../src/shared/schema';
-import { appActivityHtml, appHoldingHtml, appListHtml, appOverviewHtml, dayName, fmtDate, gbp, simpleDocHtml, statementHtml, type AppRow, type Brand, type StatementSection } from './render';
+import { appActivityHtml, appHoldingHtml, appListHtml, appOverviewHtml, appTabbedHtml, dayName, fmtDate, gbp, simpleDocHtml, statementHtml, type AppRow, type Brand, type StatementSection } from './render';
 
 export interface ExpectedTx {
   date: string;
@@ -31,6 +31,7 @@ export interface ExpectedSection {
   /** Totals of money in and out printed on the statement. */
   statedTotals?: { moneyIn: number; moneyOut: number };
   transactions?: ExpectedTx[];
+  /** The holdings shown; an empty list means the document shows none, so any read is extra. */
   holdings?: { name: string; isin?: string; units?: number; value: number }[];
   /** Nothing on the document is the account's value: none may be recorded. */
   noValue?: boolean;
@@ -39,6 +40,10 @@ export interface ExpectedSection {
 export interface Expected {
   sections: ExpectedSection[];
   figures?: { kind: FigureKind; amount: number; taxYear?: string }[];
+  /** Understood, but adds nothing another import or the stored data does not already have. */
+  nothingNew?: boolean;
+  /** Claims the document does not make (where money went, say): a note stating one loses a point. */
+  unsupported?: RegExp;
 }
 
 export interface EvalCase {
@@ -49,6 +54,8 @@ export interface EvalCase {
   expected: Expected;
   /** Cases in a group share one store and run in order; each is committed before the next. */
   group?: string;
+  /** The group's files are uploaded together, as one batch from a phone, and none is committed. */
+  together?: boolean;
   /** The account the owner uploaded it for ("Upload for this account"). */
   hintAccountId?: string;
 }
@@ -844,5 +851,105 @@ export function buildCases(): EvalCase[] {
     },
     expected: { sections: [{ account: 'moneybox-lisa', noValue: true, holdings: [{ name: 'Fidelity Index World Fund P Acc', units: 1321.007, value: 5204.77 }] }] },
   });
+  // A savings provider's app, as six screenshots taken a few minutes apart and uploaded together:
+  // the account's Transactions tab (the holding, and prizes reinvested), the same tab scrolled
+  // (older rows, no header), its Bond record tab (blocks of bond numbers: neither transactions nor
+  // holdings), and the prize history (the same prizes by bond number and month, which never says
+  // where the money went), twice. Only two of them add anything.
+  {
+    const accent = '#5b2c83';
+    const holder = 'Holder’s number ••••3704';
+    const value = 12350;
+    const reinvested = [
+      { date: '2026-09-03', amount: 50 },
+      { date: '2026-09-03', amount: 25 },
+      { date: '2026-08-05', amount: 25 },
+      { date: '2026-07-02', amount: 100 },
+      { date: '2026-07-02', amount: 25 },
+    ];
+    const older = [
+      { date: '2026-06-02', amount: 25, name: 'Auto prize reinvestment' },
+      { date: '2026-05-20', amount: 1000, name: 'Purchase by debit card' },
+      { date: '2026-05-05', amount: 50, name: 'Auto prize reinvestment' },
+      { date: '2026-04-02', amount: 25, name: 'Auto prize reinvestment' },
+    ];
+    const byDay = (rows: { date: string; amount: number; name?: string }[]) => {
+      const days = [...new Set(rows.map((r) => r.date))];
+      return days.map((d) => ({ heading: fmtDate(d, 'd-month-yyyy'), rows: rows.filter((r) => r.date === d).map((r) => ({ name: r.name ?? 'Auto prize reinvestment', amount: `+${gbp(r.amount)}`, positive: true })) }));
+    };
+    const tabs = ['Transactions', 'Bond record', 'Prizes'];
+    const account = (active: string, time: string, groups: { heading: string; rows: AppRow[] }[]) => appTabbedHtml({ accent, time, header: true, title: 'Premium Bonds', subtitle: holder, value: gbp(value), valueLabel: 'Total holding', tabs, active, groups });
+    const prizes = (header: boolean, time: string, groups: { heading: string; rows: AppRow[] }[]) => appTabbedHtml({ accent, time, header, title: 'Prize history', subtitle: holder, groups });
+    const bond = (n: string, amount: number) => ({ name: n, amount: gbp(amount) });
+    // Where the money went: none of these screens says it went elsewhere, and only the Transactions
+    // tab says prizes were reinvested.
+    const unsupported = /\b(paid (out )?(to|into)|sent to|credited to|(to|into) (your|a|another|the) (bank|current) account)\b/i;
+    const unsupportedOrReinvested = /\b(paid (out )?(to|into)|sent to|credited to|(to|into) (your|a|another|the) (bank|current) account|reinvest\w*)\b/i;
+    const together = { group: 'nsi-app', together: true } as const;
+    cases.push({
+      id: 'png-nsi-transactions',
+      title: 'Savings app, Transactions tab: the holding with no date printed, and prizes reinvested',
+      tags: ['png', 'savings', 'app-set', 'capture-date'],
+      ...together,
+      file: { name: 'Screenshot 2026-09-24 at 19.42.10.png', kind: 'png', html: account('Transactions', '19:42', byDay(reinvested)) },
+      // The holding is what the app showed when the screenshot was taken, not on the latest row's day.
+      expected: { sections: [{ account: 'premium-bonds', balance: value, balanceDate: '2026-09-24', transactions: reinvested.map((r) => ({ date: r.date, amount: r.amount, description: 'Auto prize reinvestment' })) }], unsupported },
+    });
+    cases.push({
+      id: 'png-nsi-transactions-scrolled',
+      title: 'The same tab scrolled: older rows, and nothing on screen saying which account',
+      tags: ['png', 'savings', 'app-set', 'batch'],
+      ...together,
+      file: { name: 'Screenshot 2026-09-24 at 19.42.31.png', kind: 'png', html: appTabbedHtml({ accent, time: '19:42', header: false, title: '', groups: byDay(older) }) },
+      expected: { sections: [{ account: 'premium-bonds', transactions: older.map((r) => ({ date: r.date, amount: r.amount, description: r.name })) }], unsupported },
+    });
+    cases.push({
+      id: 'png-nsi-bond-record',
+      title: 'Bond record tab: blocks of bond numbers are neither transactions nor holdings',
+      tags: ['png', 'savings', 'app-set', 'nothing-new'],
+      ...together,
+      file: {
+        name: 'Screenshot 2026-09-24 at 19.43.05.png',
+        kind: 'png',
+        html: account('Bond record', '19:43', [
+          { heading: 'Eligible for the 1 October 2026 draw', rows: [bond('117BQ206001 to 117BQ206050', 50), bond('121CR554000 to 121CR554024', 25)] },
+          { heading: 'Eligible for the 1 September 2026 draw', rows: [bond('117BQ205901 to 117BQ205925', 25)] },
+          { heading: 'Eligible for the 1 August 2026 draw', rows: [bond('098TT418200 to 098TT418299', 100), bond('098TT417800 to 098TT417824', 25)] },
+        ]),
+      },
+      // Its only figure, the holding on that day, is already on the Transactions tab's screenshot.
+      expected: { sections: [{ account: 'premium-bonds', balance: value, balanceDate: '2026-09-24', holdings: [], transactions: [] }], nothingNew: true, unsupported: unsupportedOrReinvested },
+    });
+    const history = [
+      { heading: 'September 2026', rows: [bond('117BQ204518', 50), bond('117BQ204972', 25)] },
+      { heading: 'August 2026', rows: [bond('121CR553107', 25)] },
+      { heading: 'July 2026', rows: [bond('117BQ205331', 100), bond('121CR550824', 25)] },
+    ];
+    cases.push({
+      id: 'png-nsi-prize-history',
+      title: 'Prize history: the same prizes by bond number and month, not where they went',
+      tags: ['png', 'savings', 'app-set', 'nothing-new'],
+      ...together,
+      file: { name: 'Screenshot 2026-09-24 at 19.41.12.png', kind: 'png', html: prizes(true, '19:41', history) },
+      expected: { sections: [], nothingNew: true, unsupported: unsupportedOrReinvested },
+    });
+    cases.push({
+      id: 'png-nsi-prize-history-scrolled',
+      title: 'Prize history scrolled: older prizes, nothing to record',
+      tags: ['png', 'savings', 'app-set', 'nothing-new'],
+      ...together,
+      file: {
+        name: 'Screenshot 2026-09-24 at 19.41.30.png',
+        kind: 'png',
+        html: prizes(false, '19:41', [
+          { heading: 'June 2026', rows: [bond('098TT418251', 25)] },
+          { heading: 'May 2026', rows: [bond('117BQ204077', 50)] },
+          { heading: 'April 2026', rows: [bond('121CR551990', 25)] },
+          { heading: 'February 2026', rows: [bond('098TT417811', 100), bond('117BQ205120', 25)] },
+        ]),
+      },
+      expected: { sections: [], nothingNew: true, unsupported: unsupportedOrReinvested },
+    });
+  }
   return cases;
 }

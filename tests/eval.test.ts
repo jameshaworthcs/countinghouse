@@ -59,6 +59,25 @@ describe('eval scorer', () => {
     expect(wrong.fields.duplicate).toEqual({ correct: 0, total: 1 });
   });
 
+  it('scores an understood document that adds nothing, and never a document that does', () => {
+    const empty: Draft = { documentType: 'other', sections: [], figures: [], notes: [] };
+    expect(scoreCase({ sections: [], nothingNew: true }, empty, { nothingNew: true }).score).toBe(1);
+    expect(scoreCase({ sections: [], nothingNew: true }, empty, {}).fields.nothingNew).toEqual({ correct: 0, total: 1 });
+    // Every case checks it: saying "nothing new" of a statement would hide it.
+    const s = scoreCase({ sections: [{ account: 'acc', balance: 90 }] }, draft('acc', [], { balance: 90 }), { nothingNew: true });
+    expect(s.fields.nothingNew).toEqual({ correct: 0, total: 1 });
+  });
+
+  it('costs a point for a holding a document does not show, and for a claim it does not make', () => {
+    const bonds = draft('acc', [], { balance: 12350, holdings: [{ name: '117BQ206001 to 117BQ206050', value: 50, currency: 'GBP' }] });
+    expect(scoreCase({ sections: [{ account: 'acc', balance: 12350, holdings: [] }] }, bonds).fields.noExtraHolding).toEqual({ correct: 0, total: 1 });
+    const unsupported = /\bpaid (out )?(to|into)\b/i;
+    const says = (notes: string[]) => scoreCase({ sections: [], unsupported }, { documentType: 'other', sections: [], figures: [], notes }).fields.noClaim;
+    expect(says(['Prizes are paid out to another account, so they are not transactions.'])).toEqual({ correct: 0, total: 1 });
+    // Saying the document does not say is not a claim.
+    expect(says(['The screen does not say whether the prizes were paid into a bank account.', 'The list continues.'])).toEqual({ correct: 1, total: 1 });
+  });
+
   it('every case is well formed: unique ids, known accounts, balances that add up', () => {
     const cases = buildCases();
     expect(new Set(cases.map((c) => c.id)).size).toBe(cases.length);

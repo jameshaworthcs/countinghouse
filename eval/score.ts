@@ -86,6 +86,11 @@ function scoreSection(sc: Scorer, e: ExpectedSection, s: DraftSection | undefine
     });
   }
 
+  // A document with no holdings on it (a list of bond numbers, say) must not gain any.
+  if (e.holdings) {
+    const extra = (s?.holdings ?? []).filter((x) => !e.holdings!.some((h) => (h.isin && x.isin?.toUpperCase() === h.isin) || sameText(h.name, x.name)));
+    for (const x of extra) sc.check('noExtraHolding', false, `${label} extra holding: ${x.name} ${x.value}`);
+  }
   for (const h of e.holdings ?? []) {
     const found = (s?.holdings ?? []).find((x) => (h.isin && x.isin?.toUpperCase() === h.isin) || sameText(h.name, x.name));
     sc.check('holding', Boolean(found), `${label} holding missing: ${h.name}`);
@@ -96,8 +101,19 @@ function scoreSection(sc: Scorer, e: ExpectedSection, s: DraftSection | undefine
   }
 }
 
-export function scoreCase(expected: Expected, draft: Draft | undefined): CaseScore {
+/** A sentence that states something (not one saying the document does not say it). */
+const HEDGED = /\b(whether|not (say|show|state|name)|doesn'?t|does not|isn'?t|is not|no indication|unclear|unknown|cannot tell|can'?t tell|may|might|possibly|perhaps)\b/i;
+
+export function scoreCase(expected: Expected, draft: Draft | undefined, outcome: { nothingNew?: boolean } = {}): CaseScore {
   const sc = new Scorer();
+  // Understood but adding nothing is an outcome to recognise, and never to claim of a document
+  // that does add something.
+  sc.check('nothingNew', Boolean(outcome.nothingNew) === Boolean(expected.nothingNew), expected.nothingNew ? 'not recognised as adding nothing new' : 'wrongly said to add nothing new');
+  if (expected.unsupported) {
+    const sentences = (draft?.notes ?? []).flatMap((n) => n.split(/(?<=[.;])\s+/));
+    const claims = sentences.filter((x) => expected.unsupported!.test(x) && !HEDGED.test(x));
+    sc.check('noClaim', claims.length === 0, `a note claims what the document does not say: "${claims[0]?.slice(0, 160)}"`);
+  }
   const sections = draft?.sections ?? [];
   const used = new Set<number>();
   // Sections are matched by where they are imported; a misrouted one is still scored for content.

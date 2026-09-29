@@ -267,6 +267,38 @@ export function appHoldingHtml(opts: { accent: string; fund: string; nickname: s
   return page(phoneCss(opts.accent, false), body);
 }
 
+/**
+ * A savings provider's account page with tabs (Transactions, Bond record…): the holding at the top,
+ * then the open tab's list grouped by heading. `header: false` is the same page scrolled past the
+ * holding and tabs; `title` alone (no value) is a page of its own, such as a prize history.
+ */
+export function appTabbedHtml(opts: {
+  accent: string;
+  time: string;
+  header: boolean;
+  title: string;
+  subtitle?: string;
+  value?: string;
+  valueLabel?: string;
+  tabs?: string[];
+  active?: string;
+  groups: { heading: string; rows: AppRow[] }[];
+}): string {
+  let body = `<div class="status"><span>${esc(opts.time)}</span><span>● ● ●</span></div>`;
+  if (opts.header) {
+    body += `<div class="top"><div class="label">${esc(opts.title)}</div>${opts.value ? `<div class="big">${esc(opts.value)}</div>` : ''}<div class="meta">${esc([opts.valueLabel, opts.subtitle].filter(Boolean).join(' · '))}</div>`;
+    body += (opts.tabs ?? []).map((t) => `<span class="pill" style="${t === opts.active ? '' : `background:transparent;color:inherit;border:1px solid ${opts.accent}55`}">${esc(t)}</span>`).join('');
+    body += '</div>';
+  }
+  for (const g of opts.groups) {
+    body += `<div class="day">${esc(g.heading)}</div><div class="card">`;
+    for (const r of g.rows) body += `<div class="row"><div class="mid"><div class="name">${esc(r.name)}</div>${r.sub ? `<div class="sub">${esc(r.sub)}</div>` : ''}</div><div class="amt${r.positive ? ' pos' : ''}">${esc(r.amount)}</div></div>`;
+    body += '</div>';
+  }
+  body += '<div class="foot"></div>';
+  return page(phoneCss(opts.accent, false), body);
+}
+
 // ─── Rendering ───────────────────────────────────────────────────────────────────────────────────
 
 export async function renderPdf(browser: Browser, html: string): Promise<Buffer> {
