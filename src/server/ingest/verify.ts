@@ -97,6 +97,9 @@ export function assessReading(draft: Draft, ctx: { accountTypeOf: (s: DraftSecti
     if ([s.contributions, s.bonusToDate, s.taxYearContributions, s.gain, s.annualIncome].some((v) => v !== undefined)) unconfirmed.push(`${label}: contribution and allowance figures`);
   });
   if (draft.figures.length) unconfirmed.push('Tax figures');
+  // Finding nothing to record is a reading too, and a missed balance or row would be dismissed with
+  // it: a second reader has to find nothing as well.
+  if (!draft.sections.length && !draft.figures.length) unconfirmed.push('Nothing to record');
   return { problems, unconfirmed };
 }
 

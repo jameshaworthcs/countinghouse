@@ -742,6 +742,8 @@ export const ExtractionSchema = z.object({
   accounts: z.array(ExtractedAccountSchema).default([]),
   figures: z.array(ExtractedFigureSchema).default([]),
   notes: z.array(z.string()).default([]),
+  /** Understood, but nothing to record: what the document shows, in a sentence (extract-9). */
+  nothingToRecord: z.string().nullable().default(null),
   confidence: z.enum(['high', 'medium', 'low']).default('medium'),
 });
 export type Extraction = z.infer<typeof ExtractionSchema>;
@@ -884,6 +886,8 @@ export const DraftSchema = z.object({
   sections: z.array(DraftSectionSchema),
   figures: z.array(DraftFigureSchema).default([]),
   notes: z.array(z.string()).default([]),
+  /** The reader understood the document but found nothing to record: what it shows, in its words. */
+  nothingToRecord: z.string().max(300).optional(),
   confidence: z.enum(['high', 'medium', 'low']).optional(),
   /** OCR engine: recognised text and candidate values for the reviewer. */
   ocrText: z.string().optional(),

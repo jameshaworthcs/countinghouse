@@ -338,4 +338,14 @@ as holdings, and five views that added nothing looking like failures.
     at its latest row labelled "from the document": that was a guess presented as a fact.
   - A settled row later than the capture date keeps the capture date and marks the row. The
     alternative, trusting the row, would let one misread date move the balance.
+- **The reader's misleading example is gone, not patched.** `extract-8`'s rule "a list of prizes
+  paid out to another account (Premium Bond prizes paid to a bank account, say)" came from an eval
+  screen that said so; readers then said it of screens that did not. `extract-9` replaces it with
+  what such lists are (views that repeat the movements or concern money elsewhere, rarely saying
+  which), says notes state only what the document shows, and says what holdings are. An interest or
+  dividend history on its own now records nothing: the account's transactions are where movements
+  come from, and the history rarely says whether the money stayed in the account.
+- **Finding nothing is a reading that gets checked.** A reading with no accounts and no figures
+  passed as "confirmed by its own figures" on Sonnet alone; it now needs a second reader to agree,
+  since what it finds nothing in can be dismissed in one click.
 

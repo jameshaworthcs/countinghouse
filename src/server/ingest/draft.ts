@@ -373,6 +373,7 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
     sections: importable,
     figures,
     notes,
+    ...(extraction.nothingToRecord?.trim() ? { nothingToRecord: extraction.nothingToRecord.trim().slice(0, 300) } : {}),
     confidence: extraction.confidence,
     ...(extraction.institutionName ? { institutionName: extraction.institutionName } : {}),
     ...(extraction.documentDate ? { documentDate: extraction.documentDate } : {}),

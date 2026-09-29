@@ -88,7 +88,9 @@ review screen.
    - a feed screenshot with no balances;
    - a balance on its own;
    - contribution and allowance figures;
-   - tax figures.
+   - tax figures;
+   - a reading that finds nothing to record (a second reader has to find nothing too, or the two
+     disagree and you are asked).
 4. **The two readings are compared figure by figure:**
    - each account's balances and dates;
    - every row's date, amount, pending flag and running balance;
@@ -149,8 +151,20 @@ on every import):
   Assessment, an employer's P60 replaces its payslips rather than adding to them.
 - **Overlapping tiles.** Long scrolling screenshots are cut into overlapping tiles, and rows in the
   overlaps are reported once.
-- **Only this account's movements.** A list of prizes, interest or dividends paid out to another
-  account (Premium Bond prizes paid to your bank) is not a transaction of this one.
+- **Only this account's movements** (`extract-9`). Apps have lists with dates and amounts that are
+  not the account's movements: a history of prizes, interest, dividends or bonuses, bond or
+  certificate numbers, scheduled payments, payees. Such a list usually repeats what the account's
+  own transactions show, or concerns money that went elsewhere, and it seldom says which. None of
+  its rows are transactions or holdings, and no missing day is filled in.
+- **Notes say only what the document shows**: never where money went or what became of it unless
+  the document says so in words. (`extract-8` taught the opposite by example, "Premium Bond prizes
+  paid to your bank", and readers repeated it of a prize history that said no such thing.)
+- **Holdings are investments with a price**: funds, shares, ETFs, trusts, bonds and gilts. Ranges
+  of Premium Bond numbers and savings certificate issues are the make-up of a balance, not
+  holdings. A balance shown above such a tab (a bond record, certificates, details) is an overview:
+  the balance, and nothing from the list.
+- **Nothing to record** (`nothingToRecord`): when the reader understood the document but it shows
+  nothing to record, it says what it shows, in a sentence (see "Nothing new" below).
 - **What it was unsure of** (`extract-4`):
   - each row it could not read with certainty carries a short note (`uncertain`), shown on the
     review page;

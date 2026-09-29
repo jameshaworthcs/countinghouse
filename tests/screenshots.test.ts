@@ -8,6 +8,8 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildDraft, draftIsClean } from '../src/server/ingest/draft';
 import { captureDate } from '../src/server/ingest/images';
+import { extractionJsonSchema, PROMPT_VERSION, SYSTEM_PROMPT } from '../src/server/ingest/prompt';
+import { assessReading } from '../src/server/ingest/verify';
 import { Store } from '../src/server/store';
 import { sectionChecks } from '../src/shared/review';
 import { ExtractionSchema, type Account, type DocumentRef } from '../src/shared/schema';
@@ -130,5 +132,33 @@ describe('when a screenshot was taken', () => {
     const cap = await captureDate(noMetadata, 'IMG_0101.PNG', '2026-09-29T19:07:21.000Z');
     expect(cap).toMatchObject({ date: '2026-09-29', source: 'file-modified' });
     expect(Date.parse(cap!.at!)).toBe(Date.parse('2026-09-29T19:07:21.000Z'));
+  });
+});
+
+describe('the reader: views that are not the account’s movements', () => {
+  it('no longer teaches that prizes go to another account, and says a list is not movements', () => {
+    expect(PROMPT_VERSION).toBe('extract-9');
+    expect(SYSTEM_PROMPT).not.toMatch(/paid to a bank account/i);
+    expect(SYSTEM_PROMPT).toMatch(/never where money went/);
+    expect(SYSTEM_PROMPT).toMatch(/Premium Bond numbers[^.]*are not holdings/);
+  });
+
+  it('asks what a document with nothing to record shows, as a required, nullable field', () => {
+    const schema = extractionJsonSchema() as { required: string[]; properties: Record<string, { anyOf?: { type: string }[] }> };
+    expect(schema.required).toContain('nothingToRecord');
+    expect(schema.properties.nothingToRecord!.anyOf!.map((x) => x.type)).toEqual(['string', 'null']);
+  });
+
+  it('carries the reader’s words into the draft; readings from before extract-9 still parse', () => {
+    const extraction = ExtractionSchema.parse({ documentType: 'other', accounts: [{ accountType: 'premium_bonds', last4: '3704' }], nothingToRecord: ' A prize history: prizes won, by bond number and month. ' });
+    const draft = buildDraft(extraction, { store, document: doc({ capturedOn: '2026-09-29', capturedOnSource: 'exif' }), uploadedOn: '2026-09-29' });
+    expect(draft.sections).toEqual([]);
+    expect(draft.nothingToRecord).toBe('A prize history: prizes won, by bond number and month.');
+    expect(ExtractionSchema.parse({ documentType: 'other' }).nothingToRecord).toBeNull();
+  });
+
+  it('a reading that finds nothing to record is read again before it is believed', () => {
+    const empty = buildDraft(ExtractionSchema.parse({ documentType: 'other', nothingToRecord: 'A settings screen.' }), { store, document: doc(), uploadedOn: '2026-09-29' });
+    expect(assessReading(empty, { accountTypeOf: () => undefined, latest: '2026-09-29', warnings: [] }).unconfirmed).toContain('Nothing to record');
   });
 });

@@ -1289,6 +1289,13 @@
                 "type": "string"
               }
             },
+            "nothingToRecord": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "confidence": {
               "default": "medium",
               "type": "string",
@@ -2182,6 +2189,13 @@
                 "type": "string"
               }
             },
+            "nothingToRecord": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "confidence": {
               "default": "medium",
               "type": "string",
@@ -2893,6 +2907,10 @@
           "items": {
             "type": "string"
           }
+        },
+        "nothingToRecord": {
+          "type": "string",
+          "maxLength": 300
         },
         "confidence": {
           "type": "string",

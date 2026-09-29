@@ -169,7 +169,9 @@ Standalone figures from documents, used for Self Assessment:
   - `alternative` is the reading that was not kept.
 - `draft`: exactly what you reviewed and committed. Since `extract-4` a draft section can carry
   `statedTotals` (`{moneyIn, moneyOut}` printed on the statement) and a row `uncertain` (what the
-  reader was unsure of). Both are optional and only used while reviewing.
+  reader was unsure of). Both are optional and only used while reviewing. Since `extract-9` a
+  draft can carry `nothingToRecord`: what a document the reader understood, but found nothing to
+  record in, shows (one sentence).
 - `result`: `{accountIds, accountsCreated, transactionsAdded, transactionsSkipped, balancesAdded, holdingsAdded, figuresAdded, sections}`.
   `sections` maps each draft section to the account it was committed to; with the sections'
   statement periods it gives each account's **coverage** (the days it has data for).
