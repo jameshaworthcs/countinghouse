@@ -330,3 +330,13 @@ describe('statement dates', () => {
     expect(notes('2025/26')).toMatch(/fixed: transactions cover/);
   });
 });
+
+describe('holdings identifiers', () => {
+  it('a SEDOL read into the ticker field is kept as a SEDOL; a real ticker stays a ticker', () => {
+    const d = draftOf({ documentType: 'holdings_screenshot', accounts: [{ accountType: 'lisa', accountName: 'Lifetime ISA', closingBalance: 300, holdings: [{ name: 'HSBC FTSE 100 Index Accumulation C', ticker: 'B80QFR5', value: 100 }, { name: 'iShares Core MSCI World ETF', ticker: 'SWDA', value: 200 }] }] });
+    expect(d.sections[0]!.holdings.map((h) => [h.ticker, h.sedol])).toEqual([
+      [undefined, 'B80QFR5'],
+      ['SWDA', undefined],
+    ]);
+  });
+});

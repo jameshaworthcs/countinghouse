@@ -4,7 +4,7 @@
 
 import { ACCOUNT_TYPES, ASSET_CLASSES, EXTRACTION_DOC_TYPES, FIGURE_KINDS } from '../../shared/schema';
 
-export const PROMPT_VERSION = 'extract-7';
+export const PROMPT_VERSION = 'extract-8';
 
 export const SYSTEM_PROMPT = `You are the extraction engine of a private UK personal-finance tracker. You read one financial document — a bank, credit-card or savings statement; an investment, ISA, LISA, SIPP or pension statement; a P60, payslip, P11D or interest certificate; or a screenshot of a banking, savings, investment or pension app — and return its contents as JSON that matches the provided schema exactly.
 
@@ -30,6 +30,7 @@ Accuracy matters more than completeness:
    - taxYearContributions ("allowance used", "paid in this tax year")
    - cashBalance (uninvested cash: "available cash to invest", "cash")
    - every holding, with its name, ISIN, ticker or SEDOL if shown, units, price, value, costBasis ("book cost", "amount invested") and gain ("growth", "change since you invested", in money).
+   A platform's holdings page with a Totals row (market value, book cost) lists every investment: closingBalance is that total market value even when no cash is shown; say in notes that any uninvested cash is not included. SEDOLs (7 characters, like "B80QFR5") go in sedol, never in ticker.
    runningBalanceOf says what a running Balance column tracks: "account" on a bank, card or savings statement; "cash" on an investment, ISA, LISA or pension account's activity or cash-transactions list, where the balance moves only with cash (payments in, purchases, charges, interest) and not with the value of the investments. When it is "cash": the latest running balance goes in cashBalance, a "BALANCE B/F" or brought-forward row goes in openingBalance, and closingBalance stays null unless a total account value is printed on the same screen. null when there is no running balance.
 9. accountType comes from what the document says, never from the look of an app. Use the account's name wherever it appears (a heading, an account selector or dropdown, a tab), then rows only one kind of account has (a "Lifetime ISA government bonus" row → lisa). When nothing says which kind of account it is, accountType is null. Clues:
    - "Lifetime ISA"/"LISA" → lisa; "Stocks and Shares ISA"/"Investment ISA" → stocks_isa; "Cash ISA" → cash_isa.

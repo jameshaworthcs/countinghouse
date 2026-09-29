@@ -33,6 +33,9 @@ export interface DraftContext {
   warnings?: string[];
 }
 
+/** A SEDOL: 7 characters, no vowels, a digit among the first six, a check digit. */
+const isSedol = (s: string) => /^[0-9BCDFGHJKLMNPQRSTVWXYZ]{6}\d$/.test(s.toUpperCase()) && /\d/.test(s.slice(0, 6));
+
 /** A row only a Lifetime ISA has. */
 const LISA_ROW = /\blifetime\s*isa\b.*\bbonus\b|\bgovernment\s+bonus\b/i;
 /** Rows that buy or sell investments: evidence that a running balance is cash beside holdings. */
@@ -243,8 +246,9 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
       value: h.value,
       currency: h.currency ?? currency,
       ...(h.isin ? { isin: h.isin } : {}),
-      ...(h.ticker ? { ticker: h.ticker } : {}),
-      ...(h.sedol && /^[0-9BCDFGHJKLMNPQRSTVWXYZ]{6}\d$/.test(h.sedol.toUpperCase()) ? { sedol: h.sedol.toUpperCase() } : {}),
+      // A SEDOL read into the ticker field (UK platforms print both under "Symbol") is a SEDOL.
+      ...(h.ticker && !isSedol(h.ticker) ? { ticker: h.ticker } : {}),
+      ...((h.sedol && isSedol(h.sedol)) || (h.ticker && isSedol(h.ticker)) ? { sedol: (h.sedol && isSedol(h.sedol) ? h.sedol : h.ticker!).toUpperCase() } : {}),
       ...(h.units !== null ? { units: h.units } : {}),
       ...(h.price !== null ? { price: h.price } : {}),
       ...(h.costBasis !== null ? { costBasis: h.costBasis } : {}),
