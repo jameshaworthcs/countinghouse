@@ -9,7 +9,7 @@ import { descriptionKey } from '../../shared/merchants';
 import { toMinor } from '../../shared/money';
 import type { Draft, ImportRecord, Transaction } from '../../shared/schema';
 import type { Store } from '../store';
-import { similarity } from './dedup';
+import { classifyDuplicates, similarity } from './dedup';
 
 /** How far apart a row's two dates can be and still be the same row read differently. */
 const DATE_SLACK_DAYS = 7;
@@ -27,7 +27,8 @@ type ReadRow = { date: string; amount: number; description: string; row?: number
  *    date), same date and description (its amount), or same date and amount with a similar
  *    description;
  * 3. what is left: read now and not recorded (added), or recorded by this import and not read now
- *    (missing).
+ *    (missing). A row read now that another import may have recorded in other words (the duplicate
+ *    rules) says so: adding it could record it twice.
  */
 export function compareRows(read: ReadRow[], stored: Transaction[], importId: string, opts: { byRow?: boolean } = {}): RereadRow[] {
   const out: RereadRow[] = [];
@@ -65,8 +66,18 @@ export function compareRows(read: ReadRow[], stored: Transaction[], importId: st
     const byDate = candidates.find((t) => toMinor(t.amount) === toMinor(r.amount) && descriptionKey(t.description) === dk && Math.abs(diffDays(t.date, r.date)) <= DATE_SLACK_DAYS);
     const byAmount = byDate ?? candidates.find((t) => t.date === r.date && descriptionKey(t.description) === dk);
     const byText = byAmount ?? candidates.find((t) => t.date === r.date && toMinor(t.amount) === toMinor(r.amount) && similarity(t.description, r.description) >= 0.4);
-    if (byText) settle(byText, r, i);
-    else out.push({ key: `r${i}`, kind: 'added', read: shown(r) });
+    if (byText) {
+      settle(byText, r, i);
+      continue;
+    }
+    // Recorded by another import, in other words? Then adding it would record it twice.
+    const others = stored.filter((t) => left.has(t.id) && t.source.importId !== importId);
+    const [d] = classifyDuplicates([r], others);
+    const maybe = d && d.status !== 'new' ? others.find((t) => t.id === d.duplicateOf) : undefined;
+    if (maybe && d!.status === 'duplicate') {
+      left.delete(maybe.id);
+      out.push({ key: `r${i}`, kind: 'same', stored: pick(maybe), read: shown(r) });
+    } else out.push({ key: `r${i}`, kind: 'added', read: shown(r), ...(maybe ? { maybe: pick(maybe) } : {}) });
   }
   for (const t of mine()) out.push({ key: `m-${t.id}`, kind: 'missing', stored: pick(t) });
   return out.sort((a, b) => (a.read?.date ?? a.stored!.date).localeCompare(b.read?.date ?? b.stored!.date));

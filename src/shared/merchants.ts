@@ -16,6 +16,8 @@ export const MERCHANTS: MerchantDef[] = [
   ['CAPITAL ONE', 'Capital One', 'credit-card-payment', 'out'],
   ['\\bMBNA\\b', 'MBNA', 'credit-card-payment', 'out'],
   ['VIRGIN MONEY CREDIT CARD|\\bCREDIT CARD\\b.*PAYMENT', 'Credit card', 'credit-card-payment', 'out'],
+  // Chase pays its card as "To Credit Card" (statement, app) and "To Revolving Line Account" (export).
+  ['\\bTO CREDIT CARD\\b|\\bREVOLVING LINE\\b', 'Credit card', 'credit-card-payment', 'out'],
   ['VANGUARD', 'Vanguard', 'investment-transfer', 'out'],
   ['HARGREAVES|HARGREAVE LANS', 'Hargreaves Lansdown', 'investment-transfer', 'out'],
   ['\\bAJ BELL\\b|\\bDODL\\b', 'AJ Bell', 'investment-transfer', 'out'],

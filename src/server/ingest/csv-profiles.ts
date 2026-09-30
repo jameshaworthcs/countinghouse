@@ -90,7 +90,8 @@ export const BUILTIN_CSV_PROFILES: CsvProfile[] = [
     id: 'chase',
     name: 'Chase UK',
     institutionId: 'chase',
-    accountType: 'current',
+    // No account type: Chase exports its current account, saver and card alike, so which one a file
+    // is comes from the account you upload it to, or your choice.
     headerSignature: ['date', 'time', 'transaction type', 'transaction description', 'amount', 'currency', 'balance'],
     columns: {
       date: 'Date',

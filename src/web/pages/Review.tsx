@@ -280,6 +280,10 @@ function SectionEditor({ section, index, total, latest, periodFromRows, onChange
   // Rows a check is about carry its title, so the problem is visible where it is.
   const flags = new Map<string, string[]>();
   for (const c of checks) if (c.status === 'warn') for (const k of c.rows ?? []) flags.set(k, [...(flags.get(k) ?? []), c.title]);
+  // Copies recorded twice, as commit will see them: in the account chosen, and not where you ticked a
+  // matching row in as a payment of its own.
+  const counted = new Set(section.transactions.flatMap((t) => (t.include && t.duplicateOf ? [t.duplicateOf] : [])));
+  const extraCopies = (section.extraCopies ?? []).filter((c) => target.mode === 'existing' && (!c.accountId || c.accountId === target.accountId) && !counted.has(c.keepId) && !counted.has(c.transactionId));
 
   return (
     <Card
@@ -423,11 +427,11 @@ function SectionEditor({ section, index, total, latest, periodFromRows, onChange
                 </div>
               </div>
             )}
-            {target.mode === 'existing' && section.extraCopies && section.extraCopies.length > 0 && (
-              <Callout tone="warn" title={`${plural(section.extraCopies.length, 'payment')} recorded twice`}>
-                <p className="mb-2">This account has {section.extraCopies.length === 1 ? 'it' : 'them'} twice, and this document shows {section.extraCopies.length === 1 ? 'it' : 'each'} once. A ticked copy is taken away when you commit; the other stays.</p>
+            {extraCopies.length > 0 && (
+              <Callout tone="warn" title={`${plural(extraCopies.length, 'payment')} recorded twice`}>
+                <p className="mb-2">This account has {extraCopies.length === 1 ? 'it' : 'them'} twice, and this document shows {extraCopies.length === 1 ? 'it' : 'each'} once. A ticked copy is taken away when you commit; the other stays.</p>
                 <ul className="flex flex-col gap-2">
-                  {section.extraCopies.map((c) => (
+                  {extraCopies.map((c) => (
                     <li key={c.transactionId}>
                       <Checkbox
                         checked={c.remove}

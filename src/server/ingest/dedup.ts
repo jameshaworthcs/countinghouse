@@ -8,9 +8,10 @@
 //      statement says "To Credit Card" where its export says "To Revolving Line Account".
 //   4. Same amount within ±3 days → possible duplicate, for you to decide (typical when the same
 //      period arrives from two sources, e.g. a CSV and a screenshot), when the descriptions are
-//      similar, or it is the same day, or the amount has pence (a coincidence is then unlikely).
-//      Sources date a payment differently (the day it was made, the day it cleared) and describe it
-//      differently, so a difference in either is not enough to call it new.
+//      similar. Described differently, only from £20 (`DIFFERENT_WORDS_FROM`), and then on the same
+//      day or for an amount with pence: sources date a payment differently (the day it was made,
+//      the day it cleared) and describe it differently, but two £3.50 coffees at different cafés
+//      are two coffees. Never when both show a balance after them and the balances differ.
 
 import { diffDays } from '../../shared/dates';
 import { descriptionKey } from '../../shared/merchants';
@@ -24,6 +25,13 @@ export interface DedupCandidate {
   sourceId?: string | undefined;
   balanceAfter?: number | undefined;
 }
+
+/** Below this, the same amount described differently is taken as another payment (everyday prices repeat). */
+export const DIFFERENT_WORDS_FROM = 20;
+
+/** Both show a balance after them, and the balances differ (either sign, as sources differ on a card's): two payments. */
+const otherBalance = (a: { balanceAfter?: number | undefined }, b: { balanceAfter?: number | undefined }) =>
+  a.balanceAfter !== undefined && b.balanceAfter !== undefined && Math.abs(toMinor(a.balanceAfter)) !== Math.abs(toMinor(b.balanceAfter));
 
 export interface DedupResult {
   status: 'new' | 'duplicate' | 'possible_duplicate';
@@ -105,14 +113,15 @@ export function classifyDuplicates(incoming: DedupCandidate[], existing: Transac
   incoming.forEach((c, i) => {
     if (results[i]!.status !== 'new') return;
     const pence = toMinor(c.amount) % 100 !== 0;
+    const large = Math.abs(toMinor(c.amount)) >= DIFFERENT_WORDS_FROM * 100;
     let best: { t: Transaction; score: number; similar: boolean; days: number } | null = null;
     for (const t of byAmount.get(toMinor(c.amount)) ?? []) {
-      if (used.has(t.id) || conflictingIds(c, t)) continue;
+      if (used.has(t.id) || conflictingIds(c, t) || otherBalance(c, t)) continue;
       const days = Math.abs(diffDays(t.date, c.date));
       if (days > fuzzyDays) continue;
       const sim = similarity(t.description, c.description);
       const similar = sim >= 0.4;
-      if (!similar && days > 0 && !pence) continue;
+      if (!similar && !(large && (days === 0 || pence))) continue;
       const score = sim - days * 0.05;
       if (!best || score > best.score) best = { t, score, similar, days };
     }
@@ -136,9 +145,11 @@ export function hasYourChanges(t: Transaction, withReceipts: Set<string>): boole
 /**
  * Payments the account has recorded twice that this document shows once (docs/INGESTION.md,
  * "Recorded twice"). A recorded row the document matches has a second copy when another recorded row
- * has the same date and amount, nothing on the document matches it, and either:
+ * has the same date and amount, nothing on the document matches it, another import recorded it (one
+ * document listing both means two payments: a spend, its refund and the spend again), and either:
  * - both show the same balance after them: the same payment, for certain (ticked to be taken away);
- * - or the document shows that date and amount fewer times than they are recorded (for you to judge).
+ * - or the document shows that date and amount fewer times than they are recorded, and no balances
+ *   say otherwise (for you to judge).
  * The copy offered is one with nothing of yours on it: the one the document did not match, unless
  * only the other is clean. When both have something of yours, nothing is offered.
  */
@@ -160,15 +171,16 @@ export function storedTwice(rows: Pick<DraftTransaction, 'date' | 'amount' | 'st
     const same = recorded.get(k) ?? [];
     for (const twin of same) {
       if (twin.id === matched.id || claimed.has(twin.id) || offered.has(twin.id)) continue;
+      if (twin.source.importId && twin.source.importId === matched.source.importId) continue;
       const sameBalance = matched.balanceAfter !== undefined && twin.balanceAfter !== undefined && toMinor(matched.balanceAfter) === toMinor(twin.balanceAfter);
       const extra = same.length - out.filter((c) => dayKey(c) === k).length > (shown.get(k) ?? 0);
-      if (!sameBalance && !extra) continue;
+      if (!sameBalance && (!extra || otherBalance(matched, twin))) continue;
       const [gone, kept] = !hasYourChanges(twin, withReceipts) ? [twin, matched] : !hasYourChanges(matched, withReceipts) ? [matched, twin] : [undefined, undefined];
       if (!gone || !kept) continue;
       offered.add(gone.id);
       offered.add(kept.id);
       const fromFile = opts.fileOf?.(gone);
-      out.push({ transactionId: gone.id, keepId: kept.id, date: gone.date, amount: gone.amount, description: gone.description, ...(fromFile ? { fromFile } : {}), sameBalance, remove: sameBalance });
+      out.push({ transactionId: gone.id, keepId: kept.id, accountId: gone.accountId, date: gone.date, amount: gone.amount, description: gone.description, ...(fromFile ? { fromFile } : {}), sameBalance, remove: sameBalance });
       break;
     }
   }

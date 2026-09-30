@@ -107,9 +107,16 @@ export function ReadAgainCard({ rec, currentVersion }: { rec: ImportRecord; curr
                                     Correct it
                                   </Button>
                                 ) : x.kind === 'added' ? (
-                                  <Button size="sm" loading={apply.isPending && apply.variables === x.key} onClick={() => apply.mutate(x.key)}>
-                                    Add it
-                                  </Button>
+                                  <>
+                                    {x.maybe && (
+                                      <div className="mb-1 max-w-56 whitespace-normal text-left text-[11.5px] text-warn-ink">
+                                        Maybe recorded already: {formatDate(x.maybe.date)}, <span className="sensitive">{money(x.maybe.amount)}</span>, “{x.maybe.description}”
+                                      </div>
+                                    )}
+                                    <Button size="sm" loading={apply.isPending && apply.variables === x.key} onClick={() => apply.mutate(x.key)}>
+                                      {x.maybe ? 'Add it anyway' : 'Add it'}
+                                    </Button>
+                                  </>
                                 ) : (
                                   <Link to={`/transactions?accounts=${s.accountId}&period=custom&from=${x.stored!.date}&to=${x.stored!.date}`} className="text-[12px] text-accent hover:underline">
                                     Look at it

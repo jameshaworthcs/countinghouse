@@ -20,7 +20,8 @@ describe('the same payment from another source', () => {
     tx('tx_statement', '2026-08-12', -45.67, 'To Credit Card', { balanceAfter: 954.33 }),
     tx('tx_topup', '2026-09-03', 500, 'From A N OTHER - CHASE-TOPUP', { balanceAfter: 1454.33 }),
     tx('tx_cash', '2026-09-17', -34.48, 'Cash withdrawal, Bank, Faro', { balanceAfter: 1386.7 }),
-    tx('tx_shop', '2026-09-20', -10, 'CORNER SHOP'),
+    tx('tx_shop', '2026-09-20', -40, 'CORNER SHOP'),
+    tx('tx_cafe', '2026-09-10', -3.5, 'COSTA COFFEE'),
   ];
 
   it('the same balance after it makes it the same payment, however it is described', () => {
@@ -30,11 +31,11 @@ describe('the same payment from another source', () => {
     expect(classifyDuplicates([{ date: '2026-08-12', amount: -45.67, description: 'To Revolving Line Account', balanceAfter: 900 }], stored)[0]!.status).not.toBe('duplicate');
   });
 
-  it('described differently, it is yours to check on the same day, or a few days apart for an amount with pence', () => {
+  it('described differently, from £20 it is yours to check on the same day, or a few days apart for an amount with pence', () => {
     const res = classifyDuplicates(
       [
         { date: '2026-09-15', amount: -34.48, description: 'ATM' },
-        { date: '2026-09-20', amount: -10, description: 'Transfer' },
+        { date: '2026-09-20', amount: -40, description: 'Transfer' },
       ],
       stored,
     );
@@ -42,8 +43,14 @@ describe('the same payment from another source', () => {
       { status: 'possible_duplicate', duplicateOf: 'tx_cash', reason: 'Same amount within a few days, described differently' },
       { status: 'possible_duplicate', duplicateOf: 'tx_shop', reason: 'Same amount on the same day, described differently' },
     ]);
+    const alone = (c: Parameters<typeof classifyDuplicates>[0][number]) => classifyDuplicates([c], stored)[0]!.status;
     // Whole pounds on another day, described differently: a payment of its own.
-    expect(classifyDuplicates([{ date: '2026-09-22', amount: -10, description: 'NEWSAGENT' }], stored)[0]!.status).toBe('new');
+    expect(alone({ date: '2026-09-22', amount: -40, description: 'NEWSAGENT' })).toBe('new');
+    // An everyday price at another café, the next day or the same day: another coffee.
+    expect(alone({ date: '2026-09-11', amount: -3.5, description: 'PRET A MANGER' })).toBe('new');
+    expect(alone({ date: '2026-09-10', amount: -3.5, description: 'PRET A MANGER' })).toBe('new');
+    // Both show a balance after them, and they differ: two payments.
+    expect(alone({ date: '2026-09-15', amount: -34.48, description: 'ATM', balanceAfter: 1000 })).toBe('new');
   });
 });
 
@@ -54,15 +61,19 @@ describe('recorded twice', () => {
 
   it('a document showing a payment once offers the copy with nothing of yours on it', () => {
     const fileOf = (t: Transaction) => (t.id === 'tx_csv' ? 'export.csv' : 'statement.pdf');
-    expect(storedTwice([row('tx_pdf')], [pdf, csv], { fileOf })).toEqual([{ transactionId: 'tx_csv', keepId: 'tx_pdf', date: '2026-08-12', amount: -45.67, description: 'Transfer', fromFile: 'export.csv', sameBalance: true, remove: true }]);
+    expect(storedTwice([row('tx_pdf')], [pdf, csv], { fileOf })).toEqual([{ transactionId: 'tx_csv', keepId: 'tx_pdf', accountId: 'current', date: '2026-08-12', amount: -45.67, description: 'Transfer', fromFile: 'export.csv', sameBalance: true, remove: true }]);
     // Matched to the clean copy, the linked copy still stays.
     expect(storedTwice([row('tx_csv')], [pdf, csv])).toEqual([expect.objectContaining({ transactionId: 'tx_csv', keepId: 'tx_pdf' })]);
   });
 
   it('without the same balance it is for you to judge; nothing when the document shows it as often, or both copies are yours', () => {
     const a = tx('tx_a', '2026-09-01', -3.5, 'COFFEE');
-    const b = tx('tx_b', '2026-09-01', -3.5, 'COFFEE HOUSE');
-    expect(storedTwice([{ date: '2026-09-01', amount: -3.5, status: 'duplicate', duplicateOf: 'tx_a' }], [a, b])).toEqual([expect.objectContaining({ transactionId: 'tx_b', keepId: 'tx_a', sameBalance: false, remove: false })]);
+    const b = tx('tx_b', '2026-09-01', -3.5, 'COFFEE HOUSE', { source: { importId: 'imp_20260902_120000_bbbb' } });
+    expect(storedTwice([{ date: '2026-09-01', amount: -3.5, status: 'duplicate', duplicateOf: 'tx_a' }], [a, b])).toEqual([expect.objectContaining({ transactionId: 'tx_b', keepId: 'tx_a', accountId: 'current', sameBalance: false, remove: false })]);
+    // One document listed both: two coffees, whatever this one shows.
+    expect(storedTwice([{ date: '2026-09-01', amount: -3.5, status: 'duplicate', duplicateOf: 'tx_a' }], [a, { ...b, source: a.source }])).toEqual([]);
+    // Balances after them that differ: two coffees.
+    expect(storedTwice([{ date: '2026-09-01', amount: -3.5, status: 'duplicate', duplicateOf: 'tx_a' }], [{ ...a, balanceAfter: 96.5 }, { ...b, balanceAfter: 93 }])).toEqual([]);
     // Two coffees on the document, two recorded.
     expect(storedTwice([{ date: '2026-09-01', amount: -3.5, status: 'duplicate', duplicateOf: 'tx_a' }, { date: '2026-09-01', amount: -3.5, status: 'new' }], [a, b])).toEqual([]);
     // A category you chose on one, a note on the other.

@@ -733,6 +733,8 @@ export interface RereadRow {
   /** As read now; `type` (a CSV's transaction type) is filled in on a correction when missing. */
   read?: { date: string; amount: number; description: string; type?: string };
   changes?: ('date' | 'amount' | 'description')[];
+  /** Read now, not recorded by this import, but maybe recorded by another in other words. */
+  maybe?: { id: string; date: string; amount: number; description: string };
   applied?: boolean;
 }
 

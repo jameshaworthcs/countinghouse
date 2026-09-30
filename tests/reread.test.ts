@@ -41,6 +41,24 @@ describe('comparing a new reading with what was recorded', () => {
       ['added', null, null],
     ]);
   });
+
+  it('a row read now that another import may have in other words says so', () => {
+    const statement = { ...t('tx_9', '2026-09-20', -48.15, 'Cash withdrawal, Bank, Faro', 'imp_b'), balanceAfter: 1036.27 };
+    const rows = compareRows(
+      [
+        { date: '2026-09-22', amount: -48.15, description: 'ATM' },
+        { date: '2026-09-20', amount: -48.15, description: 'Bank withdrawal', balanceAfter: 1036.27 },
+      ],
+      [statement],
+      'imp_a',
+    );
+    // The same balance after it: that row. Otherwise, a possible duplicate: offered, with a warning.
+    expect(rows.map((r) => [r.kind, r.stored?.id ?? null, r.maybe?.id ?? null])).toEqual([
+      ['same', 'tx_9', null],
+      ['added', null, null],
+    ]);
+    expect(compareRows([{ date: '2026-09-22', amount: -48.15, description: 'ATM' }], [statement], 'imp_a')).toEqual([expect.objectContaining({ kind: 'added', maybe: { id: 'tx_9', date: '2026-09-20', amount: -48.15, description: 'Cash withdrawal, Bank, Faro' } })]);
+  });
 });
 
 describe('reading a stored document again', () => {

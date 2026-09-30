@@ -542,10 +542,21 @@ Card", so the row counted as new, though both rows showed the same balance after
   duplicate, whatever each source calls it. Chase names the same payment "To Credit Card" on its
   statement, "To Revolving Line Account" in its export, and "<name>'s Account to Credit card" in
   its app.
-- **A different description no longer makes a payment new.** The same amount a few days apart is
-  offered for you to check when the descriptions are similar, when it is the same day, or when the
-  amount has pence. Only whole pounds on different days, described differently, stay new: a
-  coincidence there is common, and elsewhere it is rare.
+- **A different description no longer makes a payment new, from £20.** The same amount a few days
+  apart is offered for you to check when the descriptions are similar, or, from £20, when it is
+  the same day or the amount has pence. Below £20 everyday prices repeat: on a busy card, two
+  £3.50 coffees at different cafés a day apart are two coffees, and flagging one leaves it out by
+  default. Round sums on different days repeat too. Balances after them that differ always mean
+  two payments.
+- **Recorded twice needs two imports.** One document listing the same amount twice on a day, even
+  with the same balance after both (a spend, its refund, the spend again), is two payments. Only
+  copies from different imports are offered, and never when their balances differ.
+- **Chase's words for paying its card are card payments.** "To Credit Card" and "To Revolving Line
+  Account" are categorised as card payments, so the current account's side is a transfer by itself.
+  Otherwise, from a CSV (which carries no suggested category), it counted as spending until the
+  card's side was imported and linked.
+- **The Chase layout names no account type.** Chase exports its current account, saver and card in
+  one format, so a layout saying "current" would have put a card's export in the current account.
 - **The description column comes before a type column.** Auto-mapping prefers a header naming the
   description over one naming the other party. It never takes a type column while another will
   do. Chase's export is a built-in layout now.
@@ -559,8 +570,7 @@ Card", so the row counted as new, though both rows showed the same balance after
 
 Payslips from one employer came under three names: a group name on the payslips, the employing
 company on the P60, and a sister company's payroll in the bank. Matching by name paired none of
-them, and counted the year's pay and
-tax twice, once from the P60 and once from the payslips.
+them, and counted the year's pay and tax twice, once from the P60 and once from the payslips.
 
 - **A payment of exactly a payslip's pay after deductions is its pay**, whatever the bank calls
   the employer. A payment within 10 days of the pay date that matches to the penny is not a

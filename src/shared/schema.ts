@@ -917,9 +917,10 @@ export const DraftSectionSchema = z.object({
   extraCopies: z
     .array(
       z.object({
-        /** The recorded copy to take away, and the copy that stays. */
+        /** The recorded copy to take away, and the copy that stays, in this account. */
         transactionId: z.string(),
         keepId: z.string(),
+        accountId: SlugSchema.optional(),
         date: ISODateSchema,
         amount: MoneySchema,
         description: z.string(),

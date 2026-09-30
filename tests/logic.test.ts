@@ -84,6 +84,10 @@ describe('merchants and categorisation', () => {
     expect(c.categorise({ accountId: 'monzo', description: 'TESCO STORES', amount: -5 })).toMatchObject({ category: 'home-garden', categorisedBy: 'rule', ruleId: 'rule_a' });
     expect(c.categorise({ accountId: 'monzo', description: 'VANGUARD INVESTOR', amount: -500 })).toMatchObject({ category: 'investment-transfer', counterpartyAccountId: 'vanguard-isa' });
     expect(c.categorise({ accountId: 'monzo', description: 'AMERICAN EXPRESS', amount: -300 })).toMatchObject({ category: 'credit-card-payment', counterpartyAccountId: 'amex' });
+    // Chase's words for paying its card: the statement and app, and the export.
+    expect(c.categorise({ accountId: 'monzo', description: 'To Credit Card', amount: -112.5 }).category).toBe('credit-card-payment');
+    expect(c.categorise({ accountId: 'monzo', description: "Sam's Account to Credit card", amount: -112.5 }).category).toBe('credit-card-payment');
+    expect(c.categorise({ accountId: 'monzo', description: 'To Revolving Line Account', amount: -112.5 }).category).toBe('credit-card-payment');
     expect(c.categorise({ accountId: 'sipp', description: 'Tax relief received', amount: 200 })).toMatchObject({ category: 'tax-relief' });
     expect(c.categorise({ accountId: 'vanguard-isa', description: 'Vanguard LifeStrategy 80% purchase', amount: -500 })).toMatchObject({ category: 'trade' });
     expect(c.categorise({ accountId: 'monzo', description: 'ACME LTD SALARY', amount: 2000, payee: 'ACME LTD' })).toMatchObject({ category: 'salary', payee: 'ACME LTD' });

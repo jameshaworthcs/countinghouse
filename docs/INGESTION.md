@@ -24,7 +24,7 @@ The same file twice (by SHA-256) is recognised as already imported.
 | Starling CSV | `starling` | Running balance; "Opening Balance" row becomes the opening balance |
 | Revolut CSV | `revolut` | Completed rows only, fee applied, split into one account per product × currency |
 | Barclays CSV | `barclays` | Newest-first handled; last 4 of the account column |
-| Chase UK CSV | `chase` | Running balance and time; the description is "Transaction Description", and "Transaction Type" (Transfer, Payment, the FX rate of a cash withdrawal abroad) is kept as the type |
+| Chase UK CSV | `chase` | Running balance and time; the description is "Transaction Description", and "Transaction Type" (Transfer, Payment, the FX rate of a cash withdrawal abroad) is kept as the type. No account type: Chase exports its current account, saver and card alike, so the account is the one you upload it to, or your choice. Its card payments ("To Credit Card", "To Revolving Line Account") are card payments |
 | Lloyds / Halifax / Bank of Scotland / TSB CSV | `lloyds-group` | Debit/credit columns |
 | NatWest / RBS / Ulster CSV | `natwest-group` | Blank first line, spaced headers |
 | Nationwide CSV | `nationwide-current`, `nationwide-credit-card` | Windows-1252 `£`, preamble with account name and balance |
@@ -287,20 +287,26 @@ read again.
      balance places a row whatever each source calls it: Chase's statement says "To Credit Card"
      where its export says "To Revolving Line Account";
   4. same amount within ±3 days, flagged as a *possible* duplicate for you to decide, when the
-     descriptions are similar, or it is the same day, or the amount has pence. Sources date a
-     payment differently (made, or cleared two days later) and describe it differently, so a
-     difference in one is not enough to call it new. Whole pounds on different days, described
-     differently, stay new.
+     descriptions are similar. Described differently, only from £20 (`DIFFERENT_WORDS_FROM`), and
+     then on the same day or for an amount with pence. Sources date a payment differently (made, or
+     cleared two days later) and describe it differently, so a difference in one is not enough to
+     call it new; but everyday prices repeat (two £3.50 coffees at different cafés are two
+     coffees), and so do round sums on different days. Never when both rows show a balance after
+     them and the balances differ (either sign: sources disagree on a card's).
 - **Recorded twice** (`storedTwice` in `dedup.ts`). A document can show that the account already
   has a payment twice: one of its rows matches a recorded row, and another recorded row has the
-  same date and amount, with nothing on the document matching it. When both copies show the same
-  balance after them it is certain, and the copy comes ticked; when the document just shows that
-  date and amount fewer times than they are recorded, it is offered unticked for you to judge.
+  same date and amount, with nothing on the document matching it, recorded by another import (one
+  document listing both is two payments: a spend, its refund and the spend again). When both copies
+  show the same balance after them it is certain, and the copy comes ticked; when the document just
+  shows that date and amount fewer times than they are recorded, and no balances say otherwise, it
+  is offered unticked for you to judge. Only copies on the same day are found: a payment recorded
+  on the day it was made and again on the day it cleared is yours to spot.
   - The copy offered has nothing of yours on it (a category, payee, note, tag or split you set, a
     correction, a receipt, a transfer link): the one the document did not match, unless only the
     other is clean. When both have something of yours, nothing is offered.
-  - The review page lists it under the account ("recorded twice"). Committing takes a ticked copy
-    away, after checking it again: both copies still there, alike, nothing of yours added since,
+  - The review page lists it under the account ("recorded twice"), while the section goes to that
+    account and you have not ticked the matching row in as a payment of its own. Committing takes a
+    ticked copy away, after checking it again: both copies still there, alike, nothing of yours added since,
     and no row of the import that you ticked in as a different payment. The import records what
     it took away (`result.transactionsRemoved`), and the git history of `data/` keeps the row.
   - An import that takes a copy away is never "nothing new".
@@ -407,7 +413,8 @@ out.
   - **read differently**: a row of this import with the same amount and description a few days
     apart (its date), the same date and description (its amount), or the same date and amount with
     a similar description;
-  - **read now, not recorded**;
+  - **read now, not recorded**. When another import may have recorded it in other words (the
+    duplicate rules above), it says so, and adding it asks you to add it anyway;
   - **recorded, not read now**.
 
   The balance is compared too.
