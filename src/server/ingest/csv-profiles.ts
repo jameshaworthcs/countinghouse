@@ -182,6 +182,21 @@ export const BUILTIN_CSV_PROFILES: CsvProfile[] = [
     },
   }),
   P({
+    id: 'aqua',
+    name: 'Aqua',
+    institutionId: 'aqua',
+    accountType: 'credit_card',
+    amountSign: 'inverted',
+    headerSignature: ['date', 'description', 'note', 'amount(gbp)'],
+    columns: {
+      date: 'Date',
+      description: ['Description'],
+      // What the statement shows ("TESCO STORES 3297  LONDON  GBR"), blank on payments.
+      reference: 'Note',
+      amount: 'Amount(GBP)',
+    },
+  }),
+  P({
     id: 'trading-212',
     name: 'Trading 212',
     institutionId: 'trading-212',

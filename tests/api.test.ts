@@ -138,6 +138,33 @@ describe('API without login configured', () => {
     const profiles = (await (await req('/api/csv-profiles')).json()) as { name: string }[];
     expect(profiles.map((p) => p.name)).toContain('My Credit Union');
   });
+
+  it('reads an unknown card export card style, and the columns you choose win', async () => {
+    const json = { ...CSRF, 'content-type': 'application/json' };
+    expect((await req('/api/accounts', { method: 'POST', headers: json, body: JSON.stringify({ id: 'test-card', name: 'Test card', type: 'credit_card' }) })).status).toBe(201);
+    const form = new FormData();
+    form.append('file', new Blob(['Date,Merchant,Amount (GBP)\n01/09/2026,TESCO,12.34\n03/09/2026,TRAINLINE,30.00\n21/09/2026,PAYMENT RECEIVED - THANK YOU,-42.34\n']), 'card.csv');
+    form.append('accountId', 'test-card');
+    const { results } = (await (await req('/api/imports', { method: 'POST', headers: CSRF, body: form })).json()) as { results: { id: string }[] };
+    type Rec = { status: string; extraction: { warnings: string[] }; mapping?: { profile: { amountSign: string } }; draft?: { sections: { target: { accountId?: string }; transactions: { amount: number }[] }[] } };
+    const id = results[0]!.id;
+    const rec = await waitFor(async () => {
+      const r = (await (await req(`/api/imports/${id}`)).json()) as Rec;
+      return r.status === 'review' ? r : undefined;
+    });
+    expect(rec.draft!.sections[0]!.target.accountId).toBe('test-card');
+    expect(rec.draft!.sections[0]!.transactions.map((t) => t.amount)).toEqual([-12.34, -30, 42.34]);
+    expect(rec.mapping!.profile.amountSign).toBe('inverted');
+    expect(rec.extraction.warnings).toHaveLength(2);
+    expect(rec.extraction.warnings[1]).toContain('card style');
+
+    // Signs chosen on the review page: the draft is made again, and the warnings have done their job.
+    const mapped = await req(`/api/imports/${id}/mapping`, { method: 'POST', headers: json, body: JSON.stringify({ profile: { ...rec.mapping!.profile, amountSign: 'normal' } }) });
+    const after = (await mapped.json()) as Rec;
+    expect(after.status).toBe('review');
+    expect(after.draft!.sections[0]!.transactions.map((t) => t.amount)).toEqual([12.34, 30, -42.34]);
+    expect(after.extraction.warnings).toEqual([]);
+  });
 });
 
 describe('API with login configured', () => {

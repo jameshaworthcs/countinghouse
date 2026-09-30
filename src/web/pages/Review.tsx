@@ -561,12 +561,24 @@ const ROLE_LABELS: [keyof CsvProfile['columns'], string][] = [
   ['time', 'Time'],
 ];
 
-function MappingEditor({ rec }: { rec: Rec }) {
+/**
+ * The columns of a CSV layout no profile knows: asked for before anything is drafted, or, once a
+ * draft was made from columns worked out automatically (or chosen), there to change on asking.
+ */
+function MappingEditor({ rec, onApplied }: { rec: Rec; onApplied?: (r: ImportRecord) => void }) {
   const toast = useToast();
   const mapping = rec.mapping!;
+  const drafted = rec.status === 'review';
+  const [open, setOpen] = useState(!drafted);
   const [profile, setProfile] = useState<CsvProfile>(mapping.profile);
   const [saveAs, setSaveAs] = useState('');
-  const apply = useApiMutation(() => api(`/imports/${rec.id}/mapping`, { body: { profile, ...(saveAs.trim() ? { saveAs: saveAs.trim() } : {}) } }), { onSuccess: () => toast({ tone: 'good', text: 'Mapping applied' }) });
+  const apply = useApiMutation(() => api<ImportRecord>(`/imports/${rec.id}/mapping`, { body: { profile, ...(saveAs.trim() ? { saveAs: saveAs.trim() } : {}) } }), {
+    onSuccess: (r) => {
+      toast({ tone: 'good', text: 'Mapping applied' });
+      setOpen(false);
+      onApplied?.(r);
+    },
+  });
   const setCol = (role: keyof CsvProfile['columns'], value: string) => {
     const columns = { ...profile.columns } as Record<string, unknown>;
     if (role === 'description') columns.description = value ? [value] : [];
@@ -574,79 +586,99 @@ function MappingEditor({ rec }: { rec: Rec }) {
     else delete columns[role];
     setProfile({ ...profile, columns: columns as CsvProfile['columns'] });
   };
+  const [title, description] = !drafted
+    ? ['Tell me what the columns mean', 'This CSV layout isn’t recognised. Map it once and save it; next time it imports automatically.']
+    : /auto-detected/.test(rec.extraction.detail ?? '')
+      ? ['Columns worked out from the file', 'This CSV layout isn’t recognised, so its columns were worked out automatically. If the signs or dates are wrong, change them here; save them and the next file like it imports this way.']
+      : ['The columns you chose', 'Change them here if the rows still look wrong; save them and the next file like it imports this way.'];
   return (
-    <Card title="Tell me what the columns mean" description="This CSV layout isn’t recognised. Map it once and save it; next time it imports automatically.">
-      <div className="mb-4 overflow-x-auto rounded-lg border border-line">
-        <table className={tableClasses.table}>
-          <thead>
-            <tr>
-              {mapping.headers.map((h, i) => (
-                <th key={i} className={tableClasses.th}>
-                  {h || `(column ${i + 1})`}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {mapping.sample.slice(0, 5).map((r, i) => (
-              <tr key={i}>
-                {r.map((c, j) => (
-                  <td key={j} className={cn(tableClasses.td, 'sensitive whitespace-nowrap')}>
-                    {c}
-                  </td>
+    <Card
+      title={title}
+      description={description}
+      padded={open}
+      actions={
+        !open && (
+          <Button size="sm" icon={<Pencil className="size-3.5" />} onClick={() => setOpen(true)}>
+            Change
+          </Button>
+        )
+      }
+    >
+      {open && (
+        <>
+          <div className="mb-4 overflow-x-auto rounded-lg border border-line">
+            <table className={tableClasses.table}>
+              <thead>
+                <tr>
+                  {mapping.headers.map((h, i) => (
+                    <th key={i} className={tableClasses.th}>
+                      {h || `(column ${i + 1})`}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {mapping.sample.slice(0, 5).map((r, i) => (
+                  <tr key={i}>
+                    {r.map((c, j) => (
+                      <td key={j} className={cn(tableClasses.td, 'sensitive whitespace-nowrap')}>
+                        {c}
+                      </td>
+                    ))}
+                  </tr>
                 ))}
-              </tr>
+              </tbody>
+            </table>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Field label="Description">
+              <Select value={profile.columns.description[0] ?? ''} onChange={(e) => setCol('description', e.target.value)}>
+                <option value="">—</option>
+                {mapping.headers.map((h) => (
+                  <option key={h} value={h}>
+                    {h}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            {ROLE_LABELS.map(([role, label]) => (
+              <Field key={role} label={label}>
+                <Select value={(profile.columns[role] as string | undefined) ?? ''} onChange={(e) => setCol(role, e.target.value)}>
+                  <option value="">—</option>
+                  {mapping.headers.map((h) => (
+                    <option key={h} value={h}>
+                      {h}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
             ))}
-          </tbody>
-        </table>
-      </div>
-      <div className="grid gap-3 sm:grid-cols-3">
-        <Field label="Description">
-          <Select value={profile.columns.description[0] ?? ''} onChange={(e) => setCol('description', e.target.value)}>
-            <option value="">—</option>
-            {mapping.headers.map((h) => (
-              <option key={h} value={h}>
-                {h}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        {ROLE_LABELS.map(([role, label]) => (
-          <Field key={role} label={label}>
-            <Select value={(profile.columns[role] as string | undefined) ?? ''} onChange={(e) => setCol(role, e.target.value)}>
-              <option value="">—</option>
-              {mapping.headers.map((h) => (
-                <option key={h} value={h}>
-                  {h}
-                </option>
-              ))}
-            </Select>
-          </Field>
-        ))}
-        <Field label="Date format">
-          <Select value={profile.dateOrder} onChange={(e) => setProfile({ ...profile, dateOrder: e.target.value as CsvProfile['dateOrder'] })}>
-            <option value="DMY">Day/Month/Year (UK)</option>
-            <option value="MDY">Month/Day/Year (US)</option>
-            <option value="YMD">Year-Month-Day</option>
-            <option value="auto">Work it out</option>
-          </Select>
-        </Field>
-        <Field label="Amount signs">
-          <Select value={profile.amountSign} onChange={(e) => setProfile({ ...profile, amountSign: e.target.value as CsvProfile['amountSign'] })}>
-            <option value="normal">Money out is negative</option>
-            <option value="inverted">Money out is positive (card style)</option>
-          </Select>
-        </Field>
-        <Field label="Save as (optional)" hint="e.g. the bank’s name">
-          <Input value={saveAs} onChange={(e) => setSaveAs(e.target.value)} />
-        </Field>
-      </div>
-      {apply.error && <Callout tone="bad" className="mt-3">{apply.error.message}</Callout>}
-      <div className="mt-4 flex justify-end">
-        <Button variant="primary" loading={apply.isPending} disabled={!profile.columns.date || !profile.columns.description.length || !(profile.columns.amount || profile.columns.debit || profile.columns.credit)} onClick={() => apply.mutate(undefined)}>
-          Apply mapping
-        </Button>
-      </div>
+            <Field label="Date format">
+              <Select value={profile.dateOrder} onChange={(e) => setProfile({ ...profile, dateOrder: e.target.value as CsvProfile['dateOrder'] })}>
+                <option value="DMY">Day/Month/Year (UK)</option>
+                <option value="MDY">Month/Day/Year (US)</option>
+                <option value="YMD">Year-Month-Day</option>
+                <option value="auto">Work it out</option>
+              </Select>
+            </Field>
+            <Field label="Amount signs">
+              <Select value={profile.amountSign} onChange={(e) => setProfile({ ...profile, amountSign: e.target.value as CsvProfile['amountSign'] })}>
+                <option value="normal">Money out is negative</option>
+                <option value="inverted">Money out is positive (card style)</option>
+              </Select>
+            </Field>
+            <Field label="Save as (optional)" hint="e.g. the bank’s name">
+              <Input value={saveAs} onChange={(e) => setSaveAs(e.target.value)} />
+            </Field>
+          </div>
+          {apply.error && <Callout tone="bad" className="mt-3">{apply.error.message}</Callout>}
+          <div className="mt-4 flex justify-end">
+            <Button variant="primary" loading={apply.isPending} disabled={!profile.columns.date || !profile.columns.description.length || !(profile.columns.amount || profile.columns.debit || profile.columns.credit)} onClick={() => apply.mutate(undefined)}>
+              Apply mapping
+            </Button>
+          </div>
+        </>
+      )}
     </Card>
   );
 }
@@ -807,7 +839,16 @@ export default function Review() {
             <DocumentViewer rec={rec} />
           </div>
           <div className="flex min-w-0 flex-col gap-4">
-            {rec.status === 'needs_mapping' && rec.mapping && <MappingEditor rec={rec} />}
+            {(rec.status === 'needs_mapping' || rec.status === 'review') && rec.mapping && (
+              <MappingEditor
+                rec={rec}
+                // The draft is made again from the new columns, replacing any unsaved changes.
+                onApplied={(r) => {
+                  if (r.draft) setDraft(r.draft);
+                  setDirty(false);
+                }}
+              />
+            )}
             {draft && (
               <>
                 <VerificationNote rec={rec} />

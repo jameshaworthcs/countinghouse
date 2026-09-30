@@ -101,6 +101,21 @@ describe('CSV bank formats', () => {
     expect(acc!.transactions[0]!.sourceId).toBe('AT262450001000010012345');
   });
 
+  it('Aqua: inverted signs, and what the statement shows as the reference', () => {
+    const { match, result } = parseCsvFixture('aqua.csv');
+    expect(match.profile.id).toBe('aqua');
+    const [acc] = result.extraction.accounts;
+    expect(acc!.institutionName).toBe('Aqua (NewDay)');
+    expect(acc!.accountType).toBe('credit_card');
+    // Newest first in the file, oldest first once read: purchases out, the refund and payment in.
+    expect(acc!.transactions.map((t) => [t.date, t.amount, t.description, t.reference])).toEqual([
+      ['2026-09-01', -12.34, 'Tesco', 'TESCO STORES 3297      LONDON        GBR'],
+      ['2026-09-03', -30, 'Trainline', 'TRAINLINE.COM          LONDON        GBR'],
+      ['2026-09-05', 8.5, 'Trainline', 'TRAINLINE.COM          LONDON        GBR'],
+      ['2026-09-21', 42.34, 'PAYMENT RECEIVED - THANK YOU', null],
+    ]);
+  });
+
   it('Revolut: completed only, fee applied, split by product and currency', () => {
     const { result } = parseCsvFixture('revolut.csv');
     const accounts = result.extraction.accounts;
@@ -150,6 +165,30 @@ describe('CSV bank formats', () => {
     expect(s.confident).toBe(false);
     const parsed = parseWithProfile(rows, { profile: s.profile, headerIndex: s.headerIndex, headerless: false });
     expect(parsed.extraction.accounts[0]!.transactions.map((t) => t.amount)).toEqual([-10, 100]);
+    // Money out and money in columns say which way round the signs are, card or not.
+    expect(suggestMapping(rows, { accountType: 'credit_card' })!.profile.amountSign).toBe('normal');
+  });
+
+  it('reads an unknown layout card style only for a card whose rows need it', () => {
+    // A card's own export: purchases positive, the payment to the card negative.
+    const { rows } = readCsvRows('Date,Merchant,Amount (GBP)\n01/09/2026,TESCO,12.34\n03/09/2026,TRAINLINE,30.00\n21/09/2026,PAYMENT RECEIVED - THANK YOU,-42.34\n');
+    expect(findProfile(rows)).toBeNull();
+    const card = suggestMapping(rows, { accountType: 'credit_card' })!;
+    expect(card.confident).toBe(true);
+    expect(card.profile.amountSign).toBe('inverted');
+    const parsed = parseWithProfile(rows, { profile: card.profile, headerIndex: card.headerIndex, headerless: false });
+    expect(parsed.extraction.accounts[0]!.transactions.map((t) => t.amount)).toEqual([-12.34, -30, 42.34]);
+    // Not known to be a card: read as it stands.
+    expect(suggestMapping(rows)!.profile.amountSign).toBe('normal');
+    expect(suggestMapping(rows, { accountType: 'current' })!.profile.amountSign).toBe('normal');
+    // Too few rows to tell.
+    expect(suggestMapping(rows.slice(0, 3), { accountType: 'credit_card' })!.profile.amountSign).toBe('normal');
+    // A card export already signed the app's way is left alone.
+    const signed = readCsvRows('Date,Merchant,Amount (GBP)\n01/09/2026,TESCO,-12.34\n03/09/2026,TRAINLINE,-30.00\n21/09/2026,PAYMENT RECEIVED - THANK YOU,42.34\n').rows;
+    expect(suggestMapping(signed, { accountType: 'credit_card' })!.profile.amountSign).toBe('normal');
+    // Flipped, it would still fail the card-signs check: a payment to the card comes out as money out.
+    const mixed = readCsvRows('Date,Merchant,Amount (GBP)\n01/09/2026,TESCO,-12.34\n03/09/2026,TRAINLINE,-30.00\n05/09/2026,PRET,-4.50\n21/09/2026,PAYMENT RECEIVED - THANK YOU,-42.34\n22/09/2026,DIRECT DEBIT PAYMENT,42.34\n').rows;
+    expect(suggestMapping(mixed, { accountType: 'credit_card' })!.profile.amountSign).toBe('normal');
   });
 });
 

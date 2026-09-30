@@ -265,7 +265,7 @@ export class ImportService extends EventEmitter {
           result = { extraction: parsed.extraction, warnings: [], durationMs: Date.now() - started };
           detail = match.profile.id;
         } else {
-          const suggestion = suggestMapping(rows);
+          const suggestion = suggestMapping(rows, { accountType: record.hintAccountId ? this.store.account(record.hintAccountId)?.type : undefined });
           if (!suggestion) throw new Error('Could not find a date and description column in this CSV.');
           if (!suggestion.confident) {
             record.mapping = { profile: suggestion.profile, headers: suggestion.headers, sample: suggestion.sample, headerIndex: suggestion.headerIndex };
@@ -277,7 +277,10 @@ export class ImportService extends EventEmitter {
           const parsed = parseWithProfile(rows, { profile: suggestion.profile, headerIndex: suggestion.headerIndex, headerless: false });
           result = {
             extraction: parsed.extraction,
-            warnings: ['This CSV layout was not recognised; columns were detected automatically. Check signs and dates carefully, then save the mapping for next time.'],
+            warnings: [
+              'This CSV layout was not recognised; columns were detected automatically. Check signs and dates carefully, then save the mapping for next time.',
+              ...(suggestion.profile.amountSign === 'inverted' ? ['The amounts were read card style, money out positive: the file is for a credit card, and its purchases and payments only have the right signs that way round.'] : []),
+            ],
             durationMs: Date.now() - started,
           };
           record.mapping = { profile: suggestion.profile, headers: suggestion.headers, sample: suggestion.sample, headerIndex: suggestion.headerIndex };
@@ -477,6 +480,9 @@ export class ImportService extends EventEmitter {
       const { rows } = table ?? readCsvRows(decodeText(bytes));
       const match = findProfile(rows, this.store.csvProfiles);
       const own = !/auto-detected|holdings export/.test(record.extraction.detail ?? '') && record.mapping?.profile ? { profile: record.mapping.profile, headerIndex: record.mapping.headerIndex, headerless: false } : undefined;
+      // The account it went to, as if you had pinned the upload to it.
+      const accountIds = record.result?.accountIds ?? [];
+      const ctx: ImportRecord = { ...record, ...(accountIds.length === 1 ? { hintAccountId: accountIds[0] } : {}) };
       let layout: string;
       let parsed: ReturnType<typeof parseWithProfile>;
       if (match) {
@@ -487,14 +493,11 @@ export class ImportService extends EventEmitter {
         layout = 'the columns you chose';
       } else {
         if (parseHoldingsCsv(rows, record.document.fileName)) throw new Error('It lists holdings, not transactions: there are no rows to compare.');
-        const suggestion = suggestMapping(rows);
+        const suggestion = suggestMapping(rows, { accountType: ctx.hintAccountId ? this.store.account(ctx.hintAccountId)?.type : undefined });
         if (!suggestion) throw new Error('Could not find a date and description column in it.');
         parsed = parseWithProfile(rows, { profile: suggestion.profile, headerIndex: suggestion.headerIndex, headerless: false });
-        layout = 'columns worked out afresh';
+        layout = suggestion.profile.amountSign === 'inverted' ? 'columns worked out afresh, with card-style signs' : 'columns worked out afresh';
       }
-      // The account it went to, as if you had pinned the upload to it.
-      const accountIds = record.result?.accountIds ?? [];
-      const ctx: ImportRecord = { ...record, ...(accountIds.length === 1 ? { hintAccountId: accountIds[0] } : {}) };
       const draft = this.draftOf(ctx, { extraction: parsed.extraction, warnings: [] });
       const { sections, notes } = compareReading(this.store, record, draft, { byRow: true });
       await this.saveReread({ ...reread, status: 'done', finishedAt: nowISO(), engine: 'csv', engineVersion: table ? `${XLSX_ENGINE_VERSION}+${CSV_ENGINE_VERSION}` : CSV_ENGINE_VERSION, layout, sections, notes });
@@ -722,13 +725,11 @@ export class ImportService extends EventEmitter {
       };
       await this.store.setCsvProfiles([...this.store.csvProfiles, saved], `csv profile: ${saveAs}`);
     }
-    record.draft = buildDraft(parsed.extraction, {
-      store: this.store,
-      document: record.document,
-      hintAccountId: record.hintAccountId,
-      uploadedOn: record.createdAt.slice(0, 10),
-    });
-    record.extraction = { ...record.extraction, engine: 'csv', engineVersion: CSV_ENGINE_VERSION, detail: saveAs ?? 'custom mapping', raw: parsed.extraction };
+    // Drafted afresh from the columns you chose, so the warning about ones worked out automatically
+    // no longer applies.
+    record.draft = this.draftOf(record, { extraction: parsed.extraction, warnings: [] });
+    delete record.draftEditedAt;
+    record.extraction = { ...record.extraction, engine: 'csv', engineVersion: CSV_ENGINE_VERSION, detail: saveAs ?? 'custom mapping', warnings: [], raw: parsed.extraction };
     record.mapping = { ...(record.mapping ?? { headers: [], sample: [], headerIndex }), profile };
     record.status = 'review';
     await this.save(record);

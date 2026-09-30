@@ -6,7 +6,8 @@ import Papa from 'papaparse';
 import { parseFlexibleDate, type ISODate } from '../../shared/dates';
 import { catalogInstitution } from '../../shared/institutions';
 import { parseAmount, roundMoney } from '../../shared/money';
-import type { CsvProfile, ExtractedAccount, ExtractedTransaction, Extraction } from '../../shared/schema';
+import { cardSigns } from '../../shared/review';
+import type { AccountType, CsvProfile, ExtractedAccount, ExtractedTransaction, Extraction } from '../../shared/schema';
 import { ExtractionSchema } from '../../shared/schema';
 import { BUILTIN_CSV_PROFILES } from './csv-profiles';
 
@@ -349,7 +350,11 @@ const HINTS: Record<string, RegExp> = {
 /** Header words for the description, strongest first. */
 const DESCRIPTION_HINTS = [/description|details|narrative|particulars|memo/, /payee|merchant|name|counter ?party/, /reference|transaction/];
 
-export function suggestMapping(rows: string[][]): MappingSuggestion | null {
+/**
+ * Columns for a layout no profile knows, worked out from its header and rows. `accountType` is the
+ * account the file is going to, when known.
+ */
+export function suggestMapping(rows: string[][], opts: { accountType?: AccountType | undefined } = {}): MappingSuggestion | null {
   if (rows.length < 2) return null;
   // Header: the first row whose following row contains a date and which itself has no dates.
   let headerIndex = 0;
@@ -417,6 +422,16 @@ export function suggestMapping(rows: string[][]): MappingSuggestion | null {
       ...(type ? { type: type.header } : {}),
     },
   };
+  // A card's own export shows purchases as positive and payments to the card as negative. For a
+  // file going to a credit card, one amount column is read that way round when its rows fail the
+  // card-signs check as they stand and pass it flipped (docs/INGESTION.md).
+  if (opts.accountType === 'credit_card' && amount && readsCardStyle(rows, headerIndex, profile)) profile.amountSign = 'inverted';
   const confident = Boolean(amount || (debit && credit)) && /date/.test(date.norm);
   return { profile, headerIndex, headers, sample, confident };
+}
+
+function readsCardStyle(rows: string[][], headerIndex: number, profile: CsvProfile): boolean {
+  const txs = parseWithProfile(rows, { profile, headerIndex, headerless: false }).extraction.accounts.flatMap((a) => a.transactions);
+  const asRead = cardSigns(txs);
+  return asRead !== null && asRead.verdict !== 'ok' && cardSigns(txs.map((t) => ({ ...t, amount: -t.amount })))?.verdict === 'ok';
 }

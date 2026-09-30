@@ -655,3 +655,22 @@ worth a few per cent of the estate.
 - **A group with nothing yet sits on the stack.** d3's diverging stack puts a zero at the axis, so
   a group before its first data ran along £0 and leapt up the stack where it started. A zero now
   sits on top of its side of the stack, and debts stay below the line.
+
+## 2026-09-30: A card's own CSV export is read card style
+
+An Aqua export uploaded to the Aqua card came in with every sign the wrong way round. No layout
+knew its columns, so they were worked out automatically, and a worked-out amount column was always
+read as money out negative. A card's own export lists purchases as positive. The card-signs check
+warned, but the review page offered no way to change the signs: the column editor showed only
+before anything was drafted, even though the warning said to save the mapping.
+
+- **Aqua's layout is built in**, signs inverted like Amex's, with its Note column (what the
+  statement shows) as the reference.
+- **For a card, the rows pick the signs.** A file for a credit card (the account it was uploaded to,
+  or the one a committed import went to when it is read again) reads its single amount column card
+  style when its rows fail the card-signs check as they stand and pass it flipped. It is the same
+  rule the review page checks, so the two cannot disagree. Debit and credit columns already say
+  which way round they are. A note says the signs were read that way.
+- **The columns worked out can be changed on the review page**, and saved for the next file like
+  it. Changing them drafts the import again from the file and clears the warning about columns
+  worked out automatically: the owner has now chosen them.

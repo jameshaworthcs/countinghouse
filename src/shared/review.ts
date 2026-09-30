@@ -29,6 +29,21 @@ export interface CheckContext {
 /** Descriptions of a payment to a card, which is money in on the card's own statement. */
 const PAYMENT_TO_CARD = /\b(payment received|thank you|direct debit (payment|received)|payment - thank|card payment received|dd payment)\b/i;
 
+export type CardSigns<T> = { verdict: 'ok' } | { verdict: 'mostly-in' } | { verdict: 'payments-out'; rows: T[] };
+
+/**
+ * A credit card's settled rows: purchases are money out (negative), payments to the card money in.
+ * Null with fewer than 3 rows, too few to tell. Also picks the signs of an unrecognised CSV layout
+ * for a card (docs/INGESTION.md).
+ */
+export function cardSigns<T extends { amount: number; description: string }>(settled: readonly T[]): CardSigns<T> | null {
+  if (settled.length < 3) return null;
+  const positive = settled.filter((t) => t.amount > 0).length;
+  if (positive > settled.length - positive) return { verdict: 'mostly-in' };
+  const payments = settled.filter((t) => t.amount < 0 && PAYMENT_TO_CARD.test(t.description));
+  return payments.length ? { verdict: 'payments-out', rows: payments } : { verdict: 'ok' };
+}
+
 const rowsWord = (n: number) => (n === 1 ? '1 row' : `${n} rows`);
 
 export function sectionChecks(section: DraftSection, ctx: CheckContext): ReviewCheck[] {
@@ -135,16 +150,13 @@ export function sectionChecks(section: DraftSection, ctx: CheckContext): ReviewC
   }
 
   // Credit cards: purchases are money out (negative), payments to the card money in.
-  if (ctx.accountType === 'credit_card' && settled.length >= 3) {
-    const positive = settled.filter((t) => t.amount > 0).length;
-    const paymentsAsSpending = settled.filter((t) => t.amount < 0 && PAYMENT_TO_CARD.test(t.description));
-    if (positive > settled.length - positive) {
-      out.push({ id: 'card-signs', status: 'warn', title: 'Most rows are money in, which is unusual for a card', detail: 'On a credit card, purchases should be negative and payments to the card positive. The signs may be the wrong way round: check against the statement.' });
-    } else if (paymentsAsSpending.length) {
-      out.push({ id: 'card-signs', status: 'warn', title: `${rowsWord(paymentsAsSpending.length)} look like payments to the card but are money out`, detail: 'A payment to the card reduces what you owe, so it should be positive.', rows: paymentsAsSpending.map((t) => t.key) });
-    } else {
-      out.push({ id: 'card-signs', status: 'ok', title: 'Signs look right for a credit card' });
-    }
+  const signs = ctx.accountType === 'credit_card' ? cardSigns(settled) : null;
+  if (signs?.verdict === 'mostly-in') {
+    out.push({ id: 'card-signs', status: 'warn', title: 'Most rows are money in, which is unusual for a card', detail: 'On a credit card, purchases should be negative and payments to the card positive. The signs may be the wrong way round: check against the statement.' });
+  } else if (signs?.verdict === 'payments-out') {
+    out.push({ id: 'card-signs', status: 'warn', title: `${rowsWord(signs.rows.length)} look like payments to the card but are money out`, detail: 'A payment to the card reduces what you owe, so it should be positive.', rows: signs.rows.map((t) => t.key) });
+  } else if (signs) {
+    out.push({ id: 'card-signs', status: 'ok', title: 'Signs look right for a credit card' });
   }
 
   // The same row twice: genuine (two identical coffees) or read twice where screenshots overlap.
