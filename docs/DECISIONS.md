@@ -691,7 +691,9 @@ only recorded by the agents' background run, which is off.
   document that does not print one has not changed it.
 - **Instruments are recorded at commit and at start-up, whether or not agents are on.** An
   instrument from a statement is a fact, not agent work; only researching it is. The agents'
-  background run still records any it finds missing (holdings changed outside the app).
+  background run still records any it finds missing (holdings changed outside the app). The git
+  log says "by the app" for these, not "by agent", which read as an agent running while agents
+  were off.
 - **An export with no date is dated by its file**: the date in its file name, else the day the
   file was saved, never after the upload. An export is made as it is downloaded. A PDF is not
   dated this way: a statement saved today can be last year's.

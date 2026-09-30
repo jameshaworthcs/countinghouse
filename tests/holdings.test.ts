@@ -16,6 +16,7 @@ import { readCsvRows } from '../src/server/ingest/csv';
 import { decodeText } from '../src/server/ingest/detect';
 import { buildDraft, draftIsClean } from '../src/server/ingest/draft';
 import { parseHoldingsCsv } from '../src/server/ingest/holdings-csv';
+import { recordInstrumentsFromHoldings } from '../src/server/instruments';
 import { Store } from '../src/server/store';
 import { ExtractionSchema, type Account, type DocumentRef, type Holding, type HoldingsSnapshot } from '../src/shared/schema';
 
@@ -98,6 +99,14 @@ describe('an export with no date in it', () => {
 });
 
 describe('funds become instruments with agents off', () => {
+  it('as the app’s own record, not an agent’s, in the audit trail', async () => {
+    await store.addHoldings([snap('isa', '2026-09-29', [fund('Example Global Index Fund Acc', { sedol: 'B3X7QG6' })])], 'h');
+    const messages: string[] = [];
+    store.on('change', (e: { message: string }) => messages.push(e.message));
+    expect(await recordInstrumentsFromHoldings(store)).toBe(1);
+    expect(messages).toEqual(['instruments: 1 by the app (holdings)']);
+  });
+
   it('when the app starts, for funds already held', async () => {
     await store.setSettings({ ...store.settings, agents: { ...store.settings.agents, enabled: false } });
     await store.addHoldings([snap('isa', '2026-09-29', [fund('Example Global Index Fund Acc', { sedol: 'B3X7QG6' }), fund('Example World ETF', { ticker: 'XMPL' })])], 'h');

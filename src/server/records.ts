@@ -205,7 +205,9 @@ export async function applyRecords(store: Store, input: unknown): Promise<ApplyR
 
   const provenance = stamp(batch.provenance);
   const now = nowISO();
-  const who = provenance.setBy === 'owner' ? 'owner' : provenance.session ? `agent (${provenance.session})` : 'agent';
+  // The git log is the audit trail: the app's own writes (instruments from statements) are not an agent's.
+  const by = provenance.setBy === 'owner' ? 'owner' : provenance.setBy === 'system' ? 'the app' : 'agent';
+  const who = provenance.setBy !== 'owner' && provenance.session ? `${by} (${provenance.session})` : by;
   const result: ApplyResult = { written: [], skipped: [] };
 
   // Instruments first: other records may refer to them.
