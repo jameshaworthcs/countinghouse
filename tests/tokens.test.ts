@@ -67,6 +67,12 @@ describe('the token store', () => {
       ['POST', '/api/imports/commit-ready', null],
       ['POST', '/api/imports', null],
       ['POST', '/api/records', 'records'],
+      // An agent proposes a fix or takes it back; applying, dismissing and checking are the owner's.
+      ['POST', '/api/proposals', 'records'],
+      ['DELETE', '/api/proposals/prop_20260930_170000_ab12', 'records'],
+      ['POST', '/api/proposals/prop_20260930_170000_ab12/apply', null],
+      ['POST', '/api/proposals/prop_20260930_170000_ab12/dismiss', null],
+      ['POST', '/api/proposals/prop_20260930_170000_ab12/check', null],
       ['POST', '/api/jobs', 'jobs'],
       ['POST', '/api/jobs/job_abc123/rerun', 'jobs'],
       ['PATCH', '/api/transactions/tx_0123456789abcdef', null],

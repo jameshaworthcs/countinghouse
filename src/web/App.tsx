@@ -16,6 +16,7 @@ const Investments = lazy(() => import('./pages/Investments'));
 const TaxYear = lazy(() => import('./pages/TaxYear'));
 const Import = lazy(() => import('./pages/Import'));
 const Review = lazy(() => import('./pages/Review'));
+const Proposal = lazy(() => import('./pages/Proposal'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Assumptions = lazy(() => import('./pages/Assumptions'));
 
@@ -76,6 +77,7 @@ const router = createBrowserRouter([
       { path: 'assumptions', element: page(<Assumptions />) },
       { path: 'import', element: page(<Import />) },
       { path: 'import/:id', element: page(<Review />) },
+      { path: 'proposals/:id', element: page(<Proposal />) },
       { path: 'settings', element: page(<Settings />) },
       { path: '*', element: <div className="py-20 text-center text-ink-3">Page not found.</div> },
     ],

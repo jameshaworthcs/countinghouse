@@ -6,7 +6,7 @@ Browser (React SPA, TanStack Query)
    ▼
 Hono server  (Node 24, tsx; 127.0.0.1:4750 live, 4760 in development)
    ├─ security: Host allow-list · CSRF (custom header + Origin) · auth gate · CSP
-   ├─ routes/   auth · data (CRUD) · imports · analytics · records · jobs · system (SSE, git)
+   ├─ routes/   auth · data (CRUD) · imports · proposals · analytics · records · jobs · system (SSE, git)
    ├─ Store ─────────────────► data/*.json(l)  (atomic writes, validation, quarantine, file watcher)
    │    └─ 'change' events ──► GitCommitter ──► git commit -- data/   (debounced, pathspec-limited, main only)
    ├─ records.ts: the validated write path for assumptions, research, insights, context, instruments,
@@ -15,6 +15,8 @@ Hono server  (Node 24, tsx; 127.0.0.1:4750 live, 4760 in development)
    ├─ JobRunner (agents/) ───► claude CLI, locked down, one job at a time; state in the work area
    │    ├─ research-instrument · research-provider · refresh-assumptions   (web tools, public inputs)
    │    └─ insights-after-import · monthly-review · interpret-note          (the owner's data, no web)
+   ├─ ProposalService ───────► proposed fixes: an agent (token or job) proposes, you apply or dismiss
+   │    (pending in the work area; decided → data/proposals/, with what they changed)
    ├─ ImportService (queue) ─► work area .work/<data-dir>/   (uploads + drafts, never committed)
    │    ├─ detect → csv profiles (and spreadsheets' first table) · ofx · qif · santander-txt   (deterministic, local)
    │    ├─ images: capture date (EXIF/filename/mtime), tiling of long screenshots
@@ -40,6 +42,7 @@ Source layout:
 | `src/server/analytics/` | Read-only computations over the store; `model.ts` is pure (no store access) |
 | `src/server/agents/` | Agent jobs: the CLI runner, job kinds and prompts, the digest, the queue |
 | `src/server/records.ts` | The validated write path for agent-maintained records |
+| `src/server/proposals.ts` | Fixes agents propose to your data, checked against it and applied only by you ([AGENTS.md §5](AGENTS.md)) |
 | `src/web/` | The React app: `pages/`, `components/` (UI kit, charts), `lib/` (API client, prefs, data context) |
 | `scripts/` | Demo data, import CLI, records CLI, validate, schema export, screenshots, set-password, deploy |
 | `tests/` | Vitest suites + synthetic fixtures for every supported bank format |

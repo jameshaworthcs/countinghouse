@@ -6,7 +6,8 @@
 // - Only its SHA-256 hash is kept, in the work area (0600), never in data/ or git.
 // - It can read everything. It can change only what its scopes allow, through an explicit list of
 //   routes. No token can commit, dismiss or discard an import, change source facts, accounts or
-//   settings, or manage tokens.
+//   settings, apply or dismiss a proposed fix, or manage tokens. It can propose a fix, which
+//   changes nothing until the owner applies it.
 // - Every use is logged: when, which token, what, the answer, and from where.
 
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
@@ -21,7 +22,7 @@ export type TokenScope = (typeof TOKEN_SCOPES)[number];
 export const TOKEN_SCOPE_LABELS: Record<TokenScope, string> = {
   read: 'Read everything',
   imports: 'Import upkeep: read a pending import again, draft it again, choose its account, edit its draft',
-  records: 'Agent records: research, instruments, insights (POST /api/records)',
+  records: 'Agent records: research, instruments, insights (POST /api/records), and proposed fixes for you to apply or dismiss (POST /api/proposals)',
   jobs: 'Agent jobs: start, rerun, cancel (only while agents are on in Settings)',
 };
 
@@ -73,6 +74,9 @@ export function requiredScope(method: string, pathname: string): TokenScope | nu
     ['POST', /^\/api\/imports\/imp_[0-9a-z_]+\/(reprocess|refresh|hint)$/, 'imports'],
     ['PUT', /^\/api\/imports\/imp_[0-9a-z_]+\/draft$/, 'imports'],
     ['POST', /^\/api\/records$/, 'records'],
+    // An agent proposes a fix, or withdraws its proposal; only the owner applies or dismisses one.
+    ['POST', /^\/api\/proposals$/, 'records'],
+    ['DELETE', /^\/api\/proposals\/prop_[0-9a-z_]+$/, 'records'],
     ['POST', /^\/api\/jobs(\/tick)?$/, 'jobs'],
     ['POST', /^\/api\/jobs\/[0-9a-z_]+\/(cancel|rerun)$/, 'jobs'],
   ];

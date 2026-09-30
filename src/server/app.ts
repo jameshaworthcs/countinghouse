@@ -18,11 +18,13 @@ import { WorkArea } from './ingest/workarea';
 import { recordInstrumentsFromHoldings } from './instruments';
 import { runMigrations } from './migrations';
 import { LOGIN_PATH, OidcClient, oidcSettingsFromEnv } from './oidc';
+import { ProposalProblems, ProposalService } from './proposals';
 import { analyticsRoutes } from './routes/analytics';
 import { authRoutes, safeNext } from './routes/auth';
 import { dataRoutes } from './routes/data';
 import { documentRoutes, importRoutes } from './routes/imports';
 import { jobRoutes } from './routes/jobs';
+import { proposalRoutes } from './routes/proposals';
 import { recordRoutes } from './routes/records';
 import { receiptRoutes } from './routes/receipts';
 import { systemRoutes } from './routes/system';
@@ -83,6 +85,9 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
   const work = new WorkArea(config.workDir);
   const imports = new ImportService(store, config, work);
   await imports.init();
+  // Fixes agents propose (an agent with a token, or a job here) wait in the work area for the owner.
+  const proposals = ProposalService.forWorkDir(store, config.workDir);
+  await proposals.init();
 
   let oidcSettings: ReturnType<typeof oidcSettingsFromEnv>;
   try {
@@ -108,7 +113,7 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
 
   // Agent jobs start on their own only in a watching (serving) instance over real data (tracked in
   // git), never in tests, scripts, the demo or a throwaway copy: they spend the owner's Claude plan.
-  const runner = new JobRunner(store, analytics, config, { autoRun: config.watch && opts.inbox !== false && git.tracked });
+  const runner = new JobRunner(store, analytics, config, { autoRun: config.watch && opts.inbox !== false && git.tracked, proposals });
   await runner.init();
   imports.on('update', (r: ImportRecord) => {
     // A document filed as adding nothing new has nothing for the analyst to look at.
@@ -124,7 +129,7 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
   const tokens = AgentTokens.forWorkDir(config.workDir);
   await tokens.load();
 
-  const ctx: AppContext = { config, store, analytics, imports, git, auth, oidc, inbox, jobs: runner, runner, tokens, version: opts.version };
+  const ctx: AppContext = { config, store, analytics, imports, proposals, git, auth, oidc, inbox, jobs: runner, runner, tokens, version: opts.version };
   const app = new Hono();
   const secOpts = { allowedHosts: config.allowedHosts, production: config.production };
 
@@ -145,6 +150,7 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
   app.get('/api/health', (c) => c.json({ ok: true, version: opts.version, ...(opts.commit ? { commit: opts.commit } : {}) }));
   app.route('/api/auth', authRoutes(ctx));
   app.route('/api/imports', importRoutes(ctx));
+  app.route('/api/proposals', proposalRoutes(ctx));
   app.route('/api/jobs', jobRoutes(ctx));
   app.route('/api/tokens', tokenRoutes(ctx));
   app.route('/api/documents', documentRoutes(ctx));
@@ -184,6 +190,7 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
   }
 
   app.onError((err, c) => {
+    if (err instanceof ProposalProblems) return c.json({ error: err.message, problems: err.problems }, err.status as 400);
     if (err instanceof StoreError) return c.json({ error: err.message }, err.status as 400);
     if (err instanceof ZodError) return c.json({ error: err.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ') }, 400);
     console.error(`[api] ${c.req.method} ${c.req.path}:`, err);

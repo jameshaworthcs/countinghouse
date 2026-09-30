@@ -13,6 +13,8 @@ import type {
   ImportRecord,
   Institution,
   Profile,
+  Proposal,
+  ProposedChange,
   Rule,
   Settings,
   Transaction,
@@ -589,6 +591,72 @@ export interface ImportHistoryResponse {
   /** The page these are: the one asked for, or the last there is when it asked past the end. */
   page: number;
   pageSize: number;
+}
+
+/** A transaction a proposed change is about, as it is now (or was, for a decided proposal). */
+export interface ProposalRow {
+  id: string;
+  accountId: string;
+  date: string;
+  amount: number;
+  currency: string;
+  description: string;
+  category?: string;
+  categorisedBy?: Transaction['categorisedBy'];
+  transferGroup?: string;
+  /** The other row of its transfer, when it is linked. */
+  partner?: { id: string; accountId: string; date: string; amount: number; description: string };
+  /** The document it came from. */
+  source?: { importId: string; fileName?: string };
+  /** It is no longer in your data. */
+  missing?: true;
+}
+
+export interface ProposalChangeView {
+  change: ProposedChange;
+  /** Why it cannot be applied as things stand (the data changed, or a change it needs is left out). */
+  problem?: string;
+  /** Your data already says this: nothing to do. */
+  alreadySo?: true;
+  /** A link's rows as it would leave them: their category, and the account each is a transfer with. */
+  after?: Record<string, { category?: string; transferWith: string }>;
+}
+
+export interface ProposalView {
+  proposal: Omit<Proposal, 'before'>;
+  changes: ProposalChangeView[];
+  /** Every transaction the changes name, by id. */
+  rows: Record<string, ProposalRow>;
+  /** Every account those rows or changes name, by id. */
+  accounts: Record<string, { id: string; name: string; type: Account['type']; status: Account['status']; openedOn?: string; closedOn?: string; institutionName?: string }>;
+  /** Changes that can be applied now, and those that cannot. */
+  ready: number;
+  problems: number;
+}
+
+export interface ProposalSummary {
+  id: string;
+  status: Proposal['status'];
+  title: string;
+  changes: number;
+  applied: number;
+  provenance: Proposal['provenance'];
+  createdAt: string;
+  decidedAt?: string;
+}
+
+export interface ProposalListResponse {
+  /** Waiting for you, the newest first. */
+  pending: ProposalView[];
+  /** Applied or dismissed, the latest decided first. */
+  decided: ProposalSummary[];
+}
+
+/** POST /api/proposals/:id/check: what each change would do with some left out. */
+export interface ProposalCheckResponse {
+  changes: { key: string; problem?: string; alreadySo?: true; after?: ProposalChangeView['after'] }[];
+  ready: number;
+  problems: number;
 }
 
 export interface SystemResponse {

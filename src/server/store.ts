@@ -33,6 +33,7 @@ import {
   NoteSchema,
   ReceiptSchema,
   ProfileSchema,
+  ProposalSchema,
   ResearchSchema,
   RuleSchema,
   SettingsSchema,
@@ -56,6 +57,7 @@ import {
   type Note,
   type Receipt,
   type Profile,
+  type Proposal,
   type Research,
   type Rule,
   type Settings,
@@ -89,6 +91,19 @@ export interface ImportSummary {
   result?: ImportRecord['result'];
   /** The period each account's section covered (statement period, or the span of its rows). */
   sections: { accountId: string; from: string; to: string }[];
+  path: string;
+}
+
+/** A proposed fix you applied or dismissed (data/proposals/<yyyy>/<id>.json). */
+export interface DecidedProposalSummary {
+  id: string;
+  status: Proposal['status'];
+  title: string;
+  changes: number;
+  applied: number;
+  provenance: Proposal['provenance'];
+  createdAt: string;
+  decidedAt?: string | undefined;
   path: string;
 }
 
@@ -147,6 +162,7 @@ interface State {
   holdings: Map<string, HoldingsSnapshot[]>;
   figures: Figure[];
   imports: ImportSummary[];
+  proposals: DecidedProposalSummary[];
 }
 
 function emptyState(): State {
@@ -174,6 +190,7 @@ function emptyState(): State {
     holdings: new Map(),
     figures: [],
     imports: [],
+    proposals: [],
   };
 }
 
@@ -387,6 +404,20 @@ export class Store extends EventEmitter {
     }
     next.imports.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
+    // Proposed fixes you applied or dismissed (summaries only; full records are read on demand).
+    for (const year of await listDirs(this.abs('proposals'))) {
+      for (const f of (await listFiles(this.abs(`proposals/${year}`))).filter((f) => f.endsWith('.json'))) {
+        const rel = `proposals/${year}/${f}`;
+        const parsed = ProposalSchema.safeParse(await readJson(rel));
+        if (!parsed.success) {
+          issues.push({ file: rel, severity: 'warning', message: formatZodError(parsed.error) });
+          continue;
+        }
+        next.proposals.push(summariseProposal(parsed.data, rel));
+      }
+    }
+    next.proposals.sort(latestDecidedFirst);
+
     // Referential checks (warnings only).
     const accountIds = new Set(next.accounts.map((a) => a.id));
     for (const id of next.transactions.keys()) {
@@ -562,6 +593,10 @@ export class Store extends EventEmitter {
   get imports(): ImportSummary[] {
     return this.state.imports;
   }
+  /** Proposed fixes you applied or dismissed, the latest decided first. */
+  get proposals(): DecidedProposalSummary[] {
+    return this.state.proposals;
+  }
 
   account(id: string): Account | undefined {
     return this.state.accounts.find((a) => a.id === id);
@@ -607,6 +642,14 @@ export class Store extends EventEmitter {
     const text = await readTextIfExists(this.abs(summary.path));
     if (!text) return undefined;
     return ImportRecordSchema.parse(JSON.parse(text));
+  }
+
+  async readProposal(id: string): Promise<Proposal | undefined> {
+    const summary = this.state.proposals.find((p) => p.id === id);
+    if (!summary) return undefined;
+    const text = await readTextIfExists(this.abs(summary.path));
+    if (!text) return undefined;
+    return ProposalSchema.parse(JSON.parse(text));
   }
 
   // ─── Writes: settings-like files ────────────────────────────────────────────────────────────
@@ -748,12 +791,12 @@ export class Store extends EventEmitter {
     await this.setInstitutions(list, `institutions: ${inst.name}`);
   }
 
-  async upsertAccount(account: Account): Promise<void> {
+  async upsertAccount(account: Account, message?: string): Promise<void> {
     const existing = this.state.accounts.findIndex((a) => a.id === account.id);
     const list = [...this.state.accounts];
     if (existing >= 0) list[existing] = { ...account, updatedAt: nowISO() };
     else list.push(account);
-    await this.setAccounts(list, `${existing >= 0 ? 'account: update' : 'account: add'} ${account.name}`);
+    await this.setAccounts(list, message ?? `${existing >= 0 ? 'account: update' : 'account: add'} ${account.name}`);
   }
 
   hasAccountData(accountId: string): boolean {
@@ -1048,7 +1091,35 @@ export class Store extends EventEmitter {
       this.changed(message, [rel, ...extraPaths]);
     });
   }
+
+  /** Keep a proposed fix you applied or dismissed: the record of what changed, why, and who said so. */
+  saveProposal(record: Proposal, message: string): Promise<void> {
+    return this.exclusive(async () => {
+      const p = ProposalSchema.parse(record);
+      if (p.status === 'pending') throw new StoreError('Only a proposal you applied or dismissed is kept in the data.', 500);
+      const rel = `proposals/${p.id.slice(5, 9)}/${p.id}.json`;
+      await this.writeJson(rel, p);
+      this.state.proposals = [summariseProposal(p, rel), ...this.state.proposals.filter((x) => x.id !== p.id)].sort(latestDecidedFirst);
+      this.changed(message, [rel]);
+    });
+  }
 }
+
+function summariseProposal(p: Proposal, rel: string): DecidedProposalSummary {
+  return {
+    id: p.id,
+    status: p.status,
+    title: p.title,
+    changes: p.changes.length,
+    applied: p.applied?.length ?? 0,
+    provenance: p.provenance,
+    createdAt: p.createdAt,
+    decidedAt: p.decidedAt,
+    path: rel,
+  };
+}
+
+const latestDecidedFirst = (a: DecidedProposalSummary, b: DecidedProposalSummary) => Date.parse(b.decidedAt ?? b.createdAt) - Date.parse(a.decidedAt ?? a.createdAt);
 
 export class StoreError extends Error {
   constructor(

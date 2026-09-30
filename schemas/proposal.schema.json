@@ -1,0 +1,769 @@
+{
+  "$id": "proposal.schema.json",
+  "title": "proposal",
+  "description": "Schema for data/proposals/<year>/<id>.json (a proposed fix you applied or dismissed). Generated from src/shared/schema.ts by `npm run schemas`; do not edit.",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^prop_\\d{8}_\\d{6}_[0-9a-f]{4}$"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "applied",
+        "dismissed"
+      ]
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000
+    },
+    "changes": {
+      "minItems": 1,
+      "maxItems": 60,
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]{0,39}$"
+              },
+              "kind": {
+                "type": "string",
+                "const": "unlink_transfer"
+              },
+              "why": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000
+              },
+              "transaction": {
+                "type": "string",
+                "pattern": "^tx_[0-9a-f]{16}$"
+              }
+            },
+            "required": [
+              "key",
+              "kind",
+              "why",
+              "transaction"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]{0,39}$"
+              },
+              "kind": {
+                "type": "string",
+                "const": "link_transfer"
+              },
+              "why": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000
+              },
+              "from": {
+                "type": "string",
+                "pattern": "^tx_[0-9a-f]{16}$"
+              },
+              "to": {
+                "type": "string",
+                "pattern": "^tx_[0-9a-f]{16}$"
+              }
+            },
+            "required": [
+              "key",
+              "kind",
+              "why",
+              "from",
+              "to"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]{0,39}$"
+              },
+              "kind": {
+                "type": "string",
+                "const": "set_category"
+              },
+              "why": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000
+              },
+              "transaction": {
+                "type": "string",
+                "pattern": "^tx_[0-9a-f]{16}$"
+              },
+              "category": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              }
+            },
+            "required": [
+              "key",
+              "kind",
+              "why",
+              "transaction",
+              "category"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]{0,39}$"
+              },
+              "kind": {
+                "type": "string",
+                "const": "remove_duplicate"
+              },
+              "why": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000
+              },
+              "transaction": {
+                "type": "string",
+                "pattern": "^tx_[0-9a-f]{16}$"
+              },
+              "sameAs": {
+                "minItems": 1,
+                "maxItems": 10,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^tx_[0-9a-f]{16}$"
+                }
+              }
+            },
+            "required": [
+              "key",
+              "kind",
+              "why",
+              "transaction",
+              "sameAs"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]{0,39}$"
+              },
+              "kind": {
+                "type": "string",
+                "const": "set_account_dates"
+              },
+              "why": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000
+              },
+              "account": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+              },
+              "openedOn": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "Calendar date, YYYY-MM-DD"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "closedOn": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "Calendar date, YYYY-MM-DD"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "key",
+              "kind",
+              "why",
+              "account"
+            ]
+          }
+        ]
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "properties": {
+        "setBy": {
+          "type": "string",
+          "enum": [
+            "owner",
+            "agent",
+            "system"
+          ]
+        },
+        "model": {
+          "type": "string"
+        },
+        "promptVersion": {
+          "type": "string"
+        },
+        "jobId": {
+          "type": "string"
+        },
+        "session": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "setBy"
+      ]
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+      "description": "ISO 8601 timestamp"
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+      "description": "ISO 8601 timestamp"
+    },
+    "decidedAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+      "description": "ISO 8601 timestamp"
+    },
+    "applied": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "dismissedReason": {
+      "type": "string",
+      "maxLength": 1000
+    },
+    "before": {
+      "type": "object",
+      "properties": {
+        "transactions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^tx_[0-9a-f]{16}$"
+              },
+              "accountId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+              },
+              "date": {
+                "type": "string",
+                "description": "Calendar date, YYYY-MM-DD"
+              },
+              "transactionDate": {
+                "type": "string",
+                "description": "Calendar date, YYYY-MM-DD"
+              },
+              "time": {
+                "type": "string",
+                "pattern": "^\\d{2}:\\d{2}(:\\d{2})?$"
+              },
+              "amount": {
+                "type": "number",
+                "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+              },
+              "currency": {
+                "type": "string",
+                "pattern": "^[A-Z]{3}$",
+                "description": "ISO 4217 currency code"
+              },
+              "description": {
+                "type": "string"
+              },
+              "sourceId": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "reference": {
+                "type": "string"
+              },
+              "counterpartyName": {
+                "type": "string"
+              },
+              "merchant": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "category": {
+                    "type": "string"
+                  },
+                  "mcc": {
+                    "type": "string"
+                  },
+                  "address": {
+                    "type": "string"
+                  },
+                  "city": {
+                    "type": "string"
+                  },
+                  "postcode": {
+                    "type": "string"
+                  },
+                  "country": {
+                    "type": "string"
+                  },
+                  "website": {
+                    "type": "string"
+                  },
+                  "online": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "bankCategory": {
+                "type": "string"
+              },
+              "cardLast4": {
+                "type": "string",
+                "pattern": "^\\d{4}$"
+              },
+              "balanceAfter": {
+                "type": "number",
+                "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+              },
+              "original": {
+                "type": "object",
+                "properties": {
+                  "amount": {
+                    "type": "number",
+                    "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                  },
+                  "currency": {
+                    "type": "string",
+                    "pattern": "^[A-Z]{3}$",
+                    "description": "ISO 4217 currency code"
+                  }
+                },
+                "required": [
+                  "amount",
+                  "currency"
+                ]
+              },
+              "exchangeRate": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "fee": {
+                "type": "number",
+                "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+              },
+              "pending": {
+                "type": "boolean"
+              },
+              "raw": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "attributes": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": [
+                    "string",
+                    "number",
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "description": "Extra detail from the source with no dedicated field yet (namespaced keys welcome)"
+              },
+              "corrections": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "field": {
+                      "type": "string",
+                      "enum": [
+                        "date",
+                        "amount",
+                        "description"
+                      ]
+                    },
+                    "from": {
+                      "type": [
+                        "string",
+                        "number"
+                      ]
+                    },
+                    "to": {
+                      "type": [
+                        "string",
+                        "number"
+                      ]
+                    },
+                    "at": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                      "description": "ISO 8601 timestamp"
+                    },
+                    "note": {
+                      "type": "string",
+                      "maxLength": 500
+                    }
+                  },
+                  "required": [
+                    "field",
+                    "from",
+                    "to",
+                    "at"
+                  ]
+                }
+              },
+              "payee": {
+                "type": "string"
+              },
+              "place": {
+                "type": "string"
+              },
+              "payeeSetBy": {
+                "type": "string",
+                "enum": [
+                  "user"
+                ]
+              },
+              "category": {
+                "type": "string"
+              },
+              "categorisedBy": {
+                "type": "string",
+                "enum": [
+                  "user",
+                  "rule",
+                  "builtin",
+                  "bank",
+                  "ai",
+                  "transfer"
+                ]
+              },
+              "ruleId": {
+                "type": "string"
+              },
+              "splits": {
+                "minItems": 2,
+                "maxItems": 30,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "amount": {
+                      "type": "number",
+                      "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                    },
+                    "category": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64
+                    },
+                    "note": {
+                      "type": "string",
+                      "maxLength": 200
+                    }
+                  },
+                  "required": [
+                    "amount",
+                    "category"
+                  ]
+                }
+              },
+              "transferGroup": {
+                "type": "string"
+              },
+              "counterpartyAccountId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+              },
+              "notes": {
+                "type": "string"
+              },
+              "tags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "source": {
+                "default": {},
+                "type": "object",
+                "properties": {
+                  "importId": {
+                    "type": "string"
+                  },
+                  "documentId": {
+                    "type": "string"
+                  },
+                  "row": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                }
+              },
+              "createdAt": {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                "description": "ISO 8601 timestamp"
+              },
+              "updatedAt": {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                "description": "ISO 8601 timestamp"
+              }
+            },
+            "required": [
+              "id",
+              "accountId",
+              "date",
+              "amount",
+              "currency",
+              "description"
+            ]
+          }
+        },
+        "accounts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "current",
+                  "savings",
+                  "cash_isa",
+                  "stocks_isa",
+                  "lisa",
+                  "ifisa",
+                  "gia",
+                  "sipp",
+                  "workplace_pension",
+                  "personal_pension",
+                  "db_pension",
+                  "state_pension",
+                  "premium_bonds",
+                  "crypto",
+                  "property",
+                  "other_asset",
+                  "credit_card",
+                  "loan",
+                  "mortgage",
+                  "student_loan",
+                  "other_liability"
+                ]
+              },
+              "institutionId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+              },
+              "currency": {
+                "default": "GBP",
+                "type": "string",
+                "pattern": "^[A-Z]{3}$",
+                "description": "ISO 4217 currency code"
+              },
+              "status": {
+                "default": "open",
+                "type": "string",
+                "enum": [
+                  "open",
+                  "closed"
+                ]
+              },
+              "openedOn": {
+                "type": "string",
+                "description": "Calendar date, YYYY-MM-DD"
+              },
+              "closedOn": {
+                "type": "string",
+                "description": "Calendar date, YYYY-MM-DD"
+              },
+              "last4": {
+                "type": "string",
+                "pattern": "^\\d{2,6}$"
+              },
+              "aliases": {
+                "default": [],
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "balanceMode": {
+                "type": "string",
+                "enum": [
+                  "ledger",
+                  "market"
+                ]
+              },
+              "includeInNetWorth": {
+                "default": true,
+                "type": "boolean"
+              },
+              "flexibleIsa": {
+                "type": "boolean"
+              },
+              "interestRate": {
+                "type": "number",
+                "minimum": -100,
+                "maximum": 100
+              },
+              "maturesOn": {
+                "type": "string",
+                "description": "Calendar date, YYYY-MM-DD"
+              },
+              "pension": {
+                "type": "object",
+                "properties": {
+                  "employer": {
+                    "type": "string"
+                  },
+                  "method": {
+                    "type": "string",
+                    "enum": [
+                      "relief_at_source",
+                      "net_pay",
+                      "salary_sacrifice"
+                    ]
+                  }
+                }
+              },
+              "notes": {
+                "type": "string"
+              },
+              "attributes": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": [
+                    "string",
+                    "number",
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "description": "Extra detail from the source with no dedicated field yet (namespaced keys welcome)"
+              },
+              "createdAt": {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                "description": "ISO 8601 timestamp"
+              },
+              "updatedAt": {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                "description": "ISO 8601 timestamp"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "type",
+              "createdAt",
+              "updatedAt"
+            ]
+          }
+        }
+      },
+      "required": [
+        "transactions",
+        "accounts"
+      ]
+    }
+  },
+  "required": [
+    "id",
+    "status",
+    "title",
+    "summary",
+    "changes",
+    "provenance",
+    "createdAt",
+    "updatedAt"
+  ]
+}

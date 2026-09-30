@@ -15,6 +15,7 @@ import { addDays, today } from '../../shared/dates';
 import { ACCOUNT_TYPES, ASSET_CLASSES, CONTEXT_KINDS, INSIGHT_KINDS, INSIGHT_PAGES, INSTRUMENT_TYPES, type Insight, type Note, type Provenance, type Research } from '../../shared/schema';
 import type { Analytics } from '../analytics';
 import { nowISO } from '../fsutil';
+import type { ProposalService } from '../proposals';
 import { applyRecords, researchIdOf, type ApplyResult, type RecordBatch, type RecordInput } from '../records';
 import type { Store } from '../store';
 import type { AgentTool } from './claude';
@@ -29,6 +30,12 @@ export interface JobContext {
   params: Record<string, unknown>;
   /** Empty scratch directory the job runs in. */
   scratch: string;
+  /**
+   * Where a job proposes fixes to the owner's data (docs/AGENTS.md, "Proposing fixes"): its
+   * `apply` calls `proposals.create(input, provenance)` with the provenance it is given, and the
+   * owner applies or dismisses each. A job never changes source facts itself.
+   */
+  proposals?: ProposalService;
 }
 
 export interface JobOutcome {

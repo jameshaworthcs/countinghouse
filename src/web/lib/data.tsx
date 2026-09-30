@@ -58,6 +58,11 @@ export function useLiveUpdates(): void {
         void qc.invalidateQueries({ queryKey: ['import'] });
         void qc.invalidateQueries({ queryKey: ['summary'] });
       });
+      // An agent proposed a fix, or took one back.
+      es.addEventListener('proposal', () => {
+        void qc.invalidateQueries({ queryKey: ['proposals'] });
+        void qc.invalidateQueries({ queryKey: ['proposal'] });
+      });
     };
     connect();
     return () => {

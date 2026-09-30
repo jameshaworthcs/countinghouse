@@ -4,6 +4,7 @@ import { Link, useLocation, useSearchParams } from 'react-router';
 import type { CaptureAskView, CaptureItemView, CaptureResponse, ImportHistoryResponse, ImportListResponse, MonthlyChecklistResponse, SystemResponse } from '../../shared/api';
 import type { ImportRecord } from '../../shared/schema';
 import { Badge, Button, Callout, Card, Checkbox, EmptyState, Loading, PageHeader, Pager, StatusBadge, useToast } from '../components/ui';
+import { ProposalQueue } from '../components/Proposals';
 import { DropZone, FilePickerButton } from '../components/Upload';
 import { api, qs, useApi, useApiMutation } from '../lib/api';
 import { useAppData } from '../lib/data';
@@ -319,7 +320,7 @@ function History() {
                   {c.fileName}
                 </Link>
                 <span className="hidden text-ink-3 sm:inline">
-                  {c.result?.nothingNew ? 'filed, nothing new' : c.result ? [c.result.transactionsAdded ? `+${c.result.transactionsAdded} transactions` : '', c.result.balancesAdded ? 'balance' : '', c.result.holdingsAdded ? 'holdings' : '', c.result.figuresAdded ? `${c.result.figuresAdded} figures` : ''].filter(Boolean).join(', ') : ''}
+                  {c.result?.nothingNew ? 'filed, nothing new' : c.result ? [c.result.transactionsAdded ? `+${plural(c.result.transactionsAdded, 'transaction')}` : '', c.result.balancesAdded ? 'balance' : '', c.result.holdingsAdded ? 'holdings' : '', c.result.figuresAdded ? plural(c.result.figuresAdded, 'figure') : ''].filter(Boolean).join(', ') : ''}
                 </span>
                 <span className="w-24 text-right text-ink-3">{c.committedAt ? formatDate(c.committedAt.slice(0, 10)) : ''}</span>
               </li>
@@ -387,6 +388,7 @@ export default function Import() {
             </ul>
           </Card>
         )}
+        <ProposalQueue />
         <CaptureList />
         <Monthly />
         <Callout tone="neutral" title="Inbox folder" action={<FolderInput className="size-5 text-ink-3" />}>

@@ -9,6 +9,7 @@ it is `src/server/records.ts` (validation and writing) and `src/server/agents/` 
 
 1. **Source facts are never touched.** Transactions, balances, holdings, figures and documents are
    what the owner's documents said. Agents never write them, and inference never changes them.
+   When the data looks wrong, an agent proposes a fix and the owner decides (§5).
 2. **The owner wins.**
    - A record with `provenance.setBy: "owner"` beats any agent record for the same thing, at any
      scope ([FORMULAS.md §1](FORMULAS.md)).
@@ -50,9 +51,10 @@ read `data/` directly, but should quote computed figures from the app rather tha
 access"): `npm run -s api -- GET /imports`.
 - It is how an agent does upkeep on imports waiting for review. It can read a document again, draft
   it again, choose its account or edit its draft.
-- It can also write records (`POST /records`, the same batches as below) and start jobs, but only
-  if the token has those scopes.
-- Committing, dismissing and discarding stay with the owner.
+- It can also write records (`POST /records`, the same batches as below), propose fixes
+  (`POST /proposals`, §5) and start jobs, but only if the token has those scopes.
+- Committing, dismissing and discarding stay with the owner, and so do applying and dismissing a
+  proposed fix.
 - Never sign in any other way: never forge a session from the server's secret, and never edit the
   work area's files behind the app's back.
 
@@ -154,7 +156,58 @@ Write a **batch**:
   - The `interpret-note` job stores **proposals** on the note; the owner accepts or edits them.
   - Agents read context; they do not change it.
 
-## 5. Resolving conflicts
+## 5. Proposing fixes
+
+When the data itself looks wrong (a transfer linked to the wrong account, money recorded twice, an
+account's dates), an agent does not change it. It **proposes a fix**, and the owner applies or
+dismisses it on the Import page, under "Proposed fixes", change by change. The code is
+`src/server/proposals.ts`.
+
+- **How.** `POST /api/proposals` with a token that has the `records` scope (`npm run -s api --
+  POST /proposals @proposal.json`), or, in an in-app job, `ctx.proposals.create(input, provenance)`
+  from the job's `apply`, with the provenance it is given. Both are checked the same way.
+  `"dryRun": true` checks a proposal and returns how it would look, without keeping it.
+
+  ```json
+  {
+    "title": "Re-link the March 2026 moves between the current account and the saver",
+    "summary": "What the data shows, in a few sentences.",
+    "provenance": { "model": "claude-opus-5-5", "session": "claude-code" },
+    "changes": [
+      { "kind": "unlink_transfer", "transaction": "tx_…", "why": "…" },
+      { "kind": "link_transfer", "from": "tx_… (money out)", "to": "tx_… (money in)", "why": "…" },
+      { "kind": "set_category", "transaction": "tx_…", "category": "takeaway", "why": "…" },
+      { "kind": "remove_duplicate", "transaction": "tx_…", "sameAs": ["tx_…", "tx_…"], "why": "…" },
+      { "kind": "set_account_dates", "account": "example-fixed", "closedOn": "2026-02-01", "why": "…" }
+    ]
+  }
+  ```
+
+- **Grounded in the data.** Every change names the rows or account it is about. Its `why` says
+  what in the data shows it: the words or account number in a description, the same amount a day
+  apart, the document a row came from. The owner sees those rows, and their documents, beside each
+  change.
+- **Checked when made, when shown and when applied.** The changes run in order on a copy of the
+  data, so an unlink comes before the link that needs it.
+  - A link joins money out with the same amount in, in two different accounts, at most 10 days
+    apart, neither linked already.
+  - A duplicate's `sameAs` rows are in its account, at most 10 days from it, and add up to it.
+  - A category exists, and a row linked as a transfer keeps a transfer category.
+  - Dates are in order and not in the future.
+  - A proposal with a change that does not fit, or that the data already says, is refused (422,
+    with each problem). One that stops fitting later is shown with the problem, and applying it
+    needs that change left out.
+- **One proposal, one decision.** Group the changes that stand or fall together (the legs of one set
+  of moves) and keep unrelated fixes apart. The owner can leave any change out; the rest are checked
+  again.
+- **Not again.** The same changes cannot be proposed while they wait, or after the owner dismissed
+  them. Read a dismissal's reason (`GET /api/proposals/:id`) before proposing anything like it.
+- **Applying** goes through the store's own writes under one commit message. The proposal is kept
+  in `data/proposals/`, with the rows and accounts it changed as they were before. A category it sets
+  counts as the owner's (`categorisedBy: user`). No token can apply or dismiss a proposal; an agent
+  can withdraw its own while it waits (`DELETE /api/proposals/:id`).
+
+## 6. Resolving conflicts
 
 | Situation | What to do |
 |---|---|
@@ -165,7 +218,7 @@ Write a **batch**:
 | A fund's identity is ambiguous (share classes) | Record what the holding's ISIN says; if there is none, say so and use `confidence: "low"`. |
 | An insight would repeat an earlier one | Skip it unless something changed; the digest lists earlier insights and the owner's feedback. |
 
-## 6. In-app jobs
+## 7. In-app jobs
 
 Jobs run through the logged-in `claude` CLI (`src/server/agents/claude.ts`), locked down like
 extraction:
@@ -223,11 +276,14 @@ Other behaviour:
   | `monthly-review` | 61 s | $0.24 |
   | `interpret-note` | 15 s | $0.07 |
 - **The output's records** carry the job's id, model and prompt version.
+- **A job can propose fixes** through `ctx.proposals` (§5), under the job's provenance. None does
+  yet: a job that checks the owner's data for fixes reads the owner's data, so it gets no web tools,
+  and like every job it waits for agents to be on.
 - **Only real data starts jobs by itself.** Jobs start on their own only when the data directory
   is tracked in git; the demo and throwaway copies never start them, though you can still start
   one by hand.
 
-## 7. Prompt versions
+## 8. Prompt versions
 
 Each job has a `promptVersion` (in `src/server/agents/kinds.ts`), recorded on everything it
 writes. Change the version whenever a prompt or output schema changes, so old output can be told

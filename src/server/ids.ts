@@ -32,6 +32,10 @@ export function importId(now: Date = new Date()): string {
   return `imp_${now.getFullYear()}${p(now.getMonth() + 1)}${p(now.getDate())}_${p(now.getHours())}${p(now.getMinutes())}${p(now.getSeconds())}_${randomHex(2)}`;
 }
 
+export function proposalId(now: Date = new Date()): string {
+  return importId(now).replace(/^imp_/, 'prop_');
+}
+
 export function ruleId(): string {
   return `rule_${Date.now().toString(36)}${randomHex(3)}`;
 }

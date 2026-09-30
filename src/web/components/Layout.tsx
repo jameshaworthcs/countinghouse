@@ -25,6 +25,7 @@ import { api, useApi } from '../lib/api';
 import { useAppData, useLiveUpdates } from '../lib/data';
 import { cn } from '../lib/format';
 import { usePrefs } from '../lib/prefs';
+import { useProposals } from './Proposals';
 import { GlobalDrop } from './Upload';
 import { IconButton } from './ui';
 
@@ -89,7 +90,9 @@ export function Layout() {
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
   const imports = useApi<ImportListResponse>(['imports'], '/imports', { refetchInterval: 15_000 });
-  const reviewCount = imports.data?.pending.filter((p) => p.status === 'review' || p.status === 'needs_mapping' || p.status === 'failed').length ?? 0;
+  const proposals = useProposals();
+  // Imports to review and proposed fixes to decide: both wait for you on the Import page.
+  const reviewCount = (imports.data?.pending.filter((p) => p.status === 'review' || p.status === 'needs_mapping' || p.status === 'failed').length ?? 0) + (proposals.data?.pending.length ?? 0);
   useEffect(() => setMenuOpen(false), [location.pathname]);
 
   const logout = async () => {

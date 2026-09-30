@@ -10,6 +10,7 @@ import type { GitCommitter } from './git';
 import type { InboxWatcher } from './ingest/inbox';
 import type { ImportService } from './ingest/service';
 import type { OidcClient } from './oidc';
+import type { ProposalService } from './proposals';
 import { StoreError, type Store } from './store';
 import type { AgentTokens } from './tokens';
 
@@ -28,6 +29,8 @@ export interface AppContext {
   store: Store;
   analytics: Analytics;
   imports: ImportService;
+  /** Fixes agents propose, waiting for the owner (proposals.ts). */
+  proposals: ProposalService;
   git: GitCommitter;
   auth: Auth;
   /** Sign-in through jemedia-auth, when configured (it then replaces the password). */

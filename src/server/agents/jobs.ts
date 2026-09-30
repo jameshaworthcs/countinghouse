@@ -21,6 +21,7 @@ import type { JobQueue } from '../context';
 import { atomicWrite, nowISO, randomHex } from '../fsutil';
 import { detectEngines } from '../ingest/engines';
 import { recordInstrumentsFromHoldings } from '../instruments';
+import type { ProposalService } from '../proposals';
 import type { Store } from '../store';
 import { runAgent } from './claude';
 import { JOB_DEFS, JOB_KINDS, outputJsonSchema, REFRESHABLE_KEYS, type JobKind } from './kinds';
@@ -97,8 +98,11 @@ export class JobRunner extends EventEmitter implements JobQueue {
     private readonly store: Store,
     private readonly analytics: Analytics,
     private readonly config: Config,
-    /** autoRun: start due jobs by themselves. paused: queue jobs without running them (tests). */
-    private readonly opts: { autoRun: boolean; paused?: boolean } = { autoRun: true },
+    /**
+     * autoRun: start due jobs by themselves. paused: queue jobs without running them (tests).
+     * proposals: where a job proposes fixes for the owner to apply (JobContext.proposals).
+     */
+    private readonly opts: { autoRun: boolean; paused?: boolean; proposals?: ProposalService } = { autoRun: true },
   ) {
     super();
     this.dir = path.join(config.workDir, 'jobs');
@@ -263,7 +267,7 @@ export class JobRunner extends EventEmitter implements JobQueue {
       if (!claudeBin || !engines.find((e) => e.id === 'claude-cli')?.available) throw new Error('The claude CLI is not available; agent jobs need it.');
       await rm(scratch, { recursive: true, force: true });
       await mkdir(scratch, { recursive: true, mode: 0o700 });
-      const ctx = { store: this.store, analytics: this.analytics, params: job.params, scratch };
+      const ctx = { store: this.store, analytics: this.analytics, params: job.params, scratch, ...(this.opts.proposals ? { proposals: this.opts.proposals } : {}) };
       const prompt = await Promise.resolve(def.prepare(ctx));
       const settings = this.store.settings.agents;
       const res = await runAgent({

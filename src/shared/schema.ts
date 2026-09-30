@@ -1077,6 +1077,69 @@ export const ProvenanceSchema = z.object({
 });
 export type Provenance = z.infer<typeof ProvenanceSchema>;
 
+// ─── Proposed fixes ──────────────────────────────────────────────────────────────────────────────
+// Changes an agent found reasons for in your data, each with its reason (docs/AGENTS.md, "Proposing
+// fixes"). Nothing changes until you apply them; you can leave any change out.
+
+export const PROPOSAL_STATUSES = ['pending', 'applied', 'dismissed'] as const;
+export type ProposalStatus = (typeof PROPOSAL_STATUSES)[number];
+
+const TransactionIdSchema = z.string().regex(/^tx_[0-9a-f]{16}$/);
+/** Names a change within its proposal ("c1", "link-saver-oct"). */
+const ChangeKeySchema = z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/);
+/** What in the data shows it, in a sentence or two. */
+const ChangeWhySchema = z.string().trim().min(1).max(1000);
+
+const changeUnion = <K extends z.ZodType<string | undefined>>(key: K) =>
+  z.discriminatedUnion('kind', [
+    /** Undo a transfer link: both rows of the pair are left unlinked (their categories stay). */
+    z.object({ key, kind: z.literal('unlink_transfer'), why: ChangeWhySchema, transaction: TransactionIdSchema }),
+    /** Link money out of one of your accounts with the same money into another, as a transfer. */
+    z.object({ key, kind: z.literal('link_transfer'), why: ChangeWhySchema, from: TransactionIdSchema, to: TransactionIdSchema }),
+    /** Give a transaction a category (applied, it is yours: nothing re-categorises it). */
+    z.object({ key, kind: z.literal('set_category'), why: ChangeWhySchema, transaction: TransactionIdSchema, category: z.string().min(1).max(64) }),
+    /** Remove a transaction that repeats money already recorded: the rows it repeats add up to it. */
+    z.object({ key, kind: z.literal('remove_duplicate'), why: ChangeWhySchema, transaction: TransactionIdSchema, sameAs: z.array(TransactionIdSchema).min(1).max(10) }),
+    /** Set when an account opened or closed (null clears it; a closing date closes the account). */
+    z.object({ key, kind: z.literal('set_account_dates'), why: ChangeWhySchema, account: SlugSchema, openedOn: ISODateSchema.nullable().optional(), closedOn: ISODateSchema.nullable().optional() }),
+  ]);
+
+export const ProposedChangeSchema = changeUnion(ChangeKeySchema);
+export type ProposedChange = z.infer<typeof ProposedChangeSchema>;
+export type ProposedChangeKind = ProposedChange['kind'];
+
+export const ProposalSchema = z.object({
+  id: z.string().regex(/^prop_\d{8}_\d{6}_[0-9a-f]{4}$/),
+  status: z.enum(PROPOSAL_STATUSES),
+  title: z.string().min(1).max(160),
+  /** What the data shows, in a few sentences. */
+  summary: z.string().min(1).max(4000),
+  /** In the order they apply: an unlink comes before the link that needs it. */
+  changes: z.array(ProposedChangeSchema).min(1).max(60),
+  provenance: ProvenanceSchema,
+  createdAt: TimestampSchema,
+  updatedAt: TimestampSchema,
+  decidedAt: TimestampSchema.optional(),
+  /** Keys of the changes applied. */
+  applied: z.array(z.string()).optional(),
+  /** Why it was dismissed, if you said. */
+  dismissedReason: z.string().max(1000).optional(),
+  /** The rows and accounts the applied changes touched, as they were before: the audit trail. */
+  before: z.object({ transactions: z.array(TransactionSchema), accounts: z.array(AccountSchema) }).optional(),
+});
+export type Proposal = z.infer<typeof ProposalSchema>;
+
+/** What an agent sends (POST /api/proposals): keys are given when missing. */
+export const ProposalInputSchema = z.object({
+  title: z.string().trim().min(1).max(160),
+  summary: z.string().trim().min(1).max(4000),
+  changes: z.array(changeUnion(ChangeKeySchema.optional())).min(1).max(60),
+  provenance: ProvenanceSchema.omit({ setBy: true }).optional(),
+  /** Check it against the data and show how it would look, without saving it. */
+  dryRun: z.boolean().optional(),
+});
+export type ProposalInput = z.infer<typeof ProposalInputSchema>;
+
 /** A public source a record rests on. */
 export const SourceLinkSchema = z.object({
   title: z.string().min(1).max(300),

@@ -713,3 +713,42 @@ Import page's History showed only the latest 50 committed imports, so they sat o
 - **`GET /api/imports` lists only what waits for review.** It carried up to 200 committed summaries
   too, which the Import page (every 5 seconds) and the menu badge (every 15) fetched without
   needing.
+
+## 2026-09-30: Agents propose fixes; the owner applies them
+
+Checking the Aldermore and Santander imports turned up data that was wrong rather than missing:
+- transfers linked to the wrong account;
+- a deposit recorded twice (once from a letter);
+- an account closed a day late.
+
+The app had no way for the owner to fix most of it: no control for an account's dates, no delete
+for a transaction, and no way to change a transfer link. The owner did not want hand edits either:
+an agent should propose each fix, grounded in the data, in a queue like the imports, for the owner
+to decide.
+
+- **Proposals are drafts of changes, reviewed before they are applied**, like imports: pending ones
+  wait in the work area, never in `data/`.
+  - One the owner applies or dismisses is kept in `data/proposals/`, with the rows and accounts it
+    changed as they were before. That record is the audit trail and the way back.
+  - An applied proposal is one git commit.
+- **A few kinds of change, each checked against the data**:
+  - unlink and link transfers;
+  - set a category;
+  - remove a duplicate whose rows add up to it;
+  - set an account's dates.
+
+  No general "patch any field": each kind has rules a wrong proposal fails (AGENTS.md §5). Checking
+  runs when a proposal is made, whenever it is shown, and when it is applied, so one that stopped
+  fitting says why.
+- **Agents propose with the `records` scope; only the owner applies or dismisses.** Proposing
+  changes nothing, so it sits with the other agent-written records. The existing "Claude Code on
+  P360" token can propose without a new token.
+  - Applying, dismissing and checking are closed to every token.
+  - An agent can withdraw its own waiting proposal.
+- **Background agents use the same service** through `JobContext.proposals`, under the job's
+  provenance. No job proposes yet, and agents stay off.
+- **A category a proposal sets is the owner's** (`categorisedBy: user`): the owner approved that
+  row's category, so nothing re-categorises it. A transfer it links gets the transfer category, as
+  an import's link does.
+- **Dismissed means not again**: the same changes are refused while they wait or once dismissed,
+  and the owner's reason is kept for agents to read.

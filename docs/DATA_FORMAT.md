@@ -43,6 +43,7 @@ data/
   balances/<account-id>.jsonl               balance / valuation snapshots
   holdings/<account-id>.jsonl               holdings snapshots
   imports/<yyyy>/<import-id>.json           provenance for every committed import
+  proposals/<yyyy>/<proposal-id>.json       fixes an agent proposed that you applied or dismissed
   documents/<yyyy>/<mm>/<sha12>-<file>      original statements and screenshots
 ```
 
@@ -188,6 +189,23 @@ Standalone figures from documents, used for Self Assessment:
   (`{id, date, amount, description, importId}`, the import that had recorded the copy). A draft
   section offers them as `extraCopies` (`{transactionId, keepId, date, amount, description,
   fromFile?, sameBalance, remove}`) ([INGESTION.md](INGESTION.md), "Recorded twice").
+
+## proposals/&lt;yyyy&gt;/&lt;id&gt;.json
+
+A fix an agent proposed ([AGENTS.md §5](AGENTS.md)) that you applied or dismissed. One waiting for
+you lives in the work area (`<work>/proposals/`), never here.
+
+- `id` (`prop_<yyyymmdd>_<hhmmss>_<hex4>`), `status` (`applied` | `dismissed`), `title`, `summary`
+  (what the agent found), `provenance` (as on agent records), `createdAt`, `decidedAt`.
+- `changes`: in order, each `{key, kind, why, …}`:
+  - `unlink_transfer {transaction}`: both rows of its transfer are left unlinked.
+  - `link_transfer {from, to}`: money out and the same money in, linked as a transfer.
+  - `set_category {transaction, category}`.
+  - `remove_duplicate {transaction, sameAs}`: a row that repeats rows adding up to it.
+  - `set_account_dates {account, openedOn?, closedOn?}` (`null` clears one).
+- `applied`: the keys of the changes you applied. `dismissedReason`: what you said, if anything.
+- `before`: `{transactions, accounts}`, the rows and accounts the applied changes touched, as they
+  were before: the audit trail, and a way back.
 
 ## goals.json
 
