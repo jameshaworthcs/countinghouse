@@ -45,16 +45,23 @@ export function transferCategoryFor(otherType: AccountType, thisType?: AccountTy
   return 'transfer';
 }
 
-type WrapperRule = [pattern: RegExp, category: string, direction?: 'in' | 'out'];
+/** A dividend or fund distribution as providers word it; interactive investor writes "Div 250 VANGUARD FUNDS PLC …". */
+export const DIVIDEND_WORDING = /DIVIDEND|DISTRIBUTION|^DIV\b/i;
+
+/** The pattern, its category and direction, and where the row names the investment (group 1), used as the payee. */
+type WrapperRule = [pattern: RegExp, category: string, direction?: 'in' | 'out', names?: RegExp];
 
 /** Flows inside ISA / pension / investment accounts, recognised from the provider's wording. */
 const WRAPPER_RULES: WrapperRule[] = [
+  // A settlement date marks a trade, whatever the fund is called (interactive investor:
+  // "12 VANGUARD FTSE GLOB  Del   105.20 S Date 03/02/25").
+  [/\bS\s+DATE\s+\d{1,2}\/\d{1,2}\/\d{2,4}\b/i, 'trade', undefined, /^\s*[\d,.]+\s+(.+?)\s+(?:[A-Z]+\s+)?[\d,.]+\s+S\s+DATE\b/i],
   [/GOVERNMENT BONUS|LISA BONUS|\bBONUS\b.*(HMRC|GOV)|HMRC.*BONUS/i, 'government-bonus', 'in'],
   [/TAX RELIEF|BASIC RATE RELIEF|RELIEF AT SOURCE|\bHMRC\b|INCOME TAX RECLAIM/i, 'tax-relief', 'in'],
   [/EMPLOYER/i, 'employer-contribution', 'in'],
   [/ISA TRANSFER|TRANSFER IN FROM|TRANSFER FROM .*(ISA|PENSION|PLAN)|PENSION TRANSFER|\bTRANSFER IN\b/i, 'transfer', 'in'],
   [/CONTRIBUTION|SUBSCRIPTION|DEPOSIT|LUMP SUM|TOP ?UP|DIRECT DEBIT|REGULAR (SAVING|INVEST)|PAYMENT IN|MONEY IN|FASTER PAYMENT|BANK TRANSFER|CARD PAYMENT/i, 'contribution', 'in'],
-  [/DIVIDEND|DISTRIBUTION|INTEREST|COUPON|INCOME/i, 'investment-income', 'in'],
+  [new RegExp(`${DIVIDEND_WORDING.source}|INTEREST|COUPON|INCOME`, 'i'), 'investment-income', 'in', /^DIV\s+[\d,.]+\s+(.+)$/i],
   [/FEE|CHARGE|COMMISSION|STAMP DUTY|PTM LEVY|\bFX\b/i, 'investment-fee', 'out'],
   [/\bBUY\b|\bSELL\b|\bBOUGHT\b|\bSOLD\b|PURCHASE|\bSALE\b|SWITCH|REBALANC|ORDER/i, 'trade'],
   [/WITHDRAW|TRANSFER OUT|PAYMENT OUT|MONEY OUT|DRAWDOWN|TAX[- ]FREE CASH|LUMP SUM PAID/i, 'withdrawal', 'out'],
@@ -207,10 +214,11 @@ export class Categoriser {
     // 3. Flows inside wrapper accounts.
     if (isWrapper) {
       const dir = input.amount >= 0 ? 'in' : 'out';
-      for (const [re, category, direction] of WRAPPER_RULES) {
+      for (const [re, category, direction, names] of WRAPPER_RULES) {
         if (direction && direction !== dir) continue;
         if (re.test(input.description)) {
-          return { payee: fallbackPayee, category, categorisedBy: 'builtin' };
+          const investment = input.payee || input.aiPayee ? undefined : names?.exec(input.description)?.[1]?.replace(/\s+/g, ' ').trim();
+          return { payee: investment || fallbackPayee, category, categorisedBy: 'builtin' };
         }
       }
     }

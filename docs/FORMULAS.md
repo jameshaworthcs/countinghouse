@@ -249,10 +249,14 @@ years), both paths grow at the median:
 
 - Anchors are valuations. Between them, only external flows move the value (contributions,
   employer, relief, bonus, withdrawals, transfers).
-- Before the first valuation:
+- Before the first valuation, flagged estimated:
   - within 45 days, rolled back by the flows since;
-  - further back, contributions + (growth at the first valuation) × elapsed fraction since the
-    first flow, flagged estimated.
+  - further back, when the flows go back to the account's start (§12, **Paid in**):
+    contributions + (growth at the first valuation) × elapsed fraction since the first flow;
+  - otherwise rolled back by the flows since, as if nothing grew. The data starts part-way
+    through the account's life, so it was not empty when the first flow arrived: an ISA export
+    that opens with cash in hand and funds already held;
+  - a rolled-back value is never below nothing.
 
 **Approximate figures** (a balance you gave roughly, `approximate: true`):
 
@@ -400,6 +404,8 @@ Deterministic rules with named thresholds (`SIGNAL_RULES` in `analytics/spending
   The pages label the band with its basis.
 
 **Dividends:** dividends outside ISAs and pensions, plus vouchers, against the dividend allowance.
+In a general investment account, a dividend is investment income worded as one
+(`DIVIDEND_WORDING`: "dividend", "distribution", or interactive investor's "Div 250 …").
 
 ## 12. Paid in, growth and money-weighted return (`analytics/investments.ts`)
 

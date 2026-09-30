@@ -6,7 +6,7 @@ import { allowances } from '../src/server/analytics/allowances';
 import { BalanceEngine } from '../src/server/analytics/balances';
 import { cashflow } from '../src/server/analytics/cashflow';
 import { detectRecurring } from '../src/server/analytics/recurring';
-import { enrich } from '../src/server/enrich';
+import { categoriseInvestmentRows, enrich } from '../src/server/enrich';
 import { transactionId } from '../src/server/ids';
 import { classifyDuplicates } from '../src/server/ingest/dedup';
 import { matchAccount } from '../src/server/ingest/match';
@@ -94,6 +94,23 @@ describe('merchants and categorisation', () => {
     expect(c.categorise({ accountId: 'monzo', description: 'MYSTERY', amount: -5, bankCategory: 'groceries' })).toMatchObject({ category: 'groceries', categorisedBy: 'bank' });
     expect(c.categorise({ accountId: 'monzo', description: 'MYSTERY', amount: -5, aiCategory: 'pets' })).toMatchObject({ category: 'pets', categorisedBy: 'ai' });
     expect(c.categorise({ accountId: 'monzo', description: 'MYSTERY', amount: -5, aiCategory: 'not-a-category' }).category).toBeUndefined();
+  });
+
+  it('reads interactive investor’s wording: a settlement date is a trade, "Div" a dividend, each named after the investment', () => {
+    const c = new Categoriser([], new CategoryIndex(defaultCategories()), [acct('current', 'current'), acct('ii-isa', 'stocks_isa', { institutionId: 'interactive-investor' })], []);
+    const isa = (description: string, amount: number, extra: { payee?: string } = {}) => c.categorise({ accountId: 'ii-isa', description, amount, ...extra });
+    expect(isa('12 VANGUARD FTSE GLOB  Del   105.20 S Date 03/02/25', -1262.4)).toMatchObject({ category: 'trade', payee: 'VANGUARD FTSE GLOB', categorisedBy: 'builtin' });
+    expect(isa('3.5 LIFESTRATEGY 60  Del   250.00 S Date 3/2/2025', -875)).toMatchObject({ category: 'trade', payee: 'LIFESTRATEGY 60' });
+    // Selling an income fund is a trade, not investment income.
+    expect(isa('40 ABC EQUITY INCOME  Rec   2.50 S Date 04/03/25', 100)).toMatchObject({ category: 'trade', payee: 'ABC EQUITY INCOME' });
+    expect(isa('Div 250   VANGUARD FUNDS PLC   FTSE ALL WLD UCITS ETF', 45.5)).toMatchObject({ category: 'investment-income', payee: 'VANGUARD FUNDS PLC FTSE ALL WLD UCITS ETF' });
+    expect(isa('Div 250   VANGUARD FUNDS PLC', 45.5, { payee: 'Vanguard' }).payee).toBe('Vanguard');
+    // The rest of ii's wording as before.
+    expect(isa('GROSS INTEREST', 0.8)).toMatchObject({ category: 'investment-income', payee: 'Gross Interest' });
+    expect(isa('Monthly Subscription', 500).category).toBe('contribution');
+    expect(isa('DIVERSIFIED GROWTH FUND', 10).category).toBeUndefined();
+    // Outside an investment account neither wording means anything.
+    expect(c.categorise({ accountId: 'current', description: 'Div 250 VANGUARD FUNDS PLC', amount: 45.5 }).category).not.toBe('investment-income');
   });
 });
 
@@ -339,6 +356,46 @@ describe('store, balances and analytics', () => {
     expect(a.savings).toMatchObject({ band: 'higher', bandBasis: 'documents', allowance: 500 });
     // A past year with no P60 and no pay found is not estimated from today's salary.
     expect(allowances(store, '2024/25', '2026-09-29').taxBand).toMatchObject({ band: 'none', basis: 'minimum' });
+  });
+
+  it('on start, gives investment rows nothing categorised the category their wording now has, and touches nothing else', async () => {
+    await store.setCategories(defaultCategories());
+    const rows = {
+      trade: tx('isa', '2025-02-03', -1262.4, '12 VANGUARD FTSE GLOB  Del   105.20 S Date 03/02/25'),
+      dividend: tx('isa', '2025-04-02', 45.5, 'Div 250   VANGUARD FUNDS PLC'),
+      yourPayee: tx('isa', '2025-04-03', 30, 'Div 120   ACME FUND', { payee: 'Acme dividends', payeeSetBy: 'user' }),
+      claudes: tx('isa', '2025-04-04', 12, 'Div 250   VANGUARD FUNDS PLC', { category: 'other-income', categorisedBy: 'ai' }),
+      unexplained: tx('isa', '2025-05-01', -2, 'MYSTERY'),
+      leftByYou: tx('isa', '2025-05-02', -3, '5 ABC FUND  Del  0.60 S Date 02/05/25', { categorisedBy: 'user' }),
+      notInvestments: tx('current', '2025-05-03', -3, '5 ABC FUND  Del  0.60 S Date 02/05/25'),
+    };
+    await store.addTransactions(Object.values(rows), 'test');
+    expect(await categoriseInvestmentRows(store)).toBe(3);
+    const now = (k: keyof typeof rows) => {
+      const t = store.transaction(rows[k].id)!;
+      return [t.category, t.categorisedBy, t.payee];
+    };
+    expect(now('trade')).toEqual(['trade', 'builtin', 'VANGUARD FTSE GLOB']);
+    expect(now('dividend')).toEqual(['investment-income', 'builtin', 'VANGUARD FUNDS PLC']);
+    expect(now('yourPayee')).toEqual(['investment-income', 'builtin', 'Acme dividends']);
+    expect(now('claudes')).toEqual(['other-income', 'ai', undefined]);
+    for (const k of ['unexplained', 'leftByYou', 'notInvestments'] as const) expect(now(k)[0]).toBeUndefined();
+    expect(await categoriseInvestmentRows(store)).toBe(0);
+  });
+
+  it('counts a general investment account’s dividends in any provider’s wording, and none from an ISA', async () => {
+    await store.setCategories(defaultCategories());
+    await store.setAccounts([...store.accounts, acct('gia', 'gia')]);
+    await store.addTransactions(
+      [
+        tx('gia', '2026-07-02', 45.5, 'Div 250   VANGUARD FUNDS PLC   FTSE ALL WLD UCITS ETF', { category: 'investment-income' }),
+        tx('gia', '2026-08-01', 12.25, 'DIVIDEND ACME PLC', { category: 'investment-income' }),
+        tx('gia', '2026-08-25', 0.8, 'GROSS INTEREST', { category: 'investment-income' }),
+        tx('isa', '2026-07-02', 30, 'Div 250   VANGUARD FUNDS PLC', { category: 'investment-income' }),
+      ],
+      'test',
+    );
+    expect(allowances(store, '2026/27', '2026-09-29').dividends.amount).toBe(57.75);
   });
 
   it('counts ISA subscriptions, provider figures and one-sided transfers', async () => {

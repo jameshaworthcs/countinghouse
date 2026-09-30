@@ -2,6 +2,7 @@
 // with carry-forward, Personal Savings Allowance and the dividend allowance.
 
 import { ACCOUNT_TYPE_META, balanceModeOf } from '../../shared/accounts';
+import { DIVIDEND_WORDING } from '../../shared/categorise';
 import type { AllowanceLine, AllowancesResponse, TaxBandEstimate } from '../../shared/api';
 import { addDays, diffDays, formatDate, maxDate, minDate, today, type ISODate } from '../../shared/dates';
 import { fromMinor, toMinor } from '../../shared/money';
@@ -421,7 +422,7 @@ export function allowances(store: Store, label?: string, now: ISODate = today())
   const ledger = store.accounts.filter((a) => !ACCOUNT_TYPE_META[a.type].taxFreeInterest && balanceModeOf(a) === 'ledger');
   const gias = store.accounts.filter((a) => a.type === 'gia');
   const divLedger = sumCategory(store, ledger, ty, 'dividends');
-  const divGia = sumCategory(store, gias, ty, 'investment-income', 1, /DIVIDEND|DISTRIBUTION/i);
+  const divGia = sumCategory(store, gias, ty, 'investment-income', 1, DIVIDEND_WORDING);
   const divFigures = store.figures.filter((f) => f.taxYear === ty.label && f.kind === 'dividends_paid');
   const dividendsMinor = divLedger.minor + divGia.minor + divFigures.reduce((s, f) => s + toMinor(f.amount), 0);
 

@@ -3,7 +3,7 @@
 // better merchant lists or new categories apply to history without re-importing anything.
 
 import { CategoryIndex } from '../shared/categories';
-import { Categoriser, transferLegCategory } from '../shared/categorise';
+import { Categoriser, isWrapperAccount, transferLegCategory } from '../shared/categorise';
 import { diffDays } from '../shared/dates';
 import { toMinor } from '../shared/money';
 import { tidyPlace } from '../shared/places';
@@ -30,6 +30,32 @@ export async function refreshPlaces(store: Store): Promise<number> {
     if (place !== t.place) updates.push({ id: t.id, patch: { place } });
   }
   if (updates.length) await store.updateTransactions(updates, `data: tidy merchant addresses (${updates.length} transaction${updates.length === 1 ? '' : 's'})`);
+  return updates.length;
+}
+
+/**
+ * Rows in investment and pension accounts that nothing categorised, which the app's built-in
+ * wording now explains (a provider's words for a trade or a dividend): they get that category, and
+ * the payee it gives unless you set one. Run when the app starts, so wording learnt later reaches
+ * rows already committed. Nothing else is touched: a category set by anyone stays, and so does a
+ * row you left uncategorised. Returns how many changed.
+ */
+export async function categoriseInvestmentRows(store: Store): Promise<number> {
+  const wrappers = store.accounts.filter((a) => isWrapperAccount(a.type));
+  if (!wrappers.length) return 0;
+  const categoriser = new Categoriser(store.rules, new CategoryIndex(store.categories), store.accounts, store.institutions);
+  const updates: { id: string; patch: Partial<Transaction> }[] = [];
+  for (const a of wrappers) {
+    for (const t of store.transactions(a.id)) {
+      if (t.category || t.categorisedBy || t.transferGroup) continue;
+      const res = categoriser.categorise({ accountId: t.accountId, description: t.description, amount: t.amount, bankCategory: t.bankCategory, payee: t.merchant?.name ?? t.counterpartyName });
+      if (!res.category || res.categorisedBy !== 'builtin') continue;
+      const patch: Partial<Transaction> = { category: res.category, categorisedBy: 'builtin' };
+      if (t.payeeSetBy !== 'user' && res.payee && res.payee !== t.payee) patch.payee = res.payee;
+      updates.push({ id: t.id, patch });
+    }
+  }
+  if (updates.length) await store.updateTransactions(updates, `data: categorise ${updates.length} investment-account row${updates.length === 1 ? '' : 's'} from their wording`);
   return updates.length;
 }
 

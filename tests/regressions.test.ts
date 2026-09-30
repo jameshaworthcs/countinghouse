@@ -69,6 +69,36 @@ describe('estate value classification', () => {
     expect(engine.balanceOn('isa', '2026-03-28')!.value).toBe(19_000);
     expect(engine.balanceOn('isa', '2026-03-27')).toBeNull();
   });
+
+  it('before its first valuation, an account whose data starts part-way through is rolled back, not grown from nothing', async () => {
+    // Three payments in from October, then the first valuation in June: an export that starts with
+    // money already in the account.
+    const pays = (id: string) => ['2024-10-10', '2024-11-10', '2024-12-10'].map((d) => tx(id, d, 1_000, 'Monthly Subscription', { category: 'contribution' }));
+    await store.setAccounts([...store.accounts, acct('late', 'stocks_isa'), { ...acct('opened', 'stocks_isa'), openedOn: '2024-10-01' }, acct('empty', 'stocks_isa')]);
+    await store.addTransactions([...pays('late'), ...pays('opened'), ...pays('empty')], 'test');
+    await store.addBalances([bal('late', '2025-06-01', 50_000), bal('opened', '2025-06-01', 50_000), bal('empty', '2025-06-01', 50_000), bal('empty', '2024-09-30', 0)], 'test');
+    const engine = new BalanceEngine(store);
+    // The valuation less what arrived since, as if nothing grew.
+    expect(engine.balanceOn('late', '2024-10-10')).toEqual({ value: 48_000, gbp: 48_000, estimated: true });
+    expect(engine.balanceOn('late', '2025-01-31')!.value).toBe(50_000);
+    expect(engine.balanceOn('late', '2024-10-09')).toBeNull();
+    // The data goes back to the start, by the opening date or a nil valuation: it grew from what went in.
+    for (const id of ['opened', 'empty']) {
+      expect(engine.balanceOn(id, '2024-10-10')!.value).toBe(1_000);
+      expect(engine.balanceOn(id, '2025-01-31')!.value).toBeLessThan(50_000);
+    }
+    expect(engine.balanceOn('opened', '2024-10-10')!.estimated).toBe(true);
+  });
+
+  it('never rolls an account back below nothing', async () => {
+    await store.setAccounts([...store.accounts, acct('sipp', 'sipp')]);
+    await store.addTransactions([tx('sipp', '2024-10-10', 100, 'Contribution', { category: 'contribution' }), tx('sipp', '2024-11-10', 5_000, 'Transfer in from another pension', { category: 'transfer' })], 'test');
+    // The transfer lost a fifth before the first valuation.
+    await store.addBalances([bal('sipp', '2025-06-01', 4_000)], 'test');
+    const engine = new BalanceEngine(store);
+    expect(engine.balanceOn('sipp', '2024-10-10')!.value).toBe(0);
+    expect(engine.balanceOn('sipp', '2024-11-10')!.value).toBe(4_000);
+  });
 });
 
 describe('investment returns', () => {

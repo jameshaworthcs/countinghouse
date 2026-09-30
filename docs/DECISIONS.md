@@ -605,3 +605,32 @@ spreadsheets too.
   added again.
 - **A correction refreshes what the old words decided**: the payee and category, unless you set
   them or a transfer link did, and a transfer link. The old description stays in `corrections`.
+
+## 2026-09-30: An investment account's value before its first valuation
+
+An interactive investor ISA export opened two years back, part-way through the account's life, with
+cash in hand and funds already held. Before the account's first valuation the chart assumed it
+started from nothing at the first payment in, so it showed a few thousand pounds climbing to the
+valuation: growth that never happened.
+
+- **The same test as "paid in".** Summed flows are everything that went in only when they go back
+  to the start: a nil valuation before them, or an opening date within a month of the first. Only
+  then does the value climb from them to the first valuation.
+- **Otherwise it is rolled back as if nothing grew**: the first valuation less what arrived since,
+  as within 45 days of it already. Growth is unknown there, and leaving it out is closer than
+  inventing it. Setting the account's opening date says the data goes back to the start.
+- **Never below nothing.** A transfer in followed by a fall would otherwise roll back to a
+  negative asset.
+
+## 2026-09-30: interactive investor's wording
+
+- **A settlement date marks a trade.** ii writes "12 VANGUARD FTSE GLOB Del 105.20 S Date 03/02/25",
+  with no "buy" or "sell". The settlement date is on trades only, so it wins over fund names: an
+  income fund is not investment income when it is bought or sold.
+- **"Div 250 …" is a dividend**, in the ISA and pension rules and in a general investment account's
+  dividends for tax, which share `DIVIDEND_WORDING`.
+- **The investment is the payee.** Both kinds of row name it, so the list shows "VANGUARD FTSE GLOB"
+  rather than the whole line or "Div".
+- **Rows already committed get it when the app starts**, like tidy addresses: only rows in
+  investment and pension accounts that nothing categorised, and only a built-in category. Re-run
+  on all history would reach them too, but it works out every row again, payees included.

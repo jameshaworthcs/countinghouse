@@ -10,7 +10,7 @@ import { fromMinor, roundMoney, subMoney, toMinor } from '../../shared/money';
 import type { Account } from '../../shared/schema';
 import { ageOn, birthdayAt, lisaPenaltyAdjustedValue, pensionAccessDate, statePensionDate, statePensionFullYearly, taxYearOf, taxYearParams } from '../../shared/uk';
 import type { Store } from '../store';
-import type { BalanceEngine } from './balances';
+import { flowsFromStart, type BalanceEngine } from './balances';
 import { computeBaseline, standardPeriods } from './baseline';
 import { Coverage } from './coverage';
 import { feeDrag, retirement as retirementModel } from './model';
@@ -92,12 +92,10 @@ export function investments(store: Store, engine: BalanceEngine): InvestmentsRes
     const snaps = all.filter((b) => !b.approximate);
     const lastSnap = all.findLast((b) => !b.approximate || b.contributions !== undefined);
     const flowsTx = store.transactions(a.id).filter((t) => t.category && EXTERNAL_FLOW_CATEGORIES.has(t.category));
-    // Summed contributions are what went in only when they go back to the start: every valuation
-    // before the first of them is nothing, and there is one, or the first comes within a month of
-    // the account's opening. Otherwise they are only what went in since the data starts.
+    // Summed contributions are what went in only when they go back to the start (flowsFromStart).
+    // Otherwise they are only what went in since the data starts.
     const firstFlow = flowsTx.reduce<string | null>((m, t) => (m === null || t.date < m ? t.date : m), null);
-    const before = firstFlow ? snaps.filter((b) => b.date < firstFlow) : [];
-    const fromStart = firstFlow !== null && before.every((b) => Math.abs(b.balance) < 1) && (before.length > 0 || (a.openedOn !== undefined && diffDays(a.openedOn, firstFlow) <= 31));
+    const fromStart = flowsFromStart(a, snaps, firstFlow);
     let contributions: number | null = null;
     let contributionsSource: InvestmentAccountSummary['contributionsSource'] = null;
     if (lastSnap?.contributions !== undefined) {

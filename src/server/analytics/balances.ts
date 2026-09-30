@@ -8,9 +8,10 @@
 //
 // Market accounts (investments, pensions, property): valuations are anchors and only money moving
 // in or out from outside (contributions, withdrawals, bonus, relief) is added between them. Before
-// the first valuation, value is estimated from contributions plus growth accrued linearly.
+// the first valuation, value is estimated: from contributions plus growth accrued linearly when the
+// data goes back to the account's start, else rolled back by the money that arrived since.
 
-import { balanceModeOf } from '../../shared/accounts';
+import { ACCOUNT_TYPE_META, balanceModeOf } from '../../shared/accounts';
 import { EXTERNAL_FLOW_CATEGORIES } from '../../shared/categories';
 import { diffDays, today, type ISODate } from '../../shared/dates';
 import { fromMinor, toMinor } from '../../shared/money';
@@ -43,6 +44,20 @@ interface AccountData {
   lastSnapshot: ISODate | null;
   lastTransaction: ISODate | null;
   fx: number | null;
+  /** Market accounts: the external flows go back to the account's start (flowsFromStart). */
+  fromStart: boolean;
+}
+
+/**
+ * Whether a market account's external flows go back to its start, so that summed they are all it
+ * was ever paid (docs/FORMULAS.md §12, "Paid in"): every real valuation before the first flow is
+ * nothing, and there is one, or the first flow comes within 31 days of the account's opening.
+ * Otherwise the data starts part-way through the account's life.
+ */
+export function flowsFromStart(account: Pick<Account, 'openedOn'>, valuations: { date: ISODate; balance: number }[], firstFlow: ISODate | null): boolean {
+  if (firstFlow === null) return false;
+  const before = valuations.filter((b) => b.date < firstFlow);
+  return before.every((b) => Math.abs(b.balance) < 1) && (before.length > 0 || (account.openedOn !== undefined && diffDays(account.openedOn, firstFlow) <= 31));
 }
 
 export interface BalancePoint {
@@ -150,6 +165,7 @@ export class BalanceEngine {
         lastSnapshot,
         lastTransaction: lastTx,
         fx: fxRate(account.currency, store.settings),
+        fromStart: flowsFromStart(account, real, firstFlow),
       });
     }
   }
@@ -204,10 +220,14 @@ export class BalanceEngine {
         const contributed = sumTo(d.flows, date);
         const a2 = firstAnchorAfter(d.anchors, date);
         estimated = true;
-        if (a2 && diffDays(date, a2.date) <= 45) {
-          // Close to the first valuation: roll back by the money that arrived since.
-          minor = a2.minor - (sumTo(d.flows, a2.date) - contributed);
+        if (a2 && (diffDays(date, a2.date) <= 45 || !d.fromStart)) {
+          // Close to the first valuation, or data that starts part-way through the account's life
+          // (it was not empty when the first flow arrived): roll back by the money that arrived
+          // since, as if nothing grew. An asset is never worth less than nothing.
+          const rolled = a2.minor - (sumTo(d.flows, a2.date) - contributed);
+          minor = ACCOUNT_TYPE_META[account.type].liability ? rolled : Math.max(0, rolled);
         } else if (a2 && d.flows.dates.length) {
+          // The flows go back to the start: it grew from them to the first valuation.
           const firstFlow = d.flows.dates[0]!;
           const growthAtA2 = a2.minor - sumTo(d.flows, a2.date);
           const span = Math.max(1, diffDays(firstFlow, a2.date));

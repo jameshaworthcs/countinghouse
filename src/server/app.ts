@@ -8,7 +8,7 @@ import { ZodError } from 'zod';
 import { JobRunner } from './agents/jobs';
 import { Analytics } from './analytics';
 import { Auth, loadSessionSecret } from './auth';
-import { refreshPlaces } from './enrich';
+import { categoriseInvestmentRows, refreshPlaces } from './enrich';
 import type { Config } from './config';
 import type { AppContext } from './context';
 import { GitCommitter } from './git';
@@ -64,6 +64,12 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
     if (await refreshPlaces(store)) await git.flush();
   } catch (err) {
     console.warn(`[data] merchant addresses were not tidied: ${(err as Error).message}`);
+  }
+  // …and investment rows nothing categorised get a category once the app knows the provider's words.
+  try {
+    if (await categoriseInvestmentRows(store)) await git.flush();
+  } catch (err) {
+    console.warn(`[data] investment rows were not categorised: ${(err as Error).message}`);
   }
 
   const analytics = new Analytics(store);

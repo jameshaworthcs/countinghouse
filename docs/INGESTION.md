@@ -275,10 +275,17 @@ read again.
   1. your rules;
   2. transfers to your own accounts (by alias, or by provider name outside investment accounts);
   3. wrapper flows (contribution, employer contribution, tax relief, LISA bonus, fees, trades,
-     withdrawals);
+     withdrawals). A row with a settlement date is a trade, whatever the fund is called
+     (interactive investor: "12 VANGUARD FTSE GLOB Del 105.20 S Date 03/02/25"), and "Div 250 …" is
+     a dividend; both take the investment's name as the payee;
   4. the built-in UK merchant list (`src/shared/merchants.ts`, about 200 patterns);
   5. the bank's own category;
   6. Claude's suggestion.
+  - When the app starts, rows in investment and pension accounts that nothing categorised get the
+    category the built-in wording now gives them, and its payee unless you set one
+    (`categoriseInvestmentRows`). Nothing else changes: a category set by anyone stays, and so does
+    a row you left uncategorised. **Re-run on all history** (Settings → Rules) works everything
+    out again instead.
 - **Duplicates** (`dedup.ts`) are checked in this order:
   1. same bank id;
   2. same date + amount + simplified description, matched as a multiset (two identical coffees
