@@ -146,7 +146,8 @@ export function assessNovelty(pending: ImportRecord[], store: Store): Map<string
   for (const { r, facts, doubtful } of candidates) {
     const draft = r.draft!;
     const fresh = facts.filter((f) => !f.stored);
-    if (doubtful) {
+    // Taking away a copy recorded twice is something to do, even with nothing to add.
+    if (doubtful || draft.sections.some((s) => s.extraCopies?.some((c) => c.remove))) {
       kept.push(...fresh.map((f) => ({ fact: f.fact, from: r })));
       continue;
     }

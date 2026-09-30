@@ -14,6 +14,7 @@ import { nowISO, safeFileName } from '../fsutil';
 import { balanceId, figureId, holdingsId, transactionId, transferGroupId } from '../ids';
 import { linkTransfers } from '../enrich';
 import { StoreError, type Store } from '../store';
+import { hasYourChanges } from './dedup';
 import { sameHolding } from './match';
 
 export interface CommitInput {
@@ -141,6 +142,31 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
     }
   }
 
+  // 2b. Copies of payments recorded twice that the document shows once, ticked to be taken away
+  // (the draft's `extraCopies`). Each is checked again: both copies still there, in this account, on
+  // the same day for the same amount, and nothing of yours on the one going. Not when rows of this
+  // import match both (it shows the payment twice), or a row matched to either is ticked in (you
+  // counted it as a different payment).
+  const removals: Transaction[] = [];
+  if (!nothingNew) {
+    const withReceipts = new Set(store.receipts.map((r) => r.transactionId));
+    for (const section of draft.sections) {
+      const account = resolved.get(section.key);
+      if (!account || section.target.mode !== 'existing') continue;
+      const matched = new Set(section.transactions.flatMap((r) => (!r.include && r.duplicateOf ? [r.duplicateOf] : [])));
+      const counted = new Set(section.transactions.flatMap((r) => (r.include && r.duplicateOf ? [r.duplicateOf] : [])));
+      for (const c of section.extraCopies ?? []) {
+        if (!c.remove) continue;
+        const gone = store.transaction(c.transactionId);
+        const kept = store.transaction(c.keepId);
+        if (!gone || !kept || gone.id === kept.id || removals.some((t) => t.id === gone.id)) continue;
+        if (gone.accountId !== account.id || kept.accountId !== account.id || gone.date !== kept.date || toMinor(gone.amount) !== toMinor(kept.amount)) continue;
+        if (hasYourChanges(gone, withReceipts) || (matched.has(gone.id) && matched.has(kept.id)) || counted.has(gone.id) || counted.has(kept.id)) continue;
+        removals.push(gone);
+      }
+    }
+  }
+
   // 3. Balances, holdings, figures.
   const balances: BalanceSnapshot[] = [];
   const holdings: HoldingsSnapshot[] = [];
@@ -234,6 +260,7 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
     if (!store.account(account.id)) await store.upsertAccount(account);
   }
   const label = record.document.fileName;
+  const removed = removals.length ? await store.deleteTransactions(removals.map((t) => t.id), `import: ${label} (−${removals.length} recorded twice)`) : 0;
   const added = newTx.length ? await store.addTransactions(newTx, `import: ${label} (+${newTx.length} transactions)`) : 0;
   if (transferLinks.length) {
     await store.updateTransactions(
@@ -278,6 +305,7 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
       holdingsAdded,
       figuresAdded,
       ...(nothingNew ? { nothingNew: nothingNew.slice(0, 500) } : {}),
+      ...(removed ? { transactionsRemoved: removals.map((t) => ({ id: t.id, date: t.date, amount: t.amount, description: t.description, ...(t.source.importId ? { importId: t.source.importId } : {}) })) } : {}),
       sections: draft.sections.flatMap((s) => {
         const account = resolved.get(s.key);
         return account ? [{ key: s.key, accountId: account.id }] : [];
@@ -287,6 +315,7 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
   const names = [...new Set(accountIds)].map((id) => store.account(id)?.name ?? id).join(', ');
   const bits = [
     added ? `+${added} txns` : '',
+    removed ? `−${removed} recorded twice` : '',
     balances[0] ? `balance ${formatMoney(balances[0].balance, { currency: balances[0].currency })}` : '',
     holdingsAdded ? 'holdings' : '',
     figuresAdded ? `${figuresAdded} figures` : '',

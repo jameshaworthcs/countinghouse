@@ -26,6 +26,7 @@ import { StoreError, type ImportSummary, type Store } from '../store';
 import { extractWithClaudeApi } from './claude-api';
 import { extractWithClaudeCli } from './claude-cli';
 import { commitDraft } from './commit';
+import { BUILTIN_CSV_PROFILES } from './csv-profiles';
 import { recheckDraft } from './dedup';
 import { compareReading } from './reread';
 import { CSV_ENGINE_VERSION, findProfile, parseWithProfile, readCsvRows, suggestMapping } from './csv';
@@ -653,7 +654,7 @@ export class ImportService extends EventEmitter {
     if (saveAs) {
       const saved: CsvProfile = {
         ...profile,
-        id: slugify(saveAs, [...this.store.csvProfiles.map((p) => p.id), 'monzo', 'starling', 'revolut']),
+        id: slugify(saveAs, [...this.store.csvProfiles.map((p) => p.id), ...BUILTIN_CSV_PROFILES.map((p) => p.id)]),
         name: saveAs,
         builtin: false,
         headerSignature: (record.mapping?.headers ?? profile.headerSignature).filter(Boolean).map((h) => h.trim().toLowerCase()),

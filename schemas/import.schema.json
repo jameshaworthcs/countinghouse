@@ -2818,6 +2818,49 @@
               },
               "holdingsPartial": {
                 "type": "boolean"
+              },
+              "extraCopies": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "transactionId": {
+                      "type": "string"
+                    },
+                    "keepId": {
+                      "type": "string"
+                    },
+                    "date": {
+                      "type": "string",
+                      "description": "Calendar date, YYYY-MM-DD"
+                    },
+                    "amount": {
+                      "type": "number",
+                      "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "fromFile": {
+                      "type": "string"
+                    },
+                    "sameBalance": {
+                      "type": "boolean"
+                    },
+                    "remove": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "transactionId",
+                    "keepId",
+                    "date",
+                    "amount",
+                    "description",
+                    "sameBalance",
+                    "remove"
+                  ]
+                }
               }
             },
             "required": [
@@ -3035,6 +3078,37 @@
         "nothingNew": {
           "type": "string",
           "maxLength": 500
+        },
+        "transactionsRemoved": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "date": {
+                "type": "string",
+                "description": "Calendar date, YYYY-MM-DD"
+              },
+              "amount": {
+                "type": "number",
+                "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+              },
+              "description": {
+                "type": "string"
+              },
+              "importId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "date",
+              "amount",
+              "description"
+            ]
+          }
         },
         "sections": {
           "type": "array",

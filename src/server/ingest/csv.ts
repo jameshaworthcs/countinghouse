@@ -346,6 +346,9 @@ const HINTS: Record<string, RegExp> = {
   type: /^type$|transaction type/,
 };
 
+/** Header words for the description, strongest first. */
+const DESCRIPTION_HINTS = [/description|details|narrative|particulars|memo/, /payee|merchant|name|counter ?party/, /reference|transaction/];
+
 export function suggestMapping(rows: string[][]): MappingSuggestion | null {
   if (rows.length < 2) return null;
   // Header: the first row whose following row contains a date and which itself has no dates.
@@ -382,8 +385,14 @@ export function suggestMapping(rows: string[][]): MappingSuggestion | null {
   const debit = amount ? undefined : pick(HINTS.debit!, (s) => s.amountRatio > 0.05);
   const credit = amount ? undefined : pick(HINTS.credit!, (s) => s.amountRatio > 0.05 && s !== debit);
   const balance = pick(HINTS.balance!, (s) => s.amountRatio > 0.5);
+  // The description: a column named for it first, then one naming the other party, then any other
+  // text column the hints allow. A column that is the transaction's type ("Transaction Type": Transfer,
+  // Payment…) is never it while another will do: Chase's export has both.
+  const typeLike = (s: (typeof stats)[number]) => HINTS.type!.test(s.norm);
   const description =
-    pick(HINTS.description!, (s) => s.avgText > 3) ?? [...stats].sort((a, b) => b.avgText - a.avgText).find((s) => s.avgText > 3);
+    DESCRIPTION_HINTS.map((hint) => pick(hint, (s) => s.avgText > 3 && !typeLike(s))).find(Boolean) ??
+    pick(HINTS.description!, (s) => s.avgText > 3) ??
+    [...stats].sort((a, b) => b.avgText - a.avgText).find((s) => s.avgText > 3);
   const currency = pick(HINTS.currency!, () => true);
   const category = pick(HINTS.category!, () => true);
   const time = pick(HINTS.time!, () => true);

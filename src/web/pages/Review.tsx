@@ -423,6 +423,28 @@ function SectionEditor({ section, index, total, latest, periodFromRows, onChange
                 </div>
               </div>
             )}
+            {target.mode === 'existing' && section.extraCopies && section.extraCopies.length > 0 && (
+              <Callout tone="warn" title={`${plural(section.extraCopies.length, 'payment')} recorded twice`}>
+                <p className="mb-2">This account has {section.extraCopies.length === 1 ? 'it' : 'them'} twice, and this document shows {section.extraCopies.length === 1 ? 'it' : 'each'} once. A ticked copy is taken away when you commit; the other stays.</p>
+                <ul className="flex flex-col gap-2">
+                  {section.extraCopies.map((c) => (
+                    <li key={c.transactionId}>
+                      <Checkbox
+                        checked={c.remove}
+                        onChange={(v) => set({ extraCopies: section.extraCopies!.map((x) => (x.transactionId === c.transactionId ? { ...x, remove: v } : x)) })}
+                        label={
+                          <span>
+                            Take away the copy “{c.description}”, {formatDate(c.date)}, <Money value={c.amount} className="tabular" />
+                            {c.fromFile ? ` (from ${c.fromFile})` : ''}
+                          </span>
+                        }
+                      />
+                      <div className="ml-6 text-[12px] text-ink-3">{c.sameBalance ? 'Both copies show the same balance after them: the same payment.' : 'It is recorded more times than this document shows it: check it is not a second payment before taking it away.'}</div>
+                    </li>
+                  ))}
+                </ul>
+              </Callout>
+            )}
             {section.holdings.length > 0 && (
               <div>
                 <Checkbox checked={section.recordHoldings} onChange={(v) => set({ recordHoldings: v })} label={<span className="font-medium text-ink">Record {plural(section.holdings.length, 'holding')}</span>} />
@@ -743,6 +765,9 @@ export default function Review() {
           <KeyValue
             items={[
               ['Transactions added', `${rec.result.transactionsAdded} (${rec.result.transactionsSkipped} skipped)`],
+              ...(rec.result.transactionsRemoved?.length
+                ? [['Recorded twice, taken away', rec.result.transactionsRemoved.map((t) => `${formatDate(t.date)} ${money(t.amount)} “${t.description}”`).join('; ')] as [string, string]]
+                : []),
               ['Balances / holdings / figures', `${rec.result.balancesAdded} / ${rec.result.holdingsAdded} / ${rec.result.figuresAdded}`],
               ['Accounts', rec.result.accountIds.map((a) => <Link key={a} to={`/accounts/${a}`} className="mr-2 text-accent hover:underline">{a}</Link>)],
               ['Transactions', <Link to={`/transactions?source=${rec.id}&period=all`} className="text-accent hover:underline">View what was imported</Link>],

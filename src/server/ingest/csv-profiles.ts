@@ -87,6 +87,22 @@ export const BUILTIN_CSV_PROFILES: CsvProfile[] = [
     },
   }),
   P({
+    id: 'chase',
+    name: 'Chase UK',
+    institutionId: 'chase',
+    accountType: 'current',
+    headerSignature: ['date', 'time', 'transaction type', 'transaction description', 'amount', 'currency', 'balance'],
+    columns: {
+      date: 'Date',
+      time: 'Time',
+      type: 'Transaction Type',
+      description: ['Transaction Description'],
+      amount: 'Amount',
+      currency: 'Currency',
+      balance: 'Balance',
+    },
+  }),
+  P({
     id: 'lloyds-group',
     name: 'Lloyds / Halifax / Bank of Scotland / TSB',
     accountType: 'current',

@@ -24,6 +24,7 @@ The same file twice (by SHA-256) is recognised as already imported.
 | Starling CSV | `starling` | Running balance; "Opening Balance" row becomes the opening balance |
 | Revolut CSV | `revolut` | Completed rows only, fee applied, split into one account per product × currency |
 | Barclays CSV | `barclays` | Newest-first handled; last 4 of the account column |
+| Chase UK CSV | `chase` | Running balance and time; the description is "Transaction Description", and "Transaction Type" (Transfer, Payment, the FX rate of a cash withdrawal abroad) is kept as the type |
 | Lloyds / Halifax / Bank of Scotland / TSB CSV | `lloyds-group` | Debit/credit columns |
 | NatWest / RBS / Ulster CSV | `natwest-group` | Blank first line, spaced headers |
 | Nationwide CSV | `nationwide-current`, `nationwide-credit-card` | Windows-1252 `£`, preamble with account name and balance |
@@ -32,7 +33,7 @@ The same file twice (by SHA-256) is recognised as already imported.
 | first direct and other Date/Description/Amount CSVs | `date-description-amount` | |
 | Trading 212 CSV | `trading-212` | Buys and withdrawals are money out; deposits count as contributions |
 | Holdings exports (interactive investor's portfolio export, and any CSV with a name, quantity and value column but no dates) | `holdings-csv` | One holdings snapshot: units, price (pence or pounds), value, book cost and gain per holding, SEDOL or ticker from the symbol; the account's value is what the holdings are worth (cash is not in the file); the wrapper from the file name (`…-ISA.csv`, `…-SIPP.csv`) |
-| Anything else CSV | auto-detected mapping | Confident mappings import straight away (flagged); otherwise you map the columns once and save them as a profile |
+| Anything else CSV | auto-detected mapping | Confident mappings import straight away (flagged); otherwise you map the columns once and save them as a profile. The description is a column named for it ("description", "details", "narrative"…) before one naming the other party, and never a type column ("Transaction Type") while another will do |
 | Excel `.xlsx`, `.xls`, and HTML tables saved as `.xls` | `xlsx` → the CSV profiles | The first sheet with a table becomes rows (`src/server/ingest/xlsx.ts`, SheetJS), which go through the same profiles, holdings detection and column mapping as a CSV. Date cells become `YYYY-MM-DD`; text cells stay text, so "01/09/2026" is read day first; numbers keep full precision. The review page shows the sheet as a table |
 | OFX / QFX (1.x SGML and 2.x XML) | `ofx` | Bank and credit-card statements, FITID as id, ledger/available balance; foreign amounts per `<ORIGCURRENCY>` (already converted) or `<CURRENCY>` (converted at CURRATE) |
 | QIF | `qif` | Day/month order detected across the whole file |
@@ -282,8 +283,27 @@ read again.
   1. same bank id;
   2. same date + amount + simplified description, matched as a multiset (two identical coffees
      stay two);
-  3. same amount within ±3 days with a similar description, flagged as a *possible* duplicate
-     for you to decide.
+  3. same date + amount + balance after it (both known), matched as a multiset. The running
+     balance places a row whatever each source calls it: Chase's statement says "To Credit Card"
+     where its export says "To Revolving Line Account";
+  4. same amount within ±3 days, flagged as a *possible* duplicate for you to decide, when the
+     descriptions are similar, or it is the same day, or the amount has pence. Sources date a
+     payment differently (made, or cleared two days later) and describe it differently, so a
+     difference in one is not enough to call it new. Whole pounds on different days, described
+     differently, stay new.
+- **Recorded twice** (`storedTwice` in `dedup.ts`). A document can show that the account already
+  has a payment twice: one of its rows matches a recorded row, and another recorded row has the
+  same date and amount, with nothing on the document matching it. When both copies show the same
+  balance after them it is certain, and the copy comes ticked; when the document just shows that
+  date and amount fewer times than they are recorded, it is offered unticked for you to judge.
+  - The copy offered has nothing of yours on it (a category, payee, note, tag or split you set, a
+    correction, a receipt, a transfer link): the one the document did not match, unless only the
+    other is clean. When both have something of yours, nothing is offered.
+  - The review page lists it under the account ("recorded twice"). Committing takes a ticked copy
+    away, after checking it again: both copies still there, alike, nothing of yours added since,
+    and no row of the import that you ticked in as a different payment. The import records what
+    it took away (`result.transactionsRemoved`), and the git history of `data/` keeps the row.
+  - An import that takes a copy away is never "nothing new".
 - **Transfers.** An opposite amount within ±4 days in another of your accounts is proposed as
   the other leg. On commit both legs get a `transferGroup`, and money arriving in an ISA or
   pension becomes a `contribution`. A commit also links its new rows to other legs already stored

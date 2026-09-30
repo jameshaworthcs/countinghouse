@@ -22,7 +22,7 @@ import type {
 } from '../../shared/schema';
 import { DraftSchema } from '../../shared/schema';
 import type { Store } from '../store';
-import { classifyDuplicates } from './dedup';
+import { classifyDuplicates, storedTwice } from './dedup';
 import { fitsAccount, identifies, matchAccount, onlyKind, proposeAccount, sameHolding } from './match';
 
 export { fitsAccount } from './match';
@@ -235,7 +235,7 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
     // Transactions.
     const existingForAccount = existing ? store.transactions(existing.id) : [];
     const dups = classifyDuplicates(
-      acc.transactions.map((t) => ({ date: t.date, amount: t.amount, description: t.description, sourceId: t.sourceId ?? undefined })),
+      acc.transactions.map((t) => ({ date: t.date, amount: t.amount, description: t.description, sourceId: t.sourceId ?? undefined, balanceAfter: t.balanceAfter ?? undefined })),
       existingForAccount,
     );
     const transactions: DraftTransaction[] = acc.transactions.map((t, ti) => {
@@ -326,6 +326,13 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
     const heldMinor = holdings.reduce((sum, h) => sum + toMinor(h.value), 0) + toMinor(cash ?? 0);
     const holdingsPartial = holdings.length > 0 && (holdingDetail || balance === undefined || heldMinor < toMinor(balance) - Math.max(100, Math.round(Math.abs(toMinor(balance)) * 0.001)));
 
+    // Payments recorded twice that this document shows once: offered to be taken away on commit.
+    const extraCopies = existing
+      ? storedTwice(transactions, existingForAccount, {
+          withReceipts: new Set(store.receipts.map((r) => r.transactionId)),
+          fileOf: (t) => store.imports.find((i) => i.id === t.source.importId)?.fileName,
+        })
+      : [];
     // Screenshots of wrapper accounts rarely show a list of flows; statements do.
     const isScreenshot = /screenshot/.test(extraction.documentType) || ctx.document.mediaType.startsWith('image/');
     const section: DraftSection = {
@@ -354,6 +361,7 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
       holdings,
       ...(cashLedger ? { cashLedger: true } : {}),
       ...(holdingsPartial ? { holdingsPartial: true } : {}),
+      ...(extraCopies.length ? { extraCopies } : {}),
       ...(balanceDateSource ? { balanceDateSource } : {}),
       ...(balance !== undefined ? { balance } : {}),
       ...(acc.periodStart ? { periodStart: acc.periodStart } : {}),

@@ -1,0 +1,4 @@
+Date,Time,Transaction Type,Transaction Description,Amount,Currency,Balance
+12 August 2026,12:07,Transfer,To Revolving Line Account,-45.67,GBP,954.33
+3 September 2026,08:44,Payment,From A N OTHER - CHASE-TOPUP,"500.00",GBP,"1,454.33"
+17 September 2026,10:36,Cash withdrawal | EUR 40.00 | FX rate £1 = €1.1600,"Cash withdrawal, Bank, Faro",-34.48,GBP,"1,386.70"

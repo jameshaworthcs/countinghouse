@@ -910,8 +910,30 @@ export const DraftSectionSchema = z.object({
   holdings: z.array(HoldingSchema).default([]),
   /** The document shows only some of the account's holdings; they join the others recorded that day. */
   holdingsPartial: z.boolean().optional(),
+  /**
+   * Payments this account has recorded twice that the document shows once (ingest/dedup.ts,
+   * `storedTwice`). A copy ticked `remove` is taken away when the import is committed.
+   */
+  extraCopies: z
+    .array(
+      z.object({
+        /** The recorded copy to take away, and the copy that stays. */
+        transactionId: z.string(),
+        keepId: z.string(),
+        date: ISODateSchema,
+        amount: MoneySchema,
+        description: z.string(),
+        /** The document the copy to take away came from. */
+        fromFile: z.string().optional(),
+        /** Both copies show the same balance after them: the same payment, for certain. */
+        sameBalance: z.boolean(),
+        remove: z.boolean(),
+      }),
+    )
+    .optional(),
 });
 export type DraftSection = z.infer<typeof DraftSectionSchema>;
+export type ExtraCopy = NonNullable<DraftSection['extraCopies']>[number];
 
 export const DraftFigureSchema = z.object({
   key: z.string(),
@@ -1026,6 +1048,8 @@ export const ImportRecordSchema = z.object({
       figuresAdded: z.number().int().nonnegative().default(0),
       /** Dismissed as adding nothing new: why. Only the document and this record were written. */
       nothingNew: z.string().max(500).optional(),
+      /** Copies of payments recorded twice that this import took away (the draft's `extraCopies`). */
+      transactionsRemoved: z.array(z.object({ id: z.string(), date: ISODateSchema, amount: MoneySchema, description: z.string(), importId: z.string().optional() })).optional(),
       /** The account each draft section was committed to (new accounts get their final id). */
       sections: z.array(z.object({ key: z.string(), accountId: SlugSchema })).optional(),
     })

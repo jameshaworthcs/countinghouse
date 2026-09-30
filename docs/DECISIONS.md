@@ -530,3 +530,27 @@ needed a `fetch` loop pasted into the signed-in browser console.
 - **The first sheet with a table.** Exports put a summary or notes sheet first surprisingly often.
   The review page names the sheet it read.
 
+
+## 2026-09-30: Duplicates across sources, and an import that corrects the record
+
+A Chase export recorded a card payment the August statement had already recorded. The export was
+mapped automatically, and "Transaction Type" ("Transfer") was taken as the description because
+it contains the word "transaction". "Transfer" looked nothing like the statement's "To Credit
+Card", so the row counted as new, though both rows showed the same balance after it.
+
+- **The balance after a payment identifies it.** Same date, amount and balance after it is a
+  duplicate, whatever each source calls it. Chase names the same payment "To Credit Card" on its
+  statement, "To Revolving Line Account" in its export, and "<name>'s Account to Credit card" in
+  its app.
+- **A different description no longer makes a payment new.** The same amount a few days apart is
+  offered for you to check when the descriptions are similar, when it is the same day, or when the
+  amount has pence. Only whole pounds on different days, described differently, stay new: a
+  coincidence there is common, and elsewhere it is rare.
+- **The description column comes before a type column.** Auto-mapping prefers a header naming the
+  description over one naming the other party. It never takes a type column while another will
+  do. Chase's export is a built-in layout now.
+- **An import can take away a copy recorded twice.** Whatever duplicated a payment, the next
+  document that shows the payment once can say so and remove the copy on commit. The copy removed
+  is always one with nothing of yours on it. Removal waits for review like everything else, and
+  comes ticked only when the balances prove it. The import records what it removed. This beats
+  deleting the row by hand: the document is the evidence, and the import is the audit trail.

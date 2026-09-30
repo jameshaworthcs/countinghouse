@@ -184,6 +184,10 @@ Standalone figures from documents, used for Self Assessment:
   statement periods it gives each account's **coverage** (the days it has data for).
   `nothingNew` (optional) is set when the import was dismissed as adding nothing new: why, in words.
   Only the document and this record were written; the counts are all zero.
+  `transactionsRemoved` (optional): copies of payments recorded twice that the import took away
+  (`{id, date, amount, description, importId}`, the import that had recorded the copy). A draft
+  section offers them as `extraCopies` (`{transactionId, keepId, date, amount, description,
+  fromFile?, sameBalance, remove}`) ([INGESTION.md](INGESTION.md), "Recorded twice").
 
 ## goals.json
 

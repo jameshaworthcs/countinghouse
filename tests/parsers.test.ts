@@ -128,6 +128,20 @@ describe('CSV bank formats', () => {
     expect(acc!.transactions[1]!.description).toBe('Market buy · Vanguard FTSE All-World');
   });
 
+  it('Chase UK: the description column, not the type column beside it', () => {
+    const { match, result } = parseCsvFixture('chase.csv');
+    expect(match.profile.id).toBe('chase');
+    const [acc] = result.extraction.accounts;
+    expect(acc!.transactions.map((t) => [t.date, t.time, t.amount, t.description, t.type, t.balanceAfter])).toEqual([
+      ['2026-08-12', '12:07', -45.67, 'To Revolving Line Account', 'Transfer', 954.33],
+      ['2026-09-03', '08:44', 500, 'From A N OTHER - CHASE-TOPUP', 'Payment', 1454.33],
+      ['2026-09-17', '10:36', -34.48, 'Cash withdrawal, Bank, Faro', 'Cash withdrawal | EUR 40.00 | FX rate £1 = €1.1600', 1386.7],
+    ]);
+    // Worked out without the layout, the same columns.
+    const { rows } = readCsvRows(decodeText(fixture('chase.csv')));
+    expect(suggestMapping(rows)!.profile.columns).toMatchObject({ date: 'Date', time: 'Time', description: ['Transaction Description'], type: 'Transaction Type', amount: 'Amount', balance: 'Balance' });
+  });
+
   it('suggests a mapping for unknown layouts', () => {
     const { rows } = readCsvRows(decodeText(fixture('unknown.csv')));
     expect(findProfile(rows)).toBeNull();
