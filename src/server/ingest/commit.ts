@@ -9,7 +9,7 @@ import { tidyPlace } from '../../shared/places';
 import { formatMoney, fromMinor, toMinor } from '../../shared/money';
 import { taxYearOf } from '../../shared/uk';
 import { detailToAdd, fillIn, seenInEntry, stillAdds } from '../../shared/detail';
-import type { Account, BalanceSnapshot, DetailField, Draft, Figure, Holding, HoldingsSnapshot, ImportRecord, Transaction } from '../../shared/schema';
+import type { Account, BalanceSnapshot, DetailField, Draft, DraftSection, Extraction, Figure, Holding, HoldingsSnapshot, ImportRecord, Transaction } from '../../shared/schema';
 import { AccountSchema, BalanceSnapshotSchema, DraftSchema, FigureSchema, HoldingsSnapshotSchema, TransactionSchema } from '../../shared/schema';
 import { nowISO, safeFileName } from '../fsutil';
 import { balanceId, figureId, holdingsId, transactionId, transferGroupId } from '../ids';
@@ -35,6 +35,30 @@ function balanceKind(draft: Draft, mediaType: string): BalanceSnapshot['kind'] {
   if (draft.documentType === 'csv_export') return 'export';
   if (mediaType.startsWith('image/')) return 'screenshot';
   return 'statement';
+}
+
+/**
+ * Whether you typed or changed a section's balance while reviewing: it is not what the draft
+ * proposed. A draft from before `readBalance` is compared with the reading itself, sign aside (the
+ * draft turns a balance owed negative); with no reading kept, it is not known and so not yours.
+ */
+export function balanceByYou(section: Pick<DraftSection, 'key' | 'balance' | 'readBalance'>, reading: Extraction | undefined): boolean {
+  if (section.balance === undefined) return false;
+  if (section.readBalance !== undefined) return section.readBalance === null || toMinor(section.readBalance) !== toMinor(section.balance);
+  if (!reading) return false;
+  const read = reading.accounts[Number(section.key.slice(1))]?.closingBalance;
+  return read === null || read === undefined || Math.abs(toMinor(read)) !== Math.abs(toMinor(section.balance));
+}
+
+/**
+ * When on its day an imported balance was seen (`BalanceSnapshot.at`): one you gave for the day you
+ * gave it is as of then, like your own balance; a screenshot's is when it was taken; a statement's
+ * or an export's is the day's close (none).
+ */
+export function balanceSeenAt(date: string, kind: BalanceSnapshot['kind'], byYou: boolean, capturedAt: string | undefined, stamp: string): string | undefined {
+  if (byYou && stamp.slice(0, 10) === date) return stamp;
+  if (kind === 'screenshot' && capturedAt?.slice(0, 10) === date) return capturedAt;
+  return undefined;
 }
 
 export async function commitDraft(store: Store, input: CommitInput): Promise<ImportRecord> {
@@ -216,15 +240,20 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
     const account = resolved.get(section.key);
     if (!account || !section.balanceDate) continue;
     if (section.recordBalance && section.balance !== undefined) {
+      const kind = balanceKind(draft, record.document.mediaType);
+      const byYou = balanceByYou(section, record.extraction.raw);
+      const at = balanceSeenAt(section.balanceDate, kind, byYou, record.document.capturedAt, stamp);
       balances.push({
         id: balanceId(account.id, section.balanceDate, section.balance, 'import', record.id),
         accountId: account.id,
         date: section.balanceDate,
         balance: section.balance,
         currency: section.currency,
-        kind: balanceKind(draft, record.document.mediaType),
+        kind,
         source,
         createdAt: stamp,
+        ...(at ? { at } : {}),
+        ...(byYou ? { enteredBy: 'user' as const } : {}),
         ...(section.balanceDateSource ? { dateSource: section.balanceDateSource } : {}),
         ...(section.availableBalance !== undefined ? { availableBalance: section.availableBalance } : {}),
         ...(section.creditLimit !== undefined ? { creditLimit: section.creditLimit } : {}),

@@ -190,6 +190,8 @@ export default function AccountDetail() {
                         {market && <td className={cn(tableClasses.td, tableClasses.num)}>{b.contributions !== undefined ? <Money value={b.contributions} /> : '—'}</td>}
                         <td className={cn(tableClasses.td, 'text-ink-3')}>
                           {b.approximate ? <Badge tone="muted">approximate</Badge> : b.kind}
+                          {b.enteredBy === 'user' && b.kind !== 'manual' ? ' · entered by you' : ''}
+                          {b.at && b.at.slice(0, 10) === b.date ? ` · at ${b.at.slice(11, 16)}` : ''}
                           {b.dateSource && b.dateSource !== 'document' && b.dateSource !== 'manual' ? ` · date from ${b.dateSource}` : ''}
                           {b.note && <div className="text-[12px]">{b.note}</div>}
                           {b.source.importId && (

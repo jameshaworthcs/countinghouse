@@ -984,3 +984,30 @@ had recorded a deposit confirmation letter's deposit that morning, so the outcom
   as scheduled payments in a list already did.
 - Considered: leaving it to the draft (a confirmation's figures read into a row in code). The
   reader already returns rows and dates "Today"; the gap was only the rule.
+
+## 2026-09-30: The later balance of a day stands for it; a figure you typed is yours
+
+After a £5 payment was recorded from its confirmation, HSBC showed £5 and a £5 gap. The owner had
+given £5 as the balance at 18:00 and typed £0 into the import at 23:00, after the payment. The
+engine kept one balance a day and ranked the owner's own over a screenshot's (added this morning,
+Starling). Every balance counted as the day's close, so the 18:00 £5 hid the £0. It also counted
+the evening's −£5, which made a £5 "gap".
+
+- **Balances say when on their day they were seen** (`at`, format v3): a screenshot's capture
+  time, or when you gave a balance for that same day. Of two that say when, the later stands for
+  the day; a close (statement, export, running balance, or your balance for an earlier day) is
+  the latest. Without times, the old ranking holds.
+  - Considered: ranking yours over a screenshot's always (as this morning). That is right only
+    when yours is the close, and a balance given for today is not.
+- **A balance seen mid-day is not evidence of a gap** when a row of its day could come after it:
+  no time, or a later one. Rows seldom have times, so in practice a mid-day balance with rows that
+  day is left out of gap checks, as a screenshot is.
+- **A figure you typed while reviewing is yours** (`enteredBy: "user"`). A draft section keeps the
+  balance it proposed (`readBalance`), and a different committed figure is yours. It weighs as your
+  own balance: over a screenshot's, and in gap checks. Editing an imported balance's figure makes
+  it yours too. Applying a re-read replaces it with the reader's, and the mark goes.
+  - Considered: storing it as `kind: "manual"`. `kind` says what document it came from, and the
+    import link stays; weighting is the engine's business.
+- **Backfilled, not guessed** (migration `from: 2`). The times come from `createdAt` (your own
+  balance, given on its day) and the import's `capturedAt`. `enteredBy` is set where the committed
+  figure is not what the reader read, sign aside, since the draft turns a balance owed negative.

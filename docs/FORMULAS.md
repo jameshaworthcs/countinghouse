@@ -242,9 +242,15 @@ years), both paths grow at the median:
 
 **Ledger accounts** (`analytics/balances.ts`):
 
-- Anchors are statement or screenshot balances and end-of-day running balances.
-  - On a day with both, a statement's or your own balance outranks a screenshot's, which may
-    have been taken mid-day.
+- Anchors are statement or screenshot balances and end-of-day running balances. One stands for
+  each day:
+  - A balance is a day's close unless it says when it was seen (`at`): a screenshot's capture
+    time, or when you gave a balance for that same day. A screenshot that does not say is some
+    time that day.
+  - Of two that both say when, the later stands for the day; a close is the latest.
+  - Otherwise, or at the same moment, the stronger: a statement's or your own balance, then a
+    screenshot's, then a running balance. A figure you typed while reviewing an import
+    (`enteredBy: "user"`) is your own balance, whatever document it came with.
   - A day closes where its printed balances end: each row's balance − its amount is the balance
     before it, and the close is the one balance no row of the day starts from.
   - That holds whatever order the rows are stored in, as when two statements that overlap by a day
@@ -289,6 +295,9 @@ years), both paths grow at the median:
 
 - Consecutive strong anchors (not screenshots or approximate figures) with
   anchor_b ≠ anchor_a + Σ tx in (a, b], each transaction on the day it counts from.
+- A balance seen mid-day (`at`) is strong only when every row of its day shows a time no later
+  than it. A row with no time, or a later one, may follow it, and would look like a gap.
+  - Its day's balance(D) is still that balance: rows of the day after it are not added.
 - The difference is what is unexplained.
 - The strong anchors either side of a day (`between`): the last one before it and the first on or
   after it, and what is unexplained between them. A proposal that takes away a move inside the

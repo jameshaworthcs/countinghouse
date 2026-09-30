@@ -301,7 +301,7 @@ export function dataRoutes(ctx: AppContext): Hono {
     if (body.balance !== undefined) {
       const date = body.balanceDate ?? today();
       await store.addBalances(
-        [{ id: balanceId(id, date, body.balance, 'manual', stamp), accountId: id, date, balance: body.balance, currency: body.currency, kind: 'manual', dateSource: 'manual', source: {}, createdAt: stamp }],
+        [{ id: balanceId(id, date, body.balance, 'manual', stamp), accountId: id, date, balance: body.balance, currency: body.currency, kind: 'manual', dateSource: 'manual', source: {}, createdAt: stamp, ...(date === stamp.slice(0, 10) ? { at: stamp } : {}) }],
         `balance: ${account.name} ${date}`,
       );
     }
@@ -383,6 +383,8 @@ export function dataRoutes(ctx: AppContext): Hono {
       source: {},
       createdAt: stamp,
       ...body,
+      // A balance you give for today is as of now, not the day's close (docs/FORMULAS.md §9).
+      ...(body.date === stamp.slice(0, 10) ? { at: stamp } : {}),
     };
     await store.addBalances([snap], `balance: ${account.name} ${body.date}`);
     return c.json(snap, 201);
@@ -390,7 +392,11 @@ export function dataRoutes(ctx: AppContext): Hono {
 
   app.patch('/balances/:id', async (c) => {
     const body = await readJson(c, ManualBalance.partial());
-    return c.json(await store.updateBalance(c.req.param('id'), body, 'balance: edit'));
+    const was = store.accounts.flatMap((a) => store.balances(a.id)).find((b) => b.id === c.req.param('id'));
+    // A figure you change is yours, whatever document it came with; a new date loses the time it was seen.
+    const yours = was && body.balance !== undefined && toMinor(body.balance) !== toMinor(was.balance) && was.kind !== 'manual' ? { enteredBy: 'user' as const } : {};
+    const moved = was && body.date !== undefined && body.date !== was.date ? { at: undefined } : {};
+    return c.json(await store.updateBalance(c.req.param('id'), { ...body, ...yours, ...moved }, 'balance: edit'));
   });
 
   app.delete('/balances/:id', async (c) => {

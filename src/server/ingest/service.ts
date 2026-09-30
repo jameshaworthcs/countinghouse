@@ -558,7 +558,8 @@ export class ImportService extends EventEmitter {
     for (const section of reread.sections) {
       if (key === `balance:${section.accountId}` && section.balance?.read && section.balance.changed && !section.balance.applied) {
         const b = section.balance;
-        if (b.stored) await this.store.updateBalance(b.stored.id, { balance: b.read!.balance, date: b.read!.date, note: `${note}: was ${b.stored.balance.toFixed(2)} on ${b.stored.date}` }, `balance: ${section.accountName} read again`);
+        // The reading's figure, as you chose: no longer one you typed, and seen when the document says.
+        if (b.stored) await this.store.updateBalance(b.stored.id, { balance: b.read!.balance, date: b.read!.date, note: `${note}: was ${b.stored.balance.toFixed(2)} on ${b.stored.date}`, enteredBy: undefined, ...(b.read!.date !== b.stored.date ? { at: undefined } : {}) }, `balance: ${section.accountName} read again`);
         else await this.store.addBalances([{ id: balanceId(section.accountId, b.read!.date, b.read!.balance, 'reread', importId), accountId: section.accountId, date: b.read!.date, balance: b.read!.balance, currency: this.store.account(section.accountId)?.currency ?? 'GBP', kind: record.document.mediaType.startsWith('image/') ? 'screenshot' : 'statement', dateSource: 'document', note, source: { importId, documentId: record.document.id }, createdAt: at }], `balance: ${section.accountName} read again`);
         b.applied = true;
         await this.saveReread(reread);

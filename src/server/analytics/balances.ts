@@ -31,6 +31,28 @@ interface Anchor {
    * approximate figure you gave is weaker still: it only stands in for what is newer than your data.
    */
   source: 'snapshot' | 'running' | 'screenshot' | 'approximate';
+  /** Wall-clock time (HH:MM:SS) on its day when it was seen; absent for a close or an untimed screenshot. */
+  at?: string;
+  /** Seen mid-day with rows of its day that may come after it: weak for gap checks. */
+  midDay?: boolean;
+}
+
+/**
+ * Which of two anchors of one day stands for it (docs/FORMULAS.md §9): the later, when both say when
+ * (a close is the latest); otherwise, or at the same moment, the stronger (a statement's or your own
+ * balance, then a screenshot's, then a running balance), the newer of equals.
+ */
+const STRENGTH: Record<Anchor['source'], number> = { approximate: 0, running: 1, screenshot: 2, snapshot: 3 };
+const momentOf = (a: Anchor): string | undefined => a.at ?? (a.source === 'screenshot' ? undefined : '24:00:00');
+function outranks(next: Anchor, current: Anchor): boolean {
+  const [m, n] = [momentOf(next), momentOf(current)];
+  if (m !== undefined && n !== undefined && m !== n) return m > n;
+  return STRENGTH[next.source] >= STRENGTH[current.source];
+}
+
+/** A balance's time on its own day (HH:MM:SS), when it has one for that day. */
+export function timeOnDay(b: { date: ISODate; at?: string | undefined }): string | undefined {
+  return b.at && b.at.slice(0, 10) === b.date ? b.at.slice(11, 19) : undefined;
 }
 
 interface Series {
@@ -208,12 +230,21 @@ export class BalanceEngine {
       const real = snaps.filter((s) => !s.approximate);
       const lastReal = [txs[txs.length - 1]?.date, real[real.length - 1]?.date].filter(Boolean).sort().reverse()[0];
       const placeholders = snaps.filter((s) => s.approximate && (!lastReal || s.date > lastReal));
-      // A statement's or your own balance outranks a screenshot of the same day: a screenshot may be
-      // taken mid-day, and it would hide what the stronger one says from the gap check.
+      // One anchor a day: the later one, else the stronger (`outranks`). A screenshot may be taken
+      // mid-day, and would hide what a statement's or your own balance says from the gap check; one
+      // you typed yourself weighs as your own.
       for (const s of real) {
-        const source = s.kind === 'screenshot' ? 'screenshot' : 'snapshot';
-        if (source === 'screenshot' && anchors.get(s.date)?.source === 'snapshot') continue;
-        anchors.set(s.date, { date: s.date, minor: toMinor(s.balance), source });
+        const source = s.kind === 'screenshot' && s.enteredBy !== 'user' ? 'screenshot' : 'snapshot';
+        const at = timeOnDay(s);
+        const next: Anchor = { date: s.date, minor: toMinor(s.balance), source, ...(at ? { at } : {}) };
+        const current = anchors.get(s.date);
+        if (!current || outranks(next, current)) anchors.set(s.date, next);
+      }
+      // A balance seen mid-day is not its day's close: rows of that day not known to come before it
+      // (no time, or a later one) may follow it, so it cannot show a gap.
+      const byDay = daysOf(txs);
+      for (const a of anchors.values()) {
+        if (a.at && (byDay.get(a.date) ?? []).some((t) => !t.time || t.time.length < 5 || t.time.padEnd(8, ':00').slice(0, 8) > a.at!)) a.midDay = true;
       }
       for (const s of placeholders) if (!anchors.has(s.date)) anchors.set(s.date, { date: s.date, minor: toMinor(s.balance), source: 'approximate' });
       const sortedAnchors = [...anchors.values()].sort((a, b) => (a.date < b.date ? -1 : 1));
@@ -351,11 +382,11 @@ export class BalanceEngine {
     return { from: { date: a.date, balance: fromMinor(a.minor) }, to: { date: b.date, balance: fromMinor(b.minor) }, difference: this.unexplained(accountId, a, b).difference };
   }
 
-  /** Statement, running and your own balances: screenshots may be mid-day, approximate figures rough. */
+  /** Statement, running and your own balances: screenshots and balances seen mid-day may not be the day's close, approximate figures are rough. */
   private strongAnchors(accountId: string): Anchor[] {
     const d = this.data.get(accountId);
     if (!d || d.mode !== 'ledger' || d.tx.dates.length === 0) return [];
-    return d.anchors.filter((a) => a.source !== 'screenshot' && a.source !== 'approximate');
+    return d.anchors.filter((a) => a.source !== 'screenshot' && a.source !== 'approximate' && !a.midDay);
   }
 
   private unexplained(accountId: string, a: Anchor, b: Anchor): { from: ISODate; to: ISODate; difference: number } {

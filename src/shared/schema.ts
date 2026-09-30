@@ -346,6 +346,17 @@ export const BalanceSnapshotSchema = z.object({
    */
   approximate: z.boolean().optional(),
   dateSource: z.enum(DATE_SOURCES).optional(),
+  /**
+   * When on `date` the balance was seen, when known: a screenshot's capture time, or when you gave
+   * a balance for the day you gave it. Without it a statement's, an export's or your own balance is
+   * the day's close, and a screenshot's some time that day. On the same day, the later one wins.
+   */
+  at: TimestampSchema.optional(),
+  /**
+   * You typed or changed this figure yourself, while reviewing an import or by editing it: it
+   * weighs as your own balance, whatever document it came with.
+   */
+  enteredBy: z.literal('user').optional(),
   attributes: AttributesSchema.optional(),
   source: SourceRefSchema.default({}),
   createdAt: TimestampSchema,
@@ -964,6 +975,8 @@ export const DraftSectionSchema = z.object({
   /** Whether to record the balance snapshot below. */
   recordBalance: z.boolean().default(true),
   balance: MoneySchema.optional(),
+  /** The balance the draft proposed from the reading (null: none): a different `balance` is yours. */
+  readBalance: MoneySchema.nullable().optional(),
   balanceDate: ISODateSchema.optional(),
   balanceDateSource: z.enum(DATE_SOURCES).optional(),
   availableBalance: MoneySchema.optional(),

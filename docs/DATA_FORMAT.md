@@ -119,7 +119,7 @@ depend on).
 
 ## balances/&lt;account&gt;.jsonl
 
-A balance or valuation at the end of `date`:
+A balance or valuation at the end of `date`, or at `at` on it when that is known:
 
 | Field | Notes |
 |---|---|
@@ -132,6 +132,8 @@ A balance or valuation at the end of `date`:
 | `taxYearContributions`, `taxYear` | provider-reported "allowance used this tax year" (optional) |
 | `annualIncome` | DB / State Pension forecast (optional) |
 | `approximate` | `true` for a rough figure you gave: it stands in only for what is newer than the account's real data (optional) |
+| `at` | when on `date` it was seen, when known (optional): a screenshot's capture time, or when you gave a balance for that same day. Without it a statement's, an export's or your own balance is the day's close, and a screenshot's some time that day. Of two on one day, the later stands for it (FORMULAS.md §9) |
+| `enteredBy` | `"user"`: you typed or changed this figure yourself, while reviewing an import or by editing it. It weighs as your own balance whatever document it came with (optional) |
 | `interestRate`, `note`, `attributes`, `source`, `createdAt` | |
 
 ## holdings/&lt;account&gt;.jsonl
@@ -183,7 +185,9 @@ Standalone figures from documents, used for Self Assessment:
   reader was unsure of). Both are optional and only used while reviewing. Since `extract-9` a
   draft can carry `nothingToRecord`: what a document the reader understood, but found nothing to
   record in, shows (one sentence). `batchMatch` (`{accountId, importId}`) says a section's account
-  came from another screenshot taken and uploaded with it.
+  came from another screenshot taken and uploaded with it. A section's `readBalance` is the balance
+  the draft proposed from the reading (`null`: none); a committed `balance` that differs is one you
+  typed (`enteredBy` on the balance).
   A row's `insideAccount` names the Space it moves money to or from, inside the account: left
   unticked, and remembered on the account's `spaces` when committed so.
 - `draftEditedAt`: when you last saved changes to a pending draft; such a draft is never redrafted
@@ -419,6 +423,7 @@ An ask without a check is ticked by you (`doneAt`). Agents cannot set `doneAt` o
 |---|---|---|
 | 1 | first format | |
 | 2 | Assumptions become data. `profile.assumedRealReturn` is removed: kept as your global `return.expected` override (nominal, at 2% inflation) if you had changed it from 4%. Added `instruments.json`, `assumptions.jsonl`, `research.jsonl`, `insights.jsonl`, `context.jsonl`, `notes.jsonl`, `settings.agents`, and the optional `payeeSetBy`, `corrections` and `result.sections` fields | `from: 1` in `src/server/migrations.ts` |
+| 3 | Balances say when on their day they were seen (`at`) and which imported figures you typed (`enteredBy`). Backfilled: your own balances given on their own day take the time you gave them; imported balances take the capture time of their screenshot, or, when the committed figure is not what the reader read, `enteredBy: "user"` and the time you committed it. Draft sections gain `readBalance` | `from: 2` in `src/server/migrations.ts` |
 
 Data written by a newer version of the app than the one running is read-only until the app is
 updated.

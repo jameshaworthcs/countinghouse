@@ -83,6 +83,62 @@ export const MIGRATIONS: Migration[] = [
       if (!(await ctx.exists('instruments.json'))) await ctx.writeJson('instruments.json', { $schema: '../schemas/instruments.schema.json', instruments: [] });
     },
   },
+  {
+    from: 2,
+    description: 'Balances say when on their day they were seen (at), and which imported figures you typed yourself (enteredBy)',
+    async run(ctx) {
+      // The committed imports the balances came from: their document, reading and reviewed draft.
+      interface Rec {
+        id?: string;
+        document?: { capturedAt?: string };
+        extraction?: { raw?: { accounts?: { closingBalance?: number | null }[] } };
+        draft?: { sections?: { key: string; recordBalance?: boolean; balance?: number; balanceDate?: string }[] };
+        result?: { sections?: { key: string; accountId: string }[] };
+      }
+      const imports = new Map<string, Rec>();
+      for await (const file of walk(path.join(ctx.dataDir, 'imports'))) {
+        if (!file.endsWith('.json')) continue;
+        try {
+          const rec = JSON.parse(await readFile(file, 'utf8')) as Rec;
+          if (rec.id) imports.set(rec.id, rec);
+        } catch {
+          // An unreadable record says nothing about its balances.
+        }
+      }
+      const pence = (n: number) => Math.round(Math.abs(n) * 100);
+      let timed = 0;
+      let yours = 0;
+      await ctx.mapJsonl('balances', (b) => {
+        if (b.at || b.enteredBy || b.approximate || typeof b.date !== 'string' || typeof b.balance !== 'number') return null;
+        const created = typeof b.createdAt === 'string' ? b.createdAt : '';
+        let at: string | undefined;
+        let byYou = false;
+        const importId = (b.source as { importId?: string } | undefined)?.importId;
+        const rec = importId ? imports.get(importId) : undefined;
+        if (b.kind === 'manual') {
+          // Your own balance, given for the day you gave it: as of then.
+          if (created.slice(0, 10) === b.date) at = created;
+        } else if (rec) {
+          const keys = (rec.result?.sections ?? []).filter((s) => s.accountId === b.accountId).map((s) => s.key);
+          const section = (rec.draft?.sections ?? []).find((s) => keys.includes(s.key) && s.recordBalance !== false && s.balanceDate === b.date && s.balance === b.balance);
+          const reading = rec.extraction?.raw;
+          if (section && reading) {
+            // Not what the reader read (sign aside: the draft turns a balance owed negative): you typed it.
+            const read = reading.accounts?.[Number(section.key.slice(1))]?.closingBalance;
+            byYou = typeof read !== 'number' || pence(read) !== pence(b.balance);
+          }
+          const captured = rec.document?.capturedAt;
+          if (byYou && created.slice(0, 10) === b.date) at = created;
+          else if (b.kind === 'screenshot' && captured?.slice(0, 10) === b.date) at = captured;
+        }
+        if (!at && !byYou) return null;
+        if (at) timed++;
+        if (byYou) yours++;
+        return { ...b, ...(at ? { at } : {}), ...(byYou ? { enteredBy: 'user' } : {}) };
+      });
+      ctx.log(`[migrate] ${timed} balance${timed === 1 ? '' : 's'} now say when on their day they were seen; ${yours} you typed yourself`);
+    },
+  },
 ];
 
 export interface MigrationResult {

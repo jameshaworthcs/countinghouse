@@ -424,6 +424,7 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
       ...(extraCopies.length ? { extraCopies } : {}),
       ...(balanceDateSource ? { balanceDateSource } : {}),
       ...(balance !== undefined ? { balance } : {}),
+      readBalance: balance ?? null,
       ...(acc.periodStart ? { periodStart: acc.periodStart } : {}),
       ...(acc.periodEnd ? { periodEnd: acc.periodEnd } : {}),
       ...(acc.openingBalance !== null ? { openingBalance: acc.openingBalance } : {}),
