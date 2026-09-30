@@ -794,3 +794,35 @@ transfers at all: many such rows counted as spending and income.
   it. A closed account's data is expected only up to its closing date on the Tax page.
 - **A new account made on the review page is named from its bank and name**, not
   `new-account-<n>`.
+
+## 2026-09-30: A proposal the data has caught up with closes as already done
+
+The Aqua card proposal became moot before the owner reached it: committing the card's statements
+linked the Santander direct debits to the card's payments, which is all it proposed. The only way to
+clear it was Dismiss, which records a no. The server then refuses the same changes, and an agent
+reading the history would take it as "these are not card payments".
+
+- **A third outcome, `superseded` ("Already done")**:
+  - A waiting proposal that applying would change nothing closes by itself: every change already so,
+    or changes that undo each other (an unlink and the same link again).
+  - It is checked at start-up, after each change to the data (once it has been quiet for a second),
+    and after each proposal applied.
+  - It is kept in `data/proposals/` like the others, in a commit of its own. It changes no data and is
+    not a no: only a dismissal stops the same changes being proposed again.
+  - Considered: leaving it to the owner to close by hand. With agents proposing in the background,
+    imports will often get there first, like Dependabot's pull requests once a dependency is updated
+    elsewhere. The owner would have to clear each one, and anything they dismissed would read as a
+    no. The page still offers "Close as already done" for the moment before it closes. Apply on
+    such a proposal closes it the same way.
+- **Each decision is its own commit.** The service commits whatever came before it (an import's
+  writes), then the decision. The route no longer does it.
+- **Moving through the queue**:
+  - ‹ › and the arrow keys go to the one before or after, round the ends. Proposals you skip stay
+    waiting, with what you left out of each kept for the tab.
+  - After a decision, the next one waiting opens after the one decided, not at the top of the list.
+    A note says what was decided and that this is the next one.
+  - The action bar says which one it acts on ("2 of 4"). Its buttons wait 1.2 s after the page moves
+    on, so a click meant for the last one lands on nothing.
+- **Each proposal gets a fresh page**, shown at once from the list while it loads. The same page had
+  been reused, so the proposal just decided could show for a moment under the next one's buttons.
+  Its unticked changes and a typed reason for dismissing also carried to the next one.

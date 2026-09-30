@@ -202,3 +202,28 @@
     border-color: #ddd !important;
   }
 }
+
+/* Proposals: the note of what you just decided slides in, the next proposal's title glows once, and
+   the action bar's line fills while its buttons wait (src/web/pages/Proposal.tsx). */
+@keyframes notice-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+@keyframes arrive {
+  from {
+    background-color: var(--accent-soft);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+@keyframes pause-fill {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}

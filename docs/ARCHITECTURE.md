@@ -16,7 +16,8 @@ Hono server  (Node 24, tsx; 127.0.0.1:4750 live, 4760 in development)
    │    ├─ research-instrument · research-provider · refresh-assumptions   (web tools, public inputs)
    │    └─ insights-after-import · monthly-review · interpret-note          (the owner's data, no web)
    ├─ ProposalService ───────► proposed fixes: an agent (token or job) proposes, you apply or dismiss
-   │    (pending in the work area; decided → data/proposals/, with what they changed)
+   │    (pending in the work area; decided → data/proposals/, with what they changed; one the
+   │    data comes to say all of closes by itself as already done)
    ├─ ImportService (queue) ─► work area .work/<data-dir>/   (uploads + drafts, never committed)
    │    ├─ detect → csv profiles (and spreadsheets' first table) · ofx · qif · santander-txt   (deterministic, local)
    │    ├─ images: capture date (EXIF/filename/mtime), tiling of long screenshots

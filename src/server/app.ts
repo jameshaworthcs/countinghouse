@@ -86,7 +86,7 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
   const imports = new ImportService(store, config, work);
   await imports.init();
   // Fixes agents propose (an agent with a token, or a job here) wait in the work area for the owner.
-  const proposals = ProposalService.forWorkDir(store, config.workDir);
+  const proposals = ProposalService.forWorkDir(store, config.workDir, () => git.flush());
   await proposals.init();
 
   let oidcSettings: ReturnType<typeof oidcSettingsFromEnv>;
@@ -110,6 +110,15 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
     store.stopWatching();
     throw new Error(`${config.dataDir} holds real data (it is tracked in git), so a login is required. Run \`npm run set-password\`, or use the demo data (npm run dev / npm run demo).`);
   }
+
+  // A proposal the data comes to say all of (an import got there first) closes as already done: one
+  // that did while the app was stopped now, and from then on whenever the data changes.
+  try {
+    await proposals.closeDone();
+  } catch (err) {
+    console.warn(`[proposals] could not close the ones already done: ${(err as Error).message}`);
+  }
+  proposals.watch();
 
   // Agent jobs start on their own only in a watching (serving) instance over real data (tracked in
   // git), never in tests, scripts, the demo or a throwaway copy: they spend the owner's Claude plan.
@@ -202,6 +211,7 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
     ctx,
     async close() {
       runner.stop();
+      proposals.stop();
       inbox?.stop();
       store.stopWatching();
       await git.flush();

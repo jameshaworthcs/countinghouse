@@ -202,12 +202,22 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
 - **One proposal, one decision.** Group the changes that stand or fall together (the legs of one set
   of moves) and keep unrelated fixes apart. The owner can leave any change out; the rest are checked
   again.
+- **What the owner decided** is in `GET /api/proposals` (`decided`) and `data/proposals/`:
+  - `applied`: they applied it (`applied` lists the changes they kept).
+  - `dismissed`: a no. The same changes cannot be proposed again. Read the reason
+    (`GET /api/proposals/:id`) before proposing anything like it.
+  - `superseded`: already done. The data came to say all of it before the owner decided (an import
+    or an edit got there first), so it closed by itself and changed nothing. It says nothing about
+    what the owner thinks: if the data changes back, propose it again.
 - **Not again.** The same changes cannot be proposed while they wait, or after the owner dismissed
-  them. Read a dismissal's reason (`GET /api/proposals/:id`) before proposing anything like it.
+  them. A proposal whose changes undo each other is refused too.
 - **Applying** goes through the store's own writes under one commit message. The proposal is kept
   in `data/proposals/`, with the rows and accounts it changed as they were before. A category it sets
-  counts as the owner's (`categorisedBy: user`). No token can apply or dismiss a proposal; an agent
-  can withdraw its own while it waits (`DELETE /api/proposals/:id`).
+  counts as the owner's (`categorisedBy: user`). Another proposal that this leaves with nothing to
+  do closes as already done, in a commit of its own.
+- **Only the owner decides.** No token can apply, dismiss or close a proposal. An agent can withdraw
+  its own while it waits (`DELETE /api/proposals/:id`); one the data has caught up with needs no
+  withdrawing, as it closes by itself.
 
 ## 6. Resolving conflicts
 

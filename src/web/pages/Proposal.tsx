@@ -1,20 +1,44 @@
 // A proposed fix, for you to review: what the agent found, each change with the rows it is about and
 // its reason, checked against your data as you choose which to apply (src/server/proposals.ts).
 // A run of category changes with one reason (one pattern across years of history) shows as a table.
+// ‹ › (or the arrow keys) move through the ones waiting, leaving any undecided. Once you decide one,
+// the next one waiting opens under a note of what you did, and its buttons wait a moment.
 
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, CircleCheck, CircleDashed, Info, Tag } from 'lucide-react';
-import { useMemo, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router';
-import type { ProposalCheckResponse, ProposalView } from '../../shared/api';
+import { ArrowLeft, ChevronLeft, ChevronRight, CircleCheck, CircleDashed, Info, Tag } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Link, useLocation, useNavigate, useParams } from 'react-router';
+import type { ProposalCheckResponse, ProposalDecision, ProposalView } from '../../shared/api';
 import type { ProposedChange } from '../../shared/schema';
-import { CHANGE_LABELS, ChangeBody, proposedBy, useProposals } from '../components/Proposals';
-import { Badge, Button, Callout, Card, Checkbox, Dialog, ErrorNote, Field, Loading, PageHeader, StatusBadge, Textarea, useToast } from '../components/ui';
-import { api, useApi, useApiMutation } from '../lib/api';
+import { CHANGE_LABELS, ChangeBody, DecidedNotice, ProposalStatusBadge, proposedBy, useProposals, type DecidedHandoff, type DecidedState } from '../components/Proposals';
+import { Badge, Button, Callout, Card, Checkbox, Dialog, ErrorNote, Field, Kbd, Loading, PageHeader, StatusBadge, Textarea } from '../components/ui';
+import { api, useApiMutation, type ApiError } from '../lib/api';
 import { useAppData } from '../lib/data';
 import { cn, formatDate, money, plural, timeAgo } from '../lib/format';
 
 const when = (iso: string) => new Date(iso).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
+
+/** How long the next proposal's buttons wait after it opens on a decision: a second click meant for the last one lands on nothing. */
+const ARRIVAL_PAUSE_MS = 1200;
+
+/** The changes you left out of each proposal, kept while you look at the others (this tab only). */
+const leftOutKey = (id: string) => `finance.proposal.leftOut.${id}`;
+function readLeftOut(id: string): ReadonlySet<string> {
+  try {
+    const keys: unknown = JSON.parse(sessionStorage.getItem(leftOutKey(id)) ?? '[]');
+    return new Set(Array.isArray(keys) ? keys.filter((k): k is string => typeof k === 'string') : []);
+  } catch {
+    return new Set();
+  }
+}
+function keepLeftOut(id: string, keys: ReadonlySet<string>): void {
+  try {
+    if (keys.size) sessionStorage.setItem(leftOutKey(id), JSON.stringify([...keys]));
+    else sessionStorage.removeItem(leftOutKey(id));
+  } catch {
+    // Storage is off (a private window): the choice lasts while the page is open.
+  }
+}
 
 type Result = { problem?: string; alreadySo?: true };
 type CategoryChange = Extract<ProposedChange, { kind: 'set_category' }>;
@@ -53,15 +77,18 @@ function blocksOf(changes: ProposedChange[]): Block[] {
 
 interface Choosing {
   view: ProposalView;
+  /** Waiting, with something to choose: it is not already done. */
   pending: boolean;
+  /** Already done (closed as such, or about to be): each change is already so. */
+  superseded: boolean;
   leaveOut: ReadonlySet<string>;
   applied: ReadonlySet<string>;
   results: Map<string, Result>;
   setIncluded: (keys: string[], include: boolean) => void;
 }
 
-function ChangeItem({ change: c, index: i, view, pending, leaveOut, applied, results, setIncluded }: Choosing & { change: ProposedChange; index: number }) {
-  const out = pending ? leaveOut.has(c.key) : !applied.has(c.key);
+function ChangeItem({ change: c, index: i, view, pending, superseded, leaveOut, applied, results, setIncluded }: Choosing & { change: ProposedChange; index: number }) {
+  const out = pending ? leaveOut.has(c.key) : !superseded && !applied.has(c.key);
   const r = pending && !out ? results.get(c.key) : undefined;
   const label = CHANGE_LABELS[c.kind];
   return (
@@ -72,6 +99,8 @@ function ChangeItem({ change: c, index: i, view, pending, leaveOut, applied, res
             <Checkbox checked={!out} onChange={(v) => setIncluded([c.key], v)} label={<span className="sr-only">Apply change {i + 1}</span>} />
           ) : applied.has(c.key) ? (
             <CircleCheck className="size-4 text-good-ink" aria-label="applied" />
+          ) : superseded ? (
+            <CircleCheck className="size-4 text-ink-3" aria-label="already so" />
           ) : (
             <CircleDashed className="size-4 text-ink-3" aria-label="not applied" />
           )}
@@ -83,7 +112,7 @@ function ChangeItem({ change: c, index: i, view, pending, leaveOut, applied, res
               <span className="text-accent">{label.icon}</span>
               {label.title}
             </span>
-            {r?.alreadySo && <Badge tone="neutral">Already so: nothing to do</Badge>}
+            {superseded ? <Badge tone="neutral">Already so</Badge> : r?.alreadySo && <Badge tone="neutral">Already so: nothing to do</Badge>}
             {r?.problem && <StatusBadge status="warn">Does not fit your data</StatusBadge>}
             {out && <Badge tone="muted">{pending ? 'Left out' : 'Not applied'}</Badge>}
           </div>
@@ -102,11 +131,11 @@ function ChangeItem({ change: c, index: i, view, pending, leaveOut, applied, res
 }
 
 /** Many rows given one category for one reason: a table, each row ticked in or out. */
-function CategoryTable({ block, view, pending, leaveOut, applied, results, setIncluded }: Choosing & { block: Extract<Block, { kind: 'categories' }> }) {
+function CategoryTable({ block, view, pending, superseded, leaveOut, applied, results, setIncluded }: Choosing & { block: Extract<Block, { kind: 'categories' }> }) {
   const { cats, accountName } = useAppData();
   const [all, setAll] = useState(false);
   const keys = block.items.map((it) => it.change.key);
-  const inCount = pending ? keys.filter((k) => !leaveOut.has(k)).length : keys.filter((k) => applied.has(k)).length;
+  const inCount = pending ? keys.filter((k) => !leaveOut.has(k)).length : superseded ? keys.length : keys.filter((k) => applied.has(k)).length;
   const rows = block.items.map((it) => ({ ...it, row: view.rows[it.change.transaction] }));
   const out = rows.reduce((s, r) => s + Math.min(0, Math.round((r.row?.amount ?? 0) * 100)), 0) / 100;
   const inn = rows.reduce((s, r) => s + Math.max(0, Math.round((r.row?.amount ?? 0) * 100)), 0) / 100;
@@ -122,7 +151,7 @@ function CategoryTable({ block, view, pending, leaveOut, applied, results, setIn
           {pending ? (
             <Checkbox checked={inCount > 0} indeterminate={inCount > 0 && inCount < keys.length} onChange={(v) => setIncluded(keys, v)} label={<span className="sr-only">Apply changes {first} to {last}</span>} />
           ) : inCount ? (
-            <CircleCheck className="size-4 text-good-ink" aria-label="applied" />
+            <CircleCheck className={cn('size-4', superseded ? 'text-ink-3' : 'text-good-ink')} aria-label={superseded ? 'already so' : 'applied'} />
           ) : (
             <CircleDashed className="size-4 text-ink-3" aria-label="not applied" />
           )}
@@ -138,6 +167,7 @@ function CategoryTable({ block, view, pending, leaveOut, applied, results, setIn
             </span>
             <Badge tone="accent">{cats.path(block.category)}</Badge>
             {inCount < keys.length && <Badge tone="muted">{pending ? `${keys.length - inCount} left out` : `${keys.length - inCount} not applied`}</Badge>}
+            {superseded && <Badge tone="neutral">Already so</Badge>}
             {misfits.length > 0 && <StatusBadge status="warn">{plural(misfits.length, 'row')} no longer fit</StatusBadge>}
           </div>
           {dates.length > 0 && (
@@ -163,7 +193,7 @@ function CategoryTable({ block, view, pending, leaveOut, applied, results, setIn
               </thead>
               <tbody className="divide-y divide-line">
                 {shown.map(({ change, index, row }) => {
-                  const left = pending ? leaveOut.has(change.key) : !applied.has(change.key);
+                  const left = pending ? leaveOut.has(change.key) : !superseded && !applied.has(change.key);
                   const r = pending && !left ? results.get(change.key) : undefined;
                   return (
                     <tr key={change.key} className={cn(left && 'bg-panel-2/50 text-ink-3')}>
@@ -172,6 +202,8 @@ function CategoryTable({ block, view, pending, leaveOut, applied, results, setIn
                           <Checkbox checked={!left} onChange={(v) => setIncluded([change.key], v)} label={<span className="sr-only">Apply change {index + 1}</span>} />
                         ) : applied.has(change.key) ? (
                           <CircleCheck className="size-3.5 text-good-ink" aria-label="applied" />
+                        ) : superseded ? (
+                          <CircleCheck className="size-3.5 text-ink-3" aria-label="already so" />
                         ) : null}
                       </td>
                       <td className="px-2 py-1.5 align-top whitespace-nowrap tabular-nums">{row && !row.missing ? formatDate(row.date) : '—'}</td>
@@ -204,26 +236,107 @@ function CategoryTable({ block, view, pending, leaveOut, applied, results, setIn
   );
 }
 
+/** Where this one is among those waiting, and the way to the one before and after (round the ends). */
+function QueueNav({ at, total, prev, next, first }: { at: number; total: number; prev: string | undefined; next: string | undefined; first: string | undefined }) {
+  const navigate = useNavigate();
+  return (
+    <nav aria-label="Proposals waiting" className="no-print mb-2 flex flex-wrap items-center justify-between gap-2">
+      <Link to="/import#proposals" className="inline-flex items-center gap-1.5 py-1 text-[13px] font-medium text-ink-2 hover:text-ink">
+        <ArrowLeft className="size-4" aria-hidden />
+        All proposals
+      </Link>
+      {at >= 0 ? (
+        <div className="flex items-center gap-0.5">
+          {prev && <Button size="sm" variant="ghost" className="px-2" icon={<ChevronLeft className="size-4" />} aria-label="Previous proposal" title="Previous proposal (←)" onClick={() => void navigate(`/proposals/${prev}`)} />}
+          <span className="px-1.5 text-[13px] text-ink-2 tabular-nums" aria-current="page">
+            {total === 1 ? 'The only one waiting' : `${at + 1} of ${total} waiting`}
+          </span>
+          {next && <Button size="sm" variant="ghost" className="px-2" icon={<ChevronRight className="size-4" />} aria-label="Next proposal" title="Next proposal (→)" onClick={() => void navigate(`/proposals/${next}`)} />}
+        </div>
+      ) : first ? (
+        <Button size="sm" variant="ghost" onClick={() => void navigate(`/proposals/${first}`)}>
+          {total === 1 ? 'The one waiting' : `${total} waiting`}
+          <ChevronRight className="size-4" aria-hidden />
+        </Button>
+      ) : null}
+    </nav>
+  );
+}
+
 export default function Proposal() {
   const { id = '' } = useParams();
+  // A page of its own for each proposal: nothing chosen or typed on one carries to the next.
+  return <ProposalPage key={id} id={id} />;
+}
+
+function ProposalPage({ id }: { id: string }) {
   const navigate = useNavigate();
-  const toast = useToast();
-  const q = useApi<ProposalView>(['proposal', id], `/proposals/${id}`);
+  const location = useLocation();
   const list = useProposals();
-  const [leaveOut, setLeaveOut] = useState<ReadonlySet<string>>(new Set());
+  // While it loads, it shows from the list of those waiting: never the rows of the one before.
+  const q = useQuery<ProposalView, ApiError>({
+    queryKey: ['proposal', id],
+    queryFn: ({ signal }) => api<ProposalView>(`/proposals/${id}`, { signal }),
+    placeholderData: () => list.data?.pending.find((v) => v.proposal.id === id),
+  });
+  // Opened after you decided another: what you did, until you hide it or move on.
+  const [decided, setDecided] = useState(() => (location.state as DecidedState | null)?.decided);
+  const [armed, setArmed] = useState(!decided);
+  const [leaving, setLeaving] = useState(false);
+  const [leaveOut, setLeaveOutState] = useState(() => readLeftOut(id));
   const [dismissing, setDismissing] = useState(false);
   const [reason, setReason] = useState('');
+  const setLeaveOut = (keys: ReadonlySet<string>) => {
+    setLeaveOutState(keys);
+    keepLeftOut(id, keys);
+  };
   const view = q.data;
   const pending = view?.proposal.status === 'pending';
   const left = [...leaveOut].sort();
   const blocks = useMemo(() => (view ? blocksOf(view.proposal.changes) : []), [view]);
+
+  useEffect(() => {
+    window.scrollTo({ top: 0 });
+  }, []);
+  useEffect(() => {
+    // A reload does not show the note again.
+    if (location.state) void navigate(`${location.pathname}${location.search}${location.hash}`, { replace: true, state: null });
+  }, [location, navigate]);
+  useEffect(() => {
+    if (armed) return;
+    const t = setTimeout(() => setArmed(true), ARRIVAL_PAUSE_MS);
+    return () => clearTimeout(t);
+  }, [armed]);
+
+  // Those waiting, less the ones you just decided (the list catches up a moment later).
+  const gone = new Set([decided?.id, ...(decided?.alsoDone ?? []).map((d) => d.id)]);
+  const waiting = (list.data?.pending ?? []).filter((v) => !gone.has(v.proposal.id));
+  const at = waiting.findIndex((v) => v.proposal.id === id);
+  const around = at >= 0 && waiting.length > 1;
+  const prev = around ? waiting[(at - 1 + waiting.length) % waiting.length]!.proposal.id : undefined;
+  const next = around ? waiting[(at + 1) % waiting.length]!.proposal.id : undefined;
+
+  // ← and → move between the ones waiting, except while typing or in a dialog.
+  useEffect(() => {
+    if (!prev || !next) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight')) return;
+      const el = e.target instanceof HTMLElement ? e.target : null;
+      if (el && (el.isContentEditable || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement || (el instanceof HTMLInputElement && el.type !== 'checkbox'))) return;
+      if (document.querySelector('[role="dialog"]')) return;
+      e.preventDefault();
+      void navigate(`/proposals/${e.key === 'ArrowLeft' ? prev : next}`);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [prev, next, navigate]);
 
   // With changes left out, the server checks the rest again: a link may need an unlink you left out.
   const check = useQuery<ProposalCheckResponse>({
     queryKey: ['proposal', id, 'check', left.join(','), view?.proposal.updatedAt],
     queryFn: () => api<ProposalCheckResponse>(`/proposals/${id}/check`, { body: { leaveOut: left } }),
     enabled: pending && left.length > 0,
-    placeholderData: (prev) => prev,
+    placeholderData: (prevData) => prevData,
   });
   const results = useMemo(() => {
     const map = new Map<string, Result>();
@@ -233,30 +346,38 @@ export default function Proposal() {
     return map;
   }, [view, check.data, left.length]);
 
-  const next = () => list.data?.pending.find((v) => v.proposal.id !== id)?.proposal.id;
-  const leave = () => void navigate(next() ? `/proposals/${next()}` : '/import#proposals');
-  const apply = useApiMutation(() => api<ProposalView>(`/proposals/${id}/apply`, { body: { leaveOut: left } }), {
-    onSuccess: (r) => {
-      toast({ tone: 'good', text: `Applied ${plural(r.proposal.applied?.length ?? 0, 'change')}` });
-      leave();
-    },
-    onError: () => undefined,
-  });
-  const dismiss = useApiMutation(() => api<ProposalView>(`/proposals/${id}/dismiss`, { body: reason.trim() ? { reason: reason.trim() } : {} }), {
-    onSuccess: () => {
+  /** After a decision: on to the next one waiting after this one (round from the first), or back to the queue. */
+  const moveOn = (d: ProposalDecision) => {
+    setLeaving(true);
+    keepLeftOut(id, new Set());
+    const status = d.proposal.status === 'pending' ? 'applied' : d.proposal.status;
+    const handoff: DecidedHandoff = { id, title: d.proposal.title, status, ...(status === 'applied' ? { applied: d.proposal.applied?.length ?? 0 } : {}), ...(d.alsoDone?.length ? { alsoDone: d.alsoDone } : {}) };
+    const closed = new Set([id, ...(d.alsoDone ?? []).map((x) => x.id)]);
+    const order = waiting.map((v) => v.proposal.id);
+    const after = [...order.slice(at + 1), ...order.slice(0, Math.max(at, 0))].find((x) => !closed.has(x));
+    void navigate(after ? `/proposals/${after}` : '/import#proposals', { state: { decided: handoff } satisfies DecidedState });
+  };
+  const apply = useApiMutation(() => api<ProposalDecision>(`/proposals/${id}/apply`, { body: { leaveOut: left } }), { onSuccess: moveOn, onError: () => undefined });
+  const close = useApiMutation(() => api<ProposalDecision>(`/proposals/${id}/close`, { body: {} }), { onSuccess: moveOn, onError: () => undefined });
+  const dismiss = useApiMutation(() => api<ProposalDecision>(`/proposals/${id}/dismiss`, { body: reason.trim() ? { reason: reason.trim() } : {} }), {
+    onSuccess: (d) => {
       setDismissing(false);
-      toast({ tone: 'neutral', text: 'Dismissed: nothing changed' });
-      leave();
+      moveOn(d);
     },
   });
 
   if (q.error) return <ErrorNote error={q.error} />;
   if (!view) return <Loading />;
   const p = view.proposal;
+  const superseded = p.status === 'superseded';
+  // Waiting, but your data already says all of it: there is nothing to apply, only to close.
+  const done = pending && view.alreadyDone === true;
   const included = p.changes.filter((c) => !leaveOut.has(c.key));
   const problems = included.filter((c) => results.get(c.key)?.problem);
   const alreadySo = included.filter((c) => results.get(c.key)?.alreadySo).length;
   const ready = included.length - problems.length - alreadySo;
+  // The changes you kept would change nothing (your data says them already, or they undo each other).
+  const keptDone = included.length > 0 && (left.length ? check.data?.alreadyDone === true : done);
   const applied = new Set(p.applied ?? []);
   const setIncluded = (keys: string[], include: boolean) => {
     const nextSet = new Set(leaveOut);
@@ -266,28 +387,29 @@ export default function Proposal() {
     }
     setLeaveOut(nextSet);
   };
-  const choosing: Choosing = { view, pending, leaveOut, applied, results, setIncluded };
+  const choosing: Choosing = { view, pending: pending && !done, superseded: superseded || done, leaveOut, applied, results, setIncluded };
+  const position = at >= 0 ? { position: at + 1, total: waiting.length } : undefined;
+  // Not while the page has just changed under you, is on its way out, or shows the list's copy.
+  const paused = !armed || leaving || q.isPlaceholderData;
+  const failed = apply.error ?? close.error;
 
   return (
     <div className="mx-auto max-w-5xl">
-      <PageHeader
-        title={p.title}
-        subtitle={
-          <span className="inline-flex flex-wrap items-center gap-2">
-            {p.status === 'pending' ? <StatusBadge status="info">Waiting for you</StatusBadge> : p.status === 'applied' ? <StatusBadge status="good">Applied</StatusBadge> : <Badge tone="muted">Dismissed</Badge>}
-            <span>
-              Proposed by {proposedBy(p.provenance)} · {timeAgo(p.createdAt)}
+      {decided && <DecidedNotice decided={decided} next={position} onHide={() => setDecided(undefined)} />}
+      <QueueNav at={at} total={waiting.length} prev={prev} next={next} first={waiting[0]?.proposal.id} />
+      <div className={cn('-mx-3 rounded-xl px-3 pt-1', decided && 'motion-safe:animate-[arrive_1.6s_ease-out]')}>
+        <PageHeader
+          title={p.title}
+          subtitle={
+            <span className="inline-flex flex-wrap items-center gap-2">
+              <ProposalStatusBadge status={p.status} />
+              <span>
+                Proposed by {proposedBy(p.provenance)} · {timeAgo(p.createdAt)}
+              </span>
             </span>
-          </span>
-        }
-        actions={
-          <Link to="/import#proposals">
-            <Button variant="ghost" icon={<ArrowLeft className="size-4" />}>
-              All proposals
-            </Button>
-          </Link>
-        }
-      />
+          }
+        />
+      </div>
 
       {p.status === 'applied' && (
         <Callout tone="good" className="mb-5" title={`Applied ${when(p.decidedAt!)}`}>
@@ -299,17 +421,27 @@ export default function Proposal() {
           Nothing in your data changed.{p.dismissedReason ? ` You said: “${p.dismissedReason}”` : ''}
         </Callout>
       )}
+      {superseded && (
+        <Callout tone="neutral" className="mb-5" title={`Already done: closed ${when(p.decidedAt!)}`}>
+          Your data came to say everything it proposes before you decided (an import or an edit got there first), so it closed without changing anything. That is not a no: an agent may propose the same again if your data changes back. The rows below are as they are now.
+        </Callout>
+      )}
+      {done && (
+        <Callout tone="good" className="mb-5" title="Already done">
+          Your data already says everything this proposes (an import or an edit got there first), so applying it would change nothing. It closes by itself; you can close it now. That is not a no: an agent may propose the same again if your data changes back.
+        </Callout>
+      )}
 
       <Card title="What the agent found" className="mb-5">
         <p className="text-[14px] leading-relaxed whitespace-pre-line text-ink-2">{p.summary}</p>
       </Card>
 
       <Card
-        title={`${p.status === 'pending' ? 'Changes it proposes' : 'Changes'} (${p.changes.length})`}
-        description={pending ? 'They apply in this order. Untick any you disagree with: the rest are checked again, in case one needs another.' : undefined}
+        title={`${pending ? 'Changes it proposes' : 'Changes'} (${p.changes.length})`}
+        description={pending ? (done ? 'Your data says each of these already.' : 'They apply in this order. Untick any you disagree with: the rest are checked again, in case one needs another.') : undefined}
         padded={false}
         actions={
-          pending && p.changes.length > 1 ? (
+          pending && !done && p.changes.length > 1 ? (
             <Button size="sm" variant="ghost" onClick={() => setLeaveOut(leaveOut.size ? new Set() : new Set(p.changes.map((c) => c.key)))}>
               {leaveOut.size ? 'Include all' : 'Leave all out'}
             </Button>
@@ -322,41 +454,80 @@ export default function Proposal() {
       </Card>
 
       {pending && (
-        <div className="no-print sticky bottom-3 z-20 mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-panel px-4 py-3 shadow-lg">
-          <div className="text-[13px] text-ink-2">
-            <Info className="mr-1 inline size-4 text-accent" aria-hidden />
-            {ready ? (
-              <>
-                Applies <span className="font-semibold text-ink">{plural(ready, 'change')}</span>
-              </>
-            ) : (
-              'Nothing to apply'
-            )}
-            {alreadySo > 0 && `, skips ${alreadySo} already so`}
-            {leaveOut.size > 0 && `, leaves ${leaveOut.size} out`}
-            {problems.length > 0 && <span className="text-bad-ink"> · {plural(problems.length, 'change')} to leave out first</span>}
+        <div className="no-print sticky bottom-3 z-20 mt-5 overflow-hidden rounded-xl border border-line bg-panel shadow-lg">
+          {!armed && <div aria-hidden className="absolute inset-x-0 top-0 h-0.5 origin-left bg-accent motion-safe:animate-[pause-fill_1200ms_linear_forwards]" />}
+          <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+            <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-ink-2">
+              {position && waiting.length > 1 && (
+                <span className="rounded-md bg-panel-2 px-1.5 py-0.5 text-[12px] font-medium text-ink-2 tabular-nums" title="Where this one is among those waiting">
+                  {position.position} of {position.total}
+                </span>
+              )}
+              {done ? (
+                <span>
+                  <CircleCheck className="mr-1 inline size-4 text-good-ink" aria-hidden />
+                  Nothing to apply: your data already says all of it
+                </span>
+              ) : (
+                <span>
+                  <Info className="mr-1 inline size-4 text-accent" aria-hidden />
+                  {keptDone ? (
+                    'Nothing to apply: your data already says the ones you kept'
+                  ) : ready ? (
+                    <>
+                      Applies <span className="font-semibold text-ink">{plural(ready, 'change')}</span>
+                    </>
+                  ) : (
+                    'Nothing to apply'
+                  )}
+                  {!keptDone && alreadySo > 0 && `, skips ${alreadySo} already so`}
+                  {leaveOut.size > 0 && `, leaves ${leaveOut.size} out`}
+                  {problems.length > 0 && <span className="text-bad-ink"> · {plural(problems.length, 'change')} to leave out first</span>}
+                </span>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {done ? (
+                <Button variant="primary" disabled={paused} loading={close.isPending} onClick={() => close.mutate(undefined)}>
+                  Close as already done
+                </Button>
+              ) : (
+                <>
+                  {problems.length > 0 && (
+                    <Button size="sm" disabled={paused} onClick={() => setLeaveOut(new Set([...leaveOut, ...problems.map((c) => c.key)]))}>
+                      Leave out {problems.length === 1 ? 'the one that does not fit' : `the ${problems.length} that do not fit`}
+                    </Button>
+                  )}
+                  <Button disabled={paused} onClick={() => setDismissing(true)}>
+                    Dismiss…
+                  </Button>
+                  <Button variant="primary" disabled={paused || !ready || keptDone || problems.length > 0 || check.isFetching} loading={apply.isPending} onClick={() => apply.mutate(undefined)}>
+                    Apply {ready && !keptDone ? plural(ready, 'change') : ''}
+                  </Button>
+                </>
+              )}
+            </div>
+            {failed && <div className="w-full text-[12.5px] text-bad-ink">{failed.message}</div>}
           </div>
-          <div className="flex flex-wrap gap-2">
-            {problems.length > 0 && (
-              <Button size="sm" onClick={() => setLeaveOut(new Set([...leaveOut, ...problems.map((c) => c.key)]))}>
-                Leave out {problems.length === 1 ? 'the one that does not fit' : `the ${problems.length} that do not fit`}
-              </Button>
-            )}
-            <Button onClick={() => setDismissing(true)}>Dismiss</Button>
-            <Button variant="primary" disabled={!ready || problems.length > 0 || check.isFetching} loading={apply.isPending} onClick={() => apply.mutate(undefined)}>
-              Apply {ready ? plural(ready, 'change') : ''}
-            </Button>
-          </div>
-          {apply.error && <div className="w-full text-[12.5px] text-bad-ink">{apply.error.message}</div>}
         </div>
       )}
-      {pending && <p className="mt-3 text-center text-[12px] text-ink-3">Nothing changes until you apply. Each change is checked against your data again as it is applied, and the proposal is kept in your data’s history with what it changed.</p>}
+      {pending && (
+        <p className="mt-3 text-center text-[12px] text-ink-3">
+          {done ? 'Closing it changes nothing in your data; it is kept in your data’s history as already done.' : 'Nothing changes until you apply. Each change is checked against your data again as it is applied, and the proposal is kept in your data’s history with what it changed.'}
+          {around && (
+            <span className="hidden sm:inline">
+              {' '}
+              <Kbd>←</Kbd> <Kbd>→</Kbd> move between the ones waiting; any you skip stay waiting.
+            </span>
+          )}
+        </p>
+      )}
 
       <Dialog
         open={dismissing}
         onOpenChange={setDismissing}
         title="Dismiss this proposal?"
-        description="Nothing in your data changes. It is kept, so the same fix is not proposed again."
+        description="Nothing in your data changes. It is kept as your no, so agents do not propose the same changes again."
         footer={
           <>
             <Button onClick={() => setDismissing(false)}>Cancel</Button>
@@ -366,6 +537,7 @@ export default function Proposal() {
           </>
         }
       >
+        <div className="mb-3 rounded-lg border border-line bg-panel-2 px-3 py-2 text-[13px] font-medium text-ink">{p.title}</div>
         <Field label="Why (optional)" hint="Agents read this, so they know what you do not want.">
           <Textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={3} maxLength={1000} placeholder="e.g. That payment did go to my saver" />
         </Field>

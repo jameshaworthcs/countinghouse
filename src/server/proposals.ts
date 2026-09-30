@@ -9,17 +9,20 @@
 // - It is checked against the data when it is made, whenever it is shown, and when you apply it: its
 //   changes run in order on a copy, and each must still fit. A change your data already agrees with
 //   is marked as already so, and applying skips it.
+// - One your data comes to say all of (an import or an edit got there first) closes by itself as
+//   already done (`superseded`), kept in data/proposals like the others. That is not a no: only a
+//   dismissal stops the same changes being proposed again.
 
 import { EventEmitter } from 'node:events';
 import { mkdir, readdir, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
-import type { ProposalChangeView, ProposalCheckResponse, ProposalListResponse, ProposalRow, ProposalSummary, ProposalView } from '../shared/api';
+import type { ProposalChangeView, ProposalCheckResponse, ProposalDecision, ProposalListResponse, ProposalRow, ProposalSummary, ProposalView } from '../shared/api';
 import { CategoryIndex } from '../shared/categories';
 import { transferLegCategory } from '../shared/categorise';
 import { diffDays, formatDate, today } from '../shared/dates';
 import { formatMoney, fromMinor, toMinor } from '../shared/money';
-import { AccountSchema, ProposalSchema, type Account, type Proposal, type ProposalInput, type ProposedChange, type Provenance, type Transaction } from '../shared/schema';
-import { atomicWrite, nowISO } from './fsutil';
+import { AccountSchema, ProposalSchema, type Account, type Proposal, type ProposalInput, type ProposalStatus, type ProposedChange, type Provenance, type Transaction } from '../shared/schema';
+import { atomicWrite, Mutex, nowISO } from './fsutil';
 import { proposalId, transferGroupId } from './ids';
 import { StoreError, type DecidedProposalSummary, type Store } from './store';
 
@@ -29,6 +32,8 @@ const LINK_DAYS = 10;
 const DUPLICATE_DAYS = 10;
 /** Proposals waiting at once: an agent that keeps proposing is stopped here, not in your queue. */
 const MAX_PENDING = 50;
+/** Quiet after a change to the data before checking which proposals it finished. */
+const SWEEP_AFTER_MS = 1000;
 
 /** Changes that do not fit the data, each with its reason. */
 export class ProposalProblems extends StoreError {
@@ -206,6 +211,30 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
   return out;
 }
 
+/** Applying would leave the data as it is: every change is already so, or they undo each other. */
+function changesNothing(store: Store, o: Outcome): boolean {
+  if (o.removed.size) return false;
+  for (const [id, patch] of o.patches) {
+    const t = store.transaction(id) as Record<string, unknown> | undefined;
+    if (!t || Object.entries(patch).some(([k, v]) => t[k] !== v)) return false;
+  }
+  for (const [id, a] of o.accounts) {
+    const was = store.account(id);
+    if (!was || was.openedOn !== a.openedOn || was.closedOn !== a.closedOn || was.status !== a.status) return false;
+  }
+  return true;
+}
+
+/** Nothing in it is left to do: it fits, and applying it would change nothing. */
+const leavesNothing = (store: Store, p: Proposal, o = simulate(store, p.changes, new Set())) => ![...o.results.values()].some((r) => r.problem) && changesNothing(store, o);
+
+/** What each decided status means, when something asks to decide it again. */
+const DECIDED: Record<Exclude<ProposalStatus, 'pending'>, string> = {
+  applied: 'You applied this proposal already.',
+  dismissed: 'You dismissed this proposal already.',
+  superseded: 'This proposal closed already: your data came to say all of it.',
+};
+
 /** The transactions a change names. */
 function namedRows(c: ProposedChange): string[] {
   switch (c.kind) {
@@ -232,17 +261,26 @@ function summaryOf(p: DecidedProposalSummary): ProposalSummary {
 
 export class ProposalService extends EventEmitter {
   private readonly pending = new Map<string, Proposal>();
+  /** One decision at a time: yours, an agent's withdrawal, or closing what is already done. */
+  private readonly lock = new Mutex();
+  private sweepTimer: ReturnType<typeof setTimeout> | undefined;
+  private readonly onDataChanged = () => {
+    clearTimeout(this.sweepTimer);
+    this.sweepTimer = setTimeout(() => void this.closeDone().catch((err: Error) => console.warn(`[proposals] could not close the ones already done: ${err.message}`)), SWEEP_AFTER_MS);
+  };
 
   constructor(
     private readonly store: Store,
     /** The work area's proposals directory: proposals waiting for you (never committed). */
     readonly dir: string,
+    /** Commits the data's changes so far (the git committer's flush), so each decision is a commit of its own. */
+    private readonly commit: () => Promise<void> = () => Promise.resolve(),
   ) {
     super();
   }
 
-  static forWorkDir(store: Store, workDir: string): ProposalService {
-    return new ProposalService(store, path.join(workDir, 'proposals'));
+  static forWorkDir(store: Store, workDir: string, commit?: () => Promise<void>): ProposalService {
+    return new ProposalService(store, path.join(workDir, 'proposals'), commit);
   }
 
   async init(): Promise<void> {
@@ -260,6 +298,23 @@ export class ProposalService extends EventEmitter {
   /** Proposals waiting for you. */
   get pendingCount(): number {
     return this.pending.size;
+  }
+
+  /** From now on, whenever the data changes (an import, an edit, a file changed outside), close what it finished. */
+  watch(): void {
+    this.store.on('change', this.onDataChanged);
+    this.store.on('reload', this.onDataChanged);
+  }
+
+  stop(): void {
+    this.store.off('change', this.onDataChanged);
+    this.store.off('reload', this.onDataChanged);
+    clearTimeout(this.sweepTimer);
+  }
+
+  /** Close every waiting proposal your data already says all of, as already done. */
+  closeDone(): Promise<Proposal[]> {
+    return this.lock.run(() => this.sweep());
   }
 
   list(): ProposalListResponse {
@@ -295,6 +350,7 @@ export class ProposalService extends EventEmitter {
       return r?.problem ? [{ key: c.key, problem: r.problem }] : r?.alreadySo ? [{ key: c.key, problem: 'Your data already says this: leave the change out.' }] : [];
     });
     if (problems.length) throw new ProposalProblems(`${problems.length} of the ${proposal.changes.length} changes do not fit your data.`, problems);
+    if (changesNothing(this.store, outcome)) throw new ProposalProblems('Applying it would leave your data as it is: its changes undo each other.', []);
     if (opts.dryRun) return this.view(proposal);
 
     const sig = signature(proposal.changes);
@@ -310,12 +366,16 @@ export class ProposalService extends EventEmitter {
   }
 
   /** An agent takes back a proposal the owner has not decided. */
-  async withdraw(id: string): Promise<void> {
-    const p = this.pending.get(id);
-    if (!p) throw new StoreError(this.store.proposals.some((d) => d.id === id) ? 'The owner has decided that proposal already.' : 'No such proposal', this.store.proposals.some((d) => d.id === id) ? 409 : 404);
-    this.pending.delete(id);
-    await rm(this.file(id), { force: true });
-    this.emit('update', { ...p, status: 'dismissed' });
+  withdraw(id: string): Promise<void> {
+    return this.lock.run(async () => {
+      const p = this.pending.get(id);
+      if (!p) {
+        const decided = this.store.proposals.find((d) => d.id === id);
+        throw new StoreError(decided ? (decided.status === 'superseded' ? DECIDED.superseded : 'The owner has decided that proposal already.') : 'No such proposal', decided ? 409 : 404);
+      }
+      await this.forget(id);
+      this.emit('update', { ...p, status: 'dismissed' });
+    });
   }
 
   /** What applying it would do with some changes left out. */
@@ -323,50 +383,69 @@ export class ProposalService extends EventEmitter {
     const p = this.requirePending(id);
     const outcome = simulate(this.store, p.changes, new Set(leaveOut));
     const changes = p.changes.filter((c) => !leaveOut.includes(c.key)).map((c) => ({ key: c.key, ...outcome.results.get(c.key) }));
-    return { changes, ready: changes.filter((c) => !c.problem && !c.alreadySo).length, problems: changes.filter((c) => c.problem).length };
+    const problems = changes.filter((c) => c.problem).length;
+    return { changes, ready: changes.filter((c) => !c.problem && !c.alreadySo).length, problems, ...(!problems && changesNothing(this.store, outcome) ? { alreadyDone: true as const } : {}) };
   }
 
-  /** Apply it, leaving out `leaveOut`. Every change applied must fit the data as it is now. */
-  async apply(id: string, leaveOut: string[] = []): Promise<ProposalView> {
-    const p = this.requirePending(id);
-    const skip = new Set(leaveOut);
-    const outcome = simulate(this.store, p.changes, skip);
-    const problems = p.changes.flatMap((c) => {
-      const problem = outcome.results.get(c.key)?.problem;
-      return problem ? [{ key: c.key, problem }] : [];
+  /**
+   * Apply it, leaving out `leaveOut`. Every change applied must fit the data as it is now. One your
+   * data already says all of closes as already done instead.
+   */
+  apply(id: string, leaveOut: string[] = []): Promise<ProposalDecision> {
+    return this.lock.run(async () => {
+      const p = this.requirePending(id);
+      const skip = new Set(leaveOut.filter((key) => p.changes.some((c) => c.key === key)));
+      const outcome = simulate(this.store, p.changes, skip);
+      const problems = p.changes.flatMap((c) => {
+        const problem = outcome.results.get(c.key)?.problem;
+        return problem ? [{ key: c.key, problem }] : [];
+      });
+      if (problems.length) throw new ProposalProblems(`${problems.length === 1 ? 'A change no longer fits' : `${problems.length} changes no longer fit`} your data: leave ${problems.length === 1 ? 'it' : 'them'} out, or dismiss the proposal.`, problems, 409);
+      if (changesNothing(this.store, outcome)) {
+        if (skip.size === p.changes.length) throw new StoreError('Every change is left out: there is nothing to apply.', 409);
+        if (skip.size) throw new StoreError('Nothing is left to apply: your data already says the changes you kept.', 409);
+        // An import or an edit got there first while it waited.
+        const done = await this.decide(p, { status: 'superseded' }, `proposal: ${p.title} (already done)`);
+        await this.commit();
+        return this.view(done);
+      }
+      const doing = p.changes.filter((c) => !skip.has(c.key) && !outcome.results.get(c.key)?.alreadySo);
+
+      // One message for every write, so the data's history shows the proposal as one commit.
+      const message = `proposal: ${p.title} (${doing.length} change${doing.length === 1 ? '' : 's'} applied)`;
+      if (outcome.patches.size) await this.store.updateTransactions([...outcome.patches].map(([tid, patch]) => ({ id: tid, patch })), message);
+      if (outcome.removed.size) await this.store.deleteTransactions([...outcome.removed.keys()], message);
+      for (const account of outcome.accounts.values()) await this.store.upsertAccount(account, message);
+      const decided = await this.decide(p, { status: 'applied', applied: doing.map((c) => c.key), before: { transactions: [...outcome.touchedRows.values()], accounts: [...outcome.touchedAccounts.values()] } }, message);
+      await this.commit();
+      // Another proposal it has left with nothing to do closes now, in a commit of its own.
+      const alsoDone = await this.sweep();
+      return { ...this.view(decided), ...(alsoDone.length ? { alsoDone: alsoDone.map(({ id: doneId, title }) => ({ id: doneId, title })) } : {}) };
     });
-    if (problems.length) throw new ProposalProblems(`${problems.length === 1 ? 'A change no longer fits' : `${problems.length} changes no longer fit`} your data: leave ${problems.length === 1 ? 'it' : 'them'} out, or dismiss the proposal.`, problems, 409);
-    const doing = p.changes.filter((c) => !skip.has(c.key) && !outcome.results.get(c.key)?.alreadySo);
-    if (!doing.length) throw new StoreError('Nothing is left to apply: your data already says all of it. Dismiss the proposal instead.', 409);
-
-    // One message for every write, so the data's history shows the proposal as one commit.
-    const message = `proposal: ${p.title} (${doing.length} change${doing.length === 1 ? '' : 's'} applied)`;
-    if (outcome.patches.size) await this.store.updateTransactions([...outcome.patches].map(([tid, patch]) => ({ id: tid, patch })), message);
-    if (outcome.removed.size) await this.store.deleteTransactions([...outcome.removed.keys()], message);
-    for (const account of outcome.accounts.values()) await this.store.upsertAccount(account, message);
-    const stamp = nowISO();
-    const decided: Proposal = {
-      ...p,
-      status: 'applied',
-      updatedAt: stamp,
-      decidedAt: stamp,
-      applied: doing.map((c) => c.key),
-      before: { transactions: [...outcome.touchedRows.values()], accounts: [...outcome.touchedAccounts.values()] },
-    };
-    await this.store.saveProposal(decided, message);
-    await this.forget(p.id);
-    this.emit('update', decided);
-    return this.view(decided);
   }
 
-  async dismiss(id: string, reason?: string): Promise<ProposalView> {
-    const p = this.requirePending(id);
-    const stamp = nowISO();
-    const decided: Proposal = { ...p, status: 'dismissed', updatedAt: stamp, decidedAt: stamp, ...(reason?.trim() ? { dismissedReason: reason.trim().slice(0, 1000) } : {}) };
-    await this.store.saveProposal(decided, `proposal: ${p.title} (dismissed)`);
-    await this.forget(p.id);
-    this.emit('update', decided);
-    return this.view(decided);
+  dismiss(id: string, reason?: string): Promise<ProposalDecision> {
+    return this.lock.run(async () => {
+      const p = this.requirePending(id);
+      const decided = await this.decide(p, { status: 'dismissed', ...(reason?.trim() ? { dismissedReason: reason.trim().slice(0, 1000) } : {}) }, `proposal: ${p.title} (dismissed)`);
+      await this.commit();
+      return this.view(decided);
+    });
+  }
+
+  /** Close one your data already says all of, as already done: nothing changes, and it is not a no. */
+  close(id: string): Promise<ProposalDecision> {
+    return this.lock.run(async () => {
+      const p = this.requirePending(id);
+      const outcome = simulate(this.store, p.changes, new Set());
+      if (!leavesNothing(this.store, p, outcome)) {
+        const misfits = [...outcome.results.values()].filter((r) => r.problem).length;
+        throw new StoreError(misfits ? `${misfits === 1 ? 'A change no longer fits' : `${misfits} changes no longer fit`} your data, so it is not done: dismiss it instead.` : 'Applying it would still change your data, so it is not done: apply it, or dismiss it.', 409);
+      }
+      const done = await this.decide(p, { status: 'superseded' }, `proposal: ${p.title} (already done)`);
+      await this.commit();
+      return this.view(done);
+    });
   }
 
   /** The proposal with the rows and accounts it names, and what each change would do now. */
@@ -428,14 +507,37 @@ export class ProposalService extends EventEmitter {
       accounts[id] = { id: a.id, name: a.name, type: a.type, status: a.status, ...(a.openedOn ? { openedOn: a.openedOn } : {}), ...(a.closedOn ? { closedOn: a.closedOn } : {}), ...(inst ? { institutionName: inst.name } : {}) };
     }
     const ready = changes.filter((c) => !c.problem && !c.alreadySo).length;
-    return { proposal, changes, rows, accounts, ready, problems: changes.filter((c) => c.problem).length };
+    const done = outcome !== undefined && leavesNothing(this.store, p, outcome);
+    return { proposal, changes, rows, accounts, ready, problems: changes.filter((c) => c.problem).length, ...(done ? { alreadyDone: true as const } : {}) };
+  }
+
+  /** Close the waiting proposals your data already says all of. The caller holds the lock. */
+  private async sweep(): Promise<Proposal[]> {
+    const done = [...this.pending.values()].filter((p) => leavesNothing(this.store, p));
+    if (!done.length) return [];
+    // What got there first (an import, an edit) is committed first, under its own message.
+    await this.commit();
+    const closed: Proposal[] = [];
+    for (const p of done) closed.push(await this.decide(p, { status: 'superseded' }, `proposal: ${p.title} (already done)`));
+    await this.commit();
+    return closed;
+  }
+
+  /** Keep it in the data as decided, and stop it waiting. */
+  private async decide(p: Proposal, outcome: Pick<Proposal, 'status'> & Partial<Pick<Proposal, 'applied' | 'dismissedReason' | 'before'>>, message: string): Promise<Proposal> {
+    const stamp = nowISO();
+    const decided: Proposal = { ...p, ...outcome, updatedAt: stamp, decidedAt: stamp };
+    await this.store.saveProposal(decided, message);
+    await this.forget(p.id);
+    this.emit('update', decided);
+    return decided;
   }
 
   private requirePending(id: string): Proposal {
     const p = this.pending.get(id);
     if (p) return p;
     const decided = this.store.proposals.find((d) => d.id === id);
-    throw new StoreError(decided ? `You ${decided.status} this proposal already.` : 'No such proposal', decided ? 409 : 404);
+    throw new StoreError(decided && decided.status !== 'pending' ? DECIDED[decided.status] : 'No such proposal', decided ? 409 : 404);
   }
 
   private file(id: string): string {

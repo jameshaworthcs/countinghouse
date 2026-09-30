@@ -14,7 +14,8 @@
       "enum": [
         "pending",
         "applied",
-        "dismissed"
+        "dismissed",
+        "superseded"
       ]
     },
     "title": {
@@ -29,7 +30,7 @@
     },
     "changes": {
       "minItems": 1,
-      "maxItems": 60,
+      "maxItems": 400,
       "type": "array",
       "items": {
         "oneOf": [

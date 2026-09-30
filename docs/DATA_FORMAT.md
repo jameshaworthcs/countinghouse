@@ -192,11 +192,16 @@ Standalone figures from documents, used for Self Assessment:
 
 ## proposals/&lt;yyyy&gt;/&lt;id&gt;.json
 
-A fix an agent proposed ([AGENTS.md §5](AGENTS.md)) that you applied or dismissed. One waiting for
-you lives in the work area (`<work>/proposals/`), never here.
+A fix an agent proposed ([AGENTS.md §5](AGENTS.md)) that is no longer waiting. One waiting for you
+lives in the work area (`<work>/proposals/`), never here.
 
-- `id` (`prop_<yyyymmdd>_<hhmmss>_<hex4>`), `status` (`applied` | `dismissed`), `title`, `summary`
-  (what the agent found), `provenance` (as on agent records), `createdAt`, `decidedAt`.
+- `id` (`prop_<yyyymmdd>_<hhmmss>_<hex4>`), `title`, `summary` (what the agent found), `provenance`
+  (as on agent records), `createdAt`, `decidedAt` (when it stopped waiting).
+- `status`:
+  - `applied`: you applied it.
+  - `dismissed`: you said no.
+  - `superseded`: already done. Your data came to say all of it first, so it closed by itself and
+    changed nothing.
 - `changes`: in order, each `{key, kind, why, …}`:
   - `unlink_transfer {transaction}`: both rows of its transfer are left unlinked.
   - `link_transfer {from, to}`: money out and the same money in, linked as a transfer.

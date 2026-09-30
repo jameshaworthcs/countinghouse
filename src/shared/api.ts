@@ -632,6 +632,14 @@ export interface ProposalView {
   /** Changes that can be applied now, and those that cannot. */
   ready: number;
   problems: number;
+  /** Waiting, but applying it would change nothing: your data already says all of it. It closes as already done. */
+  alreadyDone?: true;
+}
+
+/** What applying, dismissing or closing a proposal returns. */
+export interface ProposalDecision extends ProposalView {
+  /** Other proposals it left with nothing to do, closed as already done. */
+  alsoDone?: { id: string; title: string }[];
 }
 
 export interface ProposalSummary {
@@ -648,7 +656,7 @@ export interface ProposalSummary {
 export interface ProposalListResponse {
   /** Waiting for you, the newest first. */
   pending: ProposalView[];
-  /** Applied or dismissed, the latest decided first. */
+  /** Applied, dismissed or already done, the latest first. */
   decided: ProposalSummary[];
 }
 
@@ -657,6 +665,8 @@ export interface ProposalCheckResponse {
   changes: { key: string; problem?: string; alreadySo?: true; after?: ProposalChangeView['after'] }[];
   ready: number;
   problems: number;
+  /** The changes kept would change nothing: your data already says them. */
+  alreadyDone?: true;
 }
 
 export interface SystemResponse {

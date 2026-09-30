@@ -1,15 +1,15 @@
 // Proposed fixes: what an agent proposes changing in your data, each change with its reason and the
 // rows it is about, waiting for you on the Import page (src/server/proposals.ts).
 
-import { ArrowDown, ArrowRight, CalendarDays, ChevronRight, CopyX, FileText, Link2, Sparkles, Tag, Unlink, Wand2 } from 'lucide-react';
-import { useEffect, useState, type ReactNode } from 'react';
-import { Link, useLocation } from 'react-router';
+import { ArrowDown, ArrowRight, CalendarDays, ChevronRight, CircleCheck, CircleSlash, CopyX, FileText, Link2, Sparkles, Tag, Unlink, Wand2, X } from 'lucide-react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router';
 import type { ProposalListResponse, ProposalRow, ProposalSummary, ProposalView } from '../../shared/api';
-import type { ProposedChange, ProposedChangeKind, Provenance } from '../../shared/schema';
+import type { ProposalStatus, ProposedChange, ProposedChangeKind, Provenance } from '../../shared/schema';
 import { useApi } from '../lib/api';
 import { useAppData } from '../lib/data';
 import { cn, formatDate, money, plural, timeAgo } from '../lib/format';
-import { Badge, Button, Card, StatusBadge } from './ui';
+import { Badge, Button, Card, IconButton, StatusBadge } from './ui';
 
 export function useProposals() {
   return useApi<ProposalListResponse>(['proposals'], '/proposals', { refetchInterval: 30_000 });
@@ -28,6 +28,94 @@ export function describeChanges(changes: ProposedChange[]): string {
   const counts = new Map<ProposedChangeKind, number>();
   for (const c of changes) counts.set(c.kind, (counts.get(c.kind) ?? 0) + 1);
   return [...counts].map(([kind, n]) => CHANGE_LABELS[kind].count(n)).join(', ');
+}
+
+/** Where a proposal stands, as a badge. */
+export function ProposalStatusBadge({ status }: { status: ProposalStatus }) {
+  switch (status) {
+    case 'pending':
+      return <StatusBadge status="info">Waiting for you</StatusBadge>;
+    case 'applied':
+      return <StatusBadge status="good">Applied</StatusBadge>;
+    case 'dismissed':
+      return <Badge tone="muted">Dismissed</Badge>;
+    case 'superseded':
+      return (
+        <Badge tone="neutral" icon={<CircleCheck className="size-3.5 text-good-ink" aria-hidden />}>
+          Already done
+        </Badge>
+      );
+  }
+}
+
+/** A proposal you just decided, carried to where you land next (the next one waiting, or the queue). */
+export interface DecidedHandoff {
+  id: string;
+  title: string;
+  status: Exclude<ProposalStatus, 'pending'>;
+  /** Changes applied. */
+  applied?: number;
+  /** Other proposals it left with nothing to do, closed as already done. */
+  alsoDone?: { id: string; title: string }[];
+}
+
+/** Router state for landing after a decision. */
+export interface DecidedState {
+  decided: DecidedHandoff;
+}
+
+/**
+ * Says what you just decided and that the page moved on, so the next proposal is never mistaken
+ * for the last one. It takes the focus, so a screen reader says it too.
+ */
+export function DecidedNotice({ decided, next, last, onHide }: { decided: DecidedHandoff; next?: { position: number; total: number } | undefined; last?: boolean; onHide: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    ref.current?.focus({ preventScroll: true });
+  }, []);
+  const { status } = decided;
+  const title = (
+    <Link to={`/proposals/${decided.id}`} className="hover:underline">
+      “{decided.title}”
+    </Link>
+  );
+  const detail = status === 'applied' ? `${plural(decided.applied ?? 0, 'change')} applied, and kept in your data’s history.` : status === 'dismissed' ? 'Nothing in your data changed.' : 'Your data already said all of it, so nothing changed.';
+  return (
+    <div
+      ref={ref}
+      tabIndex={-1}
+      role="status"
+      className={cn('no-print mb-4 flex items-start gap-3 rounded-xl border px-4 py-3 text-[13px] outline-none motion-safe:animate-[notice-in_220ms_ease-out]', status === 'applied' ? 'border-transparent bg-good-soft' : 'border-line bg-panel-2')}
+    >
+      {status === 'dismissed' ? <CircleSlash className="mt-0.5 size-4 shrink-0 text-ink-3" aria-hidden /> : <CircleCheck className="mt-0.5 size-4 shrink-0 text-good-ink" aria-hidden />}
+      <div className="min-w-0 flex-1">
+        <div className="font-semibold text-ink">
+          {status === 'applied' ? <>Applied {title}</> : status === 'dismissed' ? <>Dismissed {title}</> : <>Closed {title} as already done</>}
+        </div>
+        <div className="mt-0.5 text-ink-2">{detail}</div>
+        {decided.alsoDone?.map((d) => (
+          <div key={d.id} className="mt-0.5 text-ink-2">
+            That also finished{' '}
+            <Link to={`/proposals/${d.id}`} className="text-ink hover:underline">
+              {d.title}
+            </Link>
+            , so it closed as already done.
+          </div>
+        ))}
+        {next ? (
+          <div className="mt-2 flex items-center gap-1.5 font-medium text-ink">
+            <ArrowDown className="size-4 text-accent" aria-hidden />
+            {next.total === 1 ? 'Below is the last one waiting.' : `Below is the next one waiting (${next.position} of ${next.total}).`}
+          </div>
+        ) : last ? (
+          <div className="mt-2 font-medium text-ink">That was the last one waiting.</div>
+        ) : null}
+      </div>
+      <IconButton label="Hide this note" className="-my-1.5 -mr-2 size-8 shrink-0" onClick={onHide}>
+        <X className="size-4" />
+      </IconButton>
+    </div>
+  );
 }
 
 /** "Claude Code on P360 (claude-opus-5-5)", or the in-app job that proposed it. */
@@ -207,7 +295,7 @@ function QueueRow({ v }: { v: ProposalView }) {
             <Link to={`/proposals/${p.id}`} className="text-[14px] font-medium text-ink hover:underline">
               {p.title}
             </Link>
-            {v.problems > 0 ? <StatusBadge status="warn">{plural(v.problems, 'change')} no longer fit{v.problems === 1 ? 's' : ''}</StatusBadge> : <StatusBadge status="info">Waiting for you</StatusBadge>}
+            {v.problems > 0 ? <StatusBadge status="warn">{plural(v.problems, 'change')} no longer fit{v.problems === 1 ? 's' : ''}</StatusBadge> : v.alreadyDone ? <ProposalStatusBadge status="superseded" /> : <ProposalStatusBadge status="pending" />}
           </div>
           <div className="truncate text-[12.5px] text-ink-3">
             {describeChanges(p.changes)} · proposed by {proposedBy(p.provenance)} · {timeAgo(p.createdAt)}
@@ -228,11 +316,11 @@ function QueueRow({ v }: { v: ProposalView }) {
 function DecidedRow({ s }: { s: ProposalSummary }) {
   return (
     <li className="flex items-center gap-3 px-5 py-2 text-[13px]">
-      {s.status === 'applied' ? <StatusBadge status="good">Applied</StatusBadge> : <Badge tone="muted">Dismissed</Badge>}
+      <ProposalStatusBadge status={s.status} />
       <Link to={`/proposals/${s.id}`} className="min-w-0 flex-1 truncate text-ink hover:underline">
         {s.title}
       </Link>
-      <span className="hidden text-ink-3 sm:inline">{s.status === 'applied' ? `${s.applied} of ${plural(s.changes, 'change')}` : plural(s.changes, 'change')}</span>
+      <span className="hidden text-ink-3 sm:inline">{s.status === 'applied' ? `${s.applied} of ${plural(s.changes, 'change')}` : s.status === 'superseded' ? `${plural(s.changes, 'change')}, already so` : plural(s.changes, 'change')}</span>
       <span className="w-24 text-right text-ink-3">{s.decidedAt ? formatDate(s.decidedAt.slice(0, 10)) : ''}</span>
     </li>
   );
@@ -243,6 +331,13 @@ export function ProposalQueue() {
   const q = useProposals();
   const [showDecided, setShowDecided] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
+  // Arriving from the last one waiting you decided: what you did, until you hide it or leave.
+  const [justDecided, setJustDecided] = useState(() => (location.state as DecidedState | null)?.decided);
+  useEffect(() => {
+    // A reload does not show it again.
+    if (location.state) void navigate(`${location.pathname}${location.search}${location.hash}`, { replace: true, state: null });
+  }, [location, navigate]);
   const list = q.data;
   const shown = Boolean(list && (list.pending.length || list.decided.length));
   // The card renders after its data arrives, too late for the browser's own jump to #proposals.
@@ -251,6 +346,7 @@ export function ProposalQueue() {
   }, [shown, location.hash]);
   if (!list || !shown) return null;
   const decided = list.decided.slice(0, 10);
+  const waiting = list.pending.filter((v) => v.proposal.id !== justDecided?.id);
   return (
     <Card
       id="proposals"
@@ -259,7 +355,7 @@ export function ProposalQueue() {
           <Sparkles className="size-4 text-accent" aria-hidden /> Proposed fixes
         </span>
       }
-      description={list.pending.length ? 'Changes an agent found reasons for in your data, each with its evidence. Nothing changes until you apply them.' : 'Nothing is waiting for you.'}
+      description={waiting.length ? 'Changes an agent found reasons for in your data, each with its evidence. Nothing changes until you apply them.' : 'Nothing is waiting for you.'}
       padded={false}
       className="scroll-mt-16 lg:scroll-mt-5"
       actions={
@@ -270,9 +366,14 @@ export function ProposalQueue() {
         ) : undefined
       }
     >
-      {list.pending.length > 0 && (
+      {justDecided && (
+        <div className="px-5 pb-1">
+          <DecidedNotice decided={justDecided} last={waiting.length === 0} onHide={() => setJustDecided(undefined)} />
+        </div>
+      )}
+      {waiting.length > 0 && (
         <ul className="divide-y divide-line border-t border-line">
-          {list.pending.map((v) => (
+          {waiting.map((v) => (
             <QueueRow key={v.proposal.id} v={v} />
           ))}
         </ul>

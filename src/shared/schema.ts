@@ -1081,7 +1081,14 @@ export type Provenance = z.infer<typeof ProvenanceSchema>;
 // Changes an agent found reasons for in your data, each with its reason (docs/AGENTS.md, "Proposing
 // fixes"). Nothing changes until you apply them; you can leave any change out.
 
-export const PROPOSAL_STATUSES = ['pending', 'applied', 'dismissed'] as const;
+/**
+ * - `pending`: waiting for you.
+ * - `applied`: you applied it.
+ * - `dismissed`: you said no; the same changes are refused after.
+ * - `superseded`: your data came to say all of it first (an import or an edit got there), so it
+ *   closed without changing anything. Not a no.
+ */
+export const PROPOSAL_STATUSES = ['pending', 'applied', 'dismissed', 'superseded'] as const;
 /** Changes in one proposal: enough for one pattern across years of history (the page groups them). */
 export const MAX_PROPOSED_CHANGES = 400;
 export type ProposalStatus = (typeof PROPOSAL_STATUSES)[number];

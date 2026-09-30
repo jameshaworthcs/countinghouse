@@ -2,16 +2,19 @@
 // dismisses; every proposal is checked against the data when it is made, shown and applied. All data
 // here is invented.
 
+import { execFileSync } from 'node:child_process';
 import { readFile, mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { ProposalCheckResponse, ProposalListResponse, ProposalView } from '../src/shared/api';
-import type { Account, Transaction } from '../src/shared/schema';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ProposalCheckResponse, ProposalDecision, ProposalListResponse, ProposalView } from '../src/shared/api';
+import type { Account, ProposalInput, Transaction } from '../src/shared/schema';
 import { createApp, type App } from '../src/server/app';
 import { loadConfig } from '../src/server/config';
+import { GitCommitter } from '../src/server/git';
 import { transactionId, transferGroupId } from '../src/server/ids';
 import { ProposalService } from '../src/server/proposals';
+import { Store, type ChangeEvent } from '../src/server/store';
 
 const CSRF = { 'x-finance-csrf': '1', 'content-type': 'application/json' };
 const stamp = '2026-01-01T00:00:00+00:00';
@@ -40,6 +43,17 @@ const wrongLink = transferGroupId(platform.id, saverIn.id);
 const letter = tx('fixed', '2024-02-01', 10500.5, 'Confirmation of deposit to your savings account');
 const part1 = tx('fixed', '2024-02-02', 400, 'Faster Payment Posted: 01/02/2024');
 const part2 = tx('fixed', '2024-02-02', 10100.5, 'Faster Payment');
+const accounts = [acct('bank', 'current'), acct('saver', 'savings'), acct('easy', 'savings'), acct('fixed', 'savings', { openedOn: '2024-02-01', status: 'closed', closedOn: '2026-02-03' })];
+const transactions = [
+  toSaver,
+  { ...platform, category: 'savings-transfer', categorisedBy: 'transfer' as const, transferGroup: wrongLink, counterpartyAccountId: 'saver' },
+  { ...saverIn, category: 'savings-transfer', categorisedBy: 'transfer' as const, transferGroup: wrongLink, counterpartyAccountId: 'bank' },
+  { ...easyOut, category: 'transfer', categorisedBy: 'transfer' as const },
+  bankIn,
+  letter,
+  part1,
+  part2,
+];
 
 let app: App;
 let dir: string;
@@ -50,20 +64,8 @@ beforeEach(async () => {
   config.webDist = path.join(dir, 'no-web');
   app = await createApp(config, { version: 'test', env: {}, inbox: false });
   const { store } = app.ctx;
-  await store.setAccounts([acct('bank', 'current'), acct('saver', 'savings'), acct('easy', 'savings'), acct('fixed', 'savings', { openedOn: '2024-02-01', status: 'closed', closedOn: '2026-02-03' })]);
-  await store.addTransactions(
-    [
-      toSaver,
-      { ...platform, category: 'savings-transfer', categorisedBy: 'transfer', transferGroup: wrongLink, counterpartyAccountId: 'saver' },
-      { ...saverIn, category: 'savings-transfer', categorisedBy: 'transfer', transferGroup: wrongLink, counterpartyAccountId: 'bank' },
-      { ...easyOut, category: 'transfer', categorisedBy: 'transfer' },
-      bankIn,
-      letter,
-      part1,
-      part2,
-    ],
-    'test',
-  );
+  await store.setAccounts(accounts);
+  await store.addTransactions(transactions, 'test');
   agent = `Bearer ${(await app.ctx.tokens.create({ name: 'Test agent', scopes: ['records'], days: 1 })).token}`;
 });
 afterEach(async () => {
@@ -74,7 +76,7 @@ afterEach(async () => {
 const req = (p: string, init: RequestInit = {}) => app.app.request(`http://localhost${p}`, { ...init, headers: { host: 'localhost', ...(init.headers ?? {}) } });
 const propose = (body: unknown, authorization = agent) => req('/api/proposals', { method: 'POST', headers: { ...CSRF, authorization }, body: JSON.stringify(body) });
 const owner = (p: string, body: unknown = {}) => req(p, { method: 'POST', headers: CSRF, body: JSON.stringify(body) });
-const relink = {
+const relink: ProposalInput = {
   title: 'Re-link the October transfers',
   summary: 'The saver’s £1,000 came from the bank’s SAVING payment, not the platform card payment.',
   provenance: { model: 'test-model' },
@@ -249,5 +251,111 @@ describe('a proposal must fit the data', () => {
     );
     expect(view.proposal.provenance).toEqual({ setBy: 'agent', model: 'test-model', promptVersion: 'check-data-1', jobId: 'job_0123456789ab' });
     expect(app.ctx.proposals.pendingCount).toBe(1);
+  });
+});
+
+describe('one your data comes to say all of closes as already done', () => {
+  const linkEasy: ProposalInput = { title: 'Link the easy-access move', summary: 'A test.', changes: [{ kind: 'link_transfer', from: easyOut.id, to: bankIn.id, why: 'The easy-access row names the bank’s account number.' }] };
+  // What an import does when it links the same two rows first.
+  const importLinks = () => {
+    const group = transferGroupId(easyOut.id, bankIn.id);
+    return app.ctx.store.updateTransactions(
+      [
+        { id: easyOut.id, patch: { transferGroup: group, counterpartyAccountId: 'bank', category: 'transfer', categorisedBy: 'transfer' } },
+        { id: bankIn.id, patch: { transferGroup: group, counterpartyAccountId: 'easy', category: 'savings-transfer', categorisedBy: 'transfer' } },
+      ],
+      'import: a statement',
+    );
+  };
+  const unlinkEasy = () => app.ctx.store.updateTransactions([easyOut.id, bankIn.id].map((id) => ({ id, patch: { transferGroup: undefined, counterpartyAccountId: undefined } })), 'test');
+
+  it('by itself once the data changes, and that is not a no', async () => {
+    const { proposal } = (await (await propose(linkEasy)).json()) as ProposalView;
+    await importLinks();
+    // Meanwhile it shows as already done, with nothing to apply.
+    const view = (await (await req(`/api/proposals/${proposal.id}`)).json()) as ProposalView;
+    expect(view).toMatchObject({ alreadyDone: true, ready: 0, problems: 0 });
+    await vi.waitFor(() => expect(app.ctx.proposals.pendingCount).toBe(0), { timeout: 5000 });
+    const list = (await (await req('/api/proposals')).json()) as ProposalListResponse;
+    expect(list.decided[0]).toMatchObject({ id: proposal.id, status: 'superseded', applied: 0 });
+    const file = JSON.parse(await readFile(path.join(dir, 'data', app.ctx.store.proposals[0]!.path), 'utf8')) as Record<string, unknown>;
+    expect(file).toMatchObject({ status: 'superseded' });
+    expect(Object.keys(file)).not.toContain('dismissedReason');
+    expect(Object.keys(file)).not.toContain('before');
+    // Deciding it again says why not.
+    const again = await owner(`/api/proposals/${proposal.id}/dismiss`);
+    expect(again.status).toBe(409);
+    expect(((await again.json()) as { error: string }).error).toMatch(/closed already: your data came to say all of it/);
+    // Were the link undone, an agent may propose it again: only a dismissal refuses that.
+    await unlinkEasy();
+    expect((await propose(linkEasy)).status).toBe(201);
+  });
+
+  it('when you close it, or apply it after an import got there first', async () => {
+    const { proposal } = (await (await propose(linkEasy)).json()) as ProposalView;
+    const early = await owner(`/api/proposals/${proposal.id}/close`);
+    expect(early.status).toBe(409);
+    expect(((await early.json()) as { error: string }).error).toMatch(/would still change your data/);
+    expect((await req(`/api/proposals/${proposal.id}/close`, { method: 'POST', headers: { ...CSRF, authorization: agent }, body: '{}' })).status).toBe(403);
+    await importLinks();
+    const closed = await owner(`/api/proposals/${proposal.id}/close`);
+    expect(closed.status).toBe(200);
+    expect(((await closed.json()) as ProposalDecision).proposal.status).toBe('superseded');
+
+    await unlinkEasy();
+    const { proposal: second } = (await (await propose(linkEasy)).json()) as ProposalView;
+    await importLinks();
+    const applied = await owner(`/api/proposals/${second.id}/apply`);
+    expect(applied.status).toBe(200);
+    expect(((await applied.json()) as ProposalDecision).proposal.status).toBe('superseded');
+    expect(app.ctx.store.proposals.filter((d) => d.status === 'superseded')).toHaveLength(2);
+  });
+
+  it('when applying another does all it asked, even by undoing and redoing a link', async () => {
+    const { proposal: first } = (await (await propose(relink)).json()) as ProposalView;
+    // The same moves in another order: another proposal, which the owner applies.
+    const { proposal: second } = (await (await propose({ ...relink, title: 'The October moves, again', changes: [relink.changes[0]!, relink.changes[2]!, relink.changes[1]!] })).json()) as ProposalView;
+    const res = await owner(`/api/proposals/${second.id}/apply`);
+    expect(res.status).toBe(200);
+    const decision = (await res.json()) as ProposalDecision;
+    expect(decision.proposal).toMatchObject({ status: 'applied', applied: ['unlink', 'easy', 'saver'] });
+    // The first would now undo the saver's new link and make it again: that changes nothing.
+    expect(decision.alsoDone).toEqual([{ id: first.id, title: relink.title }]);
+    expect(app.ctx.proposals.pendingCount).toBe(0);
+  });
+
+  it('is never proposed: changes that undo each other are refused', async () => {
+    await importLinks();
+    const res = await propose({ title: 'Undo and redo', summary: 'A test.', changes: [{ kind: 'unlink_transfer', transaction: easyOut.id, why: 'A test.' }, { kind: 'link_transfer', from: easyOut.id, to: bankIn.id, why: 'A test.' }] });
+    expect(res.status).toBe(422);
+    expect(((await res.json()) as { error: string }).error).toMatch(/undo each other/);
+  });
+});
+
+describe('each decision is a commit of its own', () => {
+  it('the proposal applied, then another it finished', async () => {
+    const repo = await mkdtemp(path.join(os.tmpdir(), 'finance-proposals-git-'));
+    try {
+      const git = (...args: string[]) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' });
+      git('init', '-q', '-b', 'main');
+      git('config', 'user.email', 'test@example.com');
+      git('config', 'user.name', 'Test');
+      const store = await Store.open(path.join(repo, 'data'));
+      const committer = await GitCommitter.create(path.join(repo, 'data'), () => true, 60_000);
+      store.on('change', (e: ChangeEvent) => committer.queue(e));
+      await store.setAccounts(accounts, 'test: accounts');
+      await store.addTransactions(transactions, 'test: transactions');
+      await committer.flush();
+      const svc = ProposalService.forWorkDir(store, path.join(repo, 'work'), () => committer.flush());
+      await svc.init();
+      const made = { setBy: 'agent' as const, model: 'test-model' };
+      await svc.create(relink, made);
+      const again = await svc.create({ ...relink, title: 'The October moves, again', changes: [relink.changes[0]!, relink.changes[2]!, relink.changes[1]!] }, made);
+      await svc.apply(again.proposal.id);
+      expect(git('log', '--format=%s').trim().split('\n').slice(0, 2)).toEqual(['proposal: Re-link the October transfers (already done)', 'proposal: The October moves, again (3 changes applied)']);
+      expect(git('status', '--porcelain', '--', 'data')).toBe('');
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
   });
 });

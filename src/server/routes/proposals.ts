@@ -1,5 +1,5 @@
-// Proposed fixes (src/server/proposals.ts): agents propose with a token; you check, apply or dismiss
-// them signed in. No token can apply or dismiss one (tokens.ts lists what a token may do).
+// Proposed fixes (src/server/proposals.ts): agents propose with a token; you check, apply, dismiss or
+// close them signed in. No token can decide one (tokens.ts lists what a token may do).
 
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
@@ -36,19 +36,23 @@ export function proposalRoutes(ctx: AppContext): Hono {
     return c.json(svc.check(c.req.param('id'), leaveOut));
   });
 
+  /** Each decision is a commit of its own in the data's history (the service commits it). */
   app.post('/:id/apply', async (c) => {
     if (tokenOf(c)) throw new StoreError('Only the owner applies a proposal.', 403);
     const { leaveOut } = await readJson(c, LeaveOut);
-    const view = await svc.apply(c.req.param('id'), leaveOut);
-    // Commit now, so the data's history has the proposal as one commit of its own.
-    await ctx.git.flush();
-    return c.json(view);
+    return c.json(await svc.apply(c.req.param('id'), leaveOut));
   });
 
   app.post('/:id/dismiss', async (c) => {
     if (tokenOf(c)) throw new StoreError('Only the owner dismisses a proposal. An agent withdraws its own with DELETE.', 403);
     const { reason } = await readJson(c, Dismiss);
     return c.json(await svc.dismiss(c.req.param('id'), reason));
+  });
+
+  /** One your data already says all of, closed as already done (it also closes by itself). */
+  app.post('/:id/close', async (c) => {
+    if (tokenOf(c)) throw new StoreError('Only the owner closes a proposal. One your data already says closes by itself.', 403);
+    return c.json(await svc.close(c.req.param('id')));
   });
 
   /** An agent withdraws a proposal the owner has not decided yet. */
