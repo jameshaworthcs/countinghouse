@@ -59,6 +59,7 @@ data/
 | `status` | `open` \| `closed` | plus optional `openedOn`, `closedOn` |
 | `last4` | digits? | last 2–6 digits of the account/card number, never more |
 | `aliases` | string[] | other names it appears under in payment descriptions (links transfers) |
+| `spaces` | string[]? | Spaces (or pots) inside it whose money its statements count in the balance: moves to and from them are left out of imports ([INGESTION.md](INGESTION.md), "Moves inside an account") |
 | `balanceMode` | `ledger` \| `market`? | overrides the type default (see ARCHITECTURE.md) |
 | `includeInNetWorth` | boolean | the estate value includes it |
 | `flexibleIsa`, `interestRate`, `maturesOn`, `pension{employer,method}`, `notes`, `attributes` | optional | |
@@ -183,6 +184,8 @@ Standalone figures from documents, used for Self Assessment:
   draft can carry `nothingToRecord`: what a document the reader understood, but found nothing to
   record in, shows (one sentence). `batchMatch` (`{accountId, importId}`) says a section's account
   came from another screenshot taken and uploaded with it.
+  A row's `insideAccount` names the Space it moves money to or from, inside the account: left
+  unticked, and remembered on the account's `spaces` when committed so.
 - `draftEditedAt`: when you last saved changes to a pending draft; such a draft is never redrafted
   by itself.
 - `result`: `{accountIds, accountsCreated, transactionsAdded, transactionsSkipped, balancesAdded, holdingsAdded, figuresAdded, sections}`.
@@ -218,6 +221,8 @@ lives in the work area (`<work>/proposals/`), never here.
   - `remove_duplicate {transaction, sameAs}`: a row that repeats rows adding up to it.
   - `remove_wrong_sign {transaction, recordedAs}`: a row a document was read into with the wrong
     sign, whose money rows from another document record the right way round.
+  - `remove_internal_move {transaction}`: a move between an account's main balance and one of its
+    Spaces, which the balances either side of it add up only without.
   - `set_account_dates {account, openedOn?, closedOn?}` (`null` clears one).
 - `applied`: the keys of the changes you applied. `dismissedReason`: what you said, if anything.
 - `before`: `{transactions, accounts}`, the rows and accounts the applied changes touched, as they

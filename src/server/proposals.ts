@@ -22,6 +22,7 @@ import { transferLegCategory, type Categoriser } from '../shared/categorise';
 import { diffDays, formatDate, today } from '../shared/dates';
 import { formatMoney, fromMinor, toMinor } from '../shared/money';
 import { AccountSchema, ProposalSchema, type Account, type Proposal, type ProposalInput, type ProposalStatus, type ProposedChange, type Provenance, type Transaction } from '../shared/schema';
+import { BalanceEngine, type BalanceSource } from './analytics/balances';
 import { categoriserFor } from './categoriser';
 import { atomicWrite, Mutex, nowISO } from './fsutil';
 import { proposalId, transferGroupId } from './ids';
@@ -52,6 +53,8 @@ interface ChangeResult {
   alreadySo?: true;
   /** A link's rows as it leaves them: their category, and the account each is a transfer with. */
   after?: Record<string, { category?: string; transferWith: string }>;
+  /** A move inside an account: the balances either side of it, which add up without it. */
+  between?: { from: { date: string; balance: number }; to: { date: string; balance: number } };
 }
 
 interface Outcome {
@@ -106,6 +109,9 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
     return undo >= 0 ? `${what}: include change ${undo + 1}, which undoes that link.` : `${what}: undo that link first.`;
   };
   const gone = (id: string) => `Transaction ${id} is no longer in your data.`;
+  /** What you added to a row beyond a category or payee, which taking it away would lose. */
+  const keptByYou = (t: Transaction) => Boolean(t.notes || t.tags?.length || t.splits?.length || t.corrections?.length || t.seenIn?.length) || receiptsOn.has(t.id);
+  const KEPT_BY_YOU = 'It has something of yours on it (a note, tag, split, correction, receipt or details you added from another document), so a proposal leaves it to you.';
   const remove = (t: Transaction) => {
     if (!out.touchedRows.has(t.id)) out.touchedRows.set(t.id, store.transaction(t.id)!);
     out.patches.delete(t.id);
@@ -202,9 +208,7 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
         if (!doc) return { problem: 'It was not read from a document, so it cannot have been misread.' };
         // A category or payee you gave the misread row goes with it: the rows recorded the right way
         // round keep theirs. What else you added (a note, a split, a receipt…) would be lost.
-        const was = store.transaction(t.id)!;
-        if (was.notes || was.tags?.length || was.splits?.length || was.corrections?.length || was.seenIn?.length || receiptsOn.has(t.id))
-          return { problem: 'It has something of yours on it (a note, tag, split, correction, receipt or details you added from another document), so a proposal leaves it to you.' };
+        if (keptByYou(store.transaction(t.id)!)) return { problem: KEPT_BY_YOU };
         let sum = 0;
         for (const id of c.recordedAs) {
           const s = row(id);
@@ -217,6 +221,17 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
         }
         if (sum !== -toMinor(t.amount)) return { problem: `The rows recording it add up to ${money({ ...t, amount: fromMinor(sum) })}, not ${money({ ...t, amount: -t.amount })}.` };
         remove(t);
+        return {};
+      }
+      case 'remove_internal_move': {
+        const t = row(c.transaction);
+        if (!t) return rows.get(c.transaction) === null ? { problem: 'Another change here removes it already.' } : { alreadySo: true };
+        if (t.transferGroup) return { problem: linkedNow(t) };
+        if (!t.source.documentId && !t.source.importId) return { problem: 'It was not read from a document: a row you typed in is yours to remove.' };
+        // As with a misread row, a category or payee you gave it goes with it.
+        if (keptByYou(store.transaction(t.id)!)) return { problem: KEPT_BY_YOU };
+        remove(t);
+        // Whether the balances either side add up without it is checked once every change has run.
         return {};
       }
       case 'set_account_dates': {
@@ -246,6 +261,26 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
   };
 
   for (const c of changes) if (!leaveOut.has(c.key)) out.results.set(c.key, run(c));
+
+  // A move inside an account left the account's money where it was: without it (and whatever else
+  // this proposal takes away), the statement or your own balances either side of it add up.
+  const moves = changes.filter((c) => c.kind === 'remove_internal_move' && !leaveOut.has(c.key) && !out.results.get(c.key)?.problem && !out.results.get(c.key)?.alreadySo);
+  if (moves.length) {
+    const without: BalanceSource = {
+      accounts: store.accounts,
+      settings: store.settings,
+      balances: (id) => store.balances(id),
+      transactions: (id) => store.transactions(id).flatMap((t) => row(t.id) ?? []),
+    };
+    const engine = new BalanceEngine(without);
+    for (const c of moves) {
+      const t = out.removed.get((c as Extract<ProposedChange, { kind: 'remove_internal_move' }>).transaction)!;
+      const b = engine.between(t.accountId, t.date);
+      if (!b) out.results.set(c.key, { problem: `There is no statement or balance of yours on each side of ${formatDate(t.date)} in ${accountName(t.accountId)} to show its money did not move.` });
+      else if (b.difference) out.results.set(c.key, { problem: `Without it, the balances either side still do not add up: ${formatMoney(b.from.balance)} on ${formatDate(b.from.date)} to ${formatMoney(b.to.balance)} on ${formatDate(b.to.date)} leaves ${formatMoney(b.difference)} unexplained.` });
+      else out.results.set(c.key, { between: { from: b.from, to: b.to } });
+    }
+  }
   return out;
 }
 
@@ -285,6 +320,8 @@ function namedRows(c: ProposedChange): string[] {
       return [c.transaction, ...c.sameAs];
     case 'remove_wrong_sign':
       return [c.transaction, ...c.recordedAs];
+    case 'remove_internal_move':
+      return [c.transaction];
     case 'set_account_dates':
       return [];
   }

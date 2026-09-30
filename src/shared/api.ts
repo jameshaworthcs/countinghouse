@@ -620,6 +620,8 @@ export interface ProposalChangeView {
   alreadySo?: true;
   /** A link's rows as it would leave them: their category, and the account each is a transfer with. */
   after?: Record<string, { category?: string; transferWith: string }>;
+  /** A move inside an account: the balances either side of it, which add up without it. */
+  between?: { from: { date: string; balance: number }; to: { date: string; balance: number } };
 }
 
 export interface ProposalView {

@@ -28,6 +28,7 @@ export function AccountDialog({ open, onOpenChange, account }: { open: boolean; 
   const [last4, setLast4] = useState(account?.last4 ?? '');
   const [currency, setCurrency] = useState(account?.currency ?? 'GBP');
   const [aliases, setAliases] = useState((account?.aliases ?? []).join(', '));
+  const [spaces, setSpaces] = useState((account?.spaces ?? []).join(', '));
   const [include, setInclude] = useState(account?.includeInNetWorth ?? true);
   const [flexible, setFlexible] = useState(account?.flexibleIsa ?? false);
   const [pensionMethod, setPensionMethod] = useState(account?.pension?.method ?? '');
@@ -49,6 +50,7 @@ export function AccountDialog({ open, onOpenChange, account }: { open: boolean; 
           .split(',')
           .map((a) => a.trim())
           .filter(Boolean),
+        ...(meta.balanceMode === 'ledger' ? { spaces: [...new Set(spaces.split(',').map((x) => x.trim()).filter(Boolean))] } : {}),
         ...(inst ? { institutionId: inst.id } : institution.trim() ? { institutionName: institution.trim() } : {}),
         ...(last4.trim() ? { last4: last4.trim() } : account ? { last4: null } : {}),
         ...(meta.isa && type !== 'lisa' ? { flexibleIsa: flexible } : {}),
@@ -109,6 +111,11 @@ export function AccountDialog({ open, onOpenChange, account }: { open: boolean; 
         <Field label="Also appears as" hint="Names in payment descriptions, comma separated (links transfers)">
           <Input value={aliases} onChange={(e) => setAliases(e.target.value)} placeholder="e.g. J SMITH SAVER" />
         </Field>
+        {meta.balanceMode === 'ledger' && (
+          <Field label="Spaces in its balance" hint="Spaces or pots its statements count in the balance, comma separated: moves to and from them are left out of imports">
+            <Input value={spaces} onChange={(e) => setSpaces(e.target.value)} placeholder="e.g. Holiday, Rainy day" />
+          </Field>
+        )}
         <Field label="Opened on" hint="Its data need not go back further than this">
           <Input type="date" value={openedOn} max={closedOn || today()} onChange={(e) => setOpenedOn(e.target.value)} />
         </Field>

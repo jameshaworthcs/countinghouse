@@ -941,3 +941,31 @@ that amount between statements.
 - **Tesco Bank's credit-card CSV is a built-in layout.** Its `Debit/Credit Flag` gives the sign
   (`positiveWhen`, the counterpart of `negativeWhen`), so no rule has to guess from the rows. The
   posting date is the date, as on its statements.
+
+## 2026-09-30: Moves inside an account are left out of imports; a proposal can take one away
+
+Two screenshots of the Starling app listed moves between the main balance and the owner's Space
+("Rainy day", typed "Saving"). Starling's statements count Space money in the balance and list no
+such move: a statement's balances add up without the app's move from the Space. Committed, the
+moves were money in or out no statement saw: a gap in January, another hidden in September, and the
+September move linked as a transfer to a Monzo payment of the same amount that day, on its savings
+category alone.
+
+- **The draft leaves a Space move unticked** (`shared/spaces.ts`): a row the bank types as one
+  (Starling's "Saving"), or one naming a Space listed on the account (`spaces`, additive, no
+  migration) with no type saying otherwise. Committed unticked, its Space is remembered on the
+  account, so a row cut off above its type is known next time.
+  - Considered: leaving Space moves to the reader's prompt. The rows carry what is needed (type,
+    name), prompts cost a version bump and a re-read, and the rule stays testable in code.
+  - Considered: all savings-pot moves. Monzo's pots sit outside the balance its statements show,
+    so money into one does leave the account; only banks known to count Spaces in the balance,
+    or Spaces named on the account, are left out.
+- **`remove_internal_move`** takes a recorded one away when, after the whole proposal, the strong
+  balances either side of it add up without it (`BalanceEngine.between`). That is the evidence a
+  statement gives; the name alone is not.
+- **One side's transfer category alone no longer links a transfer.** It says nothing about the
+  other side: the Space move had `savings-transfer`, the Monzo payment nothing that named a
+  transfer.
+- **A statement's or your own balance outranks a screenshot's on the same day** in the balance
+  engine. The screenshot's balance had replaced the owner's for the same day, and gap checks skip
+  screenshots, so September's gap went unreported.

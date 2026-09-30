@@ -57,6 +57,7 @@ const NewAccountBody = z.object({
   openedOn: ISODateSchema.optional(),
   includeInNetWorth: z.boolean().optional(),
   aliases: z.array(z.string().max(80)).max(20).optional(),
+  spaces: z.array(z.string().min(1).max(80)).max(30).optional(),
   notes: z.string().max(2000).optional(),
   pension: PensionDetailsSchema.optional(),
   flexibleIsa: z.boolean().optional(),

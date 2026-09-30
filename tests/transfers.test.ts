@@ -104,6 +104,15 @@ describe('linking transfers', () => {
     return t.transferGroup ? store.transactions().find((x) => x.transferGroup === t.transferGroup && x.id !== id) : undefined;
   };
 
+  it('does not link on one side’s transfer category alone', async () => {
+    // Money back from a savings pot, and the same £5 spent from the card that day.
+    const [fromPot] = await commit([['bank', '2026-04-01', 5, 'FROM SAVINGS POT']]);
+    expect(store.transaction(fromPot!)!.category).toBe('savings-transfer');
+    const [spent] = await commit([['aqua', '2026-04-01', -5, 'EXAMPLE EXCHANGE LTD']]);
+    expect(partner(fromPot!)).toBeUndefined();
+    expect(partner(spent!)).toBeUndefined();
+  });
+
   it('pairs a busy day’s moves by what each row says, whichever statement comes first', async () => {
     // The card payment to AJ Bell comes first: first come, it took the saver's £1,000 before.
     const [ajbell, saving1, saving2, fromEasy, big] = await commit([

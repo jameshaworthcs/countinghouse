@@ -430,6 +430,28 @@ read again.
   - When a later statement prints the full name, the instrument takes it and keeps the short one
     as an alias. Holdings keep the names their documents printed.
 
+### Moves inside an account
+
+Some banks keep Spaces (or pots) inside an account whose money its statements count in the
+balance. Starling's do: a statement lists no move between the main balance and a Space, while its
+app lists each one, typed "Saving" and named after the Space. Recorded, such a move would be money
+in or out that the statements on either side never saw, and a gap between them
+(`src/shared/spaces.ts`).
+
+- A row is a **move inside the account** when the bank types it so (Starling: "Saving"), or when
+  it names one of the account's Spaces (`spaces` on the account) and no type says otherwise ("Max ·
+  Payments" is a payment to someone called Max).
+  - A row cut off above its type still counts when another row of the same screen shows that
+    Space's name with its type.
+- The draft leaves it unticked, badged with the Space, and never offers it as a transfer leg.
+  Ticked, it is recorded all the same.
+- Committed unticked, its Space's name is added to the account's `spaces`, so a later row that
+  shows only the name is known. The account form lists them under "Spaces in its balance".
+- A move recorded before this is taken away by a proposal (`remove_internal_move`,
+  [AGENTS.md](AGENTS.md) §5) when the balances either side add up only without it.
+- A bank whose pots are outside the account's balance (Monzo's pots, say) is not one of these:
+  money into a pot does leave the balance its statements show.
+
 ## Nothing new
 
 A document the reader understood can add nothing: a prize history that repeats the account's

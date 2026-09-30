@@ -87,6 +87,15 @@
               "type": "string"
             }
           },
+          "spaces": {
+            "maxItems": 30,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80
+            }
+          },
           "balanceMode": {
             "type": "string",
             "enum": [

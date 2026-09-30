@@ -2639,6 +2639,10 @@
                       "type": "string",
                       "maxLength": 300
                     },
+                    "insideAccount": {
+                      "type": "string",
+                      "maxLength": 80
+                    },
                     "adds": {
                       "type": "object",
                       "properties": {

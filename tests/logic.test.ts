@@ -232,6 +232,18 @@ describe('store, balances and analytics', () => {
     expect(new BalanceEngine(store).gaps('current')).toEqual([{ from: '2026-09-01', to: '2026-09-20', difference: -30 }]);
   });
 
+  it('keeps your balance over a screenshot of the same day, and says what is unexplained around a day', async () => {
+    const bal = (id: string, date: string, balance: number, kind: 'statement' | 'manual' | 'screenshot') => ({ id, accountId: 'current', date, balance, currency: 'GBP', kind, source: {}, createdAt: stamp });
+    await store.addTransactions([tx('current', '2026-09-03', 1, 'EXAMPLE PAYER'), tx('current', '2026-09-03', 1, 'Holiday'), tx('current', '2026-09-04', -3, 'EXAMPLE SHOP')], 'test');
+    // Your £0 and then a screenshot's £0, both on 30 Sep: the screenshot does not hide yours.
+    await store.addBalances([bal('bal_00000000000000b1', '2026-08-31', 2, 'statement'), bal('bal_00000000000000b2', '2026-09-30', 0, 'manual'), bal('bal_00000000000000b3', '2026-09-30', 0, 'screenshot')], 'test');
+    const engine = new BalanceEngine(store);
+    expect(engine.gaps('current')).toEqual([{ from: '2026-08-31', to: '2026-09-30', difference: -1 }]);
+    expect(engine.between('current', '2026-09-03')).toEqual({ from: { date: '2026-08-31', balance: 2 }, to: { date: '2026-09-30', balance: 0 }, difference: -1 });
+    expect(engine.between('current', '2026-08-31')).toBeNull();
+    expect(engine.between('current', '2026-10-01')).toBeNull();
+  });
+
   it('closes a day where its printed balances end, whatever order two statements stored its rows in', async () => {
     // Two exports overlap on 30 Sep: the later one (stored first) has the day's last payment, the
     // earlier one its first. Stored order puts the first payment last: the day still closes at 495.

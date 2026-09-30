@@ -179,6 +179,7 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
       { "kind": "set_category", "transaction": "tx_…", "category": "takeaway", "why": "…" },
       { "kind": "remove_duplicate", "transaction": "tx_…", "sameAs": ["tx_…", "tx_…"], "why": "…" },
       { "kind": "remove_wrong_sign", "transaction": "tx_…", "recordedAs": ["tx_…"], "why": "…" },
+      { "kind": "remove_internal_move", "transaction": "tx_…", "why": "…" },
       { "kind": "set_account_dates", "account": "example-fixed", "closedOn": "2026-02-01", "why": "…" }
     ]
   }
@@ -197,6 +198,11 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
     rows are in its account, came from another document, are at most 10 days from it, and add up
     to it with its sign turned over. A category or payee the owner gave the misread row goes with it
     (the rows recorded the right way round keep theirs); anything else of theirs on it stops it.
+  - A move inside an account (`remove_internal_move`: to or from a Space its statements count in
+    the balance) came from a document and is not linked. Once every change of the proposal has
+    run, the strongest balances either side of it (a statement's, a running balance or the
+    owner's own; not a screenshot's) must add up without it. The same category or payee rule as a
+    misread row applies.
   - A category exists, and a row linked as a transfer keeps a transfer category. A category that
     is not a transfer one, on a row not linked as one, also takes away the account of yours the row
     named as the other side, and works its payee out again when that was one of your accounts'

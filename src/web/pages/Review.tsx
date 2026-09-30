@@ -282,6 +282,11 @@ function TxRow({ t, currency, flags, onChange }: { t: DraftTransaction; currency
           )}
           {t.transferMatch && <div className="mt-0.5"><Badge tone="accent">Links to a transfer</Badge></div>}
           {t.pending && <div className="mt-0.5"><Badge tone="muted">Pending</Badge></div>}
+          {t.insideAccount && (
+            <div className="mt-0.5" title="The account’s statements count this Space in its balance and list no move to or from it, so recording it would be money in or out they never saw.">
+              <Badge tone="muted">Move {t.amount < 0 ? 'to' : 'from'} your Space “{t.insideAccount}”: inside the account</Badge>
+            </div>
+          )}
           {flags?.map((f) => (
             <div key={f} className="mt-0.5 flex items-center gap-1 text-[11.5px] text-warn-ink">
               <TriangleAlert className="size-3" /> {f}

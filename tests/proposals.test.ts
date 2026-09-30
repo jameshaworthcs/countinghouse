@@ -184,6 +184,37 @@ describe('an agent proposes, the owner decides', () => {
     expect(store.transaction(statement.id)).toMatchObject({ amount: 12.34, category: 'credit-card-payment' });
   });
 
+  it('removes a move inside an account when the balances either side add up only without it', async () => {
+    const { store } = app.ctx;
+    await store.setAccounts([...accounts, acct('spaces', 'current')]);
+    const screen = { importId: 'imp_screen', documentId: 'doc_screen' };
+    const payer = tx('spaces', '2026-06-03', 4, 'Example Payer', { source: screen });
+    const holiday = tx('spaces', '2026-06-03', 1, 'Holiday', { source: screen, category: 'savings-transfer', categorisedBy: 'ai' });
+    const shop = tx('spaces', '2026-06-04', -6, 'Example Shop', { source: screen });
+    const late = tx('spaces', '2026-07-02', 2, 'Holiday', { source: screen });
+    // The same £1 spent from the bank that day, linked to the Space move: wrong.
+    const exchange = tx('bank', '2026-06-03', -1, 'EXAMPLE EXCHANGE LTD');
+    const group = transferGroupId(exchange.id, holiday.id);
+    await store.addTransactions([payer, { ...holiday, transferGroup: group, counterpartyAccountId: 'bank' }, shop, late, { ...exchange, transferGroup: group, counterpartyAccountId: 'spaces' }], 'test: a Space move');
+    const snap = (id: string, date: string, balance: number, kind: 'statement' | 'manual') => ({ id, accountId: 'spaces', date, balance, currency: 'GBP', kind, source: {}, createdAt: stamp });
+    await store.addBalances([snap('bal_00000000000000c1', '2026-05-31', 2, 'statement'), snap('bal_00000000000000c2', '2026-06-30', 0, 'manual')], 'test');
+    const move = (transaction: string, key = 'move') => ({ key, kind: 'remove_internal_move', transaction, why: 'A move to the Holiday Space.' });
+    const problem = async (changes: Record<string, unknown>[]) => ((await (await propose({ title: 'Space moves', summary: 'A test.', changes })).json()) as { problems: { problem: string }[] }).problems[0]!.problem;
+
+    expect(await problem([move(holiday.id)])).toMatch(/is linked with .*: undo that link first/);
+    // Taking away a real payment leaves the balances short.
+    expect(await problem([move(payer.id)])).toMatch(/still do not add up: £2.00 on 31 May 2026 to £0.00 on 30 Jun 2026 leaves £3.00 unexplained/);
+    expect(await problem([move(late.id)])).toMatch(/no statement or balance of yours on each side/);
+
+    const res = await propose({ title: 'Space moves', summary: 'A test.', changes: [{ key: 'unlink', kind: 'unlink_transfer', transaction: holiday.id, why: 'The exchange is not the Space.' }, move(holiday.id)] });
+    expect(res.status).toBe(201);
+    const view = (await res.json()) as ProposalView;
+    expect(view.changes.find((c) => c.change.key === 'move')!.between).toEqual({ from: { date: '2026-05-31', balance: 2 }, to: { date: '2026-06-30', balance: 0 } });
+    expect((await owner(`/api/proposals/${view.proposal.id}/apply`)).status).toBe(200);
+    expect(store.transaction(holiday.id)).toBeUndefined();
+    expect(store.transaction(exchange.id)!.transferGroup).toBeUndefined();
+  });
+
   it('a row that stops being a transfer stops naming your account, and its payee is worked out again', async () => {
     const { store } = app.ctx;
     const cash = tx('bank', '2026-03-10', -50, 'Cash withdrawal, Example Bank, Faro', { payee: 'saver', category: 'savings-transfer', categorisedBy: 'transfer', counterpartyAccountId: 'saver' });

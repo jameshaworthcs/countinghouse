@@ -6,6 +6,7 @@ import { findInstitution } from '../../shared/institutions';
 import { isWrapperAccount, transferLegCategory } from '../../shared/categorise';
 import { dateOf, diffDays, today } from '../../shared/dates';
 import { toMinor } from '../../shared/money';
+import { spaceMove } from '../../shared/spaces';
 import { categoriserFor } from '../categoriser';
 import { addsAnything, detailToAdd, fillIn } from '../../shared/detail';
 import { rederive, transferEvidence, transferReader, type TransferSide } from '../enrich';
@@ -272,6 +273,10 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
       // A letter or confirmation may restate payments recorded one by one (dedup.ts, step 5).
       { sums: !TRANSACTION_LISTS.has(extraction.documentType) },
     );
+    // The account's Spaces, and those this document's own rows show by type: a row cut off above
+    // its type still names the Space.
+    const shownSpaces = existing ? acc.transactions.flatMap((t) => (t.type ? (spaceMove({ ...existing, spaces: [] }, t) ?? []) : [])) : [];
+    const spacesOf = existing ? { ...existing, spaces: [...new Set([...(existing.spaces ?? []), ...shownSpaces])] } : undefined;
     const transactions: DraftTransaction[] = acc.transactions.map((t, ti) => {
       const cat = categoriser.categorise({
         accountId: targetId,
@@ -284,11 +289,12 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
         aiPayee: t.payee ?? undefined,
       });
       const dup = dups[ti]!;
+      const space = spaceMove(spacesOf, t);
       let category = cat.category;
       let categorisedBy = cat.categorisedBy;
       let counterpartyAccountId = cat.counterpartyAccountId;
       let transferMatch: string | undefined;
-      if (dup.status === 'new' && (!category || TRANSFER_CATEGORIES.has(category))) {
+      if (dup.status === 'new' && !space && (!category || TRANSFER_CATEGORIES.has(category))) {
         const candidates = txByAmount.get(Math.abs(toMinor(t.amount))) ?? [];
         const row = { id: `draft:${si}:${ti}`, accountId: targetId, date: t.date, amount: t.amount, description: t.description, ...(t.type ? { type: t.type } : {}), ...(category ? { category } : {}), ...(counterpartyAccountId ? { counterpartyAccountId } : {}) };
         const other = findTransferMatch(row, counterpartyAccountId ? candidates.filter((c) => c.accountId === counterpartyAccountId) : candidates, takenTransfers, reader);
@@ -320,7 +326,8 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
       const row: DraftTransaction = {
         key: `s${si}-t${ti}`,
         // Pending rows are shown but not recorded: the settled row arrives with the next statement.
-        include: dup.status === 'new' && !t.pending,
+        // A move to or from one of the account's Spaces is not money in or out.
+        include: dup.status === 'new' && !t.pending && !space,
         status: dup.status,
         date: t.date,
         amount: t.amount,
@@ -335,6 +342,7 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
         ...(t.originalAmount !== null && t.originalCurrency ? { original: { amount: t.amount < 0 ? -Math.abs(t.originalAmount) : Math.abs(t.originalAmount), currency: t.originalCurrency.toUpperCase() } } : {}),
         ...(t.pending ? { pending: true } : {}),
         ...(t.uncertain ? { uncertain: t.uncertain.slice(0, 300) } : {}),
+        ...(space ? { insideAccount: space.slice(0, 80) } : {}),
         ...(counterpartyAccountId ? { counterpartyAccountId } : {}),
         ...(transferMatch ? { transferMatch } : {}),
         ...(t.row !== null ? { row: t.row } : { row: ti }),

@@ -166,7 +166,9 @@ export function rederive(categoriser: Categoriser, t: Transaction, filled: reado
  * How strongly two rows say they are the same money moving between your accounts, or null when one
  * of them says it went somewhere else (docs/INGESTION.md, "Transfers").
  * - A row that names the other row's account (by its number, an alias or its bank) counts 3.
- * - A row that pays you or comes from you by name counts 1; so does a transfer category.
+ * - A row that pays you or comes from you by name counts 1; so does a transfer category, but one
+ *   side's category alone is not enough: it says nothing about the other side ("Rainy day", a savings
+ *   move, is not the payment to an exchange that another account made that day).
  * - A row that names only other accounts of yours, or was set to go to another (a rule's
  *   counterparty), rules the pair out: "AJ BELL" is not a payment to the Chase saver.
  * With nothing for it, the pair is not linked.
@@ -183,8 +185,9 @@ export function transferEvidence(a: TransferSide, b: TransferSide, named: (t: Tr
   if (namesB.includes(a.accountId) || b.counterpartyAccountId === a.accountId) score += 3;
   if (ownName(a)) score += 1;
   if (ownName(b)) score += 1;
-  if (a.category && TRANSFERISH.has(a.category)) score += 1;
-  if (b.category && TRANSFERISH.has(b.category)) score += 1;
+  const categories = [a, b].filter((t) => t.category && TRANSFERISH.has(t.category)).length;
+  score += categories;
+  if (score === 1 && categories === 1) return null;
   return score > 0 ? score : null;
 }
 

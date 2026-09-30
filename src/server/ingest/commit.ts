@@ -60,7 +60,16 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
       if (!acc) throw new StoreError(`Account "${section.target.accountId}" no longer exists`, 409);
       resolved.set(section.key, acc);
       const last4 = section.detected.last4;
-      if (!nothingNew && !acc.last4 && last4 && /^\d{2,6}$/.test(last4) && !toLearn.some((a) => a.id === acc.id)) toLearn.push(AccountSchema.parse({ ...acc, last4, updatedAt: stamp }));
+      const learnt = toLearn.find((a) => a.id === acc.id) ?? acc;
+      const learn: Partial<Account> = {};
+      if (!nothingNew && !learnt.last4 && last4 && /^\d{2,6}$/.test(last4)) learn.last4 = last4;
+      // A Space whose move you left out is remembered, so a row that shows only its name is known.
+      const spaces = [...new Set(section.transactions.filter((t) => t.insideAccount && !t.include).map((t) => t.insideAccount!))].filter((name) => !learnt.spaces?.some((x) => x.toLowerCase() === name.toLowerCase()));
+      if (spaces.length) learn.spaces = [...(learnt.spaces ?? []), ...spaces];
+      if (Object.keys(learn).length) {
+        const next = AccountSchema.parse({ ...learnt, ...learn, updatedAt: stamp });
+        toLearn.splice(0, toLearn.length, ...toLearn.filter((a) => a.id !== acc.id), next);
+      }
       continue;
     }
     const input = section.target.account;

@@ -243,6 +243,8 @@ years), both paths grow at the median:
 **Ledger accounts** (`analytics/balances.ts`):
 
 - Anchors are statement or screenshot balances and end-of-day running balances.
+  - On a day with both, a statement's or your own balance outranks a screenshot's, which may
+    have been taken mid-day.
   - A day closes where its printed balances end: each row's balance − its amount is the balance
     before it, and the close is the one balance no row of the day starts from.
   - That holds whatever order the rows are stored in, as when two statements that overlap by a day
@@ -288,6 +290,9 @@ years), both paths grow at the median:
 - Consecutive strong anchors (not screenshots or approximate figures) with
   anchor_b ≠ anchor_a + Σ tx in (a, b], each transaction on the day it counts from.
 - The difference is what is unexplained.
+- The strong anchors either side of a day (`between`): the last one before it and the first on or
+  after it, and what is unexplained between them. A proposal that takes away a move inside the
+  account (§ "Proposed fixes" in AGENTS.md) must leave that at nothing.
 
 **Estate value on D:**
 

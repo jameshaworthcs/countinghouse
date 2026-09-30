@@ -125,6 +125,11 @@ export const AccountSchema = z.object({
   /** Other names this account appears under in documents and payment descriptions. */
   aliases: z.array(z.string()).default([]),
   /**
+   * Spaces (or pots) inside this account whose money its statements count in its balance, as
+   * Starling's do: moves between them and the main balance are not money in or out.
+   */
+  spaces: z.array(z.string().min(1).max(80)).max(30).optional(),
+  /**
    * ledger: balance moves exactly with transactions (bank, savings, cards, loans, cash ISAs).
    * market: balance is a valuation that moves with markets (investments, pensions, property);
    * valuations are anchors and only external cash flows are added between them.
@@ -858,6 +863,11 @@ export const DraftTransactionSchema = z.object({
   /** What the reader was unsure of on this row ("year not shown", "amount partly hidden"). */
   uncertain: z.string().max(300).optional(),
   /**
+   * The Space this row moves money to or from, inside the account (shared/spaces.ts): not money in
+   * or out, so it is left unticked. Ticked, it is recorded all the same.
+   */
+  insideAccount: z.string().max(80).optional(),
+  /**
    * A row matched to a recorded payment (`duplicateOf`) that knows more about it: the recorded
    * payment's empty source fields this document fills in (shared/detail.ts). Ticked `include`, they
    * are filled in on commit, while the row itself is not recorded again.
@@ -1181,6 +1191,11 @@ const changeUnion = <K extends z.ZodType<string | undefined>>(key: K) =>
      * the same money the right way round (they add up to it with its sign turned over).
      */
     z.object({ key, kind: z.literal('remove_wrong_sign'), why: ChangeWhySchema, transaction: TransactionIdSchema, recordedAs: z.array(TransactionIdSchema).min(1).max(10) }),
+    /**
+     * Remove a move inside an account (between its main balance and a Space its statements count
+     * in the balance): the balances either side of it add up only without it.
+     */
+    z.object({ key, kind: z.literal('remove_internal_move'), why: ChangeWhySchema, transaction: TransactionIdSchema }),
     /** Set when an account opened or closed (null clears it; a closing date closes the account). */
     z.object({ key, kind: z.literal('set_account_dates'), why: ChangeWhySchema, account: SlugSchema, openedOn: ISODateSchema.nullable().optional(), closedOn: ISODateSchema.nullable().optional() }),
   ]);

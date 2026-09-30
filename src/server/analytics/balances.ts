@@ -20,6 +20,9 @@ import { fromMinor, toMinor } from '../../shared/money';
 import type { Account, Settings } from '../../shared/schema';
 import type { Store } from '../store';
 
+/** What the engine reads: a store, or a store as a proposal would leave it. */
+export type BalanceSource = Pick<Store, 'accounts' | 'transactions' | 'balances' | 'settings'>;
+
 interface Anchor {
   date: ISODate;
   minor: number;
@@ -187,7 +190,7 @@ export function fxRate(currency: string, settings: Settings): number | null {
 export class BalanceEngine {
   private readonly data = new Map<string, AccountData>();
 
-  constructor(store: Store) {
+  constructor(store: BalanceSource) {
     for (const account of store.accounts) {
       const mode = balanceModeOf(account);
       const txs = store.transactions(account.id);
@@ -205,7 +208,13 @@ export class BalanceEngine {
       const real = snaps.filter((s) => !s.approximate);
       const lastReal = [txs[txs.length - 1]?.date, real[real.length - 1]?.date].filter(Boolean).sort().reverse()[0];
       const placeholders = snaps.filter((s) => s.approximate && (!lastReal || s.date > lastReal));
-      for (const s of real) anchors.set(s.date, { date: s.date, minor: toMinor(s.balance), source: s.kind === 'screenshot' ? 'screenshot' : 'snapshot' });
+      // A statement's or your own balance outranks a screenshot of the same day: a screenshot may be
+      // taken mid-day, and it would hide what the stronger one says from the gap check.
+      for (const s of real) {
+        const source = s.kind === 'screenshot' ? 'screenshot' : 'snapshot';
+        if (source === 'screenshot' && anchors.get(s.date)?.source === 'snapshot') continue;
+        anchors.set(s.date, { date: s.date, minor: toMinor(s.balance), source });
+      }
       for (const s of placeholders) if (!anchors.has(s.date)) anchors.set(s.date, { date: s.date, minor: toMinor(s.balance), source: 'approximate' });
       const sortedAnchors = [...anchors.values()].sort((a, b) => (a.date < b.date ? -1 : 1));
       const flows = txs.filter((t) => t.category && EXTERNAL_FLOW_CATEGORIES.has(t.category));
@@ -320,16 +329,38 @@ export class BalanceEngine {
    * Gaps between consecutive anchors that transactions don't explain: usually a missing statement.
    */
   gaps(accountId: string): { from: ISODate; to: ISODate; difference: number }[] {
-    const d = this.data.get(accountId);
-    if (!d || d.mode !== 'ledger' || d.tx.dates.length === 0) return [];
+    const strong = this.strongAnchors(accountId);
     const out: { from: ISODate; to: ISODate; difference: number }[] = [];
-    const strong = d.anchors.filter((a) => a.source !== 'screenshot' && a.source !== 'approximate');
     for (let i = 1; i < strong.length; i++) {
-      const a = strong[i - 1]!;
-      const b = strong[i]!;
-      const expected = a.minor + (sumTo(d.tx, b.date) - sumTo(d.tx, a.date));
-      if (expected !== b.minor) out.push({ from: a.date, to: b.date, difference: fromMinor(b.minor - expected) });
+      const gap = this.unexplained(accountId, strong[i - 1]!, strong[i]!);
+      if (gap.difference) out.push(gap);
     }
     return out;
+  }
+
+  /**
+   * The strong anchors either side of a day, for a row on it: the last before it and the first on
+   * or after it (a row counts in its own day's close), with what the rows between leave unexplained.
+   * Null without one on each side.
+   */
+  between(accountId: string, date: ISODate): { from: { date: ISODate; balance: number }; to: { date: ISODate; balance: number }; difference: number } | null {
+    const strong = this.strongAnchors(accountId);
+    const i = strong.findIndex((a) => a.date >= date);
+    if (i < 1) return null;
+    const [a, b] = [strong[i - 1]!, strong[i]!];
+    return { from: { date: a.date, balance: fromMinor(a.minor) }, to: { date: b.date, balance: fromMinor(b.minor) }, difference: this.unexplained(accountId, a, b).difference };
+  }
+
+  /** Statement, running and your own balances: screenshots may be mid-day, approximate figures rough. */
+  private strongAnchors(accountId: string): Anchor[] {
+    const d = this.data.get(accountId);
+    if (!d || d.mode !== 'ledger' || d.tx.dates.length === 0) return [];
+    return d.anchors.filter((a) => a.source !== 'screenshot' && a.source !== 'approximate');
+  }
+
+  private unexplained(accountId: string, a: Anchor, b: Anchor): { from: ISODate; to: ISODate; difference: number } {
+    const d = this.data.get(accountId)!;
+    const expected = a.minor + (sumTo(d.tx, b.date) - sumTo(d.tx, a.date));
+    return { from: a.date, to: b.date, difference: fromMinor(b.minor - expected) };
   }
 }
