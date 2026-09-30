@@ -190,6 +190,14 @@ and a card in credit counts as cash.
   skeletons), and Tailwind v4 with CSS-variable tokens for light and dark.
 - Live updates come over server-sent events (`/api/events`): a `data` event invalidates queries,
   and an `import` event refreshes the import queue.
+- A page that fails to show gets `RouteError` (`components/RouteError.tsx`), never React Router's
+  developer error page:
+  - an ended session (a 401) goes to sign-in, coming back to the same page;
+  - a page bundle a deploy removed (the old hashed file is gone) reloads onto the new build, once
+    per 30 seconds so a real failure can't loop;
+  - anything else first checks `/api/auth/status` and goes to sign-in if signed out, and otherwise
+    says so in plain words with Reload, with the error folded under "Technical details";
+  - a request that can't reach the server says so, not the browser's "Failed to fetch".
 - Charts are hand-built SVG on `d3-scale`/`d3-shape`, following the validated data-viz palette:
   - fixed categorical order;
   - 2px lines and rounded bar ends;

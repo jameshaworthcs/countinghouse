@@ -1,6 +1,7 @@
 // Thin, typed wrapper over the HTTP API, plus query hooks.
 
 import { keepPreviousData, useMutation, useQuery, useQueryClient, type QueryKey } from '@tanstack/react-query';
+import { signInPath } from './errors';
 
 export class ApiError extends Error {
   constructor(
@@ -22,9 +23,16 @@ export async function api<T>(path: string, init: { method?: string; body?: Json 
     headers['content-type'] = 'application/json';
     body = JSON.stringify(init.body);
   }
-  const res = await fetch(`/api${path}`, { method: init.method ?? (body ? 'POST' : 'GET'), headers, body, credentials: 'same-origin', ...(init.signal ? { signal: init.signal } : {}) });
+  let res: Response;
+  try {
+    res = await fetch(`/api${path}`, { method: init.method ?? (body ? 'POST' : 'GET'), headers, body, credentials: 'same-origin', ...(init.signal ? { signal: init.signal } : {}) });
+  } catch (err) {
+    // Offline, or the server restarting mid-deploy: say so, not the browser's "Failed to fetch".
+    if (err instanceof DOMException && err.name === 'AbortError') throw err;
+    throw new ApiError('Couldn’t reach Finance. Check your connection, then try again.', 0, 'network');
+  }
   if (res.status === 401 && !path.startsWith('/auth/')) {
-    if (!location.pathname.startsWith('/login')) location.assign(`/login?next=${encodeURIComponent(location.pathname + location.search)}`);
+    if (!location.pathname.startsWith('/login')) location.assign(signInPath(location.pathname + location.search));
     throw new ApiError('Not signed in', 401, 'unauthenticated');
   }
   const type = res.headers.get('content-type') ?? '';

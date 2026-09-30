@@ -1,6 +1,7 @@
 import { lazy, Suspense, type ReactNode } from 'react';
 import { createBrowserRouter, Navigate, RouterProvider, useLocation } from 'react-router';
 import { Layout } from './components/Layout';
+import { RouteError } from './components/RouteError';
 import { Loading } from './components/ui';
 import { useApi } from './lib/api';
 import { DataProvider } from './lib/data';
@@ -56,7 +57,7 @@ function RequireAuth({ children }: { children: ReactNode }) {
 const page = (node: ReactNode) => <Suspense fallback={<Loading />}>{node}</Suspense>;
 
 const router = createBrowserRouter([
-  { path: '/login', element: <Login /> },
+  { path: '/login', element: <Login />, errorElement: <RouteError /> },
   {
     path: '/',
     element: (
@@ -64,22 +65,29 @@ const router = createBrowserRouter([
         <Layout />
       </RequireAuth>
     ),
+    // A failure in the shell replaces the whole screen; one in a page shows inside the shell.
+    errorElement: <RouteError />,
     children: [
-      { index: true, element: page(<Dashboard />) },
-      { path: 'accounts', element: page(<Accounts />) },
-      { path: 'accounts/:id', element: page(<AccountDetail />) },
-      { path: 'transactions', element: page(<Transactions />) },
-      { path: 'spending', element: page(<Spending />) },
-      { path: 'projections', element: page(<Projections />) },
-      { path: 'investments', element: page(<Investments />) },
-      { path: 'tax', element: page(<TaxYear />) },
-      { path: 'tax/:tab', element: page(<TaxYear />) },
-      { path: 'assumptions', element: page(<Assumptions />) },
-      { path: 'import', element: page(<Import />) },
-      { path: 'import/:id', element: page(<Review />) },
-      { path: 'proposals/:id', element: page(<Proposal />) },
-      { path: 'settings', element: page(<Settings />) },
-      { path: '*', element: <div className="py-20 text-center text-ink-3">Page not found.</div> },
+      {
+        errorElement: <RouteError />,
+        children: [
+          { index: true, element: page(<Dashboard />) },
+          { path: 'accounts', element: page(<Accounts />) },
+          { path: 'accounts/:id', element: page(<AccountDetail />) },
+          { path: 'transactions', element: page(<Transactions />) },
+          { path: 'spending', element: page(<Spending />) },
+          { path: 'projections', element: page(<Projections />) },
+          { path: 'investments', element: page(<Investments />) },
+          { path: 'tax', element: page(<TaxYear />) },
+          { path: 'tax/:tab', element: page(<TaxYear />) },
+          { path: 'assumptions', element: page(<Assumptions />) },
+          { path: 'import', element: page(<Import />) },
+          { path: 'import/:id', element: page(<Review />) },
+          { path: 'proposals/:id', element: page(<Proposal />) },
+          { path: 'settings', element: page(<Settings />) },
+          { path: '*', element: <div className="py-20 text-center text-ink-3">Page not found.</div> },
+        ],
+      },
     ],
   },
 ]);
