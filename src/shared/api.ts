@@ -566,9 +566,29 @@ export interface NothingNewView {
 
 export type PendingImport = ImportRecord & { readiness?: { ready: boolean; reasons: string[] }; nothingNew?: NothingNewView };
 
+/** The imports waiting for review (committed ones are paged through `ImportHistoryResponse`). */
 export interface ImportListResponse {
   pending: PendingImport[];
-  committed: { id: string; createdAt: string; committedAt?: string; fileName: string; mediaType: string; documentId: string; engine?: string; result?: ImportRecord['result'] }[];
+}
+
+export interface CommittedImport {
+  id: string;
+  createdAt: string;
+  committedAt?: string;
+  fileName: string;
+  mediaType: string;
+  documentId: string;
+  engine?: string;
+  result?: ImportRecord['result'];
+}
+
+/** GET /imports/history?page=: committed imports, the latest committed first, a page at a time. */
+export interface ImportHistoryResponse {
+  items: CommittedImport[];
+  total: number;
+  /** The page these are: the one asked for, or the last there is when it asked past the end. */
+  page: number;
+  pageSize: number;
 }
 
 export interface SystemResponse {

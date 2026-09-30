@@ -699,3 +699,17 @@ only recorded by the agents' background run, which is off.
   dated this way: a statement saved today can be last year's.
 - **The export's growth is kept**: the totals line's gain becomes the balance's `gain`, as a
   statement's does.
+
+## 2026-09-30: History pages through every committed import
+
+The owner uploaded two dividend vouchers, was told they were already imported, and could not find
+them. They had come in through the inbox with the first big import and were committed, but the
+Import page's History showed only the latest 50 committed imports, so they sat on no page.
+
+- **History is paged, 25 a page, the latest committed first**, from `GET /api/imports/history?page=`,
+  with numbered pages. The page is kept in the address (`/import?history=3`), so coming back from an
+  import returns to it. Imports committed together (*Commit all ready*) go the latest uploaded
+  first. Times are compared as instants, not strings: the offset changes when the clocks do.
+- **`GET /api/imports` lists only what waits for review.** It carried up to 200 committed summaries
+  too, which the Import page (every 5 seconds) and the menu badge (every 15) fetched without
+  needing.

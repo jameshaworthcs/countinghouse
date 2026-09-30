@@ -1,11 +1,11 @@
 import { Archive, ChevronRight, CircleCheck, CircleDashed, CopyCheck, FileImage, FileSpreadsheet, FileText, FolderInput, LoaderCircle, Sparkles, Trash2, TriangleAlert, Upload } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { Link, useLocation } from 'react-router';
-import type { CaptureAskView, CaptureItemView, CaptureResponse, ImportListResponse, MonthlyChecklistResponse, SystemResponse } from '../../shared/api';
+import { Link, useLocation, useSearchParams } from 'react-router';
+import type { CaptureAskView, CaptureItemView, CaptureResponse, ImportHistoryResponse, ImportListResponse, MonthlyChecklistResponse, SystemResponse } from '../../shared/api';
 import type { ImportRecord } from '../../shared/schema';
-import { Badge, Button, Callout, Card, Checkbox, EmptyState, Loading, PageHeader, StatusBadge, useToast } from '../components/ui';
+import { Badge, Button, Callout, Card, Checkbox, EmptyState, Loading, PageHeader, Pager, StatusBadge, useToast } from '../components/ui';
 import { DropZone, FilePickerButton } from '../components/Upload';
-import { api, useApi, useApiMutation } from '../lib/api';
+import { api, qs, useApi, useApiMutation } from '../lib/api';
 import { useAppData } from '../lib/data';
 import { cn, fileSize, formatDate, formatMonth, money, plural, timeAgo } from '../lib/format';
 import { OlderReadings } from '../components/ReadAgain';
@@ -286,6 +286,60 @@ function Monthly() {
   );
 }
 
+/**
+ * Every committed import, the latest first, a page at a time. The page is kept in the address
+ * (`?history=`), so coming back from an import's page returns to it.
+ */
+function History() {
+  const [params, setParams] = useSearchParams();
+  const asked = Math.max(1, Math.trunc(Number(params.get('history'))) || 1);
+  const q = useApi<ImportHistoryResponse>(['imports', 'history', asked], `/imports/history${qs({ page: asked > 1 ? asked : undefined })}`);
+  const h = q.data;
+  const pages = h ? Math.max(1, Math.ceil(h.total / h.pageSize)) : 1;
+  const go = (page: number) => {
+    const next = new URLSearchParams(params);
+    if (page > 1) next.set('history', String(page));
+    else next.delete('history');
+    setParams(next, { replace: true });
+    document.getElementById('history')?.scrollIntoView({ block: 'start' });
+  };
+  return (
+    <Card id="history" title="History" padded={false} className="scroll-mt-16 lg:scroll-mt-5">
+      {!h ? (
+        <div className="px-5">
+          <Loading />
+        </div>
+      ) : h.items.length ? (
+        <>
+          <ul className="divide-y divide-line border-t border-line">
+            {h.items.map((c) => (
+              <li key={c.id} className="flex items-center gap-3 px-5 py-2.5 text-[13px]">
+                <FileIcon mediaType={c.mediaType} className="size-4" />
+                <Link to={`/import/${c.id}`} className="min-w-0 flex-1 truncate text-ink hover:underline">
+                  {c.fileName}
+                </Link>
+                <span className="hidden text-ink-3 sm:inline">
+                  {c.result?.nothingNew ? 'filed, nothing new' : c.result ? [c.result.transactionsAdded ? `+${c.result.transactionsAdded} transactions` : '', c.result.balancesAdded ? 'balance' : '', c.result.holdingsAdded ? 'holdings' : '', c.result.figuresAdded ? `${c.result.figuresAdded} figures` : ''].filter(Boolean).join(', ') : ''}
+                </span>
+                <span className="w-24 text-right text-ink-3">{c.committedAt ? formatDate(c.committedAt.slice(0, 10)) : ''}</span>
+              </li>
+            ))}
+          </ul>
+          {pages > 1 && (
+            <Pager page={h.page} pages={pages} onPage={go} label="History pages" className="border-t border-line px-5 py-2">
+              <span className="text-[13px] text-ink-3 tabular-nums">
+                {(h.page - 1) * h.pageSize + 1}–{(h.page - 1) * h.pageSize + h.items.length} of {h.total}
+              </span>
+            </Pager>
+          )}
+        </>
+      ) : (
+        <EmptyState title="Nothing imported yet" />
+      )}
+    </Card>
+  );
+}
+
 export default function Import() {
   const q = useApi<ImportListResponse>(['imports'], '/imports', { refetchInterval: 5000 });
   const { data } = useAppData();
@@ -338,26 +392,7 @@ export default function Import() {
         <Callout tone="neutral" title="Inbox folder" action={<FolderInput className="size-5 text-ink-3" />}>
           Files saved into <code className="rounded bg-panel px-1">{data.inboxDir}</code> are imported automatically. Point a Syncthing or cloud-sync folder that your phone saves screenshots to at it, and your monthly screenshots arrive here on their own.
         </Callout>
-        <Card title="History" padded={false}>
-          {q.data?.committed.length ? (
-            <ul className="divide-y divide-line border-t border-line">
-              {q.data.committed.slice(0, 50).map((c) => (
-                <li key={c.id} className="flex items-center gap-3 px-5 py-2.5 text-[13px]">
-                  <FileIcon mediaType={c.mediaType} className="size-4" />
-                  <Link to={`/import/${c.id}`} className="min-w-0 flex-1 truncate text-ink hover:underline">
-                    {c.fileName}
-                  </Link>
-                  <span className="hidden text-ink-3 sm:inline">
-                    {c.result?.nothingNew ? 'filed, nothing new' : c.result ? [c.result.transactionsAdded ? `+${c.result.transactionsAdded} transactions` : '', c.result.balancesAdded ? 'balance' : '', c.result.holdingsAdded ? 'holdings' : '', c.result.figuresAdded ? `${c.result.figuresAdded} figures` : ''].filter(Boolean).join(', ') : ''}
-                  </span>
-                  <span className="w-24 text-right text-ink-3">{c.committedAt ? formatDate(c.committedAt.slice(0, 10)) : ''}</span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <EmptyState title="Nothing imported yet" />
-          )}
-        </Card>
+        <History />
         <OlderReadings />
       </div>
     </div>

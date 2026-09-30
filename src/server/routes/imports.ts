@@ -3,17 +3,29 @@
 import { readFile } from 'node:fs/promises';
 import { Hono } from 'hono';
 import { z } from 'zod';
-import type { ImportListResponse } from '../../shared/api';
+import type { ImportHistoryResponse, ImportListResponse } from '../../shared/api';
 import { CsvProfileSchema, DraftSchema, EXTRACTION_ENGINES, SlugSchema } from '../../shared/schema';
 import { readJson, type AppContext } from '../context';
 import { detectKind } from '../ingest/detect';
 import { PROMPT_VERSION } from '../ingest/prompt';
 import { sheetRows } from '../ingest/xlsx';
-import { StoreError } from '../store';
+import { StoreError, type ImportSummary } from '../store';
+
+/** Committed imports on a page of the Import page's History. */
+const HISTORY_PAGE_SIZE = 25;
 
 function contentDisposition(fileName: string): string {
   const ascii = fileName.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
   return `inline; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
+}
+
+/**
+ * The latest committed first, as History dates them. Imports committed together (Commit all ready)
+ * go the latest uploaded first. Times are compared as instants: the offsets change with the clocks.
+ */
+function latestCommittedFirst(a: ImportSummary, b: ImportSummary): number {
+  const at = (iso: string) => Date.parse(iso);
+  return at(b.committedAt ?? b.createdAt) - at(a.committedAt ?? a.createdAt) || at(b.createdAt) - at(a.createdAt) || b.id.localeCompare(a.id);
 }
 
 export function importRoutes(ctx: AppContext): Hono {
@@ -27,7 +39,17 @@ export function importRoutes(ctx: AppContext): Hono {
         const nothingNew = novelty.get(r.id);
         return { ...r, readiness: svc.readiness(r, nothingNew), ...(nothingNew ? { nothingNew } : {}) };
       }),
-      committed: ctx.store.imports.slice(0, 200).map((i) => ({
+    };
+    return c.json(body);
+  });
+
+  /** Every committed import, a page at a time (`?page=`, from 1), for the Import page's History. */
+  app.get('/history', (c) => {
+    const all = [...ctx.store.imports].sort(latestCommittedFirst);
+    const pages = Math.max(1, Math.ceil(all.length / HISTORY_PAGE_SIZE));
+    const page = Math.min(pages, Math.max(1, Math.trunc(Number(c.req.query('page'))) || 1));
+    const body: ImportHistoryResponse = {
+      items: all.slice((page - 1) * HISTORY_PAGE_SIZE, page * HISTORY_PAGE_SIZE).map((i) => ({
         id: i.id,
         createdAt: i.createdAt,
         fileName: i.fileName,
@@ -37,6 +59,9 @@ export function importRoutes(ctx: AppContext): Hono {
         ...(i.engine ? { engine: i.engine } : {}),
         ...(i.result ? { result: i.result } : {}),
       })),
+      total: all.length,
+      page,
+      pageSize: HISTORY_PAGE_SIZE,
     };
     return c.json(body);
   });

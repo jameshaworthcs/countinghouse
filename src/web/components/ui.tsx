@@ -1,6 +1,6 @@
 // The small component kit every page is built from.
 
-import { ArrowDownRight, ArrowUpRight, CircleAlert, CircleCheck, Info, LoaderCircle, Minus, TriangleAlert, X } from 'lucide-react';
+import { ArrowDownRight, ArrowUpRight, ChevronLeft, ChevronRight, CircleAlert, CircleCheck, Info, LoaderCircle, Minus, TriangleAlert, X } from 'lucide-react';
 import { Dialog as RDialog } from 'radix-ui';
 import {
   createContext,
@@ -172,6 +172,46 @@ export function EmptyState({ icon, title, children, action, className }: { icon?
       {children && <div className="mt-1 max-w-md text-[13px] text-ink-3">{children}</div>}
       {action && <div className="mt-4">{action}</div>}
     </div>
+  );
+}
+
+/** The page numbers to offer: all of them when few, else the first, the last and this page's neighbours; null is a gap. */
+function pageNumbers(page: number, pages: number): (number | null)[] {
+  if (pages <= 7) return Array.from({ length: pages }, (_, i) => i + 1);
+  const keep = [...new Set([1, page - 1, page, page + 1, pages])].filter((p) => p >= 1 && p <= pages).sort((a, b) => a - b);
+  const out: (number | null)[] = [];
+  let last = 0;
+  for (const p of keep) {
+    // A gap of one page shows that page: "…" would take the same room.
+    if (p - last === 2) out.push(last + 1);
+    else if (p - last > 2) out.push(null);
+    out.push(p);
+    last = p;
+  }
+  return out;
+}
+
+/** Numbered pages with previous and next; `children` sits on the left (what this page shows). */
+export function Pager({ page, pages, onPage, label, children, className }: { page: number; pages: number; onPage: (page: number) => void; label: string; children?: ReactNode; className?: string }) {
+  return (
+    <nav aria-label={label} className={cn('flex flex-wrap items-center justify-between gap-x-3 gap-y-1', className)}>
+      {children}
+      <div className="flex items-center gap-0.5">
+        <Button size="sm" variant="ghost" className="px-2" icon={<ChevronLeft className="size-4" />} aria-label="Previous page" title="Previous page" disabled={page <= 1} onClick={() => onPage(page - 1)} />
+        {pageNumbers(page, pages).map((p, i) =>
+          p === null ? (
+            <span key={`gap-${i}`} className="w-6 text-center text-[13px] text-ink-3" aria-hidden>
+              …
+            </span>
+          ) : (
+            <Button key={p} size="sm" variant={p === page ? 'subtle' : 'ghost'} className="min-w-8 px-2 tabular-nums" aria-current={p === page ? 'page' : undefined} aria-label={`Page ${p}`} onClick={p === page ? undefined : () => onPage(p)}>
+              {p}
+            </Button>
+          ),
+        )}
+        <Button size="sm" variant="ghost" className="px-2" icon={<ChevronRight className="size-4" />} aria-label="Next page" title="Next page" disabled={page >= pages} onClick={() => onPage(page + 1)} />
+      </div>
+    </nav>
   );
 }
 

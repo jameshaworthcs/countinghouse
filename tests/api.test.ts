@@ -187,6 +187,40 @@ describe('API without login configured', () => {
     expect(store.instruments.map((i) => i.sedol ?? i.ticker).sort()).toEqual(['B0000C4', 'B3X7QG6', 'XMPL']);
     expect(store.balances('isa').at(-1)).toMatchObject({ date: '2026-09-29', balance: 8978.1, gain: 1478.1, dateSource: 'filename' });
   });
+
+  it('pages History through every committed import, the latest committed first', async () => {
+    const store = ctx.app.ctx.store;
+    // 30 documents uploaded a minute apart. The first two were committed last, either side of the
+    // clocks going back: the one committed at 01:10 GMT came after the one at 01:30 BST.
+    for (let n = 0; n < 30; n++) {
+      const mm = String(n).padStart(2, '0');
+      await store.saveImport(
+        {
+          id: `imp_20260901_09${mm}00_${(0xa000 + n).toString(16)}`,
+          status: 'committed',
+          createdAt: `2026-09-01T09:${mm}:00+01:00`,
+          updatedAt: `2026-09-01T09:${mm}:00+01:00`,
+          committedAt: n === 0 ? '2026-10-25T01:10:00+00:00' : n === 1 ? '2026-10-25T01:30:00+01:00' : `2026-09-01T10:${mm}:00+01:00`,
+          origin: 'inbox',
+          document: { id: `doc_${n.toString(16).padStart(16, '0')}`, sha256: n.toString(16).padStart(64, '0'), fileName: `statement-${n}.pdf`, mediaType: 'application/pdf', size: 1 },
+          extraction: { warnings: [] },
+          result: { accountIds: [], accountsCreated: [], transactionsAdded: 0, transactionsSkipped: 0, balancesAdded: 0, holdingsAdded: 0, figuresAdded: 1 },
+        },
+        'test import',
+      );
+    }
+    const history = async (query = '') => (await (await req(`/api/imports/history${query}`)).json()) as { items: { fileName: string }[]; total: number; page: number; pageSize: number };
+    const names = (h: { items: { fileName: string }[] }) => h.items.map((i) => i.fileName.replace(/^statement-(\d+)\.pdf$/, '$1'));
+    const first = await history();
+    expect(first).toMatchObject({ total: 30, page: 1, pageSize: 25 });
+    expect(names(first).slice(0, 4)).toEqual(['0', '1', '29', '28']);
+    expect(names(await history('?page=2'))).toEqual(['6', '5', '4', '3', '2']);
+    // Asked past the end (an old address): the last page there is.
+    expect((await history('?page=9')).page).toBe(2);
+    expect((await history('?page=first')).page).toBe(1);
+    // The list the app polls is only what waits for review.
+    expect(await (await req('/api/imports')).json()).toEqual({ pending: [] });
+  });
 });
 
 describe('API with login configured', () => {
