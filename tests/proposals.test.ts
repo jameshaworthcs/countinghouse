@@ -226,6 +226,18 @@ describe('a proposal must fit the data', () => {
     expect((await owner(`/api/proposals/${proposal.id}/apply`, { leaveOut: ['easy'] })).status).toBe(200);
   });
 
+  it('carries one pattern across many rows', async () => {
+    const rows = Array.from({ length: 120 }, (_, i) => tx('bank', `2025-${String(1 + (i % 12)).padStart(2, '0')}-${String(1 + (i % 28)).padStart(2, '0')}`, -(10 + i), `TO A N OTHER REFERENCE POT ${i}`));
+    await app.ctx.store.addTransactions(rows, 'test');
+    const res = await propose({ title: 'Payments to your own name', summary: 'A test.', changes: rows.map((t) => ({ kind: 'set_category', transaction: t.id, category: 'transfer', why: 'Paid to you by name.' })) });
+    expect(res.status).toBe(201);
+    const { proposal, ready } = (await res.json()) as ProposalView;
+    expect(ready).toBe(120);
+    expect((await owner(`/api/proposals/${proposal.id}/apply`, { leaveOut: ['c1'] })).status).toBe(200);
+    expect(app.ctx.store.transaction(rows[1]!.id)).toMatchObject({ category: 'transfer', categorisedBy: 'user' });
+    expect(app.ctx.store.transaction(rows[0]!.id)!.category).toBeUndefined();
+  });
+
   it('a job proposes through the same service, as itself', async () => {
     const view = await app.ctx.proposals.create(
       { title: 'From a job', summary: 'A test.', changes: [{ kind: 'link_transfer', from: easyOut.id, to: bankIn.id, why: 'A test.' }] },

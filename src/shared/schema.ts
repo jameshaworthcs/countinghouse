@@ -1082,6 +1082,8 @@ export type Provenance = z.infer<typeof ProvenanceSchema>;
 // fixes"). Nothing changes until you apply them; you can leave any change out.
 
 export const PROPOSAL_STATUSES = ['pending', 'applied', 'dismissed'] as const;
+/** Changes in one proposal: enough for one pattern across years of history (the page groups them). */
+export const MAX_PROPOSED_CHANGES = 400;
 export type ProposalStatus = (typeof PROPOSAL_STATUSES)[number];
 
 const TransactionIdSchema = z.string().regex(/^tx_[0-9a-f]{16}$/);
@@ -1115,7 +1117,7 @@ export const ProposalSchema = z.object({
   /** What the data shows, in a few sentences. */
   summary: z.string().min(1).max(4000),
   /** In the order they apply: an unlink comes before the link that needs it. */
-  changes: z.array(ProposedChangeSchema).min(1).max(60),
+  changes: z.array(ProposedChangeSchema).min(1).max(MAX_PROPOSED_CHANGES),
   provenance: ProvenanceSchema,
   createdAt: TimestampSchema,
   updatedAt: TimestampSchema,
@@ -1133,7 +1135,7 @@ export type Proposal = z.infer<typeof ProposalSchema>;
 export const ProposalInputSchema = z.object({
   title: z.string().trim().min(1).max(160),
   summary: z.string().trim().min(1).max(4000),
-  changes: z.array(changeUnion(ChangeKeySchema.optional())).min(1).max(60),
+  changes: z.array(changeUnion(ChangeKeySchema.optional())).min(1).max(MAX_PROPOSED_CHANGES),
   provenance: ProvenanceSchema.omit({ setBy: true }).optional(),
   /** Check it against the data and show how it would look, without saving it. */
   dryRun: z.boolean().optional(),

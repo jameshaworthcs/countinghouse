@@ -3,11 +3,11 @@
 
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
-import { ProposalInputSchema, type Provenance } from '../../shared/schema';
+import { MAX_PROPOSED_CHANGES, ProposalInputSchema, type Provenance } from '../../shared/schema';
 import { agentTokenOf as tokenOf, readJson, type AppContext } from '../context';
 import { StoreError } from '../store';
 
-const LeaveOut = z.object({ leaveOut: z.array(z.string().max(40)).max(60).default([]) });
+const LeaveOut = z.object({ leaveOut: z.array(z.string().max(40)).max(MAX_PROPOSED_CHANGES).default([]) });
 const Dismiss = z.object({ reason: z.string().max(1000).optional() });
 
 /** The name the owner gave the token ("Claude Code on P360"): where the agent ran. */
