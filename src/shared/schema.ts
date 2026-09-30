@@ -180,6 +180,33 @@ export const SplitLineSchema = z.object({
 });
 export type SplitLine = z.infer<typeof SplitLineSchema>;
 
+/** HH:MM or HH:MM:SS. */
+export const TimeOfDaySchema = z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/);
+
+/**
+ * The source fields another document can fill in on a recorded payment when they are empty
+ * (shared/detail.ts). Never the date, amount or description: those are what the payment was
+ * recorded by.
+ */
+export const DETAIL_FIELDS = ['transactionDate', 'transactionTime', 'time', 'sourceId', 'type', 'reference', 'counterpartyName', 'merchant', 'bankCategory', 'cardLast4', 'balanceAfter', 'original', 'exchangeRate', 'fee', 'attributes'] as const;
+export type DetailField = (typeof DETAIL_FIELDS)[number];
+
+/**
+ * Another document that showed a recorded payment and filled in some of its empty source fields:
+ * which, and what else that document said differently (its own description, say). Oldest first.
+ */
+export const SeenInSchema = z.object({
+  importId: z.string().optional(),
+  documentId: z.string().optional(),
+  row: z.number().int().nonnegative().optional(),
+  at: TimestampSchema,
+  /** The fields it filled in. */
+  added: z.array(z.enum(DETAIL_FIELDS)).min(1),
+  /** What it said where the record already says something else: `{description: "…", date: "…"}`. */
+  said: z.record(z.string(), z.union([z.string(), z.number()])).optional(),
+});
+export type SeenIn = z.infer<typeof SeenInSchema>;
+
 export const TransactionSchema = z.object({
   id: z.string().regex(/^tx_[0-9a-f]{16}$/),
   accountId: SlugSchema,
@@ -190,10 +217,12 @@ export const TransactionSchema = z.object({
   /** When the purchase itself happened, if the source shows a different date. */
   transactionDate: ISODateSchema.optional(),
   /** Local time of day, if known: HH:MM or HH:MM:SS. */
-  time: z
-    .string()
-    .regex(/^\d{2}:\d{2}(:\d{2})?$/)
-    .optional(),
+  time: TimeOfDaySchema.optional(),
+  /**
+   * The time of `transactionDate`, when a document gives it apart from `time`: an app shows when a
+   * card was used (14 Sep 21:15) where the export shows when it cleared (16 Sep 09:02).
+   */
+  transactionTime: TimeOfDaySchema.optional(),
   amount: MoneySchema,
   currency: CurrencySchema,
   /** Description exactly as the source gave it. Never edited; see `payee` and `notes`. */
@@ -265,6 +294,8 @@ export const TransactionSchema = z.object({
 
   // ── Provenance ──
   source: SourceRefSchema.default({}),
+  /** Other documents that showed this payment and filled in its empty source fields. */
+  seenIn: z.array(SeenInSchema).optional(),
   createdAt: TimestampSchema.optional(),
   updatedAt: TimestampSchema.optional(),
 });
@@ -824,6 +855,38 @@ export const DraftTransactionSchema = z.object({
   row: z.number().int().optional(),
   /** What the reader was unsure of on this row ("year not shown", "amount partly hidden"). */
   uncertain: z.string().max(300).optional(),
+  /**
+   * A row matched to a recorded payment (`duplicateOf`) that knows more about it: the recorded
+   * payment's empty source fields this document fills in (shared/detail.ts). Ticked `include`, they
+   * are filled in on commit, while the row itself is not recorded again.
+   */
+  adds: z
+    .object({
+      include: z.boolean(),
+      /** The values to fill in, only where the recorded payment has none. */
+      fields: TransactionSchema.pick({
+        transactionDate: true,
+        transactionTime: true,
+        time: true,
+        sourceId: true,
+        type: true,
+        reference: true,
+        counterpartyName: true,
+        merchant: true,
+        bankCategory: true,
+        cardLast4: true,
+        balanceAfter: true,
+        original: true,
+        exchangeRate: true,
+        fee: true,
+        attributes: true,
+      }),
+      /** What this document says where the record says something else, for you to see; nothing changes. */
+      differs: z.array(z.object({ field: z.string(), recorded: z.union([z.string(), z.number()]), here: z.union([z.string(), z.number()]) })).default([]),
+      /** The category the recorded payment would get from what is filled in, when it changes. */
+      category: z.object({ from: z.string().optional(), to: z.string().optional() }).optional(),
+    })
+    .optional(),
   /** Source detail carried through to the stored transaction untouched. */
   detail: TransactionSchema.pick({
     sourceId: true,
@@ -1051,6 +1114,8 @@ export const ImportRecordSchema = z.object({
       nothingNew: z.string().max(500).optional(),
       /** Copies of payments recorded twice that this import took away (the draft's `extraCopies`). */
       transactionsRemoved: z.array(z.object({ id: z.string(), date: ISODateSchema, amount: MoneySchema, description: z.string(), importId: z.string().optional() })).optional(),
+      /** Recorded payments this import filled in details on (the draft rows' `adds`), and which. */
+      transactionsDetailed: z.array(z.object({ id: z.string(), date: ISODateSchema, amount: MoneySchema, description: z.string(), added: z.array(z.enum(DETAIL_FIELDS)) })).optional(),
       /** The account each draft section was committed to (new accounts get their final id). */
       sections: z.array(z.object({ key: z.string(), accountId: SlugSchema })).optional(),
     })

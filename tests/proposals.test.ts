@@ -154,6 +154,35 @@ describe('an agent proposes, the owner decides', () => {
     expect(store.account('fixed')).toMatchObject({ status: 'closed', closedOn: '2026-02-01', openedOn: '2024-02-01' });
   });
 
+  it('a row that stops being a transfer stops naming your account, and its payee is worked out again', async () => {
+    const { store } = app.ctx;
+    const cash = tx('bank', '2026-03-10', -50, 'Cash withdrawal, Example Bank, Faro', { payee: 'saver', category: 'savings-transfer', categorisedBy: 'transfer', counterpartyAccountId: 'saver' });
+    const named = tx('bank', '2026-03-11', -20, 'To saver', { payee: 'My name for it', payeeSetBy: 'user', category: 'savings-transfer', categorisedBy: 'transfer', counterpartyAccountId: 'saver' });
+    // Named after your account, without saying which.
+    const loose = tx('bank', '2026-03-12', -30, 'Cash withdrawal, Example Bank, Faro', { payee: 'easy', category: 'transfer', categorisedBy: 'transfer' });
+    await store.addTransactions([cash, named, loose], 'test: rows taken for transfers');
+    const res = await propose({
+      title: 'Cash, not transfers',
+      summary: 'A test.',
+      changes: [
+        { kind: 'set_category', transaction: cash.id, category: 'cash-withdrawal', why: 'Cash from a machine.' },
+        { kind: 'set_category', transaction: named.id, category: 'gifts', why: 'A present.' },
+        { kind: 'set_category', transaction: loose.id, category: 'cash-withdrawal', why: 'Cash from a machine.' },
+      ],
+    });
+    expect(res.status).toBe(201);
+    const { proposal } = (await res.json()) as ProposalView;
+    expect((await owner(`/api/proposals/${proposal.id}/apply`)).status).toBe(200);
+    const after = store.transaction(cash.id)!;
+    expect(after).toMatchObject({ category: 'cash-withdrawal', categorisedBy: 'user' });
+    expect(after.counterpartyAccountId).toBeUndefined();
+    expect(after.payee).not.toBe('saver');
+    // A payee you set stays.
+    expect(store.transaction(named.id)).toMatchObject({ category: 'gifts', payee: 'My name for it' });
+    expect(store.transaction(named.id)!.counterpartyAccountId).toBeUndefined();
+    expect(store.transaction(loose.id)!.payee).not.toBe('easy');
+  });
+
   it('dismissed, it is kept with the reason, and the same proposal is refused after', async () => {
     const { proposal } = (await (await propose(relink)).json()) as ProposalView;
     // The same again while it waits.

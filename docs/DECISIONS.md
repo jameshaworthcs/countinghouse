@@ -865,3 +865,55 @@ and it did not know "Payment" alone as a payment to the card.
   alone as one. Without a payment, fewer than 3 rows still can't tell.
   - Considered: reading every file for a card card style unless its rows say otherwise. A file of
     purchases alone cannot say, and one already signed the app's way would be turned round.
+
+## 2026-09-30: A document can fill in a payment already recorded
+
+A screenshot of the Chase app showed two payments a Chase export had recorded that morning. It knew
+more about both: the day and time the cash was taken out (the export has the day it cleared, two
+days later), and that the card payment went to "Credit card". Dedup marked both as duplicates, and
+leaving them out lost what the screenshot said. The only other choice was to record them twice.
+
+- **A matched row can fill in its record's empty source fields**, as a third outcome beside
+  "leave it out" and "record it". The date, amount and description are never touched: the payment
+  is recorded by them. A value the record has is never replaced. This reads "source facts are
+  immutable" as "never rewritten": every value is still what a document said, and `seenIn` says
+  which document, with what it said differently. Reading a CSV again already filled in a missing
+  type this way.
+  - Considered: keeping each document's sighting as a separate record beside the transaction.
+    Everything that reads a transaction (the drawer, dedup, the categoriser, exports) would need to
+    merge them, and the details would stay invisible until it did.
+  - Considered: letting a later document win. A screenshot's reading is weaker than an export's
+    row, and "the latest wins" would make the record depend on upload order.
+- **An earlier date is when it was made.** A document dating a payment before the record's posting
+  date gives `transactionDate`, and its time for that day goes in a new `transactionTime`: `time`
+  already holds the posting's time, and putting the other day's time there would pair it with the
+  wrong day. It is an additive optional field, so no migration.
+- **The balance after it only from the same day.** A running balance places a payment in one
+  ledger's day. An app listing it by when the card was used is another view of the account.
+- **Ticked by itself only when the match is certain.** A possible duplicate may be another payment
+  of the same amount, and filling in a balance or bank id on the wrong row would mislead dedup and
+  the balance engine. Ticking it is the owner saying it is the same payment.
+- **The same date, amount and time to the minute is the same payment**, like the same balance
+  after it. Two payments of one amount in the same minute on one day are rare, and a document
+  listing both still matches both (as a multiset). A midnight on every row of an export is not a
+  time. After a record is filled in, its made date and time count too, so the same screenshot
+  uploaded again is nothing new.
+- **The category is worked out again only when a field the categoriser reads is filled in** (type,
+  other party, merchant, bank category), never on the owner's category or a linked transfer, so
+  filling in a time never re-categorises a row by surprise.
+- **Details filled in count as the owner's** when "recorded twice" or a proposal chooses a copy to
+  take away: they were committed by the owner, and taking that copy would lose them.
+
+## 2026-09-30: Cash from a machine is never a transfer
+
+The same export had categorised the withdrawal as a transfer to the owner's Santander current
+account: "Cash withdrawal, Santander, <town>" names Santander, and a provider's name in a description
+is how the categoriser finds money moving between the owner's own accounts.
+
+- **A cash withdrawal names none of your accounts**, by its words or by the bank's type for the row
+  (the Chase app lists it as "Santander", typed "Cash withdrawal"). The categoriser and the transfer
+  matcher now see the row's type. A row only the type calls cash is categorised as cash.
+- **The record already wrong is fixed by a proposal**, not by the fix: nothing re-categorises
+  history by itself (a re-run on all history would, but loses Claude's payees). The
+  proposal sets the category, and a category that is not a transfer one now also takes away the
+  account the row named, and works a payee that was one of the owner's account names out again.

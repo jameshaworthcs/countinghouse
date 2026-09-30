@@ -75,6 +75,7 @@ depend on).
 | `id`, `accountId` | |
 | `date` | posting date |
 | `transactionDate`?, `time`? | when the purchase happened, if different; `HH:MM[:SS]` |
+| `transactionTime`? | the time of `transactionDate`, when a document gives it apart from `time` (an app shows when the card was used, the export when it cleared) |
 | `amount`, `currency` | signed |
 | `description` | verbatim |
 | `sourceId`? | the bank's own transaction id (the strongest dedup key) |
@@ -109,7 +110,11 @@ depend on).
 | `notes`, `tags` | yours; tag Gift Aided donations `gift-aid` |
 | `splits` | yours: `[{amount, category, note?}]`, two or more lines adding up to `amount`, each signed like it, in spending or income categories. Spending, income and budgets count the lines ([FORMULAS.md §14](FORMULAS.md)). A transfer is never split, and correcting the amount so the lines no longer add up removes the split |
 
-**Provenance**: `source{importId, documentId, row}`, `createdAt`, `updatedAt`.
+**Provenance**: `source{importId, documentId, row}`, `createdAt`, `updatedAt`, and:
+
+| Field | Notes |
+|---|---|
+| `seenIn`? | other documents that showed this payment and filled in source fields it lacked, oldest first: `[{importId?, documentId?, row?, at, added, said?}]`. `added` names the fields filled in; `said` keeps what that document said where the record says something else (its own `description`, another `time`). The source fields above hold what the first document said, and what later ones filled in only where they were empty ([INGESTION.md](INGESTION.md), "Adding detail to a recorded payment") |
 
 ## balances/&lt;account&gt;.jsonl
 
@@ -189,6 +194,10 @@ Standalone figures from documents, used for Self Assessment:
   (`{id, date, amount, description, importId}`, the import that had recorded the copy). A draft
   section offers them as `extraCopies` (`{transactionId, keepId, date, amount, description,
   fromFile?, sameBalance, remove}`) ([INGESTION.md](INGESTION.md), "Recorded twice").
+  `transactionsDetailed` (optional): recorded payments the import filled in details on
+  (`{id, date, amount, description, added}`). A draft row matched to a recorded payment offers
+  them as `adds` (`{include, fields, differs, category?}`: the values to fill in, what the document
+  says differently, and the category the payment would change to).
 
 ## proposals/&lt;yyyy&gt;/&lt;id&gt;.json
 

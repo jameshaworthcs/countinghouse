@@ -18,10 +18,11 @@ import { mkdir, readdir, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import type { ProposalChangeView, ProposalCheckResponse, ProposalDecision, ProposalListResponse, ProposalRow, ProposalSummary, ProposalView } from '../shared/api';
 import { CategoryIndex } from '../shared/categories';
-import { transferLegCategory } from '../shared/categorise';
+import { transferLegCategory, type Categoriser } from '../shared/categorise';
 import { diffDays, formatDate, today } from '../shared/dates';
 import { formatMoney, fromMinor, toMinor } from '../shared/money';
 import { AccountSchema, ProposalSchema, type Account, type Proposal, type ProposalInput, type ProposalStatus, type ProposedChange, type Provenance, type Transaction } from '../shared/schema';
+import { categoriserFor } from './categoriser';
 import { atomicWrite, Mutex, nowISO } from './fsutil';
 import { proposalId, transferGroupId } from './ids';
 import { StoreError, type DecidedProposalSummary, type Store } from './store';
@@ -77,8 +78,10 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
   const cats = new CategoryIndex(store.categories);
   const receiptsOn = new Set(store.receipts.map((r) => r.transactionId));
   /** Something you set on the row (a transfer link is not: a proposal may undo one). */
-  const yours = (t: Transaction) => t.categorisedBy === 'user' || t.payeeSetBy === 'user' || Boolean(t.notes || t.tags?.length || t.splits?.length || t.corrections?.length) || receiptsOn.has(t.id);
+  const yours = (t: Transaction) => t.categorisedBy === 'user' || t.payeeSetBy === 'user' || Boolean(t.notes || t.tags?.length || t.splits?.length || t.corrections?.length || t.seenIn?.length) || receiptsOn.has(t.id);
   const accountName = (id: string) => store.account(id)?.name ?? id;
+  let categoriserMemo: Categoriser | undefined;
+  const categoriser = () => (categoriserMemo ??= categoriserFor(store));
   const out: Outcome = { results: new Map(), patches: new Map(), removed: new Map(), accounts: new Map(), touchedRows: new Map(), touchedAccounts: new Map() };
   // Rows as the changes so far leave them (null: removed), and transfer pairs likewise.
   const rows = new Map<string, Transaction | null>();
@@ -154,7 +157,12 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
         // Yours wins: a category you set is not changed by a proposal.
         const was = store.transaction(t.id);
         if (was?.categorisedBy === 'user') return { problem: `You set its category yourself (${cats.name(was.category)}), so a proposal leaves it to you: change it on the Transactions page if you want to.` };
-        patch(t, { category: c.category, categorisedBy: 'user' });
+        // A row that stops being a transfer stops naming one of your accounts as the other side, and
+        // a payee that was one of your accounts' names is worked out again from its words.
+        const untransferred = cat.kind !== 'transfer' && !t.transferGroup;
+        const namedYours = untransferred && t.payeeSetBy !== 'user' && store.accounts.some((a) => a.id !== t.accountId && a.name === t.payee);
+        const payee = namedYours ? categoriser().categorise({ accountId: t.accountId, description: t.description, amount: t.amount, type: t.type, bankCategory: t.bankCategory, payee: t.merchant?.name ?? t.counterpartyName }).payee : undefined;
+        patch(t, { category: c.category, categorisedBy: 'user', ...(untransferred && t.counterpartyAccountId ? { counterpartyAccountId: undefined } : {}), ...(payee && payee !== t.payee ? { payee } : {}) });
         return {};
       }
       case 'remove_duplicate': {
@@ -164,7 +172,7 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
         if (t.transferGroup) return { problem: linkedNow(t) };
         if (c.sameAs.includes(t.id)) return { problem: 'It cannot repeat itself.' };
         // A copy with something of yours on it (a category, note, split, receipt…) is never taken away.
-        if (yours(store.transaction(t.id)!)) return { problem: 'It has something of yours on it (a category, payee, note, tag, split, correction or receipt), so a proposal leaves it to you.' };
+        if (yours(store.transaction(t.id)!)) return { problem: 'It has something of yours on it (a category, payee, note, tag, split, correction, receipt or details you added from another document), so a proposal leaves it to you.' };
         let sum = 0;
         for (const id of c.sameAs) {
           const s = row(id);

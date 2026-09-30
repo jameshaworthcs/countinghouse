@@ -192,9 +192,13 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
   - A link joins money out with the same amount in, in two different accounts, at most 10 days
     apart, neither linked already.
   - A duplicate's `sameAs` rows are in its account, at most 10 days from it, and add up to it.
-  - A category exists, and a row linked as a transfer keeps a transfer category.
+  - A category exists, and a row linked as a transfer keeps a transfer category. A category that
+    is not a transfer one, on a row not linked as one, also takes away the account of yours the row
+    named as the other side, and works its payee out again when that was one of your accounts'
+    names (unless the owner set the payee).
   - The owner wins: a category the owner set is not changed, and a duplicate with something of
-    theirs on it (a category, payee, note, tag, split, correction or receipt) is not removed.
+    theirs on it (a category, payee, note, tag, split, correction, receipt or details another
+    document filled in) is not removed.
   - Dates are in order and not in the future.
   - A proposal with a change that does not fit, or that the data already says, is refused (422,
     with each problem). One that stops fitting later is shown with the problem, and applying it

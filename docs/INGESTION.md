@@ -275,7 +275,11 @@ read again.
     It is not built.
 - **Categorisation** follows `src/shared/categorise.ts`:
   1. your rules;
-  2. transfers to your own accounts (by alias, or by provider name outside investment accounts);
+  2. transfers to your own accounts (by alias, or by provider name outside investment accounts).
+     Never cash from a machine: "Cash withdrawal, Santander, Faro" names the bank that runs the
+     machine, not your account there. A row is cash by its words or by the bank's type for it (an
+     app lists a withdrawal under the machine's bank, typed "Cash withdrawal"), and a row only its
+     type calls cash is categorised as cash;
   3. wrapper flows (contribution, employer contribution, tax relief, LISA bonus, fees, trades,
      withdrawals). A row with a settlement date is a trade, whatever the fund is called
      (interactive investor: "12 VANGUARD FTSE GLOB Del 105.20 S Date 03/02/25"), and "Div 250 …" is
@@ -296,7 +300,11 @@ read again.
   3. same date + amount + balance after it (both known), matched as a multiset. The running
      balance places a row whatever each source calls it: Chase's statement says "To Credit Card"
      where its export says "To Revolving Line Account";
-  4. same amount within ±3 days, flagged as a *possible* duplicate for you to decide, when the
+  3b. same date + amount + time to the minute (both known), matched as a multiset. The date and time
+     may be the record's own or when it was made (`transactionDate`, `transactionTime`), so an app
+     that lists a payment by when the card was used finds it once it has been filled in (below). A
+     midnight on every row of an export is not a time;
+  4. same amount within ±3 days (of when it cleared, or when it was made), flagged as a *possible* duplicate for you to decide, when the
      descriptions are similar. Described differently, only from £20 (`DIFFERENT_WORDS_FROM`), and
      then on the same day or for an amount with pence. Sources date a payment differently (made, or
      cleared two days later) and describe it differently, so a difference in one is not enough to
@@ -307,6 +315,37 @@ read again.
      summary), a row that two or three recorded rows add up to exactly, within ±3 days and the same
      way, from £100: a *possible* duplicate. A deposit made in two payments is confirmed by letter as
      one.
+- **Adding detail to a recorded payment** (`src/shared/detail.ts`). A row matched to a recorded
+  payment often knows more about it: an app shows when a card was used where the export shows when
+  it cleared, names the other party, or gives a time, a bank id or a foreign amount. The review
+  page shows what it would fill in under the row, and what it says differently.
+  - **What it fills in**: only source fields the record lacks. Never the date, amount or
+    description, which the payment was recorded by, and never a value the record already has.
+    - A document dating the payment earlier than the record gives the day it was made
+      (`transactionDate`), with its own time for that day (`transactionTime`); a printed purchase
+      date beside the posting date does too. A later date says nothing about when it was made.
+    - A time goes with the day it is of: the record's `time` only from a document that posts it the
+      same day.
+    - The balance after it, only from a document that dates it the same day: a running balance is
+      the ledger's.
+    - The bank id, type, reference, other party, bank category, card, foreign amount, rate and fee;
+      the merchant and other details key by key.
+    - Nothing from a pending row, or from a row a letter restates as several payments (step 5).
+  - **What it says differently** (its own words for the payment, another time) is shown, and kept
+    with what it filled in; the record keeps its own. A shorter wording within the record's
+    ("Cash withdrawal" in "Cash withdrawal | EUR 40.00 | …") is not a difference.
+  - **Ticked by itself** only when the match is certain (the same bank id; the same date and
+    amount with the same description, balance after it or time). For a possible duplicate, ticking
+    it says it is the same payment. Ticking the row in as a payment of its own unticks it.
+  - **The category** is worked out again when what is filled in is something the categoriser reads
+    (the type, the other party, the merchant, the bank's category), as a re-run would, except on a
+    row you categorised or one linked as a transfer. The review page says when it changes, and the
+    payment is then linked as a transfer if it now is one.
+  - **On commit** it is worked out again against the record as it is then, keeping only what you
+    saw and what is still empty: another import may have filled some in since. Each record keeps
+    where its details came from (`seenIn`: the import, the document, the row, the fields it filled
+    in and what it said differently), and the import lists the payments it filled in
+    (`result.transactionsDetailed`). The transaction's panel shows both.
 - **Recorded twice** (`storedTwice` in `dedup.ts`). A document can show that the account already
   has a payment twice: one of its rows matches a recorded row, and another recorded row has the
   same date and amount, with nothing on the document matching it, recorded by another import (one
@@ -316,7 +355,7 @@ read again.
   is offered unticked for you to judge. Only copies on the same day are found: a payment recorded
   on the day it was made and again on the day it cleared is yours to spot.
   - The copy offered has nothing of yours on it (a category, payee, note, tag or split you set, a
-    correction, a receipt, a transfer link): the one the document did not match, unless only the
+    correction, a receipt, details another document filled in, a transfer link): the one the document did not match, unless only the
     other is clean. When both have something of yours, nothing is offered.
   - The review page lists it under the account ("recorded twice"), while the section goes to that
     account and you have not ticked the matching row in as a payment of its own. Committing takes a
@@ -408,6 +447,9 @@ click, not left looking failed or stuck (`src/server/ingest/novelty.ts`).
     against it; of two identical ones, the earlier upload is kept.
   - Everything counts: rows left unticked or pending, another day, one more figure (cash, rate,
     paid in), a section still waiting for its account. A rough balance you gave covers nothing.
+  - A row already imported that would fill in details its record lacks is something to add. Another
+    import waiting beside it covers it only if it fills in the same.
+    Once filled in, the same screen uploaded again adds nothing.
 - **Never for a reading that needs a look**: readers that disagreed, warnings, low confidence,
   offline OCR.
 - It is worked out afresh whenever the import list is shown, so it follows what is committed,

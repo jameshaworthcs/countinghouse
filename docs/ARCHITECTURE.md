@@ -22,7 +22,7 @@ Hono server  (Node 24, tsx; 127.0.0.1:4750 live, 4760 in development)
    │    ├─ detect → csv profiles (and spreadsheets' first table) · ofx · qif · santander-txt   (deterministic, local)
    │    ├─ images: capture date (EXIF/filename/mtime), tiling of long screenshots
    │    ├─ engines: claude-cli · claude-api · ocr (tesseract/pdftotext)
-   │    ├─ normalise → buildDraft (match accounts, categorise, dedup, transfers)
+   │    ├─ normalise → buildDraft (match accounts, categorise, dedup and what it adds to a recorded payment, transfers)
    │    └─ commitDraft → Store (+ document archived, import record written)
    │    └─ read a stored document again → compare with what was recorded → apply what you choose
    ├─ InboxWatcher: inbox/ → ImportService
@@ -37,7 +37,7 @@ Source layout:
 
 | Path | What lives there |
 |---|---|
-| `src/shared/` | Isomorphic code: schemas (`schema.ts`), money, dates, UK rules, account-type metadata, categories, merchants, categoriser, reconciliation, API types |
+| `src/shared/` | Isomorphic code: schemas (`schema.ts`), money, dates, UK rules, account-type metadata, categories, merchants, categoriser, reconciliation, what a document adds to a recorded payment (`detail.ts`), API types |
 | `src/server/` | Store, git, auth, security, migrations, enrichment, routes, app composition |
 | `src/server/ingest/` | Everything from bytes to committed records |
 | `src/server/analytics/` | Read-only computations over the store; `model.ts` is pure (no store access) |

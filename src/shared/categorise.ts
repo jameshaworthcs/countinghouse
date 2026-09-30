@@ -3,7 +3,8 @@
 // Precedence (first hit wins; a user's manual edit is never overwritten because callers skip
 // transactions with categorisedBy = "user"):
 //   1. your rules (data/rules.json), by priority
-//   2. transfers to/from your own accounts (by account aliases and institution names)
+//   2. transfers to/from your own accounts (by account aliases and institution names; never cash
+//      from a machine, whichever bank runs it)
 //   3. wrapper-account flows (contributions, tax relief, LISA bonus, fees) on ISA/pension accounts
 //   4. built-in UK merchant list
 //   5. the bank's own category (Monzo/Starling/Revolut/Amex exports)
@@ -23,6 +24,8 @@ export interface CategoriseInput {
   bankCategory?: string | undefined;
   aiCategory?: string | undefined;
   aiPayee?: string | undefined;
+  /** The bank's transaction type, as printed ("Cash withdrawal", "Card payment"). */
+  type?: string | undefined;
 }
 
 export interface CategoriseResult {
@@ -32,6 +35,16 @@ export interface CategoriseResult {
   ruleId?: string;
   tags?: string[];
   counterpartyAccountId?: string;
+}
+
+/**
+ * Cash taken from a machine, by the description or the bank's type for the row. The bank such a row
+ * names runs the machine ("Cash withdrawal, Santander, Faro"): it is not one of your accounts.
+ */
+const CASH_WITHDRAWAL = /\bCASH WITHDRAWAL|\bATM\b|CASH MACHINE|CASHPOINT|\bLINK\b.*\bCASH\b|\bCASH CD\b|\bCSH WDL\b/i;
+
+export function isCashWithdrawal(description: string, type?: string): boolean {
+  return CASH_WITHDRAWAL.test(description) || (type !== undefined && CASH_WITHDRAWAL.test(type));
 }
 
 /** Category for money moving between two of your own accounts, from the other account's type. */
@@ -199,8 +212,11 @@ export class Categoriser {
    *   a card number in a direct debit's reference, "EAV1234567") names that one account.
    * - Otherwise its aliases, and its institution's name. Institution names are only used outside
    *   investment/pension accounts, where platform names also appear in fund names.
+   * - A cash withdrawal names none: the bank in it is the machine's (`type`, the bank's type for the
+   *   row, can say it is one).
    */
-  ownAccountsMentioned(accountId: string, description: string, useInstitutions = true): Account[] {
+  ownAccountsMentioned(accountId: string, description: string, useInstitutions = true, type?: string): Account[] {
+    if (isCashWithdrawal(description, type)) return [];
     const others = this.ownMatchers.filter((m) => m.account.id !== accountId);
     const numbers = longNumbers(description);
     const byNumber = numbers.length ? others.filter((m) => m.number && numbers.some((n) => n.endsWith(m.number!))) : [];
@@ -240,7 +256,7 @@ export class Categoriser {
     const isWrapper = account ? isWrapperAccount(account.type) : false;
 
     // 2. Transfers to your own accounts.
-    const mentioned = this.ownAccountsMentioned(input.accountId, input.description, !isWrapper || account?.type === 'cash_isa');
+    const mentioned = this.ownAccountsMentioned(input.accountId, input.description, !isWrapper || account?.type === 'cash_isa', input.type);
     if (mentioned.length > 0) {
       const types = new Set(mentioned.map((a) => (account ? transferLegCategory(account.type, a.type, input.amount) : transferCategoryFor(a.type))));
       const [only] = mentioned;
@@ -255,7 +271,8 @@ export class Categoriser {
 
     // 2b. Money to or from you by name, not saying which account: your money moving between your
     // own accounts, not spending or income. Linking it to the other side says which.
-    if (!isWrapper && this.namesOwner(input.description)) {
+    const cash = input.amount < 0 && isCashWithdrawal(input.description, input.type);
+    if (!isWrapper && !cash && this.namesOwner(input.description)) {
       return { payee: fallbackPayee, category: account?.type === 'credit_card' ? 'credit-card-payment' : 'transfer', categorisedBy: 'transfer' };
     }
 
@@ -278,6 +295,8 @@ export class Categoriser {
       const payee = GENERIC_PAYEES.has(merchant.payee) ? (sourcePayee ?? cleanPayee(input.description)) : merchant.payee;
       return { payee, category: merchant.category, categorisedBy: 'builtin' };
     }
+    // 4b. Cash that only the bank's type calls cash (an app lists it under the machine's bank).
+    if (cash && !isWrapper && this.known('cash-withdrawal')) return { payee: fallbackPayee, category: 'cash-withdrawal', categorisedBy: 'builtin' };
 
     // 5. Bank-provided category.
     const bank = mapBankCategory(input.bankCategory);

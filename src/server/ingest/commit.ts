@@ -8,11 +8,13 @@ import { catalogInstitution, findInstitution } from '../../shared/institutions';
 import { tidyPlace } from '../../shared/places';
 import { formatMoney, fromMinor, toMinor } from '../../shared/money';
 import { taxYearOf } from '../../shared/uk';
-import type { Account, BalanceSnapshot, Draft, Figure, Holding, HoldingsSnapshot, ImportRecord, Transaction } from '../../shared/schema';
+import { detailToAdd, fillIn, seenInEntry, stillAdds } from '../../shared/detail';
+import type { Account, BalanceSnapshot, DetailField, Draft, Figure, Holding, HoldingsSnapshot, ImportRecord, Transaction } from '../../shared/schema';
 import { AccountSchema, BalanceSnapshotSchema, DraftSchema, FigureSchema, HoldingsSnapshotSchema, TransactionSchema } from '../../shared/schema';
 import { nowISO, safeFileName } from '../fsutil';
 import { balanceId, figureId, holdingsId, transactionId, transferGroupId } from '../ids';
-import { linkTransfers } from '../enrich';
+import { categoriserFor } from '../categoriser';
+import { linkTransfers, rederive } from '../enrich';
 import { StoreError, type Store } from '../store';
 import { hasYourChanges } from './dedup';
 import { sameHolding } from './match';
@@ -167,6 +169,36 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
     }
   }
 
+  // 2c. Details a document adds to payments already recorded (rows' `adds`, as you ticked them):
+  // worked out again against the record as it is now, keeping only what you saw and what is still
+  // empty. Not for a row ticked in as a payment of its own, nor a copy being taken away. The first
+  // row matched to a record fills it in.
+  const detailed: { t: Transaction; patch: Partial<Transaction>; added: DetailField[] }[] = [];
+  if (!nothingNew) {
+    const categoriser = categoriserFor(store);
+    for (const section of draft.sections) {
+      const account = resolved.get(section.key);
+      if (!account || section.target.mode !== 'existing') continue;
+      for (const row of section.transactions) {
+        if (row.include || !row.adds?.include || !row.duplicateOf) continue;
+        const recorded = store.transaction(row.duplicateOf);
+        if (!recorded || recorded.accountId !== account.id || toMinor(recorded.amount) !== toMinor(row.amount)) continue;
+        if (removals.some((t) => t.id === recorded.id) || detailed.some((d) => d.t.id === recorded.id)) continue;
+        const now = detailToAdd(row, recorded);
+        const { patch, added } = fillIn(recorded, stillAdds(row.adds.fields, now.fields));
+        if (!added.length) continue;
+        const merged: Transaction = { ...recorded, ...patch };
+        if (added.includes('merchant')) {
+          const place = tidyPlace(merged.merchant);
+          if (place !== recorded.place) patch.place = place;
+        }
+        Object.assign(patch, rederive(categoriser, merged, added));
+        patch.seenIn = [...(recorded.seenIn ?? []), seenInEntry({ ...source, row: row.row }, added, now.differs, stamp)];
+        detailed.push({ t: recorded, patch, added });
+      }
+    }
+  }
+
   // 3. Balances, holdings, figures.
   const balances: BalanceSnapshot[] = [];
   const holdings: HoldingsSnapshot[] = [];
@@ -249,6 +281,7 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
 
   // Validate everything before the first write.
   for (const t of newTx) TransactionSchema.parse(t);
+  for (const { t, patch } of detailed) TransactionSchema.parse(Object.fromEntries(Object.entries({ ...t, ...patch }).filter(([, v]) => v !== undefined)));
   for (const b of balances) BalanceSnapshotSchema.parse(b);
   for (const h of holdings) HoldingsSnapshotSchema.parse(h);
   for (const f of figures) FigureSchema.parse(f);
@@ -262,6 +295,18 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
   const label = record.document.fileName;
   const removed = removals.length ? await store.deleteTransactions(removals.map((t) => t.id), `import: ${label} (−${removals.length} recorded twice)`) : 0;
   const added = newTx.length ? await store.addTransactions(newTx, `import: ${label} (+${newTx.length} transactions)`) : 0;
+  if (detailed.length) {
+    await store.updateTransactions(
+      detailed.map(({ t, patch }) => ({ id: t.id, patch })),
+      `import: ${label} (details added to ${detailed.length} recorded payment${detailed.length === 1 ? '' : 's'})`,
+    );
+    // Now it says more about where it went, a row may be one leg of a transfer already recorded.
+    await linkTransfers(
+      store,
+      detailed.filter(({ t, patch }) => 'category' in patch && !t.transferGroup).map(({ t }) => t.id),
+      `import: ${label} (transfers linked)`,
+    );
+  }
   if (transferLinks.length) {
     await store.updateTransactions(
       transferLinks.map(({ newId, otherId, account }) => {
@@ -305,6 +350,7 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
       holdingsAdded,
       figuresAdded,
       ...(nothingNew ? { nothingNew: nothingNew.slice(0, 500) } : {}),
+      ...(detailed.length ? { transactionsDetailed: detailed.map(({ t, added }) => ({ id: t.id, date: t.date, amount: t.amount, description: t.description, added })) } : {}),
       ...(removed ? { transactionsRemoved: removals.map((t) => ({ id: t.id, date: t.date, amount: t.amount, description: t.description, ...(t.source.importId ? { importId: t.source.importId } : {}) })) } : {}),
       sections: draft.sections.flatMap((s) => {
         const account = resolved.get(s.key);
@@ -316,6 +362,7 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
   const bits = [
     added ? `+${added} txns` : '',
     removed ? `−${removed} recorded twice` : '',
+    detailed.length ? `details on ${detailed.length}` : '',
     balances[0] ? `balance ${formatMoney(balances[0].balance, { currency: balances[0].currency })}` : '',
     holdingsAdded ? 'holdings' : '',
     figuresAdded ? `${figuresAdded} figures` : '',

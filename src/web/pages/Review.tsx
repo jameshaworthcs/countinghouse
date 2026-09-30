@@ -1,9 +1,10 @@
 import { Archive, ArrowLeft, CircleCheck, Copy, CopyCheck, ExternalLink, Info, ListChecks, LoaderCircle, Maximize2, Minimize2, Pencil, RefreshCw, Trash2, TriangleAlert } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { ACCOUNT_TYPE_META, slugify } from '../../shared/accounts';
 import type { NothingNewView } from '../../shared/api';
 import { formatDate } from '../../shared/dates';
+import { describeDetail, describeDifference, fieldsInWords } from '../../shared/detail';
 import { sectionChecks, type ReviewCheck } from '../../shared/review';
 import { FIGURE_KINDS, type CsvProfile, type Draft, type DraftSection, type DraftTransaction, type ImportRecord } from '../../shared/schema';
 import { AccountTypeSelect } from '../components/AccountForms';
@@ -206,59 +207,112 @@ function ChecksPanel({ checks }: { checks: ReviewCheck[] }) {
   );
 }
 
-function TxRow({ t, flags, onChange }: { t: DraftTransaction; flags?: string[] | undefined; onChange: (p: Partial<DraftTransaction>) => void }) {
-  const [editing, setEditing] = useState(false);
-  const muted = !t.include;
+/**
+ * A row matched to a recorded payment that knows more about it: what it would fill in, ticked to
+ * add it on commit, and what it says differently, which stays as recorded (shared/detail.ts). A
+ * line or two under the row, so a statement overlapping an export stays easy to read.
+ */
+function AddsDetail({ t, currency, onChange }: { t: DraftTransaction; currency: string; onChange: (p: Partial<DraftTransaction>) => void }) {
+  const { cats } = useAppData();
+  const adds = t.adds!;
+  const lines = describeDetail(adds.fields, currency);
+  const differs = adds.differs.map(describeDifference);
+  const on = adds.include && !t.include;
   return (
-    <tr className={cn(muted ? 'opacity-55' : '', t.status === 'possible_duplicate' || flags?.length ? 'bg-warn-soft/60' : '')}>
-      <td className={cn(tableClasses.td, 'w-8')}>
-        <Checkbox checked={t.include} onChange={(v) => onChange({ include: v })} />
-      </td>
-      <td className={cn(tableClasses.td, 'whitespace-nowrap')}>
-        {editing ? <Input type="date" value={t.date} onChange={(e) => onChange({ date: e.target.value })} className="h-8 w-36" /> : <span className="tabular text-ink-2">{formatDate(t.date)}</span>}
-        {t.detail?.time && <div className="text-[11px] text-ink-3">{t.detail.time}</div>}
-      </td>
-      <td className={cn(tableClasses.td, 'min-w-[220px]')}>
-        {editing ? (
-          <Input value={t.description} onChange={(e) => onChange({ description: e.target.value })} className="h-8" />
-        ) : (
-          <>
-            <div className="text-[13px] font-medium text-ink">{t.payee ?? t.description}</div>
-            <div className="text-[12px] text-ink-3">{t.description}</div>
-          </>
-        )}
-        {t.status !== 'new' && (
-          <div className="mt-0.5">
-            <Badge tone={t.status === 'duplicate' ? 'muted' : 'warn'} icon={<Copy className="size-3" />}>
-              {t.status === 'duplicate' ? 'Already imported' : 'Possible duplicate'}
-            </Badge>
+    // On a phone the table scrolls sideways: the note stays in view, as wide as the screen.
+    <div className={cn('sticky left-3 flex max-w-[calc(100vw-6.5rem)] items-start gap-2 rounded-md border px-2.5 py-1.5 text-[12px] md:max-w-none', on ? 'border-accent/40 bg-accent-soft/40' : 'border-line bg-panel-2')}>
+      <Checkbox checked={on} disabled={t.include} onChange={(v) => onChange({ adds: { ...adds, include: v }, ...(v ? { include: false } : {}) })} className="mt-px" />
+      <div className="min-w-0">
+        <span className="font-medium text-ink">{t.status === 'duplicate' ? 'Add to the recorded payment: ' : 'The same payment? Add to it: '}</span>
+        <span className="sensitive text-ink-2">
+          {lines.map((l, i) => (
+            <Fragment key={l.label}>
+              {i > 0 && <span className="text-ink-3"> · </span>}
+              <span className="text-ink-3">{l.label}</span> {l.value}
+            </Fragment>
+          ))}
+        </span>
+        {adds.category && (
+          <div className="text-ink-2">
+            Its category becomes {adds.category.to ? cats.name(adds.category.to) : 'uncategorised'}
+            {adds.category.from ? ` (was ${cats.name(adds.category.from)})` : ''}.
           </div>
         )}
-        {t.transferMatch && <div className="mt-0.5"><Badge tone="accent">Links to a transfer</Badge></div>}
-        {t.pending && <div className="mt-0.5"><Badge tone="muted">Pending</Badge></div>}
-        {flags?.map((f) => (
-          <div key={f} className="mt-0.5 flex items-center gap-1 text-[11.5px] text-warn-ink">
-            <TriangleAlert className="size-3" /> {f}
+        {differs.length > 0 && (
+          <div className="sensitive text-ink-3">
+            The record keeps its own {differs.map((d) => `${d.label.toLowerCase()}, “${d.recorded}”`).join('; ')}; this says {differs.map((d) => `“${d.here}”`).join('; ')}.
           </div>
-        ))}
-      </td>
-      <td className={cn(tableClasses.td, 'w-52')}>
-        <CategorySelect value={t.category} onChange={(v) => onChange({ category: v, categorisedBy: 'user' })} className="h-8 text-[12.5px]" />
-      </td>
-      <td className={cn(tableClasses.td, tableClasses.num)}>
-        {editing ? (
-          <Input value={String(t.amount)} onChange={(e) => onChange({ amount: Number(e.target.value) || 0 })} inputMode="decimal" className="h-8 w-28 text-right" />
-        ) : (
-          <Money value={t.amount} className={cn('font-medium', t.amount > 0 ? 'text-good-ink' : 'text-ink')} />
         )}
-        {t.balanceAfter !== undefined && <div className="text-[11px] text-ink-3"><Money value={t.balanceAfter} /></div>}
-      </td>
-      <td className={cn(tableClasses.td, 'w-8')}>
-        <button className="rounded p-1 text-ink-3 hover:bg-panel-2" onClick={() => setEditing((e) => !e)} aria-label="Edit row">
-          <Pencil className="size-3.5" />
-        </button>
-      </td>
-    </tr>
+        {t.include && <div className="text-ink-3">Ticked in as a payment of its own, so nothing is added to the recorded one.</div>}
+      </div>
+    </div>
+  );
+}
+
+function TxRow({ t, currency, flags, onChange }: { t: DraftTransaction; currency: string; flags?: string[] | undefined; onChange: (p: Partial<DraftTransaction>) => void }) {
+  const [editing, setEditing] = useState(false);
+  // A row that fills in a recorded payment is doing something, though it is not recorded again.
+  const muted = !t.include && !t.adds?.include;
+  const tone = cn(muted ? 'opacity-55' : '', t.status === 'possible_duplicate' || flags?.length ? 'bg-warn-soft/60' : '');
+  return (
+    <>
+      <tr className={cn(tone, t.adds && '[&>td]:border-b-0')}>
+        <td className={cn(tableClasses.td, 'w-8')}>
+          <Checkbox checked={t.include} onChange={(v) => onChange({ include: v, ...(v && t.adds?.include ? { adds: { ...t.adds, include: false } } : {}) })} />
+        </td>
+        <td className={cn(tableClasses.td, 'whitespace-nowrap')}>
+          {editing ? <Input type="date" value={t.date} onChange={(e) => onChange({ date: e.target.value })} className="h-8 w-36" /> : <span className="tabular text-ink-2">{formatDate(t.date)}</span>}
+          {t.detail?.time && <div className="text-[11px] text-ink-3">{t.detail.time}</div>}
+        </td>
+        <td className={cn(tableClasses.td, 'min-w-[220px]')}>
+          {editing ? (
+            <Input value={t.description} onChange={(e) => onChange({ description: e.target.value })} className="h-8" />
+          ) : (
+            <>
+              <div className="text-[13px] font-medium text-ink">{t.payee ?? t.description}</div>
+              <div className="text-[12px] text-ink-3">{t.description}</div>
+            </>
+          )}
+          {t.status !== 'new' && (
+            <div className="mt-0.5">
+              <Badge tone={t.status === 'duplicate' ? 'muted' : 'warn'} icon={<Copy className="size-3" />}>
+                {t.status === 'duplicate' ? 'Already imported' : 'Possible duplicate'}
+              </Badge>
+            </div>
+          )}
+          {t.transferMatch && <div className="mt-0.5"><Badge tone="accent">Links to a transfer</Badge></div>}
+          {t.pending && <div className="mt-0.5"><Badge tone="muted">Pending</Badge></div>}
+          {flags?.map((f) => (
+            <div key={f} className="mt-0.5 flex items-center gap-1 text-[11.5px] text-warn-ink">
+              <TriangleAlert className="size-3" /> {f}
+            </div>
+          ))}
+        </td>
+        <td className={cn(tableClasses.td, 'w-52')}>
+          <CategorySelect value={t.category} onChange={(v) => onChange({ category: v, categorisedBy: 'user' })} className="h-8 text-[12.5px]" />
+        </td>
+        <td className={cn(tableClasses.td, tableClasses.num)}>
+          {editing ? (
+            <Input value={String(t.amount)} onChange={(e) => onChange({ amount: Number(e.target.value) || 0 })} inputMode="decimal" className="h-8 w-28 text-right" />
+          ) : (
+            <Money value={t.amount} className={cn('font-medium', t.amount > 0 ? 'text-good-ink' : 'text-ink')} />
+          )}
+          {t.balanceAfter !== undefined && <div className="text-[11px] text-ink-3"><Money value={t.balanceAfter} /></div>}
+        </td>
+        <td className={cn(tableClasses.td, 'w-8')}>
+          <button className="rounded p-1 text-ink-3 hover:bg-panel-2" onClick={() => setEditing((e) => !e)} aria-label="Edit row">
+            <Pencil className="size-3.5" />
+          </button>
+        </td>
+      </tr>
+      {t.adds && (
+        <tr className={tone}>
+          <td colSpan={6} className={cn(tableClasses.td, 'pt-0 md:pl-[3.25rem]')}>
+            <AddsDetail t={t} currency={currency} onChange={onChange} />
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 
@@ -271,7 +325,11 @@ function SectionEditor({ section, index, total, latest, periodFromRows, onChange
   const targetValue = target.mode === 'existing' ? target.accountId : target.mode === 'new' ? '__new' : '__skip';
   const counts = { new: 0, duplicate: 0, possible_duplicate: 0 };
   for (const t of section.transactions) counts[t.status]++;
-  const visible = section.transactions.filter((t) => showDupes || t.status !== 'duplicate');
+  const detailing = section.transactions.filter((t) => t.adds && !t.include).length;
+  // Rows matched for certain, whose details can be added all at once; a possible match is yours to judge.
+  const certainAdds = section.transactions.filter((t) => t.adds && !t.include && t.status === 'duplicate');
+  // Rows already imported are hidden, unless they have details to add.
+  const visible = section.transactions.filter((t) => showDupes || t.status !== 'duplicate' || t.adds);
   const type = target.mode === 'existing' ? data.accounts.find((a) => a.id === target.accountId)?.type : target.mode === 'new' ? target.account.type : undefined;
   const market = type ? ACCOUNT_TYPE_META[type].balanceMode === 'market' : false;
   const d = section.detected;
@@ -394,9 +452,18 @@ function SectionEditor({ section, index, total, latest, periodFromRows, onChange
                     <span className="font-semibold text-ink">{plural(counts.new, 'new transaction')}</span>
                     {counts.duplicate > 0 && <span> · {counts.duplicate} already imported</span>}
                     {counts.possible_duplicate > 0 && <span className="text-warn-ink"> · {counts.possible_duplicate} possible duplicates, check them</span>}
+                    {detailing > 0 && <span> · {detailing === 1 ? '1 knows more about a recorded payment' : `${detailing} know more about recorded payments`}</span>}
                     {section.periodStart && section.periodEnd && <span className="text-ink-3"> · {formatDate(section.periodStart)} – {formatDate(section.periodEnd)}</span>}
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-x-4 gap-y-1">
+                    {certainAdds.length > 1 && (
+                      <Checkbox
+                        checked={certainAdds.every((t) => t.adds!.include)}
+                        indeterminate={certainAdds.some((t) => t.adds!.include) && !certainAdds.every((t) => t.adds!.include)}
+                        onChange={(v) => set({ transactions: section.transactions.map((t) => (certainAdds.includes(t) ? { ...t, adds: { ...t.adds!, include: v } } : t)) })}
+                        label="Add what they show to the recorded payments"
+                      />
+                    )}
                     {counts.duplicate > 0 && <Checkbox checked={showDupes} onChange={setShowDupes} label="Show already imported" />}
                   </div>
                 </div>
@@ -408,7 +475,7 @@ function SectionEditor({ section, index, total, latest, periodFromRows, onChange
                           <Checkbox
                             checked={visible.every((t) => t.include)}
                             indeterminate={visible.some((t) => t.include) && !visible.every((t) => t.include)}
-                            onChange={(v) => set({ transactions: section.transactions.map((t) => (visible.includes(t) ? { ...t, include: v } : t)) })}
+                            onChange={(v) => set({ transactions: section.transactions.map((t) => (visible.includes(t) ? { ...t, include: v, ...(v && t.adds?.include ? { adds: { ...t.adds, include: false } } : {}) } : t)) })}
                           />
                         </th>
                         <th className={tableClasses.th}>Date</th>
@@ -420,7 +487,7 @@ function SectionEditor({ section, index, total, latest, periodFromRows, onChange
                     </thead>
                     <tbody>
                       {visible.map((t) => (
-                        <TxRow key={t.key} t={t} flags={flags.get(t.key)} onChange={(p) => setTx(t.key, p)} />
+                        <TxRow key={t.key} t={t} currency={section.currency} flags={flags.get(t.key)} onChange={(p) => setTx(t.key, p)} />
                       ))}
                     </tbody>
                   </table>
@@ -733,7 +800,7 @@ export default function Review() {
   }, [rec?.draft, rec?.updatedAt]);
   const commit = useApiMutation(() => api<ImportRecord>(`/imports/${id}/commit`, { body: draft as unknown as Record<string, unknown> }), {
     onSuccess: (r) => {
-      toast({ tone: 'good', text: `Committed: ${r.result?.transactionsAdded ?? 0} transactions${r.result?.balancesAdded ? ', balance' : ''}${r.result?.holdingsAdded ? ', holdings' : ''}` });
+      toast({ tone: 'good', text: `Committed: ${r.result?.transactionsAdded ?? 0} transactions${r.result?.transactionsDetailed?.length ? `, details on ${plural(r.result.transactionsDetailed.length, 'recorded payment')}` : ''}${r.result?.balancesAdded ? ', balance' : ''}${r.result?.holdingsAdded ? ', holdings' : ''}` });
       void navigate('/import');
     },
     // Rows another import recorded meanwhile are marked on the server's copy: show that one.
@@ -755,7 +822,8 @@ export default function Review() {
     const b = draft.sections.filter((s) => s.target.mode !== 'skip' && s.recordBalance && s.balance !== undefined).length;
     const h = draft.sections.filter((s) => s.target.mode !== 'skip' && s.recordHoldings && s.holdings.length).length;
     const f = draft.figures.filter((x) => x.include).length;
-    return [n ? plural(n, 'transaction') : '', b ? plural(b, 'balance') : '', h ? 'holdings' : '', f ? plural(f, 'tax figure') : ''].filter(Boolean).join(', ') || 'nothing';
+    const d = draft.sections.filter((s) => s.target.mode === 'existing').reduce((s, sec) => s + sec.transactions.filter((t) => !t.include && t.adds?.include).length, 0);
+    return [n ? plural(n, 'transaction') : '', d ? `details on ${plural(d, 'recorded payment')}` : '', b ? plural(b, 'balance') : '', h ? 'holdings' : '', f ? plural(f, 'tax figure') : ''].filter(Boolean).join(', ') || 'nothing';
   }, [draft]);
 
   if (q.error) return <ErrorNote error={q.error} />;
@@ -816,6 +884,9 @@ export default function Review() {
           <KeyValue
             items={[
               ['Transactions added', `${rec.result.transactionsAdded} (${rec.result.transactionsSkipped} skipped)`],
+              ...(rec.result.transactionsDetailed?.length
+                ? [['Details added to recorded payments', rec.result.transactionsDetailed.map((t) => `${formatDate(t.date)} ${money(t.amount)} “${t.description}”: ${fieldsInWords(t.added)}`).join('; ')] as [string, string]]
+                : []),
               ...(rec.result.transactionsRemoved?.length
                 ? [['Recorded twice, taken away', rec.result.transactionsRemoved.map((t) => `${formatDate(t.date)} ${money(t.amount)} “${t.description}”`).join('; ')] as [string, string]]
                 : []),

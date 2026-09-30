@@ -1,6 +1,7 @@
-import { ArrowLeftRight, ExternalLink, FileText, History, Link2, PencilLine, StickyNote, Tag, Wand2 } from 'lucide-react';
+import { ArrowLeftRight, ExternalLink, FilePlus2, FileText, History, Link2, PencilLine, StickyNote, Tag, Wand2 } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
+import { describeDifference, fieldsInWords } from '../../shared/detail';
 import { parseAmount } from '../../shared/money';
 import type { Rule, Transaction } from '../../shared/schema';
 import { api, useApi, useApiMutation } from '../lib/api';
@@ -149,7 +150,7 @@ export function TransactionDrawer({ tx, onClose }: { tx: Transaction; onClose: (
   );
   const other = tx.counterpartyAccountId ? accountsById.get(tx.counterpartyAccountId) : undefined;
   const detail: [ReactNode, ReactNode][] = [
-    ['Date', `${formatDate(tx.date)}${tx.time ? ` ${tx.time}` : ''}${tx.transactionDate ? ` (purchased ${formatDate(tx.transactionDate)})` : ''}`],
+    ['Date', `${formatDate(tx.date)}${tx.time ? ` ${tx.time}` : ''}${tx.transactionDate ? ` (made ${formatDate(tx.transactionDate)}${tx.transactionTime ? ` at ${tx.transactionTime.slice(0, 5)}` : ''})` : ''}`],
     ['Account', <Link to={`/accounts/${tx.accountId}`} className="text-accent hover:underline">{accountName(tx.accountId)}</Link>],
     ['Description', <span className="font-mono text-[12px]">{tx.description}</span>],
   ];
@@ -211,6 +212,7 @@ export function TransactionDrawer({ tx, onClose }: { tx: Transaction; onClose: (
           <KeyValue items={detail} />
         </section>
         {tx.corrections?.length ? <CorrectionTrail tx={tx} /> : null}
+        {tx.seenIn?.length ? <SeenInTrail tx={tx} /> : null}
         <CorrectSource tx={tx} onDone={onClose} />
         {tx.raw && (
           <details className="rounded-lg border border-line">
@@ -258,6 +260,52 @@ function CorrectionTrail({ tx }: { tx: Transaction }) {
             <span className="font-medium text-ink">{CORRECTION_LABEL[c.field]}</span> was {correctionValue(c.field, c.from)}, now {correctionValue(c.field, c.to)}
             <span className="text-ink-3"> · {formatDate(c.at.slice(0, 10))}</span>
             {c.note && <div className="text-ink-3">{c.note}</div>}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/**
+ * Other documents that showed this payment and filled in details it lacked, oldest first, with what
+ * each said differently (the record kept its own).
+ */
+function SeenInTrail({ tx }: { tx: Transaction }) {
+  return (
+    <section>
+      <h3 className="mb-2 flex items-center gap-1.5 text-[13px] font-semibold text-ink">
+        <FilePlus2 className="size-4 text-ink-3" /> Details from other documents
+      </h3>
+      <ul className="flex flex-col gap-2 text-[12.5px] text-ink-2">
+        {(tx.seenIn ?? []).map((s, i) => (
+          <li key={i}>
+            <span className="text-ink">Added {fieldsInWords(s.added)}</span>
+            <span className="text-ink-3"> · {formatDate(s.at.slice(0, 10))}</span>
+            {s.said && Object.keys(s.said).length > 0 && (
+              <div className="sensitive text-ink-3">
+                It said{' '}
+                {Object.entries(s.said)
+                  .map(([field, here]) => {
+                    const d = describeDifference({ field, recorded: '', here });
+                    return `${d.label.toLowerCase()} “${d.here}”`;
+                  })
+                  .join(', ')}
+                ; the record kept its own.
+              </div>
+            )}
+            <div className="flex flex-wrap gap-3">
+              {s.importId && (
+                <Link to={`/import/${s.importId}`} className="inline-flex items-center gap-1 text-accent hover:underline">
+                  <FileText className="size-3.5" /> Import record
+                </Link>
+              )}
+              {s.documentId && (
+                <a href={`/api/documents/${s.documentId}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-accent hover:underline">
+                  <ExternalLink className="size-3.5" /> Document
+                </a>
+              )}
+            </div>
           </li>
         ))}
       </ul>

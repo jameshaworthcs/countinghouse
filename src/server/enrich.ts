@@ -2,7 +2,7 @@
 // fields. Your manual edits (categorisedBy = "user") are never touched. This is what lets new rules,
 // better merchant lists or new categories apply to history without re-importing anything.
 
-import { isWrapperAccount, transferLegCategory } from '../shared/categorise';
+import { isWrapperAccount, transferLegCategory, type Categoriser } from '../shared/categorise';
 import { diffDays } from '../shared/dates';
 import { toMinor } from '../shared/money';
 import { tidyPlace } from '../shared/places';
@@ -48,7 +48,7 @@ export async function categoriseInvestmentRows(store: Store): Promise<number> {
   for (const a of wrappers) {
     for (const t of store.transactions(a.id)) {
       if (t.category || t.categorisedBy || t.transferGroup) continue;
-      const res = categoriser.categorise({ accountId: t.accountId, description: t.description, amount: t.amount, bankCategory: t.bankCategory, payee: t.merchant?.name ?? t.counterpartyName });
+      const res = categoriser.categorise({ accountId: t.accountId, description: t.description, amount: t.amount, type: t.type, bankCategory: t.bankCategory, payee: t.merchant?.name ?? t.counterpartyName });
       if (!res.category || res.categorisedBy !== 'builtin') continue;
       const patch: Partial<Transaction> = { category: res.category, categorisedBy: 'builtin' };
       if (t.payeeSetBy !== 'user' && res.payee && res.payee !== t.payee) patch.payee = res.payee;
@@ -72,6 +72,7 @@ export async function enrich(store: Store, opts: { accountIds?: string[]; dryRun
       accountId: t.accountId,
       description: t.description,
       amount: t.amount,
+      type: t.type,
       bankCategory: t.bankCategory,
       aiCategory: t.categorisedBy === 'ai' ? t.category : undefined,
       payee: t.merchant?.name ?? t.counterpartyName,
@@ -127,6 +128,40 @@ export async function enrich(store: Store, opts: { accountIds?: string[]; dryRun
   return { recategorised, transfersLinked };
 }
 
+/** Source fields the categoriser reads: filling one in can change what a row is. */
+const CATEGORISER_READS = ['type', 'counterpartyName', 'merchant', 'bankCategory'] as const;
+
+/**
+ * A recorded row's payee, category and own-account link worked out again after another document
+ * filled in some of its source fields (shared/detail.ts), as `enrich` would: only when a field
+ * the categoriser reads was filled in, and never on a row you categorised or one linked as a
+ * transfer. Returns the patch, empty when nothing changes.
+ */
+export function rederive(categoriser: Categoriser, t: Transaction, filled: readonly string[]): Partial<Transaction> {
+  if (!filled.some((f) => (CATEGORISER_READS as readonly string[]).includes(f))) return {};
+  if (t.categorisedBy === 'user' || t.transferGroup) return {};
+  const res = categoriser.categorise({
+    accountId: t.accountId,
+    description: t.description,
+    amount: t.amount,
+    type: t.type,
+    bankCategory: t.bankCategory,
+    aiCategory: t.categorisedBy === 'ai' ? t.category : undefined,
+    payee: t.merchant?.name ?? t.counterpartyName,
+  });
+  const patch: Partial<Transaction> = {};
+  if (t.payeeSetBy !== 'user' && res.payee && res.payee !== t.payee) patch.payee = res.payee;
+  if (res.category !== t.category) patch.category = res.category;
+  if (res.categorisedBy !== t.categorisedBy) patch.categorisedBy = res.categorisedBy;
+  if (res.ruleId !== t.ruleId) patch.ruleId = res.ruleId;
+  if (res.counterpartyAccountId !== t.counterpartyAccountId) patch.counterpartyAccountId = res.counterpartyAccountId;
+  if (res.tags?.length) {
+    const tags = [...new Set([...(t.tags ?? []), ...res.tags])];
+    if (tags.length !== (t.tags?.length ?? 0)) patch.tags = tags;
+  }
+  return patch;
+}
+
 /**
  * How strongly two rows say they are the same money moving between your accounts, or null when one
  * of them says it went somewhere else (docs/INGESTION.md, "Transfers").
@@ -136,7 +171,7 @@ export async function enrich(store: Store, opts: { accountIds?: string[]; dryRun
  *   counterparty), rules the pair out: "AJ BELL" is not a payment to the Chase saver.
  * With nothing for it, the pair is not linked.
  */
-export type TransferSide = Pick<Transaction, 'id' | 'accountId' | 'description' | 'category' | 'counterpartyAccountId'>;
+export type TransferSide = Pick<Transaction, 'id' | 'accountId' | 'description' | 'type' | 'category' | 'counterpartyAccountId'>;
 
 export function transferEvidence(a: TransferSide, b: TransferSide, named: (t: TransferSide) => string[], ownName: (t: TransferSide) => boolean): number | null {
   const namesA = named(a);
@@ -170,7 +205,7 @@ export function transferReader(store: Store, categoriser = categoriserFor(store)
       const type = store.account(t.accountId)?.type;
       // As when categorising: bank names say nothing inside an investment or pension account.
       const useInstitutions = !type || !isWrapperAccount(type) || type === 'cash_isa';
-      ids = categoriser.ownAccountsMentioned(t.accountId, t.description, useInstitutions).map((x) => x.id);
+      ids = categoriser.ownAccountsMentioned(t.accountId, t.description, useInstitutions, t.type).map((x) => x.id);
       cache.set(t.id, ids);
     }
     return ids;

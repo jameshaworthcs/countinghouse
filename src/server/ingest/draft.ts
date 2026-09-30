@@ -7,7 +7,8 @@ import { isWrapperAccount, transferLegCategory } from '../../shared/categorise';
 import { dateOf, diffDays, today } from '../../shared/dates';
 import { toMinor } from '../../shared/money';
 import { categoriserFor } from '../categoriser';
-import { transferEvidence, transferReader, type TransferSide } from '../enrich';
+import { addsAnything, detailToAdd, fillIn } from '../../shared/detail';
+import { rederive, transferEvidence, transferReader, type TransferSide } from '../enrich';
 import type {
   Account,
   AccountType,
@@ -263,8 +264,9 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
 
     // Transactions.
     const existingForAccount = existing ? store.transactions(existing.id) : [];
+    const recordedById = new Map(existingForAccount.map((t) => [t.id, t]));
     const dups = classifyDuplicates(
-      acc.transactions.map((t) => ({ date: t.date, amount: t.amount, description: t.description, sourceId: t.sourceId ?? undefined, balanceAfter: t.balanceAfter ?? undefined })),
+      acc.transactions.map((t) => ({ date: t.date, amount: t.amount, description: t.description, sourceId: t.sourceId ?? undefined, balanceAfter: t.balanceAfter ?? undefined, time: t.time && /^\d{2}:\d{2}(:\d{2})?$/.test(t.time) ? t.time : undefined })),
       existingForAccount,
       3,
       // A letter or confirmation may restate payments recorded one by one (dedup.ts, step 5).
@@ -275,6 +277,7 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
         accountId: targetId,
         description: t.description,
         amount: t.amount,
+        type: t.type ?? undefined,
         payee: t.payee ?? undefined,
         bankCategory: t.bankCategory ?? undefined,
         aiCategory: t.category ?? undefined,
@@ -287,7 +290,7 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
       let transferMatch: string | undefined;
       if (dup.status === 'new' && (!category || TRANSFER_CATEGORIES.has(category))) {
         const candidates = txByAmount.get(Math.abs(toMinor(t.amount))) ?? [];
-        const row = { id: `draft:${si}:${ti}`, accountId: targetId, date: t.date, amount: t.amount, description: t.description, ...(category ? { category } : {}), ...(counterpartyAccountId ? { counterpartyAccountId } : {}) };
+        const row = { id: `draft:${si}:${ti}`, accountId: targetId, date: t.date, amount: t.amount, description: t.description, ...(t.type ? { type: t.type } : {}), ...(category ? { category } : {}), ...(counterpartyAccountId ? { counterpartyAccountId } : {}) };
         const other = findTransferMatch(row, counterpartyAccountId ? candidates.filter((c) => c.accountId === counterpartyAccountId) : candidates, takenTransfers, reader);
         const otherAccount = other ? store.account(other.accountId) : undefined;
         if (other && otherAccount) {
@@ -337,6 +340,22 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
         ...(t.row !== null ? { row: t.row } : { row: ti }),
         ...(Object.keys(detail).length ? { detail } : {}),
       };
+      // Matched to a recorded payment (never one of several a letter adds up): what this document
+      // knows about it that the record does not. Filled in on commit when ticked: by itself only
+      // when the match is certain.
+      const recorded = dup.duplicateOf && !dup.sum ? recordedById.get(dup.duplicateOf) : undefined;
+      if (recorded) {
+        const found = detailToAdd(row, recorded);
+        if (addsAnything(found)) {
+          const change = rederive(categoriser, { ...recorded, ...fillIn(recorded, found.fields).patch }, Object.keys(found.fields));
+          row.adds = {
+            include: dup.status === 'duplicate',
+            fields: found.fields,
+            differs: found.differs,
+            ...('category' in change ? { category: { ...(recorded.category ? { from: recorded.category } : {}), ...(change.category ? { to: change.category } : {}) } } : {}),
+          };
+        }
+      }
       return row;
     });
 

@@ -7,7 +7,8 @@ import { formatDate } from '../../shared/dates';
 import { formatMoney } from '../../shared/money';
 import type { DraftFigure, DraftSection, Holding, ImportRecord } from '../../shared/schema';
 import type { Store } from '../store';
-import { classifyDuplicates } from './dedup';
+import { addsAnything, detailToAdd, stillAdds, type DetailFields } from '../../shared/detail';
+import { candidateOf, classifyDuplicates, type DedupResult } from './dedup';
 import { sameHolding } from './match';
 import { sameMoney, sameText } from './verify';
 
@@ -23,7 +24,8 @@ const BALANCE_FIELDS = ['balance', 'availableBalance', 'creditLimit', 'contribut
 type BalanceField = (typeof BALANCE_FIELDS)[number];
 
 type Fact =
-  | { kind: 'row'; account: string; date: string; amount: number; description: string }
+  // `adds`: what the row fills in on the payment it matches (shared/detail.ts).
+  | { kind: 'row'; account: string; date: string; amount: number; description: string; adds?: DetailFields }
   | { kind: 'balance'; account: string; date: string; values: Partial<Record<BalanceField, number>> }
   | { kind: 'holding'; account: string; date: string; holding: Holding }
   | { kind: 'figure'; figure: DraftFigure };
@@ -49,10 +51,17 @@ function factsOf(record: ImportRecord, store: Store): Placed[] {
     const account = accountKey(record, s);
     const stored = s.target.mode === 'existing' ? s.target.accountId : undefined;
     // Rows: checked against what is stored now, which may be more than when the draft was built.
-    const dups = stored ? classifyDuplicates(s.transactions, store.transactions(stored)) : s.transactions.map(() => ({ status: 'new' as const }));
+    const dups: DedupResult[] = stored ? classifyDuplicates(s.transactions.map(candidateOf), store.transactions(stored)) : s.transactions.map(() => ({ status: 'new' as const }));
     // Every row the document offers counts, ticked or not, pending or not: leaving one out is a
-    // choice to make on the review page, not a reason to call the document empty.
-    s.transactions.forEach((t, i) => out.push({ fact: { kind: 'row', account, date: t.date, amount: t.amount, description: t.description }, stored: dups[i]!.status === 'duplicate' }));
+    // choice to make on the review page, not a reason to call the document empty. A row already
+    // recorded that fills in some of the record's details is something to record too.
+    s.transactions.forEach((t, i) => {
+      const dup = dups[i]!;
+      const recorded = dup.status === 'duplicate' && dup.duplicateOf && !dup.sum ? store.transaction(dup.duplicateOf) : undefined;
+      const found = recorded ? detailToAdd(t, recorded) : undefined;
+      const adds = found && addsAnything(found) ? found.fields : undefined;
+      out.push({ fact: { kind: 'row', account, date: t.date, amount: t.amount, description: t.description, ...(adds ? { adds } : {}) }, stored: dup.status === 'duplicate' && !adds });
+    });
     if (s.recordBalance && s.balance !== undefined && s.balanceDate) {
       const values = Object.fromEntries(BALANCE_FIELDS.filter((k) => s[k] !== undefined).map((k) => [k, s[k]])) as Partial<Record<BalanceField, number>>;
       const date = s.balanceDate;
@@ -80,9 +89,14 @@ function holdingKnown(fresh: Holding, known: Holding): boolean {
   return money && units && ids;
 }
 
+/** Everything `fresh` would fill in, `known` fills in too, with the same values. */
+function addsNoMore(fresh: DetailFields | undefined, known: DetailFields | undefined): boolean {
+  return !fresh || JSON.stringify(stillAdds(known ?? {}, fresh)) === JSON.stringify(fresh);
+}
+
 /** Does `k`, a fact another import will record, record `f` too? */
 function covers(k: Fact, f: Fact): boolean {
-  if (k.kind === 'row' && f.kind === 'row') return k.account === f.account && k.date === f.date && sameMoney(k.amount, f.amount) && sameText(k.description, f.description);
+  if (k.kind === 'row' && f.kind === 'row') return k.account === f.account && k.date === f.date && sameMoney(k.amount, f.amount) && sameText(k.description, f.description) && addsNoMore(f.adds, k.adds);
   if (k.kind === 'balance' && f.kind === 'balance') return k.account === f.account && k.date === f.date && BALANCE_FIELDS.every((x) => f.values[x] === undefined || sameMoney(f.values[x], k.values[x]));
   if (k.kind === 'holding' && f.kind === 'holding') return k.account === f.account && k.date === f.date && holdingKnown(f.holding, k.holding);
   if (k.kind === 'figure' && f.kind === 'figure') {
@@ -115,7 +129,10 @@ function describe(facts: { fact: Fact; where: string }[]): string {
       const value = b.values.balance !== undefined ? ` (${formatMoney(b.values.balance)} on ${formatDate(b.date)})` : '';
       return list.length === 1 ? `its balance${value} is ${place}` : `its ${list.length} balances are ${place}`;
     }
-    if (kind === 'row') return `${list.length === 1 ? 'its transaction is' : `its ${plural(list.length, 'transaction')} are`} ${where === 'stored' ? 'already imported' : place}`;
+    if (kind === 'row') {
+      const detail = list.some((f) => f.kind === 'row' && f.adds) && where !== 'stored' ? ', with the details it adds' : '';
+      return `${list.length === 1 ? 'its transaction is' : `its ${plural(list.length, 'transaction')} are`} ${where === 'stored' ? 'already imported' : place}${detail}`;
+    }
     if (kind === 'holding') return `${list.length === 1 ? 'its holding is' : `its ${plural(list.length, 'holding')} are`} ${place}`;
     return `${list.length === 1 ? 'its tax figure is' : `its ${plural(list.length, 'tax figure')} are`} ${place}`;
   });

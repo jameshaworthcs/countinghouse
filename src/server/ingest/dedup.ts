@@ -6,6 +6,9 @@
 //   3. Same date, amount and balance after it (both known) → duplicate, as a multiset. The running
 //      balance places a row in the account's history, whatever each source calls it: Chase's
 //      statement says "To Credit Card" where its export says "To Revolving Line Account".
+//   3b. Same date, amount and time to the minute (both known) → duplicate, as a multiset. The date
+//      and time may be the record's own or the day it was made: an app lists a payment by when the
+//      card was used, and a record filled in from it keeps that too (shared/detail.ts).
 //   4. Same amount within ±3 days → possible duplicate, for you to decide (typical when the same
 //      period arrives from two sources, e.g. a CSV and a screenshot), when the descriptions are
 //      similar. Described differently, only from £20 (`DIFFERENT_WORDS_FROM`), and then on the same
@@ -27,7 +30,19 @@ export interface DedupCandidate {
   description: string;
   sourceId?: string | undefined;
   balanceAfter?: number | undefined;
+  /** HH:MM[:SS], of `date`. */
+  time?: string | undefined;
 }
+
+/** A draft row as dedup sees it: its bank id and time are in its detail. */
+export const candidateOf = (t: Pick<DraftTransaction, 'date' | 'amount' | 'description' | 'balanceAfter' | 'detail'>): DedupCandidate => ({
+  date: t.date,
+  amount: t.amount,
+  description: t.description,
+  sourceId: t.detail?.sourceId,
+  balanceAfter: t.balanceAfter,
+  time: t.detail?.time,
+});
 
 /** Below this, the same amount described differently is taken as another payment (everyday prices repeat). */
 export const DIFFERENT_WORDS_FROM = 20;
@@ -55,7 +70,12 @@ export interface DedupResult {
   status: 'new' | 'duplicate' | 'possible_duplicate';
   duplicateOf?: string;
   reason?: string;
+  /** Matched to several recorded rows adding up to it (step 5): `duplicateOf` is only the first. */
+  sum?: true;
 }
+
+/** A time a row can be placed by: to the minute, and not a midnight an export puts on every row. */
+const minuteOf = (time: string | undefined) => (time && time.slice(0, 5) !== '00:00' ? time.slice(0, 5) : undefined);
 
 function tokens(s: string): Set<string> {
   return new Set(descriptionKey(s).split(' ').filter((t) => t.length >= 3));
@@ -122,6 +142,18 @@ export function classifyDuplicates(incoming: DedupCandidate[], existing: Transac
     }
   });
 
+  // 3b. Exact date + amount + time, as a multiset: the record's posting, or when it was made.
+  incoming.forEach((c, i) => {
+    const minute = minuteOf(c.time);
+    if (results[i]!.status !== 'new' || !minute) return;
+    const at = (x: Transaction) => (x.date === c.date && minuteOf(x.time) === minute) || (x.transactionDate === c.date && minuteOf(x.transactionTime) === minute);
+    const t = existing.find((x) => !used.has(x.id) && !conflictingIds(c, x) && !otherBalance(c, x) && toMinor(x.amount) === toMinor(c.amount) && at(x));
+    if (t) {
+      used.add(t.id);
+      results[i] = { status: 'duplicate', duplicateOf: t.id, reason: 'Same date, amount and time' };
+    }
+  });
+
   // 4. Fuzzy: same amount, nearby date; similar text, the same day, or an amount with pence.
   const byAmount = new Map<number, Transaction[]>();
   for (const t of existing) {
@@ -136,7 +168,8 @@ export function classifyDuplicates(incoming: DedupCandidate[], existing: Transac
     let best: { t: Transaction; score: number; similar: boolean; days: number } | null = null;
     for (const t of byAmount.get(toMinor(c.amount)) ?? []) {
       if (used.has(t.id) || conflictingIds(c, t) || otherBalance(c, t)) continue;
-      const days = Math.abs(diffDays(t.date, c.date));
+      // From either of the record's days: when it cleared, or when it was made.
+      const days = Math.min(Math.abs(diffDays(t.date, c.date)), t.transactionDate ? Math.abs(diffDays(t.transactionDate, c.date)) : Infinity);
       if (days > fuzzyDays) continue;
       const sim = similarity(t.description, c.description);
       const similar = sim >= 0.4;
@@ -162,7 +195,7 @@ export function classifyDuplicates(incoming: DedupCandidate[], existing: Transac
       if (!parts) return;
       for (const t of parts) used.add(t.id);
       const money = (t: Transaction) => formatMoney(Math.abs(t.amount), { currency: t.currency });
-      results[i] = { status: 'possible_duplicate', duplicateOf: parts[0]!.id, reason: `The same money as ${parts.length} payments recorded within a few days: ${parts.map(money).join(' + ')}` };
+      results[i] = { status: 'possible_duplicate', duplicateOf: parts[0]!.id, reason: `The same money as ${parts.length} payments recorded within a few days: ${parts.map(money).join(' + ')}`, sum: true };
     });
   }
   return results;
@@ -170,10 +203,11 @@ export function classifyDuplicates(incoming: DedupCandidate[], existing: Transac
 
 /**
  * Something of yours is on this transaction, or it is linked to another: a category, payee, note,
- * tag or split you set, a correction, a receipt, a transfer link. Such a copy is never taken away.
+ * tag or split you set, a correction, a receipt, details another document filled in when you
+ * committed it, a transfer link. Such a copy is never taken away.
  */
 export function hasYourChanges(t: Transaction, withReceipts: Set<string>): boolean {
-  return t.categorisedBy === 'user' || t.payeeSetBy === 'user' || Boolean(t.notes || t.tags?.length || t.splits?.length || t.corrections?.length || t.transferGroup) || withReceipts.has(t.id);
+  return t.categorisedBy === 'user' || t.payeeSetBy === 'user' || Boolean(t.notes || t.tags?.length || t.splits?.length || t.corrections?.length || t.seenIn?.length || t.transferGroup) || withReceipts.has(t.id);
 }
 
 /**
@@ -241,10 +275,7 @@ export function recheckDraft(draft: Draft, stored: (accountId: string) => Transa
     const claimed = new Set(section.transactions.flatMap((t) => (t.status !== 'new' && t.duplicateOf ? [t.duplicateOf] : [])));
     const rows = section.transactions.filter((t) => t.status === 'new' && t.include);
     if (!rows.length) continue;
-    const results = classifyDuplicates(
-      rows.map((t) => ({ date: t.date, amount: t.amount, description: t.description, sourceId: t.detail?.sourceId, balanceAfter: t.balanceAfter })),
-      stored(section.target.accountId).filter((t) => !claimed.has(t.id)),
-    );
+    const results = classifyDuplicates(rows.map(candidateOf), stored(section.target.accountId).filter((t) => !claimed.has(t.id)));
     rows.forEach((t, i) => {
       const r = results[i]!;
       if (r.status === 'new') return;
