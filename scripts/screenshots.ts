@@ -66,6 +66,9 @@ async function main() {
   // Account pages from whatever data is being shot: the first current account and the first ISA.
   const boot = (await (await fetch(`${base}/api/bootstrap`, { headers: { host: '127.0.0.1', cookie } })).json()) as { accounts: { id: string; type: string }[] };
   const txs = (await (await fetch(`${base}/api/transactions?limit=1`, { headers: { host: '127.0.0.1', cookie } })).json()) as { total: number };
+  // A proposed fix waiting, when the data has one.
+  const proposals = (await (await fetch(`${base}/api/proposals`, { headers: { host: '127.0.0.1', cookie } })).json()) as { pending: { proposal: { id: string } }[] };
+  const proposalId = proposals.pending[0]?.proposal.id;
   const accountPage = (name: string, type: string): [string, string][] => {
     const id = boot.accounts.find((a) => a.type === type)?.id;
     return id ? [[name, `/accounts/${id}`]] : [];
@@ -90,6 +93,7 @@ async function main() {
     ...(pendingId ? ([['review', `/import/${pendingId}`]] as [string, string][]) : []),
     ...(repeatsId ? ([['review-already-here', `/import/${repeatsId}`]] as [string, string][]) : []),
     ...(nothingId ? ([['review-nothing-to-record', `/import/${nothingId}`]] as [string, string][]) : []),
+    ...(proposalId ? ([['proposal', `/proposals/${proposalId}`]] as [string, string][]) : []),
     ['settings', '/settings'],
     ['settings-extraction', '/settings#extraction'],
     ['settings-rules', '/settings#rules'],
@@ -142,10 +146,10 @@ async function main() {
   }
   if (!only) {
     if (txs.total > 0) await shoot('transaction-drawer', '/transactions', { width: 390, height: 844, theme: 'dark', mobile: true, act: openDrawer });
-    for (const [name, route] of [['overview', '/'], ['spending', '/spending'], ['projections', '/projections'], ['assumptions', '/assumptions'], ['review', pendingId ? `/import/${pendingId}` : '/import'], ...(nothingId ? [['review-nothing-to-record', `/import/${nothingId}`]] : [])] as [string, string][]) {
+    for (const [name, route] of [['overview', '/'], ['spending', '/spending'], ['projections', '/projections'], ['assumptions', '/assumptions'], ['review', pendingId ? `/import/${pendingId}` : '/import'], ...(nothingId ? [['review-nothing-to-record', `/import/${nothingId}`]] : []), ...(proposalId ? [['proposal', `/proposals/${proposalId}`]] : [])] as [string, string][]) {
       await shoot(name, route, { width: 1440, height: 900, theme: 'dark' });
     }
-    for (const [name, route] of [['overview', '/'], ['import', '/import'], ['transactions', '/transactions'], ['projections', '/projections'], ...(repeatsId ? [['review-already-here', `/import/${repeatsId}`]] : [])] as [string, string][]) {
+    for (const [name, route] of [['overview', '/'], ['import', '/import'], ['transactions', '/transactions'], ['projections', '/projections'], ...(repeatsId ? [['review-already-here', `/import/${repeatsId}`]] : []), ...(proposalId ? [['proposal', `/proposals/${proposalId}`]] : [])] as [string, string][]) {
       await shoot(name, route, { width: 390, height: 844, theme: 'light', mobile: true });
     }
   }

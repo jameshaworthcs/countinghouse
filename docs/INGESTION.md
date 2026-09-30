@@ -226,8 +226,11 @@ read again.
 - **Account matching** scores on last 4 digits (and a mismatch vetoes), provider, type, name
   words and currency.
   - An account you pinned the upload to always wins.
-  - Being your only account of the detected type adds a little: apps rarely show their own name
-    on screen. It is never enough on its own.
+  - Being your only open account of the detected type adds a little: apps rarely show their own
+    name on screen. It is never enough on its own, and a closed account never has it.
+  - A product the document names that shares no word with the account's name, aliases or kind
+    ("Easy Access Issue 4" against a "2 Year Fixed Rate") counts against the account: provider
+    and kind alone are then not enough, and a new account is proposed.
   - Premium Bonds are the exception. A person can hold only one, so a Premium Bonds screen is your
     Premium Bonds unless it shows another number, provider or name. Only NS&I issues them, so a new
     Premium Bonds account gets NS&I as its provider.
@@ -245,6 +248,9 @@ read again.
   - Closed accounts still take their old statements, with a small penalty so an open account wins
     a tie; the review page lists them separately.
   - Below the threshold a new account is proposed.
+  - When a commit creates an account, the drafts still waiting that you have not edited are
+    matched again, so a letter uploaded with a new account's first statement goes to that account
+    rather than an older one, or a second new one.
   - An existing account set up without its number learns the last digits its first statement
     shows, so later statements match it by themselves. An account that has its number keeps it.
 - **Screenshots taken together.** Scrolled app screens rarely name their account; the one at the

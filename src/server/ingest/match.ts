@@ -52,9 +52,14 @@ export function fitsAccount(detected: Detected, account: Account, institutions: 
   }
   if (detected.accountName) {
     const named = words(detected.accountName);
-    if (named.size && ![account.name, ...account.aliases, ACCOUNT_TYPE_META[account.type].label].some((n) => overlaps(named, words(n)))) return false;
+    if (named.size && !fitsName(named, account)) return false;
   }
   return true;
+}
+
+/** A name shares a word with the account's name, one of its aliases, or its kind ("Savings account"). */
+function fitsName(named: Set<string>, account: Account): boolean {
+  return [account.name, ...account.aliases, ACCOUNT_TYPE_META[account.type].label].some((n) => [...words(n)].some((w) => named.has(w)));
 }
 
 export interface AccountMatch {
@@ -110,12 +115,13 @@ export function matchAccount(detected: Detected, accounts: Account[], institutio
       if (detected.accountType === a.type) {
         score += 25;
         reasons.push(`type (${ACCOUNT_TYPE_META[a.type].shortLabel})`);
-        if (ofType === 1) {
+        // Only the open one is your only account of its type: a closed one does not borrow it.
+        if (ofType === 1 && a.status !== 'closed') {
           score += 15;
           reasons.push(`your only ${ACCOUNT_TYPE_META[a.type].shortLabel}`);
           // Being your only LISA is a suggestion; being your only Premium Bonds is the account, since
           // a person holds only one. Unless the screen names another number, provider or name.
-          if (ACCOUNT_TYPE_META[a.type].onePerPerson && a.status !== 'closed' && fitsAccount(detected, a, institutions)) {
+          if (ACCOUNT_TYPE_META[a.type].onePerPerson && fitsAccount(detected, a, institutions)) {
             score += 20;
             reasons.push('a person holds only one');
           }
@@ -129,6 +135,11 @@ export function matchAccount(detected: Detected, accounts: Account[], institutio
     if (dn.size && names.some((n) => [...words(n)].filter((w) => dn.has(w)).length >= Math.min(2, dn.size))) {
       score += 15;
       reasons.push('similar name');
+    } else if (dn.size && !fitsName(dn, a)) {
+      // A product named on the document that shares no word with the account's names or kind is
+      // another product ("Easy Access Issue 4" is not your "2 Year Fixed Rate"), even at the same
+      // provider: the provider and kind alone are then not enough.
+      score -= 25;
     }
     if (detected.currency && detected.currency !== a.currency) score -= 50;
     // An account already holding every fund the screen lists (a fund's own page names no account).

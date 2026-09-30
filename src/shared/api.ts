@@ -622,6 +622,23 @@ export interface ProposalChangeView {
   after?: Record<string, { category?: string; transferWith: string }>;
   /** A move inside an account: the balances either side of it, which add up without it. */
   between?: { from: { date: string; balance: number }; to: { date: string; balance: number } };
+  /** A balance moved: why it is not the account's it is in, and the balances it adds up with where it goes. */
+  moved?: { misfit: string; beside: { date: string; balance: number }[] };
+}
+
+/** A balance a proposal moves, as it is now (as it was, once decided). */
+export interface ProposalBalance {
+  id: string;
+  accountId: string;
+  date: string;
+  balance: number;
+  currency: string;
+  kind: BalanceSnapshot['kind'];
+  interestRate?: number;
+  /** The document it came from. */
+  source?: { importId: string; fileName?: string };
+  /** It is no longer in your data. */
+  missing?: true;
 }
 
 export interface ProposalView {
@@ -629,7 +646,9 @@ export interface ProposalView {
   changes: ProposalChangeView[];
   /** Every transaction the changes name, by id. */
   rows: Record<string, ProposalRow>;
-  /** Every account those rows or changes name, by id. */
+  /** Every balance the changes name, by id. */
+  balances: Record<string, ProposalBalance>;
+  /** Every account those rows, balances or changes name, by id. */
   accounts: Record<string, { id: string; name: string; type: Account['type']; status: Account['status']; openedOn?: string; closedOn?: string; institutionName?: string }>;
   /** Changes that can be applied now, and those that cannot. */
   ready: number;

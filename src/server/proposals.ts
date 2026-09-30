@@ -16,12 +16,12 @@
 import { EventEmitter } from 'node:events';
 import { mkdir, readdir, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
-import type { ProposalChangeView, ProposalCheckResponse, ProposalDecision, ProposalListResponse, ProposalRow, ProposalSummary, ProposalView } from '../shared/api';
+import type { ProposalBalance, ProposalChangeView, ProposalCheckResponse, ProposalDecision, ProposalListResponse, ProposalRow, ProposalSummary, ProposalView } from '../shared/api';
 import { CategoryIndex } from '../shared/categories';
 import { transferLegCategory, type Categoriser } from '../shared/categorise';
-import { diffDays, formatDate, today } from '../shared/dates';
+import { addDays, diffDays, formatDate, today } from '../shared/dates';
 import { formatMoney, fromMinor, toMinor } from '../shared/money';
-import { AccountSchema, ProposalSchema, type Account, type Proposal, type ProposalInput, type ProposalStatus, type ProposedChange, type Provenance, type Transaction } from '../shared/schema';
+import { AccountSchema, ProposalSchema, type Account, type BalanceSnapshot, type Proposal, type ProposalInput, type ProposalStatus, type ProposedChange, type Provenance, type Transaction } from '../shared/schema';
 import { BalanceEngine, type BalanceSource } from './analytics/balances';
 import { categoriserFor } from './categoriser';
 import { atomicWrite, Mutex, nowISO } from './fsutil';
@@ -55,6 +55,8 @@ interface ChangeResult {
   after?: Record<string, { category?: string; transferWith: string }>;
   /** A move inside an account: the balances either side of it, which add up without it. */
   between?: { from: { date: string; balance: number }; to: { date: string; balance: number } };
+  /** A balance moved: why it is not the account's it is in, and the balances it adds up with where it goes. */
+  moved?: { misfit: string; beside: { date: string; balance: number }[] };
 }
 
 interface Outcome {
@@ -68,10 +70,23 @@ interface Outcome {
   /** Every row and account the changes touch, as they are now. */
   touchedRows: Map<string, Transaction>;
   touchedAccounts: Map<string, Account>;
+  /** Balances to move, by id: to which account, and from which (as the changes before it left it). */
+  moves: Map<string, { balance: BalanceSnapshot; from: string; to: string }>;
 }
 
 const money = (t: Pick<Transaction, 'amount' | 'currency'>) => formatMoney(t.amount, { currency: t.currency });
 const brief = (t: Transaction, accountName: (id: string) => string) => `${money(t)} on ${formatDate(t.date)} in ${accountName(t.accountId)}`;
+
+/**
+ * The strong balances either side of an account's balance on a day (a statement's, a running
+ * balance or your own), each with what the rows between leave unexplained, and that day's own.
+ */
+function besideDay(engine: BalanceEngine, accountId: string, date: string) {
+  const [before, after] = [engine.between(accountId, date), engine.between(accountId, addDays(date, 1))];
+  const on = before?.to.date === date ? before.to : after?.from.date === date ? after.from : undefined;
+  const beside = [before?.to.date === date ? { ...before.from, difference: before.difference } : undefined, after?.from.date === date ? { ...after.to, difference: after.difference } : undefined].filter((b) => b !== undefined);
+  return { on, beside };
+}
 
 /**
  * Run a proposal's changes in order on a copy of the data, leaving out `leaveOut`: what each would
@@ -85,7 +100,8 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
   const accountName = (id: string) => store.account(id)?.name ?? id;
   let categoriserMemo: Categoriser | undefined;
   const categoriser = () => (categoriserMemo ??= categoriserFor(store));
-  const out: Outcome = { results: new Map(), patches: new Map(), removed: new Map(), accounts: new Map(), touchedRows: new Map(), touchedAccounts: new Map() };
+  const out: Outcome = { results: new Map(), patches: new Map(), removed: new Map(), accounts: new Map(), touchedRows: new Map(), touchedAccounts: new Map(), moves: new Map() };
+  const balanceById = new Map(store.balances().map((b) => [b.id, b]));
   // Rows as the changes so far leave them (null: removed), and transfer pairs likewise.
   const rows = new Map<string, Transaction | null>();
   const groups = new Map<string, string[]>();
@@ -257,6 +273,23 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
         out.accounts.set(acc.id, AccountSchema.parse(next));
         return {};
       }
+      case 'move_balance': {
+        const b = balanceById.get(c.balance);
+        if (!b) return { problem: `Balance ${c.balance} is no longer in your data.` };
+        const from = out.moves.get(b.id)?.to ?? b.accountId;
+        if (from === c.to) return { alreadySo: true };
+        const to = account(c.to);
+        if (!to) return { problem: `Account ${c.to} is not in your data.` };
+        if (b.currency !== to.currency) return { problem: `It is in ${b.currency}, and ${to.name} is in ${to.currency}.` };
+        // Yours wins: a balance you gave or changed is not moved by a proposal.
+        if (b.kind === 'manual' || b.enteredBy === 'user') return { problem: 'You gave this balance yourself, so a proposal leaves it to you.' };
+        if (!b.source.importId && !b.source.documentId) return { problem: 'It was not read from a document, so it cannot have been read into the wrong account.' };
+        if (to.openedOn && b.date < to.openedOn) return { problem: `${to.name} opened on ${formatDate(to.openedOn)}, after it (${formatDate(b.date)}).` };
+        if (to.closedOn && b.date > to.closedOn) return { problem: `${to.name} closed on ${formatDate(to.closedOn)}, before it (${formatDate(b.date)}).` };
+        out.moves.set(b.id, { balance: b, from, to: c.to });
+        // Whether it is wrong where it is, and fits where it goes, is checked once every change has run.
+        return {};
+      }
     }
   };
 
@@ -281,12 +314,56 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
       else out.results.set(c.key, { between: { from: b.from, to: b.to } });
     }
   }
+
+  // A balance moved: with every change run, where it was it does not belong (the account was not
+  // open that day, or its balances do not add up with it), and where it goes they do.
+  const balanceMoves = changes.filter((c): c is Extract<ProposedChange, { kind: 'move_balance' }> => c.kind === 'move_balance' && !leaveOut.has(c.key) && !out.results.get(c.key)?.problem && !out.results.get(c.key)?.alreadySo);
+  if (balanceMoves.length) {
+    const accounts = store.accounts.map((a) => out.accounts.get(a.id) ?? a);
+    /** The data as the changes leave it, with one balance kept where it was. */
+    const engineWith = (keep?: string) => {
+      const placed = (b: BalanceSnapshot) => (b.id === keep ? b.accountId : (out.moves.get(b.id)?.to ?? b.accountId));
+      const all = store.balances();
+      return new BalanceEngine({ accounts, settings: store.settings, balances: (id) => all.filter((b) => placed(b) === id), transactions: (id) => store.transactions(id).flatMap((t) => row(t.id) ?? []) });
+    };
+    const after = engineWith();
+    const said = (b: { balance: number; date: string }) => `${formatMoney(b.balance)} on ${formatDate(b.date)}`;
+    for (const c of balanceMoves) {
+      const move = out.moves.get(c.balance);
+      if (!move || move.to !== c.to) continue;
+      const { balance: b, from: fromId } = move;
+      const from = accounts.find((a) => a.id === fromId);
+      const to = accounts.find((a) => a.id === c.to)!;
+      const fromName = from?.name ?? fromId;
+      let misfit: string | undefined;
+      if (from?.openedOn && b.date < from.openedOn) misfit = `${fromName} opened on ${formatDate(from.openedOn)}, after it.`;
+      else if (from?.closedOn && b.date > from.closedOn) misfit = `${fromName} closed on ${formatDate(from.closedOn)}, before it.`;
+      else {
+        const here = besideDay(engineWith(b.id), fromId, b.date);
+        const off = here.beside.find((x) => x.difference);
+        if (off) misfit = `In ${fromName} it does not add up with ${said(off)}: ${formatMoney(Math.abs(off.difference))} is unexplained.`;
+      }
+      if (!misfit) {
+        out.results.set(c.key, { problem: `Nothing shows it is not ${fromName}’s: the account was open that day, and no balance of its says otherwise.` });
+        continue;
+      }
+      const there = besideDay(after, c.to, b.date);
+      if (there.on && toMinor(there.on.balance) !== toMinor(b.balance)) out.results.set(c.key, { problem: `${to.name}’s own data says ${said(there.on)}, not ${formatMoney(b.balance)}.` });
+      else if (!there.beside.length) out.results.set(c.key, { problem: `${to.name} has no statement, running or own balance either side of ${formatDate(b.date)} to check it against.` });
+      else {
+        const off = there.beside.find((x) => x.difference);
+        if (off) out.results.set(c.key, { problem: `In ${to.name} it does not add up with ${said(off)}: ${formatMoney(Math.abs(off.difference))} is unexplained.` });
+        else out.results.set(c.key, { moved: { misfit, beside: there.beside.map(({ date, balance }) => ({ date, balance })) } });
+      }
+    }
+  }
   return out;
 }
 
 /** Applying would leave the data as it is: every change is already so, or they undo each other. */
 function changesNothing(store: Store, o: Outcome): boolean {
   if (o.removed.size) return false;
+  if ([...o.moves.values()].some((m) => m.to !== m.balance.accountId)) return false;
   for (const [id, patch] of o.patches) {
     const t = store.transaction(id) as Record<string, unknown> | undefined;
     if (!t || Object.entries(patch).some(([k, v]) => t[k] !== v)) return false;
@@ -323,6 +400,7 @@ function namedRows(c: ProposedChange): string[] {
     case 'remove_internal_move':
       return [c.transaction];
     case 'set_account_dates':
+    case 'move_balance':
       return [];
   }
 }
@@ -493,7 +571,10 @@ export class ProposalService extends EventEmitter {
       if (outcome.patches.size) await this.store.updateTransactions([...outcome.patches].map(([tid, patch]) => ({ id: tid, patch })), message);
       if (outcome.removed.size) await this.store.deleteTransactions([...outcome.removed.keys()], message);
       for (const account of outcome.accounts.values()) await this.store.upsertAccount(account, message);
-      const decided = await this.decide(p, { status: 'applied', applied: doing.map((c) => c.key), before: { transactions: [...outcome.touchedRows.values()], accounts: [...outcome.touchedAccounts.values()] } }, message);
+      if (outcome.moves.size) await this.store.moveBalances([...outcome.moves.values()].map((m) => ({ id: m.balance.id, accountId: m.to })), message);
+      const balances = [...outcome.moves.values()].map((m) => m.balance);
+      const before = { transactions: [...outcome.touchedRows.values()], accounts: [...outcome.touchedAccounts.values()], ...(balances.length ? { balances } : {}) };
+      const decided = await this.decide(p, { status: 'applied', applied: doing.map((c) => c.key), before }, message);
       await this.commit();
       // Another proposal it has left with nothing to do closes now, in a commit of its own.
       const alsoDone = await this.sweep();
@@ -576,6 +657,29 @@ export class ProposalService extends EventEmitter {
       };
     }
     for (const c of p.changes) if (c.kind === 'set_account_dates') accountIds.add(c.account);
+    // A balance a change moves, as it is now (a decided proposal: as it was before it).
+    const wasBalance = new Map((before?.balances ?? []).map((b) => [b.id, b]));
+    const balances: Record<string, ProposalBalance> = {};
+    for (const c of p.changes) {
+      if (c.kind !== 'move_balance') continue;
+      accountIds.add(c.to);
+      const b = (pending ? undefined : wasBalance.get(c.balance)) ?? this.store.balances().find((x) => x.id === c.balance);
+      if (!b) {
+        balances[c.balance] = { id: c.balance, accountId: '', date: '', balance: 0, currency: 'GBP', kind: 'statement', missing: true };
+        continue;
+      }
+      accountIds.add(b.accountId);
+      balances[b.id] = {
+        id: b.id,
+        accountId: b.accountId,
+        date: b.date,
+        balance: b.balance,
+        currency: b.currency,
+        kind: b.kind,
+        ...(b.interestRate !== undefined ? { interestRate: b.interestRate } : {}),
+        ...(b.source.importId ? { source: { importId: b.source.importId, ...(importName.has(b.source.importId) ? { fileName: importName.get(b.source.importId)! } : {}) } } : {}),
+      };
+    }
     const accounts: ProposalView['accounts'] = {};
     for (const id of accountIds) {
       const a = (pending ? undefined : wasAccount.get(id)) ?? this.store.account(id);
@@ -585,7 +689,7 @@ export class ProposalService extends EventEmitter {
     }
     const ready = changes.filter((c) => !c.problem && !c.alreadySo).length;
     const done = outcome !== undefined && leavesNothing(this.store, p, outcome);
-    return { proposal, changes, rows, accounts, ready, problems: changes.filter((c) => c.problem).length, ...(done ? { alreadyDone: true as const } : {}) };
+    return { proposal, changes, rows, balances, accounts, ready, problems: changes.filter((c) => c.problem).length, ...(done ? { alreadyDone: true as const } : {}) };
   }
 
   /** Close the waiting proposals your data already says all of. The caller holds the lock. */

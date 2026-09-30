@@ -1,10 +1,10 @@
 // Proposed fixes: what an agent proposes changing in your data, each change with its reason and the
 // rows it is about, waiting for you on the Import page (src/server/proposals.ts).
 
-import { ArrowDown, ArrowRight, ArrowUpDown, CalendarDays, ChevronRight, CircleCheck, CircleSlash, CopyX, FileText, Link2, PiggyBank, Sparkles, Tag, Unlink, Wand2, X } from 'lucide-react';
+import { ArrowDown, ArrowRight, ArrowRightLeft, ArrowUpDown, CalendarDays, ChevronRight, CircleCheck, CircleSlash, CopyX, FileText, Link2, PiggyBank, Sparkles, Tag, Unlink, Wand2, X } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
-import type { ProposalListResponse, ProposalRow, ProposalSummary, ProposalView } from '../../shared/api';
+import type { ProposalBalance, ProposalListResponse, ProposalRow, ProposalSummary, ProposalView } from '../../shared/api';
 import type { ProposalStatus, ProposedChange, ProposedChangeKind, Provenance } from '../../shared/schema';
 import { useApi } from '../lib/api';
 import { useAppData } from '../lib/data';
@@ -23,6 +23,7 @@ export const CHANGE_LABELS: Record<ProposedChangeKind, { title: string; count: (
   remove_internal_move: { title: 'Remove a move inside the account', count: (n) => `${plural(n, 'move')} inside an account removed`, icon: <PiggyBank className="size-4" aria-hidden /> },
   remove_wrong_sign: { title: 'Remove a row read with the wrong sign', count: (n) => `${plural(n, 'row')} with the wrong sign removed`, icon: <ArrowUpDown className="size-4" aria-hidden /> },
   set_account_dates: { title: 'Change an account’s dates', count: (n) => (n === 1 ? 'an account’s dates' : `${n} accounts’ dates`), icon: <CalendarDays className="size-4" aria-hidden /> },
+  move_balance: { title: 'Move a balance to its account', count: (n) => `${plural(n, 'balance')} moved`, icon: <ArrowRightLeft className="size-4" aria-hidden /> },
 };
 
 /** "5 transfers linked, 2 transfer links undone, 1 category" */
@@ -160,6 +161,34 @@ export function TxLine({ row, view, muted, className }: { row: ProposalRow | und
           </Link>
         )}
       </div>
+    </div>
+  );
+}
+
+/** A balance as a proposal shows it: whose, on what day, how much, and the document it came from. */
+function BalanceLine({ b, view, muted }: { b: ProposalBalance | undefined; view: ProposalView; muted?: boolean }) {
+  const { accountName } = useAppData();
+  if (!b || b.missing) return <div className="rounded-lg border border-dashed border-line px-3 py-2 text-[13px] text-ink-3">No longer in your data</div>;
+  return (
+    <div className={cn('min-w-0 rounded-lg border border-line bg-panel px-3 py-2', muted && 'opacity-60')}>
+      <div className="flex items-baseline justify-between gap-3">
+        <div className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 text-[13px]">
+          <Link to={`/accounts/${b.accountId}`} className="truncate font-medium text-ink hover:underline">
+            {view.accounts[b.accountId]?.name ?? accountName(b.accountId)}
+          </Link>
+          <span className="whitespace-nowrap text-ink-3">{formatDate(b.date)}</span>
+        </div>
+        <span className={cn('sensitive shrink-0 text-[13.5px] font-semibold tabular-nums text-ink', muted && 'line-through')}>{money(b.balance, { currency: b.currency })}</span>
+      </div>
+      <div className="mt-0.5 text-[12.5px] text-ink-2">
+        Balance{b.interestRate !== undefined ? ` · ${b.interestRate}% interest` : ''}
+      </div>
+      {b.source && (
+        <Link to={`/import/${b.source.importId}`} className="mt-1 inline-flex min-w-0 items-center gap-1 text-[11.5px] text-ink-3 hover:text-accent hover:underline" title="The document it came from">
+          <FileText className="size-3 shrink-0" aria-hidden />
+          <span className="truncate">{b.source.fileName ?? 'document'}</span>
+        </Link>
+      )}
     </div>
   );
 }
@@ -317,6 +346,33 @@ export function ChangeBody({ change, view }: { change: ProposedChange; view: Pro
           {line('Opened', acc?.openedOn, change.openedOn)}
           {line('Closed', acc?.closedOn, change.closedOn)}
           {change.closedOn !== undefined && (acc?.status === 'closed') !== (change.closedOn !== null) && <div className="text-[12.5px] text-ink-3">{change.closedOn ? 'It will show as closed, and stop counting after that day.' : 'It will show as open again.'}</div>}
+        </div>
+      );
+    }
+    case 'move_balance': {
+      const b = view.balances[change.balance];
+      const to = view.accounts[change.to];
+      const moved = view.changes.find((c) => c.change.key === change.key)?.moved;
+      return (
+        <div className="grid gap-2">
+          <div className="grid items-center gap-2 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
+            <BalanceLine b={b} view={view} muted={b?.accountId !== change.to} />
+            <Arrow />
+            <div className="rounded-lg border border-line bg-panel px-3 py-2 text-[13px]">
+              <Link to={`/accounts/${change.to}`} className="font-medium text-ink hover:underline">
+                {to?.name ?? accountName(change.to)}
+              </Link>
+              {to?.institutionName ? <span className="text-ink-3"> · {to.institutionName}</span> : null}
+            </div>
+          </div>
+          {moved && (
+            <div className="sensitive grid gap-0.5 text-[12.5px] text-ink-3 tabular-nums">
+              <div>{moved.misfit}</div>
+              <div>
+                In {to?.name ?? accountName(change.to)}, it adds up with {moved.beside.map((x) => `${money(x.balance)} on ${formatDate(x.date)}`).join(' and ')} ✓
+              </div>
+            </div>
+          )}
         </div>
       );
     }

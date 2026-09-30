@@ -961,6 +961,34 @@ export class Store extends EventEmitter {
     });
   }
 
+  /** Move balances to the accounts they are of (a proposal applied): each keeps its id and all else. */
+  moveBalances(moves: { id: string; accountId: string }[], message: string): Promise<BalanceSnapshot[]> {
+    return this.exclusive(async () => {
+      const touched = new Set<string>();
+      const out: BalanceSnapshot[] = [];
+      for (const { id, accountId } of moves) {
+        const from = [...this.state.balances].find(([, list]) => list.some((b) => b.id === id));
+        if (!from) throw new StoreError(`Unknown balance ${id}`, 404);
+        const [fromId, list] = from;
+        const was = list.find((b) => b.id === id)!;
+        if (fromId === accountId) continue;
+        list.splice(list.indexOf(was), 1);
+        const next = BalanceSnapshotSchema.parse({ ...was, accountId });
+        this.state.balances.set(accountId, sortByDate([...(this.state.balances.get(accountId) ?? []), next]));
+        touched.add(fromId).add(accountId);
+        out.push(next);
+      }
+      const paths: string[] = [];
+      for (const accountId of touched) {
+        const rel = `balances/${accountId}.jsonl`;
+        await this.writeJsonl(rel, this.state.balances.get(accountId)!);
+        paths.push(rel);
+      }
+      if (out.length) this.changed(message, paths);
+      return out;
+    });
+  }
+
   deleteBalance(id: string, message: string): Promise<void> {
     return this.exclusive(async () => {
       for (const [accountId, list] of this.state.balances) {

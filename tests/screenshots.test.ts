@@ -398,6 +398,27 @@ describe('rows another import recorded meanwhile', () => {
     expect((await work.loadAll()).find((r) => r.id === plain)!.draft!.sections[0]!.target).toEqual({ mode: 'existing', accountId: 'bonds' });
   });
 
+  it('a letter about a new product waits for the account its statement creates, not the old product', async () => {
+    // A two-year bond that matured into an easy-access account at the same bank, and another saver.
+    await store.setAccounts([
+      ...store.accounts,
+      acct('fixed', 'savings', { name: 'Fixed Rate Bond 2 Year', institutionId: 'lloyds', status: 'closed', closedOn: '2026-02-28' }),
+      acct('saver', 'savings', { name: 'Everyday Saver', institutionId: 'monzo' }),
+    ]);
+    const product = { institutionName: 'Lloyds Bank', accountName: 'Easy Access Issue 7', accountType: 'savings' };
+    const statement = await make({ documentType: 'savings_statement', accounts: [{ ...product, transactions: [{ date: '2026-03-01', description: 'Interest Added', amount: 12.5, balanceAfter: 5012.5 }] }] }, '2026-09-29T08:00:00+01:00');
+    const letter = await make({ documentType: 'other', accounts: [{ ...product, closingBalance: 5012.5, balanceDate: '2026-03-01', transactions: [] }] }, '2026-09-29T21:00:00+01:00');
+    await start();
+    // Same provider and kind, but another product: not the bond (closed, and not your only saver).
+    expect(svc.getPending(letter)!.draft!.sections[0]!.target.mode).toBe('new');
+    const created = (await svc.commit(statement)).result!.accountsCreated;
+    expect(created).toHaveLength(1);
+    expect(svc.getPending(letter)!.draft!.sections[0]!.target).toEqual({ mode: 'existing', accountId: created[0] });
+    expect((await svc.commit(letter)).result!.accountsCreated).toEqual([]);
+    expect(store.balances(created[0]).map((b) => b.balance)).toEqual([5012.5]);
+    expect(store.balances('fixed')).toEqual([]);
+  });
+
   it('a row that only looks like one recorded meanwhile waits for you, marked; then it commits', async () => {
     const a = await make(tab([prize('2026-06-02', 25)], { accountName: 'Premium Bonds' }), '2026-09-29T20:08:00+01:00');
     const b = await make(tab([{ date: '2026-06-03', description: 'Auto prize reinvestment June', amount: 25 }], { accountName: 'Premium Bonds' }), '2026-09-29T22:06:27+01:00');

@@ -228,9 +228,11 @@ lives in the work area (`<work>/proposals/`), never here.
   - `remove_internal_move {transaction}`: a move between an account's main balance and one of its
     Spaces, which the balances either side of it add up only without.
   - `set_account_dates {account, openedOn?, closedOn?}` (`null` clears one).
+  - `move_balance {balance, to}`: a balance a document was read into the wrong account, moved to
+    the account it is of. It keeps its id and everything else.
 - `applied`: the keys of the changes you applied. `dismissedReason`: what you said, if anything.
-- `before`: `{transactions, accounts}`, the rows and accounts the applied changes touched, as they
-  were before: the audit trail, and a way back.
+- `before`: `{transactions, accounts, balances?}`, the rows, accounts and balances the applied
+  changes touched, as they were before: the audit trail, and a way back.
 
 ## goals.json
 

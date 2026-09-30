@@ -180,7 +180,8 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
       { "kind": "remove_duplicate", "transaction": "tx_…", "sameAs": ["tx_…", "tx_…"], "why": "…" },
       { "kind": "remove_wrong_sign", "transaction": "tx_…", "recordedAs": ["tx_…"], "why": "…" },
       { "kind": "remove_internal_move", "transaction": "tx_…", "why": "…" },
-      { "kind": "set_account_dates", "account": "example-fixed", "closedOn": "2026-02-01", "why": "…" }
+      { "kind": "set_account_dates", "account": "example-fixed", "closedOn": "2026-02-01", "why": "…" },
+      { "kind": "move_balance", "balance": "bal_…", "to": "example-easy-access", "why": "…" }
     ]
   }
   ```
@@ -203,6 +204,11 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
     run, the strongest balances either side of it (a statement's, a running balance or the
     owner's own; not a screenshot's) must add up without it. The same category or payee rule as a
     misread row applies.
+  - A balance moved to another account (`move_balance`) was read from a document, and the owner
+    did not give or change it. Once every change has run, it must not belong where it is: that
+    account was not open that day, or the strong balances either side of it there do not add up
+    with it. Where it goes, the account is open that day, has a strong balance on at least one
+    side, and they add up with it (and any balance of that day agrees).
   - A category exists, and a row linked as a transfer keeps a transfer category. A category that
     is not a transfer one, on a row not linked as one, also takes away the account of yours the row
     named as the other side, and works its payee out again when that was one of your accounts'

@@ -215,6 +215,53 @@ describe('an agent proposes, the owner decides', () => {
     expect(store.transaction(exchange.id)!.transferGroup).toBeUndefined();
   });
 
+  it('a balance read into the wrong account moves to the one whose balances it adds up with', async () => {
+    const { store } = app.ctx;
+    // The fixed account matured into an easy-access one on 4 Feb 2026, the day after it closed. The
+    // maturity letter's balance (the new account's first) was read into the fixed account.
+    await store.setAccounts([...store.accounts, acct('access', 'savings', { openedOn: '2026-02-04' })]);
+    await store.addTransactions(
+      [tx('access', '2026-02-04', 120, 'Interest Added', { balanceAfter: 10620.5 }), tx('access', '2026-03-05', -10000, 'To 12-34-56 00012345678', { balanceAfter: 620.5 })],
+      'test: the easy-access account',
+    );
+    const snap = (id: string, accountId: string, balance: number, kind: 'statement' | 'manual' = 'statement') => ({ id, accountId, date: '2026-02-04', balance, currency: 'GBP', kind, interestRate: 2.1, source: kind === 'manual' ? {} : { importId: 'imp_20260301_090000_0001' }, createdAt: stamp });
+    await store.addBalances([snap('bal_00000000000000d1', 'fixed', 10620.5), snap('bal_00000000000000d2', 'fixed', 9999), snap('bal_00000000000000d3', 'fixed', 10620.5, 'manual')], 'test: balances');
+    const move = (balance: string, to = 'access') => ({ kind: 'move_balance', balance, to, why: 'The maturity letter names the easy-access account.' });
+    const problem = async (change: Record<string, unknown>) => ((await (await propose({ title: 'A balance', summary: 'A test.', changes: [change] })).json()) as { problems: { problem: string }[] }).problems[0]!.problem;
+
+    expect(await problem(move('bal_00000000000000d1', 'saver'))).toMatch(/saver has no statement, running or own balance either side of 4 Feb 2026/);
+    expect(await problem(move('bal_00000000000000d2'))).toMatch(/In access it does not add up with £620.50 on 5 Mar 2026: £621.50 is unexplained/);
+    expect(await problem(move('bal_00000000000000d3'))).toMatch(/You gave this balance yourself/);
+    expect(await problem(move('bal_00000000000000d1', 'fixed'))).toMatch(/already says this/);
+
+    const res = await propose({ title: 'The maturity balance', summary: 'A test.', changes: [move('bal_00000000000000d1')] });
+    expect(res.status).toBe(201);
+    const view = (await res.json()) as ProposalView;
+    expect(view.balances.bal_00000000000000d1).toMatchObject({ accountId: 'fixed', balance: 10620.5, interestRate: 2.1, source: { importId: 'imp_20260301_090000_0001' } });
+    expect(view.accounts.access).toBeDefined();
+    expect(view.changes[0]!.moved).toEqual({ misfit: 'fixed closed on 3 Feb 2026, before it.', beside: [{ date: '2026-03-05', balance: 620.5 }] });
+    expect((await owner(`/api/proposals/${view.proposal.id}/apply`)).status).toBe(200);
+    expect(store.balances('access').map((b) => b.id)).toEqual(['bal_00000000000000d1']);
+    expect(store.balances('access')[0]).toMatchObject({ balance: 10620.5, interestRate: 2.1, kind: 'statement' });
+    expect(store.balances('fixed').map((b) => b.id).sort()).toEqual(['bal_00000000000000d2', 'bal_00000000000000d3']);
+    // Kept with the balance as it was, and shown from that once decided.
+    const file = JSON.parse(await readFile(path.join(dir, 'data', store.proposals[0]!.path), 'utf8')) as { before: { balances: { accountId: string }[] } };
+    expect(file.before.balances).toEqual([expect.objectContaining({ id: 'bal_00000000000000d1', accountId: 'fixed' })]);
+    const decided = (await (await req(`/api/proposals/${view.proposal.id}`)).json()) as ProposalView;
+    expect(decided.balances.bal_00000000000000d1!.accountId).toBe('fixed');
+  });
+
+  it('a balance that fits where it is is not moved', async () => {
+    const { store } = app.ctx;
+    await store.setAccounts([...store.accounts, acct('access', 'savings')]);
+    await store.addTransactions([tx('access', '2026-03-05', -100, 'To 12-34-56 00012345678', { balanceAfter: 400 })], 'test');
+    // The fixed account's statement balance after its deposit, which its rows add up to.
+    await store.addBalances([{ id: 'bal_00000000000000e1', accountId: 'fixed', date: '2024-02-02', balance: 21001, currency: 'GBP', kind: 'statement', source: { importId: 'imp_20260301_090000_0002' }, createdAt: stamp }], 'test');
+    const res = await propose({ title: 'A balance', summary: 'A test.', changes: [{ kind: 'move_balance', balance: 'bal_00000000000000e1', to: 'access', why: 'A guess.' }] });
+    expect(res.status).toBe(422);
+    expect(((await res.json()) as { problems: { problem: string }[] }).problems[0]!.problem).toMatch(/Nothing shows it is not fixed’s/);
+  });
+
   it('a row that stops being a transfer stops naming your account, and its payee is worked out again', async () => {
     const { store } = app.ctx;
     const cash = tx('bank', '2026-03-10', -50, 'Cash withdrawal, Example Bank, Faro', { payee: 'saver', category: 'savings-transfer', categorisedBy: 'transfer', counterpartyAccountId: 'saver' });

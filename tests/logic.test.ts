@@ -195,6 +195,20 @@ describe('account matching', () => {
     expect(matchAccount({ institutionName: 'Lloyds Bank', accountType: 'current', last4: '2201' }, [open, closed], []).accountId).toBe('old-lloyds');
     expect(matchAccount({ institutionName: 'Lloyds Bank', accountType: 'current' }, [open, { ...closed, last4: undefined }] as Account[], []).accountId).toBe('lloyds');
   });
+
+  it('another product at the same provider is not enough: a named product must share a word', () => {
+    const bond = acct('bond', 'savings', { name: 'Fixed Rate Bond 2 Year', institutionId: 'lloyds' });
+    const saver = acct('saver', 'savings', { name: 'Everyday Saver', institutionId: 'monzo' });
+    const letter = { institutionName: 'Lloyds Bank', accountType: 'savings' as const, accountName: 'Easy Access Issue 7' };
+    // Open, your only saver at the provider: still a suggestion to confirm, not a match.
+    expect(matchAccount(letter, [bond], []).score).toBeLessThan(50);
+    // Closed, it does not borrow "your only saver" from the open one.
+    const closed = matchAccount(letter, [{ ...bond, status: 'closed', closedOn: '2026-02-28' }, saver], []);
+    expect(closed.score).toBeLessThan(50);
+    expect(closed.reason).not.toMatch(/your only/);
+    // The bond's own letter still matches it.
+    expect(matchAccount({ ...letter, accountName: '2 Year Fixed Rate Bond' }, [bond, saver], []).accountId).toBe('bond');
+  });
 });
 
 describe('store, balances and analytics', () => {

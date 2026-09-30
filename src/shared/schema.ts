@@ -1184,6 +1184,7 @@ export const MAX_PROPOSED_CHANGES = 400;
 export type ProposalStatus = (typeof PROPOSAL_STATUSES)[number];
 
 const TransactionIdSchema = z.string().regex(/^tx_[0-9a-f]{16}$/);
+const BalanceIdSchema = z.string().regex(/^bal_[0-9a-f]{16}$/);
 /** Names a change within its proposal ("c1", "link-saver-oct"). */
 const ChangeKeySchema = z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/);
 /** What in the data shows it, in a sentence or two. */
@@ -1211,6 +1212,12 @@ const changeUnion = <K extends z.ZodType<string | undefined>>(key: K) =>
     z.object({ key, kind: z.literal('remove_internal_move'), why: ChangeWhySchema, transaction: TransactionIdSchema }),
     /** Set when an account opened or closed (null clears it; a closing date closes the account). */
     z.object({ key, kind: z.literal('set_account_dates'), why: ChangeWhySchema, account: SlugSchema, openedOn: ISODateSchema.nullable().optional(), closedOn: ISODateSchema.nullable().optional() }),
+    /**
+     * Move a balance a document was read into the wrong account to the account it is of: where it
+     * is, that account was not open that day or its balances do not add up with it; where it goes,
+     * they do.
+     */
+    z.object({ key, kind: z.literal('move_balance'), why: ChangeWhySchema, balance: BalanceIdSchema, to: SlugSchema }),
   ]);
 
 export const ProposedChangeSchema = changeUnion(ChangeKeySchema);
@@ -1233,8 +1240,8 @@ export const ProposalSchema = z.object({
   applied: z.array(z.string()).optional(),
   /** Why it was dismissed, if you said. */
   dismissedReason: z.string().max(1000).optional(),
-  /** The rows and accounts the applied changes touched, as they were before: the audit trail. */
-  before: z.object({ transactions: z.array(TransactionSchema), accounts: z.array(AccountSchema) }).optional(),
+  /** The rows, accounts and balances the applied changes touched, as they were before: the audit trail. */
+  before: z.object({ transactions: z.array(TransactionSchema), accounts: z.array(AccountSchema), balances: z.array(BalanceSnapshotSchema).optional() }).optional(),
 });
 export type Proposal = z.infer<typeof ProposalSchema>;
 

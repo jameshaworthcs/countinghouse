@@ -1011,3 +1011,26 @@ the evening's −£5, which made a £5 "gap".
 - **Backfilled, not guessed** (migration `from: 2`). The times come from `createdAt` (your own
   balance, given on its day) and the import's `capturedAt`. `enteredBy` is set where the committed
   figure is not what the reader read, sign aside, since the draft turns a balance owed negative.
+
+## 2026-09-30: Another product is not the account; a balance read into the wrong one can move
+
+A fixed-rate account matured into an easy-access account at the same bank, under the same account
+number. The maturity letter names the new product and prints no number. Uploaded with the new
+account's first statement, it matched the closed fixed-rate account (provider, kind, and "your only
+savings account", which the closed account borrowed from an open one elsewhere), so the new
+account's opening balance became the old one's last, a day after it closed.
+
+- **Being your only account of a kind is the open one's.** A closed account never gets it.
+- **A named product that shares no word with the account counts against it** (−25). The provider
+  and kind alone no longer make a match. Replayed over every committed import, no match changed.
+  - Considered: vetoing, as `fitsAccount` does for screens taken together. Account names come from
+    their first document, but you can rename one; a penalty still lets a number decide.
+- **A commit that creates an account matches the waiting drafts again** (those you have not
+  edited), as the app's start already did. Otherwise a letter drafted before its account existed
+  proposes a second new account.
+- **`move_balance` proposals** fix balances already committed to the wrong account. The checks
+  mirror `remove_internal_move`: it must not fit where it is (the account was closed or not yet
+  open that day, or its balances do not add up with it), and must add up where it goes. A balance
+  you gave or changed is yours. `before.balances` keeps it as it was (additive, no format change).
+  - Considered: deleting it (the new account's statement already has the figure). Moving keeps the
+    letter's evidence, and its interest rate, on the account it describes.
