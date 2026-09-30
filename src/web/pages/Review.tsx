@@ -483,8 +483,23 @@ function SectionEditor({ section, index, total, latest, periodFromRows, onChange
 function FiguresEditor({ draft, onChange }: { draft: Draft; onChange: (d: Draft) => void }) {
   if (!draft.figures.length) return null;
   const set = (key: string, patch: Partial<Draft['figures'][number]>) => onChange({ ...draft, figures: draft.figures.map((f) => (f.key === key ? { ...f, ...patch } : f)) });
+  // Who paid, as one name per payer on the document: renaming it renames it on all its figures.
+  const payers = [...new Set(draft.figures.flatMap((f) => (f.payer ? [f.payer] : [])))];
+  const rename = (from: string, to: string) => {
+    const name = to.trim();
+    if (name && name !== from) onChange({ ...draft, figures: draft.figures.map((f) => (f.payer === from ? { ...f, payer: name } : f)) });
+  };
   return (
     <Card title="Tax figures" description="Standalone figures for Self Assessment (P60, interest certificates, pension statements)">
+      {payers.length > 0 && (
+        <div className="mb-3 grid gap-3 sm:grid-cols-2">
+          {payers.map((p) => (
+            <Field key={p} label={payers.length > 1 ? `Paid by (${p})` : 'Paid by'} hint="Give an employer the name its P60 has: payslips and P60s under different names count as different jobs">
+              <Input defaultValue={p} onBlur={(e) => rename(p, e.target.value)} onKeyDown={(e) => e.key === 'Enter' && rename(p, e.currentTarget.value)} />
+            </Field>
+          ))}
+        </div>
+      )}
       <table className={tableClasses.table}>
         <thead>
           <tr>
@@ -513,7 +528,7 @@ function FiguresEditor({ draft, onChange }: { draft: Draft; onChange: (d: Draft)
               </td>
               <td className={tableClasses.td}>
                 {f.label}
-                {f.payer && <div className="text-[12px] text-ink-3">{f.payer}</div>}
+                {f.payer && payers.length > 1 && <div className="text-[12px] text-ink-3">{f.payer}</div>}
               </td>
               <td className={tableClasses.td}>
                 <Input value={f.taxYear ?? ''} onChange={(e) => set(f.key, { taxYear: e.target.value || undefined })} placeholder="2025/26" className="h-8 w-24" />

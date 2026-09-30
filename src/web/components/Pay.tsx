@@ -12,8 +12,11 @@ const STATUS: Record<PayMonth['status'], { tone: 'good' | 'warn' | 'bad' | 'info
   differs: { tone: 'warn', label: 'Differs' },
   'not-seen': { tone: 'warn', label: 'Not seen' },
   due: { tone: 'pending', label: 'Due' },
+  nothing: null,
   'no-payslip': null,
 };
+/** Rows with nothing to check: a muted label instead of a status. */
+const QUIET: Partial<Record<PayMonth['status'], string>> = { nothing: 'Nothing due', 'no-payslip': 'From the bank' };
 
 const cell = (v: number | null) => (v === null ? <span className="text-ink-3">—</span> : <Money value={v} className="tabular" />);
 
@@ -62,7 +65,7 @@ function EmployerCard({ e }: { e: PayEmployer }) {
                     )}
                   </td>
                   <td className={cn(tableClasses.td, 'whitespace-nowrap')} title={m.note}>
-                    {s ? <StatusBadge status={s.tone}>{s.label}</StatusBadge> : <Badge tone="muted">From the bank</Badge>}
+                    {s ? <StatusBadge status={s.tone}>{s.label}</StatusBadge> : <Badge tone="muted">{QUIET[m.status]}</Badge>}
                   </td>
                 </tr>
               );
@@ -85,8 +88,8 @@ function EmployerCard({ e }: { e: PayEmployer }) {
         <div className="flex flex-col gap-1 border-t border-line px-5 py-3 text-[12.5px] text-ink-2">
           {e.p60 && (
             <span>
-              P60 for the year: gross {cell(e.p60.gross)}, tax {cell(e.p60.tax)}
-              {t.gross !== null && e.p60.gross !== null && Math.abs(t.gross - e.p60.gross) >= 1 ? '. The payslips here do not add up to it: some are missing.' : '.'}
+              P60 for the year: pay {cell(e.p60.gross)}, tax {cell(e.p60.tax)}
+              {e.p60.ni !== null && <>, NI {cell(e.p60.ni)}</>}. {e.p60.note}
             </span>
           )}
           {e.months

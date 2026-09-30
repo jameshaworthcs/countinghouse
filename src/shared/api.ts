@@ -703,7 +703,8 @@ export interface PayMonth {
   paidIn: { amount: number; date: string; transactionId: string; accountId: string } | null;
   /** What the payslip's other deductions come to: expected net less what arrived. */
   otherDeductions: number | null;
-  status: 'paid' | 'differs' | 'not-seen' | 'due' | 'no-payslip';
+  /** nothing: a payslip with nothing to pay in (£0, or deductions as much as the pay). */
+  status: 'paid' | 'differs' | 'not-seen' | 'due' | 'nothing' | 'no-payslip';
   note?: string;
   figureIds: string[];
 }
@@ -712,8 +713,8 @@ export interface PayEmployer {
   key: string;
   payer: string;
   months: PayMonth[];
-  /** The year's P60, when there is one: the whole year, which the payslips should add up to. */
-  p60: { gross: number | null; tax: number | null } | null;
+  /** The year's P60, when there is one: the whole year, which the payslips should add up to, and whether they do. */
+  p60: { gross: number | null; tax: number | null; ni: number | null; note: string } | null;
   totals: { gross: number | null; tax: number | null; ni: number | null; pension: number | null; studentLoan: number | null; paidIn: number };
 }
 

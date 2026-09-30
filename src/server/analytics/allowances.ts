@@ -22,6 +22,7 @@ import {
 } from '../../shared/uk';
 import type { Store } from '../store';
 import { covers, mergeIntervals, type Interval } from './coverage';
+import { isPayslipFigure, pairPay, payerKey } from './pay';
 
 const inYear = (t: { date: string }, ty: TaxYear) => t.date >= ty.start && t.date <= ty.end;
 
@@ -194,23 +195,6 @@ export function giftAid(store: Store, ty: TaxYear) {
 }
 
 /**
- * A payslip's figure (one pay period) rather than a P60's (the whole year): by the document it came
- * from, else by a period much shorter than a year.
- */
-export function isPayslipFigure(store: Store, f: Figure): boolean {
-  const doc = f.source.importId ? store.imports.find((i) => i.id === f.source.importId)?.documentType : undefined;
-  if (doc) return doc === 'payslip';
-  return Boolean(f.periodStart && f.periodEnd && diffDays(f.periodStart, f.periodEnd) < 200);
-}
-
-/** An employer's name reduced for comparing: "Larchwood Data Ltd" and "LARCHWOODDATA" are one. */
-export const payerKey = (name: string | undefined) =>
-  (name ?? '')
-    .toLowerCase()
-    .replace(/\b(ltd|limited|plc|llp|uk)\b/g, '')
-    .replace(/[^a-z0-9]/g, '');
-
-/**
  * Each employer's pay (or tax, or other payroll figure) for a tax year: its P60, which is the whole
  * year, else its payslips added up, which are pay so far. Never both, so nothing counts twice.
  */
@@ -232,7 +216,10 @@ export function unexplainedSalary(store: Store, ty: TaxYear, employers: { payer:
   // Figures that name no employer cannot be told apart: take them to cover the salary received.
   if (employers.some((e) => !payerKey(e.payer))) return [];
   const keys = employers.map((e) => payerKey(e.payer).slice(0, 8)).filter((k) => k.length >= 4);
-  return store.transactions().filter((t) => inYear(t, ty) && t.category === 'salary' && t.amount > 0 && !keys.some((k) => payerKey(`${t.description} ${t.payee ?? ''}`).includes(k)));
+  // Pay the Pay tab pairs with a payslip, or puts under an employer with payslips, is that employer's.
+  const { periods, others } = pairPay(store, ty);
+  const explained = new Set([...periods.flatMap((p) => (p.credit ? [p.credit.id] : [])), ...others.flatMap((o) => (o.employer ? [o.t.id] : []))]);
+  return store.transactions().filter((t) => inYear(t, ty) && t.category === 'salary' && t.amount > 0 && !explained.has(t.id) && !keys.some((k) => payerKey(`${t.description} ${t.payee ?? ''}`).includes(k)));
 }
 
 const figuresFor = (store: Store, ty: TaxYear, kind: Figure['kind']) =>

@@ -7,8 +7,9 @@ import { addDays, diffDays, formatDate, maxDate, today, type ISODate } from '../
 import type { CaptureAsk, CaptureItem } from '../../shared/schema';
 import { parseTaxYear } from '../../shared/uk';
 import type { Store } from '../store';
-import { isPayslipFigure, payerKey, wrapperDataSpan } from './allowances';
+import { wrapperDataSpan } from './allowances';
 import { complement } from './coverage';
+import { isPayslipFigure, payerKey } from './pay';
 
 /** Gaps this short between statements (or at the ends of the period) do not count as missing. */
 const GAP_SLACK_DAYS = 4;

@@ -5,11 +5,13 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { payByEmployer, unexplainedSalary } from '../src/server/analytics/allowances';
 import { Coverage } from '../src/server/analytics/coverage';
 import { fromEmployer, pay } from '../src/server/analytics/pay';
 import { figureId, transactionId } from '../src/server/ids';
 import { Store } from '../src/server/store';
 import type { Account, Figure, Transaction } from '../src/shared/schema';
+import { taxYearOf } from '../src/shared/uk';
 
 const stamp = '2026-01-01T00:00:00+00:00';
 let dir: string;
@@ -75,5 +77,50 @@ describe('pay month by month', () => {
     const p = pay(store, new Coverage(store), '2026/27', '2026-09-29');
     const oak = p.employers.find((e) => e.payer === 'Oakfield Engineering')!;
     expect(oak.months.map((m) => [m.status, m.payDate, m.paidIn?.amount])).toEqual([['no-payslip', '2026-06-25', 2000]]);
+  });
+});
+
+describe('an employer the bank calls something else', () => {
+  // Quillon's payslips; Hartwell Group is how the bank shows its payroll. Pension is taken before tax.
+  beforeEach(async () => {
+    await store.addTransactions(
+      [credit('2026-05-22', 1550, 'Hartwell Group', 'BANK GIRO CREDIT REF HARTWELL GROUP'), credit('2026-06-24', 1550, 'Hartwell Group', 'BANK GIRO CREDIT REF HARTWELL GROUP'), credit('2026-07-24', 402.17, 'Hartwell Group', 'BANK GIRO CREDIT REF HARTWELL GROUP')],
+      'test: Hartwell pay',
+    );
+    await store.addFigures(
+      [
+        ...payslip('2026-05', '2026-05-31', { gross_pay: 2000, tax_deducted: 200, national_insurance: 100, pension_contribution_employee: 150 }, 'Quillon Systems Ltd'),
+        ...payslip('2026-06', '2026-06-30', { gross_pay: 2000, tax_deducted: 200, national_insurance: 100, pension_contribution_employee: 150 }, 'Quillon Systems Ltd'),
+        ...payslip('2026-09', '2026-09-30', { gross_pay: 0 }, 'Quillon Systems Ltd'),
+      ],
+      'test: Quillon payslips',
+    );
+  });
+  const p60 = (kind: Figure['kind'], amount: number, n = ''): Figure => ({ id: figureId(kind, amount, '2026/27', 'Quillon Systems Limited', kind, `p60${n}`), kind, label: kind, amount, currency: 'GBP', taxYear: '2026/27', periodStart: '2026-04-06', periodEnd: '2027-04-05', payer: 'Quillon Systems Limited', source: {}, createdAt: stamp });
+
+  it('pays a payslip with a payment of exactly its pay, and keeps that payer’s other pay with the employer', () => {
+    const q = pay(store, new Coverage(store), '2026/27', '2026-09-30').employers.find((e) => e.payer === 'Quillon Systems Ltd')!;
+    expect(q.months.map((m) => [m.status, m.expectedNet, m.paidIn?.date ?? null])).toEqual([
+      ['paid', 1550, '2026-05-22'],
+      ['paid', 1550, '2026-06-24'],
+      ['no-payslip', null, '2026-07-24'],
+      ['nothing', 0, null],
+    ]);
+    expect(q.months[3]!.note).toBe('Nothing to pay into your bank: no pay this month');
+    expect(pay(store, new Coverage(store), '2026/27', '2026-09-30').employers.some((e) => e.payer === 'Hartwell Group')).toBe(false);
+  });
+
+  it('the tax band counts that pay once: as the payslips, not again as salary received', () => {
+    const ty = taxYearOf('2026-06-01');
+    const unexplained = unexplainedSalary(store, ty, payByEmployer(store, ty)).map((t) => t.payee);
+    expect(unexplained).toEqual(['Oakfield Engineering']);
+  });
+
+  it('a P60 is checked by its tax and NI; its pay is the payslips’ less pension taken before tax', async () => {
+    await store.addFigures([p60('gross_pay', 3700), p60('tax_deducted', 400), p60('national_insurance', 200)], 'test: P60');
+    const q = () => pay(store, new Coverage(store), '2026/27', '2026-09-30').employers.find((e) => e.payer === 'Quillon Systems Ltd')!;
+    expect(q().p60).toEqual({ gross: 3700, tax: 400, ni: 200, note: 'The payslips add up to it. Its pay is theirs less the £300.00 of pension taken before tax.' });
+    await store.addFigures([p60('tax_deducted', 187.3, '-more')], 'test: more tax on the P60');
+    expect(q().p60!.note).toBe('The payslips’ tax comes to £187.30 less than its tax: some payslips are missing.');
   });
 });

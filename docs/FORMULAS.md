@@ -374,7 +374,9 @@ Deterministic rules with named thresholds (`SIGNAL_RULES` in `analytics/spending
     added up (pay so far), never both. A figure is a payslip's when its document was a payslip,
     else when its period is under 200 days;
     - salary received (category `salary`, after tax) from employers no figure names counts as a
-      floor; figures naming no employer are taken to cover all salary received;
+      floor; figures naming no employer are taken to cover all salary received. Salary the Pay tab
+      pairs with a payslip, or lists under an employer with payslips (§17), is that employer's
+      and never counts again;
     - for the year in progress, a larger full-year estimate wins: your salary in Settings, else
       last year's P60s;
   - benefits in kind (`benefit_in_kind`);
@@ -573,17 +575,27 @@ when its document was a payslip, or, failing that, when its period is under 200 
   - Its **gross**, **tax**, **NI**, **pension** and **student loan** are the figures of those
     kinds. A printed £0 is a figure.
   - **After these** = gross − tax − NI − pension − student loan (the deductions read).
-- **Into your bank** is the salary credit (category *salary*, money in) whose text names the
-  employer. It must fall between the period's end − 10 days and the later of the pay date and the
-  period's end + 10 days (`PAY_MATCH_DAYS`). The closest to *after these* is taken, and each
-  credit is used once.
+- **Into your bank** is a salary credit (category *salary*, money in) between the period's end −
+  10 days and the later of the pay date and the period's end + 10 days (`PAY_MATCH_DAYS`). Each
+  credit is used once, found in two passes over all the year's payslips (`pairPay`):
+  1. one whose text names the employer, the closest to *after these*;
+  2. else one of exactly *after these*, to the penny, whatever name the bank gives it (an
+     employer's payroll often pays under a group company's name), the nearest the pay date.
 - **Status**, first that applies:
-  1. **paid**: the credit is within £1 of *after these*;
-  2. **differs**: it is not. The difference is other deductions the reader did not list (a cycle
+  1. **nothing due**: *after these* is £0 or less (a £0 payslip); no payment is looked for;
+  2. **paid**: the credit is within £1 of *after these*;
+  3. **differs**: it is not. The difference is other deductions the reader did not list (a cycle
      scheme, say) or an adjustment;
-  3. **due**: the pay date has not come;
-  4. **not seen**: none was found. The note says whether your bank data covers those days.
-- Salary credits no payslip explains are listed under the employer their text names, as pay with
-  no payslip.
-- **Year so far** adds up each column. With a P60 for the year, its gross and tax are shown
-  beside the total, and a gap says payslips are missing.
+  4. **due**: the pay date has not come;
+  5. **not seen**: none was found. The note says whether your bank data covers those days, in
+     the accounts the employer's pay goes into, else any your salary goes into.
+- Salary credits no payslip explains are pay with no payslip, listed under the employer their text
+  names, else the employer the same payer paid (the nearest such payment), else their own name.
+- **Year so far** adds up each column. With a P60 for the year (the same payer), its pay, tax and
+  NI are shown beside the total, and whether the payslips add up to it:
+  - they do when their tax and NI are within £1 of the P60's. Its pay can still be less than
+    their gross by the pension taken before tax (a net pay arrangement): that is said;
+  - payslip tax short of the P60's means payslips are missing; more than it, they need checking.
+- A payslip or P60 names its employer as the document does. On the review page the payer can be
+  renamed for all of a document's figures, so a payslip that prints a group name and a P60 that
+  prints the employing company count as one employer.

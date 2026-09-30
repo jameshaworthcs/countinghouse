@@ -554,3 +554,24 @@ Card", so the row counted as new, though both rows showed the same balance after
   is always one with nothing of yours on it. Removal waits for review like everything else, and
   comes ticked only when the balances prove it. The import records what it removed. This beats
   deleting the row by hand: the document is the evidence, and the import is the audit trail.
+
+## 2026-09-30: Pay under another name
+
+Payslips from one employer came under three names: a group name on the payslips, the employing
+company on the P60, and a sister company's payroll in the bank. Matching by name paired none of
+them, and counted the year's pay and
+tax twice, once from the P60 and once from the payslips.
+
+- **A payment of exactly a payslip's pay after deductions is its pay**, whatever the bank calls
+  the employer. A payment within 10 days of the pay date that matches to the penny is not a
+  coincidence. Other payments from the same payer then belong to that employer.
+- **The tax band uses the same pairing**, so pay the Pay tab gives an employer is never counted
+  again as salary received from someone unknown.
+- **A P60 is checked by its tax and NI, not its pay.** Its "pay in this employment" is taxable pay.
+  Under a net pay arrangement that is the gross less the pension taken before tax, so every
+  payslip being there still looked like some were missing.
+- **The payer is the owner's to name on review.** No rule can know which companies belong to one group. One
+  name per payer on the review page renames it on all of a document's figures, and a payslip under
+  the P60's name counts as the same job.
+- **A £0 payslip expects nothing.** It is kept (it says the job paid nothing that month) and shown
+  as nothing due, not as a missing payment.
