@@ -634,3 +634,20 @@ valuation: growth that never happened.
 - **Rows already committed get it when the app starts**, like tidy addresses: only rows in
   investment and pension accounts that nothing categorised, and only a built-in category. Re-run
   on all history would reach them too, but it works out every row again, payees included.
+
+## 2026-09-30: The estate chart draws what is known
+
+The Overview's "Estate value over time" was empty in every range. A pension added the day before
+with a single valuation made that day the first on which every account had data, and the chart
+needed two such days. Years of history for every other account were hidden behind one account
+worth a few per cent of the estate.
+
+- **Two days with any data draw the chart.** Before every account has data, the stretch is marked
+  partial as before, and the total line starts only where the estate is fully known. This revises
+  "The estate chart draws a history only from two days on which every account has data" (see "A
+  first snapshot reads as one" above).
+- **A first snapshot still reads as one.** Figures all given on one day are one day with data, so
+  the chart still says there is not enough history yet.
+- **A group with nothing yet sits on the stack.** d3's diverging stack puts a zero at the axis, so
+  a group before its first data ran along £0 and leapt up the stack where it started. A zero now
+  sits on top of its side of the stack, and debts stay below the line.

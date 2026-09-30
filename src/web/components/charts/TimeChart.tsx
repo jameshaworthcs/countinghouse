@@ -65,6 +65,21 @@ export function TimeChart({ dates, series, height = 260, format = (v) => money(v
     const stacked = series.filter((s) => s.kind === 'area' && s.stack);
     const rows = dates.map((_, i) => Object.fromEntries(stacked.map((s) => [s.id, s.values[i] ?? 0])) as Record<string, number>);
     const layers = stacked.length ? d3stack<Record<string, number>>().keys(stacked.map((s) => s.id)).offset(stackOffsetDiverging)(rows) : [];
+    // The diverging offset puts a zero at the axis, so a series with nothing yet (a group before its
+    // first data) would run along it and leap up the stack where it starts. A zero sits on top of
+    // its side of the stack instead: below the line for a series that only goes negative.
+    const below = stacked.map((s) => s.values.some((v) => v !== null && v < 0) && !s.values.some((v) => v !== null && v > 0));
+    for (let i = 0; i < dates.length; i++) {
+      let up = 0;
+      let down = 0;
+      layers.forEach((layer, li) => {
+        const p = layer[i]!;
+        const v = rows[i]![stacked[li]!.id]!;
+        if (v > 0) up = p[1];
+        else if (v < 0) down = p[0];
+        else p[0] = p[1] = below[li] ? down : up;
+      });
+    }
     let lo = Infinity;
     let hi = -Infinity;
     for (const l of layers) for (const [a, b] of l) {

@@ -291,9 +291,10 @@ opened after D (`openedOn`), so it held nothing then. Accounts with no data at a
 **Complete from** (`completeFromDate`, the estate chart): the latest first-data date among
 accounts that were already open before their data starts.
 
-- The chart marks the total before it as partial.
-- It draws a history only with at least two sampled dates from then on; otherwise it says from
-  when every account has data.
+- The chart marks the stretch before it as partial, with no total line there: the areas show what
+  is known.
+- It draws a history from two sampled dates on which some account has data; otherwise it says
+  there is not enough history yet.
 - The headline says how much of today's value comes from estimated balances, and from how many
   accounts.
 

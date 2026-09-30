@@ -285,7 +285,7 @@ read again.
     category the built-in wording now gives them, and its payee unless you set one
     (`categoriseInvestmentRows`). Nothing else changes: a category set by anyone stays, and so does
     a row you left uncategorised. **Re-run on all history** (Settings → Rules) works everything
-    out again instead.
+    out again instead; it currently loses Claude's payees and some of its categories.
 - **Duplicates** (`dedup.ts`) are checked in this order:
   1. same bank id;
   2. same date + amount + simplified description, matched as a multiset (two identical coffees

@@ -33,11 +33,13 @@ function EstateChart() {
   const q = useApi<EstateSeriesResponse>(['estate', range, grouping], `/estate${qs({ from: rangeFrom(range), grouping })}`);
   const d = q.data;
   const color = grouping === 'wrapper' ? wrapperColor : accessColor;
-  // Before every account has data the total leaves some out: no total line there, only what is known.
+  // Before every account has data the total leaves some out: that stretch is marked partial and has
+  // no total line, only what is known.
   const firstComplete = d?.completeFrom ? d.dates.findIndex((x) => x >= d.completeFrom!) : 0;
   const partialBefore = d && firstComplete < 0 ? d.dates.length : firstComplete;
-  // A history needs at least two days on which every account has data.
-  const history = d ? d.dates.length - partialBefore >= 2 : false;
+  const totalLine = d ? d.dates.length - partialBefore >= 2 : false;
+  // A history needs at least two days on which some account has data.
+  const history = d ? d.dates.filter((_, i) => d.groups.some((g) => g.values[i] !== 0)).length >= 2 : false;
   const series: TimeSeries[] = d
     ? [
         ...d.groups.map((g) => ({ id: g.id, label: g.label, color: color(g.id), values: g.values, kind: 'area' as const, stack: true })),
@@ -45,7 +47,9 @@ function EstateChart() {
       ]
     : [];
   const requested = rangeFrom(range);
-  const legend: LegendItem[] = d ? [...d.groups.map((g) => ({ label: g.label, color: color(g.id), kind: 'area' as const })), { label: 'Estate value', color: 'var(--ink-2)', kind: 'line' as const }] : [];
+  const legend: LegendItem[] = d
+    ? [...d.groups.map((g) => ({ label: g.label, color: color(g.id), kind: 'area' as const })), ...(totalLine ? [{ label: 'Estate value', color: 'var(--ink-2)', kind: 'line' as const }] : [])]
+    : [];
   return (
     <ChartFrame
       title="Estate value over time"
@@ -82,9 +86,7 @@ function EstateChart() {
         history ? (
           <TimeChart dates={d.dates} series={series} height={280} partialBefore={partialBefore} partialLabel={d.completeFrom ? `Not every account has data before ${formatDate(d.completeFrom, { year: false })}` : undefined} ariaLabel="Estate value over time" />
         ) : (
-          <div className="py-12 text-center text-sm text-ink-3">
-            {d.completeFrom ? `Every account has data only from ${formatDate(d.completeFrom)}. Older statements or balances will draw the history.` : 'Not enough history yet.'}
-          </div>
+          <div className="py-12 text-center text-sm text-ink-3">Not enough history yet. Older statements or balances will draw it.</div>
         )
       ) : (
         <Loading />
