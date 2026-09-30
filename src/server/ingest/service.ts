@@ -22,6 +22,7 @@ import {
 import type { Config } from '../config';
 import { Limiter, nowISO, sha256 } from '../fsutil';
 import { balanceId, documentId, importId, transactionId } from '../ids';
+import { recordInstrumentsFromHoldings } from '../instruments';
 import { StoreError, type ImportSummary, type Store } from '../store';
 import { extractWithClaudeApi } from './claude-api';
 import { extractWithClaudeCli } from './claude-cli';
@@ -758,6 +759,15 @@ export class ImportService extends EventEmitter {
     const committed = await commitDraft(this.store, { record, draft: checked.draft, workFile: this.work.filePath(record.document) });
     this.pending.delete(id);
     await this.work.remove(record, [...this.pending.values()]);
+    // Funds on it become instruments. The import is committed whatever happens here: the app
+    // records any it missed when it next starts.
+    if (committed.result?.holdingsAdded) {
+      try {
+        await recordInstrumentsFromHoldings(this.store);
+      } catch (err) {
+        console.warn(`[imports] ${id}: its funds were not recorded as instruments: ${(err as Error).message}`);
+      }
+    }
     this.emit('update', committed);
     return committed;
   }

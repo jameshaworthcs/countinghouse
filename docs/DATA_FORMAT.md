@@ -256,7 +256,7 @@ Shared pieces:
 | `allocation` | your own `{equity, bond, cash, property, commodity, crypto, other}` fractions summing to 1; beats research |
 | `aliases` | other names it appears under on statements |
 
-Holdings are matched to instruments by ISIN, then ticker, then name or alias.
+Holdings are matched to instruments by ISIN, then SEDOL, then ticker, then name or alias.
 
 ### assumptions.jsonl
 

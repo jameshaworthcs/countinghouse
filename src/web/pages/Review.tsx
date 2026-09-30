@@ -465,7 +465,7 @@ function SectionEditor({ section, index, total, latest, periodFromRows, onChange
                       <tr key={i}>
                         <td className={tableClasses.td}>
                           {h.name}
-                          <div className="text-[12px] text-ink-3">{[h.isin, h.ticker, h.assetClass].filter(Boolean).join(' · ')}</div>
+                          <div className="text-[12px] text-ink-3">{[h.isin, h.sedol, h.ticker, h.assetClass].filter(Boolean).join(' · ')}</div>
                         </td>
                         <td className={cn(tableClasses.td, tableClasses.num)}>{h.units ?? '—'}</td>
                         <td className={cn(tableClasses.td, tableClasses.num)}>

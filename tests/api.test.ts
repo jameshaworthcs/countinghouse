@@ -165,6 +165,28 @@ describe('API without login configured', () => {
     expect(after.draft!.sections[0]!.transactions.map((t) => t.amount)).toEqual([12.34, 30, -42.34]);
     expect(after.extraction.warnings).toEqual([]);
   });
+
+  it('commits a holdings export as it stands, and its funds become instruments with agents off', async () => {
+    const store = ctx.app.ctx.store;
+    await store.setSettings({ ...store.settings, agents: { ...store.settings.agents, enabled: false } });
+    const json = { ...CSRF, 'content-type': 'application/json' };
+    expect((await req('/api/accounts', { method: 'POST', headers: json, body: JSON.stringify({ id: 'isa', name: 'ISA', type: 'stocks_isa' }) })).status).toBe(201);
+    const form = new FormData();
+    form.append('file', new Blob([await readFile(path.join(import.meta.dirname, 'fixtures/ii-holdings.csv'))]), 'ii-29-09-2026-ISA.csv');
+    form.append('accountId', 'isa');
+    const { results } = (await (await req('/api/imports', { method: 'POST', headers: CSRF, body: form })).json()) as { results: { id: string }[] };
+    const id = results[0]!.id;
+    const rec = await waitFor(async () => {
+      const r = (await (await req(`/api/imports/${id}`)).json()) as { status: string; readiness?: { ready: boolean; reasons: string[] } };
+      return r.status === 'review' ? r : undefined;
+    });
+    // Dated by its file name, so nothing holds it back.
+    expect(rec.readiness).toEqual({ ready: true, reasons: [] });
+    expect(store.instruments).toEqual([]);
+    expect((await req(`/api/imports/${id}/commit`, { method: 'POST', headers: CSRF })).status).toBe(200);
+    expect(store.instruments.map((i) => i.sedol ?? i.ticker).sort()).toEqual(['B0000C4', 'B3X7QG6', 'XMPL']);
+    expect(store.balances('isa').at(-1)).toMatchObject({ date: '2026-09-29', balance: 8978.1, gain: 1478.1, dateSource: 'filename' });
+  });
 });
 
 describe('API with login configured', () => {

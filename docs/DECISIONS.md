@@ -674,3 +674,26 @@ before anything was drafted, even though the warning said to save the mapping.
 - **The columns worked out can be changed on the review page**, and saved for the next file like
   it. Changing them drafts the import again from the file and clears the warning about columns
   worked out automatically: the owner has now chosen them.
+
+## 2026-09-30: A holdings export keeps what statements said about each fund
+
+interactive investor's portfolio export for the ISA read every figure right, but committing it
+would have made things worse. It has no asset classes, so the ISA's latest holdings would have
+had none, and every fund would have fallen from "shares" (the PDF statement the day before) to
+the "mixed" fallback: 6.3% expected return and 16% volatility from the owner's assumptions became
+5.5% and 10% from fallbacks. Some of its ETFs had no instrument either, because instruments were
+only recorded by the agents' background run, which is off.
+
+- **The asset class comes from the latest statement that gave one.** When the latest holdings give
+  a fund none, the model uses the latest holdings in any account that did, for the same fund (by
+  instrument, else ISIN, SEDOL, ticker or name), and says which day's. The export's snapshot stays
+  what the file said: nothing is copied into it. A class is a fact about the fund, and a later
+  document that does not print one has not changed it.
+- **Instruments are recorded at commit and at start-up, whether or not agents are on.** An
+  instrument from a statement is a fact, not agent work; only researching it is. The agents'
+  background run still records any it finds missing (holdings changed outside the app).
+- **An export with no date is dated by its file**: the date in its file name, else the day the
+  file was saved, never after the upload. An export is made as it is downloaded. A PDF is not
+  dated this way: a statement saved today can be last year's.
+- **The export's growth is kept**: the totals line's gain becomes the balance's `gain`, as a
+  statement's does.

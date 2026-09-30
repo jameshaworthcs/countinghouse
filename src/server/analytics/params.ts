@@ -6,7 +6,8 @@
 import { ACCOUNT_TYPE_META, balanceModeOf, YEARLY_STALE_AFTER_DAYS } from '../../shared/accounts';
 import { AssumptionSet, formatAssumptionValue, type AssetClass, type Range, type Resolved, type ResolveTarget } from '../../shared/assumptions';
 import { ASSET_CLASSES, type Account, type Allocation, type Holding } from '../../shared/schema';
-import { diffDays, today } from '../../shared/dates';
+import { diffDays, formatDate, today } from '../../shared/dates';
+import { sameHolding } from '../ingest/match';
 import type { Store } from '../store';
 import type { BalanceEngine } from './balances';
 import { isStale, latestResearch, matchInstrument } from './research';
@@ -121,7 +122,27 @@ export function makeResolver(store: Store, on: string = today()): Resolver {
   return { set, rho: set.resolve('correlation.assetClasses').value, staleAfterDays: store.settings.agents.researchStaleAfterDays };
 }
 
-function holdingParams(store: Store, r: Resolver, account: Account, h: { name: string; isin?: string | undefined; ticker?: string | undefined; assetClass?: Holding['assetClass']; value: number; isCash?: boolean }): HoldingParams {
+/** A holding as the model sees it. `assetClassOn`: the day of the holdings its asset class came from, when not its own. */
+type HoldingInput = { name: string; isin?: string | undefined; sedol?: string | undefined; ticker?: string | undefined; assetClass?: Holding['assetClass']; assetClassOn?: string | undefined; value: number; isCash?: boolean };
+
+/**
+ * A fund's asset class from the latest holdings that give it one, for a holding whose own document
+ * gives none (a platform's holdings export has no such column): in any account, the same fund by its
+ * instrument, else by ISIN, SEDOL, ticker or name.
+ */
+function statedAssetClass(store: Store, h: Pick<Holding, 'name' | 'isin' | 'sedol' | 'ticker'>): { assetClass: NonNullable<Holding['assetClass']>; on: string } | undefined {
+  const instrument = matchInstrument(h, store.instruments);
+  const sameFund = (g: Holding) => (instrument !== undefined && matchInstrument(g, store.instruments)?.id === instrument.id) || sameHolding(g, h);
+  let found: { assetClass: NonNullable<Holding['assetClass']>; on: string } | undefined;
+  for (const snap of store.holdings()) {
+    if (found && snap.date <= found.on) continue;
+    const hit = snap.holdings.find((g) => g.assetClass && sameFund(g));
+    if (hit?.assetClass) found = { assetClass: hit.assetClass, on: snap.date };
+  }
+  return found;
+}
+
+function holdingParams(store: Store, r: Resolver, account: Account, h: HoldingInput): HoldingParams {
   const instrument = h.isCash ? undefined : matchInstrument(h, store.instruments);
   const target: ResolveTarget = { instrumentId: instrument?.id, accountId: account.id, institutionId: account.institutionId, accountType: account.type };
 
@@ -145,7 +166,9 @@ function holdingParams(store: Store, r: Resolver, account: Account, h: { name: s
     exposureSource = 'research';
   } else if (h.assetClass) {
     exposure = { ...zeroExposure(), [h.assetClass]: 1 };
-    exposureBasis = `Asset class from the statement (${CLASS_LABEL[h.assetClass]})`;
+    exposureBasis = h.assetClassOn
+      ? `Asset class from the statement of ${formatDate(h.assetClassOn)} (${CLASS_LABEL[h.assetClass]}); the latest holdings give none`
+      : `Asset class from the statement (${CLASS_LABEL[h.assetClass]})`;
     exposureSource = 'statement';
   } else {
     const cls: AssetClass = account.type === 'crypto' ? 'crypto' : account.type === 'ifisa' ? 'other' : 'mixed';
@@ -257,9 +280,19 @@ export function accountParams(store: Store, engine: BalanceEngine, r: Resolver, 
     const snap = snaps[snaps.length - 1];
     // Holdings from an annual statement stay in use for a year and a month.
     const fresh = snap && diffDays(snap.date, on) <= YEARLY_STALE_AFTER_DAYS ? snap : undefined;
-    const items: { name: string; isin?: string; ticker?: string; assetClass?: Holding['assetClass']; value: number; isCash?: boolean }[] = [];
+    const items: HoldingInput[] = [];
     if (fresh) {
-      for (const h of fresh.holdings) items.push({ name: h.name, value: h.value, ...(h.isin ? { isin: h.isin } : {}), ...(h.ticker ? { ticker: h.ticker } : {}), ...(h.assetClass ? { assetClass: h.assetClass } : {}) });
+      for (const h of fresh.holdings) {
+        const stated = h.assetClass ? undefined : statedAssetClass(store, h);
+        items.push({
+          name: h.name,
+          value: h.value,
+          ...(h.isin ? { isin: h.isin } : {}),
+          ...(h.sedol ? { sedol: h.sedol } : {}),
+          ...(h.ticker ? { ticker: h.ticker } : {}),
+          ...(h.assetClass ? { assetClass: h.assetClass } : stated ? { assetClass: stated.assetClass, assetClassOn: stated.on } : {}),
+        });
+      }
       if (fresh.cash) items.push({ name: 'Uninvested cash', value: fresh.cash, isCash: true });
     }
     const snapTotal = items.reduce((s, x) => s + Math.max(0, x.value), 0);

@@ -15,6 +15,7 @@ import { GitCommitter } from './git';
 import { InboxWatcher } from './ingest/inbox';
 import { ImportService } from './ingest/service';
 import { WorkArea } from './ingest/workarea';
+import { recordInstrumentsFromHoldings } from './instruments';
 import { runMigrations } from './migrations';
 import { LOGIN_PATH, OidcClient, oidcSettingsFromEnv } from './oidc';
 import { analyticsRoutes } from './routes/analytics';
@@ -70,6 +71,12 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
     if (await categoriseInvestmentRows(store)) await git.flush();
   } catch (err) {
     console.warn(`[data] investment rows were not categorised: ${(err as Error).message}`);
+  }
+  // …and funds in the latest holdings that have no instrument get one, whether or not agents are on.
+  try {
+    if (await recordInstrumentsFromHoldings(store)) await git.flush();
+  } catch (err) {
+    console.warn(`[data] funds were not recorded as instruments: ${(err as Error).message}`);
   }
 
   const analytics = new Analytics(store);

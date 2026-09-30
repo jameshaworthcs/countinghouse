@@ -260,7 +260,7 @@ describe('holdings exports', () => {
     expect(rows[0]![0]).toBe('Symbol');
     const ex = parseHoldingsCsv(rows, 'ii-29-09-2026-ISA.csv')!;
     const [acc] = ex.accounts;
-    expect(acc).toMatchObject({ institutionName: 'interactive investor', accountType: 'stocks_isa', closingBalance: 8978.1 });
+    expect(acc).toMatchObject({ institutionName: 'interactive investor', accountType: 'stocks_isa', closingBalance: 8978.1, gainLoss: 1478.1 });
     expect(acc!.holdings).toEqual([
       expect.objectContaining({ name: 'Example Global Index Fund Acc', sedol: 'B3X7QG6', ticker: null, units: 1200.5, price: 2.501, value: 3002.45, costBasis: 2500, gain: 502.45 }),
       expect.objectContaining({ name: 'Example World ETF USD Acc GBP', sedol: null, ticker: 'XMPL', units: 40, price: 123.45, value: 4938 }),

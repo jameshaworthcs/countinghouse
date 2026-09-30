@@ -14,14 +14,13 @@ import { z } from 'zod';
 import { ACCOUNT_TYPE_META } from '../../shared/accounts';
 import { assumptionDef, AssumptionSet } from '../../shared/assumptions';
 import { addDays, diffDays, today } from '../../shared/dates';
-import { fullerName } from '../../shared/funds';
 import type { Analytics } from '../analytics';
-import { latestResearch, matchInstrument } from '../analytics/research';
+import { latestResearch } from '../analytics/research';
 import type { Config } from '../config';
 import type { JobQueue } from '../context';
 import { atomicWrite, nowISO, randomHex } from '../fsutil';
 import { detectEngines } from '../ingest/engines';
-import { applyRecords } from '../records';
+import { recordInstrumentsFromHoldings } from '../instruments';
 import type { Store } from '../store';
 import { runAgent } from './claude';
 import { JOB_DEFS, JOB_KINDS, outputJsonSchema, REFRESHABLE_KEYS, type JobKind } from './kinds';
@@ -303,41 +302,6 @@ export class JobRunner extends EventEmitter implements JobQueue {
 
   // ─── What is stale, and what runs by itself ──────────────────────────────────────────────────
 
-  /**
-   * Instruments for holdings that have none yet: the app records the fund's name and identifiers
-   * as they appear on the statement (a fact, not an inference), so research can follow.
-   */
-  async ensureInstrumentsFromHoldings(): Promise<number> {
-    const seen = new Map<string, { name: string; isin?: string; ticker?: string; sedol?: string }>();
-    // A fund first recorded under a name cut short takes the full name when a statement prints
-    // it; the short one stays as an alias, so older holdings still match.
-    const renamed = new Map<string, { id: string; name: string; aliases: string[]; sedol?: string }>();
-    for (const a of this.store.accounts.filter((x) => x.status === 'open')) {
-      const snap = this.store.holdings(a.id).at(-1);
-      for (const h of snap?.holdings ?? []) {
-        const known = matchInstrument(h, this.store.instruments);
-        if (known) {
-          const name = fullerName(renamed.get(known.id)?.name ?? known.name, h.name);
-          const sedol = !known.sedol && h.sedol ? h.sedol : undefined;
-          if (name !== known.name || sedol) renamed.set(known.id, { id: known.id, name, aliases: name !== known.name ? [known.name] : [], ...(sedol ? { sedol } : {}) });
-          continue;
-        }
-        const key = h.isin?.toUpperCase() ?? h.sedol?.toUpperCase() ?? h.ticker?.toUpperCase() ?? h.name.toLowerCase();
-        if (!seen.has(key)) seen.set(key, { name: h.name, ...(h.isin && /^[A-Z]{2}[A-Z0-9]{9}\d$/.test(h.isin.toUpperCase()) ? { isin: h.isin.toUpperCase() } : {}), ...(h.ticker ? { ticker: h.ticker } : {}), ...(h.sedol ? { sedol: h.sedol } : {}) });
-      }
-    }
-    if (!seen.size && !renamed.size) return 0;
-    await applyRecords(this.store, {
-      provenance: { setBy: 'system', session: 'holdings' },
-      supersede: false,
-      records: [
-        ...[...seen.values()].map((r) => ({ type: 'instrument' as const, record: { ...r, aliases: [] } })),
-        ...[...renamed.values()].map((r) => ({ type: 'instrument' as const, record: r })),
-      ],
-    });
-    return seen.size;
-  }
-
   suggestions(on: string = today()): Suggestion[] {
     const out: Suggestion[] = [];
     const staleDays = this.store.settings.agents.researchStaleAfterDays;
@@ -390,8 +354,10 @@ export class JobRunner extends EventEmitter implements JobQueue {
     // Jobs held back yesterday by the budget may start today.
     this.pump();
     if (!this.store.settings.agents.enabled || !this.opts.autoRun) return;
+    // Commits and start-up record the funds held as instruments; this catches holdings changed
+    // outside the app since, before looking for research to do.
     try {
-      await this.ensureInstrumentsFromHoldings();
+      await recordInstrumentsFromHoldings(this.store);
     } catch (err) {
       console.error(`[agents] could not record instruments from holdings: ${(err as Error).message}`);
     }

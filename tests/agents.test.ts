@@ -11,6 +11,7 @@ import { JOB_DEFS, outputJsonSchema, type JobContext } from '../src/server/agent
 import { Analytics } from '../src/server/analytics';
 import { loadConfig } from '../src/server/config';
 import { transactionId } from '../src/server/ids';
+import { recordInstrumentsFromHoldings } from '../src/server/instruments';
 import { Store } from '../src/server/store';
 import { AssumptionSet } from '../src/shared/assumptions';
 import type { Account, Transaction } from '../src/shared/schema';
@@ -56,7 +57,7 @@ describe('privacy boundary', () => {
   it('research prompts carry public identifiers only: no balances, holdings, account names or numbers', async () => {
     const runner = new JobRunner(store, new Analytics(store), loadConfig({ FINANCE_DATA_DIR: path.join(dir, 'data'), FINANCE_WORK_DIR: path.join(dir, 'work'), FINANCE_WATCH: '0' }), { autoRun: false });
     await runner.init();
-    expect(await runner.ensureInstrumentsFromHoldings()).toBe(1);
+    expect(await recordInstrumentsFromHoldings(store)).toBe(1);
     const instrumentId = store.instruments[0]!.id;
     const prompts = [
       await JOB_DEFS['research-instrument'].prepare(ctx({ instrumentId })),
@@ -192,23 +193,20 @@ describe('what is stale', () => {
   });
 
   it('a fund first recorded under a name cut short takes the full name when a statement prints it', async () => {
-    const runner = new JobRunner(store, new Analytics(store), loadConfig({ FINANCE_DATA_DIR: path.join(dir, 'data'), FINANCE_WORK_DIR: path.join(dir, 'work'), FINANCE_WATCH: '0' }), { autoRun: false });
-    await runner.init();
     const snap = (id: string, date: string, name: string) => ({ id, accountId: 'isa', date, holdings: [{ name, units: 10, value: 100, currency: 'GBP' }], totalValue: 100, source: {}, createdAt: stamp });
     await store.addHoldings([snap('hld_00000000000000b1', '2026-09-10', 'HSBC FTSE 100 Index Accum…')], 'h');
-    await runner.ensureInstrumentsFromHoldings();
+    await recordInstrumentsFromHoldings(store);
     expect(store.instruments.map((i) => i.name)).toEqual(['HSBC FTSE 100 Index Accum…']);
     await store.addHoldings([snap('hld_00000000000000b2', '2026-09-20', 'HSBC FTSE 100 Index Accumulation C')], 'h');
-    expect(await runner.ensureInstrumentsFromHoldings()).toBe(0);
+    expect(await recordInstrumentsFromHoldings(store)).toBe(0);
     expect(store.instruments).toHaveLength(1);
     expect(store.instruments[0]).toMatchObject({ name: 'HSBC FTSE 100 Index Accumulation C', aliases: ['HSBC FTSE 100 Index Accum…'] });
-    runner.stop();
   });
 
   it('suggests research for new funds and providers, and assumptions still on fallbacks', async () => {
     const runner = new JobRunner(store, new Analytics(store), loadConfig({ FINANCE_DATA_DIR: path.join(dir, 'data'), FINANCE_WORK_DIR: path.join(dir, 'work'), FINANCE_WATCH: '0' }), { autoRun: false });
     await runner.init();
-    await runner.ensureInstrumentsFromHoldings();
+    await recordInstrumentsFromHoldings(store);
     const kinds = runner.suggestions('2026-09-29').map((s) => s.kind).sort();
     expect(kinds).toEqual(['refresh-assumptions', 'research-instrument', 'research-provider', 'research-provider']);
     runner.stop();
@@ -219,7 +217,7 @@ describe('what is stale', () => {
     const config = loadConfig({ FINANCE_DATA_DIR: path.join(dir, 'data'), FINANCE_WORK_DIR: path.join(dir, 'work'), FINANCE_WATCH: '0' });
     const runner = new JobRunner(store, new Analytics(store), config, { autoRun: true, paused: true });
     await runner.init();
-    await runner.ensureInstrumentsFromHoldings();
+    await recordInstrumentsFromHoldings(store);
     // Research is due and offered, but nothing starts by itself.
     expect(runner.suggestions('2026-09-29').map((s) => s.kind)).toContain('research-instrument');
     await runner.tick('2026-09-29');
@@ -232,7 +230,7 @@ describe('what is stale', () => {
     const config = loadConfig({ FINANCE_DATA_DIR: path.join(dir, 'data'), FINANCE_WORK_DIR: path.join(dir, 'work'), FINANCE_WATCH: '0' });
     const first = new JobRunner(store, new Analytics(store), config, { autoRun: false });
     await first.init();
-    await first.ensureInstrumentsFromHoldings();
+    await recordInstrumentsFromHoldings(store);
     const due = first.suggestions('2026-09-29');
     expect(due).toHaveLength(4);
     first.stop();

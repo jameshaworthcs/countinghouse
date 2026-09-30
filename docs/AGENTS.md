@@ -190,7 +190,9 @@ Other behaviour:
 - **Settings → Agents** turns off automatic starts, insights after imports and the monthly review,
   and picks the model and effort.
 - **Holdings create instruments.** Funds listed on statements become instrument records
-  (`setBy: system`, identifiers exactly as printed), so research can follow.
+  (`setBy: system`, identifiers exactly as printed), so research can follow. They are recorded at
+  each commit that records holdings and when the app starts, whether or not agents are on: a fact
+  from the statement, not agent work. Researching them waits for agents.
 - **Job state** lives in the work area, not `data/`. Assumptions & research → Agent jobs shows
   what is due, queued, running and finished, with rerun and cancel.
 - **No repeats.** A job that succeeded for the same subject within the research staleness window

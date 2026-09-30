@@ -225,7 +225,7 @@ export default function AccountDetail() {
                   <tr key={h.name}>
                     <td className={tableClasses.td}>
                       <div className="font-medium">{h.name}</div>
-                      <div className="text-[12px] text-ink-3">{[h.isin, h.ticker, h.assetClass].filter(Boolean).join(' · ')}</div>
+                      <div className="text-[12px] text-ink-3">{[h.isin, h.sedol, h.ticker, h.assetClass].filter(Boolean).join(' · ')}</div>
                     </td>
                     <td className={cn(tableClasses.td, tableClasses.num)}>{h.units?.toLocaleString('en-GB', { maximumFractionDigits: 4 }) ?? '—'}</td>
                     <td className={cn(tableClasses.td, tableClasses.num)}>{h.price !== undefined ? h.price.toLocaleString('en-GB', { maximumFractionDigits: 4 }) : '—'}</td>

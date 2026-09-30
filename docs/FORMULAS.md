@@ -43,7 +43,7 @@ in this order:
 | Fund charge | your `fee.fund` record → researched OCF → agents' `fee.fund` → fallback |
 | Platform fee | your `fee.platform` → researched fee schedule (tiers on the account value, then cap and flat fee) → agents' → fallback |
 | Interest | your `interest.rate` → the rate on the account → the latest statement's rate → researched product rate (best name match) → agents' → fallback by account type |
-| Fund make-up | your allocation on the instrument → researched allocation → the asset class on the statement → "mixed" (unknown) |
+| Fund make-up | your allocation on the instrument → researched allocation → the asset class on the statement (when the latest holdings give none, as a platform's export does not: the latest holdings in any account that gave one for the same fund, by instrument, else ISIN, SEDOL, ticker or name) → "mixed" (unknown) |
 
 ## 2. Money
 

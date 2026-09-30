@@ -5,7 +5,7 @@ import { ACCOUNT_TYPE_META, balanceModeOf } from '../../shared/accounts';
 import { findInstitution } from '../../shared/institutions';
 import { CategoryIndex } from '../../shared/categories';
 import { Categoriser, isWrapperAccount, transferLegCategory } from '../../shared/categorise';
-import { diffDays, today } from '../../shared/dates';
+import { dateOf, diffDays, today } from '../../shared/dates';
 import { toMinor } from '../../shared/money';
 import type {
   Account,
@@ -23,6 +23,7 @@ import type {
 import { DraftSchema } from '../../shared/schema';
 import type { Store } from '../store';
 import { classifyDuplicates, storedTwice } from './dedup';
+import { dateFromFileName } from './images';
 import { fitsAccount, identifies, matchAccount, onlyKind, proposeAccount, sameHolding } from './match';
 
 export { fitsAccount } from './match';
@@ -65,6 +66,18 @@ const TRADE_ROW = /\b(purchase|bought|buy|sale|sold|sell|redemption|switch)\b/i;
  */
 export function isLiveView(documentType: Extraction['documentType'], mediaType: string): boolean {
   return documentType.endsWith('_screenshot') || (documentType === 'other' && mediaType.startsWith('image/'));
+}
+
+/**
+ * When an export with no date in it is from: an export is made as it is downloaded, so the date in
+ * its file name, else the day the file was saved, never after the upload. (Not a PDF's saved day: a
+ * statement downloaded today can be last year's.)
+ */
+function exportDate(document: DocumentRef, uploadedOn: string): { date: string; source: DateSource } | undefined {
+  const named = dateFromFileName(document.fileName);
+  if (named && named <= uploadedOn) return { date: named, source: 'filename' };
+  const saved = document.lastModified ? dateOf(document.lastModified) : undefined;
+  return saved && saved <= uploadedOn ? { date: saved, source: 'file-modified' } : undefined;
 }
 
 const DATE_SOURCE_WORDS: Record<DateSource, string> = {
@@ -195,6 +208,11 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
     if (!balanceDate && extraction.documentDate) {
       balanceDate = extraction.documentDate;
       balanceDateSource = 'document';
+    }
+    const exported = !balanceDate && extraction.documentType === 'csv_export' ? exportDate(ctx.document, ctx.uploadedOn) : undefined;
+    if (exported) {
+      balanceDate = exported.date;
+      balanceDateSource = exported.source;
     }
     if (!balanceDate) {
       balanceDate = ctx.document.capturedOn ?? ctx.uploadedOn;

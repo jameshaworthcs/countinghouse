@@ -33,7 +33,7 @@ The same file twice (by SHA-256) is recognised as already imported.
 | HSBC CSV (no header) | `hsbc` | Matched by the shape of the first row |
 | first direct and other Date/Description/Amount CSVs | `date-description-amount` | |
 | Trading 212 CSV | `trading-212` | Buys and withdrawals are money out; deposits count as contributions |
-| Holdings exports (interactive investor's portfolio export, and any CSV with a name, quantity and value column but no dates) | `holdings-csv` | One holdings snapshot: units, price (pence or pounds), value, book cost and gain per holding, SEDOL or ticker from the symbol; the account's value is what the holdings are worth (cash is not in the file); the wrapper from the file name (`…-ISA.csv`, `…-SIPP.csv`) |
+| Holdings exports (interactive investor's portfolio export, and any CSV with a name, quantity and value column but no dates) | `holdings-csv` | One holdings snapshot: units, price (pence or pounds), value, book cost and gain per holding, SEDOL or ticker from the symbol; the account's value is what the holdings are worth (cash is not in the file), and its growth the totals line's gain; the wrapper from the file name (`…-ISA.csv`, `…-SIPP.csv`). With no date in it, it is dated by the date in its file name, else the day the file was saved: an export is made as it is downloaded. It gives no asset classes, so the model takes each fund's from the latest statement that gave one ([FORMULAS.md §1](FORMULAS.md)) |
 | Anything else CSV | auto-detected mapping | Confident mappings import straight away (flagged), and the review page can change their columns and signs and save them as a profile; otherwise you map the columns once and save them. The description is a column named for it ("description", "details", "narrative"…) before one naming the other party, and never a type column ("Transaction Type") while another will do. A file for a credit card (the one you upload it to, or the one a committed import went to when it is read again) reads a single amount column card style, money out positive, when its rows fail the card-signs check ([FORMULAS.md §13](FORMULAS.md)) as they stand and pass it flipped: a card's own export lists purchases as positive |
 | Excel `.xlsx`, `.xls`, and HTML tables saved as `.xls` | `xlsx` → the CSV profiles | The first sheet with a table becomes rows (`src/server/ingest/xlsx.ts`, SheetJS), which go through the same profiles, holdings detection and column mapping as a CSV. Date cells become `YYYY-MM-DD`; text cells stay text, so "01/09/2026" is read day first; numbers keep full precision. The review page shows the sheet as a table |
 | OFX / QFX (1.x SGML and 2.x XML) | `ofx` | Bank and credit-card statements, FITID as id, ledger/available balance; foreign amounts per `<ORIGCURRENCY>` (already converted) or `<CURRENCY>` (converted at CURRATE) |
@@ -358,8 +358,9 @@ read again.
   from its reading. Nothing is read again. A newer version's matching, categories and checks then
   apply to imports already waiting.
 - **Funds on statements become instruments.** A holding with no matching instrument is recorded as
-  one, with its name and identifiers exactly as printed, and researched by an agent job
-  ([AGENTS.md](AGENTS.md)).
+  one, with its name and identifiers exactly as printed, at the commit (and, for holdings already
+  stored, when the app starts), whether or not agents are on. An agent job researches it when
+  agents are on ([AGENTS.md](AGENTS.md)).
   - A name cut short on screen ("HSBC FTSE 100 Index Accum…") matches the full name it begins, when
     only one instrument fits (`shared/funds.ts`).
   - When a later statement prints the full name, the instrument takes it and keeps the short one

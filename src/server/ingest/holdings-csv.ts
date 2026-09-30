@@ -6,7 +6,7 @@ import { parseAmount } from '../../shared/money';
 import { ExtractionSchema, type AccountType, type Extraction } from '../../shared/schema';
 import { normHeader } from './csv';
 
-export const HOLDINGS_CSV_VERSION = 'holdings-csv-1';
+export const HOLDINGS_CSV_VERSION = 'holdings-csv-2';
 
 const pick = (headers: string[], ...names: RegExp[]) => {
   for (const re of names) {
@@ -67,13 +67,17 @@ export function parseHoldingsCsv(rows: string[][], fileName: string): Extraction
 
   const holdings: Extraction['accounts'][number]['holdings'] = [];
   let printedTotal: number | null = null;
+  let printedGain: number | null = null;
   const notes: string[] = [];
   for (const row of rows.slice(headerIndex + 1)) {
     const name = row[col.name]?.trim() ?? '';
     const value = parseAmount(row[col.value]);
-    // The totals line: no holding name, a value.
+    // The totals line: no holding name, a value, and the growth on all of them.
     if (!name || /^(total|totals|gbp)$/i.test(name)) {
-      if (value !== null && row.some((c) => /^(gbp|total|totals)$/i.test(c.trim()))) printedTotal = value;
+      if (value !== null && row.some((c) => /^(gbp|total|totals)$/i.test(c.trim()))) {
+        printedTotal = value;
+        printedGain = col.gain >= 0 ? parseAmount(row[col.gain]) : null;
+      }
       continue;
     }
     if (value === null) {
@@ -101,6 +105,9 @@ export function parseHoldingsCsv(rows: string[][], fileName: string): Extraction
   if (!holdings.length) return null;
   const sum = Math.round(holdings.reduce((s, h) => s + h.value * 100, 0)) / 100;
   if (printedTotal !== null && Math.abs(printedTotal - sum) > 0.01) notes.push(`The file's own total (£${printedTotal.toFixed(2)}) differs from its rows (£${sum.toFixed(2)}).`);
+  const gains = holdings.map((h) => h.gain).filter((g): g is number => g !== null);
+  const gainSum = gains.length === holdings.length ? Math.round(gains.reduce((s, g) => s + g * 100, 0)) / 100 : null;
+  if (printedGain !== null && gainSum !== null && Math.abs(printedGain - gainSum) > 0.01) notes.push(`The file's own total growth (£${printedGain.toFixed(2)}) differs from its rows (£${gainSum.toFixed(2)}).`);
   notes.push('A holdings export lists investments only: any uninvested cash is not in it, so the value recorded is what the investments are worth.');
   // interactive investor's export has its own set of columns.
   const ii = headers.includes('day gain/loss') && headers.includes('average price');
@@ -113,6 +120,7 @@ export function parseHoldingsCsv(rows: string[][], fileName: string): Extraction
         accountType: typeFromName(fileName),
         currency: 'GBP',
         closingBalance: printedTotal ?? sum,
+        gainLoss: printedGain,
         holdings,
       },
     ],
