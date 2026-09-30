@@ -58,7 +58,8 @@ const WRAPPER_RULES: WrapperRule[] = [
   [/\bS\s+DATE\s+\d{1,2}\/\d{1,2}\/\d{2,4}\b/i, 'trade', undefined, /^\s*[\d,.]+\s+(.+?)\s+(?:[A-Z]+\s+)?[\d,.]+\s+S\s+DATE\b/i],
   [/GOVERNMENT BONUS|LISA BONUS|\bBONUS\b.*(HMRC|GOV)|HMRC.*BONUS/i, 'government-bonus', 'in'],
   [/TAX RELIEF|BASIC RATE RELIEF|RELIEF AT SOURCE|\bHMRC\b|INCOME TAX RECLAIM/i, 'tax-relief', 'in'],
-  [/EMPLOYER/i, 'employer-contribution', 'in'],
+  // interactive investor marks an employer's regular payment "(E)": "Reg Contribution (E)".
+  [/EMPLOYER|CONTRIBUTION \(E\)/i, 'employer-contribution', 'in'],
   [/ISA TRANSFER|TRANSFER IN FROM|TRANSFER FROM .*(ISA|PENSION|PLAN)|PENSION TRANSFER|\bTRANSFER IN\b/i, 'transfer', 'in'],
   [/CONTRIBUTION|SUBSCRIPTION|DEPOSIT|LUMP SUM|TOP ?UP|DIRECT DEBIT|REGULAR (SAVING|INVEST)|PAYMENT IN|MONEY IN|FASTER PAYMENT|BANK TRANSFER|CARD PAYMENT/i, 'contribution', 'in'],
   [new RegExp(`${DIVIDEND_WORDING.source}|INTEREST|COUPON|INCOME`, 'i'), 'investment-income', 'in', /^DIV\s+[\d,.]+\s+(.+)$/i],

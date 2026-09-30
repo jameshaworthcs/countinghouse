@@ -105,6 +105,11 @@ describe('merchants and categorisation', () => {
     expect(isa('40 ABC EQUITY INCOME  Rec   2.50 S Date 04/03/25', 100)).toMatchObject({ category: 'trade', payee: 'ABC EQUITY INCOME' });
     expect(isa('Div 250   VANGUARD FUNDS PLC   FTSE ALL WLD UCITS ETF', 45.5)).toMatchObject({ category: 'investment-income', payee: 'VANGUARD FUNDS PLC FTSE ALL WLD UCITS ETF' });
     expect(isa('Div 250   VANGUARD FUNDS PLC', 45.5, { payee: 'Vanguard' }).payee).toBe('Vanguard');
+    // An employer's payments into a pension, regular ("(E)") or one-off: no tax relief follows them.
+    const sipp = new Categoriser([], new CategoryIndex(defaultCategories()), [acct('ii-sipp', 'sipp', { institutionId: 'interactive-investor' })], []);
+    expect(sipp.categorise({ accountId: 'ii-sipp', description: 'Reg Contribution (E)', amount: 250 }).category).toBe('employer-contribution');
+    expect(sipp.categorise({ accountId: 'ii-sipp', description: 'Employer Bank Credit Contribution', amount: 1000 }).category).toBe('employer-contribution');
+    expect(sipp.categorise({ accountId: 'ii-sipp', description: 'Reg Contribution', amount: 250 }).category).toBe('contribution');
     // The rest of ii's wording as before.
     expect(isa('GROSS INTEREST', 0.8)).toMatchObject({ category: 'investment-income', payee: 'Gross Interest' });
     expect(isa('Monthly Subscription', 500).category).toBe('contribution');

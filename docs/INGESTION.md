@@ -277,7 +277,8 @@ read again.
   3. wrapper flows (contribution, employer contribution, tax relief, LISA bonus, fees, trades,
      withdrawals). A row with a settlement date is a trade, whatever the fund is called
      (interactive investor: "12 VANGUARD FTSE GLOB Del 105.20 S Date 03/02/25"), and "Div 250 …" is
-     a dividend; both take the investment's name as the payee;
+     a dividend; both take the investment's name as the payee. "Reg Contribution (E)" is an
+     employer's regular payment into a pension;
   4. the built-in UK merchant list (`src/shared/merchants.ts`, about 200 patterns);
   5. the bank's own category;
   6. Claude's suggestion.

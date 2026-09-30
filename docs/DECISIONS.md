@@ -631,6 +631,10 @@ valuation: growth that never happened.
   dividends for tax, which share `DIVIDEND_WORDING`.
 - **The investment is the payee.** Both kinds of row name it, so the list shows "VANGUARD FTSE GLOB"
   rather than the whole line or "Div".
+- **"Reg Contribution (E)" is an employer's.** ii marks a regular employer payment into a SIPP
+  "(E)"; such a payment comes from the employer directly, not through a payslip. No tax relief follows
+  such a payment, so counting it as the owner's own would have estimated 20% relief that never
+  comes and widened the basic-rate band by it.
 - **Rows already committed get it when the app starts**, like tidy addresses: only rows in
   investment and pension accounts that nothing categorised, and only a built-in category. Re-run
   on all history would reach them too, but it works out every row again, payees included.
