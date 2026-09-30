@@ -70,14 +70,17 @@ export function importRoutes(ctx: AppContext): Hono {
     return c.json({ results }, 201);
   });
 
-  /** Committed documents read by an older version of the reader, and any re-reading of them. */
+  /**
+   * Committed documents worth reading again, and any re-reading of them: read by an older version of
+   * the reader, or a CSV whose columns were worked out automatically (a layout may fit it now).
+   */
   app.get('/rereads', (c) =>
     c.json({
       current: PROMPT_VERSION,
       enabled: ctx.store.settings.extraction.rereadDocuments,
       older: ctx.store.imports
-        .filter((i) => (i.engine === 'claude-cli' || i.engine === 'claude-api') && i.engineVersion !== PROMPT_VERSION && !i.result?.nothingNew)
-        .map((i) => ({ id: i.id, fileName: i.fileName, engineVersion: i.engineVersion ?? null, committedAt: i.committedAt ?? null, reread: svc.getReread(i.id)?.status ?? null })),
+        .filter((i) => !i.result?.nothingNew && (((i.engine === 'claude-cli' || i.engine === 'claude-api') && i.engineVersion !== PROMPT_VERSION) || (i.engine === 'csv' && /auto-detected/.test(i.detail ?? ''))))
+        .map((i) => ({ id: i.id, fileName: i.fileName, engineVersion: i.engineVersion ?? null, reason: i.engine === 'csv' ? 'columns worked out' : null, committedAt: i.committedAt ?? null, reread: svc.getReread(i.id)?.status ?? null })),
       rereads: svc.listRereads(),
     }),
   );

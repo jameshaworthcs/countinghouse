@@ -575,3 +575,23 @@ tax twice, once from the P60 and once from the payslips.
   the P60's name counts as the same job.
 - **A £0 payslip expects nothing.** It is kept (it says the job paid nothing that month) and shown
   as nothing due, not as a missing payment.
+
+## 2026-09-30: Reading a CSV again
+
+A Chase export was committed with the transaction type as its description. The file itself was
+fine and was kept, and a built-in layout now reads it right. So "Read it again" applies to CSVs and
+spreadsheets too.
+
+- **Parsed on this machine, so no setting.** The switch for reading stored documents again is
+  about spending the Claude plan. A CSV costs nothing and sends nothing.
+- **The layout that fits now wins.** A layout you saved, or a built-in bank's, comes first; then the
+  columns you chose by hand for that import; then columns worked out again. Reading it again with
+  the same guess would change nothing.
+- **Rows pair by their line in the file.** A parser's rows keep their places, so a row read with new
+  columns is the same row whatever changed, even its whole description. Claude's readings pair by
+  what the rows say, because a new reading can split or merge rows.
+- **The same balance after it means the same row, from any import.** Otherwise a copy that was
+  taken away as recorded twice would come back as "read now, not recorded", one click from being
+  added again.
+- **A correction refreshes what the old words decided**: the payee and category, unless you set
+  them or a transfer link did, and a transfer link. The old description stays in `corrections`.

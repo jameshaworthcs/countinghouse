@@ -791,7 +791,7 @@ export default function Review() {
         </Callout>
       )}
 
-      {committed && !filed && (rec.extraction.engine === 'claude-cli' || rec.extraction.engine === 'claude-api') && (
+      {committed && !filed && (rec.extraction.engine === 'claude-cli' || rec.extraction.engine === 'claude-api' || (rec.extraction.engine === 'csv' && !/holdings export/.test(rec.extraction.detail ?? ''))) && (
         <div className="mt-4">
           <ReadAgainCard rec={rec} currentVersion={rereads.data?.current ?? null} />
         </div>

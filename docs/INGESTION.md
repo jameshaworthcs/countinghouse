@@ -384,15 +384,26 @@ No analyst job follows a dismissal.
 ## Reading a stored document again
 
 The reader improves (`PROMPT_VERSION`: `extract-4` … `extract-9`), and a document read by an earlier
-version may hold something it missed or misread. A committed PDF or screenshot can be read again
-with the current reader, and its check, from its page (Import → History → the document → *Read it
-again*). The Import page lists the documents an earlier reader read.
+version may hold something it missed or misread. A CSV whose columns were worked out automatically
+may have been read with the wrong ones, and a layout may fit it now. A committed document can be
+read again from its page (Import → History → the document → *Read it again*). The Import page lists
+the documents worth reading again: those an earlier reader read, and CSVs whose columns were worked
+out.
 
-- **It is off until you turn it on** (Settings → Import & extraction → *Read stored documents
-  again*). A reading costs what an upload does. Nothing reads by itself.
+- **A PDF or screenshot is read with the current reader and its check.** That is off until you
+  turn it on (Settings → Import & extraction → *Read stored documents again*). A reading costs what
+  an upload does. Nothing reads by itself.
+- **A CSV or spreadsheet is parsed again on this machine**, at once, whatever that setting says:
+  nothing is sent anywhere. It takes a layout that fits it now (one you saved, or a built-in bank's),
+  else the columns you chose for this import, else columns worked out afresh. A holdings export has
+  no rows to compare. OFX, QIF and Santander text files are parsed the same way every time, and are
+  not read again.
 - **The new reading is compared with what the import recorded**, account by account
   (`src/server/ingest/reread.ts`). Each row is:
-  - **the same**: same date, amount and description, whichever import recorded it;
+  - for a CSV, **the row this import recorded from the same line** of the file first, the same row
+    whatever changed (read differently, or the same);
+  - **the same**: same date, amount and description, or same date, amount and balance after it,
+    whichever import recorded it (a copy taken away as recorded twice is the other import's row);
   - **read differently**: a row of this import with the same amount and description a few days
     apart (its date), the same date and description (its amount), or the same date and amount with
     a similar description;
@@ -401,13 +412,15 @@ again*). The Import page lists the documents an earlier reader read.
 
   The balance is compared too.
 - **Nothing changes until you apply a difference**, one at a time. The actions don't delete: a row
-  missing from the new reading is yours to look at. Each is recorded as the new reader's:
+  missing from the new reading is yours to look at. Each is recorded as the new reading's:
   - a row read differently is corrected, and its `corrections` keep what was recorded, noting the
-    reader;
+    reader or the layout ("Read again with the Chase UK layout"). A type the new reading has and the
+    row lacks is filled in. What was worked out from the old words is worked out again: the payee,
+    unless you set it; the category, unless you or a transfer link set it; and a transfer link, when
+    the row is not yours to categorise;
   - a row read now is added, with the import's provenance;
   - a balance takes the new reading, and its note keeps the old figure.
 - The comparison waits in the work area (`rereads/`), never in `data/`, until you put it away.
-  Files parsed on this machine (CSV, OFX, QIF) have no reader to improve, and are not read again.
 
 ## Measuring extraction
 

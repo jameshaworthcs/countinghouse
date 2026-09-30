@@ -30,14 +30,20 @@ export function ReadAgainCard({ rec, currentVersion }: { rec: ImportRecord; curr
   const start = useApiMutation(() => api<Reread>(`/imports/${rec.id}/reread`, { method: 'POST' }));
   const apply = useApiMutation((key: string) => api<Reread>(`/imports/${rec.id}/reread/apply`, { body: { key } }));
   const forget = useApiMutation(() => api(`/imports/${rec.id}/reread`, { method: 'DELETE' }));
-  const enabled = data.settings.extraction.rereadDocuments;
+  // A CSV or spreadsheet is parsed again on this machine: no Claude, so no setting to turn on.
+  const parsed = rec.extraction.engine === 'csv';
+  const enabled = parsed || data.settings.extraction.rereadDocuments;
   const r = q.data;
   const older = currentVersion && rec.extraction.engineVersion && rec.extraction.engineVersion !== currentVersion;
   const differences = r?.sections.flatMap((s) => s.rows.filter((x) => x.kind !== 'same')) ?? [];
   return (
     <Card
       title="Read it again"
-      description={`Read with ${rec.extraction.engineVersion ?? 'an earlier reader'}${older ? `; the reader is now ${currentVersion}` : ''}. Reading it again compares the new reading with what was recorded. Nothing changes until you apply a difference.`}
+      description={
+        parsed
+          ? `Parsed on this machine${rec.extraction.detail ? ` (${rec.extraction.detail.replace('auto-detected', 'columns worked out automatically')})` : ''}. Reading it again parses the file with the layout that fits it now and compares each row with what it recorded. Nothing changes until you apply a difference.`
+          : `Read with ${rec.extraction.engineVersion ?? 'an earlier reader'}${older ? `; the reader is now ${currentVersion}` : ''}. Reading it again compares the new reading with what was recorded. Nothing changes until you apply a difference.`
+      }
       actions={
         <Button size="sm" icon={<RefreshCw className="size-3.5" />} loading={start.isPending || r?.status === 'running'} disabled={!enabled || r?.status === 'running'} onClick={() => start.mutate(undefined)}>
           {r?.status === 'running' ? 'Reading…' : r ? 'Read again' : 'Read it again'}
@@ -54,7 +60,7 @@ export function ReadAgainCard({ rec, currentVersion }: { rec: ImportRecord; curr
       {r?.status === 'done' && (
         <div className="flex flex-col gap-3">
           <div className="text-[12.5px] text-ink-2">
-            Read {formatDate(r.finishedAt!.slice(0, 10))} with {r.engineVersion}
+            Read {formatDate(r.finishedAt!.slice(0, 10))} with {r.layout ?? r.engineVersion}
             {r.model ? ` (${r.model.replace(/^claude-/, '')})` : ''}
             {r.costUsd ? `, $${r.costUsd.toFixed(2)}` : ''}. {differences.length ? `${differences.length} difference${differences.length === 1 ? '' : 's'}.` : 'Everything it read is as recorded.'}
           </div>
@@ -136,16 +142,21 @@ export function ReadAgainCard({ rec, currentVersion }: { rec: ImportRecord; curr
 interface RereadsResponse {
   current: string;
   enabled: boolean;
-  older: { id: string; fileName: string; engineVersion: string | null; committedAt: string | null; reread: Reread['status'] | null }[];
+  older: { id: string; fileName: string; engineVersion: string | null; reason: string | null; committedAt: string | null; reread: Reread['status'] | null }[];
 }
 
-/** Import page: committed documents an earlier reader read, each a link to read it again. */
+/** Import page: committed documents worth reading again (an earlier reader, or a CSV's columns worked out), each a link to read it again. */
 export function OlderReadings() {
   const q = useApi<RereadsResponse>(['rereads'], '/imports/rereads');
   const d = q.data;
   if (!d?.older.length) return null;
+  const claude = d.older.some((o) => !o.reason);
   return (
-    <Card title={`${d.older.length} document${d.older.length === 1 ? '' : 's'} read by an earlier reader`} description={`The reader is now ${d.current}. Open one to read it again and compare${d.enabled ? '' : ' (reading stored documents again is off in Settings → Import & extraction)'}.`} padded={false}>
+    <Card
+      title={`${d.older.length} document${d.older.length === 1 ? '' : 's'} worth reading again`}
+      description={`Read by an earlier reader (it is now ${d.current}), or a CSV whose columns were worked out automatically. Open one to read it again and compare${claude && !d.enabled ? '; reading PDFs and screenshots again is off in Settings → Import & extraction' : ''}.`}
+      padded={false}
+    >
       <details className="border-t border-line">
         <summary className="cursor-pointer px-5 py-2.5 text-[13px] font-medium text-ink-2">Show them</summary>
         <ul className="divide-y divide-line border-t border-line">
@@ -157,7 +168,7 @@ export function OlderReadings() {
               <span className="flex shrink-0 items-center gap-2 text-ink-3">
                 {o.reread === 'done' && <Badge tone="neutral">Read again</Badge>}
                 {o.reread === 'running' && <Badge tone="neutral">Reading…</Badge>}
-                {o.engineVersion ?? '—'}
+                {o.reason ?? o.engineVersion ?? '—'}
               </span>
             </li>
           ))}

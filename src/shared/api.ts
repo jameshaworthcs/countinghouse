@@ -730,7 +730,8 @@ export interface RereadRow {
   /** same: recorded as read; changed: recorded with another date, amount or description; added: read now, not recorded; missing: recorded, not read now. */
   kind: 'same' | 'changed' | 'added' | 'missing';
   stored?: { id: string; date: string; amount: number; description: string };
-  read?: { date: string; amount: number; description: string };
+  /** As read now; `type` (a CSV's transaction type) is filled in on a correction when missing. */
+  read?: { date: string; amount: number; description: string; type?: string };
   changes?: ('date' | 'amount' | 'description')[];
   applied?: boolean;
 }
@@ -752,6 +753,8 @@ export interface Reread {
   engineVersion?: string;
   /** The reader version that made the import. */
   previousVersion?: string;
+  /** A CSV or spreadsheet: the layout it was parsed with now ("Chase UK", or columns worked out). */
+  layout?: string;
   costUsd?: number;
   sections: RereadSection[];
   notes: string[];

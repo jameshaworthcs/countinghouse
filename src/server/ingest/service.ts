@@ -26,6 +26,7 @@ import { StoreError, type ImportSummary, type Store } from '../store';
 import { extractWithClaudeApi } from './claude-api';
 import { extractWithClaudeCli } from './claude-cli';
 import { commitDraft } from './commit';
+import { linkTransfers } from '../enrich';
 import { BUILTIN_CSV_PROFILES } from './csv-profiles';
 import { recheckDraft } from './dedup';
 import { compareReading } from './reread';
@@ -440,21 +441,66 @@ export class ImportService extends EventEmitter {
   }
 
   /**
-   * Read a committed PDF or screenshot again with the current reader (and its check), and compare
-   * the reading with what the import recorded. Runs in the background; only while reading stored
-   * documents again is turned on. Nothing in the data changes.
+   * Read a committed document again and compare the reading with what the import recorded. Nothing
+   * in the data changes.
+   * - A PDF or screenshot: with the current reader (and its check), in the background, only while
+   *   reading stored documents again is turned on (it uses Claude).
+   * - A CSV or spreadsheet: parsed again on this machine with the layout that fits it now, at once,
+   *   whatever that setting says. Its rows pair with what they recorded by their line in the file.
    */
   async startReread(importId: string): Promise<Reread> {
-    if (!this.store.settings.extraction.rereadDocuments) throw new StoreError('Reading stored documents again is off: turn it on in Settings → Import & extraction.', 409);
     const record = await this.store.readImport(importId);
     if (!record || record.status !== 'committed' || !record.document.path) throw new StoreError('Only a committed import’s document can be read again.', 404);
     if (record.result?.nothingNew) throw new StoreError('This document was filed as adding nothing new: there is nothing recorded to compare with.', 409);
-    if (!['claude-cli', 'claude-api', 'ocr'].includes(record.extraction.engine ?? '')) throw new StoreError('Files parsed on this machine (CSV, OFX, QIF) are not read by Claude, so there is no newer reader to read them.', 409);
     if (this.rereads.get(importId)?.status === 'running') throw new StoreError('It is being read again already.', 409);
     const reread: Reread = { importId, status: 'running', startedAt: nowISO(), sections: [], notes: [], ...(record.extraction.engineVersion ? { previousVersion: record.extraction.engineVersion } : {}) };
+    if (record.extraction.engine === 'csv') {
+      await this.saveReread(reread);
+      await this.runCsvReread(record, reread);
+      return this.rereads.get(importId)!;
+    }
+    if (!['claude-cli', 'claude-api', 'ocr'].includes(record.extraction.engine ?? '')) throw new StoreError('OFX, QIF and Santander text files are parsed the same way every time: there is nothing new to read them with.', 409);
+    if (!this.store.settings.extraction.rereadDocuments) throw new StoreError('Reading stored documents again is off: turn it on in Settings → Import & extraction.', 409);
     await this.saveReread(reread);
     void this.limiter.run(() => this.runReread(record, reread));
     return reread;
+  }
+
+  /**
+   * A CSV or spreadsheet parsed again: with a layout that fits it now (one you saved, or a built-in
+   * bank's), else the columns you chose for this import, else columns worked out afresh.
+   */
+  private async runCsvReread(record: ImportRecord, reread: Reread): Promise<void> {
+    try {
+      const bytes = await readFile(this.store.documentAbsPath(record.document.path!));
+      const table = detectKind(record.document.fileName, bytes) === 'xlsx' ? sheetRows(bytes) : undefined;
+      const { rows } = table ?? readCsvRows(decodeText(bytes));
+      const match = findProfile(rows, this.store.csvProfiles);
+      const own = !/auto-detected|holdings export/.test(record.extraction.detail ?? '') && record.mapping?.profile ? { profile: record.mapping.profile, headerIndex: record.mapping.headerIndex, headerless: false } : undefined;
+      let layout: string;
+      let parsed: ReturnType<typeof parseWithProfile>;
+      if (match) {
+        parsed = parseWithProfile(rows, match);
+        layout = `the ${match.profile.name} layout`;
+      } else if (own) {
+        parsed = parseWithProfile(rows, own);
+        layout = 'the columns you chose';
+      } else {
+        if (parseHoldingsCsv(rows, record.document.fileName)) throw new Error('It lists holdings, not transactions: there are no rows to compare.');
+        const suggestion = suggestMapping(rows);
+        if (!suggestion) throw new Error('Could not find a date and description column in it.');
+        parsed = parseWithProfile(rows, { profile: suggestion.profile, headerIndex: suggestion.headerIndex, headerless: false });
+        layout = 'columns worked out afresh';
+      }
+      // The account it went to, as if you had pinned the upload to it.
+      const accountIds = record.result?.accountIds ?? [];
+      const ctx: ImportRecord = { ...record, ...(accountIds.length === 1 ? { hintAccountId: accountIds[0] } : {}) };
+      const draft = this.draftOf(ctx, { extraction: parsed.extraction, warnings: [] });
+      const { sections, notes } = compareReading(this.store, record, draft, { byRow: true });
+      await this.saveReread({ ...reread, status: 'done', finishedAt: nowISO(), engine: 'csv', engineVersion: table ? `${XLSX_ENGINE_VERSION}+${CSV_ENGINE_VERSION}` : CSV_ENGINE_VERSION, layout, sections, notes });
+    } catch (err) {
+      await this.saveReread({ ...reread, status: 'failed', finishedAt: nowISO(), error: (err as Error).message.slice(0, 500) });
+    }
   }
 
   private async runReread(record: ImportRecord, reread: Reread): Promise<void> {
@@ -496,7 +542,7 @@ export class ImportService extends EventEmitter {
     if (!reread || reread.status !== 'done') throw new StoreError('Nothing read again to apply.', 404);
     const record = await this.store.readImport(importId);
     if (!record) throw new StoreError('Unknown import', 404);
-    const note = `Read again with ${reread.engineVersion ?? 'the current reader'}${reread.model ? ` (${shortModel(reread.model)})` : ''}`;
+    const note = reread.layout ? `Read again with ${reread.layout}` : `Read again with ${reread.engineVersion ?? 'the current reader'}${reread.model ? ` (${shortModel(reread.model)})` : ''}`;
     const at = nowISO();
     for (const section of reread.sections) {
       if (key === `balance:${section.accountId}` && section.balance?.read && section.balance.changed && !section.balance.applied) {
@@ -515,7 +561,21 @@ export class ImportService extends EventEmitter {
         const fields = row.changes ?? [];
         const patch: Partial<Transaction> = { corrections: [...(current.corrections ?? []), ...fields.map((f) => ({ field: f, from: current[f], to: row.read![f], at, note }))] };
         for (const f of fields) (patch as Record<string, unknown>)[f] = row.read[f];
+        if (row.read.type && !current.type) patch.type = row.read.type;
+        // What was worked out from the old description or amount is worked out again, except what
+        // you set yourself and what a transfer link decided.
+        const account = this.store.account(current.accountId)!;
+        const categoriser = new Categoriser(this.store.rules, new CategoryIndex(this.store.categories), this.store.accounts, this.store.institutions);
+        const cat = categoriser.categorise({ accountId: account.id, description: row.read.description, amount: row.read.amount, bankCategory: current.bankCategory });
+        if (current.payeeSetBy !== 'user' && cat.payee) patch.payee = cat.payee;
+        if (!current.transferGroup && current.categorisedBy !== 'user' && current.categorisedBy !== 'transfer') {
+          patch.category = cat.category;
+          patch.categorisedBy = cat.categorisedBy;
+          patch.ruleId = cat.ruleId;
+        }
         await this.store.updateTransactions([{ id: current.id, patch }], `transaction: corrected from ${record.document.fileName} read again`);
+        // Now it says where it went, it may be one leg of a transfer already recorded.
+        if (!current.transferGroup && current.categorisedBy !== 'user') await linkTransfers(this.store, [current.id], `transaction: corrected from ${record.document.fileName} read again (transfer linked)`);
       } else if (row.kind === 'added' && row.read) {
         const account = this.store.account(section.accountId)!;
         const categoriser = new Categoriser(this.store.rules, new CategoryIndex(this.store.categories), this.store.accounts, this.store.institutions);

@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/server/config';
 import { sha256 } from '../src/server/fsutil';
 import { documentId } from '../src/server/ids';
+import { parseWithProfile, readCsvRows, suggestMapping } from '../src/server/ingest/csv';
 import { compareRows } from '../src/server/ingest/reread';
 import { ImportService } from '../src/server/ingest/service';
 import { WorkArea } from '../src/server/ingest/workarea';
@@ -129,6 +130,47 @@ describe('reading a stored document again', () => {
     await svc.forgetReread(id);
     await start();
     expect(svc.getReread(id)).toBeUndefined();
+  });
+
+  it('a CSV is parsed again on this machine with the layout that fits it now, whatever the setting', async () => {
+    const text = 'Date,Time,Transaction Type,Transaction Description,Amount,Currency,Balance\n12 August 2026,12:07,Transfer,To Revolving Line Account,-45.67,GBP,954.33\n3 September 2026,08:44,Payment,From A N OTHER - CHASE-TOPUP,500.00,GBP,"1,454.33"\n';
+    const bytes = Buffer.from(text);
+    // Committed with the type column taken for the description, as a guessed mapping once did.
+    const { rows } = readCsvRows(text);
+    const { type: _type, ...columns } = suggestMapping(rows)!.profile.columns;
+    const guessed = { ...suggestMapping(rows)!.profile, columns: { ...columns, description: ['Transaction Type'] } };
+    const record: ImportRecord = {
+      id: 'imp_20260930_073000_00c5',
+      status: 'review',
+      createdAt: '2026-09-30T07:30:00+01:00',
+      updatedAt: '2026-09-30T07:30:00+01:00',
+      origin: 'upload',
+      hintAccountId: 'current',
+      document: { id: documentId(sha256(bytes)), sha256: sha256(bytes), fileName: 'Statement.csv', mediaType: 'text/csv', size: bytes.length },
+      extraction: { engine: 'csv', engineVersion: 'csv-1', detail: 'auto-detected', warnings: [], raw: parseWithProfile(rows, { profile: guessed, headerIndex: 0, headerless: false }).extraction },
+    };
+    await work.init();
+    await work.saveFile(record.document, bytes);
+    await work.saveRecord(record);
+    await start();
+    await svc.refreshDraft(record.id);
+    await svc.commit(record.id);
+    // Since then the card payment was found recorded twice and this import's copy taken away.
+    const copy = store.transactions('current').find((x) => x.description === 'Transfer')!;
+    await store.deleteTransactions([copy.id], 'test: the copy taken away');
+    await store.addTransactions([{ ...t('tx_00000000000000b1', '2026-08-12', -45.67, 'To Credit Card', 'imp_20260829_100000_0a01'), balanceAfter: 954.33 }], 'test: the statement’s row');
+
+    const r = await svc.startReread(record.id);
+    expect(r).toMatchObject({ status: 'done', engine: 'csv', layout: 'the Chase UK layout' });
+    expect(r.sections[0]!.rows.map((x) => [x.kind, x.stored?.description, x.read?.description, x.changes ?? null])).toEqual([
+      // The same balance after it: the statement's row, not a row to add again.
+      ['same', 'To Credit Card', 'To Revolving Line Account', null],
+      ['changed', 'Payment', 'From A N OTHER - CHASE-TOPUP', ['description']],
+    ]);
+    await svc.applyReread(record.id, r.sections[0]!.rows[1]!.key);
+    const fixed = store.transactions('current').find((x) => x.description === 'From A N OTHER - CHASE-TOPUP')!;
+    expect(fixed).toMatchObject({ amount: 500, type: 'Payment', corrections: [expect.objectContaining({ field: 'description', from: 'Payment', to: 'From A N OTHER - CHASE-TOPUP', note: 'Read again with the Chase UK layout' })] });
+    expect(fixed.payee).not.toBe('Payment');
   });
 
   it('a reading the app stopped in the middle of says so after a restart', async () => {
