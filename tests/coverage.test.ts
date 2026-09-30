@@ -6,7 +6,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { computeBaseline } from '../src/server/analytics/baseline';
 import { BalanceEngine } from '../src/server/analytics/balances';
-import { complement, Coverage, coveredDays, intersect, mergeIntervals } from '../src/server/analytics/coverage';
+import { accountCoverage, complement, Coverage, coveredDays, intersect, mergeIntervals } from '../src/server/analytics/coverage';
 import { projections } from '../src/server/analytics/projections';
 import { previousPeriod, spending } from '../src/server/analytics/spending';
 import { transactionId } from '../src/server/ids';
@@ -96,6 +96,43 @@ describe('coverage-aware baselines', () => {
       }
     }
   }
+
+  it('runs a statement that does not print its start on from the one it opens after', async () => {
+    let k = 0;
+    const statement = async (opening: number, closing: number, rows: string[], balanceDate?: string) => {
+      const id = `imp_20260101_000000_${(k++).toString(16).padStart(4, '0')}`;
+      const transactions = rows.map((date, i) => ({ key: `t${i}`, include: true, status: 'new' as const, date, amount: -1, description: 'SHOP' }));
+      const section = { key: 's0', detected: {}, target: { mode: 'existing' as const, accountId: 'card' }, currency: 'GBP', openingBalance: opening, balance: closing, ...(balanceDate ? { balanceDate } : {}), recordBalance: true, transactions, recordHoldings: false, holdings: [] };
+      await store.saveImport(
+        {
+          id,
+          status: 'committed',
+          createdAt: stamp,
+          updatedAt: stamp,
+          origin: 'upload',
+          document: { id: `doc_${k.toString(16).padStart(16, '0')}`, sha256: '0'.repeat(64), fileName: 's.pdf', mediaType: 'application/pdf', size: 1 },
+          extraction: { warnings: [] },
+          draft: { documentType: 'credit_card_statement', sections: [section], figures: [], notes: [] },
+          result: { accountIds: ['card'], accountsCreated: [], transactionsAdded: rows.length, transactionsSkipped: 0, balancesAdded: 1, holdingsAdded: 0, figuresAdded: 0 },
+        },
+        'test import',
+      );
+    };
+    await statement(-50, -120, ['2026-01-05', '2026-01-28']);
+    // Opens on the January close: covered from the day after January's last row, not its own first.
+    await statement(-120, -80, ['2026-02-12', '2026-02-27']);
+    // A quiet month with no rows at all still covers up to its close.
+    await statement(-80, 0, [], '2026-03-28');
+    // Opens on a different balance: something is missing before it.
+    await statement(-999, -30, ['2026-04-20', '2026-04-27']);
+    // The balances chain but two cycles apart: a statement is missing between.
+    await statement(-30, -10, ['2026-06-15', '2026-06-28']);
+    expect(accountCoverage(store, store.account('card')!).intervals).toEqual([
+      { from: '2026-01-05', to: '2026-03-28' },
+      { from: '2026-04-20', to: '2026-04-27' },
+      { from: '2026-06-15', to: '2026-06-28' },
+    ]);
+  });
 
   it('averages over complete months, not the calendar (four months of data in a twelve-month window)', async () => {
     await months(['2026-05', '2026-06', '2026-07', '2026-08']);

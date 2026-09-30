@@ -106,7 +106,7 @@ export function buildDigest(store: Store, analytics: Analytics, opts: DigestOpti
         id: i.id,
         file: i.fileName,
         document: i.documentType ?? null,
-        sections: i.sections,
+        sections: i.sections.map((s) => ({ accountId: s.accountId, from: s.from, to: s.to })),
         added: { transactions: i.result?.transactionsAdded ?? 0, balances: i.result?.balancesAdded ?? 0, holdings: i.result?.holdingsAdded ?? 0, figures: i.result?.figuresAdded ?? 0 },
       })),
     },

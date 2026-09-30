@@ -4,7 +4,8 @@
 //
 // Sources, for ledger accounts:
 //   - each committed import covers its statement period for the account (periodStart–periodEnd),
-//     or the span of the rows it contained;
+//     or the span of the rows it contained; a statement that does not print its start, and opens
+//     on the closing balance of the statement before it, runs on from that one (importIntervals);
 //   - a transaction entered by hand covers its own day;
 //   - accounts with transactions but no import records (the demo, early data) are covered from
 //     their first to their last transaction.
@@ -12,6 +13,7 @@
 import { balanceModeOf } from '../../shared/accounts';
 import type { CoverageResponse } from '../../shared/api';
 import { addDays, diffDays, eachMonth, endOfMonth, maxDate, minDate, startOfMonth, today, type ISODate } from '../../shared/dates';
+import { toMinor } from '../../shared/money';
 import type { Account } from '../../shared/schema';
 import type { Store } from '../store';
 
@@ -39,6 +41,30 @@ export function mergeIntervals(list: Interval[]): Interval[] {
     } else out.push({ ...i });
   }
   return out;
+}
+
+/**
+ * Longest a statement that does not print its start can run on from the one before it: a monthly
+ * cycle, with room for closing dates that drift. Two cycles apart, a statement is missing between.
+ */
+export const STATEMENT_CYCLE_DAYS = 40;
+
+/**
+ * The periods an account's committed imports cover. A statement that does not print its start
+ * would begin at its first row, leaving the quiet days after the last statement uncovered. When it
+ * opens on the closing balance of the statement just before it (the latest-ending one with a
+ * closing balance), within one cycle, it runs from the day after that one's period: the two
+ * balances chain, so nothing happened in between that neither shows. Formulas: docs/FORMULAS.md §3.
+ */
+export function importIntervals(store: Store, accountId: string): Interval[] {
+  const sections = store.imports.flatMap((i) => i.sections.filter((s) => s.accountId === accountId));
+  const closed = sections.filter((s) => s.closing !== undefined).sort((a, b) => (a.to < b.to ? -1 : a.to > b.to ? 1 : 0));
+  return sections.map((s) => {
+    if (s.fromStated || s.opening === undefined) return { from: s.from, to: s.to };
+    const prev = closed.filter((p) => p.to < s.to).at(-1);
+    if (!prev || toMinor(prev.closing!) !== toMinor(s.opening) || diffDays(prev.to, s.to) > STATEMENT_CYCLE_DAYS) return { from: s.from, to: s.to };
+    return { from: minDate(s.from, addDays(prev.to, 1))!, to: s.to };
+  });
 }
 
 export function covers(intervals: Interval[], date: ISODate): boolean {
@@ -94,8 +120,7 @@ export function accountCoverage(store: Store, account: Account): AccountCoverage
   const txs = store.transactions(account.id);
   const empty: AccountCoverage = { accountId: account.id, intervals: [], from: null, to: null, source: 'none' };
   if (!isTransactionAccount(account)) return empty;
-  const fromImports: Interval[] = [];
-  for (const imp of store.imports) for (const s of imp.sections ?? []) if (s.accountId === account.id) fromImports.push({ from: s.from, to: s.to });
+  const fromImports = importIntervals(store, account.id);
   let intervals: Interval[];
   let source: AccountCoverage['source'];
   if (fromImports.length) {

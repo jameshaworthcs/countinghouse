@@ -57,7 +57,12 @@ in this order:
 **Coverage of an account** (`analytics/coverage.ts`) is the union of intervals:
 
 - each committed import's statement period for the account (`periodStart`–`periodEnd`), or the
-  span of its rows;
+  span of its rows (a statement with an opening balance and no rows: its closing day);
+  - a statement that does not print its start runs from the day after the statement before it
+    (the latest-ending one with a closing balance) when it opens on that one's closing balance and
+    ends within `STATEMENT_CYCLE_DAYS` = 40 of it (`importIntervals`). The balances chain, so a
+    quiet stretch before its first row is covered, not missing. Two cycles apart, a statement is
+    missing between, and it is not linked;
 - each hand-entered transaction's day;
 - for an account with transactions but no import records: from its first to its last transaction.
 
@@ -243,6 +248,15 @@ years), both paths grow at the median:
   - That holds whatever order the rows are stored in, as when two statements that overlap by a day
     each add some of its rows. When the chain shows no single end, the day's last row with a
     balance stands in.
+- A transaction counts from its own date, with one exception (`ledgerDates`): a row printed on
+  one statement but dated on or before the previous statement's close counts from the day after
+  that close, since that closing balance did not include it.
+  - Cards print a payment made on or just before the closing day on the next statement when it
+    posts late.
+  - Only when every such row of that statement is within `LATE_POSTING_DAYS` = 7 of the close; a
+    document with older rows spans several periods and its rows keep their dates.
+  - Rows with a printed running balance keep their dates: the balance pins them.
+  - Only the balance engine uses this day; the transaction's own date is unchanged everywhere else.
 - balance(D):
   - with an anchor on or before D, balance(D) = anchor + Σ tx in (anchor, D];
   - otherwise, rolled back from the next anchor;
@@ -272,7 +286,7 @@ years), both paths grow at the median:
 **Gaps:**
 
 - Consecutive strong anchors (not screenshots or approximate figures) with
-  anchor_b ≠ anchor_a + Σ tx in (a, b].
+  anchor_b ≠ anchor_a + Σ tx in (a, b], each transaction on the day it counts from.
 - The difference is what is unexplained.
 
 **Estate value on D:**

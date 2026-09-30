@@ -3,6 +3,8 @@
 // Ledger accounts (bank, savings, cards, loans, cash ISAs): known balances are anchors (statement
 // or screenshot snapshots, and running balances printed next to transactions). Between anchors the
 // balance moves exactly with transactions: balance(D) = anchor + Σ transactions in (anchor, D].
+// A row printed on the statement after the close it is dated before counts from after that close
+// (ledgerDates).
 // Before the first anchor it is rolled back from the next one. With no anchors at all it is the
 // running sum of transactions, flagged as estimated.
 //
@@ -13,7 +15,7 @@
 
 import { ACCOUNT_TYPE_META, balanceModeOf } from '../../shared/accounts';
 import { EXTERNAL_FLOW_CATEGORIES } from '../../shared/categories';
-import { diffDays, today, type ISODate } from '../../shared/dates';
+import { addDays, diffDays, today, type ISODate } from '../../shared/dates';
 import { fromMinor, toMinor } from '../../shared/money';
 import type { Account, Settings } from '../../shared/schema';
 import type { Store } from '../store';
@@ -135,6 +137,48 @@ function firstAnchorAfter(anchors: Anchor[], d: ISODate): Anchor | undefined {
   return anchors.find((a) => a.date > d);
 }
 
+/**
+ * How far before a statement's close a payment printed on the next statement may be dated. Cards
+ * print a payment made on (or just before) the closing day on the next statement when it posts
+ * late; a document with rows older than this spans more than one statement period.
+ */
+export const LATE_POSTING_DAYS = 7;
+
+/**
+ * The day each transaction counts from in a ledger balance (docs/FORMULAS.md §9): its own date,
+ * except that a row printed on one statement but dated on or before the previous statement's close
+ * counts from the day after that close, since that closing balance did not include it. Rows with a
+ * printed running balance keep their date: the balance pins them to it.
+ */
+export function ledgerDates<T extends { date: ISODate; balanceAfter?: number | undefined; source: { importId?: string | undefined } }>(
+  txs: T[],
+  snaps: { date: ISODate; kind: string; approximate?: boolean | undefined; source: { importId?: string | undefined } }[],
+): (T & { countsFrom: ISODate })[] {
+  const closes = new Map<string, ISODate>();
+  for (const s of snaps) {
+    const id = s.source.importId;
+    if (s.kind !== 'statement' || s.approximate || !id) continue;
+    const had = closes.get(id);
+    if (!had || s.date > had) closes.set(id, s.date);
+  }
+  const sorted = [...new Set(closes.values())].sort();
+  const previousClose = (close: ISODate) => sorted.filter((d) => d < close).at(-1);
+  // A statement's rows count after the previous close only when every row dated on or before it is
+  // within LATE_POSTING_DAYS of it: otherwise the document covers more than one period.
+  const floor = new Map<string, ISODate>();
+  for (const [id, close] of closes) {
+    const prev = previousClose(close);
+    if (!prev) continue;
+    const early = txs.filter((t) => t.source.importId === id && t.balanceAfter === undefined && t.date <= prev);
+    if (early.length && early.every((t) => diffDays(t.date, prev) <= LATE_POSTING_DAYS)) floor.set(id, addDays(prev, 1));
+  }
+  const out = txs.map((t) => {
+    const from = t.source.importId && t.balanceAfter === undefined ? floor.get(t.source.importId) : undefined;
+    return { ...t, countsFrom: from && t.date < from ? from : t.date };
+  });
+  return out.sort((a, b) => (a.countsFrom < b.countsFrom ? -1 : a.countsFrom > b.countsFrom ? 1 : 0));
+}
+
 export function fxRate(currency: string, settings: Settings): number | null {
   if (currency === 'GBP') return 1;
   return settings.fx[currency] ?? null;
@@ -176,7 +220,7 @@ export class BalanceEngine {
       this.data.set(account.id, {
         account,
         mode,
-        tx: buildSeries(txs),
+        tx: buildSeries(mode === 'ledger' ? ledgerDates(txs, snaps).map((t) => ({ date: t.countsFrom, amount: t.amount })) : txs),
         flows: buildSeries(flows),
         anchors: mode === 'market' ? sortedAnchors.filter((a) => a.source !== 'running') : sortedAnchors,
         firstDate,

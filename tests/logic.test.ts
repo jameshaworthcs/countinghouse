@@ -246,6 +246,40 @@ describe('store, balances and analytics', () => {
     expect(new BalanceEngine(store).gaps('current')).toEqual([{ from: '2026-10-02', to: '2026-10-05', difference: -12 }]);
   });
 
+  it('counts a payment printed on the next statement after the close it missed', async () => {
+    await store.setAccounts([...store.accounts, acct('card', 'credit_card')]);
+    const on = (importId: string) => ({ source: { importId } });
+    const close = (id: string, importId: string, date: string, balance: number) => ({ id, accountId: 'card', date, balance, currency: 'GBP', kind: 'statement' as const, ...on(importId), createdAt: stamp });
+    const [a, b, c] = ['imp_20260303_000000_aaaa', 'imp_20260403_000000_bbbb', 'imp_20260502_000000_cccc'];
+    await store.addTransactions(
+      [
+        tx('card', '2026-02-10', -100, 'SHOP A', on(a)),
+        // Made two days before A closed and on the day B closed, but printed on the next statement.
+        tx('card', '2026-03-01', -5, 'CAFE B', on(b)),
+        tx('card', '2026-03-20', 100, 'PAYMENT RECEIVED', on(b)),
+        tx('card', '2026-04-03', -10, 'SHOP C', on(b)),
+        tx('card', '2026-04-03', -6.41, 'CAFE D', on(c)),
+        tx('card', '2026-04-20', -50, 'SHOP E', on(c)),
+      ],
+      'test',
+    );
+    await store.addBalances([close('bal_00000000000000a1', a, '2026-03-03', -100), close('bal_00000000000000a2', b, '2026-04-03', -15), close('bal_00000000000000a3', c, '2026-05-02', -71.41)], 'test');
+    let engine = new BalanceEngine(store);
+    expect(engine.gaps('card')).toEqual([]);
+    // Each closing day's balance is the statement's.
+    expect(engine.balanceOn('card', '2026-03-03')!.value).toBe(-100);
+    expect(engine.balanceOn('card', '2026-04-03')!.value).toBe(-15);
+    expect(engine.balanceOn('card', '2026-04-04')!.value).toBe(-21.41);
+
+    // A document whose rows reach weeks before the previous close covers several periods: its rows
+    // keep their dates, so what the statements do not explain still shows.
+    const d = 'imp_20260630_000000_dddd';
+    await store.addTransactions([tx('card', '2026-04-10', -20, 'SHOP F', on(d)), tx('card', '2026-06-15', -10, 'SHOP G', on(d))], 'test');
+    await store.addBalances([close('bal_00000000000000a4', d, '2026-06-30', -81.41)], 'test');
+    engine = new BalanceEngine(store);
+    expect(engine.gaps('card')).toEqual([{ from: '2026-04-03', to: '2026-05-02', difference: 20 }]);
+  });
+
   it('values market accounts from valuations plus contributions', async () => {
     await store.addBalances([{ id: 'bal_0000000000000001', accountId: 'isa', date: '2026-06-30', balance: 10_000, currency: 'GBP', kind: 'screenshot', source: {}, createdAt: stamp }], 'test');
     await store.addTransactions([tx('isa', '2026-07-15', 500, 'Contribution', { category: 'contribution' }), tx('isa', '2026-07-20', -4, 'Platform fee', { category: 'investment-fee' })], 'test');

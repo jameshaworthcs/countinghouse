@@ -826,3 +826,24 @@ reading the history would take it as "these are not card payments".
 - **Each proposal gets a fresh page**, shown at once from the list while it loads. The same page had
   been reused, so the proposal just decided could show for a moment under the next one's buttons.
   Its unticked changes and a typed reason for dismissing also carried to the next one.
+
+## 2026-09-30: A statement's rows count in its own period
+
+The Aqua card showed small balance gaps and "missing" stretches, though its
+statements chain from the first to today. Two causes:
+
+- **A payment made on a statement's closing day is sometimes printed on the next statement.** By
+  date it fell before the close that did not include it, so one period came up short and the next
+  over by the same amount.
+  - The balance engine now counts such a row from the day after the previous close (`ledgerDates`,
+    FORMULAS §9). The transaction keeps its date everywhere else.
+  - Only rows within 7 days of that close, and only when all such rows of the document are, so a
+    document spanning months keeps its dates. Rows with a running balance keep their dates.
+  - Considered: tolerating gaps that cancel out over consecutive periods. That hides a real
+    missing payment offset by a later one, and leaves the closing day's balance wrong.
+- **Most statements were read without a period start**, so each covered only its first to its last
+  row, and a quiet week after a close read as missing.
+  - A statement that opens on the closing balance of the one before it, within 40 days, now runs
+    on from it (`importIntervals`, FORMULAS §3). A statement with no rows covers its closing day.
+  - Considered: asking the reader for the period start again. It is not printed on every
+    statement, and re-reading costs the owner's plan; the chained balances are already stored.

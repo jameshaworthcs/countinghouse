@@ -22,7 +22,7 @@ import {
   type TaxYear,
 } from '../../shared/uk';
 import type { Store } from '../store';
-import { covers, mergeIntervals, type Interval } from './coverage';
+import { covers, importIntervals, mergeIntervals, type Interval } from './coverage';
 import { isPayslipFigure, pairPay, payerKey } from './pay';
 
 const inYear = (t: { date: string }, ty: TaxYear) => t.date >= ty.start && t.date <= ty.end;
@@ -57,8 +57,7 @@ const TRANSFER_OUT = new Set(['savings-transfer', 'investment-transfer', 'transf
  * of its transactions when it has no import records.
  */
 export function wrapperDataSpan(store: Store, account: Account): Interval[] {
-  const intervals: Interval[] = [];
-  for (const imp of store.imports) for (const s of imp.sections ?? []) if (s.accountId === account.id) intervals.push({ from: s.from, to: s.to });
+  const intervals = importIntervals(store, account.id);
   const txs = store.transactions(account.id);
   if (!intervals.length && txs.length) intervals.push({ from: txs[0]!.date, to: txs[txs.length - 1]!.date });
   return mergeIntervals(intervals);

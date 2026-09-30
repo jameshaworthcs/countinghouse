@@ -89,8 +89,12 @@ export interface ImportSummary {
   /** What the document was (a P60, a payslip, a statement…), as read. */
   documentType?: string | undefined;
   result?: ImportRecord['result'];
-  /** The period each account's section covered (statement period, or the span of its rows). */
-  sections: { accountId: string; from: string; to: string }[];
+  /**
+   * The period each account's section covered (statement period, or the span of its rows), with
+   * its opening and closing balances when read, and whether the start was printed (`fromStated`).
+   * Coverage links a statement to the one before it by these (analytics/coverage.ts).
+   */
+  sections: { accountId: string; from: string; to: string; fromStated?: boolean; opening?: number; closing?: number }[];
   path: string;
 }
 
@@ -1137,9 +1141,21 @@ function sectionsOf(r: ImportRecord): ImportSummary['sections'] {
     if (s.target.mode === 'skip') continue;
     const accountId = r.result?.sections?.find((x) => x.key === s.key)?.accountId ?? (s.target.mode === 'existing' ? s.target.accountId : s.target.account.id);
     const dates = s.transactions.map((t) => t.date).sort();
-    const from = s.periodStart ?? dates[0];
-    const to = s.periodEnd ?? dates[dates.length - 1];
-    if (from && to && from <= to) out.push({ accountId, from, to });
+    // A statement with an opening balance and no rows still covers the day it closed; coverage
+    // can link it back to the statement before it.
+    const to = s.periodEnd ?? dates[dates.length - 1] ?? (s.openingBalance !== undefined ? s.balanceDate : undefined);
+    const from = s.periodStart ?? dates[0] ?? to;
+    if (!from || !to || from > to) continue;
+    // With an investment app's activity list, the balances are its cash, and so is `cash`.
+    const closing = s.cashLedger ? s.cash : s.balance;
+    out.push({
+      accountId,
+      from,
+      to,
+      ...(s.periodStart ? { fromStated: true } : {}),
+      ...(s.openingBalance !== undefined ? { opening: s.openingBalance } : {}),
+      ...(closing !== undefined ? { closing } : {}),
+    });
   }
   return out;
 }
