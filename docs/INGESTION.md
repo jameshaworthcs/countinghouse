@@ -164,6 +164,10 @@ on every import):
   certificate numbers, scheduled payments, payees. Such a list usually repeats what the account's
   own transactions show, or concerns money that went elsewhere, and it seldom says which. None of
   its rows are transactions or holdings, and no missing day is filled in.
+- **A confirmation of one payment is that payment** (`extract-10`). A "payment sent" screen or a
+  deposit letter gives the one payment it confirms, dated as shown ("Today" from the capture
+  date), described by its payee and reference. A payment set up for a later day is scheduled, and
+  gives nothing.
 - **Notes say only what the document shows**: never where money went or what became of it unless
   the document says so in words. (`extract-8` taught the opposite by example, "Premium Bond prizes
   paid to your bank", and readers repeated it of a prize history that said no such thing.)
@@ -488,7 +492,7 @@ No analyst job follows a dismissal.
 
 ## Reading a stored document again
 
-The reader improves (`PROMPT_VERSION`: `extract-4` … `extract-9`), and a document read by an earlier
+The reader improves (`PROMPT_VERSION`: `extract-4` … `extract-10`), and a document read by an earlier
 version may hold something it missed or misread. A CSV whose columns were worked out automatically
 may have been read with the wrong ones, and a layout may fit it now. A committed document can be
 read again from its page (Import → History → the document → *Read it again*). The Import page lists

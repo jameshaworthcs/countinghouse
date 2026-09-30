@@ -969,3 +969,18 @@ category alone.
 - **A statement's or your own balance outranks a screenshot's on the same day** in the balance
   engine. The screenshot's balance had replaced the owner's for the same day, and gap checks skip
   screenshots, so September's gap went unreported.
+
+## 2026-09-30: A confirmation of one payment is that payment (`extract-10`)
+
+A "payment sent" screenshot (£5.00 from a current account ending 1234 to the owner's
+Santander account, reference TOPUP, dated Today) recorded nothing. Both readers called it "not a
+list of account movements": `extract-9`'s rule 5 said only the account's own list of movements
+gives transactions, and said nothing of a screen or letter confirming one payment. The same reader
+had recorded a deposit confirmation letter's deposit that morning, so the outcome was a coin toss.
+
+- **Rule 5 now says so**: a confirmation or receipt of one payment made or received gives that
+  payment, dated as shown, described by its payee and reference (so a statement's row later finds
+  it as a duplicate, `dedup.ts`). A payment set up for a later day is scheduled and gives nothing,
+  as scheduled payments in a list already did.
+- Considered: leaving it to the draft (a confirmation's figures read into a row in code). The
+  reader already returns rows and dates "Today"; the gap was only the rule.

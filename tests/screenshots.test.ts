@@ -143,10 +143,15 @@ describe('when a screenshot was taken', () => {
 
 describe('the reader: views that are not the account’s movements', () => {
   it('no longer teaches that prizes go to another account, and says a list is not movements', () => {
-    expect(PROMPT_VERSION).toBe('extract-9');
+    expect(PROMPT_VERSION).toBe('extract-10');
     expect(SYSTEM_PROMPT).not.toMatch(/paid to a bank account/i);
     expect(SYSTEM_PROMPT).toMatch(/never where money went/);
     expect(SYSTEM_PROMPT).toMatch(/Premium Bond numbers[^.]*are not holdings/);
+  });
+
+  it('reads a confirmation of one payment as that payment, and a scheduled one as nothing (extract-10)', () => {
+    expect(SYSTEM_PROMPT).toMatch(/confirmation or receipt of one payment[^.]*is a movement: it gives that one payment as a transaction/);
+    expect(SYSTEM_PROMPT).toMatch(/A payment set up for a later day is scheduled, not a movement/);
   });
 
   it('asks what a document with nothing to record shows, as a required, nullable field', () => {
