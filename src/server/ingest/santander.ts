@@ -7,11 +7,17 @@
 //   Amount: -12.34
 //   Balance: 1234.56
 
-import { parseFlexibleDate } from '../../shared/dates';
+import { formatDate, parseFlexibleDate } from '../../shared/dates';
 import { parseAmount, roundMoney } from '../../shared/money';
 import { ExtractionSchema, type ExtractedTransaction, type Extraction } from '../../shared/schema';
 
-export const SANTANDER_ENGINE_VERSION = 'santander-txt-1';
+export const SANTANDER_ENGINE_VERSION = 'santander-txt-2';
+
+/**
+ * Santander's text export holds at most this many transactions. A full file of them stops at its
+ * oldest row, however far back its header's "From" date is: the rest of the period is not in it.
+ */
+export const SANTANDER_MAX_ROWS = 600;
 
 export function parseSantanderTxt(text: string): Extraction {
   const lines = text.replace(/\u00a0/g, ' ').split(/\r?\n/);
@@ -73,6 +79,15 @@ export function parseSantanderTxt(text: string): Extraction {
   if (txs.length > 1 && txs[0]!.date > txs[txs.length - 1]!.date) txs.reverse();
   const last = txs[txs.length - 1];
   const first = txs[0];
+  // A full export covers from its oldest row, not from its header's date: saying otherwise would
+  // count days it does not have as covered (docs/INGESTION.md, the formats table).
+  const from = parseFlexibleDate(period?.[1], 'DMY');
+  const cut = records.length >= SANTANDER_MAX_ROWS && first && from && first.date > from;
+  if (cut) {
+    notes.push(
+      `Santander exports at most ${SANTANDER_MAX_ROWS} transactions, and this file has ${records.length}, so it starts on ${formatDate(first.date)}, not ${formatDate(from)} as its header says. Transactions between those dates are not in it: download that period separately.`,
+    );
+  }
   return ExtractionSchema.parse({
     documentType: 'bank_statement',
     institutionName: 'Santander UK',
@@ -82,7 +97,7 @@ export function parseSantanderTxt(text: string): Extraction {
         accountType: 'current',
         last4: account?.[1]?.replace(/\D/g, '').slice(-4) || null,
         currency: 'GBP',
-        periodStart: parseFlexibleDate(period?.[1], 'DMY'),
+        periodStart: cut ? first.date : from,
         periodEnd: parseFlexibleDate(period?.[2], 'DMY'),
         openingBalance: first?.balanceAfter != null ? roundMoney(first.balanceAfter - first.amount) : null,
         closingBalance: last?.balanceAfter ?? null,

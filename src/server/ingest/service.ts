@@ -6,7 +6,6 @@ import path from 'node:path';
 import { slugify } from '../../shared/accounts';
 import type { Reread } from '../../shared/api';
 import { CategoryIndex } from '../../shared/categories';
-import { Categoriser } from '../../shared/categorise';
 import { today } from '../../shared/dates';
 import { sectionChecks } from '../../shared/review';
 import {
@@ -19,6 +18,7 @@ import {
   type ImportRecord,
   type Transaction,
 } from '../../shared/schema';
+import { categoriserFor } from '../categoriser';
 import type { Config } from '../config';
 import { Limiter, nowISO, sha256 } from '../fsutil';
 import { balanceId, documentId, importId, transactionId } from '../ids';
@@ -569,7 +569,7 @@ export class ImportService extends EventEmitter {
         // What was worked out from the old description or amount is worked out again, except what
         // you set yourself and what a transfer link decided.
         const account = this.store.account(current.accountId)!;
-        const categoriser = new Categoriser(this.store.rules, new CategoryIndex(this.store.categories), this.store.accounts, this.store.institutions);
+        const categoriser = categoriserFor(this.store);
         const cat = categoriser.categorise({ accountId: account.id, description: row.read.description, amount: row.read.amount, bankCategory: current.bankCategory });
         if (current.payeeSetBy !== 'user' && cat.payee) patch.payee = cat.payee;
         if (!current.transferGroup && current.categorisedBy !== 'user' && current.categorisedBy !== 'transfer') {
@@ -582,7 +582,7 @@ export class ImportService extends EventEmitter {
         if (!current.transferGroup && current.categorisedBy !== 'user') await linkTransfers(this.store, [current.id], `transaction: corrected from ${record.document.fileName} read again (transfer linked)`);
       } else if (row.kind === 'added' && row.read) {
         const account = this.store.account(section.accountId)!;
-        const categoriser = new Categoriser(this.store.rules, new CategoryIndex(this.store.categories), this.store.accounts, this.store.institutions);
+        const categoriser = categoriserFor(this.store);
         const cat = categoriser.categorise({ accountId: account.id, description: row.read.description, amount: row.read.amount });
         let occurrence = 0;
         let id = transactionId(account.id, row.read.date, row.read.amount, row.read.description, occurrence, `${importId}:reread`);

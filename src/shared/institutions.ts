@@ -66,8 +66,9 @@ export const INSTITUTION_CATALOG: CatalogInstitution[] = [
   I('amex', 'American Express', 'card_issuer', 'american\\s*express|\\bamex\\b'),
   I('capital-one', 'Capital One', 'card_issuer', '\\bcapital\\s*one\\b'),
   // Narrow on purpose: "PAYPAL *SHOP" on a bank statement is a purchase, not a payment to your
-  // PayPal Credit account; "AQUA" alone is a restaurant as often as a card.
-  I('aqua', 'Aqua (NewDay)', 'card_issuer', '\\baqua\\s*card\\b|\\bnewday\\b'),
+  // PayPal Credit account; "AQUA" alone is a restaurant as often as a card. Santander
+  // prints the card's direct debit as "AQUA CREDIT CARD".
+  I('aqua', 'Aqua (NewDay)', 'card_issuer', '\\baqua\\s*(?:credit\\s*)?card\\b|\\bnewday\\b'),
   I('paypal-credit', 'PayPal Credit', 'card_issuer', '\\bpaypal\\s*credit\\b'),
   I('zable', 'Zable (Lendable)', 'card_issuer', '\\bzable\\b|\\blendable\\b'),
   I('ns-and-i', 'NS&I', 'government', '\\bns\\s*&\\s*i\\b|national\\s*savings'),

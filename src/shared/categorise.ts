@@ -108,18 +108,51 @@ export function ruleMatches(rule: Rule, input: CategoriseInput, payee?: string):
   return new Categoriser([rule], new CategoryIndex([]), [], []).matchRule(rule, input, payee);
 }
 
+/**
+ * Long numbers in a description: runs of 7 or more digits, with a card number printed in fours
+ * ("4000 1234 5678 9010") joined up. Nothing else is joined, so a date ("ON 14-03-2026") never
+ * becomes one, and a sort code and account ("12-34-56 00012345678") leave the account number whole.
+ */
+export function longNumbers(description: string): string[] {
+  const joined = description.replace(/\b\d{4}(?: \d{4})+\b/g, (m) => m.replace(/ /g, ''));
+  return (joined.match(/\d{7,}/g) ?? []).filter((n) => !/^(\d)\1+$/.test(n));
+}
+
+/**
+ * Money to or from you by name ("TO SAM TAYLOR", "FROM S R TAYLOR", "FROM TAYLOR S"): from the
+ * name in your profile. Only after "to" or "from", so a payer naming you as the payee ("BANK GIRO
+ * CREDIT REF ACME, S TAYLOR") is not taken for your own money.
+ */
+export function ownNamePattern(name: string | undefined): RegExp | null {
+  const parts = (name ?? '').trim().split(/\s+/).filter((p) => /^[A-Za-z][A-Za-z'-]+$/.test(p));
+  if (parts.length < 2) return null;
+  const [first, ...rest] = parts.map(escapeRegex) as [string, ...string[]];
+  const last = rest[rest.length - 1]!;
+  const middles = rest.slice(0, -1);
+  const initials = parts.slice(0, -1).map((p) => p[0]!);
+  const variants = [
+    `${first}\\s+${middles.map((m) => `(?:${m}\\s+)?`).join('')}${last}`,
+    `${initials[0]}\\.?\\s*${initials.slice(1).map((i) => `(?:${i}\\.?\\s*)?`).join('')}${last}`,
+    `${last},?\\s+(?:${first}|${initials[0]}\\b)`,
+  ];
+  return new RegExp(`\\b(?:to|from)\\s+(?:(?:mr|mrs|ms|miss|mx|dr)\\.?\\s+)?(?:${variants.join('|')})\\b`, 'i');
+}
+
 export class Categoriser {
   private readonly rules: CompiledRule[];
   private readonly categories: CategoryIndex;
   private readonly accountsById: Map<string, Account>;
-  private readonly ownMatchers: { account: Account; aliases: RegExp[]; institution: RegExp[]; ambiguous: boolean }[];
+  private readonly ownMatchers: { account: Account; aliases: RegExp[]; institution: RegExp[]; ambiguous: boolean; number?: string }[];
+  private readonly ownName: RegExp | null;
 
-  constructor(rules: Rule[], categories: CategoryIndex, accounts: Account[], institutions: Institution[]) {
+  /** `ownerName`: the name in your profile, so money to or from you by name is seen as a transfer. */
+  constructor(rules: Rule[], categories: CategoryIndex, accounts: Account[], institutions: Institution[], opts: { ownerName?: string | undefined } = {}) {
     this.rules = rules
       .filter((r) => r.enabled)
       .sort((a, b) => a.priority - b.priority || a.createdAt.localeCompare(b.createdAt))
       .map(compileRule);
     this.categories = categories;
+    this.ownName = ownNamePattern(opts.ownerName);
     this.accountsById = new Map(accounts.map((a) => [a.id, a]));
     const instById = new Map(institutions.map((i) => [i.id, i]));
     this.ownMatchers = accounts
@@ -140,9 +173,11 @@ export class Categoriser {
           if (catalog) institution.push(new RegExp(catalog.match, 'i'));
           else if (inst && inst.name.length >= 4) institution.push(new RegExp(`\\b${escapeRegex(inst.name)}\\b`, 'i'));
         }
-        return { account, aliases, institution, ambiguous: Boolean(catalog?.ambiguous) };
+        // Its number, as another bank prints it: the last digits you gave for it.
+        const number = account.last4 && /^\d{4,6}$/.test(account.last4) ? account.last4 : undefined;
+        return { account, aliases, institution, ambiguous: Boolean(catalog?.ambiguous), ...(number ? { number } : {}) };
       })
-      .filter((m) => m.aliases.length + m.institution.length > 0);
+      .filter((m) => m.aliases.length + m.institution.length > 0 || m.number);
   }
 
   matchRule(rule: Rule, input: CategoriseInput, payee?: string): boolean {
@@ -159,19 +194,25 @@ export class Categoriser {
   }
 
   /**
-   * Own accounts (other than this one) that a description refers to. Institution names are only
-   * used outside investment/pension accounts, where platform names also appear in fund names.
+   * Own accounts (other than this one) that a description refers to.
+   * - An account's number wins: a long number ending in its last digits (a sort code and account,
+   *   a card number in a direct debit's reference, "EAV1234567") names that one account.
+   * - Otherwise its aliases, and its institution's name. Institution names are only used outside
+   *   investment/pension accounts, where platform names also appear in fund names.
    */
   ownAccountsMentioned(accountId: string, description: string, useInstitutions = true): Account[] {
+    const others = this.ownMatchers.filter((m) => m.account.id !== accountId);
+    const numbers = longNumbers(description);
+    const byNumber = numbers.length ? others.filter((m) => m.number && numbers.some((n) => n.endsWith(m.number!))) : [];
+    if (byNumber.length) return byNumber.map((m) => m.account);
     const text = normaliseDescription(description);
     const transferish = TRANSFER_WORDS.test(text);
-    return this.ownMatchers
-      .filter(
-        (m) =>
-          m.account.id !== accountId &&
-          (m.aliases.some((re) => re.test(text)) || (useInstitutions && (!m.ambiguous || transferish) && m.institution.some((re) => re.test(text)))),
-      )
-      .map((m) => m.account);
+    return others.filter((m) => m.aliases.some((re) => re.test(text)) || (useInstitutions && (!m.ambiguous || transferish) && m.institution.some((re) => re.test(text)))).map((m) => m.account);
+  }
+
+  /** Does the description pay you, or come from you, by name? */
+  namesOwner(description: string): boolean {
+    return this.ownName?.test(description) ?? false;
   }
 
   categorise(input: CategoriseInput): CategoriseResult {
@@ -210,6 +251,12 @@ export class Categoriser {
       };
       if (mentioned.length === 1 && only) res.counterpartyAccountId = only.id;
       return res;
+    }
+
+    // 2b. Money to or from you by name, not saying which account: your money moving between your
+    // own accounts, not spending or income. Linking it to the other side says which.
+    if (!isWrapper && this.namesOwner(input.description)) {
+      return { payee: fallbackPayee, category: account?.type === 'credit_card' ? 'credit-card-payment' : 'transfer', categorisedBy: 'transfer' };
     }
 
     // 3. Flows inside wrapper accounts.

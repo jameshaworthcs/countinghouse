@@ -752,3 +752,45 @@ to decide.
   an import's link does.
 - **Dismissed means not again**: the same changes are refused while they wait or once dismissed,
   and the owner's reason is kept for agents to read.
+
+## 2026-09-30: Transfers are matched by what the descriptions say
+
+The wrong links the proposals had to fix came from how transfers were matched. Both matchers (at
+draft time, and when a commit links rows to ones already stored) took the closest opposite amount
+within 4 days. They took the first when several fitted, and never read the descriptions:
+- a card payment to AJ Bell became a Chase saver deposit;
+- a payment whose description gave Santander's sort code and account became another Chase deposit;
+- a Lifetime ISA deposit took a bank transfer "REFERENCE SAVING".
+
+Payments to the owner's own name ("TO … REFERENCE SAVING", "TOPUP") were never counted as
+transfers at all: many such rows counted as spending and income.
+
+- **Accounts are recognised by their numbers**: a long number in a description ending in an
+  account's last digits (a sort code and account, a card number in a direct debit's reference) names
+  that account. It wins over a bank's name, which several accounts can share. Digits are joined only
+  in card-style fours, so a date never reads as a number. Aqua's direct debit reads "AQUA CREDIT
+  CARD", which its pattern now takes.
+- **Money to or from the owner by name is a transfer**, from the name in the profile, only after
+  "to" or "from": a payer naming the owner as payee is not the owner's own money.
+- **One evidence rule for both matchers** (`transferEvidence`):
+  - A row naming the other's account counts most, then the owner's name and transfer categories.
+  - A row naming only other accounts of the owner's rules a pair out.
+  - Pairs are taken best evidence first, then closest date, so the result does not depend on which
+    statement arrives first.
+- **Existing links are left alone**: re-linking history would change data the owner has not seen.
+  Wrong links are fixed through proposals.
+- **A letter that restates payments is a possible duplicate**. From a document that is not a list
+  of transactions, a row that two or three recorded rows add up to (within 3 days, from £100) is
+  flagged. A deposit made in two payments had been recorded a third time from its confirmation
+  letter.
+- **Running balances close a day where their chain ends.** Where two Santander exports overlap by a
+  day, the last stored row of that day was not the day's last payment. That made two false
+  "gaps" that were not there.
+- **A Santander export of 600 rows starts at its oldest row.** Santander exports at most 600
+  transactions, so a full file stops short of its header's "From" date. The header's date would
+  have counted the missing months as covered.
+- **Account dates can be edited** (the app's own advice said to correct a closing date on the
+  account page, which had no field for it). A closing date closes the account; clearing it reopens
+  it. A closed account's data is expected only up to its closing date on the Tax page.
+- **A new account made on the review page is named from its bank and name**, not
+  `new-account-<n>`.

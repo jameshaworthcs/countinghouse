@@ -3,10 +3,11 @@
 
 import { ACCOUNT_TYPE_META, balanceModeOf } from '../../shared/accounts';
 import { findInstitution } from '../../shared/institutions';
-import { CategoryIndex } from '../../shared/categories';
-import { Categoriser, isWrapperAccount, transferLegCategory } from '../../shared/categorise';
+import { isWrapperAccount, transferLegCategory } from '../../shared/categorise';
 import { dateOf, diffDays, today } from '../../shared/dates';
 import { toMinor } from '../../shared/money';
+import { categoriserFor } from '../categoriser';
+import { transferEvidence, transferReader, type TransferSide } from '../enrich';
 import type {
   Account,
   AccountType,
@@ -91,24 +92,34 @@ const DATE_SOURCE_WORDS: Record<DateSource, string> = {
 
 const TRANSFER_CATEGORIES = new Set(['transfer', 'credit-card-payment', 'savings-transfer', 'investment-transfer', 'contribution', 'withdrawal']);
 
-/** Candidate other leg of a transfer: opposite amount, within ±4 days, in another own account. */
-function findTransferMatch(accountId: string, date: string, amount: number, others: Transaction[], taken: Set<string>): Transaction | undefined {
-  let best: { t: Transaction; days: number } | undefined;
-  const want = -toMinor(amount);
+/** Documents that list each payment: none of their rows restates others. */
+const TRANSACTION_LISTS = new Set<Extraction['documentType']>(['bank_statement', 'credit_card_statement', 'savings_statement', 'investment_statement', 'pension_statement', 'account_overview_screenshot', 'transactions_screenshot', 'csv_export']);
+
+/**
+ * The other leg of a transfer already stored: the opposite amount, within ±4 days, in another of
+ * your accounts, that the two descriptions say is the same money (transferEvidence, as when an
+ * import is linked at commit). The best evidence wins, then the closest date.
+ */
+function findTransferMatch(row: TransferSide & { date: string; amount: number }, others: Transaction[], taken: Set<string>, reader: ReturnType<typeof transferReader>): Transaction | undefined {
+  let best: { t: Transaction; score: number; days: number } | undefined;
+  const want = -toMinor(row.amount);
   for (const t of others) {
-    if (t.accountId === accountId || t.transferGroup || taken.has(t.id)) continue;
+    if (t.accountId === row.accountId || t.transferGroup || taken.has(t.id)) continue;
     if (toMinor(t.amount) !== want) continue;
-    const days = Math.abs(diffDays(t.date, date));
+    const days = Math.abs(diffDays(t.date, row.date));
     if (days > 4) continue;
-    if (!best || days < best.days) best = { t, days };
+    const [out, into] = row.amount < 0 ? [row, t] : [t, row];
+    const score = transferEvidence(out, into, reader.named, reader.ownName);
+    if (score === null) continue;
+    if (!best || score > best.score || (score === best.score && days < best.days)) best = { t, score, days };
   }
   return best?.t;
 }
 
 export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
   const { store } = ctx;
-  const categories = new CategoryIndex(store.categories);
-  const categoriser = new Categoriser(store.rules, categories, store.accounts, store.institutions);
+  const categoriser = categoriserFor(store);
+  const reader = transferReader(store, categoriser);
   const allTx = store.transactions();
   const txByAmount = new Map<number, Transaction[]>();
   for (const t of allTx) {
@@ -255,6 +266,9 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
     const dups = classifyDuplicates(
       acc.transactions.map((t) => ({ date: t.date, amount: t.amount, description: t.description, sourceId: t.sourceId ?? undefined, balanceAfter: t.balanceAfter ?? undefined })),
       existingForAccount,
+      3,
+      // A letter or confirmation may restate payments recorded one by one (dedup.ts, step 5).
+      { sums: !TRANSACTION_LISTS.has(extraction.documentType) },
     );
     const transactions: DraftTransaction[] = acc.transactions.map((t, ti) => {
       const cat = categoriser.categorise({
@@ -273,9 +287,10 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
       let transferMatch: string | undefined;
       if (dup.status === 'new' && (!category || TRANSFER_CATEGORIES.has(category))) {
         const candidates = txByAmount.get(Math.abs(toMinor(t.amount))) ?? [];
-        const other = findTransferMatch(targetId, t.date, t.amount, counterpartyAccountId ? candidates.filter((c) => c.accountId === counterpartyAccountId) : candidates, takenTransfers);
+        const row = { id: `draft:${si}:${ti}`, accountId: targetId, date: t.date, amount: t.amount, description: t.description, ...(category ? { category } : {}), ...(counterpartyAccountId ? { counterpartyAccountId } : {}) };
+        const other = findTransferMatch(row, counterpartyAccountId ? candidates.filter((c) => c.accountId === counterpartyAccountId) : candidates, takenTransfers, reader);
         const otherAccount = other ? store.account(other.accountId) : undefined;
-        if (other && otherAccount && (category || (other.category && TRANSFER_CATEGORIES.has(other.category)))) {
+        if (other && otherAccount) {
           takenTransfers.add(other.id);
           transferMatch = other.id;
           counterpartyAccountId = other.accountId;

@@ -68,6 +68,28 @@ export interface BalancePoint {
   estimated: boolean;
 }
 
+/** Transactions by day, in date order. */
+function daysOf<T extends { date: ISODate }>(txs: T[]): Map<ISODate, T[]> {
+  const days = new Map<ISODate, T[]>();
+  for (const t of txs) (days.get(t.date) ?? days.set(t.date, []).get(t.date)!).push(t);
+  return days;
+}
+
+/**
+ * A day's closing running balance, in minor units: where its printed balances end. Each row's
+ * balance follows the row before it, so the close is the balance no other row of the day starts
+ * from. That holds whatever order the rows are stored in, as when two statements that overlap by a
+ * day each add some of its rows. When the chain does not show a single end, the day's last row with
+ * a balance stands in, as before.
+ */
+export function dayClose(day: { amount: number; balanceAfter?: number | undefined }[]): number | undefined {
+  const printed = day.filter((t): t is typeof t & { balanceAfter: number } => t.balanceAfter !== undefined);
+  if (!printed.length) return undefined;
+  const starts = new Set(printed.map((t) => toMinor(t.balanceAfter) - toMinor(t.amount)));
+  const ends = [...new Set(printed.map((t) => toMinor(t.balanceAfter)).filter((b) => !starts.has(b)))];
+  return ends.length === 1 ? ends[0] : toMinor(printed[printed.length - 1]!.balanceAfter);
+}
+
 function buildSeries(items: { date: ISODate; amount: number }[]): Series {
   const dates: ISODate[] = [];
   const prefix: number[] = [];
@@ -128,13 +150,10 @@ export class BalanceEngine {
       const snaps = store.balances(account.id);
       const anchors = new Map<ISODate, Anchor>();
       if (mode === 'ledger') {
-        // End-of-day running balances: the last transaction of a day that carries a balance.
-        for (let i = 0; i < txs.length; i++) {
-          const t = txs[i]!;
-          const next = txs[i + 1];
-          if (t.balanceAfter !== undefined && (!next || next.date !== t.date)) {
-            anchors.set(t.date, { date: t.date, minor: toMinor(t.balanceAfter), source: 'running' });
-          }
+        // End-of-day running balances (docs/FORMULAS.md §9).
+        for (const [date, day] of daysOf(txs)) {
+          const close = dayClose(day);
+          if (close !== undefined) anchors.set(date, { date, minor: close, source: 'running' });
         }
       }
       // An approximate figure you gave stands in only for what is newer than all of the account's

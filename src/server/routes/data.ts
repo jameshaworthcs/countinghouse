@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { ACCOUNT_TYPE_META, slugify } from '../../shared/accounts';
 import type { AccountDetailResponse, BootstrapResponse, TransactionsResponse } from '../../shared/api';
 import { CategoryIndex } from '../../shared/categories';
-import { Categoriser, ruleMatches } from '../../shared/categorise';
+import { ruleMatches } from '../../shared/categorise';
 import { today } from '../../shared/dates';
 import { catalogInstitution, findInstitution, INSTITUTION_CATALOG } from '../../shared/institutions';
 import { cleanPayee, descriptionKey } from '../../shared/merchants';
@@ -35,6 +35,7 @@ import {
 } from '../../shared/schema';
 import { SYSTEM_CATEGORY_IDS } from '../../shared/categories';
 import { csvCell, queryDate, readJson, type AppContext } from '../context';
+import { categoriserFor } from '../categoriser';
 import { enrich } from '../enrich';
 import { nowISO } from '../fsutil';
 import { balanceId, figureId, ruleId, transactionId } from '../ids';
@@ -69,6 +70,8 @@ const AccountPatch = NewAccountBody.omit({ id: true, balance: true, balanceDate:
   .partial()
   .extend({
     status: z.enum(['open', 'closed']).optional(),
+    openedOn: ISODateSchema.optional().nullable(),
+    /** The last day it counts. Setting it closes the account; clearing it opens it again. */
     closedOn: ISODateSchema.optional().nullable(),
     balanceMode: z.enum(['ledger', 'market']).optional().nullable(),
     last4: z
@@ -300,6 +303,12 @@ export function dataRoutes(ctx: AppContext): Hono {
     const { institutionName, ...rest } = body;
     const merged = { ...account, ...applyNulls(rest) } as Record<string, unknown>;
     for (const [k, v] of Object.entries(merged)) if (v === undefined) delete merged[k];
+    // A closing date closes the account, and clearing it opens it again, unless the status is given.
+    if (body.closedOn !== undefined && body.status === undefined) merged.status = body.closedOn ? 'closed' : 'open';
+    const opened = merged.openedOn as string | undefined;
+    const closed = merged.closedOn as string | undefined;
+    if (opened && closed && closed < opened) throw new StoreError('It cannot close before it opened.', 400);
+    if (closed && closed > today()) throw new StoreError('The closing date is in the future.', 400);
     if (institutionName && !body.institutionId) {
       const cat = findInstitution(institutionName);
       const instId = cat?.id ?? slugify(institutionName, store.institutions.map((i) => i.id));
@@ -571,7 +580,7 @@ export function dataRoutes(ctx: AppContext): Hono {
 
   app.post('/categorise/preview', async (c) => {
     const body = await readJson(c, z.object({ accountId: SlugSchema, description: z.string(), amount: MoneySchema }));
-    const categoriser = new Categoriser(store.rules, new CategoryIndex(store.categories), store.accounts, store.institutions);
+    const categoriser = categoriserFor(store);
     return c.json(categoriser.categorise(body));
   });
 

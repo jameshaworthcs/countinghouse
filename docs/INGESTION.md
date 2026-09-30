@@ -38,7 +38,7 @@ The same file twice (by SHA-256) is recognised as already imported.
 | Excel `.xlsx`, `.xls`, and HTML tables saved as `.xls` | `xlsx` → the CSV profiles | The first sheet with a table becomes rows (`src/server/ingest/xlsx.ts`, SheetJS), which go through the same profiles, holdings detection and column mapping as a CSV. Date cells become `YYYY-MM-DD`; text cells stay text, so "01/09/2026" is read day first; numbers keep full precision. The review page shows the sheet as a table |
 | OFX / QFX (1.x SGML and 2.x XML) | `ofx` | Bank and credit-card statements, FITID as id, ledger/available balance; foreign amounts per `<ORIGCURRENCY>` (already converted) or `<CURRENCY>` (converted at CURRATE) |
 | QIF | `qif` | Day/month order detected across the whole file |
-| Santander text export | `santander-txt` | Newest-first, running balances |
+| Santander text export | `santander-txt` | Newest-first, running balances. Santander exports at most 600 transactions: a file with 600 covers from its oldest row, not from the "From" date in its header, and a note says which days to download separately (otherwise the days it lacks would count as covered) |
 
 ### Adding a bank's CSV layout
 
@@ -302,6 +302,10 @@ read again.
      call it new; but everyday prices repeat (two £3.50 coffees at different cafés are two
      coffees), and so do round sums on different days. Never when both rows show a balance after
      them and the balances differ (either sign: sources disagree on a card's).
+  5. from a document that is not a list of transactions (a letter, a confirmation, an annual
+     summary), a row that two or three recorded rows add up to exactly, within ±3 days and the same
+     way, from £100: a *possible* duplicate. A deposit made in two payments is confirmed by letter as
+     one.
 - **Recorded twice** (`storedTwice` in `dedup.ts`). A document can show that the account already
   has a payment twice: one of its rows matches a recorded row, and another recorded row has the
   same date and amount, with nothing on the document matching it, recorded by another import (one
@@ -319,10 +323,27 @@ read again.
     and no row of the import that you ticked in as a different payment. The import records what
     it took away (`result.transactionsRemoved`), and the git history of `data/` keeps the row.
   - An import that takes a copy away is never "nothing new".
-- **Transfers.** An opposite amount within ±4 days in another of your accounts is proposed as
-  the other leg. On commit both legs get a `transferGroup`, and money arriving in an ISA or
-  pension becomes a `contribution`. A commit also links its new rows to other legs already stored
-  (the other account's statement committed earlier), without recategorising anything else.
+- **Your own accounts in a description.** A row names one of your accounts by:
+  - **its number:** a long number ending in its last digits (a sort code and account number, a
+    card number in a direct debit's reference, "EAV1234567"), which names that one account;
+  - otherwise its aliases, or its bank's name.
+
+  Money to or from you by name ("TO SAM TAYLOR", "FROM S TAYLOR"), from the name in your
+  profile, is money moving between your accounts: a transfer, not spending or income, even when it
+  does not say which account. Only after "to" or "from", so a payer naming you as the payee is not
+  taken for your own money.
+- **Transfers.** The other leg of a transfer is the opposite amount within ±4 days in another of
+  your accounts that the descriptions say is the same money (`transferEvidence` in
+  `src/server/enrich.ts`).
+  - A row naming the other's account counts most; your name or a transfer category counts too.
+  - A row naming only other accounts of yours rules a pair out: "AJ BELL" is not a payment to the
+    Chase saver, and "TESCO BANK" is not an Amex refund.
+  - Among the rest, the best evidence wins, then the closest date. The busiest day links the same
+    whichever statement arrives first.
+  - On commit both legs get a `transferGroup`, and money arriving in an ISA or pension becomes a
+    `contribution`. A commit also links its new rows to other legs already stored (the other
+    account's statement committed earlier), without recategorising anything else. Links already
+    made are not changed: an agent proposes fixing a wrong one ([AGENTS.md §5](AGENTS.md)).
 - **Investment app screens.** On an investment, ISA, LISA or pension account:
   - An activity list whose running balance is the cash (the reader says so, or the closing
     balance is a running balance and there are trades, holdings or an investment provider) records
@@ -333,7 +354,9 @@ read again.
     list. On commit they merge into that day's holdings ([DATA_FORMAT.md](DATA_FORMAT.md)), so an
     overview, a list scrolled over two screens and each fund's page make one set.
 - **New accounts** can be given the day they opened and, for an account already closed, the day it
-  closed: it is created closed and counts for nothing after that day.
+  closed: it is created closed and counts for nothing after that day. Both dates can be changed on
+  the account's page (Edit); a closing date closes the account, and clearing it opens it again. A
+  new account made on the review page gets its id from its bank's and its own name.
 - **Liabilities.** A credit-card balance printed as a positive "amount owed" is stored as
   negative, with a note.
 - **Review checks** (`shared/review.ts`, [FORMULAS.md §13](FORMULAS.md)) run on each account:

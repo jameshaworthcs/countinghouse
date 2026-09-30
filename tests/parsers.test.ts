@@ -8,7 +8,7 @@ import { dateFromFileName } from '../src/server/ingest/images';
 import { parseStatementText } from '../src/server/ingest/ocr';
 import { parseOfx } from '../src/server/ingest/ofx';
 import { parseQif } from '../src/server/ingest/qif';
-import { parseSantanderTxt } from '../src/server/ingest/santander';
+import { parseSantanderTxt, SANTANDER_MAX_ROWS } from '../src/server/ingest/santander';
 
 const fixture = (name: string) => readFileSync(path.join(import.meta.dirname, 'fixtures', name));
 
@@ -228,6 +228,28 @@ describe('OFX, QIF, Santander TXT', () => {
     expect(acc!.transactions.map((t) => t.amount)).toEqual([-12.34, 2000, -60]);
     expect(acc!.closingBalance).toBe(2940);
     expect(acc!.openingBalance).toBe(1012.34);
+    expect(acc!.periodStart).toBe('2026-09-01');
+  });
+
+  it('a full Santander export starts at its oldest row, whatever its header says', () => {
+    // 600 transactions, one a day back from 30 Jun 2026, under a header asking for 2020 onwards.
+    const rows: string[] = [];
+    let balance = 5000;
+    for (let i = 0; i < SANTANDER_MAX_ROWS; i++) {
+      const d = new Date(Date.UTC(2026, 5, 30 - i));
+      const date = `${String(d.getUTCDate()).padStart(2, '0')}/${String(d.getUTCMonth() + 1).padStart(2, '0')}/${d.getUTCFullYear()}`;
+      rows.push(`Date: ${date}\nDescription: CARD PAYMENT TO EXAMPLE SHOP ${i}\nAmount: -1.00\nBalance: ${balance.toFixed(2)}\n`);
+      balance += 1;
+    }
+    const full = parseSantanderTxt(`From: 01/01/2020 to 30/06/2026\n\nAccount: XXXX XXXX XXXX 9876\n\n${rows.join('\n')}`);
+    const [acc] = full.accounts;
+    expect(acc!.transactions).toHaveLength(600);
+    expect(acc!.periodStart).toBe('2024-11-08');
+    expect(acc!.periodEnd).toBe('2026-06-30');
+    expect(full.notes.join(' ')).toMatch(/at most 600 transactions.*starts on 8 Nov 2024, not 1 Jan 2020/);
+    // One fewer is the whole period asked for, quiet days and all.
+    const [part] = parseSantanderTxt(`From: 01/01/2020 to 30/06/2026\n\n${rows.slice(0, 599).join('\n')}`).accounts;
+    expect(part!.periodStart).toBe('2020-01-01');
   });
 });
 

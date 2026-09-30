@@ -12,10 +12,13 @@
 //      day or for an amount with pence: sources date a payment differently (the day it was made,
 //      the day it cleared) and describe it differently, but two £3.50 coffees at different cafés
 //      are two coffees. Never when both show a balance after them and the balances differ.
+//   5. From a document that is not a list of transactions (a letter, a confirmation), a row that
+//      stored rows add up to (two or three, within ±3 days, the same way, from £100) → possible
+//      duplicate: a deposit made in two payments, confirmed by letter as one.
 
 import { diffDays } from '../../shared/dates';
 import { descriptionKey } from '../../shared/merchants';
-import { toMinor } from '../../shared/money';
+import { formatMoney, toMinor } from '../../shared/money';
 import type { Draft, DraftTransaction, ExtraCopy, Transaction } from '../../shared/schema';
 
 export interface DedupCandidate {
@@ -28,6 +31,21 @@ export interface DedupCandidate {
 
 /** Below this, the same amount described differently is taken as another payment (everyday prices repeat). */
 export const DIFFERENT_WORDS_FROM = 20;
+
+/** Below this, a row that stored rows add up to is taken as its own payment (small sums coincide). */
+export const SUM_FROM = 100;
+
+/** Two or three of `rows` whose amounts add up to `minor` exactly, if any do. */
+function rowsAddingUpTo<T extends { amount: number }>(rows: T[], minor: number): T[] | undefined {
+  const m = rows.map((r) => toMinor(r.amount));
+  for (let i = 0; i < rows.length; i++) {
+    for (let j = i + 1; j < rows.length; j++) {
+      if (m[i]! + m[j]! === minor) return [rows[i]!, rows[j]!];
+      for (let k = j + 1; k < rows.length; k++) if (m[i]! + m[j]! + m[k]! === minor) return [rows[i]!, rows[j]!, rows[k]!];
+    }
+  }
+  return undefined;
+}
 
 /** Both show a balance after them, and the balances differ (either sign, as sources differ on a card's): two payments. */
 const otherBalance = (a: { balanceAfter?: number | undefined }, b: { balanceAfter?: number | undefined }) =>
@@ -57,7 +75,8 @@ export function similarity(a: string, b: string): number {
   return (2 * common) / (ta.size + tb.size);
 }
 
-export function classifyDuplicates(incoming: DedupCandidate[], existing: Transaction[], fuzzyDays = 3): DedupResult[] {
+/** `sums`: the document is not a list of transactions, so a row may restate several (step 5). */
+export function classifyDuplicates(incoming: DedupCandidate[], existing: Transaction[], fuzzyDays = 3, opts: { sums?: boolean } = {}): DedupResult[] {
   const results: DedupResult[] = incoming.map(() => ({ status: 'new' }));
   const used = new Set<string>();
   const conflictingIds = (c: DedupCandidate, t: Transaction) => Boolean(c.sourceId && t.sourceId && c.sourceId !== t.sourceId);
@@ -131,6 +150,21 @@ export function classifyDuplicates(incoming: DedupCandidate[], existing: Transac
       results[i] = { status: 'possible_duplicate', duplicateOf: best.t.id, reason };
     }
   });
+
+  // 5. A letter restating money recorded as several payments.
+  if (opts.sums) {
+    incoming.forEach((c, i) => {
+      if (results[i]!.status !== 'new') return;
+      const want = toMinor(c.amount);
+      if (Math.abs(want) < SUM_FROM * 100) return;
+      const near = existing.filter((t) => !used.has(t.id) && Math.sign(t.amount) === Math.sign(c.amount) && Math.abs(toMinor(t.amount)) < Math.abs(want) && Math.abs(diffDays(t.date, c.date)) <= fuzzyDays);
+      const parts = rowsAddingUpTo(near, want);
+      if (!parts) return;
+      for (const t of parts) used.add(t.id);
+      const money = (t: Transaction) => formatMoney(Math.abs(t.amount), { currency: t.currency });
+      results[i] = { status: 'possible_duplicate', duplicateOf: parts[0]!.id, reason: `The same money as ${parts.length} payments recorded within a few days: ${parts.map(money).join(' + ')}` };
+    });
+  }
   return results;
 }
 

@@ -98,6 +98,12 @@ describe('allowances', () => {
     expect(a.lisa!.incomplete).toBeNull();
   });
 
+  it('an account that closed during the year needs data only until it closed', async () => {
+    await store.setAccounts([acct('isa', 'stocks_isa', { status: 'closed', closedOn: '2026-06-12' })]);
+    await store.addTransactions(['2026-04-10', '2026-05-10', '2026-06-10'].map((d) => tx('isa', d, 500, 'Subscription', { category: 'contribution' })), 't');
+    expect(allowances(store, '2026/27', '2026-09-29').isa).toMatchObject({ used: 1500, incomplete: null });
+  });
+
   it('a tax year covered from its start is complete', async () => {
     await store.setAccounts([acct('isa', 'stocks_isa')]);
     const months = ['2026-04-10', '2026-05-10', '2026-06-10', '2026-07-10', '2026-08-10', '2026-09-10'];

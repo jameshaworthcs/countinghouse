@@ -32,6 +32,8 @@ export function AccountDialog({ open, onOpenChange, account }: { open: boolean; 
   const [flexible, setFlexible] = useState(account?.flexibleIsa ?? false);
   const [pensionMethod, setPensionMethod] = useState(account?.pension?.method ?? '');
   const [notes, setNotes] = useState(account?.notes ?? '');
+  const [openedOn, setOpenedOn] = useState(account?.openedOn ?? '');
+  const [closedOn, setClosedOn] = useState(account?.closedOn ?? '');
   const [balance, setBalance] = useState('');
   const [balanceDate, setBalanceDate] = useState(today());
   const meta = ACCOUNT_TYPE_META[type];
@@ -52,6 +54,8 @@ export function AccountDialog({ open, onOpenChange, account }: { open: boolean; 
         ...(meta.isa && type !== 'lisa' ? { flexibleIsa: flexible } : {}),
         ...(meta.pension && pensionMethod ? { pension: { method: pensionMethod } } : {}),
         ...(notes.trim() ? { notes: notes.trim() } : {}),
+        // Dates you clear are cleared; a closing date closes the account, and clearing it reopens it.
+        ...(account ? { openedOn: openedOn || null, closedOn: closedOn || null } : openedOn ? { openedOn } : {}),
       };
       if (!account && balance.trim()) {
         body.balance = Number(balance);
@@ -105,6 +109,14 @@ export function AccountDialog({ open, onOpenChange, account }: { open: boolean; 
         <Field label="Also appears as" hint="Names in payment descriptions, comma separated (links transfers)">
           <Input value={aliases} onChange={(e) => setAliases(e.target.value)} placeholder="e.g. J SMITH SAVER" />
         </Field>
+        <Field label="Opened on" hint="Its data need not go back further than this">
+          <Input type="date" value={openedOn} max={closedOn || today()} onChange={(e) => setOpenedOn(e.target.value)} />
+        </Field>
+        {account && (
+          <Field label="Closed on" hint={closedOn ? 'The last day it counts in your estate value' : 'Empty while it is open'}>
+            <Input type="date" value={closedOn} min={openedOn || undefined} max={today()} onChange={(e) => setClosedOn(e.target.value)} />
+          </Field>
+        )}
         {meta.pension && type !== 'state_pension' && type !== 'db_pension' && (
           <Field label="How tax relief is given" className="sm:col-span-2">
             <Select value={pensionMethod} onChange={(e) => setPensionMethod(e.target.value)}>

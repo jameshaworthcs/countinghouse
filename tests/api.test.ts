@@ -188,6 +188,18 @@ describe('API without login configured', () => {
     expect(store.balances('isa').at(-1)).toMatchObject({ date: '2026-09-29', balance: 8978.1, gain: 1478.1, dateSource: 'filename' });
   });
 
+  it('an account’s dates can be edited: a closing date closes it, clearing it opens it again', async () => {
+    const json = { ...CSRF, 'content-type': 'application/json' };
+    await req('/api/accounts', { method: 'POST', headers: json, body: JSON.stringify({ id: 'fixed', name: 'Fixed', type: 'savings', openedOn: '2023-09-14' }) });
+    const patch = async (body: object) => req('/api/accounts/fixed', { method: 'PATCH', headers: json, body: JSON.stringify(body) });
+    expect(await (await patch({ closedOn: '2025-09-12' })).json()).toMatchObject({ status: 'closed', closedOn: '2025-09-12', openedOn: '2023-09-14' });
+    expect((await patch({ closedOn: '2020-01-01' })).status).toBe(400);
+    expect((await patch({ closedOn: '2999-01-01' })).status).toBe(400);
+    const reopened = (await (await patch({ closedOn: null })).json()) as { status: string; closedOn?: string };
+    expect(reopened.status).toBe('open');
+    expect(reopened.closedOn).toBeUndefined();
+  });
+
   it('pages History through every committed import, the latest committed first', async () => {
     const store = ctx.app.ctx.store;
     // 30 documents uploaded a minute apart. The first two were committed last, either side of the

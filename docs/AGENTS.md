@@ -170,7 +170,7 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
 
   ```json
   {
-    "title": "Re-link the March 2026 moves between the current account and the saver",
+    "title": "Re-link the October moves between the current account and the saver",
     "summary": "What the data shows, in a few sentences.",
     "provenance": { "model": "claude-opus-5-5", "session": "claude-code" },
     "changes": [

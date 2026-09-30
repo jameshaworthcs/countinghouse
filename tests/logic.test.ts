@@ -155,6 +155,18 @@ describe('duplicate detection', () => {
     const res = classifyDuplicates([{ date: '2026-09-02', amount: -20, description: 'AMAZON MKTPLACE PMTS', sourceId: 'X2' }], existing);
     expect(res[0]!.status).toBe('new');
   });
+
+  it('a letter confirming a deposit made in two payments is the same money', () => {
+    const saved = [tx('s', '2024-02-02', 400, 'Faster Payment Posted: 01/02/2024'), tx('s', '2024-02-02', 10100.5, 'Faster Payment'), tx('s', '2024-02-08', 250, 'Faster Payment')];
+    const letter = [{ date: '2024-02-01', amount: 10500.5, description: 'Confirmation of deposit to your savings account' }];
+    const [res] = classifyDuplicates(letter, saved, 3, { sums: true });
+    expect(res).toMatchObject({ status: 'possible_duplicate', duplicateOf: saved[0]!.id, reason: 'The same money as 2 payments recorded within a few days: £400.00 + £10,100.50' });
+    // A statement lists each payment, so its rows are never sums of others.
+    expect(classifyDuplicates(letter, saved)[0]!.status).toBe('new');
+    // Nor do rows a week away, or the other way, add up to it.
+    expect(classifyDuplicates([{ date: '2024-02-12', amount: 10500.5, description: 'Deposit' }], saved, 3, { sums: true })[0]!.status).toBe('new');
+    expect(classifyDuplicates([{ date: '2024-02-01', amount: -10500.5, description: 'Withdrawal' }], saved, 3, { sums: true })[0]!.status).toBe('new');
+  });
 });
 
 describe('account matching', () => {
@@ -218,6 +230,20 @@ describe('store, balances and analytics', () => {
   it('reports statement gaps between inconsistent anchors', async () => {
     await store.addTransactions([tx('current', '2026-09-01', -10, 'A', { balanceAfter: 90 }), tx('current', '2026-09-20', -10, 'B', { balanceAfter: 50 })], 'test');
     expect(new BalanceEngine(store).gaps('current')).toEqual([{ from: '2026-09-01', to: '2026-09-20', difference: -30 }]);
+  });
+
+  it('closes a day where its printed balances end, whatever order two statements stored its rows in', async () => {
+    // Two exports overlap on 30 Sep: the later one (stored first) has the day's last payment, the
+    // earlier one its first. Stored order puts the first payment last: the day still closes at 495.
+    await store.addTransactions([tx('current', '2026-09-29', -5, 'SHOP A', { balanceAfter: 500 })], 'test');
+    await store.addTransactions([tx('current', '2026-09-30', -1.5, 'CAFE B', { balanceAfter: 495 }), tx('current', '2026-10-02', -2, 'SHOP C', { balanceAfter: 493 })], 'later export');
+    await store.addTransactions([tx('current', '2026-09-30', -3.5, 'SHOP C', { balanceAfter: 496.5 })], 'earlier export');
+    const engine = new BalanceEngine(store);
+    expect(engine.gaps('current')).toEqual([]);
+    expect(engine.balanceOn('current', '2026-09-30')!.value).toBe(495);
+    // A real gap is still found.
+    await store.addTransactions([tx('current', '2026-10-05', -1, 'SHOP A', { balanceAfter: 480 })], 'test');
+    expect(new BalanceEngine(store).gaps('current')).toEqual([{ from: '2026-10-02', to: '2026-10-05', difference: -12 }]);
   });
 
   it('values market accounts from valuations plus contributions', async () => {

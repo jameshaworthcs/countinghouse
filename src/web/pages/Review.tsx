@@ -1,7 +1,7 @@
 import { Archive, ArrowLeft, CircleCheck, Copy, CopyCheck, ExternalLink, Info, ListChecks, LoaderCircle, Maximize2, Minimize2, Pencil, RefreshCw, Trash2, TriangleAlert } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
-import { ACCOUNT_TYPE_META } from '../../shared/accounts';
+import { ACCOUNT_TYPE_META, slugify } from '../../shared/accounts';
 import type { NothingNewView } from '../../shared/api';
 import { formatDate } from '../../shared/dates';
 import { sectionChecks, type ReviewCheck } from '../../shared/review';
@@ -302,7 +302,7 @@ function SectionEditor({ section, index, total, latest, periodFromRows, onChange
                   set({
                     target: {
                       mode: 'new',
-                      account: target.mode === 'new' ? target.account : { id: `new-account-${index + 1}`, name: d.accountName ?? 'New account', type: d.accountType ?? 'current', currency: section.currency, ...(d.last4 ? { last4: d.last4 } : {}), ...(d.institutionName ? { institutionName: d.institutionName } : {}) },
+                      account: target.mode === 'new' ? target.account : { id: slugify(`${d.institutionName ?? ''} ${d.accountName ?? 'account'}`, data.accounts.map((a) => a.id)), name: d.accountName ?? 'New account', type: d.accountType ?? 'current', currency: section.currency, ...(d.last4 ? { last4: d.last4 } : {}), ...(d.institutionName ? { institutionName: d.institutionName } : {}) },
                     },
                   });
                 else set({ target: { mode: 'existing', accountId: v } });

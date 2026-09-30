@@ -237,8 +237,12 @@ years), both paths grow at the median:
 
 **Ledger accounts** (`analytics/balances.ts`):
 
-- Anchors are statement or screenshot balances and end-of-day running balances (the last row of a
-  day that has one).
+- Anchors are statement or screenshot balances and end-of-day running balances.
+  - A day closes where its printed balances end: each row's balance − its amount is the balance
+    before it, and the close is the one balance no row of the day starts from.
+  - That holds whatever order the rows are stored in, as when two statements that overlap by a day
+    each add some of its rows. When the chain shows no single end, the day's last row with a
+    balance stands in.
 - balance(D):
   - with an anchor on or before D, balance(D) = anchor + Σ tx in (anchor, D];
   - otherwise, rolled back from the next anchor;

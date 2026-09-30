@@ -2,12 +2,12 @@
 // fields. Your manual edits (categorisedBy = "user") are never touched. This is what lets new rules,
 // better merchant lists or new categories apply to history without re-importing anything.
 
-import { CategoryIndex } from '../shared/categories';
-import { Categoriser, isWrapperAccount, transferLegCategory } from '../shared/categorise';
+import { isWrapperAccount, transferLegCategory } from '../shared/categorise';
 import { diffDays } from '../shared/dates';
 import { toMinor } from '../shared/money';
 import { tidyPlace } from '../shared/places';
 import type { Account, Transaction } from '../shared/schema';
+import { categoriserFor } from './categoriser';
 import { transferGroupId } from './ids';
 import type { Store } from './store';
 
@@ -43,7 +43,7 @@ export async function refreshPlaces(store: Store): Promise<number> {
 export async function categoriseInvestmentRows(store: Store): Promise<number> {
   const wrappers = store.accounts.filter((a) => isWrapperAccount(a.type));
   if (!wrappers.length) return 0;
-  const categoriser = new Categoriser(store.rules, new CategoryIndex(store.categories), store.accounts, store.institutions);
+  const categoriser = categoriserFor(store);
   const updates: { id: string; patch: Partial<Transaction> }[] = [];
   for (const a of wrappers) {
     for (const t of store.transactions(a.id)) {
@@ -60,7 +60,7 @@ export async function categoriseInvestmentRows(store: Store): Promise<number> {
 }
 
 export async function enrich(store: Store, opts: { accountIds?: string[]; dryRun?: boolean } = {}): Promise<EnrichResult> {
-  const categoriser = new Categoriser(store.rules, new CategoryIndex(store.categories), store.accounts, store.institutions);
+  const categoriser = categoriserFor(store);
   const scope = opts.accountIds ? new Set(opts.accountIds) : null;
   const patches = new Map<string, Partial<Transaction>>();
   let recategorised = 0;
@@ -128,29 +128,81 @@ export async function enrich(store: Store, opts: { accountIds?: string[]; dryRun
 }
 
 /**
- * Pair transfers: each money-out candidate with an opposite amount within 4 days in another of your
- * accounts, where at least one side already looks like a transfer (or names the other account).
+ * How strongly two rows say they are the same money moving between your accounts, or null when one
+ * of them says it went somewhere else (docs/INGESTION.md, "Transfers").
+ * - A row that names the other row's account (by its number, an alias or its bank) counts 3.
+ * - A row that pays you or comes from you by name counts 1; so does a transfer category.
+ * - A row that names only other accounts of yours, or was set to go to another (a rule's
+ *   counterparty), rules the pair out: "AJ BELL" is not a payment to the Chase saver.
+ * With nothing for it, the pair is not linked.
  */
+export type TransferSide = Pick<Transaction, 'id' | 'accountId' | 'description' | 'category' | 'counterpartyAccountId'>;
+
+export function transferEvidence(a: TransferSide, b: TransferSide, named: (t: TransferSide) => string[], ownName: (t: TransferSide) => boolean): number | null {
+  const namesA = named(a);
+  const namesB = named(b);
+  if ((namesA.length && !namesA.includes(b.accountId)) || (namesB.length && !namesB.includes(a.accountId))) return null;
+  if ((a.counterpartyAccountId && a.counterpartyAccountId !== b.accountId) || (b.counterpartyAccountId && b.counterpartyAccountId !== a.accountId)) return null;
+  let score = 0;
+  if (namesA.includes(b.accountId) || a.counterpartyAccountId === b.accountId) score += 3;
+  if (namesB.includes(a.accountId) || b.counterpartyAccountId === a.accountId) score += 3;
+  if (ownName(a)) score += 1;
+  if (ownName(b)) score += 1;
+  if (a.category && TRANSFERISH.has(a.category)) score += 1;
+  if (b.category && TRANSFERISH.has(b.category)) score += 1;
+  return score > 0 ? score : null;
+}
+
+/**
+ * Pair transfers: money out of one of your accounts with the same amount into another, at most 4
+ * days apart, where the rows say so (transferEvidence). The pairs with the most evidence are linked
+ * first, then the closest together; a row is linked once.
+ */
+/**
+ * What a transaction's description says about your accounts and you, for transferEvidence: the
+ * accounts it names (worked out once per row), and whether it names you.
+ */
+export function transferReader(store: Store, categoriser = categoriserFor(store)) {
+  const cache = new Map<string, string[]>();
+  const named = (t: TransferSide) => {
+    let ids = cache.get(t.id);
+    if (!ids) {
+      const type = store.account(t.accountId)?.type;
+      // As when categorising: bank names say nothing inside an investment or pension account.
+      const useInstitutions = !type || !isWrapperAccount(type) || type === 'cash_isa';
+      ids = categoriser.ownAccountsMentioned(t.accountId, t.description, useInstitutions).map((x) => x.id);
+      cache.set(t.id, ids);
+    }
+    return ids;
+  };
+  const ownName = (t: TransferSide) => categoriser.namesOwner(t.description);
+  return { named, ownName };
+}
+
 function pairTransfers(store: Store, candidates: Transaction[], byAmount: Map<number, Transaction[]>) {
+  const { named, ownName } = transferReader(store);
+
+  const outgoing = new Map<string, Transaction>();
+  for (const t of candidates) if (t.amount < 0) outgoing.set(t.id, t);
+  for (const t of candidates) if (t.amount > 0) for (const o of byAmount.get(-toMinor(t.amount)) ?? []) if (o.amount < 0 && !o.transferGroup) outgoing.set(o.id, o);
+  const options: { a: Transaction; b: Transaction; score: number; days: number }[] = [];
+  for (const a of outgoing.values()) {
+    for (const b of byAmount.get(-toMinor(a.amount)) ?? []) {
+      if (b.amount <= 0 || b.accountId === a.accountId || b.transferGroup) continue;
+      const days = Math.abs(diffDays(a.date, b.date));
+      if (days > 4) continue;
+      const score = transferEvidence(a, b, named, ownName);
+      if (score !== null) options.push({ a, b, score, days });
+    }
+  }
+  options.sort((x, y) => y.score - x.score || x.days - y.days || x.a.date.localeCompare(y.a.date) || x.a.id.localeCompare(y.a.id) || x.b.id.localeCompare(y.b.id));
+
   const linked = new Set<string>();
   const groupOf = new Map<string, string>();
   const legs: [Transaction, Account, Account][] = [];
   let count = 0;
-  const outgoing = [...candidates.filter((t) => t.amount < 0), ...candidates.filter((t) => t.amount > 0).flatMap((t) => (byAmount.get(-toMinor(t.amount)) ?? []).filter((o) => o.amount < 0 && !o.transferGroup))];
-  for (const a of outgoing) {
-    if (linked.has(a.id)) continue;
-    const pool = byAmount.get(-toMinor(a.amount)) ?? [];
-    let best: { t: Transaction; days: number } | undefined;
-    for (const b of pool) {
-      if (b.accountId === a.accountId || linked.has(b.id) || b.transferGroup) continue;
-      const days = Math.abs(diffDays(a.date, b.date));
-      if (days > 4) continue;
-      const hinted = (a.category && TRANSFERISH.has(a.category)) || (b.category && TRANSFERISH.has(b.category)) || a.counterpartyAccountId === b.accountId || b.counterpartyAccountId === a.accountId;
-      if (!hinted) continue;
-      if (!best || days < best.days) best = { t: b, days };
-    }
-    if (!best) continue;
-    const b = best.t;
+  for (const { a, b } of options) {
+    if (linked.has(a.id) || linked.has(b.id)) continue;
     const accA = store.account(a.accountId);
     const accB = store.account(b.accountId);
     if (!accA || !accB) continue;

@@ -35,11 +35,12 @@ export const COVERAGE_SLACK_DAYS = 45;
  * for the year is a minimum. Returns a sentence saying which, or null when every account is covered.
  */
 export function yearCoverageGap(store: Store, accounts: Account[], ty: TaxYear, on: ISODate, what: string): string | null {
-  const end = minDate(ty.end, on)!;
   const short: { name: string; from: ISODate | null }[] = [];
   for (const a of accounts) {
     if (a.closedOn && a.closedOn < ty.start) continue;
+    // An account's data need only reach from when it opened to when it closed.
     const start = maxDate(ty.start, a.openedOn) ?? ty.start;
+    const end = minDate(ty.end, on, a.closedOn)!;
     if (start > end) continue;
     const span = wrapperDataSpan(store, a);
     if (span.some((i) => diffDays(start, i.from) <= COVERAGE_SLACK_DAYS && diffDays(i.to, end) <= COVERAGE_SLACK_DAYS)) continue;
