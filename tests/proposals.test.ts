@@ -201,6 +201,10 @@ describe('a proposal must fit the data', () => {
     expect(await problem({ kind: 'set_account_dates', account: 'fixed', closedOn: '2020-01-01' })).toMatch(/close .* before it opened/);
     expect(await problem({ kind: 'set_category', transaction: toSaver.id, category: 'no-such-category' })).toMatch(/no category/);
     expect(await problem({ kind: 'set_category', transaction: saverIn.id, category: 'groceries' })).toMatch(/transfer category, not/);
+    // Yours wins: a category you set, or a copy with your note on it.
+    await app.ctx.store.updateTransactions([{ id: toSaver.id, patch: { category: 'gifts', categorisedBy: 'user' } }, { id: letter.id, patch: { notes: 'the confirmation letter' } }], 'test');
+    expect(await problem({ kind: 'set_category', transaction: toSaver.id, category: 'transfer' })).toMatch(/You set its category yourself/);
+    expect(await problem({ kind: 'remove_duplicate', transaction: letter.id, sameAs: [part1.id, part2.id] })).toMatch(/something of yours on it/);
     // What the data says already is not a change.
     expect(await problem({ kind: 'set_account_dates', account: 'fixed', closedOn: '2026-02-03' })).toMatch(/already says this/);
   });

@@ -193,6 +193,8 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
     apart, neither linked already.
   - A duplicate's `sameAs` rows are in its account, at most 10 days from it, and add up to it.
   - A category exists, and a row linked as a transfer keeps a transfer category.
+  - The owner wins: a category the owner set is not changed, and a duplicate with something of
+    theirs on it (a category, payee, note, tag, split, correction or receipt) is not removed.
   - Dates are in order and not in the future.
   - A proposal with a change that does not fit, or that the data already says, is refused (422,
     with each problem). One that stops fitting later is shown with the problem, and applying it

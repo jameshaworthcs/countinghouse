@@ -70,6 +70,9 @@ const brief = (t: Transaction, accountName: (id: string) => string) => `${money(
  */
 function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet<string>): Outcome {
   const cats = new CategoryIndex(store.categories);
+  const receiptsOn = new Set(store.receipts.map((r) => r.transactionId));
+  /** Something you set on the row (a transfer link is not: a proposal may undo one). */
+  const yours = (t: Transaction) => t.categorisedBy === 'user' || t.payeeSetBy === 'user' || Boolean(t.notes || t.tags?.length || t.splits?.length || t.corrections?.length) || receiptsOn.has(t.id);
   const accountName = (id: string) => store.account(id)?.name ?? id;
   const out: Outcome = { results: new Map(), patches: new Map(), removed: new Map(), accounts: new Map(), touchedRows: new Map(), touchedAccounts: new Map() };
   // Rows as the changes so far leave them (null: removed), and transfer pairs likewise.
@@ -143,6 +146,9 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
         if (!cat) return { problem: `There is no category "${c.category}".` };
         if (t.transferGroup && cat.kind !== 'transfer') return { problem: `${linkedNow(t)} While it is a transfer, it takes a transfer category, not ${cat.name}.` };
         if (t.category === c.category) return { alreadySo: true };
+        // Yours wins: a category you set is not changed by a proposal.
+        const was = store.transaction(t.id);
+        if (was?.categorisedBy === 'user') return { problem: `You set its category yourself (${cats.name(was.category)}), so a proposal leaves it to you: change it on the Transactions page if you want to.` };
         patch(t, { category: c.category, categorisedBy: 'user' });
         return {};
       }
@@ -152,6 +158,8 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
         if (!t) return rows.get(c.transaction) === null ? { problem: 'Another change here removes it already.' } : { alreadySo: true };
         if (t.transferGroup) return { problem: linkedNow(t) };
         if (c.sameAs.includes(t.id)) return { problem: 'It cannot repeat itself.' };
+        // A copy with something of yours on it (a category, note, split, receipt…) is never taken away.
+        if (yours(store.transaction(t.id)!)) return { problem: 'It has something of yours on it (a category, payee, note, tag, split, correction or receipt), so a proposal leaves it to you.' };
         let sum = 0;
         for (const id of c.sameAs) {
           const s = row(id);
