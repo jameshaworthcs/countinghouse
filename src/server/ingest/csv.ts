@@ -430,6 +430,17 @@ export function suggestMapping(rows: string[][], opts: { accountType?: AccountTy
   return { profile, headerIndex, headers, sample, confident };
 }
 
+/**
+ * A built-in layout that names no bank (Date / Description / Amount) says nothing about which way
+ * round its signs are. For a file going to a credit card, it is read card style on the same rule as
+ * columns worked out automatically. A bank's layout, or one you saved, is kept as it is.
+ */
+export function withCardSigns(rows: string[][], match: ProfileMatch, accountType: AccountType | undefined): ProfileMatch {
+  const p = match.profile;
+  if (accountType !== 'credit_card' || !p.builtin || p.institutionId || p.accountType || match.headerless || !p.columns.amount || p.amountSign !== 'normal') return match;
+  return readsCardStyle(rows, match.headerIndex, p) ? { ...match, profile: { ...p, amountSign: 'inverted' } } : match;
+}
+
 function readsCardStyle(rows: string[][], headerIndex: number, profile: CsvProfile): boolean {
   const txs = parseWithProfile(rows, { profile, headerIndex, headerless: false }).extraction.accounts.flatMap((a) => a.transactions);
   const asRead = cardSigns(txs);

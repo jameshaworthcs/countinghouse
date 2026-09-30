@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { findProfile, parseWithProfile, readCsvRows, suggestMapping } from '../src/server/ingest/csv';
+import { findProfile, parseWithProfile, readCsvRows, suggestMapping, withCardSigns } from '../src/server/ingest/csv';
 import { decodeText, detectKind } from '../src/server/ingest/detect';
 import { parseHoldingsCsv } from '../src/server/ingest/holdings-csv';
 import { dateFromFileName } from '../src/server/ingest/images';
@@ -116,6 +116,18 @@ describe('CSV bank formats', () => {
     ]);
   });
 
+  it('PayPal Credit: purchases positive and payments negative in the file, the other way round once read', () => {
+    const { match, result } = parseCsvFixture('paypal-credit.csv');
+    expect(match.profile.id).toBe('paypal-credit');
+    const [acc] = result.extraction.accounts;
+    expect(acc!.accountType).toBe('credit_card');
+    expect(acc!.transactions.map((t) => [t.date, t.amount])).toEqual([
+      ['2026-09-02', -3.49],
+      ['2026-09-14', -12],
+      ['2026-09-28', 15.49],
+    ]);
+  });
+
   it('Revolut: completed only, fee applied, split by product and currency', () => {
     const { result } = parseCsvFixture('revolut.csv');
     const accounts = result.extraction.accounts;
@@ -189,6 +201,38 @@ describe('CSV bank formats', () => {
     // Flipped, it would still fail the card-signs check: a payment to the card comes out as money out.
     const mixed = readCsvRows('Date,Merchant,Amount (GBP)\n01/09/2026,TESCO,-12.34\n03/09/2026,TRAINLINE,-30.00\n05/09/2026,PRET,-4.50\n21/09/2026,PAYMENT RECEIVED - THANK YOU,-42.34\n22/09/2026,DIRECT DEBIT PAYMENT,42.34\n').rows;
     expect(suggestMapping(mixed, { accountType: 'credit_card' })!.profile.amountSign).toBe('normal');
+  });
+});
+
+describe('a layout that names no bank, for a card', () => {
+  // A card's own export in the plain Date / Description / Amount layout: purchases positive.
+  const amounts = (text: string, accountType?: 'credit_card' | 'current') => {
+    const { rows } = readCsvRows(text);
+    const match = findProfile(rows)!;
+    expect(match.profile.id).toBe('date-description-amount');
+    return parseWithProfile(rows, withCardSigns(rows, match, accountType)).extraction.accounts[0]!.transactions.map((t) => t.amount);
+  };
+  const cardStyle = 'Date,Description,Amount\n01/09/2026,BOOKSHOP,12.34\n03/09/2026,TRAINLINE,30.00\n21/09/2026,PAYMENT RECEIVED - THANK YOU,-42.34\n';
+
+  it('reads it card style when its rows need it, as for columns worked out', () => {
+    expect(amounts(cardStyle, 'credit_card')).toEqual([-12.34, -30, 42.34]);
+    expect(amounts(cardStyle, 'current')).toEqual([12.34, 30, -42.34]);
+    expect(amounts(cardStyle)).toEqual([12.34, 30, -42.34]);
+    // Already the app's way round: left alone.
+    expect(amounts('Date,Description,Amount\n01/09/2026,BOOKSHOP,-12.34\n03/09/2026,TRAINLINE,-30.00\n21/09/2026,PAYMENT RECEIVED - THANK YOU,42.34\n', 'credit_card')).toEqual([-12.34, -30, 42.34]);
+  });
+
+  it('tells from a single payment to the card in a short file', () => {
+    expect(amounts('Date,Description,Amount\n07/09/2026,SOFTWARE CO,3.49\n29/09/2026,Payment,-3.49\n', 'credit_card')).toEqual([-3.49, 3.49]);
+    expect(amounts('Date,Description,Amount\n29/09/2026,Payment,-20.00\n', 'credit_card')).toEqual([20]);
+    // One purchase alone cannot say: read as it stands.
+    expect(amounts('Date,Description,Amount\n07/09/2026,SOFTWARE CO,3.49\n', 'credit_card')).toEqual([3.49]);
+  });
+
+  it('keeps a layout you saved as it is', () => {
+    const { rows } = readCsvRows(cardStyle);
+    const saved = { ...findProfile(rows)!, profile: { ...findProfile(rows)!.profile, builtin: false, id: 'mine' } };
+    expect(withCardSigns(rows, saved, 'credit_card')).toBe(saved);
   });
 });
 

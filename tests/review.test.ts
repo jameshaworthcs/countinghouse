@@ -53,6 +53,12 @@ describe('review checks', () => {
     expect(byId(sectionChecks(section([...purchases, payment]), { ...ctx, accountType: 'credit_card' }), 'card-signs')).toMatchObject({ status: 'warn', rows: [payment.key] });
     // Not a card: no sign check.
     expect(byId(sectionChecks(section(inverted), { ...ctx, accountType: 'current' }), 'card-signs')).toBeUndefined();
+    // Too few rows to count, but a payment to the card ("Payment", as a card's own export says) tells.
+    const card = { ...ctx, accountType: 'credit_card' as const };
+    const short = row('2026-09-29', -3.49, 'Payment');
+    expect(byId(sectionChecks(section([row('2026-09-07', 3.49, 'SOFTWARE CO'), short]), card), 'card-signs')).toMatchObject({ status: 'warn', rows: [short.key] });
+    expect(byId(sectionChecks(section([row('2026-09-07', -3.49, 'SOFTWARE CO'), row('2026-09-29', 3.49, 'Payment')]), card), 'card-signs')).toMatchObject({ status: 'ok' });
+    expect(byId(sectionChecks(section(purchases.slice(0, 2)), card), 'card-signs')).toBeUndefined();
   });
 
   it('notes repeated rows, unsure rows and pending rows', () => {

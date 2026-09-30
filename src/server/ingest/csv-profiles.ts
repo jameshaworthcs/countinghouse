@@ -197,6 +197,16 @@ export const BUILTIN_CSV_PROFILES: CsvProfile[] = [
     },
   }),
   P({
+    id: 'paypal-credit',
+    name: 'PayPal Credit',
+    institutionId: 'paypal-credit',
+    accountType: 'credit_card',
+    // Purchases positive ("£3.49"), payments to the card negative ("-£3.49").
+    amountSign: 'inverted',
+    headerSignature: ['date', 'id', 'amount', 'description'],
+    columns: { date: 'date', description: ['description'], amount: 'amount', id: 'id' },
+  }),
+  P({
     id: 'trading-212',
     name: 'Trading 212',
     institutionId: 'trading-212',

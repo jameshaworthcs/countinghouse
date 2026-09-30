@@ -477,7 +477,7 @@ A warning holds an import back from bulk commit:
 | Period | a row is dated outside the statement's printed period (not for exports, whose period is their first and last rows) |
 | Future | a row is dated after the upload day |
 | Balance date | a settled row is dated after the balance recorded with it (no statement period); on a screenshot, after the day it was taken |
-| Card signs | on a credit card with ≥ 3 settled rows, most are money in, or a payment to the card is money out (the same rule picks the signs of a CSV layout the app does not know, for a card: [INGESTION.md](INGESTION.md)) |
+| Card signs | on a credit card, a payment to the card (its usual wordings, or just "Payment") is money out, or, with ≥ 3 settled rows, most are money in. Fewer rows with no payment to the card can't tell. The same rule picks the signs of a CSV layout that names no bank, for a card: [INGESTION.md](INGESTION.md) |
 | Unsure | the reader marked a row as uncertain |
 | Holdings | the holdings and cash come to more than the value shown, or less when the list is not marked as part of the account's holdings; ±max(£1, 0.1%) |
 | Holdings, part of the list (information) | a screen lists only some holdings, or one fund's own page: they join that day's other holdings |

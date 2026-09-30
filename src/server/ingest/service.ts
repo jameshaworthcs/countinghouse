@@ -31,7 +31,7 @@ import { linkTransfers } from '../enrich';
 import { BUILTIN_CSV_PROFILES } from './csv-profiles';
 import { recheckDraft } from './dedup';
 import { compareReading } from './reread';
-import { CSV_ENGINE_VERSION, findProfile, parseWithProfile, readCsvRows, suggestMapping } from './csv';
+import { CSV_ENGINE_VERSION, findProfile, parseWithProfile, readCsvRows, suggestMapping, withCardSigns } from './csv';
 import { HOLDINGS_CSV_VERSION, parseHoldingsCsv } from './holdings-csv';
 import { decodeText, detectKind, MAX_UPLOAD_BYTES, mediaTypeFor } from './detect';
 import { buildDraft, draftIsClean, type BatchEvidence } from './draft';
@@ -61,6 +61,8 @@ export interface CreateImportResult {
   record?: ImportRecord;
   duplicateOf?: ImportSummary | ImportRecord;
 }
+
+const CARD_STYLE_WARNING = 'The amounts were read card style, money out positive: the file is for a credit card, and its purchases and payments only have the right signs that way round.';
 
 /** Screenshots uploaded within this long of each other were uploaded together. */
 const UPLOADED_TOGETHER_MS = 2 * 60_000;
@@ -262,8 +264,12 @@ export class ImportService extends EventEmitter {
           result = { extraction: holdings, warnings: [], durationMs: Date.now() - started };
           detail = 'holdings export';
         } else if (match) {
-          const parsed = parseWithProfile(rows, match);
-          result = { extraction: parsed.extraction, warnings: [], durationMs: Date.now() - started };
+          const layout = withCardSigns(rows, match, record.hintAccountId ? this.store.account(record.hintAccountId)?.type : undefined);
+          const parsed = parseWithProfile(rows, layout);
+          const flipped = layout.profile.amountSign !== match.profile.amountSign;
+          result = { extraction: parsed.extraction, warnings: flipped ? [CARD_STYLE_WARNING] : [], durationMs: Date.now() - started };
+          // Signs chosen for you can be changed on the review page, as with columns worked out.
+          if (flipped) record.mapping = { profile: layout.profile, headers: rows[layout.headerIndex]!, sample: rows.slice(layout.headerIndex + 1).filter((r) => r.length >= 2).slice(0, 8), headerIndex: layout.headerIndex };
           detail = match.profile.id;
         } else {
           const suggestion = suggestMapping(rows, { accountType: record.hintAccountId ? this.store.account(record.hintAccountId)?.type : undefined });
@@ -280,7 +286,7 @@ export class ImportService extends EventEmitter {
             extraction: parsed.extraction,
             warnings: [
               'This CSV layout was not recognised; columns were detected automatically. Check signs and dates carefully, then save the mapping for next time.',
-              ...(suggestion.profile.amountSign === 'inverted' ? ['The amounts were read card style, money out positive: the file is for a credit card, and its purchases and payments only have the right signs that way round.'] : []),
+              ...(suggestion.profile.amountSign === 'inverted' ? [CARD_STYLE_WARNING] : []),
             ],
             durationMs: Date.now() - started,
           };
@@ -487,8 +493,9 @@ export class ImportService extends EventEmitter {
       let layout: string;
       let parsed: ReturnType<typeof parseWithProfile>;
       if (match) {
-        parsed = parseWithProfile(rows, match);
-        layout = `the ${match.profile.name} layout`;
+        const signed = withCardSigns(rows, match, ctx.hintAccountId ? this.store.account(ctx.hintAccountId)?.type : undefined);
+        parsed = parseWithProfile(rows, signed);
+        layout = `the ${match.profile.name} layout${signed.profile.amountSign !== match.profile.amountSign ? ', with card-style signs' : ''}`;
       } else if (own) {
         parsed = parseWithProfile(rows, own);
         layout = 'the columns you chose';

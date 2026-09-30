@@ -26,22 +26,30 @@ export interface CheckContext {
   periodFromRows?: boolean;
 }
 
-/** Descriptions of a payment to a card, which is money in on the card's own statement. */
-const PAYMENT_TO_CARD = /\b(payment received|thank you|direct debit (payment|received)|payment - thank|card payment received|dd payment)\b/i;
+/**
+ * Descriptions of a payment to a card, which is money in on the card's own statement: the usual
+ * wordings, or just "Payment" (a card's own export).
+ */
+const PAYMENT_TO_CARD = /\b(payment received|thank you|direct debit (payment|received)|payment - thank|card payment received|dd payment)\b|^\s*payment\s*$/i;
 
 export type CardSigns<T> = { verdict: 'ok' } | { verdict: 'mostly-in' } | { verdict: 'payments-out'; rows: T[] };
 
 /**
  * A credit card's settled rows: purchases are money out (negative), payments to the card money in.
- * Null with fewer than 3 rows, too few to tell. Also picks the signs of an unrecognised CSV layout
- * for a card (docs/INGESTION.md).
+ * With fewer than 3 rows, only a payment to the card can tell (null without one). Also picks the
+ * signs of a CSV layout that names no bank, for a card (docs/INGESTION.md).
  */
 export function cardSigns<T extends { amount: number; description: string }>(settled: readonly T[]): CardSigns<T> | null {
-  if (settled.length < 3) return null;
+  const payments = settled.filter((t) => PAYMENT_TO_CARD.test(t.description));
+  const paymentsOut = payments.filter((t) => t.amount < 0);
+  if (settled.length < 3) {
+    // Too few rows to count, but a payment to the card still shows which way round they are.
+    if (paymentsOut.length) return { verdict: 'payments-out', rows: paymentsOut };
+    return payments.length ? { verdict: 'ok' } : null;
+  }
   const positive = settled.filter((t) => t.amount > 0).length;
   if (positive > settled.length - positive) return { verdict: 'mostly-in' };
-  const payments = settled.filter((t) => t.amount < 0 && PAYMENT_TO_CARD.test(t.description));
-  return payments.length ? { verdict: 'payments-out', rows: payments } : { verdict: 'ok' };
+  return paymentsOut.length ? { verdict: 'payments-out', rows: paymentsOut } : { verdict: 'ok' };
 }
 
 const rowsWord = (n: number) => (n === 1 ? '1 row' : `${n} rows`);

@@ -847,3 +847,21 @@ statements chain from the first to today. Two causes:
     on from it (`importIntervals`, FORMULAS §3). A statement with no rows covers its closing day.
   - Considered: asking the reader for the period start again. It is not printed on every
     statement, and re-reading costs the owner's plan; the chained balances are already stored.
+
+## 2026-09-30: A card export in a plain layout is read card style
+
+PayPal Credit's monthly exports came in with every sign the wrong way round, on a card the files
+were uploaded to. Their header (`date,id,amount,description`) fitted the built-in Date / Description
+/ Amount layout, which reads amounts as they stand, and the card-style rule only ran for layouts no
+profile knew. Most of the files have one to three rows, too few for the card-signs check to count,
+and it did not know "Payment" alone as a payment to the card.
+
+- **PayPal Credit's layout is built in**, signs inverted.
+- **A built-in layout that names no bank** (no institution or account type) goes through the same
+  card-style rule as columns worked out, for a file going to a credit card: on upload and when read
+  again. It carries the same warning, and the review page can change the signs back. A bank's
+  layout, or one you saved, is kept as it is.
+- **The card-signs check can tell from a payment to the card in a short file**, and knows "Payment"
+  alone as one. Without a payment, fewer than 3 rows still can't tell.
+  - Considered: reading every file for a card card style unless its rows say otherwise. A file of
+    purchases alone cannot say, and one already signed the app's way would be turned round.

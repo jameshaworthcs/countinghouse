@@ -166,6 +166,27 @@ describe('API without login configured', () => {
     expect(after.extraction.warnings).toEqual([]);
   });
 
+  it('reads a card export in a layout that names no bank card style, and the signs can be changed back', async () => {
+    const json = { ...CSRF, 'content-type': 'application/json' };
+    expect((await req('/api/accounts', { method: 'POST', headers: json, body: JSON.stringify({ id: 'test-card', name: 'Test card', type: 'credit_card' }) })).status).toBe(201);
+    const form = new FormData();
+    form.append('file', new Blob(['Date,Description,Amount\n07/09/2026,SOFTWARE CO,3.49\n29/09/2026,Payment,-3.49\n']), 'card.csv');
+    form.append('accountId', 'test-card');
+    const { results } = (await (await req('/api/imports', { method: 'POST', headers: CSRF, body: form })).json()) as { results: { id: string }[] };
+    type Rec = { status: string; readiness?: { ready: boolean }; extraction: { detail?: string; warnings: string[] }; mapping?: { profile: { amountSign: string } }; draft?: { sections: { transactions: { amount: number }[] }[] } };
+    const id = results[0]!.id;
+    const rec = await waitFor(async () => {
+      const r = (await (await req(`/api/imports/${id}`)).json()) as Rec;
+      return r.status === 'review' ? r : undefined;
+    });
+    expect(rec.extraction.detail).toBe('date-description-amount');
+    expect(rec.draft!.sections[0]!.transactions.map((t) => t.amount)).toEqual([-3.49, 3.49]);
+    expect(rec.extraction.warnings).toEqual([expect.stringContaining('card style')]);
+    expect(rec.mapping!.profile.amountSign).toBe('inverted');
+    const after = (await (await req(`/api/imports/${id}/mapping`, { method: 'POST', headers: json, body: JSON.stringify({ profile: { ...rec.mapping!.profile, amountSign: 'normal' } }) })).json()) as Rec;
+    expect(after.draft!.sections[0]!.transactions.map((t) => t.amount)).toEqual([3.49, -3.49]);
+  });
+
   it('commits a holdings export as it stands, and its funds become instruments with agents off', async () => {
     const store = ctx.app.ctx.store;
     await store.setSettings({ ...store.settings, agents: { ...store.settings.agents, enabled: false } });
