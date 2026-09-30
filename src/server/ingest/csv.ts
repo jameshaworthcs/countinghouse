@@ -173,9 +173,10 @@ export function parseWithProfile(rows: string[][], match: ProfileMatch): CsvPars
       warnings.push(`Row ${lineNo + 1}: no readable amount, skipped`);
       return;
     }
-    if (profile.negativeWhen) {
-      const v = (col(profile.negativeWhen.column, row) ?? '').toLowerCase();
-      if (profile.negativeWhen.values.some((x) => v.startsWith(x.toLowerCase()))) amount = -Math.abs(amount);
+    for (const [when, sign] of [[profile.negativeWhen, -1], [profile.positiveWhen, 1]] as const) {
+      if (!when) continue;
+      const v = (col(when.column, row) ?? '').toLowerCase();
+      if (when.values.some((x) => v.startsWith(x.toLowerCase()))) amount = sign * Math.abs(amount);
     }
     let fee: number | null = null;
     const feeRaw = parseAmount(col(profile.columns.fee, row));

@@ -176,6 +176,44 @@
               },
               "kind": {
                 "type": "string",
+                "const": "remove_wrong_sign"
+              },
+              "why": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000
+              },
+              "transaction": {
+                "type": "string",
+                "pattern": "^tx_[0-9a-f]{16}$"
+              },
+              "recordedAs": {
+                "minItems": 1,
+                "maxItems": 10,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^tx_[0-9a-f]{16}$"
+                }
+              }
+            },
+            "required": [
+              "key",
+              "kind",
+              "why",
+              "transaction",
+              "recordedAs"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]{0,39}$"
+              },
+              "kind": {
+                "type": "string",
                 "const": "set_account_dates"
               },
               "why": {

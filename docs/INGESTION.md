@@ -31,6 +31,7 @@ The same file twice (by SHA-256) is recognised as already imported.
 | Amex CSV | `amex` | Positive = charge (signs inverted); merchant address; reference as id |
 | Aqua CSV | `aqua` | Positive = charge (signs inverted); the Note column, what the statement shows, as the reference |
 | PayPal Credit CSV | `paypal-credit` | Positive = charge (signs inverted); `date,id,amount,description`, amounts as `£3.49` |
+| Tesco Bank credit card CSV | `tesco-bank-card` | Sign from `Debit/Credit Flag` (a payment is `-£9.99`, `Credit`); posting date is the date, transaction date kept; Windows-1252 |
 | HSBC CSV (no header) | `hsbc` | Matched by the shape of the first row |
 | first direct and other Date/Description/Amount CSVs | `date-description-amount` | Names no bank, so says nothing about signs: a file for a credit card is read card style on the same rule as an auto-detected mapping (below), with the same warning, and the review page can change the signs back |
 | Trading 212 CSV | `trading-212` | Buys and withdrawals are money out; deposits count as contributions |
@@ -58,7 +59,7 @@ A profile is data:
 - `headerSignature` identifies the file.
 - `columns` map roles (date, description, amount or debit/credit, balance, id, time, type,
   reference, category, merchant fields…) to header names.
-- The rest are options: `dateOrder`, `amountSign`, `filter`, `splitBy`, `negativeWhen`.
+- The rest are options: `dateOrder`, `amountSign`, `filter`, `splitBy`, `negativeWhen`, `positiveWhen`.
 
 ## Documents and screenshots (read by Claude)
 

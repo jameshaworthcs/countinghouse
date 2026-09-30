@@ -216,6 +216,8 @@ lives in the work area (`<work>/proposals/`), never here.
   - `link_transfer {from, to}`: money out and the same money in, linked as a transfer.
   - `set_category {transaction, category}`.
   - `remove_duplicate {transaction, sameAs}`: a row that repeats rows adding up to it.
+  - `remove_wrong_sign {transaction, recordedAs}`: a row a document was read into with the wrong
+    sign, whose money rows from another document record the right way round.
   - `set_account_dates {account, openedOn?, closedOn?}` (`null` clears one).
 - `applied`: the keys of the changes you applied. `dismissedReason`: what you said, if anything.
 - `before`: `{transactions, accounts}`, the rows and accounts the applied changes touched, as they
@@ -262,7 +264,7 @@ A monthly spending budget, yours to set (Spending → Budgets). How it is measur
   - `set`: `{category?, payee?, tags?, counterpartyAccountId?}`.
   - `priority` (lower runs first), `enabled`.
 - **CSV profile**: `headerSignature` (normalised header names), column mapping, `dateOrder`,
-  `amountSign`, `filter`, `splitBy`, `negativeWhen`. Same shape as the built-in bank profiles in
+  `amountSign`, `filter`, `splitBy`, `negativeWhen`, `positiveWhen`. Same shape as the built-in bank profiles in
   `src/server/ingest/csv-profiles.ts`.
 
 ## Assumptions, research, insights and context

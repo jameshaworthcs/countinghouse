@@ -183,6 +183,24 @@
               "values"
             ]
           },
+          "positiveWhen": {
+            "type": "object",
+            "properties": {
+              "column": {
+                "type": "string"
+              },
+              "values": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "column",
+              "values"
+            ]
+          },
           "amountSign": {
             "default": "normal",
             "type": "string",

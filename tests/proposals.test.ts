@@ -154,6 +154,36 @@ describe('an agent proposes, the owner decides', () => {
     expect(store.account('fixed')).toMatchObject({ status: 'closed', closedOn: '2026-02-01', openedOn: '2024-02-01' });
   });
 
+  it('removes a row read with the wrong sign that another document records the right way round', async () => {
+    const { store } = app.ctx;
+    await store.setAccounts([...accounts, acct('card', 'credit_card')]);
+    // An export read a £12.34 payment to the card as money out, and the statement recorded it as money in.
+    const misread = tx('card', '2026-05-06', -12.34, 'DIRECT DEBIT PAYMENT - TH', { category: 'credit-card-payment', categorisedBy: 'user', source: { importId: 'imp_export', documentId: 'doc_export' } });
+    const statement = tx('card', '2026-05-06', 12.34, 'DIRECT DEBIT PAYMENT - THANK YOU', { category: 'credit-card-payment', source: { importId: 'imp_statement', documentId: 'doc_statement' } });
+    const sameDoc = tx('card', '2026-05-07', 12.34, 'PAYMENT RECEIVED', { source: { importId: 'imp_export', documentId: 'doc_export' } });
+    const typed = tx('card', '2026-05-08', -12.34, 'Typed in by hand');
+    await store.addTransactions([misread, statement, sameDoc, typed], 'test: a card payment read both ways round');
+    const one = (change: Record<string, unknown>) => propose({ title: 'The card payment', summary: 'A test.', changes: [{ kind: 'remove_wrong_sign', why: 'A test.', ...change }] });
+    const problem = async (change: Record<string, unknown>) => ((await (await one(change)).json()) as { problems: { problem: string }[] }).problems[0]!.problem;
+
+    expect(await problem({ transaction: misread.id, recordedAs: [sameDoc.id] })).toMatch(/same document/);
+    expect(await problem({ transaction: misread.id, recordedAs: [toSaver.id] })).toMatch(/another account/);
+    expect(await problem({ transaction: typed.id, recordedAs: [statement.id] })).toMatch(/not read from a document/);
+    await store.updateTransactions([{ id: statement.id, patch: { amount: 12.43 } }], 'test: a different amount');
+    expect(await problem({ transaction: misread.id, recordedAs: [statement.id] })).toMatch(/add up to £12.43, not £12.34/);
+    await store.updateTransactions([{ id: statement.id, patch: { amount: 12.34 } }, { id: misread.id, patch: { notes: 'checked' } }], 'test: a note on it');
+    expect(await problem({ transaction: misread.id, recordedAs: [statement.id] })).toMatch(/something of yours on it/);
+    await store.updateTransactions([{ id: misread.id, patch: { notes: undefined } }], 'test: no note');
+
+    // The category the owner gave the misread row does not stop it: the statement's row keeps its own.
+    const res = await one({ transaction: misread.id, recordedAs: [statement.id] });
+    expect(res.status).toBe(201);
+    const { proposal } = (await res.json()) as ProposalView;
+    expect((await owner(`/api/proposals/${proposal.id}/apply`)).status).toBe(200);
+    expect(store.transaction(misread.id)).toBeUndefined();
+    expect(store.transaction(statement.id)).toMatchObject({ amount: 12.34, category: 'credit-card-payment' });
+  });
+
   it('a row that stops being a transfer stops naming your account, and its payee is worked out again', async () => {
     const { store } = app.ctx;
     const cash = tx('bank', '2026-03-10', -50, 'Cash withdrawal, Example Bank, Faro', { payee: 'saver', category: 'savings-transfer', categorisedBy: 'transfer', counterpartyAccountId: 'saver' });

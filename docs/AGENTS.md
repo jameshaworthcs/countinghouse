@@ -178,6 +178,7 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
       { "kind": "link_transfer", "from": "tx_… (money out)", "to": "tx_… (money in)", "why": "…" },
       { "kind": "set_category", "transaction": "tx_…", "category": "takeaway", "why": "…" },
       { "kind": "remove_duplicate", "transaction": "tx_…", "sameAs": ["tx_…", "tx_…"], "why": "…" },
+      { "kind": "remove_wrong_sign", "transaction": "tx_…", "recordedAs": ["tx_…"], "why": "…" },
       { "kind": "set_account_dates", "account": "example-fixed", "closedOn": "2026-02-01", "why": "…" }
     ]
   }
@@ -192,6 +193,10 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
   - A link joins money out with the same amount in, in two different accounts, at most 10 days
     apart, neither linked already.
   - A duplicate's `sameAs` rows are in its account, at most 10 days from it, and add up to it.
+  - A row read with the wrong sign (`remove_wrong_sign`) came from a document. Its `recordedAs`
+    rows are in its account, came from another document, are at most 10 days from it, and add up
+    to it with its sign turned over. A category or payee the owner gave the misread row goes with it
+    (the rows recorded the right way round keep theirs); anything else of theirs on it stops it.
   - A category exists, and a row linked as a transfer keeps a transfer category. A category that
     is not a transfer one, on a row not linked as one, also takes away the account of yours the row
     named as the other side, and works its payee out again when that was one of your accounts'

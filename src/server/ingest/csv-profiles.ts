@@ -197,6 +197,29 @@ export const BUILTIN_CSV_PROFILES: CsvProfile[] = [
     },
   }),
   P({
+    id: 'tesco-bank-card',
+    name: 'Tesco Bank (credit card)',
+    institutionId: 'tesco-bank',
+    accountType: 'credit_card',
+    headerSignature: ['transaction date', 'posting date', 'billing amount', 'merchant', 'debit/credit flag'],
+    columns: {
+      date: 'Posting Date',
+      transactionDate: 'Transaction Date',
+      // The name is cut at 25 characters and runs on into the city ("DIRECT DEBIT PAYMENT - TH",
+      // "ANK YOU"): the city stays with the merchant's place, as the statement prints it apart.
+      description: ['Merchant'],
+      amount: 'Billing Amount',
+      merchantCity: 'Merchant City',
+      merchantPostcode: 'Merchant Postal Code',
+      reference: 'Reference Number',
+    },
+    // The flag says which way the money went: payments to the card are "-£9.99" and "Credit",
+    // purchases "Debit". The sign in the file is the bank's, turned over where there is no flag.
+    amountSign: 'inverted',
+    negativeWhen: { column: 'Debit/Credit Flag', values: ['Debit'] },
+    positiveWhen: { column: 'Debit/Credit Flag', values: ['Credit'] },
+  }),
+  P({
     id: 'paypal-credit',
     name: 'PayPal Credit',
     institutionId: 'paypal-credit',

@@ -917,3 +917,27 @@ is how the categoriser finds money moving between the owner's own accounts.
   history by itself (a re-run on all history would, but loses Claude's payees). The
   proposal sets the category, and a category that is not a transfer one now also takes away the
   account the row named, and works a payee that was one of the owner's account names out again.
+
+## 2026-09-30: A row read with the wrong sign can be taken away by a proposal; Tesco Bank's export is built in
+
+A one-row Tesco Bank card export was read before the card-signs check could tell from a short file,
+so its payment to the card went in as money out. The card's statement then recorded the same
+payment the right way round, and dedup did not match the two (their signs differ), leaving a gap of
+that amount between statements.
+
+- **`remove_wrong_sign`** takes away a row read from a document when rows from another document, in
+  the same account and within 10 days, add up to it with its sign turned over.
+  - Not a stretched `remove_duplicate`: a copy adds up to what it repeats, and saying "or its
+    negative" there would let a refund pass as a repeat of its purchase.
+  - A category or payee the owner gave the misread row does not stop it: it was set on a row whose
+    amount was wrong, and the rows recorded the right way round keep theirs. A note, tag, split,
+    correction, receipt or details from another document still do, as they would be lost.
+  - A row typed in by hand, or recorded by the same document, cannot be the misread one.
+  - A refund and its purchase, from two documents, fit the same checks. What tells them apart is
+    what the documents say (the other document shows the row once, the right way round), so the
+    `why` must say it, and the owner sees both rows and their documents beside the change.
+  - Considered: "Read again" on the export, which now corrects the sign. It leaves the payment
+    recorded twice, which no proposal could then take away (the copy carries the owner's category).
+- **Tesco Bank's credit-card CSV is a built-in layout.** Its `Debit/Credit Flag` gives the sign
+  (`positiveWhen`, the counterpart of `negativeWhen`), so no rule has to guess from the rows. The
+  posting date is the date, as on its statements.

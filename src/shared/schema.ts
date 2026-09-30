@@ -573,6 +573,8 @@ export const CsvProfileSchema = z.object({
   splitBy: z.array(z.string()).optional(),
   /** Amounts are positive in the file but money OUT when `column` starts with one of `values`. */
   negativeWhen: z.object({ column: z.string(), values: z.array(z.string()) }).optional(),
+  /** Money IN when `column` starts with one of `values`, whatever the amount's sign in the file. */
+  positiveWhen: z.object({ column: z.string(), values: z.array(z.string()) }).optional(),
   /** "inverted": positive numbers in the amount column are money OUT (e.g. Amex). */
   amountSign: z.enum(['normal', 'inverted']).default('normal'),
   /** Keep only rows whose `column` is one of `values` (e.g. Revolut State = COMPLETED). */
@@ -1174,6 +1176,11 @@ const changeUnion = <K extends z.ZodType<string | undefined>>(key: K) =>
     z.object({ key, kind: z.literal('set_category'), why: ChangeWhySchema, transaction: TransactionIdSchema, category: z.string().min(1).max(64) }),
     /** Remove a transaction that repeats money already recorded: the rows it repeats add up to it. */
     z.object({ key, kind: z.literal('remove_duplicate'), why: ChangeWhySchema, transaction: TransactionIdSchema, sameAs: z.array(TransactionIdSchema).min(1).max(10) }),
+    /**
+     * Remove a row a document was read into with the wrong sign: rows from another document record
+     * the same money the right way round (they add up to it with its sign turned over).
+     */
+    z.object({ key, kind: z.literal('remove_wrong_sign'), why: ChangeWhySchema, transaction: TransactionIdSchema, recordedAs: z.array(TransactionIdSchema).min(1).max(10) }),
     /** Set when an account opened or closed (null clears it; a closing date closes the account). */
     z.object({ key, kind: z.literal('set_account_dates'), why: ChangeWhySchema, account: SlugSchema, openedOn: ISODateSchema.nullable().optional(), closedOn: ISODateSchema.nullable().optional() }),
   ]);

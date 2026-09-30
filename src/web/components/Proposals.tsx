@@ -1,7 +1,7 @@
 // Proposed fixes: what an agent proposes changing in your data, each change with its reason and the
 // rows it is about, waiting for you on the Import page (src/server/proposals.ts).
 
-import { ArrowDown, ArrowRight, CalendarDays, ChevronRight, CircleCheck, CircleSlash, CopyX, FileText, Link2, Sparkles, Tag, Unlink, Wand2, X } from 'lucide-react';
+import { ArrowDown, ArrowRight, ArrowUpDown, CalendarDays, ChevronRight, CircleCheck, CircleSlash, CopyX, FileText, Link2, Sparkles, Tag, Unlink, Wand2, X } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import type { ProposalListResponse, ProposalRow, ProposalSummary, ProposalView } from '../../shared/api';
@@ -20,6 +20,7 @@ export const CHANGE_LABELS: Record<ProposedChangeKind, { title: string; count: (
   link_transfer: { title: 'Link as a transfer', count: (n) => `${plural(n, 'transfer')} linked`, icon: <Link2 className="size-4" aria-hidden /> },
   set_category: { title: 'Change a category', count: (n) => plural(n, 'category', 'categories'), icon: <Tag className="size-4" aria-hidden /> },
   remove_duplicate: { title: 'Remove a duplicate', count: (n) => `${plural(n, 'duplicate')} removed`, icon: <CopyX className="size-4" aria-hidden /> },
+  remove_wrong_sign: { title: 'Remove a row read with the wrong sign', count: (n) => `${plural(n, 'row')} with the wrong sign removed`, icon: <ArrowUpDown className="size-4" aria-hidden /> },
   set_account_dates: { title: 'Change an account’s dates', count: (n) => (n === 1 ? 'an account’s dates' : `${n} accounts’ dates`), icon: <CalendarDays className="size-4" aria-hidden /> },
 };
 
@@ -255,6 +256,26 @@ export function ChangeBody({ change, view }: { change: ProposedChange; view: Pro
               {same.map((r) => money(r?.amount)).join(' + ')} = {money(sum)} {Math.round(sum * 100) === Math.round(t.amount * 100) ? '✓' : ''}
             </div>
           )}
+        </div>
+      );
+    }
+    case 'remove_wrong_sign': {
+      const t = row(change.transaction);
+      return (
+        <div className="grid gap-2">
+          <div>
+            <div className="mb-1 text-[12px] font-medium text-bad-ink">Remove</div>
+            <TxLine row={t} view={view} muted />
+          </div>
+          <div>
+            <div className="mb-1 text-[12px] font-medium text-ink-3">The same money, recorded the right way round by another document as</div>
+            <div className="grid gap-1.5">
+              {change.recordedAs.map((id) => (
+                <TxLine key={id} row={row(id)} view={view} />
+              ))}
+            </div>
+          </div>
+          {t && !t.missing && t.categorisedBy === 'user' && <div className="text-[12.5px] text-ink-3">The category you gave it goes with it; the rows above keep theirs.</div>}
         </div>
       );
     }

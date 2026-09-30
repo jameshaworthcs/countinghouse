@@ -128,6 +128,20 @@ describe('CSV bank formats', () => {
     ]);
   });
 
+  it('Tesco Bank card: the Debit/Credit flag gives the sign, and the posting date is the date', () => {
+    // Saved in Windows-1252, as the bank's export is ("£" is one byte).
+    const { match, result } = parseCsvFixture('tesco-bank-card.csv');
+    expect(match.profile.id).toBe('tesco-bank-card');
+    const [acc] = result.extraction.accounts;
+    expect(acc!.institutionName).toBe('Tesco Bank');
+    expect(acc!.accountType).toBe('credit_card');
+    expect(acc!.transactions.map((t) => [t.date, t.transactionDate, t.amount, t.description, t.merchant?.city ?? null])).toEqual([
+      ['2026-09-04', '2026-09-03', -12.34, 'EXAMPLE BOOKSHOP', 'YORK'],
+      ['2026-09-07', '2026-09-05', 5, 'EXAMPLE BOOKSHOP', 'YORK'],
+      ['2026-09-15', '2026-09-14', 20, 'DIRECT DEBIT PAYMENT - TH', 'ANK YOU'],
+    ]);
+  });
+
   it('Revolut: completed only, fee applied, split by product and currency', () => {
     const { result } = parseCsvFixture('revolut.csv');
     const accounts = result.extraction.accounts;

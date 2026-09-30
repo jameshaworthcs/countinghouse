@@ -1,0 +1,4 @@
+Transaction Date,Posting Date,Billing Amount,Merchant,Merchant City,Merchant County,Merchant Postal Code,Reference Number,Debit/Credit Flag,SICMCC Code
+14/09/2026,15/09/2026,"-£20.00",DIRECT DEBIT PAYMENT - TH,ANK YOU,,,,Credit,
+05/09/2026,07/09/2026,"-£5.00",EXAMPLE BOOKSHOP,YORK,,,70000001234567890123456,Credit,5942
+03/09/2026,04/09/2026,£12.34,EXAMPLE BOOKSHOP,YORK,,,70000001234567890123455,Debit,5942

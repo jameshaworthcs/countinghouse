@@ -106,6 +106,12 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
     return undo >= 0 ? `${what}: include change ${undo + 1}, which undoes that link.` : `${what}: undo that link first.`;
   };
   const gone = (id: string) => `Transaction ${id} is no longer in your data.`;
+  const remove = (t: Transaction) => {
+    if (!out.touchedRows.has(t.id)) out.touchedRows.set(t.id, store.transaction(t.id)!);
+    out.patches.delete(t.id);
+    out.removed.set(t.id, store.transaction(t.id)!);
+    rows.set(t.id, null);
+  };
 
   const run = (c: ProposedChange): ChangeResult => {
     switch (c.kind) {
@@ -183,10 +189,34 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
           sum += toMinor(s.amount);
         }
         if (sum !== toMinor(t.amount)) return { problem: `The rows it repeats add up to ${money({ ...t, amount: fromMinor(sum) })}, not ${money(t)}.` };
-        if (!out.touchedRows.has(t.id)) out.touchedRows.set(t.id, store.transaction(t.id)!);
-        out.patches.delete(t.id);
-        out.removed.set(t.id, store.transaction(t.id)!);
-        rows.set(t.id, null);
+        remove(t);
+        return {};
+      }
+      case 'remove_wrong_sign': {
+        const t = row(c.transaction);
+        if (!t) return rows.get(c.transaction) === null ? { problem: 'Another change here removes it already.' } : { alreadySo: true };
+        if (t.transferGroup) return { problem: linkedNow(t) };
+        if (c.recordedAs.includes(t.id)) return { problem: 'It cannot record itself.' };
+        if (!t.amount) return { problem: 'It is £0.00: there is no sign to be wrong.' };
+        const doc = t.source.documentId ?? t.source.importId;
+        if (!doc) return { problem: 'It was not read from a document, so it cannot have been misread.' };
+        // A category or payee you gave the misread row goes with it: the rows recorded the right way
+        // round keep theirs. What else you added (a note, a split, a receipt…) would be lost.
+        const was = store.transaction(t.id)!;
+        if (was.notes || was.tags?.length || was.splits?.length || was.corrections?.length || was.seenIn?.length || receiptsOn.has(t.id))
+          return { problem: 'It has something of yours on it (a note, tag, split, correction, receipt or details you added from another document), so a proposal leaves it to you.' };
+        let sum = 0;
+        for (const id of c.recordedAs) {
+          const s = row(id);
+          if (!s) return { problem: `A row recording it: ${gone(id)}` };
+          if (s.accountId !== t.accountId) return { problem: `${brief(s, accountName)} is in another account, so it cannot be the same money.` };
+          if ((s.source.documentId ?? s.source.importId) === doc) return { problem: `${brief(s, accountName)} was read from the same document: another document must record it.` };
+          const days = Math.abs(diffDays(s.date, t.date));
+          if (days > DUPLICATE_DAYS) return { problem: `${brief(s, accountName)} is ${days} days from it; the same money is recorded within ${DUPLICATE_DAYS}.` };
+          sum += toMinor(s.amount);
+        }
+        if (sum !== -toMinor(t.amount)) return { problem: `The rows recording it add up to ${money({ ...t, amount: fromMinor(sum) })}, not ${money({ ...t, amount: -t.amount })}.` };
+        remove(t);
         return {};
       }
       case 'set_account_dates': {
@@ -253,6 +283,8 @@ function namedRows(c: ProposedChange): string[] {
       return [c.from, c.to];
     case 'remove_duplicate':
       return [c.transaction, ...c.sameAs];
+    case 'remove_wrong_sign':
+      return [c.transaction, ...c.recordedAs];
     case 'set_account_dates':
       return [];
   }
