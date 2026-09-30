@@ -7,10 +7,11 @@ import { FIGURE_KINDS, type Category, type Figure, type Profile, type Rule, type
 import { taxYearOf } from '../../shared/uk';
 import { CoverageGrid } from '../components/Coverage';
 import { CategorySelect } from '../components/TransactionList';
-import { Badge, Button, Callout, Card, Checkbox, Dialog, Field, Input, KeyValue, Loading, Money, PageHeader, Select, StatusBadge, Switch, Tabs, tableClasses, useToast } from '../components/ui';
+import { Badge, Button, Callout, Card, Checkbox, Dialog, Field, Input, KeyValue, Loading, Money, PageHeader, Select, SortHeader, StatusBadge, Switch, Tabs, tableClasses, useToast } from '../components/ui';
 import { api, useApi, useApiMutation } from '../lib/api';
 import { useAppData } from '../lib/data';
 import { bandLabel, cn, money, timeAgo } from '../lib/format';
+import { Sorted } from '../lib/sort';
 
 type Section = 'profile' | 'extraction' | 'categories' | 'rules' | 'tax-documents' | 'data' | 'access' | 'health';
 
@@ -375,37 +376,39 @@ function RulesEditor() {
         }
       >
         {data.rules.length ? (
-          <table className={tableClasses.table}>
-            <thead>
-              <tr>
-                <th className={tableClasses.th}>When</th>
-                <th className={tableClasses.th}>Then</th>
-                <th className={tableClasses.th}>On</th>
-                <th className={tableClasses.th} />
-              </tr>
-            </thead>
-            <tbody>
-              {[...data.rules]
-                .sort((a, b) => a.priority - b.priority)
-                .map((r) => (
-                  <tr key={r.id} className={r.enabled ? '' : 'opacity-50'}>
-                    <td className={tableClasses.td}>
-                      {r.match.field} {r.match.op} <code className="rounded bg-panel-2 px-1">{r.match.value}</code>
-                      {r.match.accountIds?.length ? <div className="text-[12px] text-ink-3">only {r.match.accountIds.map(accountName).join(', ')}</div> : null}
-                    </td>
-                    <td className={tableClasses.td}>{[r.set.category ? cats.path(r.set.category) : null, r.set.payee ? `payee “${r.set.payee}”` : null, r.set.tags?.length ? `tags ${r.set.tags.join(', ')}` : null].filter(Boolean).join(' · ')}</td>
-                    <td className={tableClasses.td}>
-                      <Checkbox checked={r.enabled} onChange={() => toggle.mutate(r)} />
-                    </td>
-                    <td className={cn(tableClasses.td, 'text-right')}>
-                      <button className="text-ink-3 hover:text-bad-ink" aria-label="Delete rule" onClick={() => del.mutate(r.id)}>
-                        <Trash2 className="size-4" />
-                      </button>
-                    </td>
+          <Sorted rows={[...data.rules].sort((a, b) => a.priority - b.priority)} columns={{ when: { value: (r) => r.match.value }, then: { value: (r) => (r.set.category ? cats.path(r.set.category) : r.set.payee) }, on: { value: (r) => (r.enabled ? 0 : 1), first: 'asc' } }}>
+            {({ rows, sortProps }) => (
+              <table className={tableClasses.table}>
+                <thead>
+                  <tr>
+                    <SortHeader label="When" sort={sortProps('when')} />
+                    <SortHeader label="Then" sort={sortProps('then')} />
+                    <SortHeader label="On" sort={sortProps('on')} />
+                    <th className={tableClasses.th} />
                   </tr>
-                ))}
-            </tbody>
-          </table>
+                </thead>
+                <tbody>
+                  {rows.map((r) => (
+                    <tr key={r.id} className={r.enabled ? '' : 'opacity-50'}>
+                      <td className={tableClasses.td}>
+                        {r.match.field} {r.match.op} <code className="rounded bg-panel-2 px-1">{r.match.value}</code>
+                        {r.match.accountIds?.length ? <div className="text-[12px] text-ink-3">only {r.match.accountIds.map(accountName).join(', ')}</div> : null}
+                      </td>
+                      <td className={tableClasses.td}>{[r.set.category ? cats.path(r.set.category) : null, r.set.payee ? `payee “${r.set.payee}”` : null, r.set.tags?.length ? `tags ${r.set.tags.join(', ')}` : null].filter(Boolean).join(' · ')}</td>
+                      <td className={tableClasses.td}>
+                        <Checkbox checked={r.enabled} onChange={() => toggle.mutate(r)} />
+                      </td>
+                      <td className={cn(tableClasses.td, 'text-right')}>
+                        <button className="text-ink-3 hover:text-bad-ink" aria-label="Delete rule" onClick={() => del.mutate(r.id)}>
+                          <Trash2 className="size-4" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </Sorted>
         ) : (
           <div className="border-t border-line px-5 py-6 text-[13px] text-ink-3">No rules yet. The quickest way to make one is to recategorise a transaction and accept the “always categorise like this?” prompt.</div>
         )}
@@ -504,37 +507,41 @@ function TaxDocuments() {
         {!figures.data ? (
           <Loading />
         ) : figures.data.length ? (
-          <table className={tableClasses.table}>
-            <thead>
-              <tr>
-                <th className={tableClasses.th}>Tax year</th>
-                <th className={tableClasses.th}>What</th>
-                <th className={tableClasses.th}>Payer</th>
-                <th className={cn(tableClasses.th, 'text-right')}>Amount</th>
-                <th className={tableClasses.th} />
-              </tr>
-            </thead>
-            <tbody>
-              {[...figures.data].reverse().map((f) => (
-                <tr key={f.id}>
-                  <td className={tableClasses.td}>{f.taxYear ?? (f.periodEnd ? formatDate(f.periodEnd) : '—')}</td>
-                  <td className={tableClasses.td}>
-                    {f.label}
-                    <div className="text-[12px] text-ink-3">{f.kind.replace(/_/g, ' ')}</div>
-                  </td>
-                  <td className={tableClasses.td}>{f.payer ?? '—'}</td>
-                  <td className={cn(tableClasses.td, tableClasses.num)}>
-                    <Money value={f.amount} />
-                  </td>
-                  <td className={cn(tableClasses.td, 'text-right')}>
-                    <button className="text-ink-3 hover:text-bad-ink" aria-label="Delete figure" onClick={() => confirm('Delete this figure?') && del.mutate(f.id)}>
-                      <Trash2 className="size-4" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <Sorted rows={[...figures.data].reverse()} columns={{ taxYear: { value: (f) => f.taxYear ?? f.periodEnd, first: 'desc' }, what: { value: (f) => f.label }, payer: { value: (f) => f.payer }, amount: { value: (f) => f.amount } }}>
+            {({ rows, sortProps }) => (
+              <table className={tableClasses.table}>
+                <thead>
+                  <tr>
+                    <SortHeader label="Tax year" sort={sortProps('taxYear')} />
+                    <SortHeader label="What" sort={sortProps('what')} />
+                    <SortHeader label="Payer" sort={sortProps('payer')} />
+                    <SortHeader label="Amount" sort={sortProps('amount')} numeric />
+                    <th className={tableClasses.th} />
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((f) => (
+                    <tr key={f.id}>
+                      <td className={tableClasses.td}>{f.taxYear ?? (f.periodEnd ? formatDate(f.periodEnd) : '—')}</td>
+                      <td className={tableClasses.td}>
+                        {f.label}
+                        <div className="text-[12px] text-ink-3">{f.kind.replace(/_/g, ' ')}</div>
+                      </td>
+                      <td className={tableClasses.td}>{f.payer ?? '—'}</td>
+                      <td className={cn(tableClasses.td, tableClasses.num)}>
+                        <Money value={f.amount} />
+                      </td>
+                      <td className={cn(tableClasses.td, 'text-right')}>
+                        <button className="text-ink-3 hover:text-bad-ink" aria-label="Delete figure" onClick={() => confirm('Delete this figure?') && del.mutate(f.id)}>
+                          <Trash2 className="size-4" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </Sorted>
         ) : (
           <div className="border-t border-line px-5 py-6 text-[13px] text-ink-3">No tax figures yet.</div>
         )}
@@ -829,36 +836,40 @@ function AgentAccess() {
           <p className="border-t border-line px-5 py-4 text-[13px] text-ink-3">No tokens yet.</p>
         ) : (
           <div className="overflow-x-auto border-t border-line">
-            <table className={tableClasses.table}>
-              <thead>
-                <tr>
-                  <th className={tableClasses.th}>Name</th>
-                  <th className={tableClasses.th}>Can</th>
-                  <th className={tableClasses.th}>Expires</th>
-                  <th className={tableClasses.th}>Last used</th>
-                  <th className={tableClasses.th} />
-                </tr>
-              </thead>
-              <tbody>
-                {d.tokens.map((t) => (
-                  <tr key={t.id}>
-                    <td className={tableClasses.td}>{t.name}</td>
-                    <td className={tableClasses.td}>{t.scopes.map((s) => SCOPE_NAMES[s] ?? s).join(', ')}</td>
-                    <td className={tableClasses.td}>{formatDate(t.expiresAt.slice(0, 10))}</td>
-                    <td className={tableClasses.td}>{t.lastUsedAt ? `${whenTime(t.lastUsedAt)}${t.lastUsedFrom ? ` from ${t.lastUsedFrom}` : ''}` : 'never'}</td>
-                    <td className={cn(tableClasses.td, 'text-right')}>
-                      {t.status === 'active' ? (
-                        <Button size="sm" loading={revoke.isPending && revoke.variables === t.id} onClick={() => revoke.mutate(t.id)}>
-                          Revoke
-                        </Button>
-                      ) : (
-                        <Badge tone="muted">{t.status === 'revoked' ? 'Revoked' : 'Expired'}</Badge>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <Sorted rows={d.tokens} columns={{ name: { value: (t) => t.name }, can: { value: (t) => t.scopes.map((s) => SCOPE_NAMES[s] ?? s).join(', ') }, expires: { value: (t) => t.expiresAt }, used: { value: (t) => t.lastUsedAt, first: 'desc' } }}>
+              {({ rows, sortProps }) => (
+                <table className={tableClasses.table}>
+                  <thead>
+                    <tr>
+                      <SortHeader label="Name" sort={sortProps('name')} />
+                      <SortHeader label="Can" sort={sortProps('can')} />
+                      <SortHeader label="Expires" sort={sortProps('expires')} />
+                      <SortHeader label="Last used" sort={sortProps('used')} />
+                      <th className={tableClasses.th} />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((t) => (
+                      <tr key={t.id}>
+                        <td className={tableClasses.td}>{t.name}</td>
+                        <td className={tableClasses.td}>{t.scopes.map((s) => SCOPE_NAMES[s] ?? s).join(', ')}</td>
+                        <td className={tableClasses.td}>{formatDate(t.expiresAt.slice(0, 10))}</td>
+                        <td className={tableClasses.td}>{t.lastUsedAt ? `${whenTime(t.lastUsedAt)}${t.lastUsedFrom ? ` from ${t.lastUsedFrom}` : ''}` : 'never'}</td>
+                        <td className={cn(tableClasses.td, 'text-right')}>
+                          {t.status === 'active' ? (
+                            <Button size="sm" loading={revoke.isPending && revoke.variables === t.id} onClick={() => revoke.mutate(t.id)}>
+                              Revoke
+                            </Button>
+                          ) : (
+                            <Badge tone="muted">{t.status === 'revoked' ? 'Revoked' : 'Expired'}</Badge>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </Sorted>
           </div>
         )}
       </Card>
@@ -867,30 +878,34 @@ function AgentAccess() {
           <p className="border-t border-line px-5 py-4 text-[13px] text-ink-3">No token has been used yet.</p>
         ) : (
           <div className="overflow-x-auto border-t border-line">
-            <table className={tableClasses.table}>
-              <thead>
-                <tr>
-                  <th className={tableClasses.th}>When</th>
-                  <th className={tableClasses.th}>Token</th>
-                  <th className={tableClasses.th}>Request</th>
-                  <th className={tableClasses.th}>Answer</th>
-                  <th className={tableClasses.th}>From</th>
-                </tr>
-              </thead>
-              <tbody>
-                {d.uses.map((u, i) => (
-                  <tr key={`${u.at}-${i}`}>
-                    <td className={cn(tableClasses.td, 'whitespace-nowrap')}>{whenTime(u.at)}</td>
-                    <td className={tableClasses.td}>{u.name}</td>
-                    <td className={cn(tableClasses.td, 'font-mono text-[12px]')}>
-                      {u.method} {u.path}
-                    </td>
-                    <td className={tableClasses.td}>{u.status < 400 ? <StatusBadge status="good">{u.status}</StatusBadge> : <StatusBadge status="bad">{u.status}</StatusBadge>}</td>
-                    <td className={tableClasses.td}>{u.from}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <Sorted rows={d.uses} columns={{ when: { value: (u) => u.at, first: 'desc' }, token: { value: (u) => u.name }, request: { value: (u) => `${u.path} ${u.method}` }, answer: { value: (u) => u.status }, from: { value: (u) => u.from } }}>
+              {({ rows, sortProps }) => (
+                <table className={tableClasses.table}>
+                  <thead>
+                    <tr>
+                      <SortHeader label="When" sort={sortProps('when')} />
+                      <SortHeader label="Token" sort={sortProps('token')} />
+                      <SortHeader label="Request" sort={sortProps('request')} />
+                      <SortHeader label="Answer" sort={sortProps('answer')} />
+                      <SortHeader label="From" sort={sortProps('from')} />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((u, i) => (
+                      <tr key={`${u.at}-${i}`}>
+                        <td className={cn(tableClasses.td, 'whitespace-nowrap')}>{whenTime(u.at)}</td>
+                        <td className={tableClasses.td}>{u.name}</td>
+                        <td className={cn(tableClasses.td, 'font-mono text-[12px]')}>
+                          {u.method} {u.path}
+                        </td>
+                        <td className={tableClasses.td}>{u.status < 400 ? <StatusBadge status="good">{u.status}</StatusBadge> : <StatusBadge status="bad">{u.status}</StatusBadge>}</td>
+                        <td className={tableClasses.td}>{u.from}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </Sorted>
           </div>
         )}
       </Card>

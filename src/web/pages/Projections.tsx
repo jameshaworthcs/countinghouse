@@ -8,9 +8,10 @@ import { ChartFrame, SERIES } from '../components/charts/common';
 import { TimeChart, type TimeSeries } from '../components/charts/TimeChart';
 import { GoalsCard } from '../components/Goals';
 import { AssumptionsLink, InsightsPanel, SourceTag } from '../components/Intel';
-import { Badge, Callout, Card, Field, Input, Loading, Money, PageHeader, Segmented, Select, Stat, tableClasses } from '../components/ui';
+import { Badge, Callout, Card, Field, Input, Loading, Money, PageHeader, Segmented, Select, SortHeader, Stat, tableClasses } from '../components/ui';
 import { qs, useApi } from '../lib/api';
 import { cn, compact, money, pct } from '../lib/format';
+import { Sorted } from '../lib/sort';
 
 const HORIZONS = [
   { value: '12', label: '1Y' },
@@ -66,9 +67,11 @@ function ScenarioCard({ s, color }: { s: ProjectionScenario; color: string }) {
   );
 }
 
+const isInvest = (a: AccountParamsSummary) => a.bucket === 'market' || a.bucket === 'pension';
+
 function AccountRow({ a }: { a: AccountParamsSummary }) {
   const [open, setOpen] = useState(false);
-  const invest = a.bucket === 'market' || a.bucket === 'pension';
+  const invest = isInvest(a);
   return (
     <>
       <tr>
@@ -173,8 +176,8 @@ export default function Projections() {
   }, [p]);
 
   const milestones = [12, 24, 60, 120, 240, 480].filter((m) => m <= Number(months));
-  const invest = p?.accounts.filter((a) => a.bucket === 'market' || a.bucket === 'pension') ?? [];
-  const other = p?.accounts.filter((a) => !(a.bucket === 'market' || a.bucket === 'pension')) ?? [];
+  const invest = p?.accounts.filter(isInvest) ?? [];
+  const other = p?.accounts.filter((a) => !isInvest(a)) ?? [];
   return (
     <div>
       <PageHeader title="Projections" subtitle="Where your estate value heads if your income, spending and saving carried on, each account growing at its own rate" />
@@ -320,63 +323,71 @@ export default function Projections() {
               </div>
             </div>
             <div className="overflow-x-auto">
-              <table className={tableClasses.table}>
-                <thead>
-                  <tr>
-                    <th className={tableClasses.th}>Account</th>
-                    <th className={cn(tableClasses.th, 'text-right')}>Today</th>
-                    <th className={cn(tableClasses.th, 'text-right')}>Expected return</th>
-                    <th className={cn(tableClasses.th, 'text-right')}>Volatility</th>
-                    <th className={cn(tableClasses.th, 'text-right')}>Charges</th>
-                    <th className={cn(tableClasses.th, 'text-right')} title="Median growth a year after charges">Net growth</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {[...invest, ...other].map((a) => (
-                    <Fragment key={a.id}>
-                      <AccountRow a={a} />
-                    </Fragment>
-                  ))}
-                </tbody>
-              </table>
+              <Sorted rows={[...invest, ...other]} columns={{ name: { value: (a) => a.name }, value: { value: (a) => a.value }, expected: { value: (a) => (isInvest(a) ? a.expectedReturn.value : (a.interest ?? a.growth)?.value) }, volatility: { value: (a) => (isInvest(a) ? a.volatility.value : null) }, charges: { value: (a) => (isInvest(a) ? a.fundFee.value + a.platformFee.value : null) }, net: { value: (a) => a.netGrowth } }}>
+                {({ rows, sortProps }) => (
+                  <table className={tableClasses.table}>
+                    <thead>
+                      <tr>
+                        <SortHeader label="Account" sort={sortProps('name')} />
+                        <SortHeader label="Today" sort={sortProps('value')} numeric />
+                        <SortHeader label="Expected return" sort={sortProps('expected')} numeric />
+                        <SortHeader label="Volatility" sort={sortProps('volatility')} numeric />
+                        <SortHeader label="Charges" sort={sortProps('charges')} numeric />
+                        <SortHeader label="Net growth" sort={sortProps('net')} numeric title="Median growth a year after charges" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((a) => (
+                        <Fragment key={a.id}>
+                          <AccountRow a={a} />
+                        </Fragment>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </Sorted>
             </div>
           </Card>
 
           {p.categories.length > 0 && (
             <Card title="If the last 3 months’ pace continued for a year" description="Annualised spending by group, next to the last 12 months, both from covered time" padded={false}>
-              <table className={tableClasses.table}>
-                <thead>
-                  <tr>
-                    <th className={tableClasses.th}>Group</th>
-                    <th className={cn(tableClasses.th, 'text-right')}>At recent pace</th>
-                    <th className={cn(tableClasses.th, 'text-right')}>Last 12 months</th>
-                    <th className={cn(tableClasses.th, 'text-right')}>Difference</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {p.categories.map((c) => {
-                    const diff = c.recentAnnual - c.lastYear;
-                    return (
-                      <tr key={c.id}>
-                        <td className={tableClasses.td}>{c.name}</td>
-                        <td className={cn(tableClasses.td, tableClasses.num)}>
-                          <Money value={c.recentAnnual} decimals={0} />
-                        </td>
-                        <td className={cn(tableClasses.td, tableClasses.num)}>
-                          <Money value={c.lastYear} decimals={0} />
-                        </td>
-                        <td className={cn(tableClasses.td, tableClasses.num, diff > 0 ? 'text-bad-ink' : diff < 0 ? 'text-good-ink' : 'text-ink-3')}>
-                          <span className="sensitive">
-                            {diff > 0 ? '+' : ''}
-                            {money(diff, { decimals: 0 })}
-                          </span>
-                          {c.lastYear > 0 && <span className="ml-1 text-ink-3">({pct(diff / c.lastYear, 0, true)})</span>}
-                        </td>
+              <Sorted rows={p.categories} columns={{ name: { value: (c) => c.name }, recent: { value: (c) => c.recentAnnual }, lastYear: { value: (c) => c.lastYear }, diff: { value: (c) => c.recentAnnual - c.lastYear } }}>
+                {({ rows, sortProps }) => (
+                  <table className={tableClasses.table}>
+                    <thead>
+                      <tr>
+                        <SortHeader label="Group" sort={sortProps('name')} />
+                        <SortHeader label="At recent pace" sort={sortProps('recent')} numeric />
+                        <SortHeader label="Last 12 months" sort={sortProps('lastYear')} numeric />
+                        <SortHeader label="Difference" sort={sortProps('diff')} numeric />
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                    </thead>
+                    <tbody>
+                      {rows.map((c) => {
+                        const diff = c.recentAnnual - c.lastYear;
+                        return (
+                          <tr key={c.id}>
+                            <td className={tableClasses.td}>{c.name}</td>
+                            <td className={cn(tableClasses.td, tableClasses.num)}>
+                              <Money value={c.recentAnnual} decimals={0} />
+                            </td>
+                            <td className={cn(tableClasses.td, tableClasses.num)}>
+                              <Money value={c.lastYear} decimals={0} />
+                            </td>
+                            <td className={cn(tableClasses.td, tableClasses.num, diff > 0 ? 'text-bad-ink' : diff < 0 ? 'text-good-ink' : 'text-ink-3')}>
+                              <span className="sensitive">
+                                {diff > 0 ? '+' : ''}
+                                {money(diff, { decimals: 0 })}
+                              </span>
+                              {c.lastYear > 0 && <span className="ml-1 text-ink-3">({pct(diff / c.lastYear, 0, true)})</span>}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </Sorted>
             </Card>
           )}
           <Callout tone="neutral" title="How to read this">

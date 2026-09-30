@@ -9,10 +9,11 @@ import { TimeChart } from '../components/charts/TimeChart';
 import { CoverageGrid } from '../components/Coverage';
 import { InsightsPanel } from '../components/Intel';
 import { TransactionList } from '../components/TransactionList';
-import { Badge, Button, Callout, Card, EmptyState, ErrorNote, Loading, Money, PageHeader, Stat, Tabs, tableClasses, useToast } from '../components/ui';
+import { Badge, Button, Callout, Card, EmptyState, ErrorNote, Loading, Money, PageHeader, SortHeader, Stat, Tabs, tableClasses, useToast } from '../components/ui';
 import { FilePickerButton } from '../components/Upload';
 import { api, qs, useApi, useApiMutation } from '../lib/api';
 import { cn, formatDate, money, pct, timeAgo } from '../lib/format';
+import { Sorted } from '../lib/sort';
 
 type Tab = 'transactions' | 'balances' | 'holdings' | 'documents';
 
@@ -167,87 +168,95 @@ export default function AccountDetail() {
       {tab === 'balances' && (
         <Card padded={false}>
           <div className="overflow-x-auto">
-            <table className={tableClasses.table}>
-              <thead>
-                <tr>
-                  <th className={tableClasses.th}>Date</th>
-                  <th className={cn(tableClasses.th, 'text-right')}>{market ? 'Value' : 'Balance'}</th>
-                  {market && <th className={cn(tableClasses.th, 'text-right')}>Paid in</th>}
-                  <th className={tableClasses.th}>Source</th>
-                  <th className={tableClasses.th} />
-                </tr>
-              </thead>
-              <tbody>
-                {[...balances].reverse().map((b) => (
-                  <tr key={b.id}>
-                    <td className={tableClasses.td}>{formatDate(b.date)}</td>
-                    <td className={cn(tableClasses.td, tableClasses.num)}>
-                      <Money value={b.balance} currency={b.currency} />
-                    </td>
-                    {market && <td className={cn(tableClasses.td, tableClasses.num)}>{b.contributions !== undefined ? <Money value={b.contributions} /> : '—'}</td>}
-                    <td className={cn(tableClasses.td, 'text-ink-3')}>
-                      {b.approximate ? <Badge tone="muted">approximate</Badge> : b.kind}
-                      {b.dateSource && b.dateSource !== 'document' && b.dateSource !== 'manual' ? ` · date from ${b.dateSource}` : ''}
-                      {b.note && <div className="text-[12px]">{b.note}</div>}
-                      {b.source.importId && (
-                        <Link to={`/import/${b.source.importId}`} className="ml-2 text-accent hover:underline">
-                          import
-                        </Link>
-                      )}
-                    </td>
-                    <td className={cn(tableClasses.td, 'text-right')}>
-                      <button className="text-ink-3 hover:text-bad-ink" aria-label="Delete balance" onClick={() => confirm('Delete this balance snapshot?') && delBalance.mutate(b.id)}>
-                        <Trash2 className="size-4" />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <Sorted rows={[...balances].reverse()} columns={{ date: { value: (b) => b.date, first: 'desc' }, balance: { value: (b) => b.balance }, paidIn: { value: (b) => b.contributions }, source: { value: (b) => b.kind } }}>
+              {({ rows, sortProps }) => (
+                <table className={tableClasses.table}>
+                  <thead>
+                    <tr>
+                      <SortHeader label="Date" sort={sortProps('date')} />
+                      <SortHeader label={market ? 'Value' : 'Balance'} sort={sortProps('balance')} numeric />
+                      {market && <SortHeader label="Paid in" sort={sortProps('paidIn')} numeric />}
+                      <SortHeader label="Source" sort={sortProps('source')} />
+                      <th className={tableClasses.th} />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((b) => (
+                      <tr key={b.id}>
+                        <td className={tableClasses.td}>{formatDate(b.date)}</td>
+                        <td className={cn(tableClasses.td, tableClasses.num)}>
+                          <Money value={b.balance} currency={b.currency} />
+                        </td>
+                        {market && <td className={cn(tableClasses.td, tableClasses.num)}>{b.contributions !== undefined ? <Money value={b.contributions} /> : '—'}</td>}
+                        <td className={cn(tableClasses.td, 'text-ink-3')}>
+                          {b.approximate ? <Badge tone="muted">approximate</Badge> : b.kind}
+                          {b.dateSource && b.dateSource !== 'document' && b.dateSource !== 'manual' ? ` · date from ${b.dateSource}` : ''}
+                          {b.note && <div className="text-[12px]">{b.note}</div>}
+                          {b.source.importId && (
+                            <Link to={`/import/${b.source.importId}`} className="ml-2 text-accent hover:underline">
+                              import
+                            </Link>
+                          )}
+                        </td>
+                        <td className={cn(tableClasses.td, 'text-right')}>
+                          <button className="text-ink-3 hover:text-bad-ink" aria-label="Delete balance" onClick={() => confirm('Delete this balance snapshot?') && delBalance.mutate(b.id)}>
+                            <Trash2 className="size-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </Sorted>
           </div>
         </Card>
       )}
       {tab === 'holdings' && latestHoldings && (
         <Card title={`Holdings on ${formatDate(latestHoldings.date)}`} padded={false}>
           <div className="overflow-x-auto">
-            <table className={tableClasses.table}>
-              <thead>
-                <tr>
-                  <th className={tableClasses.th}>Holding</th>
-                  <th className={cn(tableClasses.th, 'text-right')}>Units</th>
-                  <th className={cn(tableClasses.th, 'text-right')}>Price</th>
-                  <th className={cn(tableClasses.th, 'text-right')}>Value</th>
-                  <th className={cn(tableClasses.th, 'text-right')}>Weight</th>
-                </tr>
-              </thead>
-              <tbody>
-                {latestHoldings.holdings.map((h) => (
-                  <tr key={h.name}>
-                    <td className={tableClasses.td}>
-                      <div className="font-medium">{h.name}</div>
-                      <div className="text-[12px] text-ink-3">{[h.isin, h.sedol, h.ticker, h.assetClass].filter(Boolean).join(' · ')}</div>
-                    </td>
-                    <td className={cn(tableClasses.td, tableClasses.num)}>{h.units?.toLocaleString('en-GB', { maximumFractionDigits: 4 }) ?? '—'}</td>
-                    <td className={cn(tableClasses.td, tableClasses.num)}>{h.price !== undefined ? h.price.toLocaleString('en-GB', { maximumFractionDigits: 4 }) : '—'}</td>
-                    <td className={cn(tableClasses.td, tableClasses.num)}>
-                      <Money value={h.value} currency={h.currency} />
-                    </td>
-                    <td className={cn(tableClasses.td, tableClasses.num)}>{pct(h.value / latestHoldings.totalValue)}</td>
-                  </tr>
-                ))}
-                {latestHoldings.cash !== undefined && (
-                  <tr>
-                    <td className={tableClasses.td}>Cash</td>
-                    <td className={tableClasses.td} />
-                    <td className={tableClasses.td} />
-                    <td className={cn(tableClasses.td, tableClasses.num)}>
-                      <Money value={latestHoldings.cash} />
-                    </td>
-                    <td className={cn(tableClasses.td, tableClasses.num)}>{pct(latestHoldings.cash / latestHoldings.totalValue)}</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+            <Sorted rows={latestHoldings.holdings} columns={{ name: { value: (h) => h.name }, units: { value: (h) => h.units }, price: { value: (h) => h.price }, value: { value: (h) => h.value }, weight: { value: (h) => h.value } }}>
+              {({ rows, sortProps }) => (
+                <table className={tableClasses.table}>
+                  <thead>
+                    <tr>
+                      <SortHeader label="Holding" sort={sortProps('name')} />
+                      <SortHeader label="Units" sort={sortProps('units')} numeric />
+                      <SortHeader label="Price" sort={sortProps('price')} numeric />
+                      <SortHeader label="Value" sort={sortProps('value')} numeric />
+                      <SortHeader label="Weight" sort={sortProps('weight')} numeric />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((h) => (
+                      <tr key={h.name}>
+                        <td className={tableClasses.td}>
+                          <div className="font-medium">{h.name}</div>
+                          <div className="text-[12px] text-ink-3">{[h.isin, h.sedol, h.ticker, h.assetClass].filter(Boolean).join(' · ')}</div>
+                        </td>
+                        <td className={cn(tableClasses.td, tableClasses.num)}>{h.units?.toLocaleString('en-GB', { maximumFractionDigits: 4 }) ?? '—'}</td>
+                        <td className={cn(tableClasses.td, tableClasses.num)}>{h.price !== undefined ? h.price.toLocaleString('en-GB', { maximumFractionDigits: 4 }) : '—'}</td>
+                        <td className={cn(tableClasses.td, tableClasses.num)}>
+                          <Money value={h.value} currency={h.currency} />
+                        </td>
+                        <td className={cn(tableClasses.td, tableClasses.num)}>{pct(h.value / latestHoldings.totalValue)}</td>
+                      </tr>
+                    ))}
+                    {latestHoldings.cash !== undefined && (
+                      <tr>
+                        <td className={tableClasses.td}>Cash</td>
+                        <td className={tableClasses.td} />
+                        <td className={tableClasses.td} />
+                        <td className={cn(tableClasses.td, tableClasses.num)}>
+                          <Money value={latestHoldings.cash} />
+                        </td>
+                        <td className={cn(tableClasses.td, tableClasses.num)}>{pct(latestHoldings.cash / latestHoldings.totalValue)}</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              )}
+            </Sorted>
           </div>
         </Card>
       )}

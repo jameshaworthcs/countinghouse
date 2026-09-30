@@ -1,16 +1,18 @@
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Download, Search, StickyNote, X } from 'lucide-react';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import type { TransactionsResponse } from '../../shared/api';
 import { addDays, addMonths, endOfMonth, startOfMonth, today } from '../../shared/dates';
 import type { Transaction } from '../../shared/schema';
+import { formatSortParam, parseSortParam, type SortDir } from '../../shared/sort';
 import { taxYearOf } from '../../shared/uk';
 import { CategorySelect, SelectionBar, TransactionDrawer } from '../components/TransactionList';
-import { Button, Checkbox, EmptyState, ErrorNote, Input, Loading, Money, PageHeader, Select, useDebounced, useToast } from '../components/ui';
+import { Button, Checkbox, EmptyState, ErrorNote, Input, Loading, Money, PageHeader, Select, SortHeader, useDebounced, useToast } from '../components/ui';
 import { api, qs, useApi, useApiMutation } from '../lib/api';
 import { useAppData } from '../lib/data';
 import { cn, formatDate, money, plural } from '../lib/format';
+import type { SortProps } from '../lib/sort';
 
 const PERIODS: { id: string; label: string; range: () => [string | undefined, string | undefined] }[] = [
   { id: 'all', label: 'All time', range: () => [undefined, undefined] },
@@ -22,6 +24,10 @@ const PERIODS: { id: string; label: string; range: () => [string | undefined, st
   { id: 'last-tax-year', label: 'Last tax year', range: () => { const t = taxYearOf(addMonths(taxYearOf(today()).start, -1)); return [t.start, t.end]; } },
   { id: '12m', label: 'Last 12 months', range: () => [addMonths(today(), -12), undefined] },
 ];
+
+/** Sortable columns and the direction of their first click (sorted by the API: the list is capped). */
+const SORT_FIRST: Record<string, SortDir> = { date: 'desc', payee: 'asc', account: 'asc', category: 'asc', amount: 'asc' };
+const DEFAULT_SORT = 'date_desc';
 
 export default function Transactions() {
   const [params, setParams] = useSearchParams();
@@ -41,6 +47,7 @@ export default function Transactions() {
     transfers: params.get('transfers') ?? undefined,
     tag: params.get('tag') ?? undefined,
     source: params.get('source') ?? undefined,
+    sort: params.get('sort') ?? undefined,
     limit: 5000,
   };
   const query = useApi<TransactionsResponse>(['transactions', filters], `/transactions${qs(filters)}`);
@@ -68,7 +75,21 @@ export default function Transactions() {
   const parentRef = useRef<HTMLDivElement>(null);
   const virtual = useVirtualizer({ count: items.length, getScrollElement: () => parentRef.current, estimateSize: () => 52, overscan: 12 });
   const allSelected = items.length > 0 && selected.size === items.length;
-  const exportHref = `/api/transactions/export.csv${qs({ ...filters, limit: undefined })}`;
+  const exportHref = `/api/transactions/export.csv${qs({ ...filters, sort: undefined, limit: undefined })}`;
+  const sort = parseSortParam(filters.sort ?? DEFAULT_SORT) ?? { key: 'date', dir: 'desc' as const };
+  const sortProps = (key: string): SortProps => ({
+    dir: sort.key === key ? sort.dir : undefined,
+    onSort: () => {
+      const first = SORT_FIRST[key] ?? 'asc';
+      const dir = sort.key === key ? (sort.dir === 'asc' ? 'desc' : 'asc') : first;
+      const next = formatSortParam(key, dir);
+      set('sort', next === DEFAULT_SORT ? undefined : next);
+    },
+  });
+  // A new order starts from its top. (A block body: scrollTo can return a promise, which isn't a cleanup.)
+  useEffect(() => {
+    parentRef.current?.scrollTo({ top: 0 });
+  }, [filters.sort]);
   const active = [filters.accounts, filters.categories, filters.direction, filters.transfers, filters.tag, filters.source, q].some(Boolean);
 
   return (
@@ -120,7 +141,7 @@ export default function Transactions() {
           <option value="only">Only transfers</option>
         </Select>
         {active && (
-          <Button size="sm" variant="ghost" icon={<X className="size-3.5" />} onClick={() => { setSearch(''); setParams(new URLSearchParams(period !== '90d' ? { period } : {}), { replace: true }); }}>
+          <Button size="sm" variant="ghost" icon={<X className="size-3.5" />} onClick={() => { setSearch(''); setParams(new URLSearchParams({ ...(period !== '90d' ? { period } : {}), ...(filters.sort ? { sort: filters.sort } : {}) }), { replace: true }); }}>
             Clear
           </Button>
         )}
@@ -130,18 +151,18 @@ export default function Transactions() {
       <div className="print-plain overflow-hidden rounded-xl border border-line bg-panel shadow-card">
         <div className="grid grid-cols-[28px_76px_1fr_120px] items-center gap-3 border-b border-line px-4 py-2 text-[12px] font-medium text-ink-3 md:grid-cols-[28px_84px_1fr_180px_200px_120px]">
           <Checkbox checked={allSelected} indeterminate={selected.size > 0 && !allSelected} onChange={(v) => setSelected(v ? new Set(items.map((t) => t.id)) : new Set())} />
-          <span>Date</span>
-          <span>Description</span>
-          <span className="hidden md:block">Account</span>
-          <span className="hidden md:block">Category</span>
-          <span className="text-right">Amount</span>
+          <SortHeader as="div" label="Date" sort={sortProps('date')} />
+          <SortHeader as="div" label="Description" sort={sortProps('payee')} />
+          <SortHeader as="div" label="Account" sort={sortProps('account')} className="hidden md:block" />
+          <SortHeader as="div" label="Category" sort={sortProps('category')} className="hidden md:block" />
+          <SortHeader as="div" label="Amount" sort={sortProps('amount')} numeric />
         </div>
         {!query.data ? (
           <Loading />
         ) : items.length === 0 ? (
           <EmptyState title="No transactions match">Try a longer period or clear the filters.</EmptyState>
         ) : (
-          <div ref={parentRef} className={cn('scrollbar-thin h-[calc(100dvh-300px)] min-h-[360px] overflow-y-auto', query.isFetching ? 'opacity-60' : '')}>
+          <div ref={parentRef} data-scroll-top className={cn('scrollbar-thin h-[calc(100dvh-300px)] min-h-[360px] overflow-y-auto', query.isFetching ? 'opacity-60' : '')}>
             <div style={{ height: virtual.getTotalSize(), position: 'relative' }}>
               {virtual.getVirtualItems().map((row) => {
                 const t = items[row.index]!;
@@ -189,7 +210,7 @@ export default function Transactions() {
           </div>
         )}
       </div>
-      {query.data && query.data.total > items.length && <div className="mt-2 text-[12.5px] text-ink-3">Showing the newest {items.length.toLocaleString()} of {query.data.total.toLocaleString()}. Narrow the filters to see the rest.</div>}
+      {query.data && query.data.total > items.length && <div className="mt-2 text-[12.5px] text-ink-3">Showing the {sort.key === 'date' && sort.dir === 'desc' ? 'newest' : 'first'} {items.length.toLocaleString()} of {query.data.total.toLocaleString()}{sort.key === 'date' && sort.dir === 'desc' ? '' : ' in this order'}. Narrow the filters to see the rest.</div>}
       <SelectionBar count={selected.size} onClear={() => setSelected(new Set())}>
         <div className="w-48">
           <CategorySelect value={bulkCategory} onChange={setBulkCategory} placeholder="Choose category" />

@@ -7,9 +7,10 @@ import { ChartFrame, SERIES } from '../components/charts/common';
 import { TimeChart } from '../components/charts/TimeChart';
 import { formatAssumptionValue } from '../../shared/assumptions';
 import { AssumptionsLink, InsightsPanel, SourceTag } from '../components/Intel';
-import { Callout, Card, EmptyState, KeyValue, Loading, Money, PageHeader, Select, Stat, tableClasses } from '../components/ui';
+import { Callout, Card, EmptyState, KeyValue, Loading, Money, PageHeader, Select, SortHeader, Stat, tableClasses } from '../components/ui';
 import { useApi } from '../lib/api';
 import { cn, money, pct } from '../lib/format';
+import { Sorted } from '../lib/sort';
 
 const ASSET_LABELS: Record<string, string> = {
   equity: 'Shares',
@@ -57,62 +58,66 @@ export default function Investments() {
 
       <Card title="Accounts" padded={false} className="mb-5">
         <div className="overflow-x-auto">
-          <table className={tableClasses.table}>
-            <thead>
-              <tr>
-                <th className={tableClasses.th}>Account</th>
-                <th className={cn(tableClasses.th, 'text-right')}>Value</th>
-                <th className={cn(tableClasses.th, 'text-right')}>Paid in</th>
-                <th className={cn(tableClasses.th, 'text-right')}>Growth</th>
-                <th className={cn(tableClasses.th, 'text-right')} title="Money-weighted annual return">Annual return</th>
-                <th className={cn(tableClasses.th, 'text-right')} title="Fund charges plus the platform fee, this year">Charges</th>
-                <th className={cn(tableClasses.th, 'text-right')} title="What the charges cost by retirement (or over 10 years), in today's money">Cost of charges</th>
-                <th className={tableClasses.th}>As of</th>
-              </tr>
-            </thead>
-            <tbody>
-              {d.accounts.map((a) => (
-                <tr key={a.id} className="hover:bg-panel-2">
-                  <td className={tableClasses.td}>
-                    <Link to={`/accounts/${a.id}`} className="font-medium hover:underline">
-                      {a.name}
-                    </Link>
-                    <div className="text-[12px] text-ink-3">{a.typeLabel}</div>
-                  </td>
-                  <td className={cn(tableClasses.td, tableClasses.num, 'font-medium')}>
-                    <Money value={a.value} decimals={0} />
-                    {a.estimated && <div className="text-[11px] font-normal text-ink-3">estimated</div>}
-                  </td>
-                  <td className={cn(tableClasses.td, tableClasses.num)}>
-                    <Money value={a.contributions} decimals={0} />
-                  </td>
-                  <td className={cn(tableClasses.td, tableClasses.num, a.growth !== null && a.growth < 0 ? 'text-bad-ink' : '')}>
-                    {a.growth !== null ? (
-                      <>
-                        <Money value={a.growth} decimals={0} />
-                        <span className="ml-1 text-ink-3">{pct(a.growthPct, 1, true)}</span>
-                        {a.estimated && <div className="text-[11px] text-ink-3">from an estimate</div>}
-                      </>
-                    ) : (
-                      '—'
-                    )}
-                  </td>
-                  <td className={cn(tableClasses.td, tableClasses.num)}>{a.xirr !== null ? pct(a.xirr, 1, true) : '—'}</td>
-                  <td className={cn(tableClasses.td, 'text-right')} title={`Fund: ${a.params.fundFee.basis}\nPlatform: ${a.params.platformFee.basis}`}>
-                    <div className="tabular">{formatAssumptionValue('fee.fund', a.charges.rate)}</div>
-                    <div className="inline-flex items-center gap-1 text-[11.5px] text-ink-3">
-                      <Money value={a.charges.annual} decimals={0} /> a year <SourceTag value={a.params.fundFee.source === 'fallback' ? a.params.platformFee : a.params.fundFee} />
-                    </div>
-                  </td>
-                  <td className={cn(tableClasses.td, tableClasses.num)}>
-                    <Money value={a.charges.drag} decimals={0} />
-                    <div className="text-[11.5px] text-ink-3">over {a.charges.horizonYears} years</div>
-                  </td>
-                  <td className={cn(tableClasses.td, 'text-ink-3')}>{a.asOf ? formatDate(a.asOf) : '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <Sorted rows={d.accounts} columns={{ account: { value: (a) => a.name }, value: { value: (a) => a.value }, paidIn: { value: (a) => a.contributions }, growth: { value: (a) => a.growth }, xirr: { value: (a) => a.xirr }, charges: { value: (a) => a.charges.rate }, drag: { value: (a) => a.charges.drag }, asOf: { value: (a) => a.asOf, first: 'desc' } }}>
+            {({ rows, sortProps }) => (
+              <table className={tableClasses.table}>
+                <thead>
+                  <tr>
+                    <SortHeader label="Account" sort={sortProps('account')} />
+                    <SortHeader label="Value" sort={sortProps('value')} numeric />
+                    <SortHeader label="Paid in" sort={sortProps('paidIn')} numeric />
+                    <SortHeader label="Growth" sort={sortProps('growth')} numeric />
+                    <SortHeader label="Annual return" sort={sortProps('xirr')} numeric title="Money-weighted annual return" />
+                    <SortHeader label="Charges" sort={sortProps('charges')} numeric title="Fund charges plus the platform fee, this year" />
+                    <SortHeader label="Cost of charges" sort={sortProps('drag')} numeric title="What the charges cost by retirement (or over 10 years), in today's money" />
+                    <SortHeader label="As of" sort={sortProps('asOf')} />
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((a) => (
+                    <tr key={a.id} className="hover:bg-panel-2">
+                      <td className={tableClasses.td}>
+                        <Link to={`/accounts/${a.id}`} className="font-medium hover:underline">
+                          {a.name}
+                        </Link>
+                        <div className="text-[12px] text-ink-3">{a.typeLabel}</div>
+                      </td>
+                      <td className={cn(tableClasses.td, tableClasses.num, 'font-medium')}>
+                        <Money value={a.value} decimals={0} />
+                        {a.estimated && <div className="text-[11px] font-normal text-ink-3">estimated</div>}
+                      </td>
+                      <td className={cn(tableClasses.td, tableClasses.num)}>
+                        <Money value={a.contributions} decimals={0} />
+                      </td>
+                      <td className={cn(tableClasses.td, tableClasses.num, a.growth !== null && a.growth < 0 ? 'text-bad-ink' : '')}>
+                        {a.growth !== null ? (
+                          <>
+                            <Money value={a.growth} decimals={0} />
+                            <span className="ml-1 text-ink-3">{pct(a.growthPct, 1, true)}</span>
+                            {a.estimated && <div className="text-[11px] text-ink-3">from an estimate</div>}
+                          </>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
+                      <td className={cn(tableClasses.td, tableClasses.num)}>{a.xirr !== null ? pct(a.xirr, 1, true) : '—'}</td>
+                      <td className={cn(tableClasses.td, 'text-right')} title={`Fund: ${a.params.fundFee.basis}\nPlatform: ${a.params.platformFee.basis}`}>
+                        <div className="tabular">{formatAssumptionValue('fee.fund', a.charges.rate)}</div>
+                        <div className="inline-flex items-center gap-1 text-[11.5px] text-ink-3">
+                          <Money value={a.charges.annual} decimals={0} /> a year <SourceTag value={a.params.fundFee.source === 'fallback' ? a.params.platformFee : a.params.fundFee} />
+                        </div>
+                      </td>
+                      <td className={cn(tableClasses.td, tableClasses.num)}>
+                        <Money value={a.charges.drag} decimals={0} />
+                        <div className="text-[11.5px] text-ink-3">over {a.charges.horizonYears} years</div>
+                      </td>
+                      <td className={cn(tableClasses.td, 'text-ink-3')}>{a.asOf ? formatDate(a.asOf) : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </Sorted>
         </div>
       </Card>
 
@@ -180,37 +185,41 @@ export default function Investments() {
       {funds.length > 0 && (
         <Card title="Your funds" description="Each holding’s charge and make-up, and where each figure came from" padded={false} className="mb-5">
           <div className="overflow-x-auto">
-            <table className={tableClasses.table}>
-              <thead>
-                <tr>
-                  <th className={tableClasses.th}>Holding</th>
-                  <th className={tableClasses.th}>Account</th>
-                  <th className={cn(tableClasses.th, 'text-right')}>Value</th>
-                  <th className={cn(tableClasses.th, 'text-right')}>Fund charge</th>
-                  <th className={tableClasses.th}>Make-up</th>
-                </tr>
-              </thead>
-              <tbody>
-                {funds.map((h) => (
-                  <tr key={`${h.accountId}-${h.name}`}>
-                    <td className={tableClasses.td}>
-                      <div className="font-medium text-ink">{h.name}</div>
-                      {!h.instrumentId && <div className="text-[11.5px] text-ink-3">Not researched yet</div>}
-                    </td>
-                    <td className={cn(tableClasses.td, 'text-ink-2')}>{h.account}</td>
-                    <td className={cn(tableClasses.td, tableClasses.num)}>
-                      <Money value={h.value} decimals={0} />
-                    </td>
-                    <td className={cn(tableClasses.td, 'text-right')} title={h.fundFee.basis}>
-                      <span className="inline-flex items-center gap-1.5">
-                        <span className="tabular">{formatAssumptionValue('fee.fund', h.fundFee.value)}</span> <SourceTag value={h.fundFee} />
-                      </span>
-                    </td>
-                    <td className={cn(tableClasses.td, 'text-[12.5px] text-ink-3')}>{h.exposureBasis}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <Sorted rows={funds} columns={{ name: { value: (h) => h.name }, account: { value: (h) => h.account }, value: { value: (h) => h.value }, fee: { value: (h) => h.fundFee.value } }}>
+              {({ rows, sortProps }) => (
+                <table className={tableClasses.table}>
+                  <thead>
+                    <tr>
+                      <SortHeader label="Holding" sort={sortProps('name')} />
+                      <SortHeader label="Account" sort={sortProps('account')} />
+                      <SortHeader label="Value" sort={sortProps('value')} numeric />
+                      <SortHeader label="Fund charge" sort={sortProps('fee')} numeric />
+                      <th className={tableClasses.th}>Make-up</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((h) => (
+                      <tr key={`${h.accountId}-${h.name}`}>
+                        <td className={tableClasses.td}>
+                          <div className="font-medium text-ink">{h.name}</div>
+                          {!h.instrumentId && <div className="text-[11.5px] text-ink-3">Not researched yet</div>}
+                        </td>
+                        <td className={cn(tableClasses.td, 'text-ink-2')}>{h.account}</td>
+                        <td className={cn(tableClasses.td, tableClasses.num)}>
+                          <Money value={h.value} decimals={0} />
+                        </td>
+                        <td className={cn(tableClasses.td, 'text-right')} title={h.fundFee.basis}>
+                          <span className="inline-flex items-center gap-1.5">
+                            <span className="tabular">{formatAssumptionValue('fee.fund', h.fundFee.value)}</span> <SourceTag value={h.fundFee} />
+                          </span>
+                        </td>
+                        <td className={cn(tableClasses.td, 'text-[12.5px] text-ink-3')}>{h.exposureBasis}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </Sorted>
           </div>
         </Card>
       )}

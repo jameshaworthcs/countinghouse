@@ -1,6 +1,6 @@
 // The small component kit every page is built from.
 
-import { ArrowDownRight, ArrowUpRight, ChevronLeft, ChevronRight, CircleAlert, CircleCheck, Info, LoaderCircle, Minus, TriangleAlert, X } from 'lucide-react';
+import { ArrowDown, ArrowDownRight, ArrowUp, ArrowUpDown, ArrowUpRight, ChevronLeft, ChevronRight, CircleAlert, CircleCheck, Info, LoaderCircle, Minus, TriangleAlert, X } from 'lucide-react';
 import { Dialog as RDialog } from 'radix-ui';
 import {
   createContext,
@@ -18,6 +18,7 @@ import {
   type TextareaHTMLAttributes,
 } from 'react';
 import { cn, compact as compactMoney, money, pct } from '../lib/format';
+import type { SortProps } from '../lib/sort';
 
 // ─── Buttons ─────────────────────────────────────────────────────────────────────────────────────
 
@@ -521,3 +522,23 @@ export const tableClasses = {
   td: 'border-b border-line px-3 py-2 align-middle text-ink',
   num: 'text-right tabular whitespace-nowrap',
 };
+
+/**
+ * A column header you can click to sort by (see `useSort`). Numeric columns right-align, with the
+ * arrow before the label so labels stay flush with the figures. `as="div"` is for grid layouts.
+ */
+export function SortHeader({ label, sort, numeric = false, title, className, as = 'th' }: { label: ReactNode; sort: SortProps; numeric?: boolean; title?: string; className?: string; as?: 'th' | 'div' }) {
+  const Icon = sort.dir === 'asc' ? ArrowUp : sort.dir === 'desc' ? ArrowDown : ArrowUpDown;
+  const icon = <Icon className={cn('size-3 shrink-0', sort.dir ? 'text-ink-2' : 'opacity-40 print:hidden')} aria-hidden />;
+  const Tag = as;
+  return (
+    <Tag className={cn(as === 'th' && tableClasses.th, numeric && 'text-right', className)} aria-sort={as === 'th' ? (sort.dir === 'asc' ? 'ascending' : sort.dir === 'desc' ? 'descending' : undefined) : undefined} title={title}>
+      <button type="button" onClick={sort.onSort} className={cn('inline-flex items-center gap-1 rounded hover:text-ink focus-visible:outline-2 focus-visible:outline-accent', sort.dir && 'text-ink')}>
+        {numeric && icon}
+        {label}
+        {!numeric && icon}
+        {as === 'div' && sort.dir && <span className="sr-only">{sort.dir === 'asc' ? ' (sorted ascending)' : ' (sorted descending)'}</span>}
+      </button>
+    </Tag>
+  );
+}

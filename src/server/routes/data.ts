@@ -11,6 +11,7 @@ import { today } from '../../shared/dates';
 import { catalogInstitution, findInstitution, INSTITUTION_CATALOG } from '../../shared/institutions';
 import { cleanPayee, descriptionKey } from '../../shared/merchants';
 import { fromMinor, toMinor } from '../../shared/money';
+import { compareValues, parseSortParam, type SortValue } from '../../shared/sort';
 import {
   AccountTypeSchema,
   CategorySchema,
@@ -161,6 +162,37 @@ function applyNulls<T extends Record<string, unknown>>(patch: T): Record<string,
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(patch)) out[k] = v === null ? undefined : v;
   return out;
+}
+
+const TX_SORT_KEYS = ['date', 'amount', 'payee', 'account', 'category'] as const;
+
+/**
+ * Order transactions by `sort` (`<key>_<asc|desc>`; newest first by default). Blank values (an
+ * uncategorised category) go last either way; ties fall back to newest first, then id, so paging is
+ * deterministic.
+ */
+export function sortTransactions(ctx: AppContext, list: Transaction[], sort: string | undefined): Transaction[] {
+  const parsed = parseSortParam(sort);
+  const { key, dir } = parsed && (TX_SORT_KEYS as readonly string[]).includes(parsed.key) ? parsed : { key: 'date', dir: 'desc' as const };
+  const cats = new CategoryIndex(ctx.store.categories);
+  const value = (t: Transaction): SortValue => {
+    switch (key) {
+      case 'amount':
+        return t.amount;
+      case 'payee':
+        return t.payee ?? t.description;
+      case 'account':
+        return ctx.store.account(t.accountId)?.name ?? t.accountId;
+      case 'category':
+        return t.category ? cats.path(t.category) : undefined;
+      default:
+        return t.date;
+    }
+  };
+  return list
+    .map((t) => ({ t, v: value(t) }))
+    .sort((a, b) => compareValues(a.v, b.v, dir) || b.t.date.localeCompare(a.t.date) || a.t.id.localeCompare(b.t.id))
+    .map((x) => x.t);
 }
 
 export function filterTransactions(ctx: AppContext, q: Record<string, string | undefined>): Transaction[] {
@@ -375,19 +407,7 @@ export function dataRoutes(ctx: AppContext): Hono {
   app.get('/transactions', (c) => {
     const q = c.req.query();
     const list = filterTransactions(ctx, q);
-    const sort = q.sort ?? 'date_desc';
-    const sorted = [...list].sort((a, b) => {
-      switch (sort) {
-        case 'date_asc':
-          return a.date.localeCompare(b.date);
-        case 'amount_asc':
-          return a.amount - b.amount;
-        case 'amount_desc':
-          return b.amount - a.amount;
-        default:
-          return b.date.localeCompare(a.date);
-      }
-    });
+    const sorted = sortTransactions(ctx, list, q.sort);
     const limit = Math.min(Number(q.limit ?? 500), 10_000);
     const offset = Number(q.offset ?? 0);
     let inMinor = 0;

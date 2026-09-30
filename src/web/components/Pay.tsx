@@ -5,7 +5,8 @@ import { Link } from 'react-router';
 import type { PayEmployer, PayMonth, PayResponse } from '../../shared/api';
 import { formatMonth } from '../../shared/dates';
 import { cn, formatDate } from '../lib/format';
-import { Badge, Callout, Card, EmptyState, Money, StatusBadge, tableClasses } from './ui';
+import { useSort } from '../lib/sort';
+import { Badge, Callout, Card, EmptyState, Money, SortHeader, StatusBadge, tableClasses } from './ui';
 
 const STATUS: Record<PayMonth['status'], { tone: 'good' | 'warn' | 'bad' | 'info' | 'pending'; label: string } | null> = {
   paid: { tone: 'good', label: 'Paid' },
@@ -23,25 +24,35 @@ const cell = (v: number | null) => (v === null ? <span className="text-ink-3">â€
 function EmployerCard({ e }: { e: PayEmployer }) {
   const payslips = e.months.filter((m) => m.status !== 'no-payslip').length;
   const t = e.totals;
+  const { rows, sortProps } = useSort(e.months, {
+    period: { value: (m) => m.periodEnd ?? m.payDate, first: 'desc' },
+    gross: { value: (m) => m.gross },
+    tax: { value: (m) => m.tax },
+    ni: { value: (m) => m.ni },
+    pension: { value: (m) => m.pension },
+    studentLoan: { value: (m) => m.studentLoan },
+    net: { value: (m) => m.expectedNet },
+    paidIn: { value: (m) => m.paidIn?.amount },
+  });
   return (
     <Card title={e.payer || 'Employer not named'} description={payslips ? `${payslips} payslip${payslips === 1 ? '' : 's'}${e.months.length > payslips ? `, and ${e.months.length - payslips} payment${e.months.length - payslips === 1 ? '' : 's'} with no payslip` : ''}` : 'Pay into your bank; no payslips for this year'} padded={false}>
       <div className="overflow-x-auto border-t border-line">
         <table className={tableClasses.table}>
           <thead>
             <tr>
-              <th className={tableClasses.th}>Period</th>
-              <th className={cn(tableClasses.th, 'text-right')}>Gross</th>
-              <th className={cn(tableClasses.th, 'text-right')}>Tax</th>
-              <th className={cn(tableClasses.th, 'text-right')}>NI</th>
-              <th className={cn(tableClasses.th, 'text-right')}>Pension</th>
-              <th className={cn(tableClasses.th, 'text-right')}>Student loan</th>
-              <th className={cn(tableClasses.th, 'text-right')}>After these</th>
-              <th className={cn(tableClasses.th, 'text-right')}>Into your bank</th>
+              <SortHeader label="Period" sort={sortProps('period')} />
+              <SortHeader label="Gross" sort={sortProps('gross')} numeric />
+              <SortHeader label="Tax" sort={sortProps('tax')} numeric />
+              <SortHeader label="NI" sort={sortProps('ni')} numeric />
+              <SortHeader label="Pension" sort={sortProps('pension')} numeric />
+              <SortHeader label="Student loan" sort={sortProps('studentLoan')} numeric />
+              <SortHeader label="After these" sort={sortProps('net')} numeric />
+              <SortHeader label="Into your bank" sort={sortProps('paidIn')} numeric />
               <th className={tableClasses.th} />
             </tr>
           </thead>
           <tbody>
-            {e.months.map((m, i) => {
+            {rows.map((m, i) => {
               const s = STATUS[m.status];
               return (
                 <tr key={`${m.periodEnd ?? m.payDate}-${i}`}>

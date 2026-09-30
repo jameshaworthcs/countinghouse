@@ -254,6 +254,34 @@ describe('API without login configured', () => {
     // The list the app polls is only what waits for review.
     expect(await (await req('/api/imports')).json()).toEqual({ pending: [] });
   });
+
+  it('sorts transactions by any column, with no category last either way', async () => {
+    const json = { ...CSRF, 'content-type': 'application/json' };
+    for (const a of [{ id: 'zed', name: 'Zed Bank', type: 'current' }, { id: 'amex', name: 'Amex', type: 'credit_card' }]) {
+      expect((await req('/api/accounts', { method: 'POST', headers: json, body: JSON.stringify(a) })).status).toBe(201);
+    }
+    const add = async (body: Record<string, unknown>) => ((await (await req('/api/transactions', { method: 'POST', headers: json, body: JSON.stringify(body) })).json()) as { id: string }).id;
+    const cherry = await add({ accountId: 'zed', date: '2026-09-03', amount: -50, description: 'CHERRY CAFE', category: 'groceries' });
+    const apple = await add({ accountId: 'amex', date: '2026-09-01', amount: -5, description: 'apple store' });
+    const banana = await add({ accountId: 'zed', date: '2026-09-02', amount: 20, description: 'Banana Co', category: 'home-garden' });
+    const order = async (sort?: string) => ((await (await req(`/api/transactions${sort ? `?sort=${sort}` : ''}`)).json()) as { items: { id: string }[] }).items.map((t) => t.id);
+
+    expect(await order()).toEqual([cherry, banana, apple]);
+    expect(await order('date_asc')).toEqual([apple, banana, cherry]);
+    // Money out is negative, so ascending puts the biggest spend first.
+    expect(await order('amount_asc')).toEqual([cherry, apple, banana]);
+    expect(await order('amount_desc')).toEqual([banana, apple, cherry]);
+    expect(await order('payee_asc')).toEqual([apple, banana, cherry]);
+    expect(await order('payee_desc')).toEqual([cherry, banana, apple]);
+    // Ties (both Zed Bank) fall back to newest first.
+    expect(await order('account_asc')).toEqual([apple, cherry, banana]);
+    expect((await order('category_asc')).at(-1)).toBe(apple);
+    expect((await order('category_desc')).at(-1)).toBe(apple);
+    expect((await order('category_asc')).slice(0, 2)).toEqual((await order('category_desc')).slice(0, 2).reverse());
+    // Anything else is the default, newest first.
+    expect(await order('nonsense')).toEqual([cherry, banana, apple]);
+    expect(await order('description_asc')).toEqual([cherry, banana, apple]);
+  });
 });
 
 describe('API with login configured', () => {

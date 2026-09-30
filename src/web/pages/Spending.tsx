@@ -9,9 +9,12 @@ import { ChartFrame } from '../components/charts/common';
 import { BudgetsCard } from '../components/Budgets';
 import { InsightsPanel, SignalList } from '../components/Intel';
 import { TransactionList } from '../components/TransactionList';
-import { Badge, Callout, Card, EmptyState, Loading, Money, PageHeader, Segmented, Select, Stat, tableClasses } from '../components/ui';
+import { Badge, Callout, Card, EmptyState, Loading, Money, PageHeader, Segmented, Select, SortHeader, Stat, tableClasses } from '../components/ui';
 import { qs, useApi } from '../lib/api';
 import { cn, formatDate, money, pct } from '../lib/format';
+import { Sorted } from '../lib/sort';
+
+const CADENCE_ORDER = ['weekly', 'fortnightly', 'monthly', 'quarterly', 'annual'];
 
 type Period = 'month' | 'last-month' | '3m' | '12m' | 'tax-year';
 
@@ -177,33 +180,37 @@ export default function Spending() {
               />
             </Card>
             <Card title="Top merchants" padded={false}>
-              <table className={tableClasses.table}>
-                <thead>
-                  <tr>
-                    <th className={tableClasses.th}>Merchant</th>
-                    <th className={cn(tableClasses.th, 'text-right')}>Visits</th>
-                    <th className={cn(tableClasses.th, 'text-right')}>Average</th>
-                    <th className={cn(tableClasses.th, 'text-right')}>Total</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {s.merchants.slice(0, 12).map((m) => (
-                    <tr key={m.payee} className="hover:bg-panel-2">
-                      <td className={tableClasses.td}>
-                        <div className="font-medium">{m.payee}</div>
-                        <div className="text-[12px] text-ink-3">{m.categoryName}</div>
-                      </td>
-                      <td className={cn(tableClasses.td, tableClasses.num)}>{m.count}</td>
-                      <td className={cn(tableClasses.td, tableClasses.num)}>
-                        <Money value={m.average} />
-                      </td>
-                      <td className={cn(tableClasses.td, tableClasses.num, 'font-medium')}>
-                        <Money value={m.amount} decimals={0} />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <Sorted rows={s.merchants.slice(0, 12)} columns={{ payee: { value: (m) => m.payee }, visits: { value: (m) => m.count }, average: { value: (m) => m.average }, total: { value: (m) => m.amount } }}>
+                {({ rows, sortProps }) => (
+                  <table className={tableClasses.table}>
+                    <thead>
+                      <tr>
+                        <SortHeader label="Merchant" sort={sortProps('payee')} />
+                        <SortHeader label="Visits" sort={sortProps('visits')} numeric />
+                        <SortHeader label="Average" sort={sortProps('average')} numeric />
+                        <SortHeader label="Total" sort={sortProps('total')} numeric />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((m) => (
+                        <tr key={m.payee} className="hover:bg-panel-2">
+                          <td className={tableClasses.td}>
+                            <div className="font-medium">{m.payee}</div>
+                            <div className="text-[12px] text-ink-3">{m.categoryName}</div>
+                          </td>
+                          <td className={cn(tableClasses.td, tableClasses.num)}>{m.count}</td>
+                          <td className={cn(tableClasses.td, tableClasses.num)}>
+                            <Money value={m.average} />
+                          </td>
+                          <td className={cn(tableClasses.td, tableClasses.num, 'font-medium')}>
+                            <Money value={m.amount} decimals={0} />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </Sorted>
             </Card>
           </div>
 
@@ -245,43 +252,47 @@ export default function Spending() {
           <Card title={<span className="inline-flex items-center gap-2"><Repeat className="size-4 text-ink-3" /> Regular payments and subscriptions</span>} description="Detected from repeating payments to the same payee" padded={false}>
             {s.recurring.length ? (
               <div className="overflow-x-auto">
-                <table className={tableClasses.table}>
-                  <thead>
-                    <tr>
-                      <th className={tableClasses.th}>Payee</th>
-                      <th className={tableClasses.th}>How often</th>
-                      <th className={cn(tableClasses.th, 'text-right')}>Amount</th>
-                      <th className={cn(tableClasses.th, 'text-right')}>Per month</th>
-                      <th className={tableClasses.th}>Next</th>
-                      <th className={tableClasses.th} />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {s.recurring.slice(0, 40).map((r) => (
-                      <tr key={r.key} className={r.active ? '' : 'opacity-50'}>
-                        <td className={tableClasses.td}>
-                          <div className="font-medium">{r.payee}</div>
-                          <div className="text-[12px] text-ink-3">{r.categoryName}</div>
-                        </td>
-                        <td className={cn(tableClasses.td, 'capitalize')}>{r.cadence}</td>
-                        <td className={cn(tableClasses.td, tableClasses.num)}>
-                          <Money value={r.typicalAmount} />
-                        </td>
-                        <td className={cn(tableClasses.td, tableClasses.num, 'font-medium')}>
-                          <Money value={r.monthlyCost} />
-                        </td>
-                        <td className={tableClasses.td}>{r.active ? formatDate(r.nextDate) : <span className="text-ink-3">stopped?</span>}</td>
-                        <td className={tableClasses.td}>
-                          {r.priceChange && r.priceChange.to > r.priceChange.from && (
-                            <Badge tone="warn" icon={<ArrowUpRight className="size-3" />}>
-                              was {money(r.priceChange.from)}
-                            </Badge>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <Sorted rows={s.recurring.slice(0, 40)} columns={{ payee: { value: (r) => r.payee }, cadence: { value: (r) => CADENCE_ORDER.indexOf(r.cadence), first: 'asc' }, amount: { value: (r) => r.typicalAmount }, monthly: { value: (r) => r.monthlyCost }, next: { value: (r) => (r.active ? r.nextDate : null) } }}>
+                  {({ rows, sortProps }) => (
+                    <table className={tableClasses.table}>
+                      <thead>
+                        <tr>
+                          <SortHeader label="Payee" sort={sortProps('payee')} />
+                          <SortHeader label="How often" sort={sortProps('cadence')} />
+                          <SortHeader label="Amount" sort={sortProps('amount')} numeric />
+                          <SortHeader label="Per month" sort={sortProps('monthly')} numeric />
+                          <SortHeader label="Next" sort={sortProps('next')} />
+                          <th className={tableClasses.th} />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rows.map((r) => (
+                          <tr key={r.key} className={r.active ? '' : 'opacity-50'}>
+                            <td className={tableClasses.td}>
+                              <div className="font-medium">{r.payee}</div>
+                              <div className="text-[12px] text-ink-3">{r.categoryName}</div>
+                            </td>
+                            <td className={cn(tableClasses.td, 'capitalize')}>{r.cadence}</td>
+                            <td className={cn(tableClasses.td, tableClasses.num)}>
+                              <Money value={r.typicalAmount} />
+                            </td>
+                            <td className={cn(tableClasses.td, tableClasses.num, 'font-medium')}>
+                              <Money value={r.monthlyCost} />
+                            </td>
+                            <td className={tableClasses.td}>{r.active ? formatDate(r.nextDate) : <span className="text-ink-3">stopped?</span>}</td>
+                            <td className={tableClasses.td}>
+                              {r.priceChange && r.priceChange.to > r.priceChange.from && (
+                                <Badge tone="warn" icon={<ArrowUpRight className="size-3" />}>
+                                  was {money(r.priceChange.from)}
+                                </Badge>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </Sorted>
               </div>
             ) : (
               <EmptyState title="Nothing regular found yet">Needs at least three payments to the same payee.</EmptyState>

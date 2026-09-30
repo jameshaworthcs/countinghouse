@@ -204,6 +204,17 @@ and a card in credit counts as cash.
   - crosshair tooltips with keyboard support;
   - a table view on every chart;
   - privacy blur on all amounts.
+- List tables sort by column (`useSort`/`Sorted` in `lib/sort.ts`, `SortHeader` in the UI kit,
+  comparison in `src/shared/sort.ts`):
+  - each click on a header goes first direction, the other, then the table's own order;
+  - blanks sort last either way;
+  - chart table views sort too, by raw values where given (`TableView.sortValues`);
+  - Transactions sorts on the server (`GET /api/transactions?sort=<date|amount|payee|account|category>_<asc|desc>`)
+    because the list is capped, and keeps the sort in the address.
+  - Tables whose order is the meaning (tax breakdowns, import review, proposals, key/value lists)
+    don't sort.
+- Clicking the sidebar link of the page you're on keeps its address (filters, sort) and scrolls it
+  back to the top, as does any inner list marked `data-scroll-top`.
 - Pages: Overview, Accounts (+ detail), Transactions (virtualised), Spending, Projections,
   Investments & pensions, Tax year (Allowances, Self Assessment prep), Assumptions & research,
   Import (+ Review), Settings, Login.

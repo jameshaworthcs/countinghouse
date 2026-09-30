@@ -2,7 +2,10 @@
 
 import { Table2, ChartLine } from 'lucide-react';
 import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { parseFigure, type SortValue } from '../../../shared/sort';
 import { cn } from '../../lib/format';
+import { useSort, type SortColumn } from '../../lib/sort';
+import { SortHeader } from '../ui';
 
 /** Categorical slots, fixed order (never cycled). */
 export const SERIES = ['var(--s1)', 'var(--s2)', 'var(--s3)', 'var(--s4)', 'var(--s5)', 'var(--s6)', 'var(--s7)', 'var(--s8)'];
@@ -61,6 +64,8 @@ export interface TableView {
   rows: (string | number | null)[][];
   /** Column indexes that are numbers (right-aligned, tabular). */
   numeric?: number[];
+  /** Raw values to sort by, parallel to `rows`; without them numeric cells are read back from their text. */
+  sortValues?: (string | number | null)[][];
 }
 
 /**
@@ -118,22 +123,31 @@ export function ChartFrame({
 
 export function DataTable({ table }: { table: TableView }) {
   const numeric = new Set(table.numeric ?? table.columns.map((_, i) => i).slice(1));
+  const cellValue = (ri: number, ci: number): SortValue => {
+    const raw = table.sortValues?.[ri]?.[ci];
+    if (raw !== undefined) return raw;
+    const v = table.rows[ri]?.[ci];
+    return typeof v === 'string' && numeric.has(ci) ? parseFigure(v) : v;
+  };
+  const columns: Record<string, SortColumn<number>> = Object.fromEntries(table.columns.map((_, ci) => [String(ci), { value: (ri: number) => cellValue(ri, ci), first: numeric.has(ci) ? 'desc' : 'asc' }]));
+  const { rows, sortProps } = useSort(
+    table.rows.map((_, ri) => ri),
+    columns,
+  );
   return (
     <div className="max-h-[420px] overflow-auto">
       <table className="w-full border-collapse text-[12.5px]">
         <thead className="sticky top-0 bg-panel">
           <tr>
             {table.columns.map((c, i) => (
-              <th key={c} className={cn('border-b border-line px-2 py-1.5 font-medium text-ink-3', numeric.has(i) ? 'text-right' : 'text-left')}>
-                {c}
-              </th>
+              <SortHeader key={c} label={c} sort={sortProps(String(i))} numeric={numeric.has(i)} className="px-2 py-1.5 text-[12.5px]" />
             ))}
           </tr>
         </thead>
         <tbody>
-          {table.rows.map((r, ri) => (
+          {rows.map((ri) => (
             <tr key={ri}>
-              {r.map((v, i) => (
+              {table.rows[ri]!.map((v, i) => (
                 <td key={i} className={cn('border-b border-line px-2 py-1 text-ink', numeric.has(i) ? 'sensitive tabular text-right' : '')}>
                   {v ?? '—'}
                 </td>

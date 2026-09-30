@@ -25,6 +25,7 @@ import { api, useApi } from '../lib/api';
 import { useAppData, useLiveUpdates } from '../lib/data';
 import { cn } from '../lib/format';
 import { usePrefs } from '../lib/prefs';
+import { scrollToTop } from '../lib/scroll';
 import { useProposals } from './Proposals';
 import { GlobalDrop } from './Upload';
 import { IconButton } from './ui';
@@ -63,6 +64,7 @@ function PrivacyButton() {
 }
 
 function NavList({ reviewCount, onNavigate }: { reviewCount: number; onNavigate?: () => void }) {
+  const { pathname } = useLocation();
   return (
     <nav aria-label="Main" className="flex flex-col gap-0.5">
       {NAV.map((n) => (
@@ -70,7 +72,14 @@ function NavList({ reviewCount, onNavigate }: { reviewCount: number; onNavigate?
           key={n.to}
           to={n.to}
           end={n.end ?? false}
-          onClick={onNavigate}
+          onClick={(e) => {
+            // The page you're on: stay put (keeping its filters) and go back to the top.
+            if (pathname === n.to) {
+              e.preventDefault();
+              scrollToTop();
+            }
+            onNavigate?.();
+          }}
           className={({ isActive }) =>
             cn('flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13.5px] font-medium transition-colors', isActive ? 'bg-panel text-ink shadow-sm ring-1 ring-line' : 'text-ink-2 hover:bg-panel-2 hover:text-ink')
           }
