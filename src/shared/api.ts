@@ -5,6 +5,7 @@ import type {
   Account,
   BalanceSnapshot,
   Category,
+  Company,
   CsvProfile,
   Figure,
   Goal,
@@ -997,6 +998,18 @@ export interface TaxDocumentsResponse {
   }[];
   /** The year's other tax figures (interest, dividends, pension statements, gift aid…), by kind. */
   other: { kind: string; label: string; total: number; figures: { id: string; label: string; amount: number; payer?: string; accountId?: string; date?: string; importId?: string; fileName?: string; yours: boolean }[] }[];
+}
+
+/** A company you hold shares in, with what it is worth and the dividends it paid you. */
+export interface CompanyView {
+  company: Company;
+  /** Its value now: the latest balance on its account (each valuation is recorded as one). */
+  value?: { amount: number; date: string; approximate: boolean };
+  /** The latest valuation, and how it was worked out. */
+  valuation?: Company['valuations'][number];
+  /** Each dividend: a voucher (with the credit that paid it, when found), or a credit with no voucher. */
+  dividends: { date: string; amount: number; taxYear?: string; figureId?: string; importId?: string; paidIn?: { transactionId: string; accountId: string; date: string } }[];
+  dividendsTotal: number;
 }
 
 /** Pay owed to you and not yet in the bank: shown beside the estate value, never counted in it. */

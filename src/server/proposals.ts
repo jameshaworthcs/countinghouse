@@ -21,11 +21,11 @@ import { CategoryIndex } from '../shared/categories';
 import { transferLegCategory, type Categoriser } from '../shared/categorise';
 import { addDays, diffDays, formatDate, today } from '../shared/dates';
 import { formatMoney, fromMinor, toMinor } from '../shared/money';
-import { AccountSchema, ProposalSchema, type Account, type BalanceSnapshot, type Proposal, type ProposalInput, type ProposalStatus, type ProposedChange, type Provenance, type Transaction } from '../shared/schema';
+import { AccountSchema, BalanceSnapshotSchema, CompanySchema, ProposalSchema, type Account, type BalanceSnapshot, type Company, type Proposal, type ProposalInput, type ProposalStatus, type ProposedChange, type Provenance, type Transaction } from '../shared/schema';
 import { BalanceEngine, type BalanceSource } from './analytics/balances';
 import { categoriserFor } from './categoriser';
 import { atomicWrite, Mutex, nowISO } from './fsutil';
-import { proposalId, transferGroupId } from './ids';
+import { balanceId, proposalId, transferGroupId } from './ids';
 import { StoreError, type DecidedProposalSummary, type Store } from './store';
 
 /** Days apart the two rows of a proposed transfer may be: a card payment can take a few days. */
@@ -72,6 +72,9 @@ interface Outcome {
   touchedAccounts: Map<string, Account>;
   /** Balances to move, by id: to which account, and from which (as the changes before it left it). */
   moves: Map<string, { balance: BalanceSnapshot; from: string; to: string }>;
+  /** Companies to add, and the balances (their valuations) to record on their new accounts. */
+  companies: Map<string, Company>;
+  balances: BalanceSnapshot[];
 }
 
 const money = (t: Pick<Transaction, 'amount' | 'currency'>) => formatMoney(t.amount, { currency: t.currency });
@@ -100,7 +103,7 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
   const accountName = (id: string) => store.account(id)?.name ?? id;
   let categoriserMemo: Categoriser | undefined;
   const categoriser = () => (categoriserMemo ??= categoriserFor(store));
-  const out: Outcome = { results: new Map(), patches: new Map(), removed: new Map(), accounts: new Map(), touchedRows: new Map(), touchedAccounts: new Map(), moves: new Map() };
+  const out: Outcome = { results: new Map(), patches: new Map(), removed: new Map(), accounts: new Map(), touchedRows: new Map(), touchedAccounts: new Map(), moves: new Map(), companies: new Map(), balances: [] };
   const balanceById = new Map(store.balances().map((b) => [b.id, b]));
   // Rows as the changes so far leave them (null: removed), and transfer pairs likewise.
   const rows = new Map<string, Transaction | null>();
@@ -299,6 +302,27 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
         // Whether it is wrong where it is, and fits where it goes, is checked once every change has run.
         return {};
       }
+      case 'add_company': {
+        const there = out.companies.get(c.company.id) ?? store.company(c.company.id);
+        // There already with this holding: what it asks for is done.
+        const same = (x: Company) => x.holdings.length === c.company.holdings.length && c.company.holdings.every((h) => x.holdings.some((y) => y.shareClass === h.shareClass && y.shares === h.shares));
+        if (there) return same(there) ? { alreadySo: true } : { problem: `${there.name} is in your data already, with another holding: change it on its account page.` };
+        const byNumber = c.company.number ? store.companies.find((x) => x.number === c.company.number) : undefined;
+        if (byNumber) return same(byNumber) ? { alreadySo: true } : { problem: `${byNumber.name} has that company number already.` };
+        if (account(c.account.id)) return { problem: `There is an account ${c.account.id} already.` };
+        if (c.company.employmentId && !store.employment(c.company.employmentId)) return { problem: `Job ${c.company.employmentId} is not in your data.` };
+        if (!c.company.holdings.length) return { problem: 'It holds no shares.' };
+        if (c.valuation.asOf > today()) return { problem: `${formatDate(c.valuation.asOf)} is in the future.` };
+        const stamp = nowISO();
+        const acc = AccountSchema.parse({ id: c.account.id, name: c.account.name, type: 'other_asset', currency: 'GBP', status: 'open', aliases: [], includeInNetWorth: true, notes: `Your shares in ${c.company.name}${c.company.number ? ` (company ${c.company.number})` : ''}.`, createdAt: stamp, updatedAt: stamp });
+        out.accounts.set(acc.id, acc);
+        // Its value on the day its balance sheet (or you) gives: a valuation of the account, its note
+        // saying how it was worked out. Not a rough figure: it is dated, from a document.
+        const balance = BalanceSnapshotSchema.parse({ id: balanceId(acc.id, c.valuation.asOf, c.valuation.value, 'manual'), accountId: acc.id, date: c.valuation.asOf, balance: c.valuation.value, currency: 'GBP', kind: 'manual', ...(c.valuation.note ? { note: c.valuation.note } : {}), source: c.valuation.source, createdAt: stamp });
+        out.balances.push(balance);
+        out.companies.set(c.company.id, CompanySchema.parse({ ...c.company, valuations: [{ ...c.valuation, balanceId: balance.id }], accountId: acc.id, createdBy: 'agent', createdAt: stamp, updatedAt: stamp }));
+        return {};
+      }
     }
   };
 
@@ -371,7 +395,7 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
 
 /** Applying would leave the data as it is: every change is already so, or they undo each other. */
 function changesNothing(store: Store, o: Outcome): boolean {
-  if (o.removed.size) return false;
+  if (o.removed.size || o.companies.size || o.balances.length) return false;
   if ([...o.moves.values()].some((m) => m.to !== m.balance.accountId)) return false;
   for (const [id, patch] of o.patches) {
     const t = store.transaction(id) as Record<string, unknown> | undefined;
@@ -411,6 +435,7 @@ function namedRows(c: ProposedChange): string[] {
       return [c.transaction];
     case 'set_account_dates':
     case 'move_balance':
+    case 'add_company':
       return [];
   }
 }
@@ -581,6 +606,8 @@ export class ProposalService extends EventEmitter {
       if (outcome.patches.size) await this.store.updateTransactions([...outcome.patches].map(([tid, patch]) => ({ id: tid, patch })), message);
       if (outcome.removed.size) await this.store.deleteTransactions([...outcome.removed.keys()], message);
       for (const account of outcome.accounts.values()) await this.store.upsertAccount(account, message);
+      for (const company of outcome.companies.values()) await this.store.upsertCompany(company, message);
+      if (outcome.balances.length) await this.store.addBalances(outcome.balances, message);
       if (outcome.moves.size) await this.store.moveBalances([...outcome.moves.values()].map((m) => ({ id: m.balance.id, accountId: m.to })), message);
       const balances = [...outcome.moves.values()].map((m) => m.balance);
       const before = { transactions: [...outcome.touchedRows.values()], accounts: [...outcome.touchedAccounts.values()], ...(balances.length ? { balances } : {}) };

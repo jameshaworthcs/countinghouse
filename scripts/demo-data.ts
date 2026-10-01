@@ -114,6 +114,8 @@ async function main() {
     acct('sipp', 'Example Pensions SIPP', 'sipp', 'example-pensions', { pension: { method: 'relief_at_source' } }),
     acct('state-pension', 'State Pension forecast', 'state_pension', 'dwp'),
     acct('student-loan', 'Student loan (Plan 2)', 'student_loan', 'slc'),
+    // Shares in a friend's small company (companies.json).
+    ...(SPARSE ? [] : [acct('studio-shares', 'Example Studio Ltd shares', 'other_asset', undefined)]),
   ]);
 
   // ── Everyday banking ──
@@ -194,6 +196,8 @@ async function main() {
     tx('current-account', salaryDay, salary, 'ACME ANALYTICS LTD SALARY', { payee: 'Acme Analytics Ltd' });
     // HMRC's refund of last year's overpaid tax.
     if (!SPARSE && m === `${thisYear.startYear}-08-01`) tx('current-account', `${thisYear.startYear}-08-04`, 248.6, 'HMRC PAYE REFUND', { payee: 'HMRC' });
+    // A dividend from the company, with its voucher (below).
+    if (!SPARSE && m === `${thisYear.startYear}-06-01`) tx('current-account', `${thisYear.startYear}-06-15`, 480, 'EXAMPLE STUDIO LTD DIVIDEND', { payee: 'Example Studio Ltd', category: 'dividends' });
     const marked = marking.find((x) => x.month === m);
     if (marked) {
       const payDate = `${addMonths(m, 1).slice(0, 7)}-25`;
@@ -444,6 +448,30 @@ async function main() {
   }
   if (hmrc.length) await store.upsertRecords('hmrc', hmrc, 'demo: HMRC records');
   if (fullSlips.length) await store.upsertRecords('payslips', fullSlips, 'demo: payslips in full');
+  // The company: the holding, its book value from its accounts (as an estimate on its account), and
+  // this year's dividend voucher.
+  if (!SPARSE) {
+    const valued = { id: balanceId('studio-shares', '2025-12-31', 9_600, 'manual'), accountId: 'studio-shares', date: '2025-12-31', balance: 9_600, currency: 'GBP', kind: 'manual' as const, note: 'Book value: net assets £96,000 × 2 of its 20 shares, from its accounts to 31 Dec 2025.', source: {}, createdAt: stamp };
+    await store.addBalances([valued], 'demo: company valuation');
+    await store.setCompanies(
+      [
+        {
+          id: 'example-studio',
+          name: 'Example Studio Ltd',
+          number: '13579246',
+          holdings: [{ shareClass: 'B ordinary', shares: 2, totalShares: 20, certificate: '3', acquiredOn: '2023-05-02', source: {} }],
+          valuations: [{ asOf: '2025-12-31', method: 'net-assets', netAssets: 96_000, value: 9_600, note: valued.note, balanceId: valued.id, source: {} }],
+          accountId: 'studio-shares',
+          createdBy: 'owner',
+          createdAt: stamp,
+          updatedAt: stamp,
+        },
+      ],
+      'demo: companies',
+    );
+    const day = `${thisYear.startYear}-06-15`;
+    if (day <= END) await store.addFigures([{ id: figureId('dividends_paid', 480, thisYear.label, 'Example Studio Ltd', 'Dividend'), kind: 'dividends_paid', label: 'Dividend', amount: 480, currency: 'GBP', taxYear: thisYear.label, periodEnd: day, date: day, payer: 'Example Studio Ltd', source: {}, createdAt: stamp }], 'demo: dividend voucher');
+  }
   const res = await enrich(store);
   console.log(`demo: ${txs.length} transactions, ${snapshots.length} balances; enrich: ${res.recategorised} categorised, ${res.transfersLinked} transfers linked`);
   // A first import has no research or insights yet: the agents have not run.

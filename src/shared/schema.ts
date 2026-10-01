@@ -517,6 +517,53 @@ export const EmploymentSchema = z.object({
 });
 export type Employment = z.infer<typeof EmploymentSchema>;
 
+/**
+ * A company you hold shares in (companies.json, docs/DATA_FORMAT.md): your holding by class, and what
+ * it is worth, dated. Its value counts in your estate on its account (an "other asset"), where each
+ * valuation is a balance (`balanceId`).
+ */
+const CompanyHoldingSchema = z.object({
+  /** As the certificate names it ("B ordinary"). */
+  shareClass: z.string().min(1).max(60),
+  shares: z.number().positive(),
+  /** Shares of every class the company has issued, when known: yours as a share of them. */
+  totalShares: z.number().positive().optional(),
+  certificate: z.string().max(40).optional(),
+  acquiredOn: ISODateSchema.optional(),
+  source: SourceRefSchema.default({}),
+});
+const CompanyValuationSchema = z.object({
+  /** The day it is worth this: a balance sheet's date for a book value. */
+  asOf: ISODateSchema,
+  /** `net-assets`: its net assets on its balance sheet, as your share of its shares; `yours`: what you say. */
+  method: z.enum(['net-assets', 'yours']),
+  netAssets: MoneySchema.optional(),
+  value: MoneySchema,
+  note: z.string().max(400).optional(),
+  /** The account balance it is (set when it is recorded). */
+  balanceId: z.string().regex(/^bal_[0-9a-f]{16}$/).optional(),
+  source: SourceRefSchema.default({}),
+});
+export const CompanySchema = z.object({
+  id: SlugSchema,
+  name: z.string().min(1).max(200),
+  /** Its Companies House number. */
+  number: z
+    .string()
+    .regex(/^[A-Z0-9]{8}$/)
+    .optional(),
+  holdings: z.array(CompanyHoldingSchema).max(20).default([]),
+  valuations: z.array(CompanyValuationSchema).max(100).default([]),
+  /** The account that carries its value in your estate, and your job there if you work for it. */
+  accountId: SlugSchema.optional(),
+  employmentId: SlugSchema.optional(),
+  notes: z.string().max(2000).optional(),
+  createdBy: z.enum(['owner', 'agent']).default('owner'),
+  createdAt: TimestampSchema,
+  updatedAt: TimestampSchema,
+});
+export type Company = z.infer<typeof CompanySchema>;
+
 // What HMRC's services hold about you, as their pages show it (docs/DATA_FORMAT.md, hmrc.jsonl).
 const HmrcWho = {
   /** The employer as HMRC's page names it. */
@@ -1563,6 +1610,18 @@ const changeUnion = <K extends z.ZodType<string | undefined>>(key: K) =>
      * they do.
      */
     z.object({ key, kind: z.literal('move_balance'), why: ChangeWhySchema, balance: BalanceIdSchema, to: SlugSchema }),
+    /**
+     * Add a company you hold shares in, from its documents (a share certificate, its accounts): your
+     * holding, and its value as a new "other asset" account in your estate, valued on `valuation.asOf`.
+     */
+    z.object({
+      key,
+      kind: z.literal('add_company'),
+      why: ChangeWhySchema,
+      company: CompanySchema.pick({ id: true, name: true, number: true, holdings: true, employmentId: true, notes: true }),
+      valuation: CompanyValuationSchema.omit({ balanceId: true }),
+      account: z.object({ id: SlugSchema, name: z.string().min(1).max(120) }),
+    }),
   ]);
 
 export const ProposedChangeSchema = changeUnion(ChangeKeySchema);
@@ -2068,6 +2127,7 @@ export type CaptureItem = z.infer<typeof CaptureItemSchema>;
 export const AccountsFileSchema = z.object({ accounts: z.array(AccountSchema) });
 export const InstrumentsFileSchema = z.object({ instruments: z.array(InstrumentSchema) });
 export const EmploymentsFileSchema = z.object({ employments: z.array(EmploymentSchema) });
+export const CompaniesFileSchema = z.object({ companies: z.array(CompanySchema) });
 export const InstitutionsFileSchema = z.object({ institutions: z.array(InstitutionSchema) });
 export const CategoriesFileSchema = z.object({ categories: z.array(CategorySchema) });
 export const RulesFileSchema = z.object({ rules: z.array(RuleSchema) });

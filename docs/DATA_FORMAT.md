@@ -42,6 +42,7 @@ data/
   employments.json     { employments: [...] }    your jobs: each employer once, under every name it comes by
   hmrc.jsonl           what HMRC's pages say: tax codes, payments, employments, settlements, NI years, the State Pension forecast
   payslips.jsonl       payslips in full: every line, the totals, the codes and the year to date
+  companies.json       { companies: [...] }      companies you hold shares in: the holding and its valuations
   transactions/<account-id>/<yyyy>.jsonl    one transaction per line, by posting date
   balances/<account-id>.jsonl               balance / valuation snapshots
   holdings/<account-id>.jsonl               holdings snapshots
@@ -234,6 +235,26 @@ The same record read twice (two printouts of one page, or one page imported twic
 is stored once. A record is what HMRC said on its `asOf` day: a later page adds new records rather
 than changing old ones. National Insurance numbers are never stored.
 
+## companies.json
+
+Companies you hold shares in that are not listed (shares in a listed company are a holding in an
+investment account). Each is `{id, name, number?, holdings, valuations, accountId?, employmentId?,
+notes?, createdBy, createdAt, updatedAt}`:
+
+- `number`: its Companies House number.
+- `holdings`: `[{shareClass, shares, totalShares?, certificate?, acquiredOn?, source}]`, your
+  shares by class, with the shares of every class it has issued when known.
+- `valuations`: `[{asOf, method, netAssets?, value, note?, balanceId?, source}]`. `method` is
+  `net-assets` (book value: its net assets × your shares ÷ its shares) or `yours`. Each is recorded
+  as a balance of its account (`balanceId`), its note saying how it was worked out
+  ([FORMULAS.md §9](FORMULAS.md), "Shares in a company").
+- `accountId`: the "other asset" account that carries its value in your estate. `employmentId`:
+  your job there, when you work for it.
+- `createdBy`: `owner`, or `agent` when a proposal you applied added it.
+
+An agent proposes a company from its documents (`add_company`); you change one with
+`PUT /api/companies/:id`.
+
 ## payslips.jsonl
 
 Payslips in full, one per line: everything a payslip prints except your name and National Insurance
@@ -327,6 +348,9 @@ lives in the work area (`<work>/proposals/`), never here.
   - `set_account_dates {account, openedOn?, closedOn?}` (`null` clears one).
   - `move_balance {balance, to}`: a balance a document was read into the wrong account, moved to
     the account it is of. It keeps its id and everything else.
+  - `add_company {company, valuation, account}`: shares you hold in a company, from its documents:
+    the company (`companies.json`), a new "other asset" account `{id, name}`, and its valuation
+    recorded as that account's balance.
 - `applied`: the keys of the changes you applied. `dismissedReason`: what you said, if anything.
 - `before`: `{transactions, accounts, balances?}`, the rows, accounts and balances the applied
   changes touched, as they were before: the audit trail, and a way back.

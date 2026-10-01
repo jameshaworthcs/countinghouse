@@ -1,0 +1,194 @@
+{
+  "$id": "companies.schema.json",
+  "title": "companies",
+  "description": "Schema for data/companies.json (companies you hold shares in). Generated from src/shared/schema.ts by `npm run schemas`; do not edit.",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "companies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+            "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "number": {
+            "type": "string",
+            "pattern": "^[A-Z0-9]{8}$"
+          },
+          "holdings": {
+            "default": [],
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "shareClass": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 60
+                },
+                "shares": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "totalShares": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "certificate": {
+                  "type": "string",
+                  "maxLength": 40
+                },
+                "acquiredOn": {
+                  "type": "string",
+                  "description": "Calendar date, YYYY-MM-DD"
+                },
+                "source": {
+                  "default": {},
+                  "type": "object",
+                  "properties": {
+                    "importId": {
+                      "type": "string"
+                    },
+                    "documentId": {
+                      "type": "string"
+                    },
+                    "row": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  }
+                }
+              },
+              "required": [
+                "shareClass",
+                "shares"
+              ]
+            }
+          },
+          "valuations": {
+            "default": [],
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "asOf": {
+                  "type": "string",
+                  "description": "Calendar date, YYYY-MM-DD"
+                },
+                "method": {
+                  "type": "string",
+                  "enum": [
+                    "net-assets",
+                    "yours"
+                  ]
+                },
+                "netAssets": {
+                  "type": "number",
+                  "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                },
+                "value": {
+                  "type": "number",
+                  "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                },
+                "note": {
+                  "type": "string",
+                  "maxLength": 400
+                },
+                "balanceId": {
+                  "type": "string",
+                  "pattern": "^bal_[0-9a-f]{16}$"
+                },
+                "source": {
+                  "default": {},
+                  "type": "object",
+                  "properties": {
+                    "importId": {
+                      "type": "string"
+                    },
+                    "documentId": {
+                      "type": "string"
+                    },
+                    "row": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  }
+                }
+              },
+              "required": [
+                "asOf",
+                "method",
+                "value"
+              ]
+            }
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+            "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+          },
+          "employmentId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+            "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+          },
+          "notes": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "createdBy": {
+            "default": "owner",
+            "type": "string",
+            "enum": [
+              "owner",
+              "agent"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "description": "ISO 8601 timestamp"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "description": "ISO 8601 timestamp"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "createdAt",
+          "updatedAt"
+        ]
+      }
+    },
+    "$schema": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "companies"
+  ]
+}

@@ -314,6 +314,20 @@ years), both paths grow at the median:
   after it, and what is unexplained between them. A proposal that takes away a move inside the
   account (§ "Proposed fixes" in AGENTS.md) must leave that at nothing.
 
+**Shares in a company** (`companies.json`, `analytics/companies.ts`). Your shares in a company that
+is not listed count in the estate on their own account (an "other asset"), at the account's latest
+balance. Each valuation is recorded as one of its balances, dated, its note saying how it was worked
+out; an "other asset" is valued yearly, so it asks for a newer one after 400 days:
+
+- **Book value** (`net-assets`) = its net assets on its balance sheet × your shares ÷ the shares
+  of every class it has issued, as at the balance sheet's date. It assumes every share ranks alike
+  for capital, as its confirmation statement says when it does. It is what the company is worth on
+  its books, not what anyone would pay.
+- **Yours** (`yours`): a value you give.
+- **Its dividends**: each voucher (a `dividends_paid` figure naming it) with the bank credit that
+  paid it (the same amount to the penny, within 10 days, naming it; the rule of §11), then its
+  dividend credits no voucher accounts for.
+
 **Estate value on D:**
 
 - Σ over included accounts of balance(D) in GBP (manual FX).

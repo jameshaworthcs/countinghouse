@@ -1249,3 +1249,25 @@ a year's jobs although the return wants a page for each.
 - **The NI record and the forecast in full** go beside the retirement outlook. Each gap shows
   HMRC's cost and pay-by date. Whether filling one would help is left to HMRC's own words: the
   forecast says when it is already the most you can get.
+
+## 2026-10-01: Shares in a company: a record, an account at book value, and its dividends
+
+The fifth slice, second part. An owner may hold shares in a company, often the one they work for. Its share
+certificate, its confirmation statement and its accounts had nowhere to go (each was "nothing to
+record"). Asked whether the shares should count, the owner said it was up to me, if they can be
+quantified.
+
+- **A company is a record** (`companies.json`): the holding by class, the shares in issue, the
+  certificate, and dated valuations.
+- **Its value counts in the estate on an "other asset" account**, at book value: net assets × your
+  shares ÷ all its shares, as at the balance sheet date. The confirmation statement says every share
+  carries full rights to capital, so pro rata is fair. The balance is not marked approximate: that
+  flag means a rough figure standing in until real data arrives, and would leave the account asking
+  for new data forever. The card and the balance's note say it is a book value.
+  - Considered: no value. That would leave out something that can be quantified, against what the
+    owner allowed.
+  - Considered: an investment account. The projection would grow it at a fund's expected return.
+- **An agent proposes it** (`add_company`), from the documents, and the owner applies it, as with any
+  other change to their data.
+- **Its dividends are listed with the credits that paid them**, by the rule the dividend allowance
+  already uses. The match is computed, not stored.

@@ -1,7 +1,7 @@
 // Proposed fixes: what an agent proposes changing in your data, each change with its reason and the
 // rows it is about, waiting for you on the Import page (src/server/proposals.ts).
 
-import { ArrowDown, ArrowRight, ArrowRightLeft, ArrowUpDown, CalendarDays, ChevronRight, CircleCheck, CircleSlash, CopyX, FileText, Link2, NotebookPen, PiggyBank, Sparkles, Tag, Unlink, Wand2, X } from 'lucide-react';
+import { ArrowDown, ArrowRight, ArrowRightLeft, ArrowUpDown, Building2, CalendarDays, ChevronRight, CircleCheck, CircleSlash, CopyX, FileText, Link2, NotebookPen, PiggyBank, Sparkles, Tag, Unlink, Wand2, X } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import type { ProposalBalance, ProposalListResponse, ProposalRow, ProposalSummary, ProposalView } from '../../shared/api';
@@ -25,6 +25,7 @@ export const CHANGE_LABELS: Record<ProposedChangeKind, { title: string; count: (
   remove_wrong_sign: { title: 'Remove a row read with the wrong sign', count: (n) => `${plural(n, 'row')} with the wrong sign removed`, icon: <ArrowUpDown className="size-4" aria-hidden /> },
   set_account_dates: { title: 'Change an account’s dates', count: (n) => (n === 1 ? 'an account’s dates' : `${n} accounts’ dates`), icon: <CalendarDays className="size-4" aria-hidden /> },
   move_balance: { title: 'Move a balance to its account', count: (n) => `${plural(n, 'balance')} moved`, icon: <ArrowRightLeft className="size-4" aria-hidden /> },
+  add_company: { title: 'Add shares you hold in a company', count: (n) => plural(n, 'company', 'companies'), icon: <Building2 className="size-4" aria-hidden /> },
 };
 
 /** "5 transfers linked, 2 transfer links undone, 1 category" */
@@ -359,6 +360,33 @@ export function ChangeBody({ change, view }: { change: ProposedChange; view: Pro
           {line('Opened', acc?.openedOn, change.openedOn)}
           {line('Closed', acc?.closedOn, change.closedOn)}
           {change.closedOn !== undefined && (acc?.status === 'closed') !== (change.closedOn !== null) && <div className="text-[12.5px] text-ink-3">{change.closedOn ? 'It will show as closed, and stop counting after that day.' : 'It will show as open again.'}</div>}
+        </div>
+      );
+    }
+    case 'add_company': {
+      const v = change.valuation;
+      return (
+        <div className="grid gap-1.5 rounded-lg border border-line bg-panel px-3 py-2 text-[13px]">
+          <div className="font-medium text-ink">
+            {change.company.name}
+            {change.company.number && <span className="font-normal text-ink-3"> · company {change.company.number}</span>}
+          </div>
+          {change.company.holdings.map((h, i) => (
+            <div key={i} className="text-ink-2">
+              {h.shares} {h.shareClass} share{h.shares === 1 ? '' : 's'}
+              {h.totalShares ? ` of the ${h.totalShares} it has issued` : ''}
+              {h.certificate ? `, certificate ${h.certificate}` : ''}
+              {h.acquiredOn ? `, from ${formatDate(h.acquiredOn)}` : ''}
+            </div>
+          ))}
+          <div className="sensitive text-ink-2 tabular-nums">
+            Worth about {money(v.value)} on {formatDate(v.asOf)}
+            {v.method === 'net-assets' && v.netAssets !== undefined ? `: its net assets of ${money(v.netAssets)}, as your share of its shares` : ''}.
+          </div>
+          {v.note && <div className="text-[12.5px] text-ink-3">{v.note}</div>}
+          <div className="text-[12.5px] text-ink-3">
+            A new account, <span className="text-ink-2">{change.account.name}</span>, carries it in your estate (Property &amp; other), at this value until a newer one.
+          </div>
         </div>
       );
     }

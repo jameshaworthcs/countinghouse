@@ -2,7 +2,7 @@ import { FileText, Pencil, Plus, Trash2, TriangleAlert, Upload } from 'lucide-re
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { ACCOUNT_TYPE_META, balanceModeOf } from '../../shared/accounts';
-import type { AccountDetailResponse, CoverageResponse, TransactionsResponse } from '../../shared/api';
+import type { AccountDetailResponse, CompanyView, CoverageResponse, TransactionsResponse } from '../../shared/api';
 import { AccountDialog, BalanceDialog } from '../components/AccountForms';
 import { ChartFrame } from '../components/charts/common';
 import { TimeChart } from '../components/charts/TimeChart';
@@ -16,6 +16,77 @@ import { cn, formatDate, money, pct, timeAgo } from '../lib/format';
 import { Sorted } from '../lib/sort';
 
 type Tab = 'transactions' | 'balances' | 'holdings' | 'documents';
+
+/** The company whose shares this account holds: the holding, how it is valued, and its dividends. */
+function CompanyCard({ accountId }: { accountId: string }) {
+  const q = useApi<CompanyView[]>(['companies'], '/companies');
+  const v = q.data?.find((x) => x.company.accountId === accountId);
+  if (!v) return null;
+  const c = v.company;
+  return (
+    <Card className="mb-5" title={c.name} description={[c.number ? `Company ${c.number}` : '', 'shares you hold'].filter(Boolean).join(' · ')}>
+      <div className="flex flex-col gap-1.5 text-[13px] text-ink-2">
+        {c.holdings.map((h, i) => (
+          <div key={i}>
+            <span className="font-medium text-ink">
+              {h.shares} {h.shareClass} share{h.shares === 1 ? '' : 's'}
+            </span>
+            {h.totalShares ? ` of the ${h.totalShares} it has issued (${pct(h.shares / h.totalShares)})` : ''}
+            {h.certificate ? `, certificate ${h.certificate}` : ''}
+            {h.acquiredOn ? `, held from ${formatDate(h.acquiredOn)}` : ''}
+          </div>
+        ))}
+        {v.valuation && (
+          <div className="sensitive">
+            Worth about <Money value={v.valuation.value} /> on {formatDate(v.valuation.asOf)}
+            {v.valuation.method === 'net-assets' && v.valuation.netAssets !== undefined ? (
+              <>
+                : its net assets of <Money value={v.valuation.netAssets} />, as your share of its shares (book value, an estimate)
+              </>
+            ) : (
+              ' (your figure)'
+            )}
+            .
+          </div>
+        )}
+        {c.employmentId && (
+          <div>
+            You also work for it: its pay is on the{' '}
+            <Link to="/tax/pay" className="text-accent hover:underline">
+              Pay tab
+            </Link>
+            .
+          </div>
+        )}
+      </div>
+      {v.dividends.length > 0 && (
+        <div className="mt-3">
+          <div className="mb-1 text-[12px] font-medium text-ink-3">
+            Dividends it paid you: <Money value={v.dividendsTotal} />
+          </div>
+          <ul className="flex flex-col gap-0.5 text-[13px]">
+            {v.dividends.map((d, i) => (
+              <li key={i} className="flex flex-wrap justify-between gap-x-3">
+                <span className="text-ink-2">
+                  {formatDate(d.date)}
+                  {d.taxYear ? <span className="text-ink-3"> · {d.taxYear}</span> : null}
+                  {d.figureId ? (d.importId ? <Link to={`/import/${d.importId}`} className="text-ink-3 hover:underline"> · voucher</Link> : <span className="text-ink-3"> · voucher</span>) : <span className="text-ink-3"> · no voucher</span>}
+                  {d.paidIn ? (
+                    <Link to={`/transactions?accounts=${d.paidIn.accountId}&period=custom&from=${d.paidIn.date}&to=${d.paidIn.date}`} className="text-ink-3 hover:underline">
+                      {' '}
+                      · paid in {formatDate(d.paidIn.date)}
+                    </Link>
+                  ) : null}
+                </span>
+                <Money value={d.amount} className="tabular" />
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </Card>
+  );
+}
 
 export default function AccountDetail() {
   const { id = '' } = useParams();
@@ -95,6 +166,8 @@ export default function AccountDetail() {
           </ul>
         </Callout>
       )}
+
+      <CompanyCard accountId={account.id} />
 
       {empty ? (
         <Card>

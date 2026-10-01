@@ -23,6 +23,7 @@ import {
   InstitutionsFileSchema,
   InstrumentsFileSchema,
   EmploymentsFileSchema,
+  CompaniesFileSchema,
   HmrcRecordSchema,
   PayslipRecordSchema,
   MetaSchema,
@@ -64,6 +65,7 @@ const schemas: [string, z.ZodType, string][] = [
   ['note', NoteSchema, 'one line of data/notes.jsonl'],
   ['receipt', ReceiptSchema, 'one line of data/receipts.jsonl'],
   ['employments', withSchemaKey(EmploymentsFileSchema), 'data/employments.json (your jobs)'],
+  ['companies', withSchemaKey(CompaniesFileSchema), 'data/companies.json (companies you hold shares in)'],
   ['hmrc', HmrcRecordSchema, "one line of data/hmrc.jsonl (HMRC's records about you)"],
   ['payslips', PayslipRecordSchema, 'one line of data/payslips.jsonl (a payslip in full)'],
 ];

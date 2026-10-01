@@ -46,6 +46,7 @@ it is `src/server/records.ts` (validation and writing) and `src/server/agents/` 
 | Jobs: each employer once, with its names, PAYE reference and payroll numbers | `data/employments.json`, `GET /employments` |
 | What HMRC's pages say (tax codes, payments, settlements, NI years, the State Pension forecast) | `data/hmrc.jsonl`, `GET /hmrc` |
 | Payslips in full (every line, the totals, the codes, the year to date) | `data/payslips.jsonl`, `GET /payslips?taxYear=2026/27` |
+| Companies you hold shares in, their valuations and dividends | `data/companies.json`, `GET /companies` |
 | A tax year's figures by job, each with the source that counts and the others | `GET /tax-documents?taxYear=2025/26` |
 
 In-app analysis jobs do not read `data/`. They read a **digest**: the app's own computed figures,
@@ -187,7 +188,8 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
       { "kind": "remove_wrong_sign", "transaction": "tx_…", "recordedAs": ["tx_…"], "why": "…" },
       { "kind": "remove_internal_move", "transaction": "tx_…", "why": "…" },
       { "kind": "set_account_dates", "account": "example-fixed", "closedOn": "2026-02-01", "why": "…" },
-      { "kind": "move_balance", "balance": "bal_…", "to": "example-easy-access", "why": "…" }
+      { "kind": "move_balance", "balance": "bal_…", "to": "example-easy-access", "why": "…" },
+      { "kind": "add_company", "company": { "id": "example-ltd", "name": "Example Ltd", "number": "01234567", "holdings": [{ "shareClass": "A ordinary", "shares": 4, "totalShares": 120, "certificate": "12" }] }, "valuation": { "asOf": "2025-12-31", "method": "net-assets", "netAssets": 100000, "value": 3333.33, "note": "…" }, "account": { "id": "example-ltd-shares", "name": "Example Ltd shares" }, "why": "…" }
     ]
   }
   ```
@@ -215,6 +217,10 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
     account was not open that day, or the strong balances either side of it there do not add up
     with it. Where it goes, the account is open that day, has a strong balance on at least one
     side, and they add up with it (and any balance of that day agrees).
+  - A company added (`add_company`) is new: no company with its id or number, and no account with
+    the id its account would take. Its valuation is not in the future. A book value's `why` names
+    the documents its figures come from (the share certificate, the accounts, the confirmation
+    statement that gives the shares in issue).
   - A category exists, and a row linked as a transfer keeps a transfer category. A category that
     is not a transfer one, on a row not linked as one, also takes away the account of yours the row
     named as the other side, and works its payee out again when that was one of your accounts'

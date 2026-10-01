@@ -87,6 +87,7 @@ async function main() {
     ['accounts', '/accounts'],
     ...accountPage('account-current', 'current'),
     ...accountPage('account-isa', 'stocks_isa'),
+    ...accountPage('account-asset', 'other_asset'),
     ['transactions', '/transactions'],
     ['spending', '/spending'],
     ['projections', '/projections'],

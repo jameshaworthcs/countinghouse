@@ -17,6 +17,7 @@ import {
   CategorySchema,
   CurrencySchema,
   EmploymentSchema,
+  CompanySchema,
   FIGURE_KINDS,
   GoalSchema,
   BudgetSchema,
@@ -44,6 +45,7 @@ import { nowISO } from '../fsutil';
 import { balanceId, figureId, ruleId, transactionId } from '../ids';
 import { payerKey } from '../analytics/pay';
 import { payeReference } from '../analytics/sources';
+import { companiesView, companyView } from '../analytics/companies';
 import { taxDocuments } from '../analytics/taxdocuments';
 import { matchEmployment } from '../employments';
 import { StoreError } from '../store';
@@ -797,6 +799,21 @@ export function dataRoutes(ctx: AppContext): Hono {
   });
 
   app.get('/hmrc', (c) => c.json(store.hmrc));
+
+  // ─── Companies you hold shares in (companies.json) ───────────────────────────────────────────
+
+  app.get('/companies', (c) => c.json(companiesView(store)));
+
+  /** Change a company: what you set wins. Its valuations are its account's balances. */
+  app.put('/companies/:id', async (c) => {
+    const company = store.company(c.req.param('id'));
+    if (!company) throw new StoreError('No such company', 404);
+    const body = await readJson(c, CompanySchema.pick({ name: true, number: true, holdings: true, employmentId: true, notes: true }).partial());
+    if (body.employmentId && !store.employment(body.employmentId)) throw new StoreError('No such job', 400);
+    const next = CompanySchema.parse({ ...company, ...body, updatedAt: nowISO() });
+    await store.upsertCompany(next, `company: ${next.name}`);
+    return c.json(companyView(store, next));
+  });
   app.get('/payslips', (c) => {
     const ty = c.req.query('taxYear');
     return c.json(ty ? store.payslips.filter((p) => p.taxYear === ty) : store.payslips);
