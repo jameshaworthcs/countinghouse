@@ -10,7 +10,7 @@ import { allowances } from './allowances';
 import { BalanceEngine } from './balances';
 import { budgetAlerts, budgets } from './budgets';
 import { goalsProgress } from './goals';
-import { earnedPay, owedPay } from './earned';
+import { earnedPay, owedPay, owedPayslips } from './earned';
 import { pay } from './pay';
 import { cashflow } from './cashflow';
 import { AssumptionSet } from '../../shared/assumptions';
@@ -224,8 +224,8 @@ export class Analytics {
       if (!this.store.profile.dateOfBirth) {
         alerts.push({ id: 'profile', level: 'info', title: 'Add your date of birth', detail: 'It drives LISA, cash-ISA and pension-age rules.', action: { label: 'Settings', href: '/settings' } });
       }
-      // Pay owed for timesheet work: pending beside the estate, never in it.
-      const owed = owedPay(this.earned());
+      // Pay owed (timesheet work, and payslips you said are owed): pending beside the estate, never in it.
+      const owed = owedPay(this.earned(), owedPayslips(this.store));
       if (owed?.late) {
         const late = owed.items.filter((i) => i.status === 'late');
         alerts.push({

@@ -6,7 +6,7 @@ import type { NothingNewView } from '../../shared/api';
 import { formatDate, formatMonth } from '../../shared/dates';
 import { describeDetail, describeDifference, fieldsInWords } from '../../shared/detail';
 import { sectionChecks, type ReviewCheck } from '../../shared/review';
-import { FIGURE_KINDS, type CsvProfile, type Draft, type DraftSection, type DraftTransaction, type Figure, type ImportRecord } from '../../shared/schema';
+import { FIGURE_KINDS, type CsvProfile, type Draft, type DraftJob, type DraftSection, type DraftTransaction, type Employment, type ExtractedHmrc, type Figure, type ImportRecord } from '../../shared/schema';
 import { AccountTypeSelect } from '../components/AccountForms';
 import { CategorySelect } from '../components/TransactionList';
 import { Badge, Button, Callout, Card, Checkbox, ErrorNote, Field, Input, KeyValue, Loading, Money, Select, StatusBadge, tableClasses, useToast } from '../components/ui';
@@ -68,6 +68,14 @@ const DATE_SOURCE_LABEL: Record<string, string> = {
 /** How the figures were checked: by the document's own arithmetic, or by a second reading. */
 function VerificationNote({ rec }: { rec: Rec }) {
   const v = rec.extraction.verification;
+  // One of HMRC's pages: read from its own text on this machine, the same way every time.
+  if (rec.extraction.engine === 'govuk') {
+    return (
+      <Callout tone={rec.draft?.confidence === 'high' ? 'good' : 'warn'} title="One of HMRC’s pages, read from its own text on this machine">
+        {rec.draft?.confidence === 'high' ? 'No Claude was used. Where the page prints a total, the rows add up to it.' : 'No Claude was used, but something on it did not add up: check the notes and the page.'}
+      </Callout>
+    );
+  }
   if (!v) return null;
   const first = shortName(v.firstModel);
   const second = v.secondModel ? shortName(v.secondModel) : undefined;
@@ -635,6 +643,143 @@ function FiguresEditor({ draft, onChange }: { draft: Draft; onChange: (d: Draft)
   );
 }
 
+/** One HMRC record in a line: what it is, its date, what it says, and its amount when it has one. */
+function describeHmrc(r: ExtractedHmrc): { what: string; date: string; detail: string; amount?: number } {
+  const code = (c: string, cumulative: boolean) => `${c}${cumulative ? '' : ' week 1/month 1'}`;
+  switch (r.type) {
+    case 'payment':
+      return { what: 'Payment reported', date: r.payDate, detail: `${r.employer ?? ''}: tax ${money(r.tax)}${r.ni !== undefined ? `, NI ${money(r.ni)}` : ''}`, amount: r.taxablePay };
+    case 'tax-code':
+      return { what: 'Tax code', date: r.date, detail: `${r.employer ?? ''}: ${code(r.code, r.cumulative)}` };
+    case 'employment':
+      return {
+        what: 'Job details',
+        date: r.asOf,
+        detail: [
+          r.employer,
+          r.payeReference ? `PAYE ${r.payeReference}` : '',
+          r.payrollNumber ? `payroll no. ${r.payrollNumber}` : '',
+          r.startedOn ? `started ${formatDate(r.startedOn)}` : '',
+          r.endedOn ? `ended ${formatDate(r.endedOn)}` : '',
+          r.code ? `code ${code(r.code, r.cumulative ?? true)}` : '',
+          r.estimatedPay !== undefined ? `HMRC estimates ${money(r.estimatedPay)} for the year` : '',
+          r.leavingPay !== undefined ? `P45 pay ${money(r.leavingPay)}` : '',
+        ]
+          .filter(Boolean)
+          .join(' · '),
+      };
+    case 'event':
+      return { what: 'PAYE account', date: r.date, detail: r.text, ...(r.amount !== undefined ? { amount: r.amount } : {}) };
+    case 'settlement':
+      return {
+        what: `Tax year ${r.taxYear} settled`,
+        date: r.asOf,
+        detail: `${r.outcome === 'underpaid' ? 'Tax was still owed' : r.outcome === 'overpaid' ? 'Tax was overpaid' : 'Nothing owed either way'}${r.calculatedOn ? ` (worked out ${formatDate(r.calculatedOn)})` : ''}${r.payments.length ? `; paid ${r.payments.map((x) => `${money(x.amount)} on ${formatDate(x.date)} by ${x.how}`).join(', ')}` : ''}; ${money(r.outstanding)} outstanding`,
+        ...(r.amount !== undefined ? { amount: r.amount } : {}),
+      };
+    case 'ni-year':
+      return {
+        what: `NI record ${r.taxYear}`,
+        date: r.asOf,
+        detail: `${r.status === 'full' ? 'Full year' : r.status === 'not-full' ? 'Not a full year' : r.status === 'not-available' ? 'Not available yet' : (r.text ?? '')}${r.contributions.length ? `: ${r.contributions.map((c) => `${c.kind}${c.amount !== undefined ? ` ${money(c.amount)}` : ''}`).join(', ')}` : ''}${r.voluntaryCost !== undefined ? `; a voluntary contribution of ${money(r.voluntaryCost)}${r.payBy ? ` by ${formatDate(r.payBy)}` : ''} fills it` : ''}`,
+      };
+    case 'state-pension-forecast':
+      return {
+        what: 'State Pension forecast',
+        date: r.asOf,
+        detail: `${money(r.weekly)} a week${r.payableFrom ? ` from ${formatDate(r.payableFrom)}` : ''}${r.qualifyingYears !== undefined ? `; ${r.qualifyingYears} qualifying years${r.yearsNeeded !== undefined ? ` (${r.yearsNeeded} needed for any)` : ''}` : ''}${r.maximum ? '; the most you can get' : ''}`,
+        amount: r.annual,
+      };
+  }
+}
+
+/**
+ * The jobs a document is about: each matched to a job of yours (by its PAYE reference, payroll number
+ * or a name it has had) or set up as a new one. Choosing another moves all its figures and records.
+ */
+function JobsEditor({ draft, onChange }: { draft: Draft; onChange: (d: Draft) => void }) {
+  const jobs = useApi<Employment[]>(['employments'], draft.jobs?.length ? '/employments' : null);
+  if (!draft.jobs?.length) return null;
+  const set = (key: string, target: DraftJob['target']) => onChange({ ...draft, jobs: draft.jobs!.map((j) => (j.key === key ? { ...j, target, matchedBy: 'you' as const } : j)) });
+  const BY = { payeReference: 'its PAYE reference', payrollNumber: 'your payroll number', name: 'a name it has had', hmrc: 'HMRC’s record of a payment with the same pay and tax', you: 'you' } as const;
+  return (
+    <Card title="Jobs" description="The job of yours each employer on this document is. Its pay figures and HMRC’s records go under it.">
+      <div className="flex flex-col gap-3">
+        {draft.jobs.map((j) => (
+          <div key={j.key} className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] sm:items-end">
+            <div className="text-[13px]">
+              <div className="font-medium text-ink">{j.employer}</div>
+              <div className="text-[12px] text-ink-3">{[j.payeReference ? `PAYE ${j.payeReference}` : '', j.payrollNumber ? `payroll no. ${j.payrollNumber}` : '', j.matchedBy ? `matched by ${BY[j.matchedBy]}` : 'no job of yours has it'].filter(Boolean).join(' · ')}</div>
+            </div>
+            <Field label="Is your job">
+              <Select
+                value={j.target.mode === 'existing' ? j.target.employmentId : 'new'}
+                onChange={(e) => set(j.key, e.target.value === 'new' ? { mode: 'new', employment: { id: j.target.mode === 'new' ? j.target.employment.id : j.employer.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 48) || 'job', employer: j.employer } } : { mode: 'existing', employmentId: e.target.value })}
+              >
+                {(jobs.data ?? []).map((x) => (
+                  <option key={x.id} value={x.id}>
+                    {x.employer}
+                    {x.payeReference ? ` (${x.payeReference})` : ''}
+                  </option>
+                ))}
+                <option value="new">A new job: {j.target.mode === 'new' ? j.target.employment.employer : j.employer}</option>
+              </Select>
+            </Field>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+/** HMRC's records on this document: payments, codes, job details, events, settlements, NI years, forecasts. */
+function HmrcEditor({ draft, onChange }: { draft: Draft; onChange: (d: Draft) => void }) {
+  if (!draft.hmrc?.length) return null;
+  const set = (key: string, include: boolean) => onChange({ ...draft, hmrc: draft.hmrc!.map((h) => (h.key === key ? { ...h, include } : h)) });
+  return (
+    <Card title="HMRC’s records" description="What HMRC’s pages show, kept as HMRC’s own record: each payment an employer reported, tax codes, job details and events, a year settled, your National Insurance record and State Pension forecast." padded={false}>
+      {/* On a phone the date goes under what it is, and long names wrap, so the table fits. */}
+      <div className="overflow-x-auto">
+        <table className={tableClasses.table}>
+          <thead>
+            <tr>
+              <th className={tableClasses.th} />
+              <th className={tableClasses.th}>What</th>
+              <th className={cn(tableClasses.th, 'hidden sm:table-cell')}>Date</th>
+              <th className={tableClasses.th}>Says</th>
+              <th className={cn(tableClasses.th, 'text-right')}>Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            {draft.hmrc.map((h) => {
+              const d = describeHmrc(h.record);
+              return (
+                <tr key={h.key} className={h.include ? '' : 'opacity-55'}>
+                  <td className={tableClasses.td}>
+                    <Checkbox checked={h.include} onChange={(v) => set(h.key, v)} />
+                  </td>
+                  <td className={cn(tableClasses.td, 'sm:whitespace-nowrap')}>
+                    {d.what}
+                    <div className="text-[12px] whitespace-nowrap text-ink-3 sm:hidden">{formatDate(d.date)}</div>
+                    {h.duplicateOf && (
+                      <div>
+                        <Badge tone="muted">already stored</Badge>
+                      </div>
+                    )}
+                  </td>
+                  <td className={cn(tableClasses.td, 'hidden whitespace-nowrap sm:table-cell')}>{formatDate(d.date)}</td>
+                  <td className={cn(tableClasses.td, 'text-[12.5px] [overflow-wrap:anywhere]')}>{d.detail}</td>
+                  <td className={cn(tableClasses.td, tableClasses.num)}>{d.amount !== undefined ? money(d.amount) : ''}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
 /**
  * A timesheet's earned pay, period by period, and the payroll that pays it: the employer as its
  * payslips name it, whose payslips its months are matched to (FORMULAS.md §17, "Earned pay").
@@ -944,7 +1089,10 @@ export default function Review() {
     const d = draft.sections.filter((s) => s.target.mode === 'existing').reduce((s, sec) => s + sec.transactions.filter((t) => !t.include && t.adds?.include).length, 0);
     // A forecast with no balance (a State Pension forecast) is recorded as its income per year.
     const p = draft.sections.filter((s) => s.target.mode !== 'skip' && s.annualIncome !== undefined && s.balanceDate && !(s.recordBalance && s.balance !== undefined)).length;
-    return [n ? plural(n, 'transaction') : '', d ? `details on ${plural(d, 'recorded payment')}` : '', b ? plural(b, 'balance') : '', h ? 'holdings' : '', f ? plural(f, 'tax figure') : '', w ? `earned pay for ${plural(w, 'month')}` : '', p ? plural(p, 'pension forecast') : ''].filter(Boolean).join(', ') || 'nothing';
+    const r = (draft.hmrc ?? []).filter((x) => x.include).length;
+    const used = new Set([...draft.figures, ...(draft.hmrc ?? [])].flatMap((x) => (x.include && x.jobKey ? [x.jobKey] : [])));
+    const j = (draft.jobs ?? []).filter((x) => x.target.mode === 'new' && used.has(x.key)).length;
+    return [n ? plural(n, 'transaction') : '', d ? `details on ${plural(d, 'recorded payment')}` : '', b ? plural(b, 'balance') : '', h ? 'holdings' : '', f ? plural(f, 'tax figure') : '', w ? `earned pay for ${plural(w, 'month')}` : '', p ? plural(p, 'pension forecast') : '', r ? plural(r, 'HMRC record') : '', j ? plural(j, 'new job') : ''].filter(Boolean).join(', ') || 'nothing';
   }, [draft]);
 
   if (q.error) return <ErrorNote error={q.error} />;
@@ -965,7 +1113,7 @@ export default function Review() {
           <h1 className="truncate text-[20px] font-semibold text-ink">{rec.document.fileName}</h1>
           <div className="mt-1 flex flex-wrap items-center gap-2 text-[12.5px] text-ink-3">
             {importStatus(rec)}
-            {rec.extraction.engine && <span>read by {rec.extraction.engine === 'csv' ? `CSV parser (${rec.extraction.detail})` : rec.extraction.engine}{rec.extraction.model ? ` · ${rec.extraction.model}` : ''}</span>}
+            {rec.extraction.engine && <span>read by {rec.extraction.engine === 'csv' ? `CSV parser (${rec.extraction.detail})` : rec.extraction.engine === 'govuk' ? 'the gov.uk page reader' : rec.extraction.engine}{rec.extraction.model ? ` · ${rec.extraction.model}` : ''}</span>}
             {rec.extraction.durationMs !== undefined && <span>· {(rec.extraction.durationMs / 1000).toFixed(1)}s</span>}
             {rec.extraction.costUsd !== undefined && <span>· ~${rec.extraction.costUsd.toFixed(3)}</span>}
             {draft?.confidence && <Badge tone={draft.confidence === 'high' ? 'good' : draft.confidence === 'medium' ? 'neutral' : 'warn'}>{draft.confidence} confidence</Badge>}
@@ -1072,7 +1220,7 @@ export default function Review() {
                     </ul>
                   </Callout>
                 )}
-                {draft.sections.length === 0 && !draft.figures.length && !nothingNew && !filed && (
+                {draft.sections.length === 0 && !draft.figures.length && !draft.hmrc?.length && !nothingNew && !filed && (
                   <Callout tone="warn" title="Nothing was found to record">
                     {draft.nothingToRecord ? `${draft.nothingToRecord} ` : ''}Check the document: if it does hold figures, read it again with another model; if not, discard it.
                   </Callout>
@@ -1099,6 +1247,20 @@ export default function Review() {
                   }}
                 />
                 <EarnedEditor
+                  draft={draft}
+                  onChange={(d) => {
+                    setDirty(true);
+                    setDraft(d);
+                  }}
+                />
+                <JobsEditor
+                  draft={draft}
+                  onChange={(d) => {
+                    setDirty(true);
+                    setDraft(d);
+                  }}
+                />
+                <HmrcEditor
                   draft={draft}
                   onChange={(d) => {
                     setDirty(true);

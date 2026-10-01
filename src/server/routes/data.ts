@@ -16,6 +16,7 @@ import {
   AccountTypeSchema,
   CategorySchema,
   CurrencySchema,
+  EmploymentSchema,
   FIGURE_KINDS,
   GoalSchema,
   BudgetSchema,
@@ -38,10 +39,12 @@ import {
 import { SYSTEM_CATEGORY_IDS } from '../../shared/categories';
 import { csvCell, queryDate, readJson, type AppContext } from '../context';
 import { categoriserFor } from '../categoriser';
-import { enrich } from '../enrich';
+import { enrich, salaryByPayroll } from '../enrich';
 import { nowISO } from '../fsutil';
 import { balanceId, figureId, ruleId, transactionId } from '../ids';
 import { payerKey } from '../analytics/pay';
+import { payeReference } from '../analytics/sources';
+import { matchEmployment } from '../employments';
 import { StoreError } from '../store';
 import { accountSummary } from '../analytics/estate';
 
@@ -718,7 +721,11 @@ export function dataRoutes(ctx: AppContext): Hono {
     if (!targets.length) throw new StoreError('No earned pay from that timesheet', 404);
     for (const f of targets) {
       const { paidBy: _old, ...rest } = f;
-      const next = body.paidBy && body.paidBy !== f.payer ? { ...rest, paidBy: body.paidBy } : rest;
+      const payroll = body.paidBy ?? f.payer;
+      // Under the job of the payroll that pays it, when there is one.
+      const job = payroll ? matchEmployment(store.employments, { employer: payroll })?.employment : undefined;
+      const { employmentId: _job, ...unplaced } = body.paidBy && body.paidBy !== f.payer ? { ...rest, paidBy: body.paidBy } : rest;
+      const next = job ? { ...unplaced, employmentId: job.id } : unplaced;
       await store.replaceFigure(next, `earned pay: paid through ${body.paidBy ?? body.payer}`);
     }
     return c.json({ updated: targets.length });
@@ -728,6 +735,64 @@ export function dataRoutes(ctx: AppContext): Hono {
     await store.deleteFigure(c.req.param('id'), 'figure: delete');
     return c.json({ ok: true });
   });
+
+  // ─── Jobs (employments.json) and HMRC's records ──────────────────────────────────────────────
+
+  app.get('/employments', (c) => c.json(store.employments));
+
+  /** Change a job: what you set wins over what documents taught it. `null` clears a field. */
+  app.put('/employments/:id', async (c) => {
+    const job = store.employment(c.req.param('id'));
+    if (!job) throw new StoreError('No such job', 404);
+    const body = await readJson(
+      c,
+      z.object({
+        employer: z.string().trim().min(1).max(200).optional(),
+        aliases: z.array(z.string().trim().min(1).max(200)).max(30).optional(),
+        payeReference: z.string().nullable().optional(),
+        payrollNumbers: z.array(z.string().regex(/^[A-Za-z0-9]{1,20}$/)).max(10).optional(),
+        startedOn: ISODateSchema.nullable().optional(),
+        endedOn: ISODateSchema.nullable().optional(),
+        pensionAccountId: SlugSchema.nullable().optional(),
+        payLagMonths: z.number().int().min(0).max(3).nullable().optional(),
+        notes: z.string().max(2000).nullable().optional(),
+      }),
+    );
+    const ref = body.payeReference === undefined ? undefined : body.payeReference === null ? null : payeReference(body.payeReference);
+    if (body.payeReference && !ref) throw new StoreError('A PAYE reference is a three-digit office number and a reference, like 123/AB45678', 400);
+    if (body.pensionAccountId && !store.account(body.pensionAccountId)) throw new StoreError('No such account', 400);
+    const next: Record<string, unknown> = { ...job, updatedAt: nowISO() };
+    for (const [k, v] of Object.entries({ ...body, ...(ref !== undefined ? { payeReference: ref } : {}) })) {
+      if (v === undefined) continue;
+      if (v === null) delete next[k];
+      else next[k] = v;
+    }
+    const parsed = EmploymentSchema.parse(next);
+    await store.upsertEmployment(parsed, `job: ${parsed.employer}`);
+    // A payroll number you added: the pay already recorded with it, uncategorised, is salary.
+    const added = parsed.payrollNumbers.filter((n) => !job.payrollNumbers.includes(n));
+    if (added.length) await salaryByPayroll(store, added, `job: ${parsed.employer} (pay with its payroll number is salary)`);
+    return c.json(parsed);
+  });
+
+  /** Say a pay period's pay is owed to you (it will be paid), or take that back. */
+  app.post('/employments/:id/owed', async (c) => {
+    const job = store.employment(c.req.param('id'));
+    if (!job) throw new StoreError('No such job', 404);
+    const body = await readJson(c, z.object({ periodEnd: ISODateSchema, note: z.string().trim().max(500).optional() }));
+    const owed = [...job.owed.filter((o) => o.periodEnd !== body.periodEnd), { periodEnd: body.periodEnd, markedAt: nowISO(), ...(body.note ? { note: body.note } : {}) }].sort((a, b) => a.periodEnd.localeCompare(b.periodEnd));
+    await store.upsertEmployment(EmploymentSchema.parse({ ...job, owed, updatedAt: nowISO() }), `job: ${job.employer} pay for ${body.periodEnd} owed`);
+    return c.json({ ok: true });
+  });
+  app.delete('/employments/:id/owed/:periodEnd', async (c) => {
+    const job = store.employment(c.req.param('id'));
+    if (!job) throw new StoreError('No such job', 404);
+    const periodEnd = c.req.param('periodEnd');
+    await store.upsertEmployment(EmploymentSchema.parse({ ...job, owed: job.owed.filter((o) => o.periodEnd !== periodEnd), updatedAt: nowISO() }), `job: ${job.employer} pay for ${periodEnd} not owed`);
+    return c.json({ ok: true });
+  });
+
+  app.get('/hmrc', (c) => c.json(store.hmrc));
 
   // ─── Profile, settings, CSV profiles ─────────────────────────────────────────────────────────
 

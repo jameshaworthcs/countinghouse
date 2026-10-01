@@ -42,6 +42,9 @@ it is `src/server/records.ts` (validation and writing) and `src/server/agents/` 
 | What the owner has told the app | `data/context.jsonl` (records), `data/notes.jsonl` (their words and proposals) |
 | The capture list (what to collect from each provider) | `data/capture.json` |
 | Accounts, transactions, balances, holdings | `data/accounts.json`, `data/transactions/`, `data/balances/`, `data/holdings/` |
+| Tax figures (P60s, payslips, certificates) | `data/figures.jsonl`, `GET /figures` |
+| Jobs: each employer once, with its names, PAYE reference and payroll numbers | `data/employments.json`, `GET /employments` |
+| What HMRC's pages say (tax codes, payments, settlements, NI years, the State Pension forecast) | `data/hmrc.jsonl`, `GET /hmrc` |
 
 In-app analysis jobs do not read `data/`. They read a **digest**: the app's own computed figures,
 with the ids of the records behind them (`src/server/agents/digest.ts`). A Claude Code session may

@@ -14,6 +14,7 @@ import {
   type CsvProfile,
   type Draft,
   type EngineId,
+  type Extraction,
   type ExtractionEnginePreference,
   type ImportRecord,
   type Transaction,
@@ -26,6 +27,7 @@ import { recordInstrumentsFromHoldings } from '../instruments';
 import { StoreError, type ImportSummary, type Store } from '../store';
 import { extractWithClaudeApi } from './claude-api';
 import { extractWithClaudeCli } from './claude-cli';
+import { GOVUK_ENGINE_VERSION, pdfText, readGovUkPage } from './govuk';
 import { commitDraft } from './commit';
 import { linkTransfers } from '../enrich';
 import { BUILTIN_CSV_PROFILES } from './csv-profiles';
@@ -100,6 +102,12 @@ export interface ProcessOptions {
    * spreadsheet that is not a list of payments is read by Claude (ingest/xlsx.ts, `looksLikeLedger`).
    */
   readAs?: 'document' | 'columns' | undefined;
+}
+
+/** A PDF that is one of HMRC's gov.uk pages, read from its text, or null (ingest/govuk.ts). */
+async function readGovUkPdf(file: string): Promise<Extraction | null> {
+  const text = await pdfText(file, path.dirname(file));
+  return text ? readGovUkPage(text) : null;
 }
 
 export class ImportService extends EventEmitter {
@@ -264,6 +272,7 @@ export class ImportService extends EventEmitter {
       // like a PDF, when Claude is available; otherwise its first table is mapped like a CSV.
       let sheets: Sheet[] | undefined;
       let noClaude: string | undefined;
+      let govuk: Extraction | null = null;
       if (kind === 'xlsx' && opts.readAs !== 'columns') {
         const { rows } = sheetRows(bytes);
         const known = opts.readAs === 'document' ? false : Boolean(findProfile(rows, this.store.csvProfiles) ?? parseHoldingsCsv(rows, record.document.fileName));
@@ -339,6 +348,12 @@ export class ImportService extends EventEmitter {
         result = { extraction: parseSantanderTxt(decodeText(bytes)), warnings: [], durationMs: Date.now() - started };
         engine = 'santander-txt';
         engineVersion = SANTANDER_ENGINE_VERSION;
+      } else if (kind === 'pdf' && (govuk = await readGovUkPdf(this.work.filePath(record.document)))) {
+        // One of HMRC's gov.uk pages, read from its text on this machine (ingest/govuk.ts).
+        result = { extraction: govuk, warnings: [], durationMs: Date.now() - started };
+        engine = 'govuk';
+        engineVersion = GOVUK_ENGINE_VERSION;
+        detail = 'gov.uk page, read on this machine';
       } else if (kind === 'pdf' || kind === 'image') {
         const read = await this.readDocument(record, kind, bytes, this.work.filePath(record.document), opts, abort.signal);
         ({ result, engine, engineVersion, verified } = read);
@@ -902,6 +917,8 @@ export class ImportService extends EventEmitter {
       // Nothing is created either: a section that would have made a new account is left out.
       sections: record.draft.sections.map((s) => ({ ...s, ...(s.target.mode === 'new' ? { target: { mode: 'skip' as const } } : {}), recordBalance: false, recordHoldings: false, transactions: s.transactions.map((t) => ({ ...t, include: false })) })),
       figures: record.draft.figures.map((f) => ({ ...f, include: false })),
+      // Nor any HMRC record, so no job is set up for one either.
+      ...(record.draft.hmrc ? { hmrc: record.draft.hmrc.map((h) => ({ ...h, include: false })) } : {}),
     };
     const filed = await commitDraft(this.store, { record, draft, workFile: this.work.filePath(record.document), nothingNew: nothing.reason });
     this.pending.delete(id);

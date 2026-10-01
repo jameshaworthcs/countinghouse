@@ -13,15 +13,19 @@ import { loadConfig, PROJECT_ROOT } from '../src/server/config';
 import { enrich } from '../src/server/enrich';
 import sharp from 'sharp';
 import { nowISO, sha256 } from '../src/server/fsutil';
-import { balanceId, documentId, figureId, holdingsId, transactionId } from '../src/server/ids';
+import { balanceId, documentId, figureId, hmrcId, holdingsId, transactionId } from '../src/server/ids';
+import { GOVUK_ENGINE_VERSION, readGovUkPage } from '../src/server/ingest/govuk';
 import { ImportService } from '../src/server/ingest/service';
 import { applyRecords, researchIdOf, setOwnerAssumption } from '../src/server/records';
 import { WorkArea } from '../src/server/ingest/workarea';
 import { Store } from '../src/server/store';
 import { addDays, addMonths, endOfMonth, startOfMonth, today, weekday } from '../src/shared/dates';
 import { roundMoney } from '../src/shared/money';
+import { employeeNi, parseTaxCode, payeTax } from '../src/shared/paye';
 import { taxYearOf } from '../src/shared/uk';
-import { ExtractionSchema, type Account, type BalanceSnapshot, type Figure, type HoldingsSnapshot, type ImportRecord, type Transaction } from '../src/shared/schema';
+import { EmploymentSchema, ExtractionSchema, HmrcRecordSchema, type Account, type BalanceSnapshot, type Employment, type ExtractedHmrc, type Figure, type HmrcRecord, type HoldingsSnapshot, type ImportRecord, type Transaction } from '../src/shared/schema';
+// A PDF with a text layer, as a saved gov.uk page has (the tests' helper).
+import { textPdf } from '../tests/pdf';
 
 const args = new Set(process.argv.slice(2));
 const option = (name: string) => [...args].find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3);
@@ -114,6 +118,26 @@ async function main() {
   // ── Everyday banking ──
   const months: string[] = [];
   for (let m = START; m <= END; m = addMonths(m, 1)) months.push(m);
+
+  // ── Jobs ── Acme pays £115,000 a year (£110,000 until March 2026), less a salary sacrifice for the
+  // pension (£18,000 a year, £15,000 before), so taxable pay stays under £100,000 and the personal
+  // allowance whole. This tax year's pay comes with its payslips (PAYE on 1257L) and HMRC's record of
+  // each payment; earlier months are the same payroll with the year's tax spread evenly. A second job,
+  // marking exam papers over the summer, pays monthly in arrears on BR; its July pay was missed, and
+  // you have said it is owed.
+  const thisYear = taxYearOf(END);
+  const job = (id: string, employer: string, extra: Partial<Employment>): Employment => EmploymentSchema.parse({ id, employer, aliases: [], payrollNumbers: [], owed: [], createdBy: 'import', createdAt: stamp, updatedAt: stamp, ...extra });
+  const hmrcRecord = (r: ExtractedHmrc, employmentId: string): HmrcRecord => HmrcRecordSchema.parse({ ...r, id: hmrcId(r), employmentId, source: {}, createdAt: stamp });
+  const payslipFigures: Figure[] = [];
+  const hmrc: HmrcRecord[] = [];
+  const payslip = (payer: string, employmentId: string, month: string, payDate: string, lines: [Figure['kind'], number][]) => {
+    for (const [kind, amount] of lines)
+      payslipFigures.push({ id: figureId(kind, amount, month, payer, kind), kind, label: kind, amount, currency: 'GBP', taxYear: taxYearOf(payDate).label, periodStart: month, periodEnd: endOfMonth(month), date: payDate, payer, employmentId, source: {}, createdAt: stamp });
+  };
+  const acmeCode = parseTaxCode('1257L')!;
+  let acmeYear = { pay: 0, tax: 0 };
+  const marking = SPARSE ? [] : [-4, -3, -2].map((k) => ({ month: startOfMonth(addMonths(END, k)), gross: [900, 1_275, 600][k + 4]! }));
+  const missed = marking[1];
   const groceries = ['TESCO STORES 3297 LONDON', "SAINSBURY'S S/MKT LONDON", 'ALDI 84 LONDON', 'WAITROSE 721 LONDON', 'LIDL GB LONDON', 'M&S SIMPLY FOOD LONDON'];
   const coffee = ['PRET A MANGER LONDON', 'COSTA COFFEE 43012', 'CAFFE NERO LONDON', 'GREGGS 1234 LONDON'];
   const takeaway = ['DELIVEROO LONDON', 'UBER *EATS HELP.UBER.COM', 'JUST EAT.CO.UK LTD'];
@@ -125,8 +149,26 @@ async function main() {
   for (const m of months) {
     const mEnd = endOfMonth(m);
     const salaryDay = addDays(mEnd, -3);
-    const salary = m >= '2026-04-01' ? 5_061.56 : m >= '2025-04-01' ? 4_973.81 : 4_964.81;
+    let salary = m >= '2026-04-01' ? 5_061.56 : m >= '2025-04-01' ? 4_973.81 : 4_964.81;
+    if (!SPARSE && salaryDay >= thisYear.start && salaryDay <= END) {
+      // The payslip's pay after deductions is what reaches the bank.
+      const gross = 8_083.33;
+      const tax = payeTax({ gross, payDate: salaryDay, code: acmeCode, previousPay: acmeYear.pay, previousTax: acmeYear.tax }) ?? 0;
+      const ni = employeeNi(gross, salaryDay) ?? 0;
+      acmeYear = { pay: roundMoney(acmeYear.pay + gross), tax: roundMoney(acmeYear.tax + tax) };
+      // Plan 2 student loan: 9% of the month's pay over £2,448.75, rounded down to the pound.
+      salary = roundMoney(gross - tax - ni - 507);
+      payslip('ACME ANALYTICS LTD', 'acme-analytics', m, salaryDay, [['gross_pay', gross], ['tax_deducted', tax], ['national_insurance', ni], ['student_loan_deducted', 507]]);
+      hmrc.push(hmrcRecord({ type: 'payment', employer: 'ACME ANALYTICS LIMITED', payDate: salaryDay, taxablePay: gross, tax, ni, taxYear: thisYear.label }, 'acme-analytics'));
+    }
     tx('current-account', salaryDay, salary, 'ACME ANALYTICS LTD SALARY', { payee: 'Acme Analytics Ltd' });
+    const marked = marking.find((x) => x.month === m);
+    if (marked) {
+      const payDate = `${addMonths(m, 1).slice(0, 7)}-25`;
+      const tax = roundMoney(marked.gross * 0.2);
+      payslip('EXAMPLE MARKING LTD', 'example-marking', m, payDate, [['gross_pay', marked.gross], ['tax_deducted', tax], ['national_insurance', 0]]);
+      if (marked !== missed) tx('current-account', payDate, roundMoney(marked.gross - tax), 'EXAMPLE MARKING LTD SALARY 773104', { payee: 'Example Marking Ltd' });
+    }
     tx('current-account', `${m.slice(0, 7)}-01`, -1_800, 'OPENRENT LTD RENT REF FLAT 4B');
     if (Number(m.slice(5, 7)) <= 10 && Number(m.slice(5, 7)) >= 1) tx('current-account', `${m.slice(0, 7)}-02`, m.startsWith('2026') ? -205 : -193, 'LB LAMBETH COUNCIL TAX');
     const winter = [1, 2, 3, 11, 12].includes(Number(m.slice(5, 7)));
@@ -296,15 +338,33 @@ async function main() {
   });
   await store.addFigures(
     [
-      fig('gross_pay', 'Pay', 95_000.04, 'Acme Analytics Ltd', { payerReference: '123/AB456' }),
-      fig('tax_deducted', 'Tax', 25_428.4, 'Acme Analytics Ltd'),
-      fig('national_insurance', "Employee's contributions", 3_909.96, 'Acme Analytics Ltd'),
-      fig('student_loan_deducted', 'Student loan deductions', 5_976, 'Acme Analytics Ltd'),
+      fig('gross_pay', 'Pay', 95_000.04, 'Acme Analytics Ltd', { payerReference: '123/AB456', employmentId: 'acme-analytics' }),
+      fig('tax_deducted', 'Tax', 25_428.4, 'Acme Analytics Ltd', { employmentId: 'acme-analytics' }),
+      fig('national_insurance', "Employee's contributions", 3_909.96, 'Acme Analytics Ltd', { employmentId: 'acme-analytics' }),
+      fig('student_loan_deducted', 'Student loan deductions', 5_976, 'Acme Analytics Ltd', { employmentId: 'acme-analytics' }),
       // The savings account's interest certificate: what it paid in 2025/26.
       fig('interest_paid', 'Gross interest paid', roundMoney(txs.filter((t) => t.accountId === 'easy-access' && t.description === 'INTEREST PAID' && t.date >= '2025-04-06' && t.date <= '2026-04-05').reduce((sum, t) => sum + t.amount, 0)), 'Example Savings', { accountId: 'easy-access' }),
+      ...payslipFigures,
     ],
     'demo: figures',
   );
+  await store.setEmployments([
+    job('acme-analytics', 'Acme Analytics Ltd', { aliases: ['ACME ANALYTICS LTD', 'ACME ANALYTICS LIMITED'], payeReference: '123/AB456', payrollNumbers: ['40021'], startedOn: '2022-09-05', pensionAccountId: 'workplace-pension' }),
+    ...(marking.length
+      ? [
+          job('example-marking', 'Example Marking Ltd', {
+            aliases: ['EXAMPLE MARKING LTD'],
+            payeReference: '581/NM2207',
+            payrollNumbers: ['773104'],
+            startedOn: marking[0]!.month,
+            owed: missed ? [{ periodEnd: endOfMonth(missed.month), note: 'Their payroll missed it; they will pay it with a later run', markedAt: stamp }] : [],
+          }),
+        ]
+      : []),
+  ]);
+  // The code HMRC issued Acme for the year, in its annual notice.
+  if (!SPARSE) hmrc.push(hmrcRecord({ type: 'tax-code', employer: 'ACME ANALYTICS LIMITED', date: addDays(thisYear.start, -40), code: '1257L', cumulative: true, taxYear: thisYear.label }, 'acme-analytics'));
+  if (hmrc.length) await store.upsertRecords('hmrc', hmrc, 'demo: HMRC records');
   const res = await enrich(store);
   console.log(`demo: ${txs.length} transactions, ${snapshots.length} balances; enrich: ${res.recategorised} categorised, ${res.transfersLinked} transfers linked`);
   // A first import has no research or insights yet: the agents have not run.
@@ -315,9 +375,11 @@ async function main() {
   const config = loadConfig({ ...process.env, FINANCE_DATA_DIR: DIR, FINANCE_WORK_DIR: WORK, FINANCE_WATCH: '0' });
   const work = new WorkArea(WORK);
   const prizes = await demoPrizeHistory(work);
+  const page = marking.length ? await demoHmrcPage(work, marking) : null;
   const svc = new ImportService(store, config, work);
   await svc.init();
   await svc.refreshDraft(prizes);
+  if (page) await svc.refreshDraft(page);
   const recent = txs.filter((t) => t.accountId === 'current-account' && t.date >= addDays(END, -12)).sort((a, b) => (a.date < b.date ? -1 : 1));
   const lines = ['Transaction ID,Date,Time,Type,Name,Emoji,Category,Amount,Currency,Local amount,Local currency,Notes and #tags,Address,Receipt,Description,Category split,Money Out,Money In'];
   recent.forEach((t, i) => {
@@ -458,6 +520,50 @@ await main();
  * (docs/INGESTION.md, "Nothing new"). Made up, and written straight into the work area so the demo
  * never calls Claude. Returns the import's id.
  */
+/**
+ * HMRC's page of the marking job's pay, saved from gov.uk and waiting for review: read on this machine
+ * from its text, as an upload would be, so no Claude runs. HMRC has the missed month too: the payroll
+ * reported it, though the pay never reached the bank.
+ */
+async function demoHmrcPage(work: WorkArea, marking: { month: string; gross: number }[]): Promise<string> {
+  const names = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const long = (d: string) => `${Number(d.slice(8, 10))} ${names[Number(d.slice(5, 7)) - 1]} ${d.slice(0, 4)}`;
+  const money = (n: number) => n.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const rows = marking.map((x) => ({ payDate: `${addMonths(x.month, 1).slice(0, 7)}-25`, gross: x.gross, tax: roundMoney(x.gross * 0.2) }));
+  const lines = [
+    'HM Revenue & Customs JO BLOGGS',
+    'Income received to date',
+    'Taxable income from EXAMPLE MARKING',
+    'LIMITED',
+    `Income Tax and National Insurance paid to ${long(rows.at(-1)!.payDate)}`,
+    'EXAMPLE MARKING LIMITED has sent us this information.',
+    'Date Taxable income (£) Income Tax paid (£) National Insurance paid (£)',
+    ...rows.map((r) => `${long(r.payDate)} ${money(r.gross)} ${money(r.tax)} 0.00`),
+    `Total ${money(rows.reduce((s, r) => s + r.gross, 0))} ${money(roundMoney(rows.reduce((s, r) => s + r.tax, 0)))} 0.00`,
+    `We estimate your annual taxable income from them will be £${money(rows.reduce((s, r) => s + r.gross, 0))}`,
+    'HM Revenue & Customs',
+  ];
+  const text = lines.join('\n');
+  const reading = readGovUkPage({ raw: text, layout: text });
+  if (!reading) throw new Error('demo: the gov.uk reader did not read the demo page');
+  const bytes = textPdf(lines);
+  const sha = sha256(bytes);
+  const stamp = nowISO();
+  const record: ImportRecord = {
+    id: `imp_${END.replace(/-/g, '')}_071500_d3a1`,
+    status: 'review',
+    createdAt: stamp,
+    updatedAt: stamp,
+    origin: 'upload',
+    document: { id: documentId(sha), sha256: sha, fileName: 'Check your Income Tax - GOV.UK.pdf', mediaType: 'application/pdf', size: bytes.length },
+    extraction: { engine: 'govuk', engineVersion: GOVUK_ENGINE_VERSION, detail: 'gov.uk page, read on this machine', warnings: [], raw: reading },
+  };
+  await work.init();
+  await work.saveFile(record.document, bytes);
+  await work.saveRecord(record);
+  return record.id;
+}
+
 async function demoPrizeHistory(work: WorkArea): Promise<string> {
   const rows: [string, [string, string][]][] = [
     ['September 2026', [['117BQ204518', '£50.00'], ['117BQ204972', '£25.00'], ['121CR551433', '£25.00']]],

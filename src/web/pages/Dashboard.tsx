@@ -262,13 +262,23 @@ function Onboarding() {
   );
 }
 
-/** Pay earned on timesheets and not yet paid: pending beside the estate, not counted in it (FORMULAS §17). */
+/** Pay owed to you and not yet paid (timesheet work, payslips you said are owed): pending beside the estate, not counted in it (FORMULAS §17). */
 function OwedLine({ owed }: { owed: NonNullable<SummaryResponse['owed']> }) {
+  const payslips = owed.items.filter((i) => i.kind === 'payslip');
+  const work = owed.items.filter((i) => i.kind !== 'payslip');
+  const when = owed.late ? 'late' : owed.next ? `expected about ${formatDate(owed.next, { year: false })}` : 'when its payslip comes';
   return (
     <Link to="/tax/pay" className="-mx-2 mt-2 flex items-start gap-2 rounded-lg px-2 py-1.5 text-[12.5px] hover:bg-panel-2">
       <Badge tone={owed.late ? 'warn' : 'muted'}>Pending</Badge>
       <span className="min-w-0 flex-1 text-ink-3">
-        <span className="font-medium text-ink-2">{owed.net !== null ? <Money value={owed.net} decimals={0} /> : <Money value={owed.gross} decimals={0} />}</span> pay owed to you{owed.net !== null ? <> after estimated tax and NI (<Money value={owed.gross} decimals={0} /> before)</> : ' before tax'}, {owed.late ? 'late' : owed.next ? `expected about ${formatDate(owed.next, { year: false })}` : 'when its payslip comes'}. Not counted until it arrives.
+        <span className="font-medium text-ink-2">{owed.net !== null ? <Money value={owed.net} decimals={0} /> : <Money value={owed.gross} decimals={0} />}</span> pay owed to you{owed.net !== null ? <> after {work.length ? 'estimated ' : ''}tax and NI (<Money value={owed.gross} decimals={0} /> before)</> : ' before tax'}
+        {payslips.length > 0 && (
+          <>
+            : {payslips.map((i) => `${i.payroll}’s ${i.periods[0] ? formatMonth(i.periods[0]) : ''} pay`).join(', ')}, which you said will be paid
+            {work.length > 0 && <>, and timesheet work {when}</>}
+          </>
+        )}
+        {!payslips.length && <>, {when}</>}. Not counted until it arrives.
       </span>
     </Link>
   );

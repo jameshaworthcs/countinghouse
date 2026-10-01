@@ -91,7 +91,7 @@ function ExtractionForm() {
   const setEx = (patch: Partial<SettingsT['extraction']>) => setS({ ...s, extraction: { ...ex, ...patch } });
   return (
     <div className="flex flex-col gap-5">
-      <Card title="Reading PDFs and screenshots" description="CSV, OFX, QIF and Santander TXT files are always parsed on this machine.">
+      <Card title="Reading PDFs and screenshots" description="CSV, OFX, QIF and Santander TXT files, and HMRC’s pages saved from gov.uk, are always read on this machine.">
         <ul className="mb-4 flex flex-col gap-2">
           {sys.data?.engines.map((e) => (
             <li key={e.id} className="flex items-start gap-2 text-[13px]">

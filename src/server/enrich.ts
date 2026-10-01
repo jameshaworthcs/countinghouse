@@ -2,7 +2,7 @@
 // fields. Your manual edits (categorisedBy = "user") are never touched. This is what lets new rules,
 // better merchant lists or new categories apply to history without re-importing anything.
 
-import { isWrapperAccount, transferLegCategory, type Categoriser } from '../shared/categorise';
+import { isWrapperAccount, payrollPattern, transferLegCategory, type Categoriser } from '../shared/categorise';
 import { diffDays } from '../shared/dates';
 import { toMinor } from '../shared/money';
 import { tidyPlace } from '../shared/places';
@@ -126,6 +126,23 @@ export async function enrich(store: Store, opts: { accountIds?: string[]; dryRun
     );
   }
   return { recategorised, transfersLinked };
+}
+
+/**
+ * Pay recorded before its job had your payroll number: money in with no category that carries one of
+ * `numbers` is salary, as the categoriser now says of it (shared/categorise.ts, step 4c). Only gaps
+ * are filled: a category you, a rule or a reader gave stays. Returns how many.
+ */
+export async function salaryByPayroll(store: Store, numbers: readonly string[], message: string): Promise<number> {
+  const re = payrollPattern(numbers);
+  if (!re) return 0;
+  const wrapper = (id: string) => {
+    const a = store.account(id);
+    return a ? isWrapperAccount(a.type) : false;
+  };
+  const found = store.transactions().filter((t) => t.amount > 0 && !t.category && t.categorisedBy !== 'user' && !t.transferGroup && !wrapper(t.accountId) && re.test(t.description));
+  if (found.length) await store.updateTransactions(found.map((t) => ({ id: t.id, patch: { category: 'salary', categorisedBy: 'builtin' } })), message);
+  return found.length;
 }
 
 /** Source fields the categoriser reads: filling one in can change what a row is. */

@@ -22,6 +22,8 @@ import {
   InsightSchema,
   InstitutionsFileSchema,
   InstrumentsFileSchema,
+  EmploymentsFileSchema,
+  HmrcRecordSchema,
   MetaSchema,
   NoteSchema,
   ProfileSchema,
@@ -60,6 +62,8 @@ const schemas: [string, z.ZodType, string][] = [
   ['context', ContextSchema, 'one line of data/context.jsonl'],
   ['note', NoteSchema, 'one line of data/notes.jsonl'],
   ['receipt', ReceiptSchema, 'one line of data/receipts.jsonl'],
+  ['employments', withSchemaKey(EmploymentsFileSchema), 'data/employments.json (your jobs)'],
+  ['hmrc', HmrcRecordSchema, "one line of data/hmrc.jsonl (HMRC's records about you)"],
 ];
 await mkdir(out, { recursive: true });
 for (const [name, schema, describes] of schemas) {

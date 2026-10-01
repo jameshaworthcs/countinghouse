@@ -43,13 +43,30 @@ export function selfAssessment(store: Store, label?: string): SelfAssessmentResp
   // them, so nothing counts twice.
   const jobs = employerYears(store, ty);
   const withPay = jobs.filter((e) => e.chosen.gross_pay);
-  const pay = withPay.flatMap((e) => e.chosen.gross_pay!.figures);
-  const tax = jobs.flatMap((e) => e.chosen.tax_deducted?.figures ?? []);
+  const pay = withPay.map((e) => e.chosen.gross_pay!);
+  const tax = jobs.flatMap((e) => (e.chosen.tax_deducted ? [e.chosen.tax_deducted] : []));
+  const total = (list: PaySource[]) => fromMinor(list.reduce((x, s) => x + toMinor(s.amount), 0));
+  // Where each amount came from: a document's figures, or HMRC's record of the job's payments.
+  const sourcesOf = (list: PaySource[], what: 'pay' | 'tax'): SaSource[] =>
+    list.flatMap((s) => [
+      ...figureSources(s.figures),
+      ...(s.records ?? []).map((r) => ({ type: 'hmrc' as const, id: r.id, label: `HMRC's record: ${r.employer ?? 'a payment'}${what === 'tax' ? ', tax' : ', taxable pay'}`, amount: what === 'tax' ? r.tax : r.taxablePay, date: r.payDate })),
+    ]);
   const soFar = withPay.filter((e) => !e.chosen.gross_pay!.final);
   const taxUnknown = withPay.filter((e) => !e.chosen.tax_deducted);
   const taxSoFar = jobs.filter((e) => e.chosen.tax_deducted && !e.chosen.tax_deducted.final);
   const fromWhat = (src: PaySource) =>
-    src.kind === 'payslips' ? `${src.label}: its P60 for ${ty.label} gives the year's figure` : src.kind === 'yours' ? 'your figure' : src.final ? (src.label === 'P60' ? 'its P60' : 'a document for the whole year') : `a document ${src.label}: its P60 gives the year's figure`;
+    src.kind === 'payslips'
+      ? `${src.label}: its P60 for ${ty.label} gives the year's figure`
+      : src.kind === 'yours'
+        ? 'your figure'
+        : src.records
+          ? `HMRC's record of its payments to ${formatDate(src.asOf)}${src.final ? ' (the job has ended)' : `: its P60 gives the year's figure`}`
+          : src.label === 'P60'
+            ? 'its P60'
+            : src.kind === 'year'
+              ? 'a document for the whole year'
+              : `a document ${src.label}${src.final ? ' (the job has ended)' : `: its P60 gives the year's figure`}`;
   const jobNotes = withPay.map((e) => {
     const t = e.chosen.tax_deducted;
     return `${e.payer || 'An employer'}${e.payeReference ? ` (PAYE ${e.payeReference})` : ''}: pay ${formatMoney(e.chosen.gross_pay!.amount)}, from ${fromWhat(e.chosen.gross_pay!)}; tax ${t ? formatMoney(t.amount) : 'not known'}.`;
@@ -66,7 +83,7 @@ export function selfAssessment(store: Store, label?: string): SelfAssessmentResp
       id: 'pay',
       label: 'Pay from employment',
       where: 'SA102 Employment: pay from this employment (from your P60/P45)',
-      amount: pay.length ? sumFigures(pay) : null,
+      amount: pay.length ? total(pay) : null,
       status: pay.length ? (soFar.length ? 'check' : 'ready') : salaryTx.length ? 'missing' : 'not-applicable',
       basis: pay.length ? (soFar.length ? (soFar.length === withPay.length ? 'So far this year' : 'The year’s figures, and so far for some jobs') : wholeYear) : 'No P60 imported',
       notes: pay.length
@@ -74,19 +91,19 @@ export function selfAssessment(store: Store, label?: string): SelfAssessmentResp
         : salaryTx.length
           ? [`${salaryTx.length} salary payments were found in your bank data, but those are net of tax. Upload your ${ty.label} P60 to get the gross figure.`]
           : [],
-      sources: figureSources(pay),
+      sources: sourcesOf(pay, 'pay'),
     },
     {
       id: 'paye-tax',
       label: 'UK tax taken off pay',
       where: 'SA102 Employment: UK tax taken off pay',
-      amount: tax.length ? sumFigures(tax) : null,
+      amount: tax.length ? total(tax) : null,
       status: tax.length ? (taxUnknown.length || taxSoFar.length ? 'check' : 'ready') : pay.length || salaryTx.length ? 'missing' : 'not-applicable',
       basis: tax.length ? (taxUnknown.length ? 'Some jobs only' : taxSoFar.length ? 'So far this year' : 'Figures for the whole year') : 'Not found',
       notes: taxUnknown.length
         ? [`Tax taken off is not known for ${taxUnknown.map((e) => e.payer || 'an employer').join(', ')}: ${taxUnknown.length === 1 ? 'its P60 gives it' : 'their P60s give it'} (or HMRC’s page for each job, under Check your Income Tax).`]
         : [],
-      sources: figureSources(tax),
+      sources: sourcesOf(tax, 'tax'),
     },
     {
       id: 'bik',

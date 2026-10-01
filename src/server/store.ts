@@ -19,6 +19,8 @@ import {
   BalanceSnapshotSchema,
   CategorySchema,
   ContextSchema,
+  EmploymentSchema,
+  HmrcRecordSchema,
   CsvProfileSchema,
   FigureSchema,
   CaptureItemSchema,
@@ -43,6 +45,8 @@ import {
   type BalanceSnapshot,
   type Category,
   type ContextRecord,
+  type Employment,
+  type HmrcRecord,
   type CsvProfile,
   type Figure,
   type CaptureItem,
@@ -66,7 +70,7 @@ import {
 import { atomicWrite, Mutex, nowISO, readTextIfExists, sha256 } from './fsutil';
 
 /** Bump when the on-disk format changes, and add a migration in migrations.ts. */
-export const FORMAT_VERSION = 4;
+export const FORMAT_VERSION = 5;
 
 export interface DataIssue {
   file: string;
@@ -128,6 +132,7 @@ const ARRAY_FILES = {
   capture: { file: 'capture.json', key: 'items', schema: CaptureItemSchema },
   csvProfiles: { file: 'csv-profiles.json', key: 'profiles', schema: CsvProfileSchema },
   instruments: { file: 'instruments.json', key: 'instruments', schema: InstrumentSchema },
+  employments: { file: 'employments.json', key: 'employments', schema: EmploymentSchema },
 } as const;
 
 /** Single-file JSONL collections: one record per line. */
@@ -138,6 +143,7 @@ const JSONL_FILES = {
   context: { file: 'context.jsonl', schema: ContextSchema },
   notes: { file: 'notes.jsonl', schema: NoteSchema },
   receipts: { file: 'receipts.jsonl', schema: ReceiptSchema },
+  hmrc: { file: 'hmrc.jsonl', schema: HmrcRecordSchema },
 } as const;
 
 interface State {
@@ -153,6 +159,7 @@ interface State {
   capture: CaptureItem[];
   csvProfiles: CsvProfile[];
   instruments: Instrument[];
+  employments: Employment[];
   /** Append-only: every version of every assumption, in file order. */
   assumptions: Assumption[];
   /** Append-only: every research record, in file order. */
@@ -161,6 +168,7 @@ interface State {
   context: ContextRecord[];
   notes: Note[];
   receipts: Receipt[];
+  hmrc: HmrcRecord[];
   transactions: Map<string, Transaction[]>;
   balances: Map<string, BalanceSnapshot[]>;
   holdings: Map<string, HoldingsSnapshot[]>;
@@ -183,12 +191,14 @@ function emptyState(): State {
     capture: [],
     csvProfiles: [],
     instruments: [],
+    employments: [],
     assumptions: [],
     research: [],
     insights: [],
     context: [],
     notes: [],
     receipts: [],
+    hmrc: [],
     transactions: new Map(),
     balances: new Map(),
     holdings: new Map(),
@@ -269,6 +279,7 @@ export class Store extends EventEmitter {
       ['budgets.json', { $schema: '../schemas/budgets.schema.json', budgets: [] }],
       ['csv-profiles.json', { $schema: '../schemas/csv-profiles.schema.json', profiles: [] }],
       ['instruments.json', { $schema: '../schemas/instruments.schema.json', instruments: [] }],
+      ['employments.json', { $schema: '../schemas/employments.schema.json', employments: [] }],
     ];
     for (const [rel, value] of writes) await this.writeJson(rel, value);
     for (const def of Object.values(JSONL_FILES)) await atomicWrite(this.abs(def.file), '');
@@ -571,6 +582,15 @@ export class Store extends EventEmitter {
   get figures(): Figure[] {
     return this.state.figures;
   }
+  get employments(): Employment[] {
+    return this.state.employments;
+  }
+  employment(id: string | undefined): Employment | undefined {
+    return id ? this.state.employments.find((e) => e.id === id) : undefined;
+  }
+  get hmrc(): HmrcRecord[] {
+    return this.state.hmrc;
+  }
   get instruments(): Instrument[] {
     return this.state.instruments;
   }
@@ -729,6 +749,16 @@ export class Store extends EventEmitter {
   setInstruments(list: Instrument[], message = 'instruments: update'): Promise<void> {
     return this.setArray('instruments', list, message);
   }
+  setEmployments(list: Employment[], message = 'jobs: update'): Promise<void> {
+    return this.setArray('employments', list, message);
+  }
+  async upsertEmployment(employment: Employment, message?: string): Promise<void> {
+    const existing = this.state.employments.findIndex((e) => e.id === employment.id);
+    const list = [...this.state.employments];
+    if (existing >= 0) list[existing] = employment;
+    else list.push(employment);
+    await this.setEmployments(list, message ?? `${existing >= 0 ? 'job: update' : 'job: add'} ${employment.employer}`);
+  }
 
   // ─── Writes: agent-maintained collections (assumptions, research, insights, context, notes) ──
 
@@ -772,7 +802,7 @@ export class Store extends EventEmitter {
     });
   }
 
-  upsertRecords<K extends 'insights' | 'context' | 'notes' | 'receipts'>(name: K, records: State[K], message: string): Promise<void> {
+  upsertRecords<K extends 'insights' | 'context' | 'notes' | 'receipts' | 'hmrc'>(name: K, records: State[K], message: string): Promise<void> {
     return this.exclusive(async () => {
       const def = JSONL_FILES[name];
       const list = [...(this.state[name] as unknown as { id: string }[])];

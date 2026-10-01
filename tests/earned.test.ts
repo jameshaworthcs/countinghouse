@@ -125,7 +125,7 @@ describe('earned pay', () => {
   it('owed past its pay day is late, and the estate shows it as pending', () => {
     const owed = owedPay(earnedPay(store, '2026-10-01'))!;
     expect(owed).toMatchObject({ gross: 2120, net: 1820.04, next: '2026-09-24', late: true });
-    expect(owed.items).toEqual([{ payroll: PAYROLL, gross: 2120, net: 1820.04, payDate: '2026-09-24', periods: ['2026-07-31', '2026-08-31'], status: 'late' }]);
+    expect(owed.items).toEqual([{ payroll: PAYROLL, gross: 2120, net: 1820.04, payDate: '2026-09-24', periods: ['2026-07-31', '2026-08-31'], status: 'late', kind: 'timesheet' }]);
     expect(owedPay(earnedPay(store, '2026-09-10'))!.late).toBe(false);
   });
 

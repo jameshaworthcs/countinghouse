@@ -9,7 +9,8 @@ import { employeeNi, parseTaxCode, payeTax, standardTaxCode, type TaxCode } from
 import type { DraftFigure, Figure, Transaction } from '../../shared/schema';
 import { taxYear, taxYearOf } from '../../shared/uk';
 import type { Store } from '../store';
-import { fromEmployer, isPayslipFigure, pairPay, payerKey, type PayPeriod } from './pay';
+import { fromJob, isPayslipFigure, pairPay, payerKey, type PayPeriod } from './pay';
+import { namesOf } from '../employments';
 
 /** A payslip's tax is reproduced by a basis when the estimate is within this of it. */
 const BASIS_TOLERANCE_POUNDS = 1;
@@ -183,9 +184,13 @@ export function earnedPay(store: Store, now: ISODate = today()): EarnedPayroll[]
   }
   const used = new Set<string>();
   const out: EarnedPayroll[] = [];
-  const keys = [...new Set(earned.map((f) => payerKey(payrollOf(f))))];
+  // A payroll is the job its earned pay is under, else its reduced name (before jobs).
+  const keyOf = (f: Figure) => f.employmentId ?? payerKey(payrollOf(f));
+  const keys = [...new Set(earned.map(keyOf))];
   for (const key of keys) {
-    const mine = earned.filter((f) => payerKey(payrollOf(f)) === key);
+    const mine = earned.filter((f) => keyOf(f) === key);
+    const job = store.employment(key);
+    const who = job ? { names: namesOf(job), payrollNumbers: job.payrollNumbers } : { names: [payrollOf(mine[0]!)], payrollNumbers: [] };
     const ownSlips = slips.filter((s) => s.key === key);
     const payroll = ownSlips[0]?.payer || payrollOf(mine[0]!);
     const paid = matchEarned(mine, ownSlips);
@@ -193,7 +198,7 @@ export function earnedPay(store: Store, now: ISODate = today()): EarnedPayroll[]
     for (const [s, run] of paid) for (const f of run) paidBy.set(f.id, s);
 
     // How long after the work its pay comes: yours, else learned from the latest payslip that paid some.
-    const yours = store.profile.employers?.find((e) => payerKey(e.name) === key)?.payLagMonths;
+    const yours = job?.payLagMonths ?? store.profile.employers?.find((e) => payerKey(e.name) === key)?.payLagMonths;
     const latestPaid = [...paid.entries()].sort(([a], [b]) => slipEnd(a).localeCompare(slipEnd(b))).at(-1);
     const learned = latestPaid ? monthsBetween(periodName(latestPaid[1].at(-1)!), slipEnd(latestPaid[0]).slice(0, 7)) : null;
     const lag = yours ?? learned;
@@ -220,7 +225,7 @@ export function earnedPay(store: Store, now: ISODate = today()): EarnedPayroll[]
       const latestWork = run.at(-1)!.periodEnd!;
       // Arrived before its payslip was imported: an unexplained payment from this payroll after the work.
       const arrived = unexplained
-        .filter((t) => !used.has(t.id) && t.date > latestWork && (!payDate || t.date >= addDays(payDate, -15)) && (bankNames.has(payerKey(t.payee ?? t.counterpartyName ?? t.description)) || fromEmployer(t, payroll)))
+        .filter((t) => !used.has(t.id) && t.date > latestWork && (!payDate || t.date >= addDays(payDate, -15)) && (bankNames.has(payerKey(t.payee ?? t.counterpartyName ?? t.description)) || fromJob(t, who)))
         .sort((a, b) => a.date.localeCompare(b.date))[0];
       if (arrived) used.add(arrived.id);
       const { apart, ...estimate } = estimateDeductions(ownSlips, gross, payDate ?? endOfMonth(now), run.map((f) => f.amount));
@@ -264,6 +269,7 @@ export function earnedPay(store: Store, now: ISODate = today()): EarnedPayroll[]
     });
     out.push({
       key,
+      ...(job ? { employmentId: job.id } : {}),
       payroll,
       timesheets: [...new Set(mine.map((f) => [f.payer, f.work?.role].filter(Boolean).join(', ')))],
       lag: { months: lag, source: yours !== undefined ? 'yours' : learned !== null ? 'learned' : null },
@@ -274,20 +280,36 @@ export function earnedPay(store: Store, now: ISODate = today()): EarnedPayroll[]
   return out;
 }
 
-/** Pay owed and not yet in the bank, for the estate: shown beside it, never counted in it. */
-export function owedPay(payrolls: EarnedPayroll[]): OwedPay | null {
-  const open = payrolls.flatMap((p) => p.expected.filter((e) => e.status !== 'arrived').map((e) => ({ p, e })));
+/**
+ * Pay owed and not yet in the bank, for the estate: shown beside it, never counted in it. Timesheet
+ * work not yet paid (its tax and NI estimated), and payslips whose pay you said is owed to you (their
+ * pay after deductions, as the payslip says).
+ */
+export function owedPay(payrolls: EarnedPayroll[], payslips: PayPeriod[] = []): OwedPay | null {
+  const open: OwedPay['items'] = payrolls.flatMap((p) => p.expected.filter((e) => e.status !== 'arrived').map((e) => ({ payroll: p.payroll, gross: e.gross, net: e.estimate.net, payDate: e.payDate, periods: e.periods, status: e.status as 'owed' | 'late', kind: 'timesheet' as const })));
+  for (const p of payslips) {
+    if (!p.owed || p.credit || p.gross === null) continue;
+    open.push({ payroll: p.payer, gross: p.gross, net: p.expectedNet, payDate: p.payDate, periods: p.periodEnd ? [p.periodEnd] : [], status: 'owed', kind: 'payslip' });
+  }
   if (!open.length) return null;
-  const gross = fromMinor(open.reduce((s, { e }) => s + toMinor(e.gross), 0));
-  const nets = open.map(({ e }) => e.estimate.net);
-  const dates = open.map(({ e }) => e.payDate).filter((d): d is string => Boolean(d)).sort();
+  const gross = fromMinor(open.reduce((s, e) => s + toMinor(e.gross), 0));
+  const nets = open.map((e) => e.net);
+  // When the next should come: timesheet pay's expected pay date. A payslip's pay you said is owed
+  // has no date to give: its own pay date has passed.
+  const dates = open.flatMap((e) => (e.kind !== 'payslip' && e.payDate ? [e.payDate] : [])).sort();
   return {
     gross,
     net: nets.every((n): n is number => n !== null) ? fromMinor(nets.reduce((s, n) => s + toMinor(n), 0)) : null,
     next: dates[0] ?? null,
-    late: open.some(({ e }) => e.status === 'late'),
-    items: open.map(({ p, e }) => ({ payroll: p.payroll, gross: e.gross, net: e.estimate.net, payDate: e.payDate, periods: e.periods, status: e.status as 'owed' | 'late' })),
+    late: open.some((e) => e.status === 'late'),
+    items: open,
   };
+}
+
+/** Payslips whose pay you said is owed to you, in this tax year and the last, not yet arrived. */
+export function owedPayslips(store: Store, now: ISODate = today()): PayPeriod[] {
+  const ty = taxYearOf(now);
+  return [taxYear(ty.startYear - 1), ty].flatMap((y) => pairPay(store, y).periods.filter((p) => p.owed && !p.credit));
 }
 
 /**

@@ -15,6 +15,7 @@ const STATUS: Record<PayMonth['status'], { tone: 'good' | 'warn' | 'bad' | 'info
   paid: { tone: 'good', label: 'Paid' },
   differs: { tone: 'warn', label: 'Differs' },
   'not-seen': { tone: 'warn', label: 'Not seen' },
+  owed: { tone: 'pending', label: 'Owed' },
   due: { tone: 'pending', label: 'Due' },
   nothing: null,
   'no-payslip': null,
@@ -95,10 +96,11 @@ function ExpectedNote({ x }: { x: ExpectedPay }) {
   );
 }
 
-/** How long after the work this payroll pays a timesheet: learned, or what you say (kept in your profile). */
-function LagSelect({ payroll, lag }: { payroll: string; lag: EarnedPayroll['lag'] }) {
+/** How long after the work this payroll pays a timesheet: learned, or what you say (kept with its job). */
+function LagSelect({ payroll, lag, employmentId }: { payroll: string; lag: EarnedPayroll['lag']; employmentId?: string | undefined }) {
   const { data } = useAppData();
   const save = useApiMutation((v: string) => {
+    if (employmentId) return api(`/employments/${employmentId}`, { method: 'PUT', body: { payLagMonths: v === '' ? null : Number(v) } });
     const others = (data.profile.employers ?? []).filter((e) => e.name !== payroll);
     const employers = v === '' ? others : [...others, { name: payroll, payLagMonths: Number(v) }];
     const profile: Profile = { ...data.profile, ...(employers.length ? { employers } : {}) };
@@ -154,7 +156,7 @@ function EarnedSection({ w, choices }: { w: EarnedPayroll; choices: string[] }) 
           {sheets.map((t) => (
             <LinkSelect key={`${t.payer}|${t.role ?? ''}`} timesheet={t} payroll={w.payroll} choices={choices} />
           ))}
-          <LagSelect payroll={w.payroll} lag={w.lag} />
+          <LagSelect payroll={w.payroll} lag={w.lag} employmentId={w.employmentId} />
         </span>
       </div>
       {w.periods.length > 0 && (
@@ -230,6 +232,38 @@ function EarnedSection({ w, choices }: { w: EarnedPayroll; choices: string[] }) 
   );
 }
 
+/** What HMRC and the job's documents say of it: its PAYE reference, payroll number, dates and the codes HMRC issued. */
+function jobFacts(e: PayEmployer): string {
+  const code = (c: NonNullable<PayEmployer['codes']>[number]) => `${c.code}${c.cumulative ? '' : ' M1'} from ${formatDate(c.date)}`;
+  return [
+    e.payeReference ? `PAYE ${e.payeReference}` : '',
+    e.payrollNumbers?.length ? `payroll no. ${e.payrollNumbers.join(', ')}` : '',
+    e.startedOn ? `started ${formatDate(e.startedOn)}` : '',
+    e.endedOn ? `ended ${formatDate(e.endedOn)}` : '',
+    e.codes?.length ? `tax code${e.codes.length === 1 ? '' : 's'} ${e.codes.map(code).join(', ')}` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
+
+/** Say a payslip's pay is owed to you (it will be paid), or take that back. */
+function OwedToggle({ employmentId, m }: { employmentId: string; m: PayMonth }) {
+  const mark = useApiMutation(() => api(`/employments/${employmentId}/owed`, { method: 'POST', body: { periodEnd: m.periodEnd } }));
+  const unmark = useApiMutation(() => api(`/employments/${employmentId}/owed/${m.periodEnd}`, { method: 'DELETE' }));
+  if (!m.periodEnd || (m.status !== 'owed' && m.status !== 'not-seen')) return null;
+  const owed = m.status === 'owed';
+  return (
+    <button
+      className="mt-0.5 block text-[11.5px] text-accent hover:underline disabled:opacity-50"
+      disabled={mark.isPending || unmark.isPending}
+      title={owed ? 'It is not owed after all' : 'Your employer has not paid it yet and will: count it as owed to you'}
+      onClick={() => (owed ? unmark.mutate(undefined) : mark.mutate(undefined))}
+    >
+      {owed ? 'Not owed' : 'Owed to me'}
+    </button>
+  );
+}
+
 function EmployerCard({ e, choices }: { e: PayEmployer; choices: string[] }) {
   const payslips = e.months.filter((m) => m.status !== 'no-payslip').length;
   const t = e.totals;
@@ -246,7 +280,12 @@ function EmployerCard({ e, choices }: { e: PayEmployer; choices: string[] }) {
   return (
     <Card
       title={e.payer || 'Employer not named'}
-      description={payslips ? `${payslips} payslip${payslips === 1 ? '' : 's'}${e.months.length > payslips ? `, and ${e.months.length - payslips} payment${e.months.length - payslips === 1 ? '' : 's'} with no payslip` : ''}` : e.months.length ? 'Pay into your bank; no payslips for this year' : 'Timesheet work; no payslips for this year yet'}
+      description={[
+        payslips ? `${payslips} payslip${payslips === 1 ? '' : 's'}${e.months.length > payslips ? `, and ${e.months.length - payslips} payment${e.months.length - payslips === 1 ? '' : 's'} with no payslip` : ''}` : e.months.length ? 'Pay into your bank; no payslips for this year' : 'Timesheet work; no payslips for this year yet',
+        jobFacts(e),
+      ]
+        .filter(Boolean)
+        .join(' · ')}
       padded={false}
     >
       {e.months.length > 0 && (
@@ -273,6 +312,11 @@ function EmployerCard({ e, choices }: { e: PayEmployer; choices: string[] }) {
                   <td className={cn(tableClasses.td, 'whitespace-nowrap')}>
                     {m.periodEnd ? formatMonth(m.periodEnd) : <span className="text-ink-3">No payslip</span>}
                     {m.payDate && <div className="text-[11.5px] text-ink-3">{m.paidIn ? `arrived ${formatDate(m.paidIn.date)}` : `pay date ${formatDate(m.payDate)}`}</div>}
+                    {m.hmrc && (
+                      <div className="text-[11.5px] text-ink-3" title="What the employer reported to HMRC for this pay date">
+                        HMRC: <Money value={m.hmrc.taxablePay} className="tabular" /> taxable, <Money value={m.hmrc.tax} className="tabular" /> tax
+                      </div>
+                    )}
                   </td>
                   <td className={cn(tableClasses.td, 'text-right')}>{cell(m.gross)}</td>
                   <td className={cn(tableClasses.td, 'text-right')}>{cell(m.tax)}</td>
@@ -290,7 +334,13 @@ function EmployerCard({ e, choices }: { e: PayEmployer; choices: string[] }) {
                     )}
                   </td>
                   <td className={cn(tableClasses.td, 'whitespace-nowrap')} title={m.note}>
-                    {s ? <StatusBadge status={s.tone}>{s.label}</StatusBadge> : <Badge tone="muted">{QUIET[m.status]}</Badge>}
+                    {s ? <StatusBadge status={s.tone}>{s.label}</StatusBadge> : <Badge tone="muted">{m.status === 'no-payslip' && !m.paidIn && m.hmrc ? 'HMRC’s record' : QUIET[m.status]}</Badge>}
+                    {m.check && (
+                      <div className="mt-0.5">
+                        <StatusBadge status="warn">Tax check</StatusBadge>
+                      </div>
+                    )}
+                    {e.employmentId && <OwedToggle employmentId={e.employmentId} m={m} />}
                   </td>
                 </tr>
               );
@@ -311,7 +361,7 @@ function EmployerCard({ e, choices }: { e: PayEmployer; choices: string[] }) {
       </div>
       )}
       {e.earned && <EarnedSection w={e.earned} choices={choices} />}
-      {(e.months.some((m) => m.note) || e.document) && (
+      {(e.months.some((m) => m.note || m.check) || e.document) && (
         <div className="flex flex-col gap-1 border-t border-line px-5 py-3 text-[12.5px] text-ink-2">
           {e.document && (
             <span>
@@ -326,6 +376,13 @@ function EmployerCard({ e, choices }: { e: PayEmployer; choices: string[] }) {
             .map((m, i) => (
               <span key={i}>
                 {m.periodEnd ? formatMonth(m.periodEnd) : formatDate(m.payDate!)}: {m.note}.
+              </span>
+            ))}
+          {e.months
+            .filter((m) => m.check)
+            .map((m, i) => (
+              <span key={`check-${i}`} className="text-warn-ink">
+                {m.periodEnd ? formatMonth(m.periodEnd) : formatDate(m.payDate!)}: {m.check!.note}.
               </span>
             ))}
         </div>

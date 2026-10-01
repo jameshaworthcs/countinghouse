@@ -223,10 +223,13 @@ within 5%, percentiles within 3–6%.
 - Pots in today's money: p ÷ (1+π)^(T/12).
 - Income a year = pots × `withdrawal.rate`, rising with inflation (so constant in today's money).
 - **State Pension:**
-  - your latest recorded forecast (today's money): a `pension_income_forecast` figure on the State
-    Pension account (a forecast has no balance to carry it), or a balance with `annualIncome`;
+  - your latest forecast (today's money), whichever is newest:
+    - HMRC's: a `state-pension-forecast` record, read from your gov.uk forecast;
+    - one you recorded: a `pension_income_forecast` figure on the State Pension account (a forecast
+      has no balance to carry it), or a balance with `annualIncome`;
   - else the full new State Pension for the current tax year (52 × weekly rate, UK tables);
-  - from your State Pension age (`statePensionDate`, the legislated timetable).
+  - from the State Pension age that forecast gives, else yours by the legislated timetable
+    (`statePensionDate`).
 - DB pensions: their recorded yearly income.
 - Tax-free cash: 25% of each pot, up to the Lump Sum Allowance (UK tables).
 
@@ -450,19 +453,29 @@ Deterministic rules with named thresholds (`SIGNAL_RULES` in `analytics/spending
   The pages label the band with its basis.
 
 **One source per employer and year** (`analytics/sources.ts`). A job's pay, tax, NI and student
-loan for a year can be stated by its P60, its P45, HMRC's taxable-income pages and the payslips.
-Each kind of figure counts from exactly one of them; the others are kept and shown beside it.
+loan for a year can be stated by its P60, its P45, HMRC's taxable-income pages and records, and the
+payslips. Each kind of figure counts from exactly one of them; the others are kept and shown beside
+it.
 
-- **One employer:** figures whose names match once reduced (`payerKey`), or that carry the same PAYE
-  reference ("123 AB456" = "123/AB456"), are one employer's, transitively.
-- **Candidate sources**, for each kind: the payslips added up (as at the last one's date); each
-  other document's figures added up (as at the last date they cover: a year's end, a leaving date,
-  a pay date); and your own figures typed in Settings.
+- **One employer:** the figures and HMRC records of one job (`employmentId`, `employments.json`)
+  are one employer's. Figures with no job are one employer's when their names match once reduced
+  (`payerKey`), or they carry the same PAYE reference ("123 AB456" = "123/AB456"), transitively.
+- **Candidate sources**, for each kind:
+  - the payslips added up (as at the last one's date);
+  - each other document's figures added up (as at the last date they cover: a year's end, a
+    leaving date, a pay date);
+  - your own figures typed in Settings;
+  - HMRC's record of the job's payments (`payment` records) added up, as at the last pay date: its
+    taxable pay for pay, its tax and NI for those. It states no student loan.
+- **A job that has ended** (on your date, else HMRC's: an employment page's end date, or the
+  account's "ended" event) has nothing more to come that year. A source as at or after the day it
+  ended is final: the year's figure for it, and Self Assessment says so.
 - **The one that counts:**
   1. yours;
   2. a document for the whole tax year (its figures reach the year's end), a P60 first;
-  3. else the most recent, as at its date. On the same date a document, which states the total,
-     wins over the payslips added up.
+  3. else the most recent, as at its date. On the same date a document (or HMRC's record), which
+     states the total, wins over the payslips added up, and an imported document over HMRC's
+     record.
 - So a P45 and an HMRC page to a later date state one job's year so far once, and a page to a date
   never stops later payslips counting.
 
@@ -645,27 +658,57 @@ when its document was a payslip, or, failing that, when its period is under 200 
 from a timesheet is never a payslip's figure: it is shown under the payroll that pays it ("Earned
 pay", below).
 
-- **A pay period** is an employer's payslip figures with one period, where two employers' names
-  match once reduced (`payerKey`: case, spaces and "Ltd" go).
+- **A pay period** is one job's payslip figures with one period (`employmentId`). Figures with no
+  job are an employer's when the names match once reduced (`payerKey`: case, spaces and "Ltd" go).
   - Its **gross**, **tax**, **NI**, **pension** and **student loan** are the figures of those
     kinds. A printed £0 is a figure.
   - **After these** = gross − tax − NI − pension − student loan (the deductions read).
+  - **HMRC's record of it**: the one `payment` record of the job in the year whose tax is the
+    payslip's and whose taxable pay is its gross, or its gross less pension (taken before tax), to
+    the penny. Two such records (equal months) give neither.
 - **Into your bank** is a salary credit (category *salary*, money in) between the period's end −
-  10 days and the later of the pay date and the period's end + 10 days (`PAY_MATCH_DAYS`). Each
-  credit is used once, found in two passes over all the year's payslips (`pairPay`):
-  1. one whose text names the employer, the closest to *after these*;
+  10 days and the later of the pay date and the period's end + 10 days (`PAY_MATCH_DAYS`). A
+  payslip that prints no period (a last one, dated the day you left) is looked for 10 days either
+  side of the pay date on HMRC's record of it, when it has one. Each credit is used once, found in
+  these passes over the year's payslips in date order (`pairPay`):
+  1. one from the job: its text names the job (any name it comes under) or carries your payroll
+     number there (5 characters or more, not inside a longer number). First one within £1 of
+     *after these*, so no payslip takes another's own payment. Then pay brought forward (before
+     Christmas, say): exactly *after these*, to the penny, earlier in the pay period than those
+     days, the nearest the pay date. Then the closest to *after these*;
   2. else one of exactly *after these*, to the penny, whatever name the bank gives it (an
-     employer's payroll often pays under a group company's name), the nearest the pay date.
+     employer's payroll often pays under a group company's name), the nearest the pay date;
+  3. pay you said is owed, arriving late: a credit from the job of exactly *after these*, after
+     the period's days, for the oldest owed period first. A credit naming the period's month is
+     taken first.
 - **Status**, first that applies:
   1. **nothing due**: *after these* is £0 or less (a £0 payslip); no payment is looked for;
-  2. **paid**: the credit is within £1 of *after these*;
+  2. **paid**: the credit is within £1 of *after these*. Pay you said was owed that came after
+     the period's days says it arrived late;
   3. **differs**: it is not. The difference is other deductions the reader did not list (a cycle
      scheme, say) or an adjustment;
-  4. **due**: the pay date has not come;
-  5. **not seen**: none was found. The note says whether your bank data covers those days, in
+  4. **owed**: you said its pay is owed to you (Pay tab, on the job's `owed`), and none has come;
+  5. **due**: the pay date has not come;
+  6. **not seen**: none was found. The note says whether your bank data covers those days, in
      the accounts the employer's pay goes into, else any your salary goes into.
-- Salary credits no payslip explains are pay with no payslip, listed under the employer their text
-  names, else the employer the same payer paid (the nearest such payment), else their own name.
+- Salary credits no payslip explains are pay with no payslip, listed under the job their text names
+  (or whose payroll number it carries), else the employer the same payer paid (the nearest such
+  payment), else their own name.
+- **HMRC's record beside each month**: each `payment` record of the year goes beside the payslip it
+  is the record of (above), else the month of the same tax month (month 1 runs 6 April to 5 May),
+  a payslip's month first. A record no month has is a pay date with no payslip imported; one with
+  no pay and no tax is nothing paid.
+- **Tax on HMRC's code** (`taxChecks`): for each month with HMRC's record, in pay-date order, the
+  tax HMRC's code would take (`payeTax`, below) on the record's taxable pay, with the record's
+  earlier pay and tax in the year for a cumulative code. The code is the one in force: the latest
+  `tax-code` record for the job issued at least 14 days before the pay date (`CODE_NOTICE_DAYS`; an
+  employer works a new code from the first pay day after it gets the notice, and runs the payroll a
+  while before). When it differs from the tax taken by more than £1, the month says so, with the
+  code and when it was issued.
+- **Owed pay** (`owedPayslips`): periods of this tax year and the last that you said are owed,
+  with no pay yet, count in the Overview's owed line (their *after these* and gross) beside
+  timesheet work not yet paid. They are never the next payment expected: that is the timesheet
+  work's.
 - **Year so far** adds up each column. Beside it is the employer's document for the year (§11, "One
   source per employer and year"): its P60 or another figure for the whole year, else the latest one
   to a date (a P45, an HMRC page). Its pay, tax and NI are shown, and whether the payslips paid by
@@ -686,8 +729,8 @@ payslip that pays them is, in the tax year it is paid.
 
 - **The figure that counts** for one timesheet (payer and role) and period is the one committed
   last (`effectiveEarned`).
-- **Payroll.** A figure is paid through `paidBy` (the employer as its payslips name it), else its
-  own payer; names compare as `payerKey` does.
+- **Payroll.** A figure is paid through its job (`employmentId`), else `paidBy` (the employer as
+  its payslips name it), else its own payer; names compare as `payerKey` does.
 - **Which payslip paid which months** (`matchEarned`), payslips in order of their period's end:
   - a payslip with gross > 0 pays the run of consecutive unpaid months, oldest first, all ending
     by the payslip's own end, whose earned pay adds up to its gross to the penny: the first such
@@ -695,9 +738,10 @@ payslip that pays them is, in the tax year it is paid.
   - a £0 payslip pays nothing. A month the usual delay put on it is noted as not on it (a
     timesheet that went in late);
   - a payslip no run adds up to (expenses, a bonus, a correction) pays none of them.
-- **The delay** *L*, in months, from the work to the payslip that pays it: yours
-  (`profile.employers[].payLagMonths`, set on the Pay tab), else learned from the latest payslip
-  that paid some months (its month − the month of the latest work on it).
+- **The delay** *L*, in months, from the work to the payslip that pays it: yours (the job's
+  `payLagMonths`, set on the Pay tab; for a payroll with no job yet, `profile.employers`), else
+  learned from the latest payslip that paid some months (its month − the month of the latest work
+  on it).
 - **What is owed**: the months no payslip paid. Each is expected with the payslip of month
   max(work month + *L*, the month after this payroll's latest payslip), so a late timesheet's month
   comes with the next payslip. Months expected on the same payslip are one expected payment. With

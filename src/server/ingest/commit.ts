@@ -9,12 +9,13 @@ import { tidyPlace } from '../../shared/places';
 import { formatMoney, fromMinor, toMinor } from '../../shared/money';
 import { taxYearOf } from '../../shared/uk';
 import { detailToAdd, fillIn, seenInEntry, stillAdds } from '../../shared/detail';
-import type { Account, BalanceSnapshot, DetailField, Draft, DraftSection, Extraction, Figure, Holding, HoldingsSnapshot, ImportRecord, Transaction } from '../../shared/schema';
-import { AccountSchema, BalanceSnapshotSchema, DraftSchema, FigureSchema, HoldingsSnapshotSchema, TransactionSchema } from '../../shared/schema';
+import type { Account, BalanceSnapshot, DetailField, Draft, DraftSection, Employment, Extraction, Figure, HmrcRecord, Holding, HoldingsSnapshot, ImportRecord, Transaction } from '../../shared/schema';
+import { AccountSchema, BalanceSnapshotSchema, DraftSchema, EmploymentSchema, FigureSchema, HmrcRecordSchema, HoldingsSnapshotSchema, TransactionSchema } from '../../shared/schema';
+import { learn } from '../employments';
 import { nowISO, safeFileName } from '../fsutil';
-import { balanceId, figureId, holdingsId, transactionId, transferGroupId } from '../ids';
+import { balanceId, figureId, hmrcId, holdingsId, transactionId, transferGroupId } from '../ids';
 import { categoriserFor } from '../categoriser';
-import { linkTransfers, rederive } from '../enrich';
+import { linkTransfers, rederive, salaryByPayroll } from '../enrich';
 import { StoreError, type Store } from '../store';
 import { hasYourChanges } from './dedup';
 import { sameHolding } from './match';
@@ -298,6 +299,32 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
       });
     }
   }
+  // 3b. Jobs: the job of yours each draft job is, or a new one, and what an existing job learns from
+  // the document (another name, its PAYE reference, a payroll number). Only a job something ticked
+  // is about is set up or changed.
+  const used = new Set([...draft.figures, ...(draft.hmrc ?? [])].flatMap((x) => (x.include && x.jobKey ? [x.jobKey] : [])));
+  const jobIds = new Map<string, string>();
+  const jobsToWrite = new Map<string, Employment>();
+  const employmentsCreated: string[] = [];
+  for (const job of draft.jobs ?? []) {
+    if (!used.has(job.key)) continue;
+    const who = { employer: job.employer, payeReference: job.payeReference, payrollNumber: job.payrollNumber };
+    if (job.target.mode === 'existing') {
+      const e = jobsToWrite.get(job.target.employmentId) ?? store.employment(job.target.employmentId);
+      if (!e) throw new StoreError(`The job "${job.target.employmentId}" no longer exists`, 409);
+      const next = learn(e, who);
+      if (JSON.stringify(next) !== JSON.stringify(e)) jobsToWrite.set(e.id, { ...next, updatedAt: stamp });
+      jobIds.set(job.key, e.id);
+    } else {
+      const taken = [...store.employments.map((e) => e.id), ...jobsToWrite.keys()];
+      const id = taken.includes(job.target.employment.id) ? slugify(job.target.employment.id, taken) : job.target.employment.id;
+      const fresh = EmploymentSchema.parse({ id, employer: job.target.employment.employer, aliases: [], payrollNumbers: [], owed: [], createdBy: 'import', createdAt: stamp, updatedAt: stamp });
+      jobsToWrite.set(id, learn(fresh, who));
+      employmentsCreated.push(id);
+      jobIds.set(job.key, id);
+    }
+  }
+  const jobOf = (key: string | undefined) => (key ? jobIds.get(key) : undefined);
   const figures: Figure[] = draft.figures
     .filter((f) => f.include)
     .map((f) => ({
@@ -318,7 +345,24 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
       ...(f.taxCode ? { taxCode: f.taxCode } : {}),
       ...(f.paidBy && f.paidBy !== f.payer ? { paidBy: f.paidBy } : {}),
       ...(f.work ? { work: f.work } : {}),
+      ...(jobOf(f.jobKey) ? { employmentId: jobOf(f.jobKey)! } : {}),
     }));
+  // HMRC's records, under their job: an id from what each says, so one read twice is stored once. A
+  // State Pension forecast is on your State Pension account, when you have the one.
+  const statePensions = store.accounts.filter((a) => a.type === 'state_pension' && a.status === 'open');
+  const hmrcRecords: HmrcRecord[] = (draft.hmrc ?? [])
+    .filter((h) => h.include)
+    .map((h) =>
+      HmrcRecordSchema.parse({
+        ...h.record,
+        id: hmrcId(h.record),
+        ...(jobOf(h.jobKey) ? { employmentId: jobOf(h.jobKey)! } : {}),
+        ...(h.record.type === 'state-pension-forecast' && statePensions.length === 1 ? { accountId: statePensions[0]!.id } : {}),
+        source,
+        createdAt: stamp,
+      }),
+    );
+  const hmrcFresh = hmrcRecords.filter((r) => !store.hmrc.some((x) => x.id === r.id));
   // A forecast with no balance (a State Pension forecast) is its income per year on its account
   // (FORMULAS.md §9). With a balance, the balance carries it.
   for (const section of draft.sections) {
@@ -343,6 +387,7 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
   for (const b of balances) BalanceSnapshotSchema.parse(b);
   for (const h of holdings) HoldingsSnapshotSchema.parse(h);
   for (const f of figures) FigureSchema.parse(f);
+  for (const e of jobsToWrite.values()) EmploymentSchema.parse(e);
 
   // 4. Write.
   for (const account of toLearn) await store.upsertAccount(account);
@@ -388,7 +433,13 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
   );
   const balancesAdded = balances.length ? await store.addBalances(balances, `import: ${label} balance`) : 0;
   const holdingsAdded = holdings.length ? await store.addHoldings(holdings, `import: ${label} holdings`, replacedHoldings) : 0;
+  // A payroll number the document taught a job: the pay already recorded with it, uncategorised, is salary.
+  const learned = [...jobsToWrite.values()].flatMap((e) => e.payrollNumbers.filter((n) => !(store.employment(e.id)?.payrollNumbers ?? []).includes(n)));
+  for (const e of jobsToWrite.values()) await store.upsertEmployment(e, `import: ${label} (job ${e.employer})`);
+  const salaried = learned.length ? await salaryByPayroll(store, learned, `import: ${label} (pay with a payroll number it gave is salary)`) : 0;
   const figuresAdded = figures.length ? await store.addFigures(figures, `import: ${label} figures`) : 0;
+  if (hmrcFresh.length) await store.upsertRecords('hmrc', hmrcFresh, `import: ${label} HMRC records`);
+  const hmrcAdded = hmrcFresh.length;
 
   const sha = record.document.sha256;
   const docPath = await store.storeDocument(input.workFile, sha, safeFileName(record.document.fileName));
@@ -407,6 +458,9 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
       balancesAdded,
       holdingsAdded,
       figuresAdded,
+      ...(hmrcAdded ? { hmrcAdded } : {}),
+      ...(employmentsCreated.length ? { employmentsCreated } : {}),
+      ...(jobIds.size ? { jobs: [...jobIds].map(([key, employmentId]) => ({ key, employmentId })) } : {}),
       ...(nothingNew ? { nothingNew: nothingNew.slice(0, 500) } : {}),
       ...(detailed.length ? { transactionsDetailed: detailed.map(({ t, added }) => ({ id: t.id, date: t.date, amount: t.amount, description: t.description, added })) } : {}),
       ...(removed ? { transactionsRemoved: removals.map((t) => ({ id: t.id, date: t.date, amount: t.amount, description: t.description, ...(t.source.importId ? { importId: t.source.importId } : {}) })) } : {}),
@@ -424,6 +478,9 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
     balances[0] ? `balance ${formatMoney(balances[0].balance, { currency: balances[0].currency })}` : '',
     holdingsAdded ? 'holdings' : '',
     figuresAdded ? `${figuresAdded} figures` : '',
+    hmrcAdded ? `${hmrcAdded} HMRC record${hmrcAdded === 1 ? '' : 's'}` : '',
+    employmentsCreated.length ? `${employmentsCreated.length} new job${employmentsCreated.length === 1 ? '' : 's'}` : '',
+    salaried ? `${salaried} payment${salaried === 1 ? '' : 's'} with its payroll number now salary` : '',
   ].filter(Boolean);
   const message = nothingNew ? `import: ${label} filed, nothing new` : `import: ${label} → ${names || 'figures'}${bits.length ? ` (${bits.join(', ')})` : ''}`;
   await store.saveImport(committed, message, [docPath]);

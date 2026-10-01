@@ -11,6 +11,7 @@ import { addsAnything, detailToAdd, stillAdds, type DetailFields } from '../../s
 import { candidateOf, classifyDuplicates, type DedupResult } from './dedup';
 import { sameHolding } from './match';
 import { sameMoney, sameText } from './verify';
+import { hmrcId } from '../ids';
 
 export interface NothingNew {
   /** Why, in words, for the review page. */
@@ -28,7 +29,9 @@ type Fact =
   | { kind: 'row'; account: string; date: string; amount: number; description: string; adds?: DetailFields }
   | { kind: 'balance'; account: string; date: string; values: Partial<Record<BalanceField, number>> }
   | { kind: 'holding'; account: string; date: string; holding: Holding }
-  | { kind: 'figure'; figure: DraftFigure };
+  | { kind: 'figure'; figure: DraftFigure }
+  // An HMRC record is known by what it says (ids.ts, `hmrcId`).
+  | { kind: 'hmrc'; id: string; what: string };
 
 /** A fact and where it already is: the stored data, or another import. */
 interface Placed {
@@ -80,6 +83,7 @@ function factsOf(record: ImportRecord, store: Store): Placed[] {
     }
   }
   for (const f of draft.figures) if (f.include || f.duplicateOf) out.push({ fact: { kind: 'figure', figure: f }, stored: Boolean(f.duplicateOf) });
+  for (const h of draft.hmrc ?? []) if (h.include || h.duplicateOf) out.push({ fact: { kind: 'hmrc', id: hmrcId(h.record), what: h.record.type }, stored: Boolean(h.duplicateOf) });
   return out;
 }
 
@@ -105,6 +109,7 @@ function covers(k: Fact, f: Fact): boolean {
   if (k.kind === 'row' && f.kind === 'row') return k.account === f.account && k.date === f.date && sameMoney(k.amount, f.amount) && sameText(k.description, f.description) && addsNoMore(f.adds, k.adds);
   if (k.kind === 'balance' && f.kind === 'balance') return k.account === f.account && k.date === f.date && BALANCE_FIELDS.every((x) => f.values[x] === undefined || sameMoney(f.values[x], k.values[x]));
   if (k.kind === 'holding' && f.kind === 'holding') return k.account === f.account && k.date === f.date && holdingKnown(f.holding, k.holding);
+  if (k.kind === 'hmrc' && f.kind === 'hmrc') return k.id === f.id;
   if (k.kind === 'figure' && f.kind === 'figure') {
     const [a, b] = [k.figure, f.figure];
     return a.kind === b.kind && sameMoney(a.amount, b.amount) && (a.taxYear ?? '') === (b.taxYear ?? '') && (a.periodEnd ?? '') === (b.periodEnd ?? '') && (a.payer ?? '').toLowerCase() === (b.payer ?? '').toLowerCase();
@@ -140,6 +145,7 @@ function describe(facts: { fact: Fact; where: string }[]): string {
       return `${list.length === 1 ? 'its transaction is' : `its ${plural(list.length, 'transaction')} are`} ${where === 'stored' ? 'already imported' : place}${detail}`;
     }
     if (kind === 'holding') return `${list.length === 1 ? 'its holding is' : `its ${plural(list.length, 'holding')} are`} ${place}`;
+    if (kind === 'hmrc') return `${list.length === 1 ? 'its HMRC record is' : `its ${plural(list.length, 'HMRC record')} are`} ${place}`;
     return `${list.length === 1 ? 'its tax figure is' : `its ${plural(list.length, 'tax figure')} are`} ${place}`;
   });
   const text = parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}` : (parts[0] ?? '');
@@ -174,7 +180,7 @@ export function assessNovelty(pending: ImportRecord[], store: Store): Map<string
       kept.push(...fresh.map((f) => ({ fact: f.fact, from: r })));
       continue;
     }
-    if (!draft.sections.length && !draft.figures.length) {
+    if (!draft.sections.length && !draft.figures.length && !draft.hmrc?.length) {
       // Understood, and nothing to record: the reader says what it is. With no such words, it was
       // not understood, and stays a document to look at.
       if (draft.nothingToRecord) out.set(r.id, { reason: draft.nothingToRecord, coveredBy: [] });

@@ -373,7 +373,8 @@ export interface TaxBandEstimate {
 }
 
 export interface SaSource {
-  type: 'figure' | 'transaction' | 'account';
+  /** `hmrc`: HMRC's record of a payment an employer reported (hmrc.jsonl). */
+  type: 'figure' | 'transaction' | 'account' | 'hmrc';
   id: string;
   date?: string;
   label: string;
@@ -824,10 +825,22 @@ export interface PayMonth {
   paidIn: { amount: number; date: string; transactionId: string; accountId: string } | null;
   /** What the payslip's other deductions come to: expected net less what arrived. */
   otherDeductions: number | null;
-  /** nothing: a payslip with nothing to pay in (£0, or deductions as much as the pay). */
-  status: 'paid' | 'differs' | 'not-seen' | 'due' | 'nothing' | 'no-payslip';
+  /**
+   * nothing: a payslip with nothing to pay in (£0, or deductions as much as the pay); owed: not in
+   * the bank, and you said it is owed to you (it will be paid).
+   */
+  status: 'paid' | 'differs' | 'not-seen' | 'due' | 'nothing' | 'no-payslip' | 'owed';
   note?: string;
   figureIds: string[];
+  /** HMRC's record of the payment in the same tax month: what the employer reported (FORMULAS §17). */
+  hmrc?: { payDate: string; taxablePay: number; tax: number; ni: number | null; recordId: string };
+  /**
+   * The tax the code HMRC issued for the job would take, when it is not what was taken (by more than
+   * £1): the code, its basis, the day HMRC issued it, and that tax.
+   */
+  check?: { code: string; cumulative: boolean; issuedOn: string; tax: number; taken: number; note: string };
+  /** You said its pay is owed to you (`employments.json` → owed). */
+  owed?: { markedAt: string; note?: string };
 }
 
 /** A timesheet's period: what was earned, and the payslip that paid it or when it should come (FORMULAS §17, "Earned pay"). */
@@ -872,6 +885,8 @@ export interface ExpectedPay {
 /** A payroll that pays timesheet work. */
 export interface EarnedPayroll {
   key: string;
+  /** The payroll's job (employments.json), where you set how long after the work it pays. */
+  employmentId?: string;
   /** The employer as its payslips name it. */
   payroll: string;
   /** The timesheets it pays: "Halden Systems Limited, Role A". */
@@ -889,12 +904,21 @@ export interface OwedPay {
   net: number | null;
   next: string | null;
   late: boolean;
-  items: { payroll: string; gross: number; net: number | null; payDate: string | null; periods: string[]; status: 'owed' | 'late' }[];
+  /** `payslip`: a payslip's pay you said is owed (its pay after deductions is known); else timesheet work. */
+  items: { payroll: string; gross: number; net: number | null; payDate: string | null; periods: string[]; status: 'owed' | 'late'; kind?: 'payslip' | 'timesheet' }[];
 }
 
 export interface PayEmployer {
   key: string;
   payer: string;
+  /** The job (employments.json), with what HMRC and its documents say of it. */
+  employmentId?: string;
+  payeReference?: string;
+  payrollNumbers?: string[];
+  startedOn?: string;
+  endedOn?: string;
+  /** Tax codes HMRC issued for the job that apply in the year, oldest first. */
+  codes?: { date: string; code: string; cumulative: boolean }[];
   months: PayMonth[];
   /** Timesheet work this payroll pays (FORMULAS §17, "Earned pay"). */
   earned?: EarnedPayroll;

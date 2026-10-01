@@ -1,0 +1,688 @@
+{
+  "$id": "hmrc.schema.json",
+  "title": "hmrc",
+  "description": "Schema for one line of data/hmrc.jsonl (HMRC's records about you). Generated from src/shared/schema.ts by `npm run schemas`; do not edit.",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "tax-code"
+        },
+        "employer": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "payeReference": {
+          "type": "string",
+          "pattern": "^\\d{3}\\/[A-Z0-9]{1,10}$"
+        },
+        "date": {
+          "type": "string",
+          "description": "Calendar date, YYYY-MM-DD"
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 20
+        },
+        "cumulative": {
+          "type": "boolean"
+        },
+        "taxYear": {
+          "type": "string",
+          "pattern": "^\\d{4}\\/\\d{2}$"
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^hmrc_[0-9a-f]{16}$"
+        },
+        "employmentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+        },
+        "accountId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+        },
+        "source": {
+          "default": {},
+          "type": "object",
+          "properties": {
+            "importId": {
+              "type": "string"
+            },
+            "documentId": {
+              "type": "string"
+            },
+            "row": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          }
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+          "description": "ISO 8601 timestamp"
+        }
+      },
+      "required": [
+        "type",
+        "date",
+        "code",
+        "cumulative",
+        "taxYear",
+        "id",
+        "createdAt"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "payment"
+        },
+        "employer": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "payeReference": {
+          "type": "string",
+          "pattern": "^\\d{3}\\/[A-Z0-9]{1,10}$"
+        },
+        "payDate": {
+          "type": "string",
+          "description": "Calendar date, YYYY-MM-DD"
+        },
+        "taxablePay": {
+          "type": "number",
+          "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+        },
+        "tax": {
+          "type": "number",
+          "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+        },
+        "ni": {
+          "type": "number",
+          "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+        },
+        "taxYear": {
+          "type": "string",
+          "pattern": "^\\d{4}\\/\\d{2}$"
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^hmrc_[0-9a-f]{16}$"
+        },
+        "employmentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+        },
+        "accountId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+        },
+        "source": {
+          "default": {},
+          "type": "object",
+          "properties": {
+            "importId": {
+              "type": "string"
+            },
+            "documentId": {
+              "type": "string"
+            },
+            "row": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          }
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+          "description": "ISO 8601 timestamp"
+        }
+      },
+      "required": [
+        "type",
+        "payDate",
+        "taxablePay",
+        "tax",
+        "taxYear",
+        "id",
+        "createdAt"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "employment"
+        },
+        "employer": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "payeReference": {
+          "type": "string",
+          "pattern": "^\\d{3}\\/[A-Z0-9]{1,10}$"
+        },
+        "asOf": {
+          "type": "string",
+          "description": "Calendar date, YYYY-MM-DD"
+        },
+        "taxYear": {
+          "type": "string",
+          "pattern": "^\\d{4}\\/\\d{2}$"
+        },
+        "payrollNumber": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9]{1,20}$"
+        },
+        "startedOn": {
+          "type": "string",
+          "description": "Calendar date, YYYY-MM-DD"
+        },
+        "endedOn": {
+          "type": "string",
+          "description": "Calendar date, YYYY-MM-DD"
+        },
+        "estimatedPay": {
+          "type": "number",
+          "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+        },
+        "leavingPay": {
+          "type": "number",
+          "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+        },
+        "code": {
+          "type": "string",
+          "maxLength": 20
+        },
+        "cumulative": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^hmrc_[0-9a-f]{16}$"
+        },
+        "employmentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+        },
+        "accountId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+        },
+        "source": {
+          "default": {},
+          "type": "object",
+          "properties": {
+            "importId": {
+              "type": "string"
+            },
+            "documentId": {
+              "type": "string"
+            },
+            "row": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          }
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+          "description": "ISO 8601 timestamp"
+        }
+      },
+      "required": [
+        "type",
+        "asOf",
+        "taxYear",
+        "id",
+        "createdAt"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "event"
+        },
+        "employer": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "payeReference": {
+          "type": "string",
+          "pattern": "^\\d{3}\\/[A-Z0-9]{1,10}$"
+        },
+        "date": {
+          "type": "string",
+          "description": "Calendar date, YYYY-MM-DD"
+        },
+        "event": {
+          "type": "string",
+          "enum": [
+            "started",
+            "ended",
+            "allowance",
+            "year-started",
+            "other"
+          ]
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "amount": {
+          "type": "number",
+          "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^hmrc_[0-9a-f]{16}$"
+        },
+        "employmentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+        },
+        "accountId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+        },
+        "source": {
+          "default": {},
+          "type": "object",
+          "properties": {
+            "importId": {
+              "type": "string"
+            },
+            "documentId": {
+              "type": "string"
+            },
+            "row": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          }
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+          "description": "ISO 8601 timestamp"
+        }
+      },
+      "required": [
+        "type",
+        "date",
+        "event",
+        "text",
+        "id",
+        "createdAt"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "settlement"
+        },
+        "taxYear": {
+          "type": "string",
+          "pattern": "^\\d{4}\\/\\d{2}$"
+        },
+        "asOf": {
+          "type": "string",
+          "description": "Calendar date, YYYY-MM-DD"
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "underpaid",
+            "overpaid",
+            "settled"
+          ]
+        },
+        "amount": {
+          "type": "number",
+          "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+        },
+        "calculatedOn": {
+          "type": "string",
+          "description": "Calendar date, YYYY-MM-DD"
+        },
+        "outstanding": {
+          "type": "number",
+          "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+        },
+        "payments": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "date": {
+                "type": "string",
+                "description": "Calendar date, YYYY-MM-DD"
+              },
+              "amount": {
+                "type": "number",
+                "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+              },
+              "how": {
+                "type": "string",
+                "maxLength": 100
+              }
+            },
+            "required": [
+              "date",
+              "amount",
+              "how"
+            ]
+          }
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^hmrc_[0-9a-f]{16}$"
+        },
+        "employmentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+        },
+        "accountId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+        },
+        "source": {
+          "default": {},
+          "type": "object",
+          "properties": {
+            "importId": {
+              "type": "string"
+            },
+            "documentId": {
+              "type": "string"
+            },
+            "row": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          }
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+          "description": "ISO 8601 timestamp"
+        }
+      },
+      "required": [
+        "type",
+        "taxYear",
+        "asOf",
+        "outcome",
+        "outstanding",
+        "id",
+        "createdAt"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "ni-year"
+        },
+        "asOf": {
+          "type": "string",
+          "description": "Calendar date, YYYY-MM-DD"
+        },
+        "taxYear": {
+          "type": "string",
+          "pattern": "^\\d{4}\\/\\d{2}$"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "full",
+            "not-full",
+            "not-available",
+            "other"
+          ]
+        },
+        "contributions": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              },
+              "amount": {
+                "type": "number",
+                "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          }
+        },
+        "voluntaryCost": {
+          "type": "number",
+          "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+        },
+        "payBy": {
+          "type": "string",
+          "description": "Calendar date, YYYY-MM-DD"
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^hmrc_[0-9a-f]{16}$"
+        },
+        "employmentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+        },
+        "accountId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+        },
+        "source": {
+          "default": {},
+          "type": "object",
+          "properties": {
+            "importId": {
+              "type": "string"
+            },
+            "documentId": {
+              "type": "string"
+            },
+            "row": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          }
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+          "description": "ISO 8601 timestamp"
+        }
+      },
+      "required": [
+        "type",
+        "asOf",
+        "taxYear",
+        "status",
+        "id",
+        "createdAt"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "state-pension-forecast"
+        },
+        "asOf": {
+          "type": "string",
+          "description": "Calendar date, YYYY-MM-DD"
+        },
+        "weekly": {
+          "type": "number",
+          "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+        },
+        "monthly": {
+          "type": "number",
+          "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+        },
+        "annual": {
+          "type": "number",
+          "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+        },
+        "payableFrom": {
+          "type": "string",
+          "description": "Calendar date, YYYY-MM-DD"
+        },
+        "recordTo": {
+          "type": "string",
+          "description": "Calendar date, YYYY-MM-DD"
+        },
+        "qualifyingYears": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 80
+        },
+        "yearsNeeded": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 80
+        },
+        "assumesYears": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 80
+        },
+        "maximum": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^hmrc_[0-9a-f]{16}$"
+        },
+        "employmentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+        },
+        "accountId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+        },
+        "source": {
+          "default": {},
+          "type": "object",
+          "properties": {
+            "importId": {
+              "type": "string"
+            },
+            "documentId": {
+              "type": "string"
+            },
+            "row": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          }
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+          "description": "ISO 8601 timestamp"
+        }
+      },
+      "required": [
+        "type",
+        "asOf",
+        "weekly",
+        "annual",
+        "id",
+        "createdAt"
+      ]
+    }
+  ]
+}

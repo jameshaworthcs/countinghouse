@@ -217,19 +217,23 @@ export function investments(store: Store, engine: BalanceEngine): InvestmentsRes
     if (ageOn(dob, now) >= store.profile.retirementAge) notes.push('You are at or past your retirement age in Settings; the figures are for today.');
   } else notes.push('Add your date of birth in Settings to see a retirement outlook.');
 
-  // State Pension: your latest forecast if you recorded one (a forecast figure on the account, or a
-  // balance that carries the income), else the full new State Pension (fallback).
-  const forecast = store.accounts
-    .filter((a) => a.type === 'state_pension')
-    .flatMap((a) => [
-      ...store.balances(a.id).flatMap((b) => (b.annualIncome !== undefined ? [{ date: b.date, annualIncome: b.annualIncome }] : [])),
-      ...store.figures.flatMap((f) => (f.kind === 'pension_income_forecast' && f.accountId === a.id && f.date ? [{ date: f.date, annualIncome: f.amount }] : [])),
-    ])
+  // State Pension: the latest forecast, HMRC's (your gov.uk forecast, as imported) or one you recorded
+  // (a forecast figure on the account, or a balance that carries the income), else the full new State
+  // Pension (fallback). It starts at the State Pension age the forecast gives, else the timetable's.
+  const forecast = [
+    ...store.accounts
+      .filter((a) => a.type === 'state_pension')
+      .flatMap((a) => [
+        ...store.balances(a.id).flatMap((b) => (b.annualIncome !== undefined ? [{ date: b.date, annualIncome: b.annualIncome, payableFrom: undefined, hmrc: false }] : [])),
+        ...store.figures.flatMap((f) => (f.kind === 'pension_income_forecast' && f.accountId === a.id && f.date ? [{ date: f.date, annualIncome: f.amount, payableFrom: undefined, hmrc: false }] : [])),
+      ]),
+    ...store.hmrc.flatMap((r) => (r.type === 'state-pension-forecast' ? [{ date: r.asOf, annualIncome: r.annual, payableFrom: r.payableFrom, hmrc: true }] : [])),
+  ]
     .sort((a, b) => a.date.localeCompare(b.date))
     .at(-1);
-  const spDate = dob ? statePensionDate(dob) : null;
+  const spDate = forecast?.payableFrom ?? (dob ? statePensionDate(dob) : null);
   const statePension = forecast
-    ? { annual: forecast.annualIncome, source: 'forecast' as const, basis: `Your forecast recorded on ${forecast.date} (in today's money)`, startsOn: spDate }
+    ? { annual: forecast.annualIncome, source: 'forecast' as const, basis: forecast.hmrc ? `HMRC’s forecast of ${formatDate(forecast.date)} (in today's money)` : `Your forecast recorded on ${forecast.date} (in today's money)`, startsOn: spDate }
     : dob
       ? { annual: statePensionFullYearly(taxYearOf(now)), source: 'fallback' as const, basis: `Fallback: the full new State Pension for ${taxYearOf(now).label}. Your gov.uk forecast replaces it (it depends on your National Insurance record).`, startsOn: spDate }
       : null;

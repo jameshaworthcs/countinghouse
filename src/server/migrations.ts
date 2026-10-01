@@ -15,7 +15,10 @@ import path from 'node:path';
 import { today } from '../shared/dates';
 import { isNiNumber, withoutNiNumbers } from '../shared/privacy';
 import { atomicWrite, nowISO, shortHash } from './fsutil';
-import { figureId } from './ids';
+import { figureId, hmrcId } from './ids';
+import { Employers, PAY_KINDS, payerKey } from './analytics/sources';
+import { pdfText, readGovUkPage } from './ingest/govuk';
+import { HmrcRecordSchema } from '../shared/schema';
 import { FORMAT_VERSION } from './store';
 
 export interface MigrationContext {
@@ -245,6 +248,123 @@ export const MIGRATIONS: Migration[] = [
         inImports++;
       }
       ctx.log(`[migrate] National Insurance numbers taken out of ${inFigures} figure${inFigures === 1 ? '' : 's'} and ${inImports} import record${inImports === 1 ? '' : 's'}`);
+    },
+  },
+  {
+    from: 4,
+    description: 'Jobs (employments.json) set up from the pay figures, each pay figure under its job; HMRC pages already imported read again on this machine into hmrc.jsonl',
+    async run(ctx) {
+      interface Rec {
+        id?: string;
+        status?: string;
+        committedAt?: string;
+        document?: { id?: string; path?: string; mediaType?: string };
+        draft?: { documentType?: string };
+      }
+      const imports = new Map<string, Rec>();
+      for await (const file of walk(path.join(ctx.dataDir, 'imports'))) {
+        if (!file.endsWith('.json')) continue;
+        try {
+          const rec = JSON.parse(await readFile(file, 'utf8')) as Rec;
+          if (rec.id && rec.status === 'committed') imports.set(rec.id, rec);
+        } catch {
+          // An unreadable record says nothing.
+        }
+      }
+      type Fig = Record<string, unknown> & { id: string; kind: string; payer?: string; payerReference?: string; paidBy?: string; source?: { importId?: string } };
+      const lines = (await ctx.exists('figures.jsonl')) ? (await readFile(path.join(ctx.dataDir, 'figures.jsonl'), 'utf8')).split('\n').filter((l) => l.trim()) : [];
+      let figures = lines.map((l) => JSON.parse(l) as Fig);
+      const docType = (f: Fig) => (f.source?.importId ? imports.get(f.source.importId)?.draft?.documentType : undefined);
+
+      // 1. HMRC's pages already imported, read again from their text (no Claude). What they say goes to
+      //    hmrc.jsonl; the figures their earlier reading made for what the records now hold (a National
+      //    Insurance record's amounts, a State Pension forecast) are taken out.
+      const hmrcLines: string[] = (await ctx.exists('hmrc.jsonl')) ? (await readFile(path.join(ctx.dataDir, 'hmrc.jsonl'), 'utf8')).split('\n').filter((l) => l.trim()) : [];
+      const have = new Set(hmrcLines.map((l) => (JSON.parse(l) as { id: string }).id));
+      let reread = 0;
+      const replaced = new Set<string>();
+      for (const rec of imports.values()) {
+        if (rec.document?.mediaType !== 'application/pdf' || !rec.document.path) continue;
+        const file = path.join(ctx.dataDir, rec.document.path);
+        const text = await pdfText(file, path.dirname(file));
+        const reading = text ? readGovUkPage(text) : null;
+        if (!reading?.hmrc.length) continue;
+        reread++;
+        // A forecast stays on the account its figure was on.
+        const forecastAccount = figures.find((f) => f.source?.importId === rec.id && f.kind === 'pension_income_forecast' && typeof f.accountId === 'string')?.accountId;
+        for (const r of reading.hmrc) {
+          const id = hmrcId(r);
+          if (have.has(id)) continue;
+          have.add(id);
+          const account = r.type === 'state-pension-forecast' && forecastAccount ? { accountId: forecastAccount } : {};
+          hmrcLines.push(JSON.stringify(HmrcRecordSchema.parse({ ...r, id, ...account, source: { importId: rec.id, ...(rec.document.id ? { documentId: rec.document.id } : {}) }, createdAt: rec.committedAt ?? nowISO() })));
+        }
+        const holds = new Set(reading.hmrc.map((r) => r.type));
+        for (const f of figures) {
+          if (f.source?.importId !== rec.id) continue;
+          if ((holds.has('ni-year') && f.kind === 'national_insurance' && !f.payer) || (holds.has('state-pension-forecast') && f.kind === 'pension_income_forecast')) replaced.add(f.id);
+        }
+      }
+      figures = figures.filter((f) => !replaced.has(f.id));
+      ctx.log(`[migrate] ${reread} HMRC page${reread === 1 ? '' : 's'} read again on this machine; ${replaced.size} figure${replaced.size === 1 ? '' : 's'} they replace taken out`);
+
+      // 2. Jobs: pay figures whose names (reduced) or PAYE references meet are one job's. Earned pay
+      //    is the payroll's that pays it, and a payslip's pension deductions are its job's.
+      const pay = figures.filter((f) => (PAY_KINDS as readonly string[]).includes(f.kind) && f.payer);
+      const groups = new Employers(pay);
+      const profile = ((await ctx.readJson('profile.json')) ?? {}) as Record<string, unknown> & { employers?: { name: string; payLagMonths?: number }[] };
+      const employments: Record<string, unknown>[] = [];
+      const idOf = new Map<string, string>();
+      const taken = new Set<string>();
+      const slug = (name: string) => {
+        const base = name.toLowerCase().replace(/\b(ltd|limited|plc|llp)\b\.?/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 48) || 'job';
+        let id = base;
+        for (let i = 2; taken.has(id); i++) id = `${base}-${i}`;
+        taken.add(id);
+        return id;
+      };
+      const stamp = nowISO();
+      const jobFor = (key: string, named?: string) => {
+        const existing = idOf.get(key);
+        if (existing) return existing;
+        // A payroll known only from earned pay has no pay figures to give it a name: the one it came by.
+        const names = groups.namesOf(key).length ? groups.namesOf(key) : named ? [named] : [];
+        // The name a whole-year document gives it (a P60), else the one its figures use most.
+        const p60 = pay.find((f) => groups.keyOf(f) === key && docType(f) === 'p60' && f.payer)?.payer;
+        const employer = p60 ?? names[0] ?? 'Employer';
+        const aliases = [...new Set(names.filter((n) => payerKey(n) !== payerKey(employer)))];
+        const lag = profile.employers?.find((e) => names.some((n) => payerKey(n) === payerKey(e.name)))?.payLagMonths;
+        const ref = groups.referenceOf(key);
+        const id = slug(employer);
+        employments.push({ id, employer, aliases, ...(ref ? { payeReference: ref } : {}), payrollNumbers: [], ...(lag !== undefined ? { payLagMonths: lag } : {}), owed: [], createdBy: 'migration', createdAt: stamp, updatedAt: stamp });
+        idOf.set(key, id);
+        return id;
+      };
+      let placed = 0;
+      figures = figures.map((f) => {
+        if (f.employmentId) return f;
+        let key: string | undefined;
+        let named: string | undefined;
+        if ((PAY_KINDS as readonly string[]).includes(f.kind) && f.payer) key = groups.keyOf(f);
+        else if ((f.kind === 'pension_contribution_employee' || f.kind === 'pension_contribution_employer') && f.payer && docType(f) === 'payslip') key = groups.keyOfName((named = f.payer));
+        else if (f.kind === 'earned_pay' && (f.paidBy ?? f.payer)) key = groups.keyOfName((named = f.paidBy ?? f.payer));
+        if (!key) return f;
+        placed++;
+        return { ...f, employmentId: jobFor(key, named) };
+      });
+      // A payroll whose pay lag you set but that has no pay figures yet keeps it on a job of its own.
+      for (const e of profile.employers ?? []) {
+        if (e.payLagMonths === undefined || employments.some((x) => [x.employer as string, ...(x.aliases as string[])].some((n) => payerKey(n) === payerKey(e.name)))) continue;
+        employments.push({ id: slug(e.name), employer: e.name, aliases: [], payrollNumbers: [], payLagMonths: e.payLagMonths, owed: [], createdBy: 'migration', createdAt: stamp, updatedAt: stamp });
+      }
+      if ('employers' in profile) {
+        delete profile.employers;
+        await ctx.writeJson('profile.json', profile);
+      }
+      await ctx.writeJson('employments.json', { $schema: '../schemas/employments.schema.json', employments });
+      await ctx.writeText('figures.jsonl', figures.length ? `${figures.map((f) => JSON.stringify(f)).join('\n')}\n` : '');
+      await ctx.writeText('hmrc.jsonl', hmrcLines.length ? `${hmrcLines.join('\n')}\n` : '');
+      ctx.log(`[migrate] ${employments.length} job${employments.length === 1 ? '' : 's'} set up; ${placed} pay figure${placed === 1 ? '' : 's'} put under ${placed === 1 ? 'its job' : 'their jobs'}`);
     },
   },
 ];

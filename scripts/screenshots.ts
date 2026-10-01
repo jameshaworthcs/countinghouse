@@ -6,6 +6,9 @@
 //
 // A server with a login also needs SCREENS_USER and SCREENS_PASSWORD. The script then signs in
 // through the login page first, and fails unless that lands in the app on the first try.
+//
+// `--only <text>` shoots only the pages whose name has it (light, desktop), for a change that
+// touches a few pages; add `--dark` or `--mobile` (or both) to shoot those that way instead.
 
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
@@ -21,6 +24,8 @@ const base = arg('base', 'http://127.0.0.1:4770');
 const out = path.resolve(PROJECT_ROOT, arg('out', 'screens'));
 const chrome = process.env.CHROME_BIN ?? '/usr/bin/google-chrome';
 const only = arg('only', '');
+const dark = argv.includes('--dark');
+const mobile = argv.includes('--mobile');
 const login = process.env.SCREENS_USER && process.env.SCREENS_PASSWORD ? { user: process.env.SCREENS_USER, password: process.env.SCREENS_PASSWORD } : null;
 
 /** Sign in through the login page as a person would; returns the session cookie. */
@@ -58,11 +63,13 @@ async function main() {
   // Pages share the default browser context, so they all use this session.
   const cookie = status.configured && login ? await signIn(browser, login) : '';
   if (cookie) console.log('✓ login');
-  const imports = (await (await fetch(`${base}/api/imports`, { headers: { host: '127.0.0.1', cookie } })).json()) as { pending: { id: string; nothingNew?: unknown; draft?: { sections: unknown[] } }[] };
+  const imports = (await (await fetch(`${base}/api/imports`, { headers: { host: '127.0.0.1', cookie } })).json()) as { pending: { id: string; nothingNew?: unknown; draft?: { sections: unknown[]; hmrc?: unknown[] } }[] };
   // An import to review, and the two kinds that add nothing new, when the data has them.
-  const pendingId = (imports.pending.find((p) => !p.nothingNew) ?? imports.pending[0])?.id;
+  const pendingId = (imports.pending.find((p) => !p.nothingNew && !p.draft?.hmrc?.length) ?? imports.pending.find((p) => !p.nothingNew) ?? imports.pending[0])?.id;
   const repeatsId = imports.pending.find((p) => p.nothingNew && p.draft?.sections.length)?.id;
   const nothingId = imports.pending.find((p) => p.nothingNew && !p.draft?.sections.length)?.id;
+  // One of HMRC's pages, with its records and the jobs they are about.
+  const hmrcPageId = imports.pending.find((p) => p.draft?.hmrc?.length && p.id !== pendingId)?.id;
   // Account pages from whatever data is being shot: the first current account and the first ISA.
   const boot = (await (await fetch(`${base}/api/bootstrap`, { headers: { host: '127.0.0.1', cookie } })).json()) as { accounts: { id: string; type: string }[] };
   const txs = (await (await fetch(`${base}/api/transactions?limit=1`, { headers: { host: '127.0.0.1', cookie } })).json()) as { total: number };
@@ -93,6 +100,7 @@ async function main() {
     ...(pendingId ? ([['review', `/import/${pendingId}`]] as [string, string][]) : []),
     ...(repeatsId ? ([['review-already-here', `/import/${repeatsId}`]] as [string, string][]) : []),
     ...(nothingId ? ([['review-nothing-to-record', `/import/${nothingId}`]] as [string, string][]) : []),
+    ...(hmrcPageId ? ([['review-hmrc', `/import/${hmrcPageId}`]] as [string, string][]) : []),
     ...(proposalId ? ([['proposal', `/proposals/${proposalId}`]] as [string, string][]) : []),
     ['settings', '/settings'],
     ['settings-extraction', '/settings#extraction'],
@@ -128,7 +136,7 @@ async function main() {
   };
   for (const [name, route] of pages) {
     if (only && !name.includes(only)) continue;
-    await shoot(name, route, { width: 1440, height: 900, theme: 'light' });
+    await shoot(name, route, { ...(mobile ? { width: 390, height: 844, mobile: true } : { width: 1440, height: 900 }), theme: dark ? 'dark' : 'light' });
     console.log(`✓ ${name}`);
   }
   // The transaction drawer, with the form for correcting a misread value open.

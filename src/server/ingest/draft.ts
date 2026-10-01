@@ -24,7 +24,10 @@ import type {
   Transaction,
 } from '../../shared/schema';
 import { isNiNumber, withoutNiNumbers } from '../../shared/privacy';
-import { DraftSchema, WorkDetailSchema, type WorkDetail } from '../../shared/schema';
+import { DraftSchema, WorkDetailSchema, type DraftJob, type Employment, type WorkDetail } from '../../shared/schema';
+import { isPayslipFigure, payeReference, payerKey } from '../analytics/sources';
+import { jobOfFigure, jobOfHmrc, matchEmployment, newEmploymentId, type JobIdentity } from '../employments';
+import { hmrcId } from '../ids';
 import { earnedReplaced, inferPayroll } from '../analytics/earned';
 import type { Store } from '../store';
 import { classifyDuplicates, storedTwice } from './dedup';
@@ -459,6 +462,23 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
     return parsed.success && Object.keys(parsed.data).length ? parsed.data : undefined;
   };
   const payrolls = inferPayroll(store, extraction.figures.map((f) => ({ kind: f.kind, payer: f.payer ?? undefined, periodEnd: f.periodEnd ?? undefined, amount: f.amount, work: workOf(f.work) })));
+  // The jobs the document's pay figures and HMRC records are about, each matched to a job of yours
+  // or set up as a new one (server/employments.ts).
+  const identities: { ref: string; who: JobIdentity }[] = [];
+  extraction.figures.forEach((f, fi) => {
+    const ref = f.payerReference && !isNiNumber(f.payerReference) ? f.payerReference : undefined;
+    const who = jobOfFigure({ kind: f.kind, payer: f.payer ?? undefined, payerReference: ref, paidBy: f.kind === 'earned_pay' ? payrolls.get(f.payer ?? '') : undefined }, extraction.documentType);
+    if (who) identities.push({ ref: `f${fi}`, who });
+  });
+  extraction.hmrc.forEach((r, hi) => {
+    const who = jobOfHmrc(r);
+    if (who) identities.push({ ref: `h${hi}`, who });
+  });
+  const { jobs, jobKeyOf } = documentJobs(store, identities, extraction.figures);
+  const employmentOf = (ref: string) => {
+    const job = jobs.find((j) => j.key === jobKeyOf.get(ref));
+    return job?.target.mode === 'existing' ? job.target.employmentId : undefined;
+  };
   const figures: DraftFigure[] = extraction.figures.map((f, fi) => {
     // Matched by last 4 digits only when exactly one account has them.
     const byLast4 = f.accountLast4 ? store.accounts.filter((a) => a.last4 === f.accountLast4) : [];
@@ -470,7 +490,12 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
         // The same tax year and, for a payslip, the same pay period: two months' equal pay are two figures.
         (x.taxYear ?? x.periodEnd ?? '') === ((f.kind === 'earned_pay' ? null : f.taxYear) ?? f.periodEnd ?? '') &&
         (x.periodEnd ?? '') === (f.periodEnd ?? '') &&
-        (x.payer ?? '').toLowerCase() === (f.payer ?? '').toLowerCase(),
+        // The same payer, by name or by the job both are about…
+        ((x.payer ?? '').toLowerCase() === (f.payer ?? '').toLowerCase() || (Boolean(x.employmentId) && x.employmentId === employmentOf(`f${fi}`))) &&
+        // …from the same kind of document: a P60 and HMRC's page that agree are two sources, both
+        // kept (one counts: analytics/sources.ts); the same P60 read twice is one. A figure with no
+        // import is a payslip's when it covers a pay period, else yours.
+        (store.imports.find((i) => i.id === x.source.importId)?.documentType ?? (isPayslipFigure(store, x) ? 'payslip' : 'yours')) === extraction.documentType,
     );
     const earned = f.kind === 'earned_pay';
     const work = earned ? workOf(f.work) : undefined;
@@ -480,6 +505,7 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
     return {
       key: `f${fi}`,
       include: !dup,
+      ...(jobKeyOf.has(`f${fi}`) ? { jobKey: jobKeyOf.get(`f${fi}`)! } : {}),
       kind: f.kind,
       label: f.label,
       amount: f.amount,
@@ -503,10 +529,18 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
   // An account the document only mentions (the account on an interest certificate, say) has
   // nothing to import: leave it out rather than offer to create it.
   const importable = sections.filter((s) => s.transactions.length || s.holdings.length || s.balance !== undefined || [s.contributions, s.bonusToDate, s.taxYearContributions, s.cash, s.annualIncome].some((v) => v !== undefined));
+  // HMRC's records, each ticked unless the same record is stored already.
+  const hmrc = extraction.hmrc.map((record, hi) => {
+    const id = hmrcId(record);
+    const dup = store.hmrc.find((x) => x.id === id);
+    return { key: `h${hi}`, include: !dup, ...(jobKeyOf.has(`h${hi}`) ? { jobKey: jobKeyOf.get(`h${hi}`)! } : {}), ...(dup ? { duplicateOf: dup.id } : {}), record };
+  });
   return DraftSchema.parse({
     documentType: extraction.documentType,
     sections: importable,
     figures,
+    ...(jobs.length ? { jobs } : {}),
+    ...(hmrc.length ? { hmrc } : {}),
     notes,
     ...(extraction.nothingToRecord?.trim() ? { nothingToRecord: extraction.nothingToRecord.trim().slice(0, 300) } : {}),
     ...(batchMatch && importable.some((s) => s.target.mode === 'existing' && s.target.accountId === batchMatch!.accountId) ? { batchMatch } : {}),
@@ -514,6 +548,61 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
     ...(extraction.institutionName ? { institutionName: extraction.institutionName } : {}),
     ...(extraction.documentDate ? { documentDate: extraction.documentDate } : {}),
   });
+}
+
+/**
+ * The jobs a document's items are about: items naming one PAYE reference, or one employer once
+ * names are reduced, are one job. Each is matched to a job of yours, else set up as a new one.
+ */
+function documentJobs(store: Store, items: { ref: string; who: JobIdentity }[], figures: Extraction['figures'] = []): { jobs: DraftJob[]; jobKeyOf: Map<string, string> } {
+  const groups: { who: JobIdentity; names: Set<string>; refs: string[] }[] = [];
+  for (const it of items) {
+    const key = payerKey(it.who.employer);
+    const paye = payeReference(it.who.payeReference);
+    let g = groups.find((x) => (paye && payeReference(x.who.payeReference) === paye) || (key && x.names.has(key)));
+    if (!g) groups.push((g = { who: { employer: it.who.employer }, names: new Set(), refs: [] }));
+    g.refs.push(it.ref);
+    if (key) g.names.add(key);
+    g.who = { employer: g.who.employer || it.who.employer, payeReference: payeReference(g.who.payeReference) ?? paye, payrollNumber: g.who.payrollNumber ?? it.who.payrollNumber };
+  }
+  const taken = new Set(store.employments.map((e) => e.id));
+  const jobKeyOf = new Map<string, string>();
+  const jobs = groups.map((g, i): DraftJob => {
+    const key = `j${i}`;
+    for (const r of g.refs) jobKeyOf.set(r, key);
+    const m = matchEmployment(store.employments, g.who) ?? matchByPayment(store, g.refs.flatMap((r) => (r.startsWith('f') ? [figures[Number(r.slice(1))]!] : [])));
+    const id = m ? m.employment.id : newEmploymentId(g.who.employer, taken);
+    taken.add(id);
+    return {
+      key,
+      employer: g.who.employer,
+      ...(g.who.payeReference ? { payeReference: g.who.payeReference } : {}),
+      ...(g.who.payrollNumber ? { payrollNumber: g.who.payrollNumber } : {}),
+      ...(m ? { matchedBy: m.by } : {}),
+      target: m ? { mode: 'existing', employmentId: id } : { mode: 'new', employment: { id, employer: g.who.employer } },
+    };
+  });
+  return { jobs, jobKeyOf };
+}
+
+/**
+ * A payslip's job by HMRC's record of the payment it is: a stored payment in the same tax year with
+ * the same tax, to the penny and not £0, and the same taxable pay (its gross, or its gross less the
+ * pension taken before tax). Two jobs' payments that agree to the penny on both are not a coincidence;
+ * a payslip that prints a group's name rather than the employer's is still its job's.
+ */
+function matchByPayment(store: Store, figures: Extraction['figures']): { employment: Employment; by: 'hmrc' } | undefined {
+  const sum = (kind: string) => figures.filter((f) => f.kind === kind).reduce((x, f) => x + toMinor(f.amount), 0);
+  const tax = sum('tax_deducted');
+  const gross = sum('gross_pay');
+  if (!tax || !figures.some((f) => f.kind === 'gross_pay')) return undefined;
+  const taxable = [gross, gross - sum('pension_contribution_employee')];
+  const years = new Set(figures.flatMap((f) => (f.taxYear ? [f.taxYear] : [])));
+  const jobs = new Set(
+    store.hmrc.flatMap((r) => (r.type === 'payment' && r.employmentId && (!years.size || years.has(r.taxYear)) && toMinor(r.tax) === tax && taxable.includes(toMinor(r.taxablePay)) ? [r.employmentId] : [])),
+  );
+  const only = jobs.size === 1 ? store.employment([...jobs][0]) : undefined;
+  return only ? { employment: only, by: 'hmrc' } : undefined;
 }
 
 /** Is this draft safe to commit without looking (for "Commit all ready")? */
@@ -526,7 +615,8 @@ export function draftIsClean(draft: Draft): { clean: boolean; reasons: string[] 
     if (s.transactions.some((t) => t.status === 'possible_duplicate')) reasons.push('possible duplicates to check');
     if (s.balanceDateSource === 'upload') reasons.push('balance date unknown');
   }
-  if (!draft.sections.length && !draft.figures.length) reasons.push('nothing extracted');
+  if (!draft.sections.length && !draft.figures.length && !draft.hmrc?.length) reasons.push('nothing extracted');
+  if (draft.jobs?.some((j) => j.target.mode === 'new' && [...draft.figures, ...(draft.hmrc ?? [])].some((x) => x.include && x.jobKey === j.key))) reasons.push('sets up a new job');
   if (draft.figures.some((f) => f.include && f.replaces)) reasons.push('replaces earned pay recorded from an earlier upload');
   return { clean: reasons.length === 0, reasons: [...new Set(reasons)] };
 }

@@ -471,12 +471,171 @@ export const FigureSchema = z.object({
   paidBy: z.string().max(200).optional(),
   /** `earned_pay`: days, holiday and rate from the timesheet. */
   work: WorkDetailSchema.optional(),
+  /** The job a pay figure is from (employments.json): its pay, tax, NI and pension deductions, or the payroll that pays earned pay. */
+  employmentId: SlugSchema.optional(),
   notes: z.string().optional(),
   attributes: AttributesSchema.optional(),
   source: SourceRefSchema.default({}),
   createdAt: TimestampSchema,
 });
 export type Figure = z.infer<typeof FigureSchema>;
+
+// ─── Jobs and HMRC's records ─────────────────────────────────────────────────────────────────────
+
+/** An employer PAYE reference, tidied: the three-digit office number and the reference ("123/AB456"). */
+export const PayeReferenceSchema = z.string().regex(/^\d{3}\/[A-Z0-9]{1,10}$/);
+const TaxYearLabelSchema = z.string().regex(/^\d{4}\/\d{2}$/);
+
+/**
+ * A job: one employment with one employer, as its documents and HMRC know it (docs/DATA_FORMAT.md,
+ * employments.json). Its documents name the employer in several ways (a group name on the
+ * payslips, the employing company on the P60, a payroll company in the bank). They are one job when
+ * they share its PAYE reference or payroll number, or when you say so.
+ */
+export const EmploymentSchema = z.object({
+  id: SlugSchema,
+  /** The employer as HMRC and its P60 name it. */
+  employer: z.string().min(1).max(200),
+  /** Other names it comes under: on payslips, a group's name, how the bank shows its pay. */
+  aliases: z.array(z.string().min(1).max(200)).max(30).default([]),
+  payeReference: PayeReferenceSchema.optional(),
+  /** Your works or payroll numbers there, as its documents and bank references print them. */
+  payrollNumbers: z.array(z.string().regex(/^[A-Za-z0-9]{1,20}$/)).max(10).default([]),
+  startedOn: ISODateSchema.optional(),
+  endedOn: ISODateSchema.optional(),
+  /** The pension account its payroll's pension deductions go into. */
+  pensionAccountId: SlugSchema.optional(),
+  /** Months after the work that a timesheet's pay comes (yours; unset, it is learned: FORMULAS.md §17). */
+  payLagMonths: z.number().int().min(0).max(3).optional(),
+  /** Pay periods (by their last day) whose pay has not arrived and that you say is owed to you. */
+  owed: z.array(z.object({ periodEnd: ISODateSchema, note: z.string().max(500).optional(), markedAt: TimestampSchema })).max(36).default([]),
+  /** How the record began: from an import, by you, or by a data migration. */
+  createdBy: z.enum(['import', 'owner', 'migration']).default('import'),
+  notes: z.string().max(2000).optional(),
+  createdAt: TimestampSchema,
+  updatedAt: TimestampSchema,
+});
+export type Employment = z.infer<typeof EmploymentSchema>;
+
+// What HMRC's services hold about you, as their pages show it (docs/DATA_FORMAT.md, hmrc.jsonl).
+const HmrcWho = {
+  /** The employer as HMRC's page names it. */
+  employer: z.string().max(200).optional(),
+  payeReference: PayeReferenceSchema.optional(),
+};
+const hmrcTaxCode = z.object({
+  type: z.literal('tax-code'),
+  ...HmrcWho,
+  /** The day HMRC's account says the code was issued or updated. */
+  date: ISODateSchema,
+  /** As written, without the basis: "1257L", "BR", "K475". */
+  code: z.string().min(1).max(20),
+  /** False for a week 1 / month 1 (non-cumulative) code. */
+  cumulative: z.boolean(),
+  taxYear: TaxYearLabelSchema,
+});
+const hmrcPayment = z.object({
+  type: z.literal('payment'),
+  ...HmrcWho,
+  /** The pay date the employer reported. */
+  payDate: ISODateSchema,
+  taxablePay: MoneySchema,
+  tax: MoneySchema,
+  ni: MoneySchema.optional(),
+  taxYear: TaxYearLabelSchema,
+});
+const hmrcEmployment = z.object({
+  type: z.literal('employment'),
+  ...HmrcWho,
+  /** The day the page showed it. */
+  asOf: ISODateSchema,
+  taxYear: TaxYearLabelSchema,
+  payrollNumber: z.string().regex(/^[A-Za-z0-9]{1,20}$/).optional(),
+  startedOn: ISODateSchema.optional(),
+  endedOn: ISODateSchema.optional(),
+  /** HMRC's estimate of the year's taxable pay from it: an estimate, never income. */
+  estimatedPay: MoneySchema.optional(),
+  /** The pay on its P45, when it has ended. */
+  leavingPay: MoneySchema.optional(),
+  code: z.string().max(20).optional(),
+  cumulative: z.boolean().optional(),
+});
+const hmrcEvent = z.object({
+  type: z.literal('event'),
+  ...HmrcWho,
+  date: ISODateSchema,
+  event: z.enum(['started', 'ended', 'allowance', 'year-started', 'other']),
+  /** As the page words it. */
+  text: z.string().min(1).max(500),
+  amount: MoneySchema.optional(),
+});
+const hmrcSettlement = z.object({
+  type: z.literal('settlement'),
+  taxYear: TaxYearLabelSchema,
+  asOf: ISODateSchema,
+  /** What HMRC worked out: tax still to pay, tax to repay, or nothing either way. */
+  outcome: z.enum(['underpaid', 'overpaid', 'settled']),
+  /** The amount its calculation said (positive), and when. */
+  amount: MoneySchema.optional(),
+  calculatedOn: ISODateSchema.optional(),
+  /** Still to pay (positive) or to be repaid (negative) as at `asOf`. */
+  outstanding: MoneySchema,
+  payments: z.array(z.object({ date: ISODateSchema, amount: MoneySchema, how: z.string().max(100) })).default([]),
+});
+const hmrcNiYear = z.object({
+  type: z.literal('ni-year'),
+  asOf: ISODateSchema,
+  taxYear: TaxYearLabelSchema,
+  status: z.enum(['full', 'not-full', 'not-available', 'other']),
+  /** What made the year up, as listed ("Paid employment", "National Insurance credits"). */
+  contributions: z.array(z.object({ kind: z.string().min(1).max(80), amount: MoneySchema.optional() })).default([]),
+  /** A voluntary contribution that would fill the year, and the day it can be paid by. */
+  voluntaryCost: MoneySchema.optional(),
+  payBy: ISODateSchema.optional(),
+  text: z.string().max(500).optional(),
+});
+const hmrcStatePension = z.object({
+  type: z.literal('state-pension-forecast'),
+  asOf: ISODateSchema,
+  weekly: MoneySchema,
+  monthly: MoneySchema.optional(),
+  annual: MoneySchema,
+  /** Your State Pension age. */
+  payableFrom: ISODateSchema.optional(),
+  /** The National Insurance record it is based on, to the end of this tax year. */
+  recordTo: ISODateSchema.optional(),
+  qualifyingYears: z.number().int().min(0).max(80).optional(),
+  yearsNeeded: z.number().int().min(0).max(80).optional(),
+  /** The years more it assumes you contribute. */
+  assumesYears: z.number().int().min(0).max(80).optional(),
+  /** It is the most you can get. */
+  maximum: z.boolean().optional(),
+});
+
+/** A record as a page or document shows it, before it is matched to a job and stored. */
+export const ExtractedHmrcSchema = z.discriminatedUnion('type', [hmrcTaxCode, hmrcPayment, hmrcEmployment, hmrcEvent, hmrcSettlement, hmrcNiYear, hmrcStatePension]);
+export type ExtractedHmrc = z.infer<typeof ExtractedHmrcSchema>;
+
+const HmrcStored = {
+  id: z.string().regex(/^hmrc_[0-9a-f]{16}$/),
+  /** The job it is about, when it is about one. */
+  employmentId: SlugSchema.optional(),
+  /** The account it is about (the State Pension account for a forecast). */
+  accountId: SlugSchema.optional(),
+  source: SourceRefSchema.default({}),
+  createdAt: TimestampSchema,
+};
+export const HmrcRecordSchema = z.discriminatedUnion('type', [
+  hmrcTaxCode.extend(HmrcStored),
+  hmrcPayment.extend(HmrcStored),
+  hmrcEmployment.extend(HmrcStored),
+  hmrcEvent.extend(HmrcStored),
+  hmrcSettlement.extend(HmrcStored),
+  hmrcNiYear.extend(HmrcStored),
+  hmrcStatePension.extend(HmrcStored),
+]);
+export type HmrcRecord = z.infer<typeof HmrcRecordSchema>;
+export type HmrcRecordType = HmrcRecord['type'];
 
 // ─── Categories, rules, goals ────────────────────────────────────────────────────────────────────
 
@@ -889,6 +1048,8 @@ export const ExtractionSchema = z.object({
   documentDate: ISODateSchema.nullable().default(null),
   accounts: z.array(ExtractedAccountSchema).default([]),
   figures: z.array(ExtractedFigureSchema).default([]),
+  /** What HMRC's pages show: tax codes, payments, jobs, events, settlements, NI years, forecasts (ingest/govuk.ts). */
+  hmrc: z.array(ExtractedHmrcSchema).default([]),
   notes: z.array(z.string()).default([]),
   /** Understood, but nothing to record: what the document shows, in a sentence (extract-9). */
   nothingToRecord: z.string().nullable().default(null),
@@ -1073,9 +1234,41 @@ export const DraftSectionSchema = z.object({
 export type DraftSection = z.infer<typeof DraftSectionSchema>;
 export type ExtraCopy = NonNullable<DraftSection['extraCopies']>[number];
 
+/**
+ * A job a document is about, and the job of yours it is (`existing`) or would be (`new`). Its pay
+ * figures and HMRC records point at it by `jobKey`; choosing another job moves them all.
+ */
+export const DraftJobSchema = z.object({
+  key: z.string(),
+  /** The employer as the document names it. */
+  employer: z.string().min(1).max(200),
+  payeReference: PayeReferenceSchema.optional(),
+  payrollNumber: z.string().regex(/^[A-Za-z0-9]{1,20}$/).optional(),
+  /** What matched it to a job of yours. */
+  matchedBy: z.enum(['payeReference', 'payrollNumber', 'name', 'hmrc', 'you']).optional(),
+  target: z.discriminatedUnion('mode', [
+    z.object({ mode: z.literal('existing'), employmentId: SlugSchema }),
+    z.object({ mode: z.literal('new'), employment: z.object({ id: SlugSchema, employer: z.string().min(1).max(200) }) }),
+  ]),
+});
+export type DraftJob = z.infer<typeof DraftJobSchema>;
+
+/** An HMRC record on the review page: ticked to be recorded, under its job. */
+export const DraftHmrcSchema = z.object({
+  key: z.string(),
+  include: z.boolean(),
+  jobKey: z.string().optional(),
+  /** The same record is stored already. */
+  duplicateOf: z.string().optional(),
+  record: ExtractedHmrcSchema,
+});
+export type DraftHmrc = z.infer<typeof DraftHmrcSchema>;
+
 export const DraftFigureSchema = z.object({
   key: z.string(),
   include: z.boolean(),
+  /** The job a pay figure is from (`DraftJob.key`). */
+  jobKey: z.string().optional(),
   kind: z.enum(FIGURE_KINDS),
   label: z.string(),
   amount: MoneySchema,
@@ -1103,6 +1296,9 @@ export const DraftSchema = z.object({
   documentDate: ISODateSchema.optional(),
   sections: z.array(DraftSectionSchema),
   figures: z.array(DraftFigureSchema).default([]),
+  /** The jobs its pay figures and HMRC records are about (none on drafts made before jobs). */
+  jobs: z.array(DraftJobSchema).optional(),
+  hmrc: z.array(DraftHmrcSchema).optional(),
   notes: z.array(z.string()).default([]),
   /** The reader understood the document but found nothing to record: what it shows, in its words. */
   nothingToRecord: z.string().max(300).optional(),
@@ -1118,7 +1314,7 @@ export type Draft = z.infer<typeof DraftSchema>;
 export const IMPORT_STATUSES = ['queued', 'processing', 'needs_mapping', 'review', 'committed', 'failed', 'discarded'] as const;
 export type ImportStatus = (typeof IMPORT_STATUSES)[number];
 
-export const ENGINE_IDS = ['csv', 'ofx', 'qif', 'santander-txt', 'claude-cli', 'claude-api', 'ocr', 'manual'] as const;
+export const ENGINE_IDS = ['csv', 'ofx', 'qif', 'santander-txt', 'govuk', 'claude-cli', 'claude-api', 'ocr', 'manual'] as const;
 export type EngineId = (typeof ENGINE_IDS)[number];
 
 export const ImportRecordSchema = z.object({
@@ -1190,6 +1386,11 @@ export const ImportRecordSchema = z.object({
       balancesAdded: z.number().int().nonnegative(),
       holdingsAdded: z.number().int().nonnegative(),
       figuresAdded: z.number().int().nonnegative().default(0),
+      /** HMRC records written, and the jobs it set up or that learned something from it. */
+      hmrcAdded: z.number().int().nonnegative().optional(),
+      employmentsCreated: z.array(SlugSchema).optional(),
+      /** The job each draft job was committed to (new jobs get their final id). */
+      jobs: z.array(z.object({ key: z.string(), employmentId: SlugSchema })).optional(),
       /** Dismissed as adding nothing new: why. Only the document and this record were written. */
       nothingNew: z.string().max(500).optional(),
       /** Copies of payments recorded twice that this import took away (the draft's `extraCopies`). */
@@ -1782,6 +1983,7 @@ export type CaptureItem = z.infer<typeof CaptureItemSchema>;
 
 export const AccountsFileSchema = z.object({ accounts: z.array(AccountSchema) });
 export const InstrumentsFileSchema = z.object({ instruments: z.array(InstrumentSchema) });
+export const EmploymentsFileSchema = z.object({ employments: z.array(EmploymentSchema) });
 export const InstitutionsFileSchema = z.object({ institutions: z.array(InstitutionSchema) });
 export const CategoriesFileSchema = z.object({ categories: z.array(CategorySchema) });
 export const RulesFileSchema = z.object({ rules: z.array(RuleSchema) });

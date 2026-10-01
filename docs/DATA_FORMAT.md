@@ -12,7 +12,7 @@ point at them with `"$schema"` so editors validate as you type.
 | Money | JSON number in **pounds** (major units), at most 2 dp: `-4.5`, `1234.56`. Integer pence internally. |
 | Sign | From your point of view. Positive increases net worth (money in, assets); negative decreases it (money out, balances owed). A credit-card purchase is negative; a card balance owed is negative. |
 | Dates | `YYYY-MM-DD` calendar dates. Timestamps are ISO 8601 with offset (`2026-09-28T21:08:17+01:00`). |
-| Ids | Accounts, institutions and categories are readable slugs (`monzo-current`). Records have prefixed content hashes assigned once at creation: `tx_`, `bal_`, `hld_`, `fig_` + 16 hex. Imports: `imp_YYYYMMDD_HHMMSS_xxxx`. Documents: `doc_` + first 16 hex of the SHA-256. |
+| Ids | Accounts, institutions, categories and jobs are readable slugs (`monzo-current`). Records have prefixed content hashes assigned once at creation: `tx_`, `bal_`, `hld_`, `fig_` + 16 hex. HMRC's records: `hmrc_` + 16 hex of what the record says, so one read twice is stored once. Imports: `imp_YYYYMMDD_HHMMSS_xxxx`. Documents: `doc_` + first 16 hex of the SHA-256. |
 | Unknown fields | Not part of the format. They are reported by `npm run validate`, and a record that fails validation is kept verbatim (quarantined) rather than lost. |
 | Versioning | `meta.json → version`. Migrations upgrade files in place (see `src/server/migrations.ts` and "Versions" below). |
 
@@ -21,7 +21,7 @@ point at them with `"$schema"` so editors validate as you type.
 ```
 data/
   meta.json            format + version + base currency
-  profile.json         you: date of birth, region, salary, retirement age (the tax band is computed), and `employers`: how many months after the work a payroll pays a timesheet (`[{name, payLagMonths}]`, optional)
+  profile.json         you: date of birth, region, salary, retirement age (the tax band is computed), and `employers`: how many months after the work a payroll with no job yet pays a timesheet (`[{name, payLagMonths}]`, optional; a job keeps its own)
   settings.json        extraction engine/model (and reading receipts or stored documents again, both off by default), agents (with the background budget), git behaviour, stale threshold, FX rates
   institutions.json    { institutions: [...] }   banks, platforms, providers (+ FSCS group)
   accounts.json        { accounts: [...] }
@@ -39,6 +39,8 @@ data/
   notes.jsonl          your words, and the records proposed from them
   receipts.jsonl       receipts attached to transactions, and what Claude read on them (when turned on)
   figures.jsonl        one tax figure per line (P60, interest certificates, …)
+  employments.json     { employments: [...] }    your jobs: each employer once, under every name it comes by
+  hmrc.jsonl           what HMRC's pages say: tax codes, payments, employments, settlements, NI years, the State Pension forecast
   transactions/<account-id>/<yyyy>.jsonl    one transaction per line, by posting date
   balances/<account-id>.jsonl               balance / valuation snapshots
   holdings/<account-id>.jsonl               holdings snapshots
@@ -165,7 +167,9 @@ Standalone figures from documents, used for Self Assessment and the Pay tab:
 - Other fields: `label` (as printed), `amount`, `currency`, `taxYear` (`2025/26`), `periodStart`,
   `periodEnd`, `date`, `accountId`, `payer`, `payerReference` (the employer's PAYE reference or a
   company number; never a National Insurance number, which is left out), `taxCode` (a payslip's or
-  P60's PAYE code, `1257L M1`), `notes`, `attributes`, `source`, `createdAt`.
+  P60's PAYE code, `1257L M1`), `employmentId` (the job a pay figure, a payslip's pension deduction
+  or a timesheet's earned pay is about: its id in `employments.json`), `notes`, `attributes`,
+  `source`, `createdAt`.
 - Several documents can state one job's figure for a year (a P60, a P45, HMRC's pages, the
   payslips). All are kept; exactly one counts ([FORMULAS.md §11](FORMULAS.md), "One source per
   employer and year").
@@ -178,6 +182,55 @@ Standalone figures from documents, used for Self Assessment and the Pay tab:
   timesheet names another entity than the payslips, `paidBy`: the payroll as its payslips name it.
   For one timesheet (`payer` and `work.role`) and period, the figure committed last counts; an
   earlier one stays as the record of what that upload said ([FORMULAS.md §17](FORMULAS.md)).
+
+## employments.json
+
+Your jobs. One employer's documents name it in several ways: a group's name on the payslips, the
+employing company on the P60, a payroll company in the bank. A job holds them all, so its figures
+and HMRC's records about it are one employer's.
+
+- `id` (slug), `employer`: the name HMRC and its P60 give it. `aliases`: its other names.
+- `payeReference` (`120/AB12345`, office number and reference), `payrollNumbers` (your works or
+  payroll numbers there, as its documents and bank references print them).
+- `startedOn`, `endedOn`: yours, when you set them. Unset, HMRC's records give them (an employment
+  page's dates, the account's "started" and "ended" events).
+- `pensionAccountId`: the pension account its payroll's pension deductions go into.
+- `payLagMonths`: how many months after the work its payroll pays a timesheet (yours; unset, it is
+  learned: [FORMULAS.md §17](FORMULAS.md)).
+- `owed`: `[{periodEnd, note?, markedAt}]`, pay periods whose pay has not arrived and that you say
+  is owed to you. Pay arriving later pairs with it.
+- `createdBy`: `import` (set up on reviewing a document), `owner` or `migration`. `notes`,
+  `createdAt`, `updatedAt`.
+
+An import matches a document's employer to a job by PAYE reference (a payroll number or name
+decides between two jobs with one reference), then payroll number, then a name only one job has,
+then HMRC's record of a payment with the document's pay and tax to the penny; else it sets up a new
+job. You see which, and can change it, before committing ([INGESTION.md](INGESTION.md), "Jobs").
+Importing teaches a job a name, reference or payroll number it did not have. In the Pay tab you set
+a job's pay lag and say which periods' pay is owed; `PUT /api/employments/:id` (you only, not an
+agent's token) changes the rest, and what you set wins over what documents taught it.
+
+## hmrc.jsonl
+
+What HMRC's online services hold about you, one record per line, as their pages show it. Each has
+`id` (`hmrc_` + a hash of what it says), `type`, `employmentId` (the job it is about, when it is
+about one), `accountId` (the State Pension account, for a forecast), `source` (the import) and
+`createdAt`. A record about an employer also has `employer` (as the page names it) and
+`payeReference` when the page prints one.
+
+| `type` | Fields | From |
+|---|---|---|
+| `tax-code` | `date` issued, `code` (`1257L`, `BR`, `K475`), `cumulative` (false: week 1/month 1), `taxYear` | Your PAYE account's activity |
+| `payment` | `payDate`, `taxablePay`, `tax`, `ni?`, `taxYear`: one pay date as the employer reported it | Taxable income from an employer |
+| `employment` | `asOf`, `taxYear`, `payrollNumber?`, `startedOn?`, `endedOn?`, `estimatedPay?` (HMRC's estimate: never income), `leavingPay?`, `code?`, `cumulative?` | Employment details |
+| `event` | `date`, `event` (`started`, `ended`, `allowance`, `year-started`, `other`), `text` as worded, `amount?` | Your PAYE account's activity |
+| `settlement` | `taxYear`, `asOf`, `outcome` (`underpaid`, `overpaid`, `settled`), `amount?`, `calculatedOn?`, `outstanding` (to pay positive, to be repaid negative), `payments` | Tax you paid (a year's calculation) |
+| `ni-year` | `asOf`, `taxYear`, `status` (`full`, `not-full`, `not-available`, `other`), `contributions` (`[{kind, amount?}]`), `voluntaryCost?`, `payBy?`, `text?` | Your National Insurance record |
+| `state-pension-forecast` | `asOf`, `weekly`, `monthly?`, `annual`, `payableFrom?` (your State Pension age), `recordTo?`, `qualifyingYears?`, `yearsNeeded?`, `assumesYears?`, `maximum?` | Check your State Pension |
+
+The same record read twice (two printouts of one page, or one page imported twice) has one id and
+is stored once. A record is what HMRC said on its `asOf` day: a later page adds new records rather
+than changing old ones. National Insurance numbers are never stored.
 
 ## imports/&lt;yyyy&gt;/&lt;id&gt;.json
 
@@ -443,6 +496,7 @@ An ask without a check is ticked by you (`doneAt`). Agents cannot set `doneAt` o
 | 2 | Assumptions become data. `profile.assumedRealReturn` is removed: kept as your global `return.expected` override (nominal, at 2% inflation) if you had changed it from 4%. Added `instruments.json`, `assumptions.jsonl`, `research.jsonl`, `insights.jsonl`, `context.jsonl`, `notes.jsonl`, `settings.agents`, and the optional `payeeSetBy`, `corrections` and `result.sections` fields | `from: 1` in `src/server/migrations.ts` |
 | 3 | Balances say when on their day they were seen (`at`) and which imported figures you typed (`enteredBy`). Backfilled: your own balances given on their own day take the time you gave them; imported balances take the capture time of their screenshot, or, when the committed figure is not what the reader read, `enteredBy: "user"` and the time you committed it. Draft sections gain `readBalance` | `from: 2` in `src/server/migrations.ts` |
 | 4 | A pension forecast with no balance (a State Pension forecast) is kept as a `pension_income_forecast` figure. Backfilled from each committed import whose section had income per year and recorded no balance. National Insurance numbers are taken out of figures (a `payerReference` that is one is removed) and of the readings and drafts kept with imports (replaced by "[NI number]"); bank descriptions keep theirs, as source facts | `from: 3` in `src/server/migrations.ts` |
+| 5 | Jobs and HMRC's records. Added `employments.json` and `hmrc.jsonl`, the figures' `employmentId`, and the imports' `draft.jobs`, `draft.hmrc` and `result.hmrcAdded`/`employmentsCreated`/`jobs`. HMRC's pages already imported are read again on this machine into `hmrc.jsonl`; the figures their earlier reading made for what the records now hold (a National Insurance record's amounts, a State Pension forecast) are taken out, and a forecast's record keeps its account. Jobs are set up from the pay figures: figures whose employer names (reduced) or PAYE references meet are one job's, named as its P60 names it. Pay, payslip pension and earned pay figures get their job. `profile.employers` (pay lag) moves to the jobs | `from: 4` in `src/server/migrations.ts` |
 
 Data written by a newer version of the app than the one running is read-only until the app is
 updated.

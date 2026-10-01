@@ -14,7 +14,7 @@
 
 import { diffDays, formatDate, type ISODate } from '../../shared/dates';
 import { fromMinor, toMinor } from '../../shared/money';
-import type { Figure, FigureKind } from '../../shared/schema';
+import type { Figure, FigureKind, HmrcRecord } from '../../shared/schema';
 import type { TaxYear } from '../../shared/uk';
 import type { Store } from '../store';
 
@@ -136,6 +136,8 @@ export interface PaySource {
   final: boolean;
   amount: number;
   figures: Figure[];
+  /** HMRC's records of the job's payments it adds up (its figures are then none). */
+  records?: Extract<HmrcRecord, { type: 'payment' }>[];
   /** The import it came from (none for payslips, which are several, or for your own). */
   importId?: string;
 }
@@ -143,6 +145,10 @@ export interface PaySource {
 /** A job's tax year: for each kind of figure, the source that counts and the others that state it. */
 export interface EmployerYear {
   key: string;
+  /** The job (employments.json), when the figures are under one. */
+  employmentId?: string;
+  /** The day the job ended, when HMRC or you say it has. */
+  endedOn?: string;
   /** The employer's name: its P60's, else the name its figures use most. */
   payer: string;
   /** Every name its figures give it. */
@@ -156,9 +162,27 @@ export interface EmployerYear {
 const sum = (figures: Figure[]) => fromMinor(figures.reduce((s, f) => s + toMinor(f.amount), 0));
 const latest = (dates: (string | undefined)[]) => dates.filter((d): d is string => Boolean(d)).sort().at(-1);
 
-/** The candidate sources for one employer's figures of one kind in one tax year. */
-export function candidateSources(store: Store, figures: Figure[], ty: TaxYear): PaySource[] {
+/** The amount an HMRC payment record gives for a kind of pay figure (taxable pay, tax, NI). */
+const paymentAmount = (r: Extract<HmrcRecord, { type: 'payment' }>, kind: PayKind): number | undefined => (kind === 'gross_pay' ? r.taxablePay : kind === 'tax_deducted' ? r.tax : kind === 'national_insurance' ? r.ni : undefined);
+
+/** The day a job ended: yours, else HMRC's (its employment page, or the account's "employment ended"). */
+export function jobEndedOn(store: Store, employmentId: string | undefined): string | undefined {
+  if (!employmentId) return undefined;
+  const yours = store.employment(employmentId)?.endedOn;
+  if (yours) return yours;
+  return latest(
+    store.hmrc.flatMap((r) => (r.employmentId !== employmentId ? [] : r.type === 'employment' && r.endedOn ? [r.endedOn] : r.type === 'event' && r.event === 'ended' ? [r.date] : [])),
+  );
+}
+
+/**
+ * The candidate sources for one job's figures of one kind in one tax year: its payslips, each
+ * document, your own figures, and HMRC's record of its payments. A document (or HMRC's record) to a
+ * day on or after the job ended is final for the year: nothing more comes from a job you left.
+ */
+export function candidateSources(store: Store, figures: Figure[], ty: TaxYear, extra: { payments?: Extract<HmrcRecord, { type: 'payment' }>[]; kind?: PayKind; endedOn?: string | undefined } = {}): PaySource[] {
   const out: PaySource[] = [];
+  const ended = extra.endedOn && extra.endedOn >= ty.start && extra.endedOn <= ty.end ? extra.endedOn : undefined;
   const payslips = figures.filter((f) => isPayslipFigure(store, f));
   if (payslips.length) {
     const periods = new Set(payslips.map((f) => `${f.periodStart ?? ''}|${f.periodEnd ?? f.date ?? ''}`)).size;
@@ -177,11 +201,17 @@ export function candidateSources(store: Store, figures: Figure[], ty: TaxYear): 
       kind: whole ? 'year' : 'to-date',
       label: p60 ? 'P60' : whole ? 'the whole year' : `to ${formatDate(end)}`,
       asOf: whole ? ty.end : end,
-      final: whole,
+      final: whole || Boolean(ended && end >= ended),
       amount: sum(list),
       figures: list,
       importId,
     });
+  }
+  const payments = (extra.payments ?? []).filter((r) => extra.kind && paymentAmount(r, extra.kind) !== undefined);
+  if (payments.length && extra.kind) {
+    const asOf = latest(payments.map((r) => r.payDate))!;
+    const minor = payments.reduce((x, r) => x + toMinor(paymentAmount(r, extra.kind!)!), 0);
+    out.push({ kind: 'to-date', label: `HMRC to ${formatDate(asOf)}`, asOf, final: Boolean(ended && asOf >= ended), amount: fromMinor(minor), figures: [], records: payments });
   }
   return out;
 }
@@ -195,37 +225,48 @@ export function chooseSource(store: Store, candidates: PaySource[]): PaySource |
       rank(b) - rank(a) ||
       p60(b) - p60(a) ||
       b.asOf.localeCompare(a.asOf) ||
-      // On the same date: a document over the payslips, then the later import.
+      // On the same date: a document (or HMRC's record) over the payslips, then a document over
+      // HMRC's record, then the later import.
       Number(b.kind !== 'payslips') - Number(a.kind !== 'payslips') ||
+      Number(Boolean(b.importId)) - Number(Boolean(a.importId)) ||
       (b.importId ?? '').localeCompare(a.importId ?? ''),
   )[0];
 }
 
-/** Every job's tax year in `ty`, with the source of each figure that counts. */
+/**
+ * Every job's tax year in `ty`, with the source of each figure that counts. A job is its figures'
+ * `employmentId`; figures under none are grouped by name and PAYE reference (`Employers`).
+ */
 export function employerYears(store: Store, ty: TaxYear, kinds: readonly PayKind[] = PAY_KINDS): EmployerYear[] {
   const figures = store.figures.filter((f) => (kinds as readonly string[]).includes(f.kind) && figureInYear(f, ty));
-  const employers = new Employers(figures);
-  const groups = new Map<string, Figure[]>();
-  for (const f of figures) {
-    const key = employers.keyOf(f);
-    (groups.get(key) ?? groups.set(key, []).get(key)!).push(f);
-  }
+  const payments = store.hmrc.filter((r): r is Extract<HmrcRecord, { type: 'payment' }> => r.type === 'payment' && r.taxYear === ty.label);
+  const employers = new Employers([...figures.filter((f) => !f.employmentId), ...payments.filter((r) => !r.employmentId).map((r) => ({ payer: r.employer, payerReference: r.payeReference }))]);
+  const keyOf = (f: Figure) => (f.employmentId ? `job:${f.employmentId}` : `name:${employers.keyOf(f)}`);
+  const keyOfPayment = (r: (typeof payments)[number]) => (r.employmentId ? `job:${r.employmentId}` : `name:${employers.keyOf({ payer: r.employer, payerReference: r.payeReference })}`);
+  const groups = new Map<string, { figures: Figure[]; payments: typeof payments }>();
+  const group = (key: string) => groups.get(key) ?? groups.set(key, { figures: [], payments: [] }).get(key)!;
+  for (const f of figures) group(keyOf(f)).figures.push(f);
+  for (const r of payments) group(keyOfPayment(r)).payments.push(r);
   const out: EmployerYear[] = [];
-  for (const [key, list] of groups) {
+  for (const [key, g] of groups) {
+    const employmentId = key.startsWith('job:') ? key.slice(4) : undefined;
+    const job = store.employment(employmentId);
+    const endedOn = jobEndedOn(store, employmentId);
     const chosen: EmployerYear['chosen'] = {};
     const sources: EmployerYear['sources'] = {};
     for (const kind of kinds) {
-      const of = list.filter((f) => f.kind === kind);
-      if (!of.length) continue;
-      const candidates = candidateSources(store, of, ty);
+      const of = g.figures.filter((f) => f.kind === kind);
+      const candidates = candidateSources(store, of, ty, { payments: g.payments, kind, endedOn });
+      if (!candidates.length) continue;
       const pick = chooseSource(store, candidates)!;
       chosen[kind] = pick;
       sources[kind] = [pick, ...candidates.filter((c) => c !== pick)];
     }
-    const names = employers.namesOf(key);
-    const yearName = (chosen.gross_pay?.kind === 'year' || chosen.gross_pay?.kind === 'yours' ? chosen.gross_pay.figures.find((f) => f.payer)?.payer : undefined) ?? names[0] ?? '';
-    const ref = employers.referenceOf(key);
-    out.push({ key, payer: yearName, names, ...(ref ? { payeReference: ref } : {}), chosen, sources });
+    if (!Object.keys(chosen).length) continue;
+    const named = [...new Set([...(job ? [job.employer, ...job.aliases] : []), ...g.figures.flatMap((f) => (f.payer ? [f.payer] : [])), ...g.payments.flatMap((r) => (r.employer ? [r.employer] : []))])];
+    const yearName = job?.employer ?? (chosen.gross_pay?.kind === 'year' || chosen.gross_pay?.kind === 'yours' ? chosen.gross_pay.figures.find((f) => f.payer)?.payer : undefined) ?? (key.startsWith('name:') ? employers.namesOf(key.slice(5))[0] : undefined) ?? named[0] ?? '';
+    const ref = job?.payeReference ?? (key.startsWith('name:') ? employers.referenceOf(key.slice(5)) : undefined);
+    out.push({ key, ...(employmentId ? { employmentId } : {}), ...(endedOn ? { endedOn } : {}), payer: yearName, names: named, ...(ref ? { payeReference: ref } : {}), chosen, sources });
   }
   return out.sort((a, b) => a.payer.localeCompare(b.payer));
 }
@@ -239,6 +280,6 @@ export function payByEmployer(store: Store, ty: TaxYear, kind: PayKind = 'gross_
     .filter((e) => e.chosen[kind])
     .map((e) => {
       const source = e.chosen[kind]!;
-      return { key: e.key, payer: e.payer, names: e.names, ...(e.payeReference ? { payeReference: e.payeReference } : {}), source, final: source.final, figures: source.figures, amount: source.amount, others: (e.sources[kind] ?? []).slice(1) };
+      return { key: e.key, ...(e.employmentId ? { employmentId: e.employmentId } : {}), payer: e.payer, names: e.names, ...(e.payeReference ? { payeReference: e.payeReference } : {}), source, final: source.final, figures: source.figures, amount: source.amount, others: (e.sources[kind] ?? []).slice(1) };
     });
 }

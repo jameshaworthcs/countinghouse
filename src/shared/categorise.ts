@@ -157,15 +157,20 @@ export class Categoriser {
   private readonly accountsById: Map<string, Account>;
   private readonly ownMatchers: { account: Account; aliases: RegExp[]; institution: RegExp[]; ambiguous: boolean; number?: string }[];
   private readonly ownName: RegExp | null;
+  private readonly payroll: RegExp | null;
 
-  /** `ownerName`: the name in your profile, so money to or from you by name is seen as a transfer. */
-  constructor(rules: Rule[], categories: CategoryIndex, accounts: Account[], institutions: Institution[], opts: { ownerName?: string | undefined } = {}) {
+  /**
+   * `ownerName`: the name in your profile, so money to or from you by name is seen as a transfer.
+   * `payrollNumbers`: your payroll numbers at your jobs, so pay that carries one is seen as salary.
+   */
+  constructor(rules: Rule[], categories: CategoryIndex, accounts: Account[], institutions: Institution[], opts: { ownerName?: string | undefined; payrollNumbers?: readonly string[] } = {}) {
     this.rules = rules
       .filter((r) => r.enabled)
       .sort((a, b) => a.priority - b.priority || a.createdAt.localeCompare(b.createdAt))
       .map(compileRule);
     this.categories = categories;
     this.ownName = ownNamePattern(opts.ownerName);
+    this.payroll = payrollPattern(opts.payrollNumbers);
     this.accountsById = new Map(accounts.map((a) => [a.id, a]));
     const instById = new Map(institutions.map((i) => [i.id, i]));
     this.ownMatchers = accounts
@@ -297,6 +302,9 @@ export class Categoriser {
     }
     // 4b. Cash that only the bank's type calls cash (an app lists it under the machine's bank).
     if (cash && !isWrapper && this.known('cash-withdrawal')) return { payee: fallbackPayee, category: 'cash-withdrawal', categorisedBy: 'builtin' };
+    // 4c. Money in that carries one of your payroll numbers: pay. An employer's name alone is not
+    // enough, since a company you own also pays you dividends and transfers under its name.
+    if (input.amount > 0 && !isWrapper && this.payroll?.test(input.description) && this.known('salary')) return { payee: fallbackPayee, category: 'salary', categorisedBy: 'builtin' };
 
     // 5. Bank-provided category.
     const bank = mapBankCategory(input.bankCategory);
@@ -338,6 +346,15 @@ export function transferLegCategory(thisType: AccountType, otherType: AccountTyp
   if (thisWrapper && otherWrapper) return 'transfer';
   if (thisWrapper) return amount >= 0 ? 'contribution' : 'withdrawal';
   return transferCategoryFor(otherType, thisType);
+}
+
+/**
+ * A bank reference carrying one of your payroll numbers: 5 characters or more (a shorter one is
+ * too likely by chance), not inside a longer number. Null with none.
+ */
+export function payrollPattern(numbers: readonly string[] | undefined): RegExp | null {
+  const usable = [...new Set((numbers ?? []).filter((n) => /^[A-Za-z0-9]{5,20}$/.test(n)))];
+  return usable.length ? new RegExp(`(?:^|[^0-9])(?:${usable.map(escapeRegex).join('|')})(?:[^0-9]|$)`, 'i') : null;
 }
 
 function escapeRegex(s: string): string {

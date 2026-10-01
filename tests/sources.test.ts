@@ -10,7 +10,7 @@ import { BalanceEngine } from '../src/server/analytics/balances';
 import { investments } from '../src/server/analytics/investments';
 import { selfAssessment } from '../src/server/analytics/selfassessment';
 import { payByEmployer, payeReference } from '../src/server/analytics/sources';
-import { transactionId } from '../src/server/ids';
+import { hmrcId, transactionId } from '../src/server/ids';
 import { commitDraft } from '../src/server/ingest/commit';
 import { buildDraft } from '../src/server/ingest/draft';
 import { runMigrations } from '../src/server/migrations';
@@ -199,6 +199,15 @@ describe('a pension forecast with no balance', () => {
     expect(store.figures.find((f) => f.kind === 'pension_income_forecast')).toMatchObject({ accountId: 'state', amount: 11500.5, date: '2026-09-30' });
     expect(investments(store, new BalanceEngine(store)).retirement.statePension).toMatchObject({ annual: 11500.5, source: 'forecast' });
   });
+
+  it('HMRC’s forecast, when newer, takes over, from the State Pension age it gives', async () => {
+    await store.setProfile({ ...store.profile, dateOfBirth: '1990-03-01' });
+    await store.setAccounts([account('current', 'current', 'Current account'), account('state', 'state_pension', 'State Pension', { includeInNetWorth: false })]);
+    await importDocument('pension_statement', [], { accounts: [{ accountName: 'State Pension', accountType: 'state_pension', annualIncome: 11500.5, balanceDate: '2026-09-30' }], hintAccountId: 'state' });
+    const forecast = { type: 'state-pension-forecast' as const, asOf: '2026-10-01', weekly: 230.25, annual: 12006.75, payableFrom: '2058-03-01' };
+    await store.upsertRecords('hmrc', [{ ...forecast, id: hmrcId(forecast), accountId: 'state', source: {}, createdAt: stamp }], 'test: HMRC forecast');
+    expect(investments(store, new BalanceEngine(store)).retirement.statePension).toEqual({ annual: 12006.75, source: 'forecast', basis: 'HMRC’s forecast of 1 Oct 2026 (in today\'s money)', startsOn: '2058-03-01' });
+  });
 });
 
 describe('National Insurance numbers', () => {
@@ -234,7 +243,7 @@ describe('format v4 migration', () => {
     };
     await writeFile(path.join(data, 'imports', '2026', `${imp.id}.json`), `${JSON.stringify(imp, null, 2)}\n`);
     await writeFile(path.join(data, 'figures.jsonl'), `${JSON.stringify({ id: 'fig_00000000000000a1', kind: 'pension_contribution_employee', label: 'paid', amount: 50, currency: 'GBP', taxYear: '2025/26', payer: 'Quillon UK', payerReference: 'QQ123456C', source: {}, createdAt: stamp })}\n`);
-    expect(await runMigrations(data, () => undefined)).toMatchObject({ from: 3, to: 4 });
+    expect(await runMigrations(data, () => undefined)).toMatchObject({ from: 3, to: 5 });
     const figures = (await readFile(path.join(data, 'figures.jsonl'), 'utf8')).trim().split('\n').map((l) => JSON.parse(l) as Record<string, unknown>);
     expect(figures[0]).not.toHaveProperty('payerReference');
     expect(figures[1]).toMatchObject({ kind: 'pension_income_forecast', accountId: 'state', amount: 11500.5, date: '2026-09-30', source: { importId: imp.id } });

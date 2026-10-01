@@ -1113,3 +1113,59 @@ the plan on 2026-10-01). Reviewing the pending imports showed facts counted twic
   rent instalment paid. Applied, it is the owner's note; it never replaces one.
 - **Dividends over the allowance are a filing hint.** The deadline to tell HMRC (5 October) and the
   £10,000 threshold are UK rules in `uk.ts`, from gov.uk's "How to report tax on dividends".
+
+## 2026-10-01: Jobs, HMRC's records, and pay owed to you (format v5)
+
+The second slice. HMRC's pages said more than the figures could hold. Each pay date's taxable pay
+and tax, every tax code with the day it was issued, when a job started and ended, the year's
+settlement, the National Insurance years and the State Pension forecast were read and then dropped,
+or squeezed into figures that counted them wrongly. One employer appeared under three names (a
+group name on payslips, the company on the P60, a payroll company in the bank), and only its name
+joined them. Pay owed to the owner (a missed month the employer will pay) had nowhere to go.
+
+- **A job is a record** (`employments.json`), not a name. It holds every name the employer comes by,
+  its PAYE reference and the owner's payroll numbers. Figures and HMRC's records carry its id.
+  - An import matches a job by PAYE reference, payroll number, a name only one job has, then HMRC's
+    record of the payment to the penny. Otherwise it proposes a new job, which the owner sees and
+    which holds the import back from "Commit all ready".
+  - Considered: keeping name matching (`payerKey`) and adding references to it. A payslip printing a
+    group's name and no reference would still be a separate employer, and nothing could hold the
+    pay lag, the owed months or the dates.
+- **HMRC's records are records of their own** (`hmrc.jsonl`), a typed list: tax codes, payments,
+  employments, events, settlements, NI years and the State Pension forecast. Each has an id from
+  what it says, so the same page printed twice is stored once.
+  - Considered: more figure kinds. A tax code, an event or an NI year is not an amount for a tax
+    year, and a payment record is not income on top of the payslip it records.
+  - HMRC's record of a job's payments is one more source for its year (§11). A job that has ended
+    makes a source to its leaving date final.
+- **HMRC's pages are read on this machine** (`ingest/govuk.ts`, from their text with `pdftotext`).
+  Their layouts are fixed and their figures exact, so a reader per page is more faithful than
+  Claude, costs nothing, and keeps the owner's tax records out of any model. Pages already imported
+  are read again by the v5 migration, which takes out the figures they replace.
+- **The tax a code would take sits beside the tax taken.** It uses the code in force 14 days before
+  the pay date (`CODE_NOTICE_DAYS`): a code issued days before a pay date is too late for that
+  payroll. A difference is a note on the month, never a correction: HMRC settles it after the year.
+  - Considered: the code printed on the payslip. It is what the payroll used, so it cannot show
+    that the payroll used the wrong one.
+- **Pay owed to you is the owner's word** (`owed` on the job), set from the Pay tab. A late payment
+  of that exact amount from the job pairs with it, and until then it counts in the Overview's owed
+  line. A month is never marked owed by itself: one not seen may be a bank statement not imported
+  yet.
+- **A payslip that prints no period is looked for at HMRC's pay date**, when HMRC's record of the
+  payment matches it to the penny. A last payslip dated the day a job ended, weeks before its pay
+  day, was taking the previous month's payment. A payment within £1 of the expected amount is now
+  paired before the nearest one, so no payslip takes another's own payment.
+- **The same figure from two kinds of document is two sources.** A draft figure is a duplicate only
+  of one from the same kind of document: a P60 and HMRC's year page that agree are both kept (one
+  counts), and the same P60 read twice is one.
+- **The State Pension forecast is HMRC's record when there is one.** The retirement outlook takes
+  the newest forecast, HMRC's or the owner's, and starts it at the State Pension age the forecast
+  gives.
+- **Pay carrying your payroll number is salary.** A payroll's bank reference prints the payroll
+  number. A statement export with no categories left months of pay uncategorised, so the Pay tab
+  could not find it. The categoriser now knows the jobs' payroll numbers. When a job learns one,
+  pay already recorded with it and no category is filled in. A category anyone set stays.
+  - Considered: the employer's name. A company you own pays you dividends and transfers under its
+    name, and those are not pay.
+  - Considered: re-running enrichment on all history. That would also apply rules you chose not to
+    apply to history.

@@ -61,6 +61,28 @@ A profile is data:
   reference, category, merchant fields…) to header names.
 - The rest are options: `dateOrder`, `amountSign`, `filter`, `splitBy`, `negativeWhen`, `positiveWhen`.
 
+### HMRC's pages
+
+A page saved or printed from HMRC's online services (gov.uk) is a PDF with its words as text, in one
+layout per kind of page. `src/server/ingest/govuk.ts` reads it from that text (`pdftotext`, engine
+`govuk`, "gov.uk page, read on this machine"): nothing goes to Claude. A PDF that is none of these,
+or has no text (a scan), goes to Claude as before.
+
+| Page | Gives |
+|---|---|
+| Check your Income Tax: taxable income from an employer | a `payment` for each pay date, as the employer reported it, and the job's estimate or leaving date |
+| Check your Income Tax: your taxable income for a year | each job's pay for the year (figures) |
+| PAYE Service: employment details | the `employment` as HMRC shows it that day: payroll number, dates, tax code |
+| PAYE Service: all activity | `tax-code` notices and `event`s (a job started or ended, an allowance changed) |
+| Check how much Income Tax you paid | the year's `settlement`: underpaid, overpaid or settled, and what is outstanding |
+| Check your State Pension: summary | the `state-pension-forecast` |
+| Check your State Pension: National Insurance record | an `ni-year` for each year |
+
+The records go to `hmrc.jsonl` ([DATA_FORMAT.md](DATA_FORMAT.md)) under the job each is about.
+The same record read twice (two printouts of one page) is stored once. To read another page: a
+reader in `govuk.ts`, an invented fixture in `tests/fixtures/govuk/` and a test in
+`tests/govuk.test.ts`. Bump `GOVUK_ENGINE_VERSION` when a reader changes what it reads.
+
 ## Documents and screenshots (read by Claude)
 
 PDF statements, P60s, interest certificates, pension statements and screenshots of any banking,
@@ -194,7 +216,8 @@ on every import):
   statements. A payslip gives the figures for its own pay period, never its year-to-date column
   (`extract-6`); a P60 gives the year's. A payslip's or P60's tax code goes on its gross pay
   (`taxCode`, `extract-11`). Two payslips of equal pay are two figures: a figure is a
-  duplicate only for the same payer, amount, tax year and period. For the tax band and Self
+  duplicate only for the same payer (or job), amount, tax year and period, from the same kind of
+  document. A P60 and HMRC's page that agree are two sources, both kept. For the tax band and Self
   Assessment, an employer's P60 replaces its payslips rather than adding to them.
 - **Timesheets** (`extract-11`): earned pay for each period with work in it, holiday balances
   left out, and no tax year (above).
@@ -338,8 +361,14 @@ read again.
      a dividend; both take the investment's name as the payee. "Reg Contribution (E)" is an
      employer's regular payment into a pension;
   4. the built-in UK merchant list (`src/shared/merchants.ts`, about 200 patterns);
-  5. the bank's own category;
-  6. Claude's suggestion.
+  5. money in that carries one of your payroll numbers at your jobs (`employments.json`; 5
+     characters or more, not inside a longer number) is salary. An employer's name alone is not
+     enough: a company you own pays you dividends and transfers under its name too;
+  6. the bank's own category;
+  7. Claude's suggestion.
+  - When a job learns a payroll number (a document gave it, or you added it), money in already
+    recorded with that number and no category becomes salary (`salaryByPayroll`). A category set by
+    anyone stays.
   - When the app starts, rows in investment and pension accounts that nothing categorised get the
     category the built-in wording now gives them, and its payee unless you set one
     (`categoriseInvestmentRows`). Nothing else changes: a category set by anyone stays, and so does
@@ -462,7 +491,22 @@ read again.
   ([FORMULAS.md §11](FORMULAS.md), "One source per employer and year").
 - **A forecast with no balance** (a State Pension forecast: income per year, nothing held) is
   recorded as a `pension_income_forecast` figure on its account, and the review page counts it as
-  "a pension forecast". With a balance, the balance carries the income.
+  "a pension forecast". With a balance, the balance carries the income. HMRC's State Pension page,
+  read on this machine, gives a `state-pension-forecast` record instead ("HMRC's pages", above).
+- **Jobs** (`server/employments.ts`). A document's pay figures and HMRC's records are grouped by
+  the job they are about: one PAYE reference, or one employer once names are reduced. Each group is
+  matched to a job of yours:
+  1. by PAYE reference (a payroll number or name decides between two jobs with one reference);
+  2. else by payroll number;
+  3. else by a name only one job has;
+  4. else by HMRC's record of a payment with the payslip's tax and taxable pay to the penny (a
+     payslip that prints a group's name, not the employer's, is still its job's).
+
+  Otherwise a new job is proposed. The review page shows each job and how it matched, and you can
+  choose another or a new one. A new job holds the import back from "Commit all ready". Only a job
+  that something ticked is about is set up or changed. Committing teaches it any name, PAYE
+  reference or payroll number the document gave that it lacked.
+- **HMRC's records** are ticked unless the same record is stored already.
 - **National Insurance numbers stay out.** A figure's `payerReference` that is one is left out (a
   pension statement prints it as your "Reference"), and one in the reader's notes becomes
   "[NI number]" (`shared/privacy.ts`). The document itself keeps it.
@@ -522,7 +566,8 @@ click, not left looking failed or stuck (`src/server/ingest/novelty.ts`).
   its words), with no balance, rows, holdings or figures. A reading that found nothing and could not
   say what the document is stays a document to look at ("Nothing was found to record").
 - **Already here.** Everything it would record is already stored (rows already imported, the same
-  balance and figures on the same day for that account, the same holdings, the same tax figures),
+  balance and figures on the same day for that account, the same holdings, the same tax figures,
+  the same HMRC records),
   or is in another import waiting beside it. The reason says which: "its balance (£1,250.00 on 29
   Sep 2026) is also on IMG_0102.PNG, and its 5 transactions are already imported".
   - Of imports waiting together, the one with the most to add is kept and the others are checked

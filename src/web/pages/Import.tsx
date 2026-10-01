@@ -132,7 +132,7 @@ function EngineLine() {
       ) : (
         <span className="text-bad-ink">nothing yet: no engine is available</span>
       )}
-      . CSV, OFX, QIF and TXT exports are parsed on this machine.{' '}
+      . CSV, OFX, QIF and TXT exports, and HMRC’s pages saved from gov.uk, are read on this machine.{' '}
       <Link to="/settings#extraction" className="text-accent hover:underline">
         Change
       </Link>

@@ -11,6 +11,33 @@ export function transactionId(accountId: string, date: string, amount: number, d
   return importId ? `tx_${shortHash('tx', accountId, date, amount.toFixed(2), description, occurrence, importId)}` : `tx_${shortHash('tx', accountId, date, amount.toFixed(2), description, occurrence)}`;
 }
 
+/**
+ * An HMRC record's id is what it says (its employer's name reduced, as names are compared), with no
+ * import in it: the same payment or code read from two printouts of a page, or the same page twice,
+ * is one record, stored once.
+ */
+export function hmrcId(record: { type: string; employer?: string | undefined }): string {
+  const { employer, ...rest } = record;
+  const who = (employer ?? '')
+    .toLowerCase()
+    .replace(/\b(ltd|limited|plc|llp|uk)\b/g, '')
+    .replace(/[^a-z0-9]/g, '');
+  return `hmrc_${shortHash('hmrc', who, stableJson(rest))}`;
+}
+
+/** JSON with keys in order, so equal records give equal text. */
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .filter(([, v]) => v !== undefined)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([k, v]) => `${JSON.stringify(k)}:${stableJson(v)}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
 export function balanceId(accountId: string, date: string, balance: number, kind: string, salt = ''): string {
   return `bal_${shortHash('bal', accountId, date, balance.toFixed(2), kind, salt)}`;
 }
