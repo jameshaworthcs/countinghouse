@@ -1370,3 +1370,29 @@ end, so `extract-14`:
 
 `extract-14` scored 100% on the four cases (eval/results, `owner-go-final`), three confirmed by
 their own figures and the P60 read twice with no disagreement. The four runs cost $1.11.
+
+## 2026-10-01: A job learns what its payslips print (format 8)
+
+A Halden payslip, a scan, was drafted as a new job, "Fennick Group Ltd": the reading took the
+group's name for the employer. The Halden job's payslips already in the data print that
+name, and a payroll number, but the job had learnt neither: format 6 filed them under it
+without teaching it, and a commit taught a job only the draft's one employer name.
+
+- **A payslip filed under a job teaches it** the payroll number and every name the payslip prints,
+  a group's as an alias (the job's `aliases` were always meant to hold "a group's name" on
+  payslips). The next payslip is the same job by its payroll number, or by whichever of its names
+  the reading takes.
+- **Format 8 teaches each job from the payslips already stored under it**, once. A startup routine
+  was considered: it would put back an alias or number you had taken off.
+- The bank shows both Fennick jobs' pay as "FENNICK THERMAL" with the payroll number, so the group's
+  name as an alias pairs no other job's pay.
+- **A payroll number is learnt only at 5 characters or more**, as bank references are matched. The
+  scan prints "Payroll Ref.: Q1", a payroll's group code, not the owner's number (which is not on
+  it); learnt, it could take another Fennick payslip printing the same code for this job.
+
+## 2026-10-01: Settings say what is not saved
+
+A switch on Settings → Import & extraction changed only the page until Save, at the foot of a
+long page, was pressed; the owner turned on reading everything and it never reached the data.
+While a form differs from what is saved, its Save bar now stays in view at the foot of the screen,
+says the changes are not saved yet, and offers Undo.

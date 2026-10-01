@@ -35,6 +35,32 @@ function TaxBandLine() {
   );
 }
 
+/** The same settings, whatever order their keys are in. */
+const sameSettings = (a: unknown, b: unknown): boolean => {
+  const sorted = (v: unknown): unknown => (Array.isArray(v) ? v.map(sorted) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).sort(([x], [y]) => x.localeCompare(y)).map(([k, x]) => [k, sorted(x)])) : v);
+  return JSON.stringify(sorted(a)) === JSON.stringify(sorted(b));
+};
+
+/**
+ * Save, with what is not saved yet said plainly: while anything is changed, the bar stays in view
+ * at the foot of the screen with Undo beside Save, so a switch turned on is not left unsaved.
+ */
+function SaveBar({ dirty, saving, label = 'Save', onSave, onUndo }: { dirty: boolean; saving: boolean; label?: string; onSave: () => void; onUndo: () => void }) {
+  return (
+    <div className={cn('flex flex-wrap items-center justify-end gap-2', dirty && 'sticky bottom-3 z-20 rounded-xl border border-line bg-panel px-4 py-3 shadow-card')}>
+      {dirty && <span className="mr-auto text-[13px] font-medium text-warn-ink">Not saved yet: your changes apply once you save.</span>}
+      {dirty && (
+        <Button variant="secondary" onClick={onUndo}>
+          Undo
+        </Button>
+      )}
+      <Button variant="primary" loading={saving} onClick={onSave}>
+        {label}
+      </Button>
+    </div>
+  );
+}
+
 function ProfileForm() {
   const { data } = useAppData();
   const toast = useToast();
@@ -72,10 +98,8 @@ function ProfileForm() {
         </div>
       </div>
       {save.error && <Callout tone="bad" className="mt-3">{save.error.message}</Callout>}
-      <div className="mt-4 flex justify-end">
-        <Button variant="primary" loading={save.isPending} onClick={() => save.mutate(undefined)}>
-          Save profile
-        </Button>
+      <div className="mt-4">
+        <SaveBar dirty={!sameSettings(p, data.profile)} saving={save.isPending} label="Save profile" onSave={() => save.mutate(undefined)} onUndo={() => setP(data.profile)} />
       </div>
     </Card>
   );
@@ -210,11 +234,7 @@ function ExtractionForm() {
         </Field>
       </Card>
       {save.error && <Callout tone="bad">{save.error.message}</Callout>}
-      <div className="flex justify-end">
-        <Button variant="primary" loading={save.isPending} onClick={() => save.mutate(undefined)}>
-          Save
-        </Button>
-      </div>
+      <SaveBar dirty={!sameSettings(s, data.settings)} saving={save.isPending} onSave={() => save.mutate(undefined)} onUndo={() => setS(data.settings)} />
     </div>
   );
 }

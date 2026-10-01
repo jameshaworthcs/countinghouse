@@ -78,7 +78,7 @@ import {
 import { atomicWrite, Mutex, nowISO, readTextIfExists, sha256 } from './fsutil';
 
 /** Bump when the on-disk format changes, and add a migration in migrations.ts. */
-export const FORMAT_VERSION = 7;
+export const FORMAT_VERSION = 8;
 
 export interface DataIssue {
   file: string;

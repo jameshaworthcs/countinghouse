@@ -13,11 +13,13 @@ import { pay } from '../src/server/analytics/pay';
 import { payByEmployer } from '../src/server/analytics/sources';
 import { createApp, type App } from '../src/server/app';
 import { loadConfig } from '../src/server/config';
-import { matchEmployment } from '../src/server/employments';
+import { learnFromPayslip, matchEmployment } from '../src/server/employments';
 import { figureId, hmrcId, transactionId } from '../src/server/ids';
 import { runMigrations } from '../src/server/migrations';
+import { commitDraft } from '../src/server/ingest/commit';
+import { buildDraft } from '../src/server/ingest/draft';
 import { Store } from '../src/server/store';
-import type { Account, ContextRecord, Employment, Figure, HmrcRecord, ImportRecord, Transaction } from '../src/shared/schema';
+import { ExtractionSchema, type Account, type ContextRecord, type Employment, type Figure, type HmrcRecord, type ImportRecord, type Transaction } from '../src/shared/schema';
 import { CategoryIndex, defaultCategories } from '../src/shared/categories';
 import { Categoriser } from '../src/shared/categorise';
 import { taxYear, taxYearOf } from '../src/shared/uk';
@@ -417,7 +419,7 @@ describe('format v5 migration', () => {
         { id: 'fig_00000000000000a7', kind: 'pension_income_forecast', label: 'Forecast', amount: 11500.5, currency: 'GBP', date: '2026-09-30', accountId: 'state', source: { importId: 'imp_20260930_120000_0a04' }, createdAt: stamp },
       ];
       await writeFile(path.join(data, 'figures.jsonl'), `${figures.map((f) => JSON.stringify(f)).join('\n')}\n`);
-      expect(await runMigrations(data, () => undefined)).toMatchObject({ from: 4, to: 7 });
+      expect(await runMigrations(data, () => undefined)).toMatchObject({ from: 4, to: 8 });
 
       const store = await Store.open(data);
       expect(store.issues.map((i) => `${i.file}: ${i.message}`)).toEqual([]);
@@ -434,6 +436,64 @@ describe('format v5 migration', () => {
       expect(byId('fig_00000000000000a7')).toBeUndefined();
       expect(store.hmrc.filter((r) => r.type === 'state-pension-forecast')).toMatchObject([{ accountId: 'state', source: { importId: 'imp_20260930_120000_0a04' } }]);
       expect(store.profile).not.toHaveProperty('employers');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('a job learns what its payslips print', () => {
+  const slip = (employer: string, payDate: string, extra: Record<string, unknown> = {}) => ({ employer, otherNames: [], payDate, payments: [{ label: 'Salary', amount: 1500 }], deductions: [], totals: { net: 1200 }, employerCosts: {}, yearToDate: {}, ...extra });
+
+  it('format v8: the payroll number and every name its stored payslips print, so a payslip naming its group is that job', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'finance-v8-'));
+    try {
+      const data = path.join(dir, 'data');
+      await mkdir(data, { recursive: true });
+      await writeFile(path.join(data, 'meta.json'), JSON.stringify({ format: 'finance-data', version: 7, baseCurrency: 'GBP', createdAt: stamp }));
+      await writeFile(path.join(data, 'employments.json'), JSON.stringify({ employments: [job('quillon', 'QUILLON SYSTEMS LIMITED', { payeReference: '120/QS123' }), job('holdings', 'Quillon Holdings Limited')] }));
+      // Filed under their jobs, but the jobs never learnt from them.
+      const records = [
+        { ...slip('Quillon Systems Ltd', '2026-05-29', { otherNames: ['Quillon Group Ltd'], payrollNumber: '88001234' }), id: 'pay_00000000000000a1', employmentId: 'quillon', taxYear: '2026/27', source: {}, createdAt: stamp },
+        { ...slip('Quillon Holdings Limited', '2026-08-28', { payrollNumber: '99007788' }), id: 'pay_00000000000000a2', employmentId: 'holdings', taxYear: '2026/27', source: {}, createdAt: stamp },
+      ];
+      await writeFile(path.join(data, 'payslips.jsonl'), `${records.map((r) => JSON.stringify(r)).join('\n')}\n`);
+      expect(await runMigrations(data, () => undefined)).toMatchObject({ from: 7, to: 8 });
+
+      const store = await Store.open(data);
+      expect(store.issues).toEqual([]);
+      // "Quillon Systems Ltd" is the job's own name, reduced: not an alias.
+      expect(store.employment('quillon')).toMatchObject({ payrollNumbers: ['88001234'], aliases: ['Quillon Group Ltd'], payeReference: '120/QS123' });
+      expect(store.employment('holdings')).toMatchObject({ payrollNumbers: ['99007788'], aliases: [] });
+
+      // The last payslip, read as its group's: by the name its payslips print, and by its payroll number.
+      const document = { id: 'doc_00000000000000b1', sha256: 'ab'.repeat(32), fileName: 'last-paystub.pdf', mediaType: 'application/pdf', size: 1 };
+      const figures = [{ kind: 'gross_pay', label: 'Total pay', amount: 263.18, taxYear: '2026/27', payer: 'Quillon Group Ltd' }];
+      const byName = buildDraft(ExtractionSchema.parse({ documentType: 'payslip', figures }), { store, document, uploadedOn: '2026-10-01' });
+      expect(byName.jobs).toMatchObject([{ target: { mode: 'existing', employmentId: 'quillon' }, matchedBy: 'name' }]);
+      const inFull = buildDraft(ExtractionSchema.parse({ documentType: 'payslip', figures, payslips: [slip('Quillon Group Ltd', '2026-07-03', { payrollNumber: '88001234' })] }), { store, document, uploadedOn: '2026-10-01' });
+      expect(inFull.jobs).toMatchObject([{ target: { mode: 'existing', employmentId: 'quillon' }, matchedBy: 'payrollNumber' }]);
+      store.stopWatching();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('a payslip committed under a job teaches it the names it prints', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'finance-learn-'));
+    try {
+      const store = await Store.open(path.join(dir, 'data'));
+      await store.setEmployments([job('quillon', 'QUILLON SYSTEMS LIMITED', { payeReference: '120/QS123' })]);
+      const document = { id: 'doc_00000000000000c1', sha256: 'cd'.repeat(32), fileName: 'paystub.pdf', mediaType: 'application/pdf', size: 1 };
+      const draft = buildDraft(ExtractionSchema.parse({ documentType: 'payslip', payslips: [slip('Quillon Systems Ltd', '2026-06-30', { otherNames: ['Quillon Group Ltd'], payrollNumber: '88001234', payeReference: '120/QS123' })] }), { store, document, uploadedOn: '2026-07-01' });
+      const workFile = path.join(dir, 'paystub.pdf');
+      await writeFile(workFile, 'x');
+      const record = { id: 'imp_20260701_090000_0c01', status: 'review', createdAt: stamp, updatedAt: stamp, origin: 'upload', document, extraction: { warnings: [] } } as unknown as ImportRecord;
+      await commitDraft(store, { record, draft, workFile });
+      expect(store.employment('quillon')).toMatchObject({ payrollNumbers: ['88001234'], aliases: ['Quillon Group Ltd'] });
+      // A payroll's group code ("Payroll Ref.: Q1") is not your payroll number: it is not learnt.
+      expect(learnFromPayslip(store.employment('quillon')!, { employer: 'Quillon Group Ltd', payrollNumber: 'Q1' }).payrollNumbers).toEqual(['88001234']);
+      store.stopWatching();
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

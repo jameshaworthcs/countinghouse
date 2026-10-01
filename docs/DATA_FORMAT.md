@@ -249,7 +249,12 @@ An import matches a document's employer to a job by PAYE reference (a payroll nu
 decides between two jobs with one reference), then payroll number, then a name only one job has,
 then HMRC's record of a payment with the document's pay and tax to the penny; else it sets up a new
 job. You see which, and can change it, before committing ([INGESTION.md](INGESTION.md), "Jobs").
-Importing teaches a job a name, reference or payroll number it did not have. In the Pay tab you set
+Importing teaches a job a name, reference or payroll number it did not have, and a payslip filed
+under it teaches it the payroll number and every name the payslip prints (a group's too: an SAP
+paystub that prints both "Halden Systems Ltd" and "Fennick Group Ltd"), so its next payslip is the same job
+whichever name a reading takes for the employer. A payroll number is learnt only at 5 to 20
+letters and digits: a shorter code is more often a payroll's group code ("Payroll Ref.: Q1")
+shared by everyone on it. In the Pay tab you set
 a job's pay lag and say which periods' pay is owed; `PUT /api/employments/:id` (you only, not an
 agent's token) changes the rest, and what you set wins over what documents taught it.
 
@@ -629,6 +634,7 @@ An ask without a check is ticked by you (`doneAt`). Agents cannot set `doneAt` o
 | 5 | Jobs and HMRC's records. Added `employments.json` and `hmrc.jsonl`, the figures' `employmentId`, and the imports' `draft.jobs`, `draft.hmrc` and `result.hmrcAdded`/`employmentsCreated`/`jobs`. HMRC's pages already imported are read again on this machine into `hmrc.jsonl`; the figures their earlier reading made for what the records now hold (a National Insurance record's amounts, a State Pension forecast) are taken out, and a forecast's record keeps its account. Jobs are set up from the pay figures: figures whose employer names (reduced) or PAYE references meet are one job's, named as its P60 names it. Pay, payslip pension and earned pay figures get their job. `profile.employers` (pay lag) moves to the jobs | `from: 4` in `src/server/migrations.ts` |
 | 6 | Payslips in full. Added `payslips.jsonl`, the readings' and drafts' `payslips`, `result.payslipsAdded`, and the `payslip` engine. Payslips already imported, in a layout read on this machine, are read again from their stored PDFs: each is kept in full under its job, its pay figure gets the tax code it prints, and, when every line on it adds up to the totals it prints, a figure its first reading got wrong is put right (its note keeps the old amount) and one it left out is added. Several figures of one kind are left as they are | `from: 5` in `src/server/migrations.ts` |
 | 7 | Terms. Added `terms.jsonl`, the readings' and drafts' `terms`, `result.termsAdded`, the `set_terms` proposal and `before.terms`. The credit limit and rate each balance kept move into the account's terms for that day and document (the same terms from two balances of one day kept once); balances no longer have `creditLimit` or `interestRate`. One that cannot be made a terms record stays on its balance, and the migration says which | `from: 6` in `src/server/migrations.ts` |
+| 8 | Jobs learn what their payslips print. Each job takes from the payslips stored under it the payroll number and every name they print (a group's as an alias), which payslips filed by format 6 never taught it. No file changes shape | `from: 7` in `src/server/migrations.ts` |
 
 Data written by a newer version of the app than the one running is read-only until the app is
 updated.

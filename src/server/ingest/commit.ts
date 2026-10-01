@@ -12,7 +12,7 @@ import { detailToAdd, fillIn, seenInEntry, stillAdds } from '../../shared/detail
 import { sameTerms, termsOfReading } from '../../shared/terms';
 import type { Account, BalanceSnapshot, DetailField, Draft, DraftSection, Employment, Extraction, Figure, HmrcRecord, Holding, HoldingsSnapshot, ImportRecord, PayslipRecord, Terms, Transaction } from '../../shared/schema';
 import { AccountSchema, BalanceSnapshotSchema, DraftSchema, EmploymentSchema, FigureSchema, HmrcRecordSchema, HoldingsSnapshotSchema, PayslipRecordSchema, TermsSchema, TransactionSchema } from '../../shared/schema';
-import { learn, matchEmployment } from '../employments';
+import { learn, learnFromPayslip, matchEmployment } from '../employments';
 import { payeReference } from '../analytics/sources';
 import { nowISO, safeFileName } from '../fsutil';
 import { balanceId, figureId, hmrcId, holdingsId, payslipId, termsId, transactionId, transferGroupId } from '../ids';
@@ -380,6 +380,14 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
     .filter((p) => p.include)
     .map((p) => PayslipRecordSchema.parse({ ...p.record, id: payslipId(p.record), ...(jobOf(p.jobKey) ? { employmentId: jobOf(p.jobKey)! } : {}), taxYear: taxYearOf(p.record.payDate).label, source, createdAt: stamp }));
   const payslipsFresh = payslipRecords.filter((r, i) => !store.payslips.some((x) => x.id === r.id) && payslipRecords.findIndex((x) => x.id === r.id) === i);
+  // Each payslip's job learns what it prints: its payroll number, and every name on it (a group's).
+  for (const p of payslipRecords) {
+    if (!p.employmentId) continue;
+    const e = jobsToWrite.get(p.employmentId) ?? store.employment(p.employmentId);
+    if (!e) continue;
+    const next = learnFromPayslip(e, p);
+    if (JSON.stringify(next) !== JSON.stringify(e)) jobsToWrite.set(e.id, { ...next, updatedAt: stamp });
+  }
   // A forecast with no balance (a State Pension forecast) is its income per year on its account
   // (FORMULAS.md §9). With a balance, the balance carries it.
   for (const section of draft.sections) {

@@ -366,11 +366,18 @@ export function transferLegCategory(thisType: AccountType, otherType: AccountTyp
 }
 
 /**
- * A bank reference carrying one of your payroll numbers: 5 characters or more (a shorter one is
- * too likely by chance), not inside a longer number. Null with none.
+ * Is it one person's payroll or works number, as far as can be told: 5 to 20 letters and digits. A
+ * shorter one is too likely by chance, and is more often a payroll's group code ("Payroll Ref.: Q1")
+ * shared by everyone on it.
+ */
+export const isPayrollNumber = (n: string): boolean => /^[A-Za-z0-9]{5,20}$/.test(n);
+
+/**
+ * A bank reference carrying one of your payroll numbers (`isPayrollNumber`), not inside a longer
+ * number. Null with none.
  */
 export function payrollPattern(numbers: readonly string[] | undefined): RegExp | null {
-  const usable = [...new Set((numbers ?? []).filter((n) => /^[A-Za-z0-9]{5,20}$/.test(n)))];
+  const usable = [...new Set((numbers ?? []).filter(isPayrollNumber))];
   return usable.length ? new RegExp(`(?:^|[^0-9])(?:${usable.map(escapeRegex).join('|')})(?:[^0-9]|$)`, 'i') : null;
 }
 

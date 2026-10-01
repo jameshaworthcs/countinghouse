@@ -19,7 +19,8 @@ import { figureId, hmrcId, payslipId, termsId } from './ids';
 import { Employers, PAY_KINDS, payerKey } from './analytics/sources';
 import { pdfText, readGovUkPage } from './ingest/govuk';
 import { readPayslipPage } from './ingest/payslips';
-import { HmrcRecordSchema, PayslipRecordSchema, TermsSchema, type AccountType, type Terms } from '../shared/schema';
+import { EmploymentSchema, HmrcRecordSchema, PayslipRecordSchema, TermsSchema, type AccountType, type Employment, type PayslipRecord, type Terms } from '../shared/schema';
+import { learnFromPayslip } from './employments';
 import { sameTerms, termsOfReading } from '../shared/terms';
 import { toMinor } from '../shared/money';
 import { taxYearOf } from '../shared/uk';
@@ -500,6 +501,28 @@ export const MIGRATIONS: Migration[] = [
       await ctx.writeText('terms.jsonl', terms.length ? `${terms.map((t) => JSON.stringify(t)).join('\n')}\n` : '');
       ctx.log(`[migrate] the credit limit or rate on ${moved} balance${moved === 1 ? '' : 's'} kept as ${terms.length} terms record${terms.length === 1 ? '' : 's'}`);
       if (kept.length) ctx.log(`[migrate] a limit or rate that could not be kept as terms, left on its balance: ${kept.join(', ')}`);
+    },
+  },
+  {
+    from: 7,
+    description: 'Jobs learn what their payslips print: the payroll number, and every name on them (a group’s too)',
+    async run(ctx) {
+      const file = (await ctx.readJson('employments.json')) as { employments?: Employment[] } | undefined;
+      const jobs = file?.employments ?? [];
+      if (!jobs.length) return;
+      const lines = (await ctx.exists('payslips.jsonl')) ? (await readFile(path.join(ctx.dataDir, 'payslips.jsonl'), 'utf8')).split('\n').filter((l) => l.trim()) : [];
+      const taught = new Set<string>();
+      for (const line of lines) {
+        const p = JSON.parse(line) as PayslipRecord;
+        const i = jobs.findIndex((e) => e.id === p.employmentId);
+        if (i < 0) continue;
+        const next = learnFromPayslip(EmploymentSchema.parse(jobs[i]), p);
+        if (JSON.stringify(next) === JSON.stringify(EmploymentSchema.parse(jobs[i]))) continue;
+        jobs[i] = { ...next, updatedAt: nowISO() };
+        taught.add(next.id);
+      }
+      if (taught.size) await ctx.writeJson('employments.json', { ...file, employments: jobs });
+      ctx.log(`[migrate] ${taught.size} job${taught.size === 1 ? '' : 's'} learnt what ${taught.size === 1 ? 'its' : 'their'} payslips print${taught.size ? `: ${[...taught].join(', ')}` : ''}`);
     },
   },
 ];

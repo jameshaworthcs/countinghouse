@@ -203,7 +203,7 @@ describe('format v3 migration', () => {
       bal('2026-09-30', 3, 'screenshot', { createdAt: '2026-09-30T23:10:00+01:00', source: { importId: read } }),
     ];
     await writeFile(path.join(dir, 'balances', 'bank.jsonl'), `${lines.map((l) => JSON.stringify(l)).join('\n')}\n`);
-    expect(await runMigrations(dir, () => undefined)).toMatchObject({ from: 2, to: 7 });
+    expect(await runMigrations(dir, () => undefined)).toMatchObject({ from: 2, to: 8 });
     const out = (await readFile(path.join(dir, 'balances', 'bank.jsonl'), 'utf8'))
       .trim()
       .split('\n')

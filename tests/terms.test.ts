@@ -38,7 +38,7 @@ describe('format v7 migration', () => {
       // A statement and a screenshot of one day with the same rate: one record. A rate that is no rate stays.
       await writeFile(path.join(data, 'balances', 'saver.jsonl'), [bal('bal_00000000000000b1', 'saver', '2026-03-31', { interestRate: 4.25 }), bal('bal_00000000000000b2', 'saver', '2026-03-31', { interestRate: 4.25, kind: 'screenshot' }, 'imp_20260331_100000_0002'), bal('bal_00000000000000b3', 'saver', '2026-04-30', { interestRate: 425 })].join('\n') + '\n');
       const logged: string[] = [];
-      expect(await runMigrations(data, (m) => logged.push(m))).toMatchObject({ from: 6, to: 7 });
+      expect(await runMigrations(data, (m) => logged.push(m))).toMatchObject({ from: 6, to: 8 });
       const store = await Store.open(data);
       expect(store.issues).toEqual([]);
       expect(store.terms('card').map((t) => [t.asOf, t.limit ?? null, t.rates])).toEqual([

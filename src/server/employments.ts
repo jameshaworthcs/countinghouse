@@ -5,6 +5,7 @@
 // change on the review page.
 
 import { slugify } from '../shared/accounts';
+import { isPayrollNumber } from '../shared/categorise';
 import type { Employment, ExtractedHmrc, Figure, FigureKind } from '../shared/schema';
 import { PAY_KINDS, payeReference, payerKey } from './analytics/sources';
 
@@ -39,13 +40,27 @@ export function matchEmployment(employments: Employment[], who: JobIdentity): { 
   return undefined;
 }
 
-/** What a job learns from a document that is about it: another name, its reference, a payroll number. */
+/**
+ * What a job learns from a document that is about it: another name, its reference, a payroll number.
+ * Not a code too short to be yours alone (a payroll's group code, "Q1": `isPayrollNumber`).
+ */
 export function learn(e: Employment, who: JobIdentity): Employment {
   const ref = payeReference(who.payeReference);
   const names = namesOf(e).map(payerKey);
   const aliases = who.employer && !names.includes(payerKey(who.employer)) ? [...e.aliases, who.employer] : e.aliases;
-  const payrollNumbers = who.payrollNumber && !e.payrollNumbers.includes(who.payrollNumber) ? [...e.payrollNumbers, who.payrollNumber] : e.payrollNumbers;
+  const payrollNumbers = who.payrollNumber && isPayrollNumber(who.payrollNumber) && !e.payrollNumbers.includes(who.payrollNumber) ? [...e.payrollNumbers, who.payrollNumber] : e.payrollNumbers;
   return { ...e, aliases, payrollNumbers, ...(ref && !e.payeReference ? { payeReference: ref } : {}) };
+}
+
+/**
+ * What a job learns from one of its payslips: its PAYE reference and payroll number, and every name
+ * the payslip prints (the employer's, and a group's), so the next document naming any of them is the
+ * same job.
+ */
+export function learnFromPayslip(e: Employment, p: { employer: string; otherNames?: readonly string[] | undefined; payeReference?: string | undefined; payrollNumber?: string | undefined }): Employment {
+  let next = learn(e, { employer: p.employer, payeReference: p.payeReference, payrollNumber: p.payrollNumber });
+  for (const name of p.otherNames ?? []) next = learn(next, { employer: name });
+  return next;
 }
 
 /** An id for a new job from its employer's name, not one taken already. */

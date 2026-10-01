@@ -160,7 +160,8 @@ The equations are in [FORMULAS.md](FORMULAS.md); the rules for writing these rec
    - It writes each account's terms for the day (`terms.jsonl`: its rates, limit and a card's
      minimum payment), whether or not the balance is recorded, unless the same terms are there.
    - It sets up the jobs the draft proposed, teaches existing ones what the document said about
-     them, and writes HMRC's records under their jobs.
+     them (each payslip's payroll number and every name it prints, a group's too), and writes
+     HMRC's records under their jobs.
    - It archives the document and writes the import record, including the account each section
      went to, which gives coverage.
    - The result is a single git commit.
