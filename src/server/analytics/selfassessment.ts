@@ -54,7 +54,9 @@ export function selfAssessment(store: Store, label?: string): SelfAssessmentResp
     const t = e.chosen.tax_deducted;
     return `${e.payer || 'An employer'}${e.payeReference ? ` (PAYE ${e.payeReference})` : ''}: pay ${formatMoney(e.chosen.gross_pay!.amount)}, from ${fromWhat(e.chosen.gross_pay!)}; tax ${t ? formatMoney(t.amount) : 'not known'}.`;
   });
-  const allP60 = withPay.every((e) => e.chosen.gross_pay!.label === 'P60');
+  // What the year's figures came from, for the basis: "P60 figures", else each kind there is.
+  const kinds = new Set(withPay.map((e) => (e.chosen.gross_pay!.label === 'P60' ? 'P60s' : e.chosen.gross_pay!.kind === 'yours' ? 'your own' : 'other documents')));
+  const wholeYear = kinds.size === 1 && kinds.has('P60s') ? 'P60 figures' : `Figures for the whole year: ${[...kinds].sort().join(' and ')}`;
   const bik = figuresOf(store, ty, 'benefit_in_kind');
   // Student loan deducted, like pay: one source per job.
   const slDeducted = jobs.flatMap((e) => e.chosen.student_loan_deducted?.figures ?? []);
@@ -66,7 +68,7 @@ export function selfAssessment(store: Store, label?: string): SelfAssessmentResp
       where: 'SA102 Employment: pay from this employment (from your P60/P45)',
       amount: pay.length ? sumFigures(pay) : null,
       status: pay.length ? (soFar.length ? 'check' : 'ready') : salaryTx.length ? 'missing' : 'not-applicable',
-      basis: pay.length ? (soFar.length ? (soFar.length === withPay.length ? 'So far this year' : 'The year’s figures, and so far for some jobs') : allP60 ? 'P60 figures' : 'Figures for the whole year (P60s and HMRC’s)') : 'No P60 imported',
+      basis: pay.length ? (soFar.length ? (soFar.length === withPay.length ? 'So far this year' : 'The year’s figures, and so far for some jobs') : wholeYear) : 'No P60 imported',
       notes: pay.length
         ? ['Use one SA102 per employer. The figure should match box "Pay" on its P60 (or P45 for a job you left).', ...jobNotes]
         : salaryTx.length
