@@ -1058,7 +1058,7 @@ export const SettingsSchema = z.object({
       /** Read stored documents again with the current reader, to compare with what was recorded. Off until you turn it on. */
       rereadDocuments: z.boolean().default(false),
       /**
-       * Read everything a document prints (extract-13): a payslip in full, HMRC's pages as records, an
+       * Read everything a document prints (extract-14): a payslip in full, HMRC's pages as records, an
        * account's terms, and every other labelled value. Off until its evaluation has passed.
        */
       readEverything: z.boolean().default(false),
@@ -1281,7 +1281,7 @@ export const ExtractionSchema = z.object({
   /** Payslips in full (ingest/payslips.ts). */
   payslips: z.array(ExtractedPayslipSchema).default([]),
   /**
-   * Every other labelled value the document prints, as printed (extract-13, "read everything"):
+   * Every other labelled value the document prints, as printed (extract-14, "read everything"):
    * kept with the import so nothing on a document is lost, though nothing reads it yet.
    */
   printed: z.array(z.object({ section: z.string().max(120).optional(), label: z.string().min(1).max(200), value: z.string().min(1).max(500) })).max(400).default([]),

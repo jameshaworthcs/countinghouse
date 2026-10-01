@@ -355,7 +355,7 @@ number. Its pay, tax, NI, pension and student loan for the period are also tax f
 - `extraction`: `{engine, engineVersion, detail, model, durationMs, costUsd, warnings, raw,
   verification?, alternative?}`.
   - `raw` is the engine's complete output, kept for audit and re-derivation. A reading that read
-    everything (`extract-13`) also has `payslips`, `hmrc`, each account's `terms` and `printed`:
+    everything (`extract-14`) also has `payslips`, `hmrc`, each account's `terms` and `printed`:
     every other labelled value the document prints, `{section?, label, value}` as printed.
   - `verification` records how the reading was checked (docs/INGESTION.md, "Checking every
     figure"): `{method: checks|second-reading, firstModel, secondModel?, reasons, disagreements,

@@ -1351,3 +1351,22 @@ rest was in the readings' notes.
   scores terms on two cases, so one run covers it.
 - **An agent sets a document's terms in full** (`set_terms`) from the documents already imported;
   the owner applies it.
+
+## 2026-10-01: The reader that keeps everything, evaluated (extract-14)
+
+The owner asked for its evaluation run. On four cases (a scanned payslip, a P60, a card statement
+and a savings statement) `extract-13` scored 99.6%: everything it adds (payslips in full, printed
+values, terms) was right, but on the payslip it also gave the employer's £75 pension as a tax
+figure, which the payslip in full already holds. The same fact twice is what this work set out to
+end, so `extract-14`:
+
+- **names a payslip's figures in rule 20**: pay, tax, NI, your pension and student loan; never the
+  employer's NI or pension, which go in its employer costs. Rule 13, shared with the reader in use,
+  lists "the same kinds as a P60" (no pension) and is left alone: a first attempt that pointed at
+  it made the reader drop your pension too (its result is kept as `extract-14-draft`).
+- **drops a repeat in the normaliser** (not left to the reader): an employer's pension figure is
+  dropped when the payslip's employer costs hold it, moved there when they do not, and kept when
+  the two disagree.
+
+`extract-14` scored 100% on the four cases (eval/results, `owner-go-final`), three confirmed by
+their own figures and the P60 read twice with no disagreement. The four runs cost $1.11.

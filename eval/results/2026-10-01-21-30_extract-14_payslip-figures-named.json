@@ -1,0 +1,78 @@
+{"summary": {
+ "ranAt": "2026-10-01T21:30:07.590Z",
+ "promptVersion": "extract-14",
+ "label": "payslip-figures-named",
+ "model": "app default",
+ "effort": "app default",
+ "verifyModel": "app default",
+ "readTwice": 0,
+ "confirmedByFigures": 1,
+ "withDisagreements": 0,
+ "cases": 1,
+ "minutes": 0.2,
+ "costUsd": 0.06,
+ "fieldAccuracy": 100,
+ "rows": {
+  "expected": 0,
+  "found": 0,
+  "extra": 0
+ },
+ "byField": {
+  "nothingNew": {
+   "correct": 1,
+   "total": 1,
+   "pct": 100
+  },
+  "figure": {
+   "correct": 5,
+   "total": 5,
+   "pct": 100
+  },
+  "figureYear": {
+   "correct": 5,
+   "total": 5,
+   "pct": 100
+  },
+  "payslip": {
+   "correct": 1,
+   "total": 1,
+   "pct": 100
+  },
+  "payslipNet": {
+   "correct": 1,
+   "total": 1,
+   "pct": 100
+  },
+  "payslipCodes": {
+   "correct": 1,
+   "total": 1,
+   "pct": 100
+  },
+  "payslipLine": {
+   "correct": 8,
+   "total": 8,
+   "pct": 100
+  },
+  "payslipNoExtraLine": {
+   "correct": 2,
+   "total": 2,
+   "pct": 100
+  },
+  "payslipYtd": {
+   "correct": 9,
+   "total": 9,
+   "pct": 100
+  }
+ },
+ "byKind": {
+  "png": 100
+ },
+ "byTag": {
+  "png": 100,
+  "figures": 100,
+  "payslip": 100
+ }
+},
+"results": [
+{"id":"png-payslip-scan","title":"A scanned payslip in a layout read by no rule: every line, the totals, the codes and the year to date","tags":["png","figures","payslip"],"kind":"png","status":"review","engine":"claude-cli","model":"claude-sonnet-5-5","durationMs":13130,"costUsd":0.0633,"confidence":"high","warnings":[],"notes":["Pay period dates inferred from 'Tax period: Month 5' and pay date 28/08/2026 (August 2026); not printed as dates.","Taxable pay for the period is not printed; year-to-date gross is not printed."],"verification":{"method":"checks","firstModel":"claude-sonnet-5-5","reasons":0,"disagreements":[],"kept":"first"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"figure":{"correct":5,"total":5},"figureYear":{"correct":5,"total":5},"payslip":{"correct":1,"total":1},"payslipNet":{"correct":1,"total":1},"payslipCodes":{"correct":1,"total":1},"payslipLine":{"correct":8,"total":8},"payslipNoExtraLine":{"correct":2,"total":2},"payslipYtd":{"correct":9,"total":9}},"rows":{"expected":0,"found":0,"extra":0},"errors":[],"score":1}}
+]}

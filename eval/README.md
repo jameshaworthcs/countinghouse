@@ -11,7 +11,7 @@ npm run eval -- --tag card-signs              # cases with a tag
 npm run eval -- --render                      # write the documents to eval/.out/docs and stop
 npm run eval -- --model sonnet --effort medium --concurrency 3 --label try-sonnet
 npm run eval -- --verify-model off            # the reading model alone, without the check
-npm run eval -- --everything --only png-payslip-scan,pdf-p60,pdf-barclaycard,pdf-marcus-savings   # the reader that reads everything (extract-13)
+npm run eval -- --everything --only png-payslip-scan,pdf-p60,pdf-barclaycard,pdf-marcus-savings   # the reader that reads everything (extract-14)
 ```
 
 By default a run uses the app's own settings: Sonnet reads, and Opus checks anything the

@@ -1,0 +1,171 @@
+{"summary": {
+ "ranAt": "2026-10-01T21:30:51.328Z",
+ "promptVersion": "extract-14",
+ "label": "owner-go-final",
+ "model": "app default",
+ "effort": "app default",
+ "verifyModel": "app default",
+ "readTwice": 1,
+ "confirmedByFigures": 3,
+ "withDisagreements": 0,
+ "cases": 4,
+ "minutes": 0.4,
+ "costUsd": 0.26,
+ "fieldAccuracy": 100,
+ "rows": {
+  "expected": 20,
+  "found": 20,
+  "extra": 0
+ },
+ "byField": {
+  "nothingNew": {
+   "correct": 4,
+   "total": 4,
+   "pct": 100
+  },
+  "account": {
+   "correct": 2,
+   "total": 2,
+   "pct": 100
+  },
+  "period": {
+   "correct": 4,
+   "total": 4,
+   "pct": 100
+  },
+  "balance": {
+   "correct": 4,
+   "total": 4,
+   "pct": 100
+  },
+  "row": {
+   "correct": 20,
+   "total": 20,
+   "pct": 100
+  },
+  "date": {
+   "correct": 20,
+   "total": 20,
+   "pct": 100
+  },
+  "sign": {
+   "correct": 20,
+   "total": 20,
+   "pct": 100
+  },
+  "amount": {
+   "correct": 20,
+   "total": 20,
+   "pct": 100
+  },
+  "description": {
+   "correct": 20,
+   "total": 20,
+   "pct": 100
+  },
+  "pending": {
+   "correct": 20,
+   "total": 20,
+   "pct": 100
+  },
+  "duplicate": {
+   "correct": 20,
+   "total": 20,
+   "pct": 100
+  },
+  "noExtra": {
+   "correct": 20,
+   "total": 20,
+   "pct": 100
+  },
+  "termsLimit": {
+   "correct": 1,
+   "total": 1,
+   "pct": 100
+  },
+  "termsRate": {
+   "correct": 4,
+   "total": 4,
+   "pct": 100
+  },
+  "termsNoExtraRate": {
+   "correct": 2,
+   "total": 2,
+   "pct": 100
+  },
+  "termsMinimum": {
+   "correct": 1,
+   "total": 1,
+   "pct": 100
+  },
+  "balanceAfter": {
+   "correct": 7,
+   "total": 7,
+   "pct": 100
+  },
+  "figure": {
+   "correct": 9,
+   "total": 9,
+   "pct": 100
+  },
+  "figureYear": {
+   "correct": 9,
+   "total": 9,
+   "pct": 100
+  },
+  "printed": {
+   "correct": 1,
+   "total": 1,
+   "pct": 100
+  },
+  "payslip": {
+   "correct": 1,
+   "total": 1,
+   "pct": 100
+  },
+  "payslipNet": {
+   "correct": 1,
+   "total": 1,
+   "pct": 100
+  },
+  "payslipCodes": {
+   "correct": 1,
+   "total": 1,
+   "pct": 100
+  },
+  "payslipLine": {
+   "correct": 8,
+   "total": 8,
+   "pct": 100
+  },
+  "payslipNoExtraLine": {
+   "correct": 2,
+   "total": 2,
+   "pct": 100
+  },
+  "payslipYtd": {
+   "correct": 9,
+   "total": 9,
+   "pct": 100
+  }
+ },
+ "byKind": {
+  "pdf": 100,
+  "png": 100
+ },
+ "byTag": {
+  "pdf": 100,
+  "card-signs": 100,
+  "savings": 100,
+  "figures": 100,
+  "tax": 100,
+  "png": 100,
+  "payslip": 100
+ }
+},
+"results": [
+{"id":"pdf-barclaycard","title":"Barclaycard-style statement: spending positive, payments negative in print","tags":["pdf","card-signs"],"kind":"pdf","status":"review","engine":"claude-cli","model":"claude-sonnet-5-5","durationMs":17926,"costUsd":0.0532,"confidence":"high","warnings":[],"notes":["Amounts converted to the cardholder's point of view: purchases negative, the payment positive. Balances shown as owed (negative). The printed amounts reconcile: 287.20 + 309.80 purchases - 300.00 payment = 297.00."],"verification":{"method":"checks","firstModel":"claude-sonnet-5-5","reasons":0,"disagreements":[],"kept":"first"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"period":{"correct":2,"total":2},"balance":{"correct":2,"total":2},"row":{"correct":13,"total":13},"date":{"correct":13,"total":13},"sign":{"correct":13,"total":13},"amount":{"correct":13,"total":13},"description":{"correct":13,"total":13},"pending":{"correct":13,"total":13},"duplicate":{"correct":13,"total":13},"noExtra":{"correct":13,"total":13},"termsLimit":{"correct":1,"total":1},"termsRate":{"correct":3,"total":3},"termsNoExtraRate":{"correct":1,"total":1},"termsMinimum":{"correct":1,"total":1}},"rows":{"expected":13,"found":13,"extra":0},"errors":[],"score":1}},
+{"id":"pdf-marcus-savings","title":"Savings statement for a quarter: deposits, a withdrawal and monthly interest","tags":["pdf","savings"],"kind":"pdf","status":"review","engine":"claude-cli","model":"claude-sonnet-5-5","durationMs":11796,"costUsd":0.0372,"confidence":"high","warnings":[],"notes":[],"verification":{"method":"checks","firstModel":"claude-sonnet-5-5","reasons":0,"disagreements":[],"kept":"first"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"period":{"correct":2,"total":2},"balance":{"correct":2,"total":2},"row":{"correct":7,"total":7},"date":{"correct":7,"total":7},"sign":{"correct":7,"total":7},"amount":{"correct":7,"total":7},"description":{"correct":7,"total":7},"pending":{"correct":7,"total":7},"balanceAfter":{"correct":7,"total":7},"duplicate":{"correct":7,"total":7},"noExtra":{"correct":7,"total":7},"termsRate":{"correct":1,"total":1},"termsNoExtraRate":{"correct":1,"total":1}},"rows":{"expected":7,"found":7,"extra":0},"errors":[],"score":1}},
+{"id":"pdf-p60","title":"P60 for 2025/26: pay, tax, National Insurance and student loan","tags":["pdf","figures","tax"],"kind":"pdf","status":"review","engine":"claude-cli","model":"claude-opus-5-5","durationMs":19449,"costUsd":0.1283,"confidence":"high","warnings":[],"notes":[],"verification":{"method":"second-reading","firstModel":"claude-sonnet-5-5","secondModel":"claude-opus-5-5","reasons":1,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"figure":{"correct":4,"total":4},"figureYear":{"correct":4,"total":4},"printed":{"correct":1,"total":1}},"rows":{"expected":0,"found":0,"extra":0},"errors":[],"score":1}},
+{"id":"png-payslip-scan","title":"A scanned payslip in a layout read by no rule: every line, the totals, the codes and the year to date","tags":["png","figures","payslip"],"kind":"png","status":"review","engine":"claude-cli","model":"claude-sonnet-5-5","durationMs":13047,"costUsd":0.0389,"confidence":"high","warnings":[],"notes":["Pay period dates inferred from 'Tax period Month 5' (August 2026); no period dates are printed.","Pay date printed as 28/08/2026.","The employer's PAYE reference is not printed."],"verification":{"method":"checks","firstModel":"claude-sonnet-5-5","reasons":0,"disagreements":[],"kept":"first"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"figure":{"correct":5,"total":5},"figureYear":{"correct":5,"total":5},"payslip":{"correct":1,"total":1},"payslipNet":{"correct":1,"total":1},"payslipCodes":{"correct":1,"total":1},"payslipLine":{"correct":8,"total":8},"payslipNoExtraLine":{"correct":2,"total":2},"payslipYtd":{"correct":9,"total":9}},"rows":{"expected":0,"found":0,"extra":0},"errors":[],"score":1}}
+]}

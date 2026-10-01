@@ -1,4 +1,4 @@
-// Reading everything a document prints (extract-13; docs/INGESTION.md, "Reading everything"): the
+// Reading everything a document prints (extract-14; docs/INGESTION.md, "Reading everything"): the
 // prompt and schema it adds, what the normaliser makes of a reading, and a payslip that confirms its
 // own figures. No Claude runs here: the readings are written by hand, and invented.
 
@@ -12,7 +12,7 @@ const NI = /[A-Z]{2} ?\d{2} ?\d{2} ?\d{2} ?[A-D]/;
 
 describe('the reader, reading everything', () => {
   it('is a prompt version of its own, with four more rules and their part of the schema', () => {
-    expect([promptVersion(false), promptVersion(true)]).toEqual(['extract-11', 'extract-13']);
+    expect([promptVersion(false), promptVersion(true)]).toEqual(['extract-11', 'extract-14']);
     expect(systemPrompt(false)).not.toMatch(/^20\. payslips/m);
     expect(systemPrompt(true)).toMatch(/^20\. payslips:/m);
     expect(systemPrompt(true)).toMatch(/^22\. printed:/m);
@@ -24,6 +24,27 @@ describe('the reader, reading everything', () => {
     const account = (s: Record<string, unknown>) => ((s.properties as Record<string, { items: Record<string, unknown> }>).accounts!.items);
     expect(keys(account(extractionJsonSchema(false)))).not.toContain('terms');
     expect(keys(account(extractionJsonSchema(true)))).toContain('terms');
+  });
+
+  it('keeps the employer’s pension on a payslip once: with the payslip in full, not as a figure too', () => {
+    const figure = (kind: string, amount: number) => ({ kind, label: kind, amount, currency: 'GBP', periodStart: '2026-08-01', periodEnd: '2026-08-31', taxYear: '2026/27', payer: 'Quillon Systems Ltd', payerReference: null, accountLast4: null, taxCode: null, work: null });
+    const read = (pension: number | null, figureAmount: number) =>
+      normaliseExtraction({
+        documentType: 'payslip',
+        accounts: [],
+        figures: [figure('gross_pay', 2835), figure('pension_contribution_employee', 125), figure('pension_contribution_employer', figureAmount)],
+        payslips: [{ employer: 'Quillon Systems Ltd', payDate: '2026-08-28', periodEnd: '2026-08-31', payments: [{ label: 'Salary', amount: 2835 }], deductions: [], totals: { net: 2092.21 }, employerCosts: { ni: 337.86, pension }, yearToDate: {} }],
+      }).extraction;
+    // Read twice over: the figure goes, the payslip keeps it.
+    const twice = read(75, 75);
+    expect(twice.figures.map((f) => f.kind)).toEqual(['gross_pay', 'pension_contribution_employee']);
+    expect(twice.payslips[0]!.employerCosts).toEqual({ ni: 337.86, pension: 75 });
+    // Only as a figure: it moves to the payslip.
+    const moved = read(null, 75);
+    expect(moved.figures.map((f) => f.kind)).toEqual(['gross_pay', 'pension_contribution_employee']);
+    expect(moved.payslips[0]!.employerCosts.pension).toBe(75);
+    // The two disagree: both stay, for you to see.
+    expect(read(80, 75).figures.map((f) => f.kind)).toContain('pension_contribution_employer');
   });
 
   it('keeps a scanned payslip in full, HMRC’s records by their kind, and every other value printed', () => {

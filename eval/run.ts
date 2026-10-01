@@ -5,7 +5,7 @@
 //   npm run eval -- --tag fx              cases with a tag
 //   npm run eval -- --render              write the documents to eval/.out/docs and stop
 //   npm run eval -- --model sonnet --effort medium --concurrency 3 --label note
-//   npm run eval -- --everything --only png-payslip-scan,pdf-p60,pdf-barclaycard,pdf-marcus-savings   the reader that reads everything (extract-13)
+//   npm run eval -- --everything --only png-payslip-scan,pdf-p60,pdf-barclaycard,pdf-marcus-savings   the reader that reads everything (extract-14)
 //   npm run eval -- --verify-model off    Sonnet's reading alone, without the second reading
 //
 // Each case (or group) gets a temporary store holding the accounts in cases.ts, so account
@@ -169,7 +169,7 @@ async function main() {
     else groups.push([c]);
   }
   const concurrency = Number(arg('concurrency') ?? 3);
-  // --everything: the reader that keeps everything a document prints (extract-13).
+  // --everything: the reader that keeps everything a document prints (extract-14).
   const opts = { model: arg('model'), effort: arg('effort'), verifyModel: arg('verify-model'), everything: argv.includes('--everything') };
   const results: CaseResult[] = [];
   let next = 0;

@@ -462,7 +462,7 @@ export class ImportService extends EventEmitter {
       spreadsheet: kind === 'sheet',
     };
     const timeoutMs = settings.timeoutSeconds * 1000;
-    // Everything the document prints, when that is turned on (prompt.ts, extract-13).
+    // Everything the document prints, when that is turned on (prompt.ts, extract-14).
     const everything = settings.readEverything;
     const readWith = async (m: string): Promise<EngineResult> => {
       if (chosen === 'claude-cli') {

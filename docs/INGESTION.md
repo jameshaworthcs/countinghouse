@@ -162,7 +162,7 @@ is paid ([FORMULAS.md §17](FORMULAS.md), "Earned pay").
   stays in `figures.jsonl` and no longer counts. The draft says what it replaces, and is held back
   from "Commit all ready".
 
-### Reading everything (`extract-13`)
+### Reading everything (`extract-14`)
 
 The reader keeps every value a document prints when **Read everything a document prints** is on
 (Settings → Import & extraction; `settings.extraction.readEverything`). It is off until its
@@ -174,7 +174,10 @@ of the schema:
 - **20. Payslips in full**, as the local readers keep them (`payslips.jsonl`): every payment and
   deduction line, signed as printed; the totals and net pay; employer costs; the tax code and its
   basis; the NI letter; the pay date, period and its number; the payroll number; and the
-  year-to-date column. Its tax figures are given as before.
+  year-to-date column. Its tax figures are given as before: pay, tax, NI, your pension and student
+  loan, never the employer's NI or pension, which are kept with the payslip only. A figure for the
+  employer's pension that the reader gives anyway is dropped when the payslip's employer costs hold
+  it, moved there when they leave it out, and kept when they disagree.
 - **21. HMRC's pages as records** (`hmrc.jsonl`), for a screenshot or scan of HMRC's services or
   app. Each fact is one flat record with the fields of its kind; the normaliser keeps those and
   checks it as the gov.uk readers' records are checked.

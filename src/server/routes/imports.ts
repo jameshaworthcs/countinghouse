@@ -100,7 +100,7 @@ export function importRoutes(ctx: AppContext): Hono {
    * the reader, or a CSV whose columns were worked out automatically (a layout may fit it now).
    */
   app.get('/rereads', (c) => {
-    // The reader now: extract-13 when it reads everything a document prints (prompt.ts).
+    // The reader now: extract-14 when it reads everything a document prints (prompt.ts).
     const current = promptVersion(ctx.store.settings.extraction.readEverything);
     const number = (v: string | undefined) => Number(/extract-(\d+)/.exec(v ?? '')?.[1] ?? 0);
     return c.json({

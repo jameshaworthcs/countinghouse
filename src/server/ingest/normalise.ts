@@ -2,9 +2,9 @@
 // drop rows that cannot be salvaged (with a note), and fill defaults.
 
 import { isISODate, parseFlexibleDate } from '../../shared/dates';
-import { parseAmount, roundMoney } from '../../shared/money';
+import { parseAmount, roundMoney, toMinor } from '../../shared/money';
 import { isNiNumber, withoutNiNumbers } from '../../shared/privacy';
-import { ExtractedHmrcSchema, ExtractedPayslipSchema, ExtractionSchema, TermsRateSchema, type Extraction } from '../../shared/schema';
+import { ExtractedHmrcSchema, ExtractedPayslipSchema, ExtractionSchema, TermsRateSchema, type ExtractedPayslip, type Extraction } from '../../shared/schema';
 import { payeReference } from '../analytics/sources';
 import { formatZodError } from '../store';
 
@@ -74,7 +74,7 @@ const HMRC_FIELDS: Record<string, string[]> = {
 };
 
 /**
- * A payslip in full, HMRC's records, an account's terms and the other values printed (extract-13),
+ * A payslip in full, HMRC's records, an account's terms and the other values printed (extract-14),
  * as the reader gives them, made into what an extraction keeps. One that cannot be made valid is left out, with a
  * warning; a National Insurance number in any of them is taken out.
  */
@@ -105,6 +105,20 @@ function readEverything(fixed: Record<string, unknown>, original: Record<string,
       if (slip.success) return [slip.data];
       warnings.push(`Payslip ${i + 1} could not be kept in full: ${formatZodError(slip.error)}`);
       return [];
+    });
+  }
+  // The employer's pension on a payslip is kept with the payslip in full (its employer costs), as
+  // the payslips read on this machine keep it: a figure for it as well would hold it twice. A figure
+  // the payslip's costs leave out moves there; one that disagrees with them stays, for you to see.
+  const slips = Array.isArray(fixed.payslips) ? (fixed.payslips as ExtractedPayslip[]) : [];
+  if (slips.length && Array.isArray(fixed.figures)) {
+    fixed.figures = (fixed.figures as Record<string, unknown>[]).filter((f) => {
+      if (f.kind !== 'pension_contribution_employer' || typeof f.amount !== 'number') return true;
+      const slip = slips.length === 1 ? slips[0] : slips.find((p) => (p.periodEnd ?? p.payDate) === f.periodEnd);
+      if (!slip) return true;
+      if (slip.employerCosts.pension === undefined) slip.employerCosts = { ...slip.employerCosts, pension: f.amount };
+      else if (toMinor(slip.employerCosts.pension) !== toMinor(f.amount)) return true;
+      return false;
     });
   }
   if (Array.isArray(fixed.hmrc)) {

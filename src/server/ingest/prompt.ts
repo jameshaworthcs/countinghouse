@@ -10,7 +10,7 @@
 import { ACCOUNT_TYPES, ASSET_CLASSES, EXTRACTION_DOC_TYPES, FIGURE_KINDS, TERMS_RATE_APPLIES } from '../../shared/schema';
 
 export const PROMPT_VERSION = 'extract-11';
-export const PROMPT_VERSION_EVERYTHING = 'extract-13';
+export const PROMPT_VERSION_EVERYTHING = 'extract-14';
 
 /** The prompt version a reading is made with. */
 export const promptVersion = (everything: boolean) => (everything ? PROMPT_VERSION_EVERYTHING : PROMPT_VERSION);
@@ -76,9 +76,9 @@ Accuracy matters more than completeness:
     - Holiday balances (accrued, taken, carried over, left) are not figures.
     For every figure that is not earned_pay, work is null.`;
 
-/** Rules 20 to 23: everything else the document prints (extract-13). */
+/** Rules 20 to 23: everything else the document prints (extract-14). */
 const EVERYTHING_RULES = `
-20. payslips: each payslip on the document in full, as well as its figures under rule 13.
+20. payslips: each payslip on the document in full, as well as its figures for the period under rule 13: gross_pay, tax_deducted, national_insurance, pension_contribution_employee (the pension deducted from your pay) and student_loan_deducted, each when printed. The employer's NI and pension are never figures: they go in employerCosts.
     - employer as the payslip names it; otherNames for any other company it prints (a group company); payeReference ("123/AB45678") and payrollNumber (your payroll or works number) when printed.
     - payDate is the date it prints; periodStart and periodEnd the pay period; periodLabel the period as printed ("Sep-2026"); periodNumber the tax period number ("Week/Month No. 07" → 7); frequency weekly, fortnightly, four-weekly or monthly when it says.
     - taxCode without its basis ("1257L"), and cumulative false when it is week 1 / month 1 (M1, W1, X); niLetter is the National Insurance category letter only ("A", from "AB123456C - A" or "NI Code: A"). Never output the National Insurance number itself.

@@ -1,0 +1,78 @@
+{"summary": {
+ "ranAt": "2026-10-01T21:29:09.517Z",
+ "promptVersion": "extract-14-draft",
+ "label": "payslip-employer-pension-once",
+ "model": "app default",
+ "effort": "app default",
+ "verifyModel": "app default",
+ "readTwice": 1,
+ "confirmedByFigures": 0,
+ "withDisagreements": 1,
+ "cases": 1,
+ "minutes": 0.6,
+ "costUsd": 0.19,
+ "fieldAccuracy": 96.9,
+ "rows": {
+  "expected": 0,
+  "found": 0,
+  "extra": 0
+ },
+ "byField": {
+  "nothingNew": {
+   "correct": 1,
+   "total": 1,
+   "pct": 100
+  },
+  "figure": {
+   "correct": 4,
+   "total": 5,
+   "pct": 80
+  },
+  "figureYear": {
+   "correct": 4,
+   "total": 4,
+   "pct": 100
+  },
+  "payslip": {
+   "correct": 1,
+   "total": 1,
+   "pct": 100
+  },
+  "payslipNet": {
+   "correct": 1,
+   "total": 1,
+   "pct": 100
+  },
+  "payslipCodes": {
+   "correct": 1,
+   "total": 1,
+   "pct": 100
+  },
+  "payslipLine": {
+   "correct": 8,
+   "total": 8,
+   "pct": 100
+  },
+  "payslipNoExtraLine": {
+   "correct": 2,
+   "total": 2,
+   "pct": 100
+  },
+  "payslipYtd": {
+   "correct": 9,
+   "total": 9,
+   "pct": 100
+  }
+ },
+ "byKind": {
+  "png": 96.9
+ },
+ "byTag": {
+  "png": 96.9,
+  "figures": 96.9,
+  "payslip": 96.9
+ }
+},
+"results": [
+{"id":"png-payslip-scan","title":"A scanned payslip in a layout read by no rule: every line, the totals, the codes and the year to date","tags":["png","figures","payslip"],"kind":"png","status":"review","engine":"claude-cli","model":"claude-opus-5-5","durationMs":32190,"costUsd":0.1855,"confidence":"high","warnings":[],"notes":["The payslip prints no pay period dates, only 'Tax period: Month 5' and pay date 28/08/2026. The figures use August 2026 (calendar month), taken from the pay date and file name."],"verification":{"method":"second-reading","firstModel":"claude-sonnet-5-5","secondModel":"claude-opus-5-5","reasons":2,"disagreements":["Total payments: period ending none in Sonnet, 2026-08-31 in Opus","PAYE tax: period ending none in Sonnet, 2026-08-31 in Opus","National Insurance: period ending none in Sonnet, 2026-08-31 in Opus","Student loan (Plan 2): period ending none in Sonnet, 2026-08-31 in Opus"],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"figure":{"correct":4,"total":5},"figureYear":{"correct":4,"total":4},"payslip":{"correct":1,"total":1},"payslipNet":{"correct":1,"total":1},"payslipCodes":{"correct":1,"total":1},"payslipLine":{"correct":8,"total":8},"payslipNoExtraLine":{"correct":2,"total":2},"payslipYtd":{"correct":9,"total":9}},"rows":{"expected":0,"found":0,"extra":0},"errors":["figure pension_contribution_employee 125: missing"],"score":0.96875}}
+]}
