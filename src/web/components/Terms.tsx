@@ -11,9 +11,9 @@ import { useApi } from '../lib/api';
 import { formatDate, money } from '../lib/format';
 import { Badge, Callout, Card, StatusBadge } from './ui';
 
-/** "34.94% simple, variable". */
-export function rateText(r: Pick<TermsRate, 'rate' | 'basis' | 'variable'>): string {
-  return [`${r.rate}%`, [r.basis, r.variable === undefined ? '' : r.variable ? 'variable' : 'fixed'].filter(Boolean).join(', ')].filter(Boolean).join(' ');
+/** "34.94% simple, variable"; "2.104% a month". */
+export function rateText(r: Pick<TermsRate, 'rate' | 'per' | 'basis' | 'variable'>): string {
+  return [`${r.rate}%${r.per === 'month' ? ' a month' : ''}`, [r.basis, r.variable === undefined ? '' : r.variable ? 'variable' : 'fixed'].filter(Boolean).join(', ')].filter(Boolean).join(' ');
 }
 
 /** What a limit is on an account of this type. */

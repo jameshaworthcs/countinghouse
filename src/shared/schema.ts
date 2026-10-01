@@ -371,8 +371,10 @@ export type TermsRateApplies = (typeof TERMS_RATE_APPLIES)[number];
 /** A rate an account's document gives, as it gives it. */
 export const TermsRateSchema = z.object({
   applies: z.enum(TERMS_RATE_APPLIES),
-  /** % a year. */
+  /** A percentage: a year's, unless `per` says a month's. */
   rate: z.number().min(0).max(100),
+  /** `month` when the document gives a monthly rate (a card's "2.104% monthly interest rate"). */
+  per: z.literal('month').optional(),
   /** How it is stated: AER, APR, EAR (an overdraft's), a simple annual rate (a card's), or gross. */
   basis: z.enum(['AER', 'APR', 'EAR', 'simple', 'gross']).optional(),
   /** Whether it can change: false for a fixed rate. */

@@ -95,7 +95,7 @@ const EVERYTHING_RULES = `
     - state-pension-forecast: asOf, weekly, monthly, annual, payableFrom, recordTo, qualifyingYears, yearsNeeded, assumesYears, maximum.
 22. printed: every other labelled value the document prints that nothing above holds, so nothing on it is lost: plan and policy details, charges, transfer and projected values, estimated interest, a P60's National Insurance table and statutory payments, a P45's details, and the like. One entry each: section (the heading it is under, or null), label and value exactly as printed. Leave out transaction rows, holdings and anything already given under figures, payslips, hmrc or an account's terms. Never include a name, address, date of birth, National Insurance number, full account or card number, sort code, or a reference that identifies the account holder.
 23. terms, on each account: its terms as the document gives them; null when it gives none. The credit limit or arranged overdraft stays in creditLimit, and the AER in interestRate as well.
-    - rates: every rate it prints, one each: applies (interest when paid to you on what the account holds; purchases, cash or balance-transfers on a card; overdraft; loan when charged on a loan or mortgage; other), rate as a percentage a year (34.94 for 34.940%), basis as printed (AER, APR, EAR, simple for a card's annual simple rate, gross), variable true or false when it says, until the last day it applies when it ends (a promotional rate "until 31 Mar 2027", a boosted rate, a fixed rate's end), balance the amount at that rate when printed (a promotional balance), and label as printed ("Standard purchases", "Boosted rate").
+    - rates: every rate it prints, one each: applies (interest when paid to you on what the account holds; purchases, cash or balance-transfers on a card; overdraft; loan when charged on a loan or mortgage; other), rate as the percentage printed (34.94 for 34.940%), per month when the document gives it for a month ("2.104% monthly interest rate") and null for a year, basis as printed (AER, APR, EAR, simple for a card's annual simple rate, gross), variable true or false when it says, until the last day it applies when it ends (a promotional rate "until 31 Mar 2027", a boosted rate, a fixed rate's end), balance the amount at that rate when printed (a promotional balance), and label as printed ("Standard purchases", "Boosted rate").
     - minimumPayment and paymentDue: a card's minimum payment and the date it is due.`;
 
 /** The system prompt: rules 1 to 19, and 20 to 23 when reading everything. */
@@ -152,7 +152,8 @@ export function extractionJsonSchema(everything = false): Record<string, unknown
       type: 'array',
       items: object({
         applies: { type: 'string', enum: [...TERMS_RATE_APPLIES] },
-        rate: num('% a year, as printed'),
+        rate: num('The percentage printed'),
+        per: nullable({ type: 'string', enum: ['month'], description: 'month for a monthly rate' }),
         basis: nullable({ type: 'string', enum: ['AER', 'APR', 'EAR', 'simple', 'gross'] }),
         variable: nullable(bool()),
         until: nullable(date('The last day it applies, when it ends')),

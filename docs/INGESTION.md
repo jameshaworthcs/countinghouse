@@ -186,8 +186,8 @@ of the schema:
   with what it applies to, how it is stated, whether it is variable, when it ends (a promotional
   rate, a boost, a fixed term) and the amount at it; and a card's minimum payment and due date. The
   limit and the AER stay in `creditLimit` and `interestRate`, which every reading gives. A rate is
-  taken as the reader gives it, not as an amount (34.940% is not £34.94); one that cannot be kept is
-  left out with a warning.
+  taken as the reader gives it, not as an amount (34.940% is not £34.94), and a monthly rate stays
+  a month's (`per: "month"`); one that cannot be kept is left out with a warning.
 - **Never a personal identifier.** The prompt says to leave out names, addresses, dates of birth,
   NI numbers and full account numbers. The normaliser also takes any NI number out of all three,
   drops a payroll number that is one, and keeps only the NI letter.

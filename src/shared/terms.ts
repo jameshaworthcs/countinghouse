@@ -43,7 +43,7 @@ export function termsOfReading(r: { creditLimit?: number | undefined; interestRa
   return rates.length || content.limit !== undefined || content.minimumPayment !== undefined ? content : undefined;
 }
 
-const rateKey = (r: TermsRate) => JSON.stringify([r.applies, Math.round(r.rate * 1000), r.basis ?? '', r.variable ?? '', r.until ?? '', r.balance === undefined ? '' : toMinor(r.balance), r.label ?? '']);
+const rateKey = (r: TermsRate) => JSON.stringify([r.applies, Math.round(r.rate * 1000), r.per ?? '', r.basis ?? '', r.variable ?? '', r.until ?? '', r.balance === undefined ? '' : toMinor(r.balance), r.label ?? '']);
 
 /** Do two sets of terms say the same: the same rates (in any order), limit and minimum payment? */
 export function sameTerms(a: TermsContent, b: TermsContent): boolean {

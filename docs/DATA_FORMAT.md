@@ -154,7 +154,7 @@ day:
 |---|---|
 | `id` | `trm_…`, from the account, the day and the document (your own share one a day) |
 | `accountId`, `asOf` | the account, and the day they are given for: a statement's balance date |
-| `rates` | every rate it gives, `[{applies, rate, basis?, variable?, until?, balance?, label?}]` |
+| `rates` | every rate it gives, `[{applies, rate, per?, basis?, variable?, until?, balance?, label?}]` |
 | `limit` | a card's credit limit, or a current account's arranged overdraft (optional) |
 | `minimumPayment`, `paymentDue` | a card's minimum payment, and the day it is due (optional) |
 | `source`, `createdAt` | the document (`importId`, `documentId`) |
@@ -162,8 +162,10 @@ day:
 - `applies`: `interest` (paid to you on what the account holds: a saver's AER, a current account's
   credit interest, an investment account's cash), `purchases`, `cash` and `balance-transfers` (a
   card's), `overdraft`, `loan` (charged on a loan or mortgage), `other`.
-- `rate` is a percentage a year as printed (`34.94`). `basis` is how it is stated: `AER`, `APR`,
-  `EAR`, `simple` (a card's annual simple rate) or `gross`. `variable` is false for a fixed rate.
+- `rate` is the percentage printed (`34.94`): a year's, or a month's with `per: "month"` (a card's
+  "2.104% monthly interest rate", never made into a year's). `basis` is how it is stated: `AER`,
+  `APR`, `EAR`, `simple` (a card's annual simple rate) or `gross`. `variable` is false for a fixed
+  rate.
 - `until` is the last day a rate applies when it ends: a promotional rate, a boost, a fixed term.
   `balance` is the amount at that rate when the document gives it. `label` is its name as printed.
 

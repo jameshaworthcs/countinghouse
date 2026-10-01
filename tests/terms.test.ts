@@ -119,17 +119,19 @@ describe('terms from a statement', () => {
   it('the reader’s rates are kept as printed, not as money, with their dates and amounts repaired', () => {
     const { extraction, warnings } = normaliseExtraction({
       documentType: 'credit_card_statement',
-      accounts: [{ accountName: 'Card', transactions: [], terms: { rates: [{ applies: 'purchases', rate: 40.876, basis: 'simple', variable: null, until: null, balance: null, label: 'Standard purchases' }, { applies: 'purchases', rate: '0%', basis: null, variable: null, until: '31 Mar 2027', balance: '£2,716.30', label: 'Promotional purchases' }, { applies: 'nonsense', rate: 1, basis: null, variable: null, until: null, balance: null, label: null }], minimumPayment: '£72.00', paymentDue: '27/05/2026' } }],
+      accounts: [{ accountName: 'Card', transactions: [], terms: { rates: [{ applies: 'purchases', rate: 40.876, basis: 'simple', variable: null, until: null, balance: null, label: 'Standard purchases' }, { applies: 'purchases', rate: '0%', basis: null, variable: null, until: '31 Mar 2027', balance: '£2,716.30', label: 'Promotional purchases' }, { applies: 'purchases', rate: 2.104, per: 'month', basis: null, variable: null, until: null, balance: null, label: 'Purchases' }, { applies: 'nonsense', rate: 1, basis: null, variable: null, until: null, balance: null, label: null }], minimumPayment: '£72.00', paymentDue: '27/05/2026' } }],
     });
     expect(extraction.accounts[0]!.terms).toEqual({
       rates: [
         { applies: 'purchases', rate: 40.876, basis: 'simple', label: 'Standard purchases' },
         { applies: 'purchases', rate: 0, until: '2027-03-31', balance: 2716.3, label: 'Promotional purchases' },
+        // A monthly rate stays a month's: it is not made into a year's.
+        { applies: 'purchases', rate: 2.104, per: 'month', label: 'Purchases' },
       ],
       minimumPayment: 72,
       paymentDue: '2026-05-27',
     });
-    expect(warnings.join(' ')).toMatch(/a rate it prints could not be kept \(3\)/);
+    expect(warnings.join(' ')).toMatch(/a rate it prints could not be kept \(4\)/);
   });
 });
 

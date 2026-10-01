@@ -165,8 +165,8 @@ rates, its limit and a card's minimum payment, as each document gives them on it
   (`TERMS_ENDING_DAYS`) is shown on the account's page with what applies after it (the standing
   rate of its kind, when the document gives one), or as ended once past. On an open account, one
   that has not ended is an alert on the overview.
-- **The rate projections use** (the interest row above): the first interest rate in the latest
-  terms that give one that is still running on the day projected from. When every one has ended
+- **The rate projections use** (the interest row above): the first interest rate a year (not a
+  monthly one) in the latest terms that give one that is still running on the day projected from. When every one has ended
   (a boost, a fixed term), what follows is not known from the documents, and the next source
   stands in, its basis saying which rate ended when.
 

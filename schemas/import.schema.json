@@ -790,6 +790,10 @@
                               "minimum": 0,
                               "maximum": 100
                             },
+                            "per": {
+                              "type": "string",
+                              "const": "month"
+                            },
                             "basis": {
                               "type": "string",
                               "enum": [
@@ -2456,6 +2460,10 @@
                               "minimum": 0,
                               "maximum": 100
                             },
+                            "per": {
+                              "type": "string",
+                              "const": "month"
+                            },
                             "basis": {
                               "type": "string",
                               "enum": [
@@ -4113,6 +4121,10 @@
                           "type": "number",
                           "minimum": 0,
                           "maximum": 100
+                        },
+                        "per": {
+                          "type": "string",
+                          "const": "month"
                         },
                         "basis": {
                           "type": "string",

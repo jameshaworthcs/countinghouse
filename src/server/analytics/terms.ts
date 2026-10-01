@@ -16,12 +16,14 @@ export const TERMS_ENDING_DAYS = 60;
  * interest rates still running on `on`, or, when every one has ended, the one that ended.
  */
 export function interestFromTerms(store: Store, accountId: string, on: ISODate): { terms: Terms; rate: TermsRate; ended: boolean } | undefined {
+  // A year's rates: a monthly one is not a rate a year.
+  const yearly = (r: TermsRate) => r.applies === 'interest' && r.per !== 'month';
   const terms = store
     .terms(accountId)
-    .filter((t) => t.rates.some((r) => r.applies === 'interest'))
+    .filter((t) => t.rates.some(yearly))
     .at(-1);
   if (!terms) return undefined;
-  const rates = terms.rates.filter((r) => r.applies === 'interest');
+  const rates = terms.rates.filter(yearly);
   const running = rates.find((r) => !r.until || r.until >= on);
   return running ? { terms, rate: running, ended: false } : { terms, rate: rates[0]!, ended: true };
 }

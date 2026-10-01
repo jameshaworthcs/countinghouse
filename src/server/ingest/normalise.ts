@@ -141,7 +141,7 @@ function readEverything(fixed: Record<string, unknown>, original: Record<string,
     const rates = (Array.isArray(t.rates) ? (t.rates as Record<string, unknown>[]) : []).flatMap((r, ri) => {
       const rate = typeof r.rate === 'number' ? r.rate : typeof r.rate === 'string' ? Number.parseFloat(r.rate.replace(/[%\s]/g, '')) : Number.NaN;
       const label = typeof r.label === 'string' && r.label.trim() ? withoutNiNumbers(r.label.trim()).slice(0, 120) : undefined;
-      const parsed = TermsRateSchema.safeParse(present({ applies: r.applies, rate: Number.isFinite(rate) ? Math.round(rate * 1000) / 1000 : undefined, basis: r.basis, variable: r.variable, until: day(r.until), balance: money(r.balance), label }));
+      const parsed = TermsRateSchema.safeParse(present({ applies: r.applies, rate: Number.isFinite(rate) ? Math.round(rate * 1000) / 1000 : undefined, per: r.per === 'month' ? 'month' : undefined, basis: r.basis, variable: r.variable, until: day(r.until), balance: money(r.balance), label }));
       if (parsed.success) return [parsed.data];
       warnings.push(`Account ${i + 1}: a rate it prints could not be kept (${ri + 1}): ${formatZodError(parsed.error)}`);
       return [];
