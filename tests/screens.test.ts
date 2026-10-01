@@ -265,12 +265,12 @@ describe('payslips and P60s', () => {
       { label: 'Other pay (at least: 1 salary payment received, after tax)', amount: 1310.18, kind: 'pay' },
     ]);
     expect(band.basis).toBe('minimum');
-    // A P60 from the same employer replaces its payslips rather than adding to them.
+    // A P60's figures from the same employer (typed by hand here) replace its payslips rather than adding to them.
     await store.addFigures([fig(4, 'gross_pay', 9000, 'Larchwood Data Ltd'), fig(5, 'gross_pay', 30000, 'Oakfield Engineering Ltd')], 't');
     band = allowances(store, '2026/27', '2026-09-29').taxBand;
     expect(band.lines.filter((l) => l.kind === 'pay').map((l) => [l.label, l.amount])).toEqual([
-      ['Pay from Larchwood Data Ltd (P60)', 9000],
-      ['Pay from Oakfield Engineering Ltd (P60)', 30000],
+      ['Pay from Larchwood Data Ltd (your figure)', 9000],
+      ['Pay from Oakfield Engineering Ltd (your figure)', 30000],
     ]);
     expect(band.basis).toBe('documents');
     const sa = selfAssessment(store, '2026/27');
@@ -280,8 +280,8 @@ describe('payslips and P60s', () => {
   it('Self Assessment shows payslips as pay so far, to be settled by the P60', async () => {
     await store.addFigures(payslips, 't');
     const item = selfAssessment(store, '2026/27').sections[0]!.items.find((i) => i.id === 'pay')!;
-    expect(item).toMatchObject({ amount: 3022.9, status: 'check', basis: 'Payslips so far' });
-    expect(item.notes.join(' ')).toMatch(/3 payslips so far/);
+    expect(item).toMatchObject({ amount: 3022.9, status: 'check', basis: 'So far this year' });
+    expect(item.notes.join(' ')).toMatch(/LARCHWOOD DATA LTD: pay £3,022\.90, from 3 payslips, so far: its P60 for 2026\/27 gives the year's figure/);
   });
 
   it('two months of equal pay are two figures, not a duplicate', async () => {

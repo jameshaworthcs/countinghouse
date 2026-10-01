@@ -7,9 +7,10 @@ import type { SaItem, SaSection, SaSource, SelfAssessmentResponse } from '../../
 import { addDays, formatDate, maxDate, minDate, today } from '../../shared/dates';
 import { formatMoney, fromMinor, toMinor } from '../../shared/money';
 import type { Figure, FigureKind } from '../../shared/schema';
-import { parseTaxYear, taxYearOf, taxYearParams, type TaxYear } from '../../shared/uk';
+import { parseTaxYear, taxYearOf, taxYearParams, untaxedIncomeNoticeBy, type TaxYear } from '../../shared/uk';
 import type { Store } from '../store';
-import { allowances, giftAid, payByEmployer, pensionTotals, reliefAtSource } from './allowances';
+import { allowances, giftAid, pensionTotals, reliefAtSource } from './allowances';
+import { employerYears, type PaySource } from './sources';
 
 export const SA_DISCLAIMER =
   'This page gathers figures from your own data to help you fill in your Self Assessment return. It is not tax advice and it can be incomplete or wrong: bank data shows net pay, may miss interest paid into accounts you have not imported, and cannot know which donations were Gift Aided. Check every figure against your P60, P11D, bank interest statements, pension and dividend statements before you submit. You are responsible for your return.';
@@ -37,15 +38,26 @@ export function selfAssessment(store: Store, label?: string): SelfAssessmentResp
   const mayNeedToFile: SelfAssessmentResponse['mayNeedToFile'] = [];
 
   // ── Employment (SA102) ──
-  // Each employer's P60, else its payslips so far: never both, so nothing counts twice.
-  const byEmployer = payByEmployer(store, ty);
-  const taxByEmployer = payByEmployer(store, ty, 'tax_deducted');
-  const pay = byEmployer.flatMap((e) => e.figures);
-  const tax = taxByEmployer.flatMap((e) => e.figures);
-  const payslipsOnly = byEmployer.filter((e) => !e.fromP60);
-  const payslipNotes = payslipsOnly.map((e) => `${e.payer || 'An employer'}: ${e.figures.length} payslip${e.figures.length === 1 ? '' : 's'} so far (${formatMoney(e.amount)}). Its P60 for ${ty.label} gives the year's figure.`);
+  // Each job's pay and tax from the one source that counts (sources.ts): its P60 or another figure for
+  // the whole year, else the latest of its documents to date and its payslips so far. Never two of
+  // them, so nothing counts twice.
+  const jobs = employerYears(store, ty);
+  const withPay = jobs.filter((e) => e.chosen.gross_pay);
+  const pay = withPay.flatMap((e) => e.chosen.gross_pay!.figures);
+  const tax = jobs.flatMap((e) => e.chosen.tax_deducted?.figures ?? []);
+  const soFar = withPay.filter((e) => !e.chosen.gross_pay!.final);
+  const taxUnknown = withPay.filter((e) => !e.chosen.tax_deducted);
+  const taxSoFar = jobs.filter((e) => e.chosen.tax_deducted && !e.chosen.tax_deducted.final);
+  const fromWhat = (src: PaySource) =>
+    src.kind === 'payslips' ? `${src.label}: its P60 for ${ty.label} gives the year's figure` : src.kind === 'yours' ? 'your figure' : src.final ? (src.label === 'P60' ? 'its P60' : 'a document for the whole year') : `a document ${src.label}: its P60 gives the year's figure`;
+  const jobNotes = withPay.map((e) => {
+    const t = e.chosen.tax_deducted;
+    return `${e.payer || 'An employer'}${e.payeReference ? ` (PAYE ${e.payeReference})` : ''}: pay ${formatMoney(e.chosen.gross_pay!.amount)}, from ${fromWhat(e.chosen.gross_pay!)}; tax ${t ? formatMoney(t.amount) : 'not known'}.`;
+  });
+  const allP60 = withPay.every((e) => e.chosen.gross_pay!.label === 'P60');
   const bik = figuresOf(store, ty, 'benefit_in_kind');
-  const slDeducted = figuresOf(store, ty, 'student_loan_deducted');
+  // Student loan deducted, like pay: one source per job.
+  const slDeducted = jobs.flatMap((e) => e.chosen.student_loan_deducted?.figures ?? []);
   const salaryTx = store.transactions().filter((t) => inYear(t.date, ty) && t.category === 'salary' && t.amount > 0);
   const employment: SaItem[] = [
     {
@@ -53,10 +65,10 @@ export function selfAssessment(store: Store, label?: string): SelfAssessmentResp
       label: 'Pay from employment',
       where: 'SA102 Employment: pay from this employment (from your P60/P45)',
       amount: pay.length ? sumFigures(pay) : null,
-      status: pay.length ? (payslipsOnly.length ? 'check' : 'ready') : salaryTx.length ? 'missing' : 'not-applicable',
-      basis: pay.length ? (payslipsOnly.length ? (payslipsOnly.length === byEmployer.length ? 'Payslips so far' : 'P60 and payslips so far') : 'P60 figures') : 'No P60 imported',
+      status: pay.length ? (soFar.length ? 'check' : 'ready') : salaryTx.length ? 'missing' : 'not-applicable',
+      basis: pay.length ? (soFar.length ? (soFar.length === withPay.length ? 'So far this year' : 'The year’s figures, and so far for some jobs') : allP60 ? 'P60 figures' : 'Figures for the whole year (P60s and HMRC’s)') : 'No P60 imported',
       notes: pay.length
-        ? ['Use one SA102 per employer. The figure should match box "Pay" on your P60.', ...payslipNotes]
+        ? ['Use one SA102 per employer. The figure should match box "Pay" on its P60 (or P45 for a job you left).', ...jobNotes]
         : salaryTx.length
           ? [`${salaryTx.length} salary payments were found in your bank data, but those are net of tax. Upload your ${ty.label} P60 to get the gross figure.`]
           : [],
@@ -67,9 +79,11 @@ export function selfAssessment(store: Store, label?: string): SelfAssessmentResp
       label: 'UK tax taken off pay',
       where: 'SA102 Employment: UK tax taken off pay',
       amount: tax.length ? sumFigures(tax) : null,
-      status: tax.length ? (taxByEmployer.some((e) => !e.fromP60) ? 'check' : 'ready') : pay.length || salaryTx.length ? 'missing' : 'not-applicable',
-      basis: tax.length ? (taxByEmployer.some((e) => !e.fromP60) ? 'Payslips so far' : 'P60 figures') : 'Not found',
-      notes: [],
+      status: tax.length ? (taxUnknown.length || taxSoFar.length ? 'check' : 'ready') : pay.length || salaryTx.length ? 'missing' : 'not-applicable',
+      basis: tax.length ? (taxUnknown.length ? 'Some jobs only' : taxSoFar.length ? 'So far this year' : 'Figures for the whole year') : 'Not found',
+      notes: taxUnknown.length
+        ? [`Tax taken off is not known for ${taxUnknown.map((e) => e.payer || 'an employer').join(', ')}: ${taxUnknown.length === 1 ? 'its P60 gives it' : 'their P60s give it'} (or HMRC’s page for each job, under Check your Income Tax).`]
+        : [],
       sources: figureSources(tax),
     },
     {
@@ -94,7 +108,7 @@ export function selfAssessment(store: Store, label?: string): SelfAssessmentResp
     },
   ];
   sections.push({ id: 'employment', title: 'Employment', description: 'From your P60 (and P11D if you have benefits).', items: employment });
-  checklist.push({ id: 'p60', done: byEmployer.length > 0 && !payslipsOnly.length, label: `P60 for ${ty.label} imported`, detail: 'Drop the PDF on the Import page; the pay and tax figures are extracted.' });
+  checklist.push({ id: 'p60', done: withPay.length > 0 && !soFar.length && !taxUnknown.length, label: `P60 for ${ty.label} imported for every job`, detail: 'Drop the PDF on the Import page; the pay and tax figures are extracted.' });
 
   // ── Savings and investment income (SA100 TR 3) ──
   const interestItemNotes: string[] = [];
@@ -267,6 +281,19 @@ export function selfAssessment(store: Store, label?: string): SelfAssessmentResp
       reason: 'Interest above your Personal Savings Allowance',
       detail: 'HMRC usually collects the tax through your tax code or sends a tax calculation (simple assessment). You can also declare it on a return.',
     });
+  }
+  if (allow.dividends.amount > allow.dividends.allowance) {
+    // gov.uk, "How to report tax on dividends": over £10,000 a return; up to it, through your tax code.
+    const noticeBy = formatDate(untaxedIncomeNoticeBy(ty));
+    const threshold = formatMoney(params.dividendsReturnThreshold, { decimals: 0 });
+    mayNeedToFile.push(
+      allow.dividends.amount > params.dividendsReturnThreshold
+        ? { reason: `Dividends over ${threshold}`, detail: `${formatMoney(allow.dividends.amount)} of dividends this tax year: above ${threshold} you must send a Self Assessment return. If you do not usually send one, register by ${noticeBy}.` }
+        : {
+            reason: 'Dividends over the dividend allowance',
+            detail: `${formatMoney(allow.dividends.amount)} of dividends, over the ${formatMoney(allow.dividends.allowance, { decimals: 0 })} allowance. If you send a return, they go on it. If not, HMRC must hear of them by ${noticeBy}: ask it to collect the tax through your tax code, or call its helpline.`,
+          },
+    );
   }
   if (rasPersonalGross > 0 && (band === 'higher' || band === 'additional')) {
     mayNeedToFile.push({ reason: 'Higher-rate relief on pension contributions', detail: 'Claim the extra relief on relief-at-source contributions via your return (or by contacting HMRC).' });

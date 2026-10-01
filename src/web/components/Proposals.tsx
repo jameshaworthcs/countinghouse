@@ -1,7 +1,7 @@
 // Proposed fixes: what an agent proposes changing in your data, each change with its reason and the
 // rows it is about, waiting for you on the Import page (src/server/proposals.ts).
 
-import { ArrowDown, ArrowRight, ArrowRightLeft, ArrowUpDown, CalendarDays, ChevronRight, CircleCheck, CircleSlash, CopyX, FileText, Link2, PiggyBank, Sparkles, Tag, Unlink, Wand2, X } from 'lucide-react';
+import { ArrowDown, ArrowRight, ArrowRightLeft, ArrowUpDown, CalendarDays, ChevronRight, CircleCheck, CircleSlash, CopyX, FileText, Link2, NotebookPen, PiggyBank, Sparkles, Tag, Unlink, Wand2, X } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import type { ProposalBalance, ProposalListResponse, ProposalRow, ProposalSummary, ProposalView } from '../../shared/api';
@@ -19,6 +19,7 @@ export const CHANGE_LABELS: Record<ProposedChangeKind, { title: string; count: (
   unlink_transfer: { title: 'Undo a transfer link', count: (n) => `${plural(n, 'transfer link')} undone`, icon: <Unlink className="size-4" aria-hidden /> },
   link_transfer: { title: 'Link as a transfer', count: (n) => `${plural(n, 'transfer')} linked`, icon: <Link2 className="size-4" aria-hidden /> },
   set_category: { title: 'Change a category', count: (n) => plural(n, 'category', 'categories'), icon: <Tag className="size-4" aria-hidden /> },
+  set_note: { title: 'Add a note', count: (n) => plural(n, 'note'), icon: <NotebookPen className="size-4" aria-hidden /> },
   remove_duplicate: { title: 'Remove a duplicate', count: (n) => `${plural(n, 'duplicate')} removed`, icon: <CopyX className="size-4" aria-hidden /> },
   remove_internal_move: { title: 'Remove a move inside the account', count: (n) => `${plural(n, 'move')} inside an account removed`, icon: <PiggyBank className="size-4" aria-hidden /> },
   remove_wrong_sign: { title: 'Remove a row read with the wrong sign', count: (n) => `${plural(n, 'row')} with the wrong sign removed`, icon: <ArrowUpDown className="size-4" aria-hidden /> },
@@ -259,6 +260,18 @@ export function ChangeBody({ change, view }: { change: ProposedChange; view: Pro
             <Badge tone="muted">{cats.name(t?.category)}</Badge>
             <ArrowRight className="size-3.5 text-ink-3" aria-hidden />
             <Badge tone="accent">{cats.path(change.category)}</Badge>
+          </div>
+        </div>
+      );
+    }
+    case 'set_note': {
+      const t = row(change.transaction);
+      return (
+        <div className="grid gap-2">
+          <TxLine row={t} view={view} />
+          <div className="flex flex-wrap items-baseline gap-2 text-[13px]">
+            <span className="text-ink-3">Note</span>
+            <span className="text-ink">{change.note}</span>
           </div>
         </div>
       );

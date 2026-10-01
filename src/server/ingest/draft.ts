@@ -23,6 +23,7 @@ import type {
   Holding,
   Transaction,
 } from '../../shared/schema';
+import { isNiNumber, withoutNiNumbers } from '../../shared/privacy';
 import { DraftSchema, WorkDetailSchema, type WorkDetail } from '../../shared/schema';
 import { earnedReplaced, inferPayroll } from '../analytics/earned';
 import type { Store } from '../store';
@@ -130,7 +131,8 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
     (txByAmount.get(k) ?? txByAmount.set(k, []).get(k)!).push(t);
   }
   const takenTransfers = new Set<string>();
-  const notes = [...extraction.notes, ...(ctx.warnings ?? [])];
+  // A National Insurance number the reader copied into its remarks is not kept (shared/privacy.ts).
+  const notes = [...extraction.notes.map(withoutNiNumbers), ...(ctx.warnings ?? [])];
   const liveView = isLiveView(extraction.documentType, ctx.document.mediaType);
   let batchMatch: Draft['batchMatch'];
   // Each account's latest holdings: a fund's own page names no account, but the account holding it.
@@ -487,7 +489,8 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
       // Earned pay belongs to no tax year until it is paid.
       ...(!earned && f.taxYear && /^\d{4}\/\d{2}$/.test(f.taxYear) ? { taxYear: f.taxYear } : {}),
       ...(f.payer ? { payer: f.payer } : {}),
-      ...(f.payerReference ? { payerReference: f.payerReference } : {}),
+      // A "reference" that is your National Insurance number is not the payer's: it is left out.
+      ...(f.payerReference && !isNiNumber(f.payerReference) ? { payerReference: f.payerReference } : {}),
       ...(account ? { accountId: account.id } : {}),
       ...(taxCode && !earned ? { taxCode } : {}),
       ...(paidBy && paidBy !== f.payer ? { paidBy } : {}),

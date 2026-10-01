@@ -160,10 +160,18 @@ Standalone figures from documents, used for Self Assessment and the Pay tab:
   `tax_deducted` `national_insurance` `pension_contribution_employee`
   `pension_contribution_employer` `pension_tax_relief` `student_loan_deducted` `benefit_in_kind`
   `gift_aid_donation` `child_benefit` `self_employment_income` `self_employment_expenses`
-  `capital_gain` `capital_loss` `rental_income` `other_income` `earned_pay` `other`.
+  `capital_gain` `capital_loss` `rental_income` `other_income` `earned_pay`
+  `pension_income_forecast` `other`.
 - Other fields: `label` (as printed), `amount`, `currency`, `taxYear` (`2025/26`), `periodStart`,
-  `periodEnd`, `date`, `accountId`, `payer`, `payerReference`, `taxCode` (a payslip's or P60's
-  PAYE code, `1257L M1`), `notes`, `attributes`, `source`, `createdAt`.
+  `periodEnd`, `date`, `accountId`, `payer`, `payerReference` (the employer's PAYE reference or a
+  company number; never a National Insurance number, which is left out), `taxCode` (a payslip's or
+  P60's PAYE code, `1257L M1`), `notes`, `attributes`, `source`, `createdAt`.
+- Several documents can state one job's figure for a year (a P60, a P45, HMRC's pages, the
+  payslips). All are kept; exactly one counts ([FORMULAS.md §11](FORMULAS.md), "One source per
+  employer and year").
+- `pension_income_forecast` is a State Pension or defined-benefit pension's forecast income per
+  year, as at `date`, on its `accountId`: a forecast has no balance to carry it. It is never
+  income for tax.
 - `earned_pay` is a timesheet's pay for one period of work, before it is paid. It has no
   `taxYear` and is never income for tax: the payslip that pays it is. It has `work` (`role`,
   `daysWorked`, `holidayDays`, `hoursWorked`, `rate`, `ratePer`: `day` or `hour`) and, when the
@@ -228,6 +236,8 @@ lives in the work area (`<work>/proposals/`), never here.
   - `unlink_transfer {transaction}`: both rows of its transfer are left unlinked.
   - `link_transfer {from, to}`: money out and the same money in, linked as a transfer.
   - `set_category {transaction, category}`.
+  - `set_note {transaction, note}`: what the payment was for, from a document. Applied, it is your
+    note; it never replaces one already there.
   - `remove_duplicate {transaction, sameAs}`: a row that repeats rows adding up to it.
   - `remove_wrong_sign {transaction, recordedAs}`: a row a document was read into with the wrong
     sign, whose money rows from another document record the right way round.
@@ -432,6 +442,7 @@ An ask without a check is ticked by you (`doneAt`). Agents cannot set `doneAt` o
 | 1 | first format | |
 | 2 | Assumptions become data. `profile.assumedRealReturn` is removed: kept as your global `return.expected` override (nominal, at 2% inflation) if you had changed it from 4%. Added `instruments.json`, `assumptions.jsonl`, `research.jsonl`, `insights.jsonl`, `context.jsonl`, `notes.jsonl`, `settings.agents`, and the optional `payeeSetBy`, `corrections` and `result.sections` fields | `from: 1` in `src/server/migrations.ts` |
 | 3 | Balances say when on their day they were seen (`at`) and which imported figures you typed (`enteredBy`). Backfilled: your own balances given on their own day take the time you gave them; imported balances take the capture time of their screenshot, or, when the committed figure is not what the reader read, `enteredBy: "user"` and the time you committed it. Draft sections gain `readBalance` | `from: 2` in `src/server/migrations.ts` |
+| 4 | A pension forecast with no balance (a State Pension forecast) is kept as a `pension_income_forecast` figure. Backfilled from each committed import whose section had income per year and recorded no balance. National Insurance numbers are taken out of figures (a `payerReference` that is one is removed) and of the readings and drafts kept with imports (replaced by "[NI number]"); bank descriptions keep theirs, as source facts | `from: 3` in `src/server/migrations.ts` |
 
 Data written by a newer version of the app than the one running is read-only until the app is
 updated.

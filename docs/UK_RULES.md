@@ -173,11 +173,22 @@ change between years, so the page names sections, not boxes. Filing and payment 
 [gov.uk/check-if-you-need-tax-return](https://www.gov.uk/check-if-you-need-tax-return).
 **Everything on that page must be checked by you against your own documents before you submit.**
 
+**Dividends over the allowance** (`dividendsReturnThreshold`, `untaxedIncomeNoticeBy` in
+`src/shared/uk.ts`):
+
+- Up to **£10,000**: if you send a return, they go on it. If not, HMRC must hear of them after the
+  tax year ends and **before 5 October**, by asking it to collect the tax through your tax code or
+  by calling its helpline.
+- Over £10,000: you must send a return. If you do not usually send one, register for Self
+  Assessment by **5 October** after the tax year.
+- Within the dividend allowance there is nothing to report.
+
 ## Sources
 
 Checked 1 October 2026:
 
 - GOV.UK, [Rates and thresholds for employers 2026 to 2027](https://www.gov.uk/guidance/rates-and-thresholds-for-employers-2026-to-2027) (Class 1 NI thresholds and rates, emergency tax code)
+- GOV.UK, [Tax on dividends: how to report tax on dividends](https://www.gov.uk/tax-on-dividends/how-to-report-tax-on-dividends) (up to £10,000 through your tax code by 5 October; over £10,000 a return, registering by 5 October; 2026/27 dividend rates 10.75%, 35.75%, 39.35%)
 
 Checked 29 September 2026:
 

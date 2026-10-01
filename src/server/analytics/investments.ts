@@ -217,14 +217,19 @@ export function investments(store: Store, engine: BalanceEngine): InvestmentsRes
     if (ageOn(dob, now) >= store.profile.retirementAge) notes.push('You are at or past your retirement age in Settings; the figures are for today.');
   } else notes.push('Add your date of birth in Settings to see a retirement outlook.');
 
-  // State Pension: your forecast if you recorded one, else the full new State Pension (fallback).
+  // State Pension: your latest forecast if you recorded one (a forecast figure on the account, or a
+  // balance that carries the income), else the full new State Pension (fallback).
   const forecast = store.accounts
     .filter((a) => a.type === 'state_pension')
-    .map((a) => store.balances(a.id).findLast((b) => b.annualIncome !== undefined))
-    .find((b) => b !== undefined);
+    .flatMap((a) => [
+      ...store.balances(a.id).flatMap((b) => (b.annualIncome !== undefined ? [{ date: b.date, annualIncome: b.annualIncome }] : [])),
+      ...store.figures.flatMap((f) => (f.kind === 'pension_income_forecast' && f.accountId === a.id && f.date ? [{ date: f.date, annualIncome: f.amount }] : [])),
+    ])
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .at(-1);
   const spDate = dob ? statePensionDate(dob) : null;
   const statePension = forecast
-    ? { annual: forecast.annualIncome!, source: 'forecast' as const, basis: `Your forecast recorded on ${forecast.date} (in today's money)`, startsOn: spDate }
+    ? { annual: forecast.annualIncome, source: 'forecast' as const, basis: `Your forecast recorded on ${forecast.date} (in today's money)`, startsOn: spDate }
     : dob
       ? { annual: statePensionFullYearly(taxYearOf(now)), source: 'fallback' as const, basis: `Fallback: the full new State Pension for ${taxYearOf(now).label}. Your gov.uk forecast replaces it (it depends on your National Insurance record).`, startsOn: spDate }
       : null;

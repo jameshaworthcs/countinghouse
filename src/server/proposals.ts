@@ -193,6 +193,15 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
         patch(t, { category: c.category, categorisedBy: 'user', ...(untransferred && t.counterpartyAccountId ? { counterpartyAccountId: undefined } : {}), ...(payee && payee !== t.payee ? { payee } : {}) });
         return {};
       }
+      case 'set_note': {
+        const t = row(c.transaction);
+        if (!t) return { problem: gone(c.transaction) };
+        if ((t.notes ?? '').trim() === c.note.trim()) return { alreadySo: true };
+        // Yours wins: a note on the row (typed, or from a proposal you applied) is not replaced.
+        if (t.notes?.trim()) return { problem: `It has a note already (“${t.notes.trim().slice(0, 80)}${t.notes.trim().length > 80 ? '…' : ''}”), so a proposal leaves it to you: change it on the Transactions page if you want to.` };
+        patch(t, { notes: c.note.trim() });
+        return {};
+      }
       case 'remove_duplicate': {
         const t = row(c.transaction);
         // Gone already: what it asks for is done.
@@ -390,6 +399,7 @@ function namedRows(c: ProposedChange): string[] {
   switch (c.kind) {
     case 'unlink_transfer':
     case 'set_category':
+    case 'set_note':
       return [c.transaction];
     case 'link_transfer':
       return [c.from, c.to];

@@ -119,8 +119,8 @@ describe('an employer the bank calls something else', () => {
   it('a P60 is checked by its tax and NI; its pay is the payslips’ less pension taken before tax', async () => {
     await store.addFigures([p60('gross_pay', 3700), p60('tax_deducted', 400), p60('national_insurance', 200)], 'test: P60');
     const q = () => pay(store, new Coverage(store), '2026/27', '2026-09-30').employers.find((e) => e.payer === 'Quillon Systems Ltd')!;
-    expect(q().p60).toEqual({ gross: 3700, tax: 400, ni: 200, note: 'The payslips add up to it. Its pay is theirs less the £300.00 of pension taken before tax.' });
+    expect(q().document).toMatchObject({ title: 'Your figures for the year', final: true, gross: 3700, tax: 400, ni: 200, note: 'The payslips add up to it. Its pay is theirs less the £300.00 of pension taken before tax.' });
     await store.addFigures([p60('tax_deducted', 187.3, '-more')], 'test: more tax on the P60');
-    expect(q().p60!.note).toBe('The payslips’ tax comes to £187.30 less than its tax: some payslips are missing.');
+    expect(q().document!.note).toBe('The payslips’ tax comes to £187.30 less than its tax: some payslips are missing.');
   });
 });

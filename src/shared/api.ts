@@ -898,8 +898,12 @@ export interface PayEmployer {
   months: PayMonth[];
   /** Timesheet work this payroll pays (FORMULAS §17, "Earned pay"). */
   earned?: EarnedPayroll;
-  /** The year's P60, when there is one: the whole year, which the payslips should add up to, and whether they do. */
-  p60: { gross: number | null; tax: number | null; ni: number | null; note: string } | null;
+  /**
+   * The document beside the payslips: the year's P60 (or another figure for the whole year), else the
+   * latest one to a date (a P45, an HMRC page). The payslips paid by then should add up to it; `note`
+   * says whether they do (FORMULAS §11, "One source per employer and year").
+   */
+  document: { title: string; fileName?: string; importId?: string; final: boolean; asOf: string; gross: number | null; tax: number | null; ni: number | null; note: string } | null;
   totals: { gross: number | null; tax: number | null; ni: number | null; pension: number | null; studentLoan: number | null; paidIn: number };
 }
 

@@ -311,12 +311,14 @@ function EmployerCard({ e, choices }: { e: PayEmployer; choices: string[] }) {
       </div>
       )}
       {e.earned && <EarnedSection w={e.earned} choices={choices} />}
-      {(e.months.some((m) => m.note) || e.p60) && (
+      {(e.months.some((m) => m.note) || e.document) && (
         <div className="flex flex-col gap-1 border-t border-line px-5 py-3 text-[12.5px] text-ink-2">
-          {e.p60 && (
+          {e.document && (
             <span>
-              P60 for the year: pay {cell(e.p60.gross)}, tax {cell(e.p60.tax)}
-              {e.p60.ni !== null && <>, NI {cell(e.p60.ni)}</>}. {e.p60.note}
+              {e.document.title}
+              {e.document.fileName && <span className="text-ink-3"> ({e.document.fileName})</span>}: pay {cell(e.document.gross)}
+              {e.document.tax !== null && <>, tax {cell(e.document.tax)}</>}
+              {e.document.ni !== null && <>, NI {cell(e.document.ni)}</>}. {e.document.note}
             </span>
           )}
           {e.months

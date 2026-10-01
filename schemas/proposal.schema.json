@@ -138,6 +138,40 @@
               },
               "kind": {
                 "type": "string",
+                "const": "set_note"
+              },
+              "why": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000
+              },
+              "transaction": {
+                "type": "string",
+                "pattern": "^tx_[0-9a-f]{16}$"
+              },
+              "note": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              }
+            },
+            "required": [
+              "key",
+              "kind",
+              "why",
+              "transaction",
+              "note"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]{0,39}$"
+              },
+              "kind": {
+                "type": "string",
                 "const": "remove_duplicate"
               },
               "why": {

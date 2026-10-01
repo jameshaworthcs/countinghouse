@@ -319,6 +319,23 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
       ...(f.paidBy && f.paidBy !== f.payer ? { paidBy: f.paidBy } : {}),
       ...(f.work ? { work: f.work } : {}),
     }));
+  // A forecast with no balance (a State Pension forecast) is its income per year on its account
+  // (FORMULAS.md §9). With a balance, the balance carries it.
+  for (const section of draft.sections) {
+    const account = resolved.get(section.key);
+    if (!account || section.annualIncome === undefined || !section.balanceDate || (section.recordBalance && section.balance !== undefined)) continue;
+    figures.push({
+      id: figureId('pension_income_forecast', section.annualIncome, section.balanceDate, account.id, 'Forecast income per year', record.id),
+      kind: 'pension_income_forecast',
+      label: 'Forecast income per year',
+      amount: section.annualIncome,
+      currency: section.currency,
+      date: section.balanceDate,
+      accountId: account.id,
+      source,
+      createdAt: stamp,
+    });
+  }
 
   // Validate everything before the first write.
   for (const t of newTx) TransactionSchema.parse(t);

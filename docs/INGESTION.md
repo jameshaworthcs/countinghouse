@@ -458,6 +458,14 @@ read again.
   them out. Statement balances are of settled transactions, and the settled row arrives with the
   next statement. Include one only if you know it will never appear settled.
 - **Figures** are matched to an account by last 4 digits only when exactly one account has them.
+  Several documents can state one job's figure for a year; all are kept and exactly one counts
+  ([FORMULAS.md §11](FORMULAS.md), "One source per employer and year").
+- **A forecast with no balance** (a State Pension forecast: income per year, nothing held) is
+  recorded as a `pension_income_forecast` figure on its account, and the review page counts it as
+  "a pension forecast". With a balance, the balance carries the income.
+- **National Insurance numbers stay out.** A figure's `payerReference` that is one is left out (a
+  pension statement prints it as your "Reference"), and one in the reader's notes becomes
+  "[NI number]" (`shared/privacy.ts`). The document itself keeps it.
 - **Committing is safe to retry.** Everything is validated before the first write. Transaction ids
   include the import id, so committing the same import again adds nothing twice.
 - **Rows recorded meanwhile.** A draft's rows are checked against what was stored when it was

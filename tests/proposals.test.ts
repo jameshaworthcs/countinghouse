@@ -291,6 +291,26 @@ describe('an agent proposes, the owner decides', () => {
     expect(store.transaction(loose.id)!.payee).not.toBe('easy');
   });
 
+  it('notes what a payment was for, and never replaces a note of yours', async () => {
+    const res = await propose({
+      title: 'What the deposit paid for',
+      summary: 'The confirmation letter names the account and the term.',
+      changes: [
+        { key: 'cat', kind: 'set_category', transaction: part1.id, category: 'rent', why: 'The first instalment for the room, from the offer letter.' },
+        { key: 'note', kind: 'set_note', transaction: part1.id, note: 'Room 4, Example Court: instalment 1 of 3, 13 Sep 2025 to 20 Jun 2026', why: 'The amount and due date are the offer letter’s first instalment.' },
+      ],
+    });
+    expect(res.status).toBe(201);
+    const view = (await res.json()) as ProposalView;
+    expect(view).toMatchObject({ ready: 2, problems: 0 });
+    expect((await owner(`/api/proposals/${view.proposal.id}/apply`)).status).toBe(200);
+    expect(app.ctx.store.transaction(part1.id)).toMatchObject({ category: 'rent', categorisedBy: 'user', notes: 'Room 4, Example Court: instalment 1 of 3, 13 Sep 2025 to 20 Jun 2026' });
+    // A note there already (yours, or one you applied) is left to you.
+    const again = await propose({ title: 'Another note', summary: 'A test.', changes: [{ kind: 'set_note', transaction: part1.id, note: 'Something else', why: 'A test.' }] });
+    expect(again.status).toBe(422);
+    expect(((await again.json()) as { problems: { problem: string }[] }).problems[0]!.problem).toMatch(/has a note already/);
+  });
+
   it('dismissed, it is kept with the reason, and the same proposal is refused after', async () => {
     const { proposal } = (await (await propose(relink)).json()) as ProposalView;
     // The same again while it waits.

@@ -942,7 +942,9 @@ export default function Review() {
     const f = draft.figures.filter((x) => x.include && x.kind !== 'earned_pay').length;
     const w = draft.figures.filter((x) => x.include && x.kind === 'earned_pay').length;
     const d = draft.sections.filter((s) => s.target.mode === 'existing').reduce((s, sec) => s + sec.transactions.filter((t) => !t.include && t.adds?.include).length, 0);
-    return [n ? plural(n, 'transaction') : '', d ? `details on ${plural(d, 'recorded payment')}` : '', b ? plural(b, 'balance') : '', h ? 'holdings' : '', f ? plural(f, 'tax figure') : '', w ? `earned pay for ${plural(w, 'month')}` : ''].filter(Boolean).join(', ') || 'nothing';
+    // A forecast with no balance (a State Pension forecast) is recorded as its income per year.
+    const p = draft.sections.filter((s) => s.target.mode !== 'skip' && s.annualIncome !== undefined && s.balanceDate && !(s.recordBalance && s.balance !== undefined)).length;
+    return [n ? plural(n, 'transaction') : '', d ? `details on ${plural(d, 'recorded payment')}` : '', b ? plural(b, 'balance') : '', h ? 'holdings' : '', f ? plural(f, 'tax figure') : '', w ? `earned pay for ${plural(w, 'month')}` : '', p ? plural(p, 'pension forecast') : ''].filter(Boolean).join(', ') || 'nothing';
   }, [draft]);
 
   if (q.error) return <ErrorNote error={q.error} />;

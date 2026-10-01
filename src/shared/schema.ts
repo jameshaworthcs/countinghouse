@@ -422,6 +422,11 @@ export const FIGURE_KINDS = [
   'other_income',
   /** Pay earned for work done (a timesheet), not paid yet: never income for tax, which counts pay when it is paid. */
   'earned_pay',
+  /**
+   * A State Pension or defined-benefit pension's forecast income per year, as at `date`, on its
+   * account: a forecast has no balance to carry it (FORMULAS.md §9). Never income for tax.
+   */
+  'pension_income_forecast',
   'other',
 ] as const;
 export type FigureKind = (typeof FIGURE_KINDS)[number];
@@ -1248,6 +1253,11 @@ const changeUnion = <K extends z.ZodType<string | undefined>>(key: K) =>
     z.object({ key, kind: z.literal('link_transfer'), why: ChangeWhySchema, from: TransactionIdSchema, to: TransactionIdSchema }),
     /** Give a transaction a category (applied, it is yours: nothing re-categorises it). */
     z.object({ key, kind: z.literal('set_category'), why: ChangeWhySchema, transaction: TransactionIdSchema, category: z.string().min(1).max(64) }),
+    /**
+     * Give a transaction a note saying what the payment was for, from a document (the room and term
+     * a rent instalment paid, say). Applied, it is yours, like a note you typed; it never replaces one.
+     */
+    z.object({ key, kind: z.literal('set_note'), why: ChangeWhySchema, transaction: TransactionIdSchema, note: z.string().trim().min(1).max(500) }),
     /** Remove a transaction that repeats money already recorded: the rows it repeats add up to it. */
     z.object({ key, kind: z.literal('remove_duplicate'), why: ChangeWhySchema, transaction: TransactionIdSchema, sameAs: z.array(TransactionIdSchema).min(1).max(10) }),
     /**

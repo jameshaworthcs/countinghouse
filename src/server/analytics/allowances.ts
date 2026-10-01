@@ -23,7 +23,10 @@ import {
 } from '../../shared/uk';
 import type { Store } from '../store';
 import { covers, importIntervals, mergeIntervals, type Interval } from './coverage';
-import { isPayslipFigure, pairPay, payerKey } from './pay';
+import { fromEmployer, isPayslipFigure, pairPay, payerKey } from './pay';
+import { payByEmployer } from './sources';
+
+export { payByEmployer };
 
 const inYear = (t: { date: string }, ty: TaxYear) => t.date >= ty.start && t.date <= ty.end;
 
@@ -122,67 +125,217 @@ function sumCategory(store: Store, accounts: Account[], ty: TaxYear, category: s
   return { minor, lines };
 }
 
+/** Days either side of a dividend's payment date that the credit paying it may fall on. */
+export const DIVIDEND_MATCH_DAYS = 10;
+
+/**
+ * Dividends outside ISAs and pensions in the tax year, each counted once (FORMULAS.md §12): a voucher
+ * and the bank credit that paid it are one dividend. A credit is a voucher's when it is the same
+ * amount to the penny, within 10 days of the payment date, and names the company. That is the rule an
+ * interest certificate follows for its account's interest. Credits no voucher accounts for count as
+ * they are; so does a voucher whose payment is not in your data.
+ */
+export function dividendsOf(store: Store, ty: TaxYear): { minor: number; lines: AllowanceLine[] } {
+  const ledger = store.accounts.filter((a) => !ACCOUNT_TYPE_META[a.type].taxFreeInterest && balanceModeOf(a) === 'ledger');
+  const gias = store.accounts.filter((a) => a.type === 'gia' && !ledger.includes(a));
+  const credits = [
+    ...ledger.flatMap((a) => store.transactions(a.id).filter((t) => inYear(t, ty) && t.category === 'dividends' && t.amount > 0)),
+    ...gias.flatMap((a) => store.transactions(a.id).filter((t) => inYear(t, ty) && t.category === 'investment-income' && t.amount > 0 && DIVIDEND_WORDING.test(t.description))),
+  ];
+  const vouchers = store.figures.filter((f) => f.taxYear === ty.label && f.kind === 'dividends_paid').sort((a, b) => (a.periodEnd ?? a.date ?? '').localeCompare(b.periodEnd ?? b.date ?? ''));
+  const used = new Set<string>();
+  const lines: AllowanceLine[] = [];
+  let minor = 0;
+  for (const f of vouchers) {
+    const day = f.periodEnd ?? f.date;
+    const paid = day && f.payer
+      ? credits
+          .filter((t) => !used.has(t.id) && toMinor(t.amount) === toMinor(f.amount) && Math.abs(diffDays(day, t.date)) <= DIVIDEND_MATCH_DAYS && fromEmployer(t, f.payer!))
+          .sort((a, b) => Math.abs(diffDays(day, a.date)) - Math.abs(diffDays(day, b.date)))[0]
+      : undefined;
+    if (paid) used.add(paid.id);
+    minor += toMinor(f.amount);
+    lines.push({
+      label: `${f.payer ?? f.label} (voucher${paid ? `, paid into ${store.account(paid.accountId)?.name ?? paid.accountId} on ${formatDate(paid.date)}` : ''})`,
+      amount: f.amount,
+      source: 'figure',
+      ...(day ? { date: day } : {}),
+      ...(paid ? { accountId: paid.accountId, transactionIds: [paid.id] } : {}),
+    });
+  }
+  for (const a of [...ledger, ...gias]) {
+    const rest = credits.filter((t) => t.accountId === a.id && !used.has(t.id));
+    if (!rest.length) continue;
+    const m = rest.reduce((x, t) => x + toMinor(t.amount), 0);
+    minor += m;
+    lines.push({ accountId: a.id, label: a.name, amount: fromMinor(m), source: 'transactions', transactionIds: rest.map((t) => t.id) });
+  }
+  return { minor, lines };
+}
+
+/** A pension account whose contributions get basic-rate relief added by the provider. */
+const reliefAtSourceAccount = (a: Account) => a.type === 'sipp' || a.type === 'personal_pension' || a.pension?.method === 'relief_at_source';
+
+/** The one pension account an import updated, when it updated exactly one: its statement's figures are that account's. */
+function pensionAccountOfImport(store: Store, importId: string | undefined): string | undefined {
+  if (!importId) return undefined;
+  const ids = [...new Set(store.imports.find((i) => i.id === importId)?.sections.map((s) => s.accountId) ?? [])].filter((id) => {
+    const a = store.account(id);
+    return a && ACCOUNT_TYPE_META[a.type].pension && a.type !== 'state_pension' && a.type !== 'db_pension';
+  });
+  return ids.length === 1 ? ids[0] : undefined;
+}
+
+/** One pension scheme's contributions for a tax year, in pence. */
+export interface SchemeYear {
+  key: string;
+  accountId?: string;
+  label: string;
+  /** What you paid in (for relief at source, before the provider's relief). */
+  personal: number;
+  /** What you paid in, gross: with the relief at source added. */
+  personalGross: number;
+  employer: number;
+  relief: number;
+  reliefAtSource: boolean;
+  source: 'transactions' | 'figure';
+  transactionIds: string[];
+  figureIds: string[];
+  /** Said about the figures: relief at source estimated when none was recorded. */
+  note?: string;
+}
+
+const PENSION_FIGURES = ['pension_contribution_employee', 'pension_contribution_employer', 'pension_tax_relief'] as const;
+
+/**
+ * The year's pension contributions, scheme by scheme (FORMULAS.md §14):
+ * - each pension account from its own rows;
+ * - a pension statement's figures for the year replace its account's rows, kind by kind, as an
+ *   interest certificate does (the account it names, else the one pension account the same statement
+ *   updated);
+ * - payslip deductions are their employer's scheme, and that statement's money when they add up to
+ *   its figure to the penny;
+ * - anything else from documents is a scheme of its own.
+ * Schemes add up: a SIPP's and a workplace scheme's contributions are both counted.
+ */
 export function pensionTotals(store: Store, ty: TaxYear) {
   const pensionAccounts = store.accounts.filter((a) => ACCOUNT_TYPE_META[a.type].pension && a.type !== 'state_pension' && a.type !== 'db_pension');
-  let personal = 0;
-  let personalGross = 0;
-  let employer = 0;
-  let relief = 0;
-  const lines: AllowanceLine[] = [];
-  const notes: string[] = [];
+  const rate = taxYearParams(ty).reliefAtSourceRate;
+  const schemes = new Map<string, SchemeYear>();
   for (const a of pensionAccounts) {
     const contrib = wrapperContributions(store, a, ty);
     const emp = sumCategory(store, [a], ty, 'employer-contribution');
     const rel = sumCategory(store, [a], ty, 'tax-relief');
-    const reliefAtSource = a.type === 'sipp' || a.type === 'personal_pension' || a.pension?.method === 'relief_at_source';
+    const ras = reliefAtSourceAccount(a);
     let gross = contrib.minor;
-    if (reliefAtSource) {
+    let note: string | undefined;
+    if (ras) {
       if (rel.minor) gross = contrib.minor + rel.minor;
       else if (contrib.minor) {
-        const rate = taxYearParams(ty).reliefAtSourceRate;
         gross = Math.round(contrib.minor / (1 - rate));
-        notes.push(`${a.name}: no tax-relief payments recorded yet, so basic-rate relief at source (${Math.round(rate * 100)}% of the gross) is estimated.`);
+        note = `${a.name}: no tax-relief payments recorded yet, so basic-rate relief at source (${Math.round(rate * 100)}% of the gross) is estimated.`;
       }
     }
-    personal += contrib.minor;
-    personalGross += gross;
-    employer += emp.minor;
-    relief += rel.minor;
-    if (contrib.minor || emp.minor || rel.minor) {
-      lines.push({
-        accountId: a.id,
-        label: `${a.name}: you ${fromMinor(contrib.minor).toFixed(2)}${rel.minor ? `, relief ${fromMinor(rel.minor).toFixed(2)}` : ''}${emp.minor ? `, employer ${fromMinor(emp.minor).toFixed(2)}` : ''}`,
-        amount: fromMinor(gross + emp.minor),
-        source: 'transactions',
-        transactionIds: [...(contrib.lines[0]?.transactionIds ?? []), ...(emp.lines[0]?.transactionIds ?? []), ...(rel.lines[0]?.transactionIds ?? [])],
-      });
-    }
+    if (!contrib.minor && !emp.minor && !rel.minor) continue;
+    schemes.set(a.id, {
+      key: a.id,
+      accountId: a.id,
+      label: a.name,
+      personal: contrib.minor,
+      personalGross: gross,
+      employer: emp.minor,
+      relief: rel.minor,
+      reliefAtSource: ras,
+      source: 'transactions',
+      transactionIds: [...(contrib.lines[0]?.transactionIds ?? []), ...(emp.lines[0]?.transactionIds ?? []), ...(rel.lines[0]?.transactionIds ?? [])],
+      figureIds: [],
+      ...(note ? { note } : {}),
+    });
   }
-  // Figures from pension statements / payslips take precedence when present. Documents state what
-  // you paid and the basic-rate relief the provider added separately; together they are the gross.
-  const figs = store.figures.filter((f) => f.taxYear === ty.label);
-  const figEmployee = figs.filter((f) => f.kind === 'pension_contribution_employee').reduce((s, f) => s + toMinor(f.amount), 0);
-  const figRelief = figs.filter((f) => f.kind === 'pension_tax_relief').reduce((s, f) => s + toMinor(f.amount), 0);
-  const figEmployer = figs.filter((f) => f.kind === 'pension_contribution_employer').reduce((s, f) => s + toMinor(f.amount), 0);
-  if (figEmployee && figEmployee + figRelief > personalGross) {
-    personalGross = figEmployee + figRelief;
-    lines.push({ label: `Your contributions (from documents${figRelief ? ', with the tax relief added' : ''})`, amount: fromMinor(figEmployee + figRelief), source: 'figure' });
+
+  const figs = store.figures.filter((f) => f.taxYear === ty.label && (PENSION_FIGURES as readonly string[]).includes(f.kind));
+  const of = (list: Figure[], kind: (typeof PENSION_FIGURES)[number]) => list.filter((f) => f.kind === kind);
+  const minorOf = (list: Figure[]) => list.reduce((x, f) => x + toMinor(f.amount), 0);
+  // Pension statements: by the scheme they are about.
+  const statements = new Map<string, Figure[]>();
+  for (const f of figs.filter((x) => !isPayslipFigure(store, x))) {
+    const key = f.accountId ?? pensionAccountOfImport(store, f.source.importId) ?? (f.source.importId ? `document:${f.source.importId}` : `payer:${payerKey(f.payer)}`);
+    (statements.get(key) ?? statements.set(key, []).get(key)!).push(f);
   }
-  if (figEmployer && figEmployer > employer) {
-    employer = figEmployer;
-    lines.push({ label: 'Employer contributions (from documents)', amount: fromMinor(figEmployer), source: 'figure' });
+  for (const [key, list] of statements) {
+    const account = store.account(key);
+    const before = schemes.get(key);
+    const [employee, employer, relief] = [of(list, 'pension_contribution_employee'), of(list, 'pension_contribution_employer'), of(list, 'pension_tax_relief')];
+    // Relief the statement shows is relief at source, whatever the account.
+    const ras = account ? reliefAtSourceAccount(account) || relief.length > 0 : relief.length > 0;
+    const personal = employee.length ? minorOf(employee) : (before?.personal ?? 0);
+    const reliefMinor = relief.length ? minorOf(relief) : (before?.relief ?? 0);
+    // A statement's own relief figure makes its payments gross; without one, what it says you paid is
+    // taken as the gross (docs/INGESTION.md: a lone total is the gross).
+    const personalGross = employee.length || relief.length ? personal + (ras ? reliefMinor : 0) : (before?.personalGross ?? 0);
+    schemes.set(key, {
+      key,
+      ...(account ? { accountId: account.id } : {}),
+      label: account?.name ?? list.find((f) => f.payer)?.payer ?? 'A pension statement',
+      personal,
+      personalGross,
+      employer: employer.length ? minorOf(employer) : (before?.employer ?? 0),
+      relief: reliefMinor,
+      reliefAtSource: ras,
+      source: 'figure',
+      transactionIds: before?.transactionIds ?? [],
+      figureIds: list.map((f) => f.id),
+      // The statement's own payments replace the estimate made from the rows.
+      ...(before?.note && !employee.length && !relief.length ? { note: before.note } : {}),
+    });
   }
-  return { personal, personalGross, employer, relief, total: personalGross + employer, lines, notes, hasAccounts: pensionAccounts.length > 0 };
+  // Payslip deductions: by employer. The same money as a statement's when they add up to it to the penny.
+  const payslips = new Map<string, Figure[]>();
+  for (const f of figs.filter((x) => isPayslipFigure(store, x))) {
+    const key = payerKey(f.payer);
+    (payslips.get(key) ?? payslips.set(key, []).get(key)!).push(f);
+  }
+  for (const [key, list] of payslips) {
+    const employee = minorOf(of(list, 'pension_contribution_employee'));
+    const employer = minorOf(of(list, 'pension_contribution_employer'));
+    const statementOf = [...statements.keys()].map((k) => schemes.get(k)!).find((s) => (employee && s.personal === employee) || (!employee && employer && s.employer === employer));
+    if (statementOf) continue;
+    if (!employee && !employer) continue;
+    schemes.set(`payslips:${key}`, {
+      key: `payslips:${key}`,
+      label: `${list.find((f) => f.payer)?.payer ?? 'Your employer'} (payslips)`,
+      personal: employee,
+      personalGross: employee,
+      employer,
+      relief: 0,
+      reliefAtSource: false,
+      source: 'figure',
+      transactionIds: [],
+      figureIds: list.map((f) => f.id),
+    });
+  }
+
+  const all = [...schemes.values()];
+  const total = (pick: (s: SchemeYear) => number) => all.reduce((x, s) => x + pick(s), 0);
+  const personal = total((s) => s.personal);
+  const personalGross = total((s) => s.personalGross);
+  const employer = total((s) => s.employer);
+  const relief = total((s) => s.relief);
+  const lines: AllowanceLine[] = all.map((s) => ({
+    ...(s.accountId ? { accountId: s.accountId } : {}),
+    label: `${s.label}: you ${fromMinor(s.personal).toFixed(2)}${s.relief ? `, relief ${fromMinor(s.relief).toFixed(2)}` : ''}${s.employer ? `, employer ${fromMinor(s.employer).toFixed(2)}` : ''}${s.source === 'figure' && !s.key.startsWith('payslips:') ? ' (its statement)' : ''}`,
+    amount: fromMinor(s.personalGross + s.employer),
+    source: s.source,
+    ...(s.transactionIds.length ? { transactionIds: s.transactionIds } : {}),
+  }));
+  const notes = all.flatMap((s) => (s.note ? [s.note] : []));
+  return { personal, personalGross, employer, relief, total: personalGross + employer, lines, notes, hasAccounts: pensionAccounts.length > 0, schemes: all };
 }
 
 /** Relief-at-source pensions (SIPPs, personal pensions) and your gross contributions to them in the year. */
 export function reliefAtSource(store: Store, ty: TaxYear, pen: ReturnType<typeof pensionTotals> = pensionTotals(store, ty)) {
-  const accounts = store.accounts.filter((a) => a.type === 'sipp' || a.type === 'personal_pension' || a.pension?.method === 'relief_at_source');
-  let grossMinor = 0;
-  for (const a of accounts) {
-    grossMinor += pen.lines.filter((l) => l.accountId === a.id).reduce((x, l) => x + toMinor(l.amount), 0);
-    grossMinor -= store.transactions(a.id).filter((t) => inYear(t, ty) && t.category === 'employer-contribution').reduce((x, t) => x + toMinor(t.amount), 0);
-  }
+  const accounts = store.accounts.filter(reliefAtSourceAccount);
+  const grossMinor = pen.schemes.filter((s) => s.reliefAtSource && s.accountId && accounts.some((a) => a.id === s.accountId)).reduce((x, s) => x + s.personalGross, 0);
   return { accounts, personalGross: fromMinor(grossMinor) };
 }
 
@@ -195,28 +348,12 @@ export function giftAid(store: Store, ty: TaxYear) {
   return { charity, aided, figures, paid };
 }
 
-/**
- * Each employer's pay (or tax, or other payroll figure) for a tax year: its P60, which is the whole
- * year, else its payslips added up, which are pay so far. Never both, so nothing counts twice.
- */
-export function payByEmployer(store: Store, ty: TaxYear, kind: Figure['kind'] = 'gross_pay') {
-  const groups = new Map<string, { payer: string; p60: Figure[]; payslips: Figure[] }>();
-  for (const f of figuresFor(store, ty, kind)) {
-    const key = payerKey(f.payer);
-    const g = groups.get(key) ?? groups.set(key, { payer: f.payer ?? '', p60: [], payslips: [] }).get(key)!;
-    (isPayslipFigure(store, f) ? g.payslips : g.p60).push(f);
-  }
-  return [...groups.values()].map((g) => {
-    const figures = g.p60.length ? g.p60 : g.payslips;
-    return { payer: figures[0]?.payer ?? g.payer, fromP60: g.p60.length > 0, figures, amount: fromMinor(figures.reduce((s, f) => s + toMinor(f.amount), 0)) };
-  });
-}
-
 /** Salary received in the year from employers the figures do not cover (after tax: a floor). */
-export function unexplainedSalary(store: Store, ty: TaxYear, employers: { payer: string }[]): Transaction[] {
+export function unexplainedSalary(store: Store, ty: TaxYear, employers: { payer: string; names?: string[] }[]): Transaction[] {
   // Figures that name no employer cannot be told apart: take them to cover the salary received.
   if (employers.some((e) => !payerKey(e.payer))) return [];
-  const keys = employers.map((e) => payerKey(e.payer).slice(0, 8)).filter((k) => k.length >= 4);
+  // Any name an employer's figures give it (its P60's, its payslips', HMRC's).
+  const keys = [...new Set(employers.flatMap((e) => [e.payer, ...(e.names ?? [])]).map((n) => payerKey(n).slice(0, 8)))].filter((k) => k.length >= 4);
   // Pay the Pay tab pairs with a payslip, or puts under an employer with payslips, is that employer's.
   const { periods, others } = pairPay(store, ty);
   const explained = new Set([...periods.flatMap((p) => (p.credit ? [p.credit.id] : [])), ...others.flatMap((o) => (o.employer ? [o.t.id] : []))]);
@@ -239,13 +376,14 @@ export function taxBandEstimate(store: Store, ty: TaxYear, now: ISODate, found: 
   const sum = (list: Figure[]) => fromMinor(list.reduce((s, f) => s + toMinor(f.amount), 0));
   let basis: TaxBandEstimate['basis'];
   const inProgress = ty.end >= now;
-  // Each employer's pay: its P60 for the year, else its payslips so far. Salary received from an
-  // employer with neither counts too, after tax, as a floor.
+  // Each employer's pay, from the one source that counts (sources.ts): its P60 or another figure for
+  // the whole year, else the latest of its documents to date and its payslips so far. Salary received
+  // from an employer with none of them counts too, after tax, as a floor.
   const employers = payByEmployer(store, ty);
   const net = unexplainedSalary(store, ty, employers);
   const netTotal = fromMinor(net.reduce((s, t) => s + toMinor(t.amount), 0));
   const documented = fromMinor(employers.reduce((s, e) => s + toMinor(e.amount), 0) + toMinor(netTotal));
-  const lastYearP60 = payByEmployer(store, makeTaxYear(ty.startYear - 1)).filter((e) => e.fromP60);
+  const lastYearP60 = payByEmployer(store, makeTaxYear(ty.startYear - 1)).filter((e) => e.final);
   // For the year in progress a full-year estimate wins over pay to date when it is larger.
   const fullYear = inProgress ? (store.profile.grossSalary ?? fromMinor(lastYearP60.reduce((s, e) => s + toMinor(e.amount), 0))) : 0;
   if (fullYear > 0 && fullYear > documented) {
@@ -253,14 +391,14 @@ export function taxBandEstimate(store: Store, ty: TaxYear, now: ISODate, found: 
     lines.push(
       store.profile.grossSalary
         ? { label: 'Pay (your salary in Settings)', amount: store.profile.grossSalary, kind: 'pay' }
-        : { label: `Pay (last year’s P60, ${makeTaxYear(ty.startYear - 1).label})`, amount: fullYear, kind: 'pay' },
+        : { label: `Pay (last year’s, ${makeTaxYear(ty.startYear - 1).label})`, amount: fullYear, kind: 'pay' },
     );
   } else {
     for (const e of employers) {
-      lines.push({ label: `Pay from ${e.payer || 'your employer'} (${e.fromP60 ? 'P60' : `${e.figures.length} payslip${e.figures.length === 1 ? '' : 's'}, so far`})`, amount: e.amount, kind: 'pay' });
+      lines.push({ label: `Pay from ${e.payer || 'your employer'} (${e.source.label})`, amount: e.amount, kind: 'pay' });
     }
     if (net.length) lines.push({ label: `Other pay (at least: ${net.length} salary payment${net.length === 1 ? '' : 's'} received, after tax)`, amount: netTotal, kind: 'pay' });
-    basis = employers.length && employers.every((e) => e.fromP60) && !net.length ? 'documents' : 'minimum';
+    basis = employers.length && employers.every((e) => e.final) && !net.length ? 'documents' : 'minimum';
     if (basis === 'minimum') {
       notes.push(
         employers.length
@@ -418,13 +556,9 @@ export function allowances(store: Store, label?: string, now: ISODate = today())
     now,
     'interest',
   );
-  // Dividends outside ISAs and pensions.
-  const ledger = store.accounts.filter((a) => !ACCOUNT_TYPE_META[a.type].taxFreeInterest && balanceModeOf(a) === 'ledger');
-  const gias = store.accounts.filter((a) => a.type === 'gia');
-  const divLedger = sumCategory(store, ledger, ty, 'dividends');
-  const divGia = sumCategory(store, gias, ty, 'investment-income', 1, DIVIDEND_WORDING);
-  const divFigures = store.figures.filter((f) => f.taxYear === ty.label && f.kind === 'dividends_paid');
-  const dividendsMinor = divLedger.minor + divGia.minor + divFigures.reduce((s, f) => s + toMinor(f.amount), 0);
+  // Dividends outside ISAs and pensions, each counted once: a voucher and the credit that paid it are one.
+  const dividends = dividendsOf(store, ty);
+  const dividendsMinor = dividends.minor;
 
   // The band, and with it the Personal Savings Allowance, follows from the year's income.
   const taxBand = taxBandEstimate(store, ty, now, { interest: fromMinor(interestMinor), dividends: fromMinor(dividendsMinor) });
@@ -473,7 +607,7 @@ export function allowances(store: Store, label?: string, now: ISODate = today())
       amount: fromMinor(dividendsMinor),
       allowance: params.dividendAllowance,
       remaining: fromMinor(Math.max(0, toMinor(params.dividendAllowance) - dividendsMinor)),
-      lines: [...divLedger.lines, ...divGia.lines, ...divFigures.map((f) => ({ label: `${f.payer ?? f.label} (voucher)`, amount: f.amount, source: 'figure' as const }))],
+      lines: dividends.lines,
     },
     taxBand,
     ruleNotes,

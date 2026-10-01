@@ -103,6 +103,11 @@ export interface TaxYearParams {
   propertyAllowance: number;
   /** Disposals must be reported when proceeds exceed this, even with no tax due (null: 4 × the exempt amount). */
   cgtReportingProceeds: number | null;
+  /**
+   * Dividends above this mean a Self Assessment return. Up to it, tax on dividends over the allowance
+   * can be paid through your tax code instead (HMRC must hear of them by `untaxedIncomeNoticeBy`).
+   */
+  dividendsReturnThreshold: number;
   /** Full new State Pension, per week. */
   statePensionFullWeekly: number;
   /**
@@ -154,6 +159,7 @@ export const TAX_YEAR_PARAMS: ParamsRow[] = [
     tradingAllowance: 0,
     propertyAllowance: 0,
     cgtReportingProceeds: null,
+    dividendsReturnThreshold: 10_000,
     statePensionFullWeekly: 155.65,
     employeeNi: null,
   },
@@ -418,6 +424,15 @@ export function statePensionDate(dateOfBirth: ISODate): ISODate {
 }
 
 /** The full new State Pension a year, for a tax year (52 weeks). */
+/**
+ * The day by which HMRC must hear of income with tax to pay for `ty` (dividends over the allowance,
+ * say) when it does not already know of it and you do not send a return: 5 October after the year
+ * ends. It is also the last day to register for Self Assessment for that year.
+ */
+export function untaxedIncomeNoticeBy(ty: TaxYear): ISODate {
+  return `${ty.startYear + 1}-10-05`;
+}
+
 export function statePensionFullYearly(ty: TaxYear): number {
   return Math.round(taxYearParams(ty).statePensionFullWeekly * 52 * 100) / 100;
 }

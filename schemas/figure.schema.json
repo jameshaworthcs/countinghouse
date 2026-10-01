@@ -32,6 +32,7 @@
         "rental_income",
         "other_income",
         "earned_pay",
+        "pension_income_forecast",
         "other"
       ]
     },

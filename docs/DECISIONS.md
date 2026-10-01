@@ -1072,3 +1072,44 @@ in late is paid with the next month's.
   refunded.
 - There is no short-term cash forecast to add the expected payment to; the projections use average
   income and would count it twice.
+
+## 2026-10-01: Each fact counts once: one source per job and year, dividends, pensions; forecasts and NI numbers kept right
+
+The first of five slices that give everything on a document somewhere to go (the owner approved
+the plan on 2026-10-01). Reviewing the pending imports showed facts counted twice or dropped:
+- a P45 and an HMRC page each stated one job's year so far, and both counted;
+- any HMRC page to a date counted as a P60 and froze that employer's pay;
+- a dividend voucher and the bank credit that paid it both counted;
+- a pension statement and the payslips that paid the same contributions both counted, and the
+  larger of two schemes' employer contributions replaced the other;
+- a State Pension forecast was dropped at commit;
+- the owner's National Insurance number sat in three figures.
+
+- **One source per employer and year** (`analytics/sources.ts`). Every document's figure is kept,
+  and exactly one counts: your own, else a figure for the whole year (a P60 first), else the most
+  recent as at its date (a document over the payslips on the same date).
+  - Considered: adding up different documents and taking out repeated amounts. One total stated by
+    two documents to different dates is not a repeat by amount. The date it is true at says which
+    is the year so far.
+- **Employers are matched by PAYE reference as well as name.** HMRC prints names its own way
+  ("(UK)", capitals, LIMITED), and the reference is printed on P60s, P45s and HMRC's pages.
+- **A dividend voucher and its credit are one dividend:** the same amount to the penny, within 10
+  days, from the company named. This is the rule an interest certificate already follows.
+  - Considered: re-categorising the bank credit away from Dividends. That mislabels income.
+  - Considered: a stored link now. It comes with dividend records in a later slice. Until then the
+    match is computed, and the owner sees it on the line ("paid into … on …").
+- **Pension contributions are counted scheme by scheme.** A statement replaces its scheme's rows,
+  as an interest certificate does. Payslip deductions that add up to a statement to the penny are
+  its money. Schemes add up.
+- **A forecast with no balance is a figure** (`pension_income_forecast`).
+  - Considered: a balance of £0. The account would show a £0 State Pension.
+  - Considered: making a balance's amount optional. Every reader of balances would need to handle
+    it.
+- **National Insurance numbers stay out of what the app derives.** Format v4 takes them out of
+  figures and the readings kept with imports. Anything shaped like one is caught, since keeping a
+  number out matters more than telling a real one from HMRC's example. Bank descriptions are source
+  facts and keep theirs.
+- **A proposal can note what a payment was for** (`set_note`), from a document: the room and term a
+  rent instalment paid. Applied, it is the owner's note; it never replaces one.
+- **Dividends over the allowance are a filing hint.** The deadline to tell HMRC (5 October) and the
+  £10,000 threshold are UK rules in `uk.ts`, from gov.uk's "How to report tax on dividends".

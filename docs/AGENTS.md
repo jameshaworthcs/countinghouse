@@ -177,6 +177,7 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
       { "kind": "unlink_transfer", "transaction": "tx_…", "why": "…" },
       { "kind": "link_transfer", "from": "tx_… (money out)", "to": "tx_… (money in)", "why": "…" },
       { "kind": "set_category", "transaction": "tx_…", "category": "takeaway", "why": "…" },
+      { "kind": "set_note", "transaction": "tx_…", "note": "Room 4, Example Court: instalment 1 of 3", "why": "…" },
       { "kind": "remove_duplicate", "transaction": "tx_…", "sameAs": ["tx_…", "tx_…"], "why": "…" },
       { "kind": "remove_wrong_sign", "transaction": "tx_…", "recordedAs": ["tx_…"], "why": "…" },
       { "kind": "remove_internal_move", "transaction": "tx_…", "why": "…" },
@@ -213,7 +214,8 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
     is not a transfer one, on a row not linked as one, also takes away the account of yours the row
     named as the other side, and works its payee out again when that was one of your accounts'
     names (unless the owner set the payee).
-  - The owner wins: a category the owner set is not changed, and a duplicate with something of
+  - The owner wins: a category the owner set is not changed, a note already on a row is not
+    replaced (`set_note` adds one only where there is none), and a duplicate with something of
     theirs on it (a category, payee, note, tag, split, correction, receipt or details another
     document filled in) is not removed.
   - Dates are in order and not in the future.

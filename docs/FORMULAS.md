@@ -223,8 +223,9 @@ within 5%, percentiles within 3–6%.
 - Pots in today's money: p ÷ (1+π)^(T/12).
 - Income a year = pots × `withdrawal.rate`, rising with inflation (so constant in today's money).
 - **State Pension:**
-  - your recorded forecast (today's money), else the full new State Pension for the current tax
-    year (52 × weekly rate, UK tables);
+  - your latest recorded forecast (today's money): a `pension_income_forecast` figure on the State
+    Pension account (a forecast has no balance to carry it), or a balance with `annualIncome`;
+  - else the full new State Pension for the current tax year (52 × weekly rate, UK tables);
   - from your State Pension age (`statePensionDate`, the legislated timetable).
 - DB pensions: their recorded yearly income.
 - Tax-free cash: 25% of each pot, up to the Lump Sum Allowance (UK tables).
@@ -387,13 +388,21 @@ Deterministic rules with named thresholds (`SIGNAL_RULES` in `analytics/spending
 - Contributions against £4,000.
 - Expected bonus = 25% × min(contributions, £4,000).
 
-**Pension annual allowance:**
+**Pension annual allowance** (`pensionTotals`), scheme by scheme, then added up:
 
-- Per account: personal contributions, grossed up for relief at source by 1/(1−r) when no relief
-  rows are recorded; plus employer contributions and recorded relief.
-- Pension-statement figures win when larger. Documents state what you paid and the basic-rate
-  relief the provider added separately (`pension_contribution_employee`, `pension_tax_relief`);
-  their sum is your gross contribution. Salary sacrifice is an employer contribution.
+- **A pension account from its own rows:** personal contributions, grossed up for relief at source
+  by 1/(1−r) when no relief rows are recorded; plus employer contributions and recorded relief.
+- **A pension statement's figures for the year replace its account's rows**, kind by kind (what
+  you paid, the relief, the employer's), as an interest certificate replaces its account's interest.
+  The statement's scheme is the account its figures name, else the one pension account the same
+  statement updated, else a scheme of its own. Documents state what you paid and the basic-rate
+  relief the provider added separately (`pension_contribution_employee`, `pension_tax_relief`):
+  their sum is your gross contribution, and a statement that shows relief is relief at source.
+  Salary sacrifice is an employer contribution.
+- **Payslip deductions** are their employer's scheme. When they add up to a statement's figure to
+  the penny (your contributions, else the employer's), they are that statement's money and count
+  once. Otherwise they are a scheme of their own.
+- The total is every scheme's: a SIPP's employer contributions and a workplace scheme's both count.
 - **Not yet known** (`incomplete`) when a pension account's data does not cover the tax year so
   far (±45 days) and no statement figures exist for it: the amount used is then a minimum.
 - Taper per the UK tables when income is given.
@@ -410,15 +419,14 @@ Deterministic rules with named thresholds (`SIGNAL_RULES` in `analytics/spending
 **Tax band** (`taxBandEstimate`, with the pure `taxBandFor` in `shared/uk.ts`):
 
 - Income for the year, in whole pounds:
-  - pay, employer by employer (figures grouped by payer): its P60 for the year, else its payslips
-    added up (pay so far), never both. A figure is a payslip's when its document was a payslip,
-    else when its period is under 200 days;
+  - pay, job by job, from **one source per employer and year** (below), never two. A figure is a
+    payslip's when its document was a payslip, else when its period is under 200 days;
     - salary received (category `salary`, after tax) from employers no figure names counts as a
       floor; figures naming no employer are taken to cover all salary received. Salary the Pay tab
       pairs with a payslip, or lists under an employer with payslips (§17), is that employer's
       and never counts again;
     - for the year in progress, a larger full-year estimate wins: your salary in Settings, else
-      last year's P60s;
+      last year's figures for the whole year;
   - benefits in kind (`benefit_in_kind`);
   - side income: turnover (`side-income` rows and `self_employment_income` figures) less the
     trading allowance, when over it;
@@ -434,14 +442,37 @@ Deterministic rules with named thresholds (`SIGNAL_RULES` in `analytics/spending
 - These are the UK bands that savings and dividends use everywhere. Scottish rates on pay are not
   modelled, and the page says so.
 - **Basis:**
-  - `documents`: every employer's pay comes from its P60, and no salary is unaccounted for;
-  - `estimate`: pay comes from your salary or last year's P60;
-  - `minimum`: pay is known only so far (payslips, or salary after tax), so the band may be higher.
+  - `documents`: every employer's pay is a figure for the whole year (a P60, HMRC's figure for a
+    finished year, or yours), and no salary is unaccounted for;
+  - `estimate`: pay comes from your salary or last year's figures;
+  - `minimum`: pay is known only so far (payslips, a page to a date, or salary after tax), so the
+    band may be higher.
   The pages label the band with its basis.
 
-**Dividends:** dividends outside ISAs and pensions, plus vouchers, against the dividend allowance.
-In a general investment account, a dividend is investment income worded as one
-(`DIVIDEND_WORDING`: "dividend", "distribution", or interactive investor's "Div 250 …").
+**One source per employer and year** (`analytics/sources.ts`). A job's pay, tax, NI and student
+loan for a year can be stated by its P60, its P45, HMRC's taxable-income pages and the payslips.
+Each kind of figure counts from exactly one of them; the others are kept and shown beside it.
+
+- **One employer:** figures whose names match once reduced (`payerKey`), or that carry the same PAYE
+  reference ("123 AB456" = "123/AB456"), are one employer's, transitively.
+- **Candidate sources**, for each kind: the payslips added up (as at the last one's date); each
+  other document's figures added up (as at the last date they cover: a year's end, a leaving date,
+  a pay date); and your own figures typed in Settings.
+- **The one that counts:**
+  1. yours;
+  2. a document for the whole tax year (its figures reach the year's end), a P60 first;
+  3. else the most recent, as at its date. On the same date a document, which states the total,
+     wins over the payslips added up.
+- So a P45 and an HMRC page to a later date state one job's year so far once, and a page to a date
+  never stops later payslips counting.
+
+**Dividends** (`dividendsOf`): dividends outside ISAs and pensions against the dividend allowance,
+**each counted once**. A dividend voucher and the bank credit that paid it are one dividend: a
+`dividends` credit (or, in a general investment account, investment income worded as a dividend:
+`DIVIDEND_WORDING`, "dividend", "distribution", or interactive investor's "Div 250 …") is a
+voucher's when it is the same amount to the penny, within 10 days of the payment date
+(`DIVIDEND_MATCH_DAYS`), and names the company. Credits no voucher accounts for count as they are,
+and so does a voucher whose payment is not in your data.
 
 ## 12. Paid in, growth and money-weighted return (`analytics/investments.ts`)
 
@@ -635,11 +666,14 @@ pay", below).
      the accounts the employer's pay goes into, else any your salary goes into.
 - Salary credits no payslip explains are pay with no payslip, listed under the employer their text
   names, else the employer the same payer paid (the nearest such payment), else their own name.
-- **Year so far** adds up each column. With a P60 for the year (the same payer), its pay, tax and
-  NI are shown beside the total, and whether the payslips add up to it:
-  - they do when their tax and NI are within £1 of the P60's. Its pay can still be less than
+- **Year so far** adds up each column. Beside it is the employer's document for the year (§11, "One
+  source per employer and year"): its P60 or another figure for the whole year, else the latest one
+  to a date (a P45, an HMRC page). Its pay, tax and NI are shown, and whether the payslips paid by
+  its date (with 10 days for a pay date to move) add up to it:
+  - they do when their tax and NI are within £1 of the document's. Its pay can still be less than
     their gross by the pension taken before tax (a net pay arrangement): that is said;
-  - payslip tax short of the P60's means payslips are missing; more than it, they need checking.
+  - payslip tax short of the document's means payslips are missing; more than it, they need
+    checking (a refund on a payslip not imported, say).
 - A payslip or P60 names its employer as the document does. On the review page the payer can be
   renamed for all of a document's figures, so a payslip that prints a group name and a P60 that
   prints the employing company count as one employer.

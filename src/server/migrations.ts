@@ -13,7 +13,9 @@
 import { access, readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { today } from '../shared/dates';
+import { isNiNumber, withoutNiNumbers } from '../shared/privacy';
 import { atomicWrite, nowISO, shortHash } from './fsutil';
+import { figureId } from './ids';
 import { FORMAT_VERSION } from './store';
 
 export interface MigrationContext {
@@ -137,6 +139,112 @@ export const MIGRATIONS: Migration[] = [
         return { ...b, ...(at ? { at } : {}), ...(byYou ? { enteredBy: 'user' } : {}) };
       });
       ctx.log(`[migrate] ${timed} balance${timed === 1 ? '' : 's'} now say when on their day they were seen; ${yours} you typed yourself`);
+    },
+  },
+  {
+    from: 3,
+    description: 'A pension forecast with no balance is kept as a figure (backfilled from the imports that dropped it); National Insurance numbers are taken out of figures and readings',
+    async run(ctx) {
+      interface Rec {
+        id?: string;
+        status?: string;
+        committedAt?: string;
+        document?: { id?: string };
+        draft?: { sections?: { key: string; target?: { mode?: string }; recordBalance?: boolean; balance?: number; balanceDate?: string; annualIncome?: number; currency?: string }[] };
+        result?: { sections?: { key: string; accountId: string }[] };
+      }
+      // 1. Forecasts: a committed section with income per year and no balance recorded nothing before.
+      const figures = (await ctx.exists('figures.jsonl')) ? (await readFile(path.join(ctx.dataDir, 'figures.jsonl'), 'utf8')).split('\n').filter((l) => l.trim()) : [];
+      const have = new Set(figures.map((l) => (JSON.parse(l) as { id: string }).id));
+      const added: string[] = [];
+      for await (const file of walk(path.join(ctx.dataDir, 'imports'))) {
+        if (!file.endsWith('.json')) continue;
+        let rec: Rec;
+        try {
+          rec = JSON.parse(await readFile(file, 'utf8')) as Rec;
+        } catch {
+          continue;
+        }
+        if (rec.status !== 'committed' || !rec.id) continue;
+        for (const s of rec.draft?.sections ?? []) {
+          if (s.target?.mode === 'skip' || typeof s.annualIncome !== 'number' || !s.balanceDate || (s.recordBalance !== false && typeof s.balance === 'number')) continue;
+          const accountId = rec.result?.sections?.find((x) => x.key === s.key)?.accountId;
+          if (!accountId) continue;
+          const id = figureId('pension_income_forecast', s.annualIncome, s.balanceDate, accountId, 'Forecast income per year', rec.id);
+          if (have.has(id)) continue;
+          have.add(id);
+          added.push(
+            JSON.stringify({
+              id,
+              kind: 'pension_income_forecast',
+              label: 'Forecast income per year',
+              amount: s.annualIncome,
+              currency: s.currency ?? 'GBP',
+              date: s.balanceDate,
+              accountId,
+              source: { importId: rec.id, ...(rec.document?.id ? { documentId: rec.document.id } : {}) },
+              createdAt: rec.committedAt ?? nowISO(),
+            }),
+          );
+        }
+      }
+
+      // 2. National Insurance numbers: out of figures (a payer reference that is one) and out of the
+      //    readings and drafts kept with imports. Bank descriptions are source facts and keep theirs.
+      const scrub = (value: unknown): { value: unknown; changed: boolean } => {
+        if (typeof value === 'string') {
+          const next = withoutNiNumbers(value);
+          return { value: next, changed: next !== value };
+        }
+        if (Array.isArray(value)) {
+          let changed = false;
+          const next = value.map((v) => {
+            const r = scrub(v);
+            changed ||= r.changed;
+            return r.value;
+          });
+          return { value: next, changed };
+        }
+        if (value && typeof value === 'object') {
+          let changed = false;
+          const next: Record<string, unknown> = {};
+          for (const [k, v] of Object.entries(value)) {
+            if (k === 'payerReference' && typeof v === 'string' && isNiNumber(v)) {
+              changed = true;
+              continue;
+            }
+            const r = scrub(v);
+            changed ||= r.changed;
+            next[k] = r.value;
+          }
+          return { value: next, changed };
+        }
+        return { value, changed: false };
+      };
+      let inFigures = 0;
+      const lines = [...figures, ...added].map((line) => {
+        const r = scrub(JSON.parse(line));
+        if (!r.changed) return line;
+        inFigures++;
+        return JSON.stringify(r.value);
+      });
+      if (added.length || inFigures) await ctx.writeText('figures.jsonl', `${lines.join('\n')}\n`);
+      ctx.log(`[migrate] ${added.length} pension forecast${added.length === 1 ? '' : 's'} recorded from the imports that read ${added.length === 1 ? 'it' : 'them'}`);
+      let inImports = 0;
+      for await (const file of walk(path.join(ctx.dataDir, 'imports'))) {
+        if (!file.endsWith('.json')) continue;
+        let rec: unknown;
+        try {
+          rec = JSON.parse(await readFile(file, 'utf8'));
+        } catch {
+          continue;
+        }
+        const r = scrub(rec);
+        if (!r.changed) continue;
+        await ctx.writeJson(path.relative(ctx.dataDir, file), r.value);
+        inImports++;
+      }
+      ctx.log(`[migrate] National Insurance numbers taken out of ${inFigures} figure${inFigures === 1 ? '' : 's'} and ${inImports} import record${inImports === 1 ? '' : 's'}`);
     },
   },
 ];

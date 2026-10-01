@@ -2,13 +2,16 @@
 // your bank, and pay seen in the bank with no payslip (docs/FORMULAS.md §17).
 
 import type { EarnedPayroll, PayEmployer, PayMonth, PayResponse } from '../../shared/api';
-import { addDays, diffDays, formatMonth, maxDate, today, type ISODate } from '../../shared/dates';
+import { addDays, diffDays, formatDate, formatMonth, maxDate, today, type ISODate } from '../../shared/dates';
 import { formatMoney, fromMinor, toMinor } from '../../shared/money';
 import type { Figure, Transaction } from '../../shared/schema';
 import { taxYearOf, type TaxYear } from '../../shared/uk';
 import { earnedPay } from './earned';
 import type { Store } from '../store';
 import { covers, type Coverage } from './coverage';
+import { employerYears, isPayslipFigure, payerKey, type PayKind, type PaySource } from './sources';
+
+export { isPayslipFigure, payerKey };
 
 /** How far either side of the pay date a payment into the bank is looked for, in days. */
 export const PAY_MATCH_DAYS = 10;
@@ -16,23 +19,6 @@ export const PAY_MATCH_DAYS = 10;
 export const PAY_TOLERANCE_POUNDS = 1;
 
 const DEDUCTIONS = ['tax_deducted', 'national_insurance', 'pension_contribution_employee', 'student_loan_deducted'] as const;
-
-/** An employer's name reduced for comparing: "Larchwood Data Ltd" and "LARCHWOODDATA" are one. */
-export const payerKey = (name: string | undefined) =>
-  (name ?? '')
-    .toLowerCase()
-    .replace(/\b(ltd|limited|plc|llp|uk)\b/g, '')
-    .replace(/[^a-z0-9]/g, '');
-
-/**
- * A payslip's figure (one pay period) rather than a P60's (the whole year): by the document it came
- * from, else by a period much shorter than a year.
- */
-export function isPayslipFigure(store: Store, f: Figure): boolean {
-  const doc = f.source.importId ? store.imports.find((i) => i.id === f.source.importId)?.documentType : undefined;
-  if (doc) return doc === 'payslip';
-  return Boolean(f.periodStart && f.periodEnd && diffDays(f.periodStart, f.periodEnd) < 200);
-}
 
 /** Does a bank credit look like it came from this employer: a word of the name in its text? */
 export function fromEmployer(t: Pick<Transaction, 'description' | 'payee' | 'counterpartyName'>, payer: string): boolean {
@@ -150,31 +136,53 @@ export function pairPay(store: Store, ty: TaxYear): { periods: PayPeriod[]; othe
   return { periods, others, salary };
 }
 
-/** A P60 beside the payslips it covers: do they add up to it? Tax and NI settle it; pay can differ by the pension taken before tax. */
-function p60Note(p60: { gross: number | null; tax: number | null; ni: number | null }, t: PayEmployer['totals']): string {
+/**
+ * A document's figures for the year beside the payslips it covers (a P60, or a P45 or HMRC page to a
+ * date): do they add up to it? Tax and NI settle it; pay can differ by the pension taken before tax.
+ */
+function documentNote(doc: { gross: number | null; tax: number | null; ni: number | null }, t: Pick<PayEmployer['totals'], 'gross' | 'tax' | 'ni' | 'pension'>): string {
   const close = (a: number, b: number) => Math.abs(toMinor(a) - toMinor(b)) < PAY_TOLERANCE_POUNDS * 100;
-  if (p60.tax !== null && t.tax !== null) {
-    const gap = fromMinor(toMinor(p60.tax) - toMinor(t.tax));
-    if (close(p60.tax, t.tax) && (p60.ni === null || t.ni === null || close(p60.ni, t.ni))) {
-      if (p60.gross === null || t.gross === null || close(p60.gross, t.gross)) return 'The payslips add up to it.';
-      if (t.pension !== null && close(p60.gross, fromMinor(toMinor(t.gross) - toMinor(t.pension)))) return `The payslips add up to it. Its pay is theirs less the ${formatMoney(t.pension)} of pension taken before tax.`;
-      const diff = fromMinor(toMinor(p60.gross) - toMinor(t.gross));
+  if (doc.tax !== null && t.tax !== null) {
+    const gap = fromMinor(toMinor(doc.tax) - toMinor(t.tax));
+    if (close(doc.tax, t.tax) && (doc.ni === null || t.ni === null || close(doc.ni, t.ni))) {
+      if (doc.gross === null || t.gross === null || close(doc.gross, t.gross)) return 'The payslips add up to it.';
+      if (t.pension !== null && close(doc.gross, fromMinor(toMinor(t.gross) - toMinor(t.pension)))) return `The payslips add up to it. Its pay is theirs less the ${formatMoney(t.pension)} of pension taken before tax.`;
+      const diff = fromMinor(toMinor(doc.gross) - toMinor(t.gross));
       return `The payslips’ tax and NI add up to it; its pay is ${formatMoney(Math.abs(diff))} ${diff < 0 ? 'less' : 'more'} than their gross.`;
     }
-    if (!close(p60.tax, t.tax)) return gap > 0 ? `The payslips’ tax comes to ${formatMoney(gap)} less than its tax: some payslips are missing.` : `The payslips’ tax comes to ${formatMoney(-gap)} more than its tax: check them.`;
+    if (!close(doc.tax, t.tax)) return gap > 0 ? `The payslips’ tax comes to ${formatMoney(gap)} less than its tax: some payslips are missing.` : `The payslips’ tax comes to ${formatMoney(-gap)} more than its tax: check them.`;
     return 'The payslips’ NI does not add up to it: check them.';
   }
-  if (p60.gross !== null && t.gross !== null && !close(p60.gross, t.gross)) return 'The payslips do not add up to it: some may be missing.';
+  if (doc.gross !== null && t.gross !== null && !close(doc.gross, t.gross)) return 'The payslips do not add up to it: some may be missing.';
   return 'The payslips add up to it.';
+}
+
+/** The document to set beside an employer's payslips: its year's figure, else the latest one to date. */
+function employerDocument(store: Store, sources: Partial<Record<PayKind, PaySource[]>>) {
+  const docs = (sources.gross_pay ?? sources.tax_deducted ?? []).filter((s) => s.kind !== 'payslips');
+  const doc = docs.find((s) => s.final) ?? [...docs].sort((a, b) => b.asOf.localeCompare(a.asOf))[0];
+  if (!doc) return null;
+  // The same document's other figures (its tax beside its pay).
+  const fromDoc = (kind: PayKind) => (sources[kind] ?? []).find((s) => (doc.importId ? s.importId === doc.importId : s.kind === doc.kind))?.amount ?? null;
+  const imported = doc.importId ? store.imports.find((i) => i.id === doc.importId) : undefined;
+  return {
+    title: imported?.documentType === 'p60' ? 'P60 for the year' : doc.kind === 'yours' ? 'Your figures for the year' : doc.final ? 'For the whole year' : `To ${formatDate(doc.asOf)}`,
+    ...(imported ? { fileName: imported.fileName, importId: imported.id } : {}),
+    final: doc.final,
+    asOf: doc.asOf,
+    gross: fromDoc('gross_pay'),
+    tax: fromDoc('tax_deducted'),
+    ni: fromDoc('national_insurance'),
+  };
 }
 
 export function pay(store: Store, coverage: Coverage, taxYear?: string, now: ISODate = today(), earned: EarnedPayroll[] = earnedPay(store, now)): PayResponse {
   const ty = taxYear ? taxYearOf(`${taxYear.slice(0, 4)}-06-01`) : taxYearOf(now);
   const { periods, others, salary } = pairPay(store, ty);
-  const p60Figures = store.figures.filter((f) => !isPayslipFigure(store, f) && f.taxYear === ty.label && (f.kind === 'gross_pay' || f.kind === 'tax_deducted' || f.kind === 'national_insurance'));
+  const years = employerYears(store, ty);
 
   const employers: PayEmployer[] = [];
-  const employer = (key: string, payer: string) => employers.find((e) => e.key === key) ?? (employers.push({ key, payer, months: [], p60: null, totals: { gross: null, tax: null, ni: null, pension: null, studentLoan: null, paidIn: 0 } }), employers[employers.length - 1]!);
+  const employer = (key: string, payer: string) => employers.find((e) => e.key === key) ?? (employers.push({ key, payer, months: [], document: null, totals: { gross: null, tax: null, ni: null, pension: null, studentLoan: null, paidIn: 0 } }), employers[employers.length - 1]!);
 
   for (const p of periods) {
     const credit = p.credit;
@@ -246,14 +254,19 @@ export function pay(store: Store, coverage: Coverage, taxYear?: string, now: ISO
       return vals.length ? fromMinor(vals.reduce((s, v) => s + toMinor(v), 0)) : null;
     };
     e.totals = { gross: total((m) => m.gross), tax: total((m) => m.tax), ni: total((m) => m.ni), pension: total((m) => m.pension), studentLoan: total((m) => m.studentLoan), paidIn: total((m) => m.paidIn?.amount ?? null) ?? 0 };
-    const p60 = p60Figures.filter((f) => payerKey(f.payer) === e.key);
-    const pick = (kind: Figure['kind']) => {
-      const of = p60.filter((f) => f.kind === kind);
-      return of.length ? fromMinor(of.reduce((s, f) => s + toMinor(f.amount), 0)) : null;
-    };
-    if (p60.length) {
-      const figures = { gross: pick('gross_pay'), tax: pick('tax_deducted'), ni: pick('national_insurance') };
-      e.p60 = { ...figures, note: p60Note(figures, e.totals) };
+    // The document for the year beside the payslips: under any of the employer's names.
+    const year = years.find((y) => y.names.some((n) => payerKey(n) === e.key)) ?? years.find((y) => payerKey(y.payer) === e.key);
+    const doc = year ? employerDocument(store, year.sources) : null;
+    if (doc) {
+      // A document to a date is checked against the payslips paid by then (with the days a pay date can move).
+      const upTo = doc.final ? null : addDays(doc.asOf, PAY_MATCH_DAYS);
+      const months = upTo ? e.months.filter((m) => (m.payDate ?? m.periodEnd ?? '') <= upTo) : e.months;
+      const sumOf = (pick: (m: PayMonth) => number | null) => {
+        const vals = months.map(pick).filter((v): v is number => v !== null);
+        return vals.length ? fromMinor(vals.reduce((s, v) => s + toMinor(v), 0)) : null;
+      };
+      const covered = { gross: sumOf((m) => m.gross), tax: sumOf((m) => m.tax), ni: sumOf((m) => m.ni), pension: sumOf((m) => m.pension) };
+      e.document = { ...doc, note: documentNote(doc, covered) };
     }
   }
   employers.sort((a, b) => (b.totals.gross ?? b.totals.paidIn) - (a.totals.gross ?? a.totals.paidIn));
