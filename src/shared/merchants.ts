@@ -37,7 +37,9 @@ export const MERCHANTS: MerchantDef[] = [
   ['CASH WITHDRAWAL|\\bATM\\b|CASH MACHINE|CASHPOINT|\\bLINK\\b.*CASH|^CASH\\b|CASH CD\\b|CSH WDL', 'Cash withdrawal', 'cash-withdrawal', 'out'],
 
   // ── Income ──
-  ['SALARY|PAYROLL|\\bWAGES\\b|\\bSAL\\b', 'Salary', 'salary', 'in'],
+  // "WAGES" also inside a payroll reference ("WWAGES012345/01"); "PAYE" at a word's end is an
+  // employer's payroll ("ExampleCoPAYE"), except HMRC's own PAYE refunds (below).
+  ['SALARY|PAYROLL|WAGES|\\bSAL\\b|^(?!.*HMRC).*PAYE\\b', 'Salary', 'salary', 'in'],
   ['HMRC.*(CHILD BENEFIT|TAX CREDIT)|CHILD BENEFIT|UNIVERSAL CREDIT|\\bDWP\\b', 'Benefits', 'benefits', 'in'],
   ['HMRC', 'HMRC', 'tax-refund', 'in'],
   ['HMRC', 'HMRC', 'tax', 'out'],

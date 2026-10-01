@@ -370,6 +370,15 @@ describe('ingestion details', () => {
     expect(converted).toMatchObject({ amount: -85, originalAmount: -100, originalCurrency: 'EUR' });
   });
 
+  it('pay is salary when its reference says wages or PAYE, but HMRC’s PAYE refund is a tax refund', () => {
+    const c = new Categoriser([], new CategoryIndex(defaultCategories()), [acct('current', 'current')], []);
+    expect(c.categorise({ accountId: 'current', description: 'BANK GIRO CREDIT REF EXAMPLE UNIVERSITY, WWAGES012345/01', amount: 600 }).category).toBe('salary');
+    expect(c.categorise({ accountId: 'current', description: 'FASTER PAYMENTS RECEIPT REF.ExampleCoPAYE FROM EXAMPLE CO LTD', amount: 600 }).category).toBe('salary');
+    expect(c.categorise({ accountId: 'current', description: 'BANK GIRO CREDIT REF HMRC PAYE, T0000000', amount: 120 }).category).toBe('tax-refund');
+    // A university's own payment for tuition is still a course.
+    expect(c.categorise({ accountId: 'current', description: 'CARD PAYMENT TO EXAMPLE UNIVERSITY', amount: -900 }).category).toBe('courses');
+  });
+
   it('a card purchase mentioning "chip" is not a transfer to your Chip account', () => {
     const accounts = [acct('current', 'current'), acct('chip-savings', 'savings', { institutionId: 'chip' })];
     const c = new Categoriser([], new CategoryIndex(defaultCategories()), accounts, [{ id: 'chip', name: 'Chip', kind: 'investment_platform' }]);
