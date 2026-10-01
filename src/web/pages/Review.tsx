@@ -759,6 +759,38 @@ function PayslipEditor({ draft, onChange }: { draft: Draft; onChange: (d: Draft)
   );
 }
 
+/**
+ * Every other labelled value the document prints (extract-12, "read everything"): kept with the
+ * import, by the heading it is under, though nothing reads it yet.
+ */
+function PrintedValues({ printed }: { printed: { section?: string | undefined; label: string; value: string }[] }) {
+  if (!printed.length) return null;
+  const sections = [...new Set(printed.map((p) => p.section ?? ''))];
+  return (
+    <details className="rounded-xl border border-line bg-panel">
+      <summary className="cursor-pointer px-5 py-3 text-[13px] font-medium text-ink-2">Everything else it prints ({printed.length})</summary>
+      <div className="flex flex-col gap-3 border-t border-line px-5 py-3">
+        <p className="text-[12.5px] text-ink-3">Kept with the import as printed, so nothing on the document is lost.</p>
+        {sections.map((section) => (
+          <div key={section}>
+            {section && <div className="mb-1 text-[12px] font-medium text-ink-3">{section}</div>}
+            <dl className="grid grid-cols-1 gap-x-6 gap-y-0.5 text-[13px] sm:grid-cols-2">
+              {printed
+                .filter((p) => (p.section ?? '') === section)
+                .map((p, i) => (
+                  <div key={i} className="flex justify-between gap-3">
+                    <dt className="min-w-0 text-ink-2">{p.label}</dt>
+                    <dd className="text-right [overflow-wrap:anywhere]">{p.value}</dd>
+                  </div>
+                ))}
+            </dl>
+          </div>
+        ))}
+      </div>
+    </details>
+  );
+}
+
 /** One HMRC record in a line: what it is, its date, what it says, and its amount when it has one. */
 function describeHmrc(r: ExtractedHmrc): { what: string; date: string; detail: string; amount?: number } {
   const code = (c: string, cumulative: boolean) => `${c}${cumulative ? '' : ' week 1/month 1'}`;
@@ -1391,6 +1423,7 @@ export default function Review() {
                     setDraft(d);
                   }}
                 />
+                <PrintedValues printed={rec.extraction.raw?.printed ?? []} />
                 {draft.ocrText && (
                   <details className="rounded-xl border border-line bg-panel p-4">
                     <summary className="cursor-pointer text-[13px] font-medium text-ink-2">Recognised text (offline OCR)</summary>

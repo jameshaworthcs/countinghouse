@@ -896,8 +896,13 @@ export const SettingsSchema = z.object({
       readReceipts: z.boolean().default(false),
       /** Read stored documents again with the current reader, to compare with what was recorded. Off until you turn it on. */
       rereadDocuments: z.boolean().default(false),
+      /**
+       * Read everything a document prints (extract-12): a payslip in full, HMRC's pages as records, and
+       * every other labelled value. Off until its evaluation has passed.
+       */
+      readEverything: z.boolean().default(false),
     })
-    .default({ engine: 'auto', model: 'sonnet', verifyModel: 'opus', effort: 'high', maxConcurrent: 2, timeoutSeconds: 900, readReceipts: false, rereadDocuments: false }),
+    .default({ engine: 'auto', model: 'sonnet', verifyModel: 'opus', effort: 'high', maxConcurrent: 2, timeoutSeconds: 900, readReceipts: false, rereadDocuments: false, readEverything: false }),
   git: z
     .object({
       autoCommit: z.boolean().default(true),
@@ -1112,6 +1117,11 @@ export const ExtractionSchema = z.object({
   hmrc: z.array(ExtractedHmrcSchema).default([]),
   /** Payslips in full (ingest/payslips.ts). */
   payslips: z.array(ExtractedPayslipSchema).default([]),
+  /**
+   * Every other labelled value the document prints, as printed (extract-12, "read everything"):
+   * kept with the import so nothing on a document is lost, though nothing reads it yet.
+   */
+  printed: z.array(z.object({ section: z.string().max(120).optional(), label: z.string().min(1).max(200), value: z.string().min(1).max(500) })).max(400).default([]),
   notes: z.array(z.string()).default([]),
   /** Understood, but nothing to record: what the document shows, in a sentence (extract-9). */
   nothingToRecord: z.string().nullable().default(null),

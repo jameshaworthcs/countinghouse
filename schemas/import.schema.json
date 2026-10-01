@@ -1976,6 +1976,34 @@
                 ]
               }
             },
+            "printed": {
+              "default": [],
+              "maxItems": 400,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "section": {
+                    "type": "string",
+                    "maxLength": 120
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "value": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  }
+                },
+                "required": [
+                  "label",
+                  "value"
+                ]
+              }
+            },
             "notes": {
               "default": [],
               "type": "array",
@@ -3541,6 +3569,34 @@
                 "required": [
                   "employer",
                   "payDate"
+                ]
+              }
+            },
+            "printed": {
+              "default": [],
+              "maxItems": 400,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "section": {
+                    "type": "string",
+                    "maxLength": 120
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "value": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  }
+                },
+                "required": [
+                  "label",
+                  "value"
                 ]
               }
             },

@@ -5,6 +5,7 @@
 //   npm run eval -- --tag fx              cases with a tag
 //   npm run eval -- --render              write the documents to eval/.out/docs and stop
 //   npm run eval -- --model sonnet --effort medium --concurrency 3 --label note
+//   npm run eval -- --everything --only png-payslip-scan,pdf-p60   the reader that reads everything (extract-12)
 //   npm run eval -- --verify-model off    Sonnet's reading alone, without the second reading
 //
 // Each case (or group) gets a temporary store holding the accounts in cases.ts, so account
@@ -19,7 +20,7 @@ import path from 'node:path';
 import puppeteer from 'puppeteer-core';
 import { loadConfig, PROJECT_ROOT } from '../src/server/config';
 import { ImportService } from '../src/server/ingest/service';
-import { PROMPT_VERSION } from '../src/server/ingest/prompt';
+import { promptVersion } from '../src/server/ingest/prompt';
 import { WorkArea } from '../src/server/ingest/workarea';
 import { Store } from '../src/server/store';
 import { defaultCategories } from '../src/shared/categories';
@@ -71,7 +72,7 @@ interface CaseResult {
   score: CaseScore;
 }
 
-async function runGroup(cases: EvalCase[], files: Map<string, Buffer>, opts: { model?: string; effort?: string; verifyModel?: string }): Promise<CaseResult[]> {
+async function runGroup(cases: EvalCase[], files: Map<string, Buffer>, opts: { model?: string; effort?: string; verifyModel?: string; everything: boolean }): Promise<CaseResult[]> {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'finance-eval-'));
   const store = await Store.open(path.join(dir, 'data'), { watch: false });
   const out: CaseResult[] = [];
@@ -84,7 +85,7 @@ async function runGroup(cases: EvalCase[], files: Map<string, Buffer>, opts: { m
     await store.setAccounts(EVAL_ACCOUNTS.map((a) => ({ id: a.id, name: a.name, type: a.type, institutionId: a.institutionId, currency: 'GBP', status: 'open', aliases: [], includeInNetWorth: true, createdAt: stamp, updatedAt: stamp, ...(a.last4 ? { last4: a.last4 } : {}) })));
     await store.setSettings({
       ...store.settings,
-      extraction: { ...store.settings.extraction, ...(opts.model ? { model: opts.model } : {}), ...(opts.effort ? { effort: opts.effort as 'high' } : {}), ...(opts.verifyModel !== undefined ? { verifyModel: opts.verifyModel === 'off' ? '' : opts.verifyModel } : {}) },
+      extraction: { ...store.settings.extraction, ...(opts.model ? { model: opts.model } : {}), ...(opts.effort ? { effort: opts.effort as 'high' } : {}), ...(opts.verifyModel !== undefined ? { verifyModel: opts.verifyModel === 'off' ? '' : opts.verifyModel } : {}), readEverything: opts.everything },
       agents: { ...store.settings.agents, enabled: false },
     });
     const config = loadConfig({ FINANCE_DATA_DIR: path.join(dir, 'data'), FINANCE_WORK_DIR: path.join(dir, 'work'), FINANCE_WATCH: '0' });
@@ -99,7 +100,7 @@ async function runGroup(cases: EvalCase[], files: Map<string, Buffer>, opts: { m
       return rec;
     };
     const result = (c: EvalCase, rec: ImportRecord | undefined, nothingNew: boolean): CaseResult => {
-      const score = scoreCase(c.expected, rec?.status === 'review' ? rec.draft : undefined, { nothingNew });
+      const score = scoreCase(c.expected, rec?.status === 'review' ? rec.draft : undefined, { nothingNew }, { everything: opts.everything, printed: rec?.extraction.raw?.printed ?? [] });
       const v = rec?.extraction.verification;
       const how = !v ? '' : v.method === 'checks' ? '  [confirmed by its own figures]' : `  [read twice${v.disagreements.length ? `, ${v.disagreements.length} disagreement(s), kept ${v.kept}` : ', agreed'}]`;
       console.log(`${(score.score * 100).toFixed(1).padStart(6)}%  ${c.id}${how}${nothingNew ? '  [nothing new]' : ''}${rec?.status !== 'review' ? `  (${rec?.status}${rec?.extraction.error ? `: ${rec.extraction.error.slice(0, 120)}` : ''})` : ''}`);
@@ -168,7 +169,8 @@ async function main() {
     else groups.push([c]);
   }
   const concurrency = Number(arg('concurrency') ?? 3);
-  const opts = { model: arg('model'), effort: arg('effort'), verifyModel: arg('verify-model') };
+  // --everything: the reader that keeps everything a document prints (extract-12).
+  const opts = { model: arg('model'), effort: arg('effort'), verifyModel: arg('verify-model'), everything: argv.includes('--everything') };
   const results: CaseResult[] = [];
   let next = 0;
   const started = Date.now();
@@ -207,7 +209,7 @@ async function main() {
   };
   const summary = {
     ranAt: new Date().toISOString(),
-    promptVersion: PROMPT_VERSION,
+    promptVersion: promptVersion(opts.everything),
     label: arg('label') ?? null,
     model: opts.model ?? 'app default',
     effort: opts.effort ?? 'app default',
@@ -234,7 +236,7 @@ async function main() {
     for (const e of r.score.errors.slice(0, 8)) console.log(`  - ${e}`);
   }
   if (!existsSync(RESULTS)) await mkdir(RESULTS, { recursive: true });
-  const file = path.join(RESULTS, `${summary.ranAt.slice(0, 16).replace(/[:T]/g, '-')}_${PROMPT_VERSION}${summary.label ? `_${summary.label}` : ''}.json`);
+  const file = path.join(RESULTS, `${summary.ranAt.slice(0, 16).replace(/[:T]/g, '-')}_${summary.promptVersion}${summary.label ? `_${summary.label}` : ''}.json`);
   // The summary readable, then one line per case: small, and diffs between runs stay legible.
   await writeFile(file, `{"summary": ${JSON.stringify(summary, null, 1)},\n"results": [\n${results.map((r) => JSON.stringify(r)).join(',\n')}\n]}\n`);
   console.log(`\nResults in ${path.relative(PROJECT_ROOT, file)}`);

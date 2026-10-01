@@ -11,6 +11,7 @@ npm run eval -- --tag card-signs              # cases with a tag
 npm run eval -- --render                      # write the documents to eval/.out/docs and stop
 npm run eval -- --model sonnet --effort medium --concurrency 3 --label try-sonnet
 npm run eval -- --verify-model off            # the reading model alone, without the check
+npm run eval -- --everything --only png-payslip-scan,pdf-p60   # the reader that reads everything (extract-12)
 ```
 
 By default a run uses the app's own settings: Sonnet reads, and Opus checks anything the
@@ -58,6 +59,8 @@ Every expected field is one point (`score.ts`):
 | `noExtraHolding` | each holding read from a document that shows none, or other ones (a point lost) |
 | `nothingNew` | every case: recognised as adding nothing new when it adds nothing, and never otherwise |
 | `noClaim` | a note that states what the document does not say, such as where money went (a point lost) |
+| `payslip`, `payslipNet`, `payslipCodes`, `payslipLine`, `payslipNoExtraLine`, `payslipYtd` | with `--everything`: each payslip read in full, its net pay, codes and period, every line, no extra line, each year-to-date value and employer cost |
+| `printed`, `printedPrivate` | with `--everything`: each value the document prints that nothing else holds; a name or NI number kept among them (a point lost) |
 
 Rows are aligned before scoring: an exact date and amount first, then near misses. So a sign or
 date error counts as that error, not as a missing row plus an extra one.

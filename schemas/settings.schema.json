@@ -14,7 +14,8 @@
         "maxConcurrent": 2,
         "timeoutSeconds": 900,
         "readReceipts": false,
-        "rereadDocuments": false
+        "rereadDocuments": false,
+        "readEverything": false
       },
       "type": "object",
       "properties": {
@@ -64,6 +65,10 @@
           "type": "boolean"
         },
         "rereadDocuments": {
+          "default": false,
+          "type": "boolean"
+        },
+        "readEverything": {
           "default": false,
           "type": "boolean"
         }

@@ -37,9 +37,25 @@ export interface ExpectedSection {
   noValue?: boolean;
 }
 
+/** A payslip read in full (scored when reading everything, `--everything`). */
+export interface ExpectedPayslip {
+  payDate: string;
+  net: number;
+  taxCode: string;
+  niLetter: string;
+  periodNumber?: number;
+  payments: { label: string; amount: number }[];
+  deductions: { label: string; amount: number }[];
+  yearToDate: Partial<Record<'gross' | 'taxable' | 'tax' | 'ni' | 'niEmployer' | 'pension' | 'pensionEmployer' | 'studentLoan', number>>;
+  employerCosts?: { ni?: number; pension?: number };
+}
+
 export interface Expected {
   sections: ExpectedSection[];
   figures?: { kind: FigureKind; amount: number; taxYear?: string }[];
+  /** Payslips in full, and other values it prints as label and value (scored when reading everything). */
+  payslips?: ExpectedPayslip[];
+  printed?: { label: RegExp; value: RegExp }[];
   /** Understood, but adds nothing another import or the stored data does not already have. */
   nothingNew?: boolean;
   /** Claims the document does not make (where money went, say): a note stating one loses a point. */
@@ -531,6 +547,57 @@ export function buildCases(): EvalCase[] {
         { kind: 'tax_deducted', amount: 15137.6, taxYear: '2025/26' },
         { kind: 'national_insurance', amount: 3247.35, taxYear: '2025/26' },
         { kind: 'student_loan_deducted', amount: 3070.8, taxYear: '2025/26' },
+      ],
+      // Its NI table, which no figure holds.
+      printed: [{ label: /earnings at (the )?LEL/i, value: /6,?500(\.00)?/ }],
+    },
+  });
+  cases.push({
+    id: 'png-payslip-scan',
+    title: 'A scanned payslip in a layout read by no rule: every line, the totals, the codes and the year to date',
+    tags: ['png', 'figures', 'payslip'],
+    file: {
+      name: 'payslip-august-2026.png',
+      kind: 'png',
+      html: simpleDocHtml(brand('Brightwater Analytics Ltd', '#2d5d7b', 'Payroll: Brightwater Analytics Ltd, 9 Quay Street, Bristol BS1 4DA'), 'Payslip', [
+        { rows: [['Employee', 'Alex Taylor'], ['Payroll no.', '50021'], ['NI number', 'QQ ** ** ** C'], ['NI category', 'A'], ['Tax code', '1257L'], ['Pay date', '28/08/2026'], ['Tax period', 'Month 5'], ['Pay method', 'BACS']] },
+        { heading: 'Payments', table: { head: ['Description', 'Units', 'Rate', 'Amount'], rows: [['Basic salary', '', '', '2,500.00'], ['Overtime', '6.00', '22.50', '135.00'], ['Bonus', '', '', '200.00']], numeric: [1, 2, 3] } },
+        { heading: 'Deductions', table: { head: ['Description', 'Amount'], rows: [['PAYE tax', '398.40'], ['National Insurance', '140.72'], ['Pension (net pay)', '125.00'], ['Student loan (Plan 2)', '37.00'], ['Cycle to work', '41.67']], numeric: [1] } },
+        { heading: 'This period', rows: [['Total payments', '£2,835.00'], ['Total deductions', '£742.79'], ['Net pay', '£2,092.21'], ['Employer NI', '£337.86'], ['Employer pension', '£75.00']] },
+        { heading: 'Year to date', rows: [['Taxable pay', '£13,050.00'], ['Tax', '£1,992.00'], ['Employee NI', '£703.60'], ['Employer NI', '£1,689.30'], ['Pension (you)', '£625.00'], ['Pension (employer)', '£375.00'], ['Student loan', '£185.00']] },
+      ]),
+    },
+    expected: {
+      sections: [],
+      figures: [
+        { kind: 'gross_pay', amount: 2835, taxYear: '2026/27' },
+        { kind: 'tax_deducted', amount: 398.4, taxYear: '2026/27' },
+        { kind: 'national_insurance', amount: 140.72, taxYear: '2026/27' },
+        { kind: 'pension_contribution_employee', amount: 125, taxYear: '2026/27' },
+        { kind: 'student_loan_deducted', amount: 37, taxYear: '2026/27' },
+      ],
+      payslips: [
+        {
+          payDate: '2026-08-28',
+          net: 2092.21,
+          taxCode: '1257L',
+          niLetter: 'A',
+          periodNumber: 5,
+          payments: [
+            { label: 'Basic salary', amount: 2500 },
+            { label: 'Overtime', amount: 135 },
+            { label: 'Bonus', amount: 200 },
+          ],
+          deductions: [
+            { label: 'PAYE tax', amount: 398.4 },
+            { label: 'National Insurance', amount: 140.72 },
+            { label: 'Pension (net pay)', amount: 125 },
+            { label: 'Student loan (Plan 2)', amount: 37 },
+            { label: 'Cycle to work', amount: 41.67 },
+          ],
+          yearToDate: { taxable: 13050, tax: 1992, ni: 703.6, niEmployer: 1689.3, pension: 625, pensionEmployer: 375, studentLoan: 185 },
+          employerCosts: { ni: 337.86, pension: 75 },
+        },
       ],
     },
   });

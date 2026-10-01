@@ -7,7 +7,7 @@ import type { ImportHistoryResponse, ImportListResponse } from '../../shared/api
 import { CsvProfileSchema, DraftSchema, EXTRACTION_ENGINES, SlugSchema } from '../../shared/schema';
 import { readJson, type AppContext } from '../context';
 import { detectKind } from '../ingest/detect';
-import { PROMPT_VERSION } from '../ingest/prompt';
+import { promptVersion } from '../ingest/prompt';
 import { sheetRows } from '../ingest/xlsx';
 import { StoreError, type ImportSummary } from '../store';
 
@@ -99,16 +99,19 @@ export function importRoutes(ctx: AppContext): Hono {
    * Committed documents worth reading again, and any re-reading of them: read by an older version of
    * the reader, or a CSV whose columns were worked out automatically (a layout may fit it now).
    */
-  app.get('/rereads', (c) =>
-    c.json({
-      current: PROMPT_VERSION,
+  app.get('/rereads', (c) => {
+    // The reader now: extract-12 when it reads everything a document prints (prompt.ts).
+    const current = promptVersion(ctx.store.settings.extraction.readEverything);
+    const number = (v: string | undefined) => Number(/extract-(\d+)/.exec(v ?? '')?.[1] ?? 0);
+    return c.json({
+      current,
       enabled: ctx.store.settings.extraction.rereadDocuments,
       older: ctx.store.imports
-        .filter((i) => !i.result?.nothingNew && (((i.engine === 'claude-cli' || i.engine === 'claude-api') && i.engineVersion !== PROMPT_VERSION) || (i.engine === 'csv' && /auto-detected/.test(i.detail ?? ''))))
+        .filter((i) => !i.result?.nothingNew && (((i.engine === 'claude-cli' || i.engine === 'claude-api') && number(i.engineVersion) < number(current)) || (i.engine === 'csv' && /auto-detected/.test(i.detail ?? ''))))
         .map((i) => ({ id: i.id, fileName: i.fileName, engineVersion: i.engineVersion ?? null, reason: i.engine === 'csv' ? 'columns worked out' : null, committedAt: i.committedAt ?? null, reread: svc.getReread(i.id)?.status ?? null })),
       rereads: svc.listRereads(),
-    }),
-  );
+    });
+  });
   app.post('/commit-ready', async (c) => c.json(await svc.commitReady()));
 
   /** Dismiss every import that adds nothing new (their documents are filed, nothing recorded). */

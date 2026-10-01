@@ -104,7 +104,7 @@ function scoreSection(sc: Scorer, e: ExpectedSection, s: DraftSection | undefine
 /** A sentence that states something (not one saying the document does not say it). */
 const HEDGED = /\b(whether|not (say|show|state|name)|doesn'?t|does not|isn'?t|is not|no indication|unclear|unknown|cannot tell|can'?t tell|may|might|possibly|perhaps)\b/i;
 
-export function scoreCase(expected: Expected, draft: Draft | undefined, outcome: { nothingNew?: boolean } = {}): CaseScore {
+export function scoreCase(expected: Expected, draft: Draft | undefined, outcome: { nothingNew?: boolean } = {}, opts: { everything?: boolean; printed?: { label: string; value: string }[] } = {}): CaseScore {
   const sc = new Scorer();
   // Understood but adding nothing is an outcome to recognise, and never to claim of a document
   // that does add something.
@@ -149,6 +149,28 @@ export function scoreCase(expected: Expected, draft: Draft | undefined, outcome:
   figures.forEach((x, n) => {
     if (!usedFigures.has(n) && x.amount !== 0) sc.check('noExtraFigure', false, `extra figure: ${x.kind} ${x.amount} (${x.label})`);
   });
+  // Reading everything: each payslip in full, and the values printed that nothing else holds.
+  if (opts.everything) {
+    const slips = draft?.payslips ?? [];
+    for (const e of expected.payslips ?? []) {
+      const found = slips.find((p) => p.record.payDate === e.payDate) ?? slips[0];
+      const r = found?.record;
+      sc.check('payslip', Boolean(r), `payslip of ${e.payDate}: missing`);
+      if (!r) continue;
+      sc.check('payslipNet', sameMoney(r.totals.net, e.net), `payslip net: got ${r.totals.net ?? 'none'}`);
+      sc.check('payslipCodes', r.taxCode === e.taxCode && r.niLetter === e.niLetter && (e.periodNumber === undefined || r.periodNumber === e.periodNumber), `payslip codes: ${r.taxCode ?? '-'} ${r.niLetter ?? '-'} ${r.periodNumber ?? '-'}`);
+      for (const [kind, lines] of [['payments', e.payments], ['deductions', e.deductions]] as const) {
+        const got = r[kind];
+        for (const l of lines) sc.check('payslipLine', got.some((g) => sameMoney(g.amount, l.amount) && sameText(l.label, g.label)), `payslip ${kind}: ${l.label} ${l.amount} missing`);
+        sc.check('payslipNoExtraLine', got.length === lines.length, `payslip ${kind}: ${got.length} lines, ${lines.length} printed`);
+      }
+      for (const [k, v] of Object.entries(e.yearToDate)) sc.check('payslipYtd', sameMoney(r.yearToDate[k as keyof typeof r.yearToDate], v), `payslip year to date ${k}: got ${r.yearToDate[k as keyof typeof r.yearToDate] ?? 'none'}`);
+      for (const [k, v] of Object.entries(e.employerCosts ?? {})) sc.check('payslipYtd', sameMoney(r.employerCosts[k as 'ni' | 'pension'], v), `payslip employer ${k}: got ${r.employerCosts[k as 'ni' | 'pension'] ?? 'none'}`);
+    }
+    for (const e of expected.printed ?? []) sc.check('printed', (opts.printed ?? []).some((p) => e.label.test(p.label) && e.value.test(p.value)), `printed: ${e.label.source} missing`);
+    // Never a name or a National Insurance number among the values kept.
+    for (const p of opts.printed ?? []) if (/Alex Taylor|[A-Z]{2} ?\d{2} ?\d{2} ?\d{2} ?[A-D]\b/.test(`${p.label} ${p.value}`)) sc.check('printedPrivate', false, `printed a personal identifier: ${p.label}`);
+  }
   const all = Object.values(sc.fields);
   const correct = all.reduce((s, t) => s + t.correct, 0);
   const total = all.reduce((s, t) => s + t.total, 0);

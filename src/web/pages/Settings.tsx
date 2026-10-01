@@ -91,7 +91,7 @@ function ExtractionForm() {
   const setEx = (patch: Partial<SettingsT['extraction']>) => setS({ ...s, extraction: { ...ex, ...patch } });
   return (
     <div className="flex flex-col gap-5">
-      <Card title="Reading PDFs and screenshots" description="CSV, OFX, QIF and Santander TXT files, and HMRC’s pages saved from gov.uk, are always read on this machine.">
+      <Card title="Reading PDFs and screenshots" description="CSV, OFX, QIF and Santander TXT files, HMRC’s pages saved from gov.uk, and payslips in a layout known here (SAP paystubs, the classic UK payslip), are always read on this machine.">
         <ul className="mb-4 flex flex-col gap-2">
           {sys.data?.engines.map((e) => (
             <li key={e.id} className="flex items-start gap-2 text-[13px]">
@@ -145,6 +145,7 @@ function ExtractionForm() {
         <div className="mt-4">
           <Switch checked={ex.readReceipts} onChange={(v) => setEx({ readReceipts: v })} label="Read receipts with Claude" description="When you attach a receipt to a transaction, Claude reads its lines (with the model above, about $0.05 each) and suggests how to split the payment. Nothing changes until you save the split. Off: receipts are only kept." />
           <Switch checked={ex.rereadDocuments} onChange={(v) => setEx({ rereadDocuments: v })} label="Read stored documents again" description="On a committed import’s page, read its document again with the current reader and see what it finds different from what was recorded (a reading costs what an upload does). You apply each difference yourself." />
+          <Switch checked={ex.readEverything} onChange={(v) => setEx({ readEverything: v })} label="Read everything a document prints" description="Claude also keeps what has nowhere else to go: a scanned payslip in full, HMRC’s pages as their records, and every other labelled value (rates, limits, a P60’s NI table). A reading takes a little longer. Off until its evaluation run has passed; your gov.uk pages and known payslip layouts are read in full on this machine either way." />
         </div>
       </Card>
       <Card title="Agents" description="Jobs that research what you hold, keep assumptions current and write insights, through the same Claude login. Research jobs send only public identifiers (fund names, ISINs, providers); jobs that read your data get no web access.">

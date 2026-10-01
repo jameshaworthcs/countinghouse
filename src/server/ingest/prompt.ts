@@ -1,10 +1,18 @@
 // The extraction contract shared by the Claude CLI and Claude API engines: one system prompt, one
 // JSON schema. Bump PROMPT_VERSION whenever either changes; it is recorded on every import so old
 // extractions can be told apart (and re-run) later.
+//
+// Reading everything (Settings → Import & extraction, `readEverything`) adds rules 20 to 22 and their
+// part of the schema: a payslip in full, HMRC's pages as records, and every other labelled value the
+// document prints. It is PROMPT_VERSION_EVERYTHING, and stays off until its evaluation has passed.
 
 import { ACCOUNT_TYPES, ASSET_CLASSES, EXTRACTION_DOC_TYPES, FIGURE_KINDS } from '../../shared/schema';
 
 export const PROMPT_VERSION = 'extract-11';
+export const PROMPT_VERSION_EVERYTHING = 'extract-12';
+
+/** The prompt version a reading is made with. */
+export const promptVersion = (everything: boolean) => (everything ? PROMPT_VERSION_EVERYTHING : PROMPT_VERSION);
 
 export const SYSTEM_PROMPT = `You are the extraction engine of a private UK personal-finance tracker. You read one financial document — a bank, credit-card or savings statement; an investment, ISA, LISA, SIPP or pension statement; a P60, payslip, P11D or interest certificate; a timesheet; or a screenshot of a banking, savings, investment or pension app — and return its contents as JSON that matches the provided schema exactly.
 
@@ -67,6 +75,28 @@ Accuracy matters more than completeness:
     - Holiday balances (accrued, taken, carried over, left) are not figures.
     For every figure that is not earned_pay, work is null.`;
 
+/** Rules 20 to 22: everything else the document prints (extract-12). */
+const EVERYTHING_RULES = `
+20. payslips: each payslip on the document in full, as well as its figures under rule 13.
+    - employer as the payslip names it; otherNames for any other company it prints (a group company); payeReference ("123/AB45678") and payrollNumber (your payroll or works number) when printed.
+    - payDate is the date it prints; periodStart and periodEnd the pay period; periodLabel the period as printed ("Sep-2026"); periodNumber the tax period number ("Week/Month No. 07" → 7); frequency weekly, fortnightly, four-weekly or monthly when it says.
+    - taxCode without its basis ("1257L"), and cumulative false when it is week 1 / month 1 (M1, W1, X); niLetter is the National Insurance category letter only ("A", from "AB123456C - A" or "NI Code: A"). Never output the National Insurance number itself.
+    - payments and deductions: every line, in printed order, with its label as printed and its amount signed as printed (a minus sign or CR makes it negative); quantity and rate when printed (hours and an hourly rate).
+    - totals: the totals it prints for the period (total payments or total pay, total deductions, taxable pay, non-taxable pay, net pay). employerCosts: employer's NI and pension for the period, when printed.
+    - yearToDate: every year-to-date value it prints (total or gross pay, taxable pay, tax, employee NI, employer NI, pay for NI, employee pension, employer pension, student loan, SSP, SMP, tax credit). Never put a year-to-date value anywhere else.
+21. hmrc: what a page of HMRC's online services shows (Check your Income Tax, the PAYE Service, Check your State Pension, the HMRC app), one record per fact, with the fields of its type and the rest null:
+    - payment: one pay date in an employer's list: employer, payDate, taxablePay, tax, ni, taxYear.
+    - tax-code: a code HMRC issued or changed: employer, date, code, cumulative, taxYear.
+    - employment: a job's details as the page shows them that day: employer, payeReference, asOf, taxYear, payrollNumber, startedOn, endedOn, estimatedPay (HMRC's estimate), leavingPay, code, cumulative.
+    - event: a dated line of the account's activity: employer, date, event (started, ended, allowance, year-started or other), text as worded, amount.
+    - settlement: a tax year worked out: taxYear, asOf, outcome (underpaid, overpaid or settled), amount, calculatedOn, outstanding (to pay positive, to be repaid negative), payments made.
+    - ni-year: a year of the National Insurance record: asOf, taxYear, status (full, not-full, not-available, other), contributions by kind, voluntaryCost and payBy to fill it, text.
+    - state-pension-forecast: asOf, weekly, monthly, annual, payableFrom, recordTo, qualifyingYears, yearsNeeded, assumesYears, maximum.
+22. printed: every other labelled value the document prints that nothing above holds, so nothing on it is lost: rates and limits, minimum payments and due dates, plan and policy details, charges, transfer and projected values, a P60's National Insurance table and statutory payments, a P45's details, and the like. One entry each: section (the heading it is under, or null), label and value exactly as printed. Leave out transaction rows, holdings and anything already given under figures, payslips or hmrc. Never include a name, address, date of birth, National Insurance number, full account or card number, sort code, or a reference that identifies the account holder.`;
+
+/** The system prompt: rules 1 to 19, and 20 to 22 when reading everything. */
+export const systemPrompt = (everything: boolean) => (everything ? `${SYSTEM_PROMPT}${EVERYTHING_RULES}` : SYSTEM_PROMPT);
+
 const nullable = (schema: Record<string, unknown>) => ({ anyOf: [schema, { type: 'null' }] });
 const str = (description?: string) => ({ type: 'string', ...(description ? { description } : {}) });
 const num = (description?: string) => ({ type: 'number', ...(description ? { description } : {}) });
@@ -77,7 +107,7 @@ function object(properties: Record<string, unknown>) {
 }
 
 /** JSON Schema for the model's output (every field required; absent values are null). */
-export function extractionJsonSchema(): Record<string, unknown> {
+export function extractionJsonSchema(everything = false): Record<string, unknown> {
   const transaction = object({
     date: date('Posting date, YYYY-MM-DD'),
     transactionDate: nullable(date('Transaction date if printed separately')),
@@ -161,12 +191,77 @@ export function extractionJsonSchema(): Record<string, unknown> {
       }),
     ),
   });
+  const bool = (description?: string) => ({ type: 'boolean', ...(description ? { description } : {}) });
+  const line = object({ label: str('As printed'), amount: num('Signed as printed: a minus or CR makes it negative'), quantity: nullable(num('Hours or units, if printed')), rate: nullable(num('Rate per hour or unit, if printed')) });
+  const payslip = object({
+    employer: str('The employer as the payslip names it'),
+    otherNames: { type: 'array', items: str(), description: 'Other company names it prints' },
+    payeReference: nullable(str('Employer PAYE reference, e.g. 123/AB45678')),
+    payrollNumber: nullable(str('Your payroll or works number')),
+    payDate: date('The date it prints, YYYY-MM-DD'),
+    periodStart: nullable(date()),
+    periodEnd: nullable(date()),
+    periodLabel: nullable(str('The period as printed, e.g. Sep-2026')),
+    periodNumber: nullable(num('Tax period number printed')),
+    frequency: nullable({ type: 'string', enum: ['weekly', 'fortnightly', 'four-weekly', 'monthly'] }),
+    taxCode: nullable(str('Without its basis, e.g. 1257L')),
+    cumulative: nullable(bool('false for week 1 / month 1')),
+    niLetter: nullable(str('National Insurance category letter only, never the number')),
+    payMethod: nullable(str()),
+    department: nullable(str()),
+    payments: { type: 'array', items: line },
+    deductions: { type: 'array', items: line },
+    totals: object({ payments: nullable(num('Total payments / total pay')), deductions: nullable(num('Total deductions')), taxable: nullable(num('Taxable pay this period')), nonTaxable: nullable(num()), net: nullable(num('Net pay')) }),
+    employerCosts: object({ ni: nullable(num('Employer NI this period')), pension: nullable(num('Employer pension this period')) }),
+    yearToDate: object(Object.fromEntries(['gross', 'taxable', 'tax', 'ni', 'niEmployer', 'niablePay', 'pension', 'pensionEmployer', 'studentLoan', 'ssp', 'smp', 'taxCredit'].map((k) => [k, nullable(num())]))),
+  });
+  const hmrc = object({
+    type: { type: 'string', enum: ['payment', 'tax-code', 'employment', 'event', 'settlement', 'ni-year', 'state-pension-forecast'] },
+    employer: nullable(str()),
+    payeReference: nullable(str()),
+    taxYear: nullable(str('YYYY/YY')),
+    date: nullable(date('tax-code: issued; event: its date')),
+    asOf: nullable(date('The day the page shows it')),
+    code: nullable(str('Tax code without its basis')),
+    cumulative: nullable(bool()),
+    payDate: nullable(date()),
+    taxablePay: nullable(num()),
+    tax: nullable(num()),
+    ni: nullable(num()),
+    payrollNumber: nullable(str()),
+    startedOn: nullable(date()),
+    endedOn: nullable(date()),
+    estimatedPay: nullable(num()),
+    leavingPay: nullable(num()),
+    event: nullable({ type: 'string', enum: ['started', 'ended', 'allowance', 'year-started', 'other'] }),
+    text: nullable(str('As worded')),
+    amount: nullable(num()),
+    outcome: nullable({ type: 'string', enum: ['underpaid', 'overpaid', 'settled'] }),
+    calculatedOn: nullable(date()),
+    outstanding: nullable(num('To pay positive, to be repaid negative')),
+    payments: { type: 'array', items: object({ date: date(), amount: num(), how: str() }) },
+    status: nullable({ type: 'string', enum: ['full', 'not-full', 'not-available', 'other'] }),
+    contributions: { type: 'array', items: object({ kind: str(), amount: nullable(num()) }) },
+    voluntaryCost: nullable(num()),
+    payBy: nullable(date()),
+    weekly: nullable(num()),
+    monthly: nullable(num()),
+    annual: nullable(num()),
+    payableFrom: nullable(date()),
+    recordTo: nullable(date()),
+    qualifyingYears: nullable(num()),
+    yearsNeeded: nullable(num()),
+    assumesYears: nullable(num()),
+    maximum: nullable(bool()),
+  });
+  const printed = object({ section: nullable(str('The heading it is under')), label: str('As printed'), value: str('As printed') });
   return object({
     documentType: { type: 'string', enum: [...EXTRACTION_DOC_TYPES] },
     institutionName: nullable(str()),
     documentDate: nullable(date()),
     accounts: { type: 'array', items: account },
     figures: { type: 'array', items: figure },
+    ...(everything ? { payslips: { type: 'array', items: payslip }, hmrc: { type: 'array', items: hmrc }, printed: { type: 'array', items: printed } } : {}),
     notes: { type: 'array', items: str() },
     nothingToRecord: nullable(str('What the document shows, when it has nothing to record')),
     confidence: { type: 'string', enum: ['high', 'medium', 'low'] },

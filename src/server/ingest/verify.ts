@@ -5,7 +5,8 @@
 
 import { formatMoney } from '../../shared/money';
 import { sectionChecks } from '../../shared/review';
-import type { AccountType, Draft, DraftSection } from '../../shared/schema';
+import type { AccountType, Draft, DraftSection, ExtractedPayslip } from '../../shared/schema';
+import { payslipAddsUp, payslipFigures, payslipProblems } from './payslips';
 import type { TimesheetCheck } from './timesheet';
 
 /** Checks whose failure means a figure was probably misread. */
@@ -102,13 +103,30 @@ export function assessReading(
     if (s.holdings.length && !passed.has('holdings')) unconfirmed.push(`${label}: holdings with no total to check them against`);
     if ([s.contributions, s.bonusToDate, s.taxYearContributions, s.gain, s.annualIncome].some((v) => v !== undefined)) unconfirmed.push(`${label}: contribution and allowance figures`);
   });
-  const unchecked = draft.figures.filter((f) => !ctx.sheetCheck?.confirmed.has(f.key));
+  // A payslip read in full confirms its own figures when it adds up (its lines to its totals, its
+  // totals to its net pay) and the figures read are what its lines say (ingest/payslips.ts).
+  const slips = draft.payslips ?? [];
+  for (const p of slips) problems.push(...payslipProblems(p.record));
+  const bySlips = slips.length > 0 && slips.every((p) => payslipAddsUp(p.record)) && slipFiguresAgree(draft, slips.map((p) => p.record));
+  if (slips.length && slips.every((p) => payslipAddsUp(p.record)) && !bySlips) problems.push('The tax figures read are not what the payslip’s lines say');
+  const unchecked = draft.figures.filter((f) => !ctx.sheetCheck?.confirmed.has(f.key) && !(bySlips && SLIP_KINDS.has(f.kind)));
   if (unchecked.some((f) => f.kind !== 'earned_pay')) unconfirmed.push('Tax figures');
   if (unchecked.some((f) => f.kind === 'earned_pay')) unconfirmed.push('Earned pay');
   // Finding nothing to record is a reading too, and a missed balance or row would be dismissed with
   // it: a second reader has to find nothing as well.
   if (!draft.sections.length && !draft.figures.length) unconfirmed.push('Nothing to record');
   return { problems, unconfirmed };
+}
+
+/** The kinds of tax figure a payslip's lines give. */
+const SLIP_KINDS = new Set<string>(['gross_pay', 'tax_deducted', 'national_insurance', 'pension_contribution_employee', 'student_loan_deducted']);
+
+/** Are a draft's payslip figures, kind by kind, what its payslips' own lines add up to? */
+function slipFiguresAgree(draft: Draft, slips: ExtractedPayslip[]): boolean {
+  const sum = (list: { kind: string; amount: number }[], kind: string) => list.filter((f) => f.kind === kind).reduce((x, f) => x + Math.round(f.amount * 100), 0);
+  const fromSlips = slips.flatMap((p) => payslipFigures(p));
+  const read = draft.figures.filter((f) => SLIP_KINDS.has(f.kind));
+  return [...SLIP_KINDS].every((k) => sum(read, k) === sum(fromSlips, k));
 }
 
 export interface Comparison {

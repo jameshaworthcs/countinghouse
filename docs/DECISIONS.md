@@ -1209,3 +1209,26 @@ one UK payroll package) are the same every month.
 - **Settings → Tax documents shows a year by job.** For pay, tax, NI, student loan and payslip
   pension, it shows the source that counts and the others, each linked to its document. The year's
   other figures follow, by kind.
+
+## 2026-10-01: The reader keeps everything a document prints (extract-12), off until evaluated
+
+The fourth slice. The local readers keep payslips and HMRC's pages in full, but a scanned payslip,
+a screenshot of HMRC's app, or a P60's NI table still lost everything with no figure kind. The
+prompt now has three more rules and their part of the schema: payslips in full, HMRC's records, and
+every other labelled value (`printed`).
+
+- **It ships off** (`settings.extraction.readEverything`), and the reader stays `extract-11` until
+  the evaluation run passes. The owner's standing rule is that no Claude runs while building or
+  testing, and the reader is too central to change on faith. The eval has a scanned payslip in a
+  layout no rule reads, and checks the P60's NI table; `npm run eval -- --everything` runs it.
+  - Considered: switching the reader over untested. A worse reader of every upload costs more than
+    waiting for one run.
+- **Other values are kept as printed text**, with the import, not as records. Nothing reads them
+  yet; the last slice gives some of them homes (terms, companies, arrangements).
+  - Considered: a record kind per document type. Too many kinds for values nothing reads, and a
+    reading would fail on any it got slightly wrong.
+- **A payslip that adds up checks itself.** Its lines, totals and net agree, so its tax figures need
+  no second reading by the stronger model. That is cheaper, and it is the same arithmetic the local
+  readers use.
+- **No personal identifier is kept**, by the prompt's rule and by the normaliser, which takes NI
+  numbers out of all of it.

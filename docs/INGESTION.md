@@ -162,6 +162,34 @@ is paid ([FORMULAS.md §17](FORMULAS.md), "Earned pay").
   stays in `figures.jsonl` and no longer counts. The draft says what it replaces, and is held back
   from "Commit all ready".
 
+### Reading everything (`extract-12`)
+
+The reader keeps every value a document prints when **Read everything a document prints** is on
+(Settings → Import & extraction; `settings.extraction.readEverything`). It is off until its
+evaluation run has passed (`npm run eval -- --everything`, which spends the Claude plan), so until
+then readings are `extract-11`. The gov.uk pages and payslip layouts read on this machine (above)
+are read in full either way. Three rules are added to the prompt (`prompt.ts`), each with its part
+of the schema:
+
+- **20. Payslips in full**, as the local readers keep them (`payslips.jsonl`): every payment and
+  deduction line, signed as printed; the totals and net pay; employer costs; the tax code and its
+  basis; the NI letter; the pay date, period and its number; the payroll number; and the
+  year-to-date column. Its tax figures are given as before.
+- **21. HMRC's pages as records** (`hmrc.jsonl`), for a screenshot or scan of HMRC's services or
+  app. Each fact is one flat record with the fields of its kind; the normaliser keeps those and
+  checks it as the gov.uk readers' records are checked.
+- **22. Every other labelled value** (`extraction.raw.printed`): rates and limits, minimum
+  payments and due dates, plan and policy details, charges, transfer and projected values, a P60's
+  NI table, a P45's details. Each is `{section?, label, value}` as printed, kept with the import and
+  shown on the review page ("Everything else it prints"), though nothing reads it yet.
+- **Never a personal identifier.** The prompt says to leave out names, addresses, dates of birth,
+  NI numbers and full account numbers. The normaliser also takes any NI number out of all three,
+  drops a payroll number that is one, and keeps only the NI letter.
+- A payslip that adds up confirms its own figures, so it needs no second reading ("Checking every
+  figure", below). One that does not add up is read again.
+- With it on, documents an older reader read are listed as worth reading again (by version
+  number).
+
 ### Checking every figure
 
 `src/server/ingest/verify.ts`, after each Claude reading:
@@ -170,7 +198,9 @@ is paid ([FORMULAS.md §17](FORMULAS.md), "Earned pay").
    ([FORMULAS.md §13](FORMULAS.md)):
    - rows and balances, when opening + rows = closing, running balances follow, or printed
      totals match;
-   - holdings, when they (with cash) add up to the value.
+   - holdings, when they (with cash) add up to the value;
+   - a payslip read in full (below, "Reading everything"), when its lines add up to its totals,
+     its totals to its net pay, and the tax figures read are what its lines say.
 2. **A reading every check confirms is kept.** Typically a bank or card statement with balances.
 3. **Otherwise Opus reads the document again.** That is when a check failed (balances that don't
    add up, wrong card signs, dates outside the period, rows the reader was unsure of, dropped

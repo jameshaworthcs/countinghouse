@@ -85,7 +85,7 @@ const sum = (lines: PayslipLine[], re: RegExp): number | null => {
  * The figures a payslip gives for its period (as the reader always has): its gross (the total of its
  * payments), and the tax, NI, pension and student loan taken. The tax code goes on the gross.
  */
-function figuresOf(p: ExtractedPayslip): ExtractedFigure[] {
+export function payslipFigures(p: ExtractedPayslip): ExtractedFigure[] {
   const taxYear = taxYearOf(p.payDate).label;
   const base = { currency: 'GBP', taxYear, payer: p.employer, ...(p.periodStart ? { periodStart: p.periodStart } : {}), ...(p.periodEnd ? { periodEnd: p.periodEnd } : {}), ...(p.payeReference ? { payerReference: p.payeReference } : {}) };
   const gross = p.totals.payments ?? fromMinor(p.payments.reduce((x, l) => x + toMinor(l.amount), 0));
@@ -104,28 +104,33 @@ function figuresOf(p: ExtractedPayslip): ExtractedFigure[] {
 }
 
 /**
- * Do the lines add up to the totals printed, and the totals to the net pay? Notes for what does not.
- * `extra` is paid on top of the total of the payments (SAP's net claims).
+ * Do a payslip's lines add up to the totals it prints, and its totals to its net pay (with any pay
+ * not taxed, which some layouts print apart from the total)? What does not, in words; none when it
+ * adds up.
  */
-function checks(p: ExtractedPayslip, extra: number): string[] {
+export function payslipProblems(p: ExtractedPayslip): string[] {
   const notes: string[] = [];
   const total = (lines: PayslipLine[]) => lines.reduce((x, l) => x + toMinor(l.amount), 0);
   if (p.totals.payments !== undefined && total(p.payments) !== toMinor(p.totals.payments)) notes.push(`The payment lines read come to ${fromMinor(total(p.payments)).toFixed(2)}, not the ${p.totals.payments.toFixed(2)} printed: check them against the payslip.`);
   if (p.totals.deductions !== undefined && total(p.deductions) !== toMinor(p.totals.deductions)) notes.push(`The deduction lines read come to ${fromMinor(total(p.deductions)).toFixed(2)}, not the ${p.totals.deductions.toFixed(2)} printed: check them against the payslip.`);
   if (p.totals.payments !== undefined && p.totals.deductions !== undefined && p.totals.net !== undefined) {
-    const net = toMinor(p.totals.payments) + toMinor(extra) - toMinor(p.totals.deductions);
-    if (net !== toMinor(p.totals.net)) notes.push(`Its pay less its deductions is ${fromMinor(net).toFixed(2)}, not the net pay of ${p.totals.net.toFixed(2)} printed.`);
+    const net = toMinor(p.totals.payments) - toMinor(p.totals.deductions);
+    const withExtra = net + toMinor(p.totals.nonTaxable ?? 0);
+    if (net !== toMinor(p.totals.net) && withExtra !== toMinor(p.totals.net)) notes.push(`Its pay less its deductions is ${fromMinor(net).toFixed(2)}, not the net pay of ${p.totals.net.toFixed(2)} printed.`);
   }
   return notes;
 }
 
-function finish(p: ExtractedPayslip, layout: string, extra = 0): Extraction {
-  const problems = checks(p, extra);
+/** A payslip that confirms its own figures: it prints its total pay and net pay, and adds up. */
+export const payslipAddsUp = (p: ExtractedPayslip) => p.totals.payments !== undefined && p.totals.net !== undefined && !payslipProblems(p).length;
+
+function finish(p: ExtractedPayslip, layout: string): Extraction {
+  const problems = payslipProblems(p);
   return ExtractionSchema.parse({
     documentType: 'payslip',
     institutionName: p.employer,
     documentDate: p.payDate,
-    figures: figuresOf(p),
+    figures: payslipFigures(p),
     payslips: [p],
     notes: [`A ${layout} payslip, read in full: ${p.payments.length} payment line${p.payments.length === 1 ? '' : 's'}, ${p.deductions.length} deduction line${p.deductions.length === 1 ? '' : 's'}, the totals and the year to date.`, ...problems],
     confidence: problems.length ? 'medium' : 'high',
@@ -228,7 +233,7 @@ export function readSapPaystub(text: string): Extraction | null {
     employerCosts: {},
     yearToDate,
   };
-  return finish(p, 'SAP', totals.nonTaxable ?? 0);
+  return finish(p, 'SAP');
 }
 
 // ─── The classic UK payslip ───────────────────────────────────────────────────────────────────────

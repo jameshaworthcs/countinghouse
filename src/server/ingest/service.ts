@@ -44,7 +44,7 @@ import { detectEngines, pickEngine, type EngineResult } from './engines';
 import { captureDate, imageInfo, prepareImage } from './images';
 import { extractWithOcr, OCR_ENGINE_VERSION } from './ocr';
 import { OFX_ENGINE_VERSION, parseOfx } from './ofx';
-import { extractionJsonSchema, PROMPT_VERSION, SYSTEM_PROMPT, userPrompt } from './prompt';
+import { extractionJsonSchema, promptVersion, systemPrompt, userPrompt } from './prompt';
 import { parseQif, QIF_ENGINE_VERSION } from './qif';
 import { parseSantanderTxt, SANTANDER_ENGINE_VERSION } from './santander';
 import { WorkArea } from './workarea';
@@ -462,6 +462,8 @@ export class ImportService extends EventEmitter {
       spreadsheet: kind === 'sheet',
     };
     const timeoutMs = settings.timeoutSeconds * 1000;
+    // Everything the document prints, when that is turned on (prompt.ts, extract-12).
+    const everything = settings.readEverything;
     const readWith = async (m: string): Promise<EngineResult> => {
       if (chosen === 'claude-cli') {
         if (!claudeBin) throw new Error('claude CLI not found');
@@ -469,8 +471,8 @@ export class ImportService extends EventEmitter {
           bin: claudeBin,
           cwd: scratch,
           userPrompt: userPrompt({ ...promptCtx, files: files.map((f) => `./${path.basename(f.path)}`) }),
-          systemPrompt: SYSTEM_PROMPT,
-          schema: extractionJsonSchema(),
+          systemPrompt: systemPrompt(everything),
+          schema: extractionJsonSchema(everything),
           model: m,
           effort: settings.effort,
           timeoutMs,
@@ -481,8 +483,8 @@ export class ImportService extends EventEmitter {
         apiKey: this.config.anthropicApiKey!,
         files,
         userPrompt: userPrompt(promptCtx),
-        systemPrompt: SYSTEM_PROMPT,
-        schema: extractionJsonSchema(),
+        systemPrompt: systemPrompt(everything),
+        schema: extractionJsonSchema(everything),
         model: m,
         effort: settings.effort,
         timeoutMs,
@@ -494,7 +496,7 @@ export class ImportService extends EventEmitter {
       engineVersion = OCR_ENGINE_VERSION;
     } else {
       result = await readWith(model);
-      engineVersion = kind === 'sheet' ? `${XLSX_ENGINE_VERSION}+${PROMPT_VERSION}` : PROMPT_VERSION;
+      engineVersion = kind === 'sheet' ? `${XLSX_ENGINE_VERSION}+${promptVersion(everything)}` : promptVersion(everything);
       const verifyModel = opts.verifyModel !== undefined ? opts.verifyModel : settings.verifyModel;
       if (verifyModel && verifyModel !== model) {
         const checked = await this.verifyReading(record, result, { model, verifyModel, readWith, batch: await this.batchEvidence(record), sheets });
