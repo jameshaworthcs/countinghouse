@@ -4,7 +4,8 @@
 import type { EarnedPayroll, PayEmployer, PayMonth, PayResponse } from '../../shared/api';
 import { addDays, diffDays, formatDate, formatMonth, maxDate, today, type ISODate } from '../../shared/dates';
 import { formatMoney, fromMinor, toMinor } from '../../shared/money';
-import type { Employment, Figure, HmrcRecord, Transaction } from '../../shared/schema';
+import type { Employment, Figure, HmrcRecord, PayslipRecord, Transaction } from '../../shared/schema';
+import { employerCostsOf, jobPayslips, payslipGaps, payslipOf } from './payslips';
 import { taxYearOf, type TaxYear } from '../../shared/uk';
 import { earnedPay } from './earned';
 import type { Store } from '../store';
@@ -72,6 +73,9 @@ export interface PayPeriod {
   owed?: { markedAt: string; note?: string; contextId?: string };
   /** HMRC's record of this payment, when its pay and tax are the payslip's to the penny. */
   hmrcId?: string;
+  /** The payslip in full, when it was read in full; `expectedNet` is then the net pay it prints. */
+  payslip?: PayslipRecord;
+  netPrinted?: boolean;
 }
 
 /** HMRC's one record of a job's payment whose pay and tax are a payslip's, to the penny (its taxable pay is the gross, or the gross less pension taken before tax). */
@@ -97,6 +101,22 @@ function owedFor(store: Store, job: Employment, periodEnd: string | null): PayPe
     return c.status === 'active' && d.event === 'pay_not_received' && Boolean(d.to) && periodEnd >= (d.from ?? d.to!) && periodEnd <= d.to! && typeof employer === 'string' && Boolean(matchEmployment([job], { employer }));
   });
   return told ? { markedAt: told.createdAt, contextId: told.id } : undefined;
+}
+
+/** What a month shows of its payslip in full: its code and NI letter, the net it prints, and the employer's costs. */
+function payslipDetail(store: Store, p: PayPeriod, ty: TaxYear): Pick<PayMonth, 'netPrinted' | 'payslipId' | 'taxCode' | 'niLetter' | 'employerCosts'> {
+  const slip = p.payslip;
+  const code = slip?.taxCode ? `${slip.taxCode}${slip.cumulative === false ? ' M1' : ''}` : p.figures.find((f) => f.taxCode)?.taxCode;
+  const list = slip?.employmentId ? jobPayslips(store, slip.employmentId, ty) : [];
+  const at = slip ? list.findIndex((x) => x.id === slip.id) : -1;
+  const costs = at >= 0 ? employerCostsOf(list, at) : {};
+  return {
+    ...(p.netPrinted ? { netPrinted: true } : {}),
+    ...(slip ? { payslipId: slip.id } : {}),
+    ...(code ? { taxCode: code } : {}),
+    ...(slip?.niLetter ? { niLetter: slip.niLetter } : {}),
+    ...(Object.keys(costs).length ? { employerCosts: costs } : {}),
+  };
 }
 
 /** Nothing to pay into the bank: the deductions read are as much as the pay (a £0 payslip). */
@@ -145,6 +165,9 @@ export function pairPay(store: Store, ty: TaxYear): { periods: PayPeriod[]; othe
       const periodEnd = first.periodEnd ?? first.date ?? null;
       const payDate = undated ?? first.date ?? periodEnd;
       const owed = job ? owedFor(store, job, periodEnd) : undefined;
+      // The payslip in full: the net pay it prints is what reaches the bank, whatever the lines read.
+      const slip = payslipOf(store, figures);
+      const printed = slip?.totals.net;
       periods.push({
         key,
         payer: e.payer,
@@ -157,7 +180,9 @@ export function pairPay(store: Store, ty: TaxYear): { periods: PayPeriod[]; othe
         ni,
         pension,
         studentLoan,
-        expectedNet: gross !== null ? fromMinor(toMinor(gross) - listed) : null,
+        expectedNet: printed ?? (gross !== null ? fromMinor(toMinor(gross) - listed) : null),
+        ...(printed !== undefined ? { netPrinted: true } : {}),
+        ...(slip ? { payslip: slip } : {}),
         periodEnd,
         payDate,
         from: addDays(undated ?? periodEnd ?? payDate!, -PAY_MATCH_DAYS),
@@ -248,7 +273,7 @@ function documentNote(doc: { gross: number | null; tax: number | null; ni: numbe
 
 /** The document to set beside an employer's payslips: its year's figure, else the latest one to date. */
 function employerDocument(store: Store, sources: Partial<Record<PayKind, PaySource[]>>) {
-  const docs = (sources.gross_pay ?? sources.tax_deducted ?? []).filter((s) => s.kind !== 'payslips');
+  const docs = (sources.gross_pay ?? sources.tax_deducted ?? []).filter((s) => s.kind !== 'payslips' && !s.payslipId);
   const doc = docs.find((s) => s.final) ?? [...docs].sort((a, b) => b.asOf.localeCompare(a.asOf))[0];
   if (!doc) return null;
   // The same source's other figures (its tax beside its pay): the same import, or HMRC's record.
@@ -292,7 +317,7 @@ export function codeInForce(store: Store, employmentId: string, payDate: ISODate
 }
 
 /** The day a job started: yours, else HMRC's (its employment page, or the account's "new employment"). */
-function jobStartedOn(store: Store, employmentId: string): string | undefined {
+export function jobStartedOn(store: Store, employmentId: string): string | undefined {
   const yours = store.employment(employmentId)?.startedOn;
   if (yours) return yours;
   return store.hmrc
@@ -342,7 +367,10 @@ export function pay(store: Store, coverage: Coverage, taxYear?: string, now: ISO
     } else if (credit) {
       const diff = p.expectedNet !== null ? toMinor(credit.amount) - toMinor(p.expectedNet) : 0;
       status = p.expectedNet === null || Math.abs(diff) <= PAY_TOLERANCE_POUNDS * 100 ? 'paid' : 'differs';
-      if (status === 'differs') note = `${formatMoney(Math.abs(fromMinor(diff)))} ${diff < 0 ? 'less' : 'more'} than the payslip’s pay after the deductions read from it: other deductions or adjustments on the payslip`;
+      if (status === 'differs')
+        note = p.netPrinted
+          ? `${formatMoney(Math.abs(fromMinor(diff)))} ${diff < 0 ? 'less' : 'more'} than the net pay the payslip prints`
+          : `${formatMoney(Math.abs(fromMinor(diff)))} ${diff < 0 ? 'less' : 'more'} than the payslip’s pay after the deductions read from it: other deductions or adjustments on the payslip`;
       else if (p.owed && credit.date > p.to) note = `Arrived late, on ${formatDate(credit.date)}: you had said it was owed`;
     } else if (p.owed) {
       status = 'owed';
@@ -379,6 +407,7 @@ export function pay(store: Store, coverage: Coverage, taxYear?: string, now: ISO
       ...(note ? { note } : {}),
       figureIds: p.figures.map((f) => f.id),
       ...(p.owed ? { owed: p.owed } : {}),
+      ...payslipDetail(store, p, ty),
     });
   }
 
@@ -445,7 +474,12 @@ export function pay(store: Store, coverage: Coverage, taxYear?: string, now: ISO
       return vals.length ? fromMinor(vals.reduce((s, v) => s + toMinor(v), 0)) : null;
     };
     e.totals = { gross: total((m) => m.gross), tax: total((m) => m.tax), ni: total((m) => m.ni), pension: total((m) => m.pension), studentLoan: total((m) => m.studentLoan), paidIn: total((m) => m.paidIn?.amount ?? null) ?? 0 };
-    if (e.employmentId) taxChecks(store, e, e.employmentId);
+    if (e.employmentId) {
+      taxChecks(store, e, e.employmentId);
+      // Pay the year to date shows on no imported payslip.
+      const gaps = payslipGaps(jobPayslips(store, e.employmentId, ty));
+      if (gaps.length) e.gaps = gaps.map((g) => ({ ...(g.after ? { after: g.after.payDate } : {}), before: g.before.payDate, amount: g.amount }));
+    }
     // The document for the year beside the payslips: the job's, else under any of the employer's names.
     const year = years.find((y) => y.employmentId && y.employmentId === e.key) ?? years.find((y) => y.names.some((n) => payerKey(n) === e.key)) ?? years.find((y) => payerKey(y.payer) === e.key);
     const doc = year ? employerDocument(store, year.sources) : null;
@@ -466,7 +500,7 @@ export function pay(store: Store, coverage: Coverage, taxYear?: string, now: ISO
   const notes: string[] = [];
   if (earned.length) notes.push('Timesheet work is matched to the payslip whose gross is exactly a run of its unpaid months, oldest first. What is owed is expected with the next payslip after the usual delay; its tax and NI are estimates from the payroll’s last payslip and the UK rates.');
   if (!periods.length) notes.push('No payslips for this tax year: import them to see gross pay, tax and NI month by month. Pay into your bank is shown on its own.');
-  notes.push('Pay is matched to a payment into your bank within 10 days of the pay date: from the same job (by name or payroll number), or of exactly the pay after the deductions read. Pay the job brought forward (before Christmas, say) is matched earlier in its pay period when it is exactly that pay. Deductions not read from a payslip (a cycle scheme, say) show as the difference.');
+  notes.push('Pay is matched to a payment into your bank within 10 days of the pay date: from the same job (by name or payroll number), or of exactly the pay after the deductions read. Pay the job brought forward (before Christmas, say) is matched earlier in its pay period when it is exactly that pay. Net pay is what the payslip prints when it was read in full; otherwise it is the pay less the deductions read, and any not read (a cycle scheme, say) show as the difference.');
   if (employers.some((e) => e.months.some((m) => m.check))) notes.push(`The tax a pay date would have on HMRC’s code is worked out from the taxable pay HMRC’s record shows, on the code HMRC issued at least ${CODE_NOTICE_DAYS} days before it (a payroll cannot use a code it has not been sent).`);
   return { taxYear: { label: ty.label, start: ty.start, end: ty.end }, employers, notes };
 }
@@ -485,7 +519,7 @@ function taxChecks(store: Store, e: PayEmployer, employmentId: string): void {
     const code = issued ? parseTaxCode(`${issued.code}${issued.cumulative ? '' : ' M1'}`) : null;
     const tax = code ? payeTax({ gross: h.taxablePay, payDate: h.payDate, code, previousPay, previousTax }) : null;
     if (issued && tax !== null && Math.abs(toMinor(tax) - toMinor(h.tax)) > PAY_TOLERANCE_POUNDS * 100) {
-      const printed = store.figures.find((f) => m.figureIds.includes(f.id) && f.taxCode)?.taxCode;
+      const printed = m.taxCode;
       m.check = {
         code: issued.code,
         cumulative: issued.cumulative,

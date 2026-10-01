@@ -417,7 +417,7 @@ describe('format v5 migration', () => {
         { id: 'fig_00000000000000a7', kind: 'pension_income_forecast', label: 'Forecast', amount: 11500.5, currency: 'GBP', date: '2026-09-30', accountId: 'state', source: { importId: 'imp_20260930_120000_0a04' }, createdAt: stamp },
       ];
       await writeFile(path.join(data, 'figures.jsonl'), `${figures.map((f) => JSON.stringify(f)).join('\n')}\n`);
-      expect(await runMigrations(data, () => undefined)).toMatchObject({ from: 4, to: 5 });
+      expect(await runMigrations(data, () => undefined)).toMatchObject({ from: 4, to: 6 });
 
       const store = await Store.open(data);
       expect(store.issues.map((i) => `${i.file}: ${i.message}`)).toEqual([]);

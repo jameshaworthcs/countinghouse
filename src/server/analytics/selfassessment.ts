@@ -51,6 +51,7 @@ export function selfAssessment(store: Store, label?: string): SelfAssessmentResp
     list.flatMap((s) => [
       ...figureSources(s.figures),
       ...(s.records ?? []).map((r) => ({ type: 'hmrc' as const, id: r.id, label: `HMRC's record: ${r.employer ?? 'a payment'}${what === 'tax' ? ', tax' : ', taxable pay'}`, amount: what === 'tax' ? r.tax : r.taxablePay, date: r.payDate })),
+      ...(s.payslipId ? [{ type: 'payslip' as const, id: s.payslipId, label: `Payslip: ${what === 'tax' ? 'tax' : 'taxable pay'} for the year to date`, amount: s.amount, date: s.asOf }] : []),
     ]);
   const soFar = withPay.filter((e) => !e.chosen.gross_pay!.final);
   const taxUnknown = withPay.filter((e) => !e.chosen.tax_deducted);
@@ -60,7 +61,9 @@ export function selfAssessment(store: Store, label?: string): SelfAssessmentResp
       ? `${src.label}: its P60 for ${ty.label} gives the year's figure`
       : src.kind === 'yours'
         ? 'your figure'
-        : src.records
+        : src.payslipId
+          ? `the ${src.label}${src.final ? ' (the job has ended)' : `: its P60 gives the year's figure`}`
+          : src.records
           ? `HMRC's record of its payments to ${formatDate(src.asOf)}${src.final ? ' (the job has ended)' : `: its P60 gives the year's figure`}`
           : src.label === 'P60'
             ? 'its P60'

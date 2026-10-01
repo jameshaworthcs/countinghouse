@@ -17,6 +17,7 @@ import { fromMinor, toMinor } from '../../shared/money';
 import type { Figure, FigureKind, HmrcRecord } from '../../shared/schema';
 import type { TaxYear } from '../../shared/uk';
 import type { Store } from '../store';
+import { yearSoFar } from './payslips';
 
 /** An employer's name reduced for comparing: "Larchwood Data Ltd" and "LARCHWOODDATA" are one. */
 export const payerKey = (name: string | undefined) =>
@@ -138,6 +139,8 @@ export interface PaySource {
   figures: Figure[];
   /** HMRC's records of the job's payments it adds up (its figures are then none). */
   records?: Extract<HmrcRecord, { type: 'payment' }>[];
+  /** The payslip whose year-to-date column it is (its figures are then none). */
+  payslipId?: string;
   /** The import it came from (none for payslips, which are several, or for your own). */
   importId?: string;
 }
@@ -180,7 +183,7 @@ export function jobEndedOn(store: Store, employmentId: string | undefined): stri
  * document, your own figures, and HMRC's record of its payments. A document (or HMRC's record) to a
  * day on or after the job ended is final for the year: nothing more comes from a job you left.
  */
-export function candidateSources(store: Store, figures: Figure[], ty: TaxYear, extra: { payments?: Extract<HmrcRecord, { type: 'payment' }>[]; kind?: PayKind; endedOn?: string | undefined } = {}): PaySource[] {
+export function candidateSources(store: Store, figures: Figure[], ty: TaxYear, extra: { payments?: Extract<HmrcRecord, { type: 'payment' }>[]; kind?: PayKind; endedOn?: string | undefined; employmentId?: string | undefined } = {}): PaySource[] {
   const out: PaySource[] = [];
   const ended = extra.endedOn && extra.endedOn >= ty.start && extra.endedOn <= ty.end ? extra.endedOn : undefined;
   const payslips = figures.filter((f) => isPayslipFigure(store, f));
@@ -212,6 +215,12 @@ export function candidateSources(store: Store, figures: Figure[], ty: TaxYear, e
     const asOf = latest(payments.map((r) => r.payDate))!;
     const minor = payments.reduce((x, r) => x + toMinor(paymentAmount(r, extra.kind!)!), 0);
     out.push({ kind: 'to-date', label: `HMRC to ${formatDate(asOf)}`, asOf, final: Boolean(ended && asOf >= ended), amount: fromMinor(minor), figures: [], records: payments });
+  }
+  // The payroll's own count: the year to date on the job's latest payslip that prints it, with any
+  // payslips after it that were not read in full (analytics/payslips.ts). Its pay is taxable pay.
+  if (extra.employmentId && extra.kind) {
+    const ytd = yearSoFar(store, extra.employmentId, ty, extra.kind, payslips);
+    if (ytd) out.push({ kind: 'to-date', label: `year to date on the payslip of ${formatDate(ytd.payslip.payDate)}`, asOf: ytd.asOf, final: Boolean(ended && ytd.asOf >= ended), amount: ytd.amount, figures: [], payslipId: ytd.payslip.id, ...(ytd.payslip.source.importId ? { importId: ytd.payslip.source.importId } : {}) });
   }
   return out;
 }
@@ -256,7 +265,7 @@ export function employerYears(store: Store, ty: TaxYear, kinds: readonly PayKind
     const sources: EmployerYear['sources'] = {};
     for (const kind of kinds) {
       const of = g.figures.filter((f) => f.kind === kind);
-      const candidates = candidateSources(store, of, ty, { payments: g.payments, kind, endedOn });
+      const candidates = candidateSources(store, of, ty, { payments: g.payments, kind, endedOn, employmentId });
       if (!candidates.length) continue;
       const pick = chooseSource(store, candidates)!;
       chosen[kind] = pick;

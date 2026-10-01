@@ -44,6 +44,7 @@ import { nowISO } from '../fsutil';
 import { balanceId, figureId, ruleId, transactionId } from '../ids';
 import { payerKey } from '../analytics/pay';
 import { payeReference } from '../analytics/sources';
+import { taxDocuments } from '../analytics/taxdocuments';
 import { matchEmployment } from '../employments';
 import { StoreError } from '../store';
 import { accountSummary } from '../analytics/estate';
@@ -692,6 +693,9 @@ export function dataRoutes(ctx: AppContext): Hono {
     return c.json(ty ? store.figures.filter((f) => f.taxYear === ty) : store.figures);
   });
 
+  /** Settings → Tax documents: a tax year's figures by job, each value with its sources. */
+  app.get('/tax-documents', (c) => c.json(taxDocuments(store, c.req.query('taxYear'))));
+
   app.post('/figures', async (c) => {
     const body = await readJson(c, FigureBody);
     const stamp = nowISO();
@@ -793,6 +797,10 @@ export function dataRoutes(ctx: AppContext): Hono {
   });
 
   app.get('/hmrc', (c) => c.json(store.hmrc));
+  app.get('/payslips', (c) => {
+    const ty = c.req.query('taxYear');
+    return c.json(ty ? store.payslips.filter((p) => p.taxYear === ty) : store.payslips);
+  });
 
   // ─── Profile, settings, CSV profiles ─────────────────────────────────────────────────────────
 

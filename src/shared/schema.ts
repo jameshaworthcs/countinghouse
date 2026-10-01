@@ -637,6 +637,66 @@ export const HmrcRecordSchema = z.discriminatedUnion('type', [
 export type HmrcRecord = z.infer<typeof HmrcRecordSchema>;
 export type HmrcRecordType = HmrcRecord['type'];
 
+// A payslip in full, as printed (docs/DATA_FORMAT.md, payslips.jsonl): everything on it except your
+// name and National Insurance number. Its pay, tax, NI, pension and student loan for the period are
+// also tax figures (figures.jsonl), which the calculations read; this keeps the rest.
+const PayslipLineSchema = z.object({
+  /** As printed ("Monthly Salary", "Scheme - Pension Deduction"). */
+  label: z.string().min(1).max(80),
+  /** Signed as printed: a line printed with a minus (an adjustment, a refund) is negative. */
+  amount: MoneySchema,
+  quantity: z.number().optional(),
+  rate: z.number().optional(),
+});
+export type PayslipLine = z.infer<typeof PayslipLineSchema>;
+const PAYSLIP_YTD = ['gross', 'taxable', 'tax', 'ni', 'niEmployer', 'niablePay', 'pension', 'pensionEmployer', 'studentLoan', 'ssp', 'smp', 'taxCredit'] as const;
+export type PayslipYtdKey = (typeof PAYSLIP_YTD)[number];
+
+export const ExtractedPayslipSchema = z.object({
+  /** The employer as the payslip names it, and any other name it prints (a group company). */
+  employer: z.string().min(1).max(200),
+  otherNames: z.array(z.string().min(1).max(200)).max(5).default([]),
+  payeReference: PayeReferenceSchema.optional(),
+  /** Your payroll or works number there. */
+  payrollNumber: z.string().regex(/^[A-Za-z0-9]{1,20}$/).optional(),
+  /** The date it prints (the pay date). */
+  payDate: ISODateSchema,
+  periodStart: ISODateSchema.optional(),
+  periodEnd: ISODateSchema.optional(),
+  /** The period as printed ("Sep-2026"), and its number in the tax year (month 1 is April's). */
+  periodLabel: z.string().max(40).optional(),
+  periodNumber: z.number().int().min(1).max(56).optional(),
+  frequency: z.enum(['weekly', 'fortnightly', 'four-weekly', 'monthly']).optional(),
+  /** As printed, without the basis ("1257L", "BR"); `cumulative` false for week 1 / month 1. */
+  taxCode: z.string().max(20).optional(),
+  cumulative: z.boolean().optional(),
+  /** The National Insurance category letter ("A"); never the number. */
+  niLetter: z.string().regex(/^[A-Z]$/).optional(),
+  payMethod: z.string().max(40).optional(),
+  department: z.string().max(80).optional(),
+  payments: z.array(PayslipLineSchema).max(60).default([]),
+  deductions: z.array(PayslipLineSchema).max(60).default([]),
+  /** The totals it prints for the period. */
+  totals: z
+    .object({ payments: MoneySchema.optional(), deductions: MoneySchema.optional(), taxable: MoneySchema.optional(), nonTaxable: MoneySchema.optional(), net: MoneySchema.optional() })
+    .default({}),
+  /** What the employer paid on top this period, when printed: its NI and pension contributions. */
+  employerCosts: z.object({ ni: MoneySchema.optional(), pension: MoneySchema.optional() }).default({}),
+  /** The year-to-date column, as printed. */
+  yearToDate: z.partialRecord(z.enum(PAYSLIP_YTD), MoneySchema).default({}),
+});
+export type ExtractedPayslip = z.infer<typeof ExtractedPayslipSchema>;
+
+export const PayslipRecordSchema = ExtractedPayslipSchema.extend({
+  id: z.string().regex(/^pay_[0-9a-f]{16}$/),
+  /** The job it is from. */
+  employmentId: SlugSchema.optional(),
+  taxYear: TaxYearLabelSchema,
+  source: SourceRefSchema.default({}),
+  createdAt: TimestampSchema,
+});
+export type PayslipRecord = z.infer<typeof PayslipRecordSchema>;
+
 // ─── Categories, rules, goals ────────────────────────────────────────────────────────────────────
 
 export const CATEGORY_KINDS = ['expense', 'income', 'transfer', 'investment'] as const;
@@ -1050,6 +1110,8 @@ export const ExtractionSchema = z.object({
   figures: z.array(ExtractedFigureSchema).default([]),
   /** What HMRC's pages show: tax codes, payments, jobs, events, settlements, NI years, forecasts (ingest/govuk.ts). */
   hmrc: z.array(ExtractedHmrcSchema).default([]),
+  /** Payslips in full (ingest/payslips.ts). */
+  payslips: z.array(ExtractedPayslipSchema).default([]),
   notes: z.array(z.string()).default([]),
   /** Understood, but nothing to record: what the document shows, in a sentence (extract-9). */
   nothingToRecord: z.string().nullable().default(null),
@@ -1264,6 +1326,16 @@ export const DraftHmrcSchema = z.object({
 });
 export type DraftHmrc = z.infer<typeof DraftHmrcSchema>;
 
+export const DraftPayslipSchema = z.object({
+  key: z.string(),
+  include: z.boolean(),
+  jobKey: z.string().optional(),
+  /** The same payslip is stored already. */
+  duplicateOf: z.string().optional(),
+  record: ExtractedPayslipSchema,
+});
+export type DraftPayslip = z.infer<typeof DraftPayslipSchema>;
+
 export const DraftFigureSchema = z.object({
   key: z.string(),
   include: z.boolean(),
@@ -1299,6 +1371,7 @@ export const DraftSchema = z.object({
   /** The jobs its pay figures and HMRC records are about (none on drafts made before jobs). */
   jobs: z.array(DraftJobSchema).optional(),
   hmrc: z.array(DraftHmrcSchema).optional(),
+  payslips: z.array(DraftPayslipSchema).optional(),
   notes: z.array(z.string()).default([]),
   /** The reader understood the document but found nothing to record: what it shows, in its words. */
   nothingToRecord: z.string().max(300).optional(),
@@ -1314,7 +1387,7 @@ export type Draft = z.infer<typeof DraftSchema>;
 export const IMPORT_STATUSES = ['queued', 'processing', 'needs_mapping', 'review', 'committed', 'failed', 'discarded'] as const;
 export type ImportStatus = (typeof IMPORT_STATUSES)[number];
 
-export const ENGINE_IDS = ['csv', 'ofx', 'qif', 'santander-txt', 'govuk', 'claude-cli', 'claude-api', 'ocr', 'manual'] as const;
+export const ENGINE_IDS = ['csv', 'ofx', 'qif', 'santander-txt', 'govuk', 'payslip', 'claude-cli', 'claude-api', 'ocr', 'manual'] as const;
 export type EngineId = (typeof ENGINE_IDS)[number];
 
 export const ImportRecordSchema = z.object({
@@ -1388,6 +1461,7 @@ export const ImportRecordSchema = z.object({
       figuresAdded: z.number().int().nonnegative().default(0),
       /** HMRC records written, and the jobs it set up or that learned something from it. */
       hmrcAdded: z.number().int().nonnegative().optional(),
+      payslipsAdded: z.number().int().nonnegative().optional(),
       employmentsCreated: z.array(SlugSchema).optional(),
       /** The job each draft job was committed to (new jobs get their final id). */
       jobs: z.array(z.object({ key: z.string(), employmentId: SlugSchema })).optional(),

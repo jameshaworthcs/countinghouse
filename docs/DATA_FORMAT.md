@@ -12,7 +12,7 @@ point at them with `"$schema"` so editors validate as you type.
 | Money | JSON number in **pounds** (major units), at most 2 dp: `-4.5`, `1234.56`. Integer pence internally. |
 | Sign | From your point of view. Positive increases net worth (money in, assets); negative decreases it (money out, balances owed). A credit-card purchase is negative; a card balance owed is negative. |
 | Dates | `YYYY-MM-DD` calendar dates. Timestamps are ISO 8601 with offset (`2026-09-28T21:08:17+01:00`). |
-| Ids | Accounts, institutions, categories and jobs are readable slugs (`monzo-current`). Records have prefixed content hashes assigned once at creation: `tx_`, `bal_`, `hld_`, `fig_` + 16 hex. HMRC's records: `hmrc_` + 16 hex of what the record says, so one read twice is stored once. Imports: `imp_YYYYMMDD_HHMMSS_xxxx`. Documents: `doc_` + first 16 hex of the SHA-256. |
+| Ids | Accounts, institutions, categories and jobs are readable slugs (`monzo-current`). Records have prefixed content hashes assigned once at creation: `tx_`, `bal_`, `hld_`, `fig_` + 16 hex. HMRC's records: `hmrc_` + 16 hex of what the record says, and payslips: `pay_` + 16 hex of what identifies one, so one read twice is stored once. Imports: `imp_YYYYMMDD_HHMMSS_xxxx`. Documents: `doc_` + first 16 hex of the SHA-256. |
 | Unknown fields | Not part of the format. They are reported by `npm run validate`, and a record that fails validation is kept verbatim (quarantined) rather than lost. |
 | Versioning | `meta.json → version`. Migrations upgrade files in place (see `src/server/migrations.ts` and "Versions" below). |
 
@@ -41,6 +41,7 @@ data/
   figures.jsonl        one tax figure per line (P60, interest certificates, …)
   employments.json     { employments: [...] }    your jobs: each employer once, under every name it comes by
   hmrc.jsonl           what HMRC's pages say: tax codes, payments, employments, settlements, NI years, the State Pension forecast
+  payslips.jsonl       payslips in full: every line, the totals, the codes and the year to date
   transactions/<account-id>/<yyyy>.jsonl    one transaction per line, by posting date
   balances/<account-id>.jsonl               balance / valuation snapshots
   holdings/<account-id>.jsonl               holdings snapshots
@@ -232,6 +233,30 @@ about one), `accountId` (the State Pension account, for a forecast), `source` (t
 The same record read twice (two printouts of one page, or one page imported twice) has one id and
 is stored once. A record is what HMRC said on its `asOf` day: a later page adds new records rather
 than changing old ones. National Insurance numbers are never stored.
+
+## payslips.jsonl
+
+Payslips in full, one per line: everything a payslip prints except your name and National Insurance
+number. Its pay, tax, NI, pension and student loan for the period are also tax figures in
+`figures.jsonl` (with its tax code on the pay), which the calculations read; this keeps the rest
+([FORMULAS.md §17](FORMULAS.md), "Payslips in full").
+
+| Field | Notes |
+|---|---|
+| `id` | `pay_` + 16 hex of what identifies it: your payroll number there (else the employer's name, reduced), its pay date, its period and its net pay. The same payslip read twice, or by two readers, is one record |
+| `employer`, `otherNames` | the employer as the payslip names it, and any other name it prints (a group company) |
+| `employmentId`, `taxYear` | its job, and the tax year of its pay date |
+| `payeReference`, `payrollNumber` | when printed |
+| `payDate`, `periodStart`, `periodEnd` | the date it prints, and its pay period |
+| `periodLabel`, `periodNumber`, `frequency` | the period as printed (`Sep-2026`), its number in the tax year (month 1 is April's), `weekly` `fortnightly` `four-weekly` `monthly` |
+| `taxCode`, `cumulative` | as printed without the basis (`1257L`), and `false` for week 1/month 1 |
+| `niLetter` | the National Insurance category letter (`A`, `M`); never the number |
+| `payMethod`, `department` | when printed |
+| `payments`, `deductions` | every line, `{label, amount, quantity?, rate?}`, signed as printed: a line printed with a minus is negative |
+| `totals` | `{payments?, deductions?, taxable?, nonTaxable?, net?}` as printed for the period |
+| `employerCosts` | `{ni?, pension?}`: what the employer paid on top this period, when printed |
+| `yearToDate` | the year-to-date column as printed: `gross`, `taxable`, `tax`, `ni`, `niEmployer`, `niablePay`, `pension`, `pensionEmployer`, `studentLoan`, `ssp`, `smp`, `taxCredit` |
+| `source`, `createdAt` | the import it came from |
 
 ## imports/&lt;yyyy&gt;/&lt;id&gt;.json
 
@@ -502,6 +527,7 @@ An ask without a check is ticked by you (`doneAt`). Agents cannot set `doneAt` o
 | 3 | Balances say when on their day they were seen (`at`) and which imported figures you typed (`enteredBy`). Backfilled: your own balances given on their own day take the time you gave them; imported balances take the capture time of their screenshot, or, when the committed figure is not what the reader read, `enteredBy: "user"` and the time you committed it. Draft sections gain `readBalance` | `from: 2` in `src/server/migrations.ts` |
 | 4 | A pension forecast with no balance (a State Pension forecast) is kept as a `pension_income_forecast` figure. Backfilled from each committed import whose section had income per year and recorded no balance. National Insurance numbers are taken out of figures (a `payerReference` that is one is removed) and of the readings and drafts kept with imports (replaced by "[NI number]"); bank descriptions keep theirs, as source facts | `from: 3` in `src/server/migrations.ts` |
 | 5 | Jobs and HMRC's records. Added `employments.json` and `hmrc.jsonl`, the figures' `employmentId`, and the imports' `draft.jobs`, `draft.hmrc` and `result.hmrcAdded`/`employmentsCreated`/`jobs`. HMRC's pages already imported are read again on this machine into `hmrc.jsonl`; the figures their earlier reading made for what the records now hold (a National Insurance record's amounts, a State Pension forecast) are taken out, and a forecast's record keeps its account. Jobs are set up from the pay figures: figures whose employer names (reduced) or PAYE references meet are one job's, named as its P60 names it. Pay, payslip pension and earned pay figures get their job. `profile.employers` (pay lag) moves to the jobs | `from: 4` in `src/server/migrations.ts` |
+| 6 | Payslips in full. Added `payslips.jsonl`, the readings' and drafts' `payslips`, `result.payslipsAdded`, and the `payslip` engine. Payslips already imported, in a layout read on this machine, are read again from their stored PDFs: each is kept in full under its job, its pay figure gets the tax code it prints, and, when every line on it adds up to the totals it prints, a figure its first reading got wrong is put right (its note keeps the old amount) and one it left out is added. Several figures of one kind are left as they are | `from: 5` in `src/server/migrations.ts` |
 
 Data written by a newer version of the app than the one running is read-only until the app is
 updated.

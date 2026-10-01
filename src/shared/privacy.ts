@@ -16,6 +16,11 @@ export function isNiNumber(text: string | undefined): boolean {
   return Boolean(text && new RegExp(`^\\s*(?:${NI_NUMBER.source})\\s*$`).test(text.toUpperCase()));
 }
 
+/** Does `text` have a National Insurance number anywhere in it? */
+export function hasNiNumber(text: string): boolean {
+  return new RegExp(NI_NUMBER.source, 'i').test(text);
+}
+
 /** `text` with any National Insurance number in it replaced by "[NI number]". */
 export function withoutNiNumbers(text: string): string {
   return text.replace(new RegExp(NI_NUMBER.source, 'gi'), (m) => (isNiNumber(m) ? '[NI number]' : m));

@@ -433,6 +433,7 @@
             "qif",
             "santander-txt",
             "govuk",
+            "payslip",
             "claude-cli",
             "claude-api",
             "ocr",
@@ -1764,6 +1765,214 @@
                       "annual"
                     ]
                   }
+                ]
+              }
+            },
+            "payslips": {
+              "default": [],
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "employer": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "otherNames": {
+                    "default": [],
+                    "maxItems": 5,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    }
+                  },
+                  "payeReference": {
+                    "type": "string",
+                    "pattern": "^\\d{3}\\/[A-Z0-9]{1,10}$"
+                  },
+                  "payrollNumber": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9]{1,20}$"
+                  },
+                  "payDate": {
+                    "type": "string",
+                    "description": "Calendar date, YYYY-MM-DD"
+                  },
+                  "periodStart": {
+                    "type": "string",
+                    "description": "Calendar date, YYYY-MM-DD"
+                  },
+                  "periodEnd": {
+                    "type": "string",
+                    "description": "Calendar date, YYYY-MM-DD"
+                  },
+                  "periodLabel": {
+                    "type": "string",
+                    "maxLength": 40
+                  },
+                  "periodNumber": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 56
+                  },
+                  "frequency": {
+                    "type": "string",
+                    "enum": [
+                      "weekly",
+                      "fortnightly",
+                      "four-weekly",
+                      "monthly"
+                    ]
+                  },
+                  "taxCode": {
+                    "type": "string",
+                    "maxLength": 20
+                  },
+                  "cumulative": {
+                    "type": "boolean"
+                  },
+                  "niLetter": {
+                    "type": "string",
+                    "pattern": "^[A-Z]$"
+                  },
+                  "payMethod": {
+                    "type": "string",
+                    "maxLength": 40
+                  },
+                  "department": {
+                    "type": "string",
+                    "maxLength": 80
+                  },
+                  "payments": {
+                    "default": [],
+                    "maxItems": 60,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "label": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 80
+                        },
+                        "amount": {
+                          "type": "number",
+                          "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                        },
+                        "quantity": {
+                          "type": "number"
+                        },
+                        "rate": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "label",
+                        "amount"
+                      ]
+                    }
+                  },
+                  "deductions": {
+                    "default": [],
+                    "maxItems": 60,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "label": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 80
+                        },
+                        "amount": {
+                          "type": "number",
+                          "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                        },
+                        "quantity": {
+                          "type": "number"
+                        },
+                        "rate": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "label",
+                        "amount"
+                      ]
+                    }
+                  },
+                  "totals": {
+                    "default": {},
+                    "type": "object",
+                    "properties": {
+                      "payments": {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      },
+                      "deductions": {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      },
+                      "taxable": {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      },
+                      "nonTaxable": {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      },
+                      "net": {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      }
+                    }
+                  },
+                  "employerCosts": {
+                    "default": {},
+                    "type": "object",
+                    "properties": {
+                      "ni": {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      },
+                      "pension": {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      }
+                    }
+                  },
+                  "yearToDate": {
+                    "default": {},
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string",
+                      "enum": [
+                        "gross",
+                        "taxable",
+                        "tax",
+                        "ni",
+                        "niEmployer",
+                        "niablePay",
+                        "pension",
+                        "pensionEmployer",
+                        "studentLoan",
+                        "ssp",
+                        "smp",
+                        "taxCredit"
+                      ]
+                    },
+                    "additionalProperties": {
+                      "type": "number",
+                      "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                    }
+                  }
+                },
+                "required": [
+                  "employer",
+                  "payDate"
                 ]
               }
             },
@@ -3124,6 +3333,214 @@
                       "annual"
                     ]
                   }
+                ]
+              }
+            },
+            "payslips": {
+              "default": [],
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "employer": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "otherNames": {
+                    "default": [],
+                    "maxItems": 5,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    }
+                  },
+                  "payeReference": {
+                    "type": "string",
+                    "pattern": "^\\d{3}\\/[A-Z0-9]{1,10}$"
+                  },
+                  "payrollNumber": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9]{1,20}$"
+                  },
+                  "payDate": {
+                    "type": "string",
+                    "description": "Calendar date, YYYY-MM-DD"
+                  },
+                  "periodStart": {
+                    "type": "string",
+                    "description": "Calendar date, YYYY-MM-DD"
+                  },
+                  "periodEnd": {
+                    "type": "string",
+                    "description": "Calendar date, YYYY-MM-DD"
+                  },
+                  "periodLabel": {
+                    "type": "string",
+                    "maxLength": 40
+                  },
+                  "periodNumber": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 56
+                  },
+                  "frequency": {
+                    "type": "string",
+                    "enum": [
+                      "weekly",
+                      "fortnightly",
+                      "four-weekly",
+                      "monthly"
+                    ]
+                  },
+                  "taxCode": {
+                    "type": "string",
+                    "maxLength": 20
+                  },
+                  "cumulative": {
+                    "type": "boolean"
+                  },
+                  "niLetter": {
+                    "type": "string",
+                    "pattern": "^[A-Z]$"
+                  },
+                  "payMethod": {
+                    "type": "string",
+                    "maxLength": 40
+                  },
+                  "department": {
+                    "type": "string",
+                    "maxLength": 80
+                  },
+                  "payments": {
+                    "default": [],
+                    "maxItems": 60,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "label": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 80
+                        },
+                        "amount": {
+                          "type": "number",
+                          "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                        },
+                        "quantity": {
+                          "type": "number"
+                        },
+                        "rate": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "label",
+                        "amount"
+                      ]
+                    }
+                  },
+                  "deductions": {
+                    "default": [],
+                    "maxItems": 60,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "label": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 80
+                        },
+                        "amount": {
+                          "type": "number",
+                          "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                        },
+                        "quantity": {
+                          "type": "number"
+                        },
+                        "rate": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "label",
+                        "amount"
+                      ]
+                    }
+                  },
+                  "totals": {
+                    "default": {},
+                    "type": "object",
+                    "properties": {
+                      "payments": {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      },
+                      "deductions": {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      },
+                      "taxable": {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      },
+                      "nonTaxable": {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      },
+                      "net": {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      }
+                    }
+                  },
+                  "employerCosts": {
+                    "default": {},
+                    "type": "object",
+                    "properties": {
+                      "ni": {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      },
+                      "pension": {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      }
+                    }
+                  },
+                  "yearToDate": {
+                    "default": {},
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string",
+                      "enum": [
+                        "gross",
+                        "taxable",
+                        "tax",
+                        "ni",
+                        "niEmployer",
+                        "niablePay",
+                        "pension",
+                        "pensionEmployer",
+                        "studentLoan",
+                        "ssp",
+                        "smp",
+                        "taxCredit"
+                      ]
+                    },
+                    "additionalProperties": {
+                      "type": "number",
+                      "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                    }
+                  }
+                },
+                "required": [
+                  "employer",
+                  "payDate"
                 ]
               }
             },
@@ -4653,6 +5070,235 @@
             ]
           }
         },
+        "payslips": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string"
+              },
+              "include": {
+                "type": "boolean"
+              },
+              "jobKey": {
+                "type": "string"
+              },
+              "duplicateOf": {
+                "type": "string"
+              },
+              "record": {
+                "type": "object",
+                "properties": {
+                  "employer": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "otherNames": {
+                    "default": [],
+                    "maxItems": 5,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    }
+                  },
+                  "payeReference": {
+                    "type": "string",
+                    "pattern": "^\\d{3}\\/[A-Z0-9]{1,10}$"
+                  },
+                  "payrollNumber": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9]{1,20}$"
+                  },
+                  "payDate": {
+                    "type": "string",
+                    "description": "Calendar date, YYYY-MM-DD"
+                  },
+                  "periodStart": {
+                    "type": "string",
+                    "description": "Calendar date, YYYY-MM-DD"
+                  },
+                  "periodEnd": {
+                    "type": "string",
+                    "description": "Calendar date, YYYY-MM-DD"
+                  },
+                  "periodLabel": {
+                    "type": "string",
+                    "maxLength": 40
+                  },
+                  "periodNumber": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 56
+                  },
+                  "frequency": {
+                    "type": "string",
+                    "enum": [
+                      "weekly",
+                      "fortnightly",
+                      "four-weekly",
+                      "monthly"
+                    ]
+                  },
+                  "taxCode": {
+                    "type": "string",
+                    "maxLength": 20
+                  },
+                  "cumulative": {
+                    "type": "boolean"
+                  },
+                  "niLetter": {
+                    "type": "string",
+                    "pattern": "^[A-Z]$"
+                  },
+                  "payMethod": {
+                    "type": "string",
+                    "maxLength": 40
+                  },
+                  "department": {
+                    "type": "string",
+                    "maxLength": 80
+                  },
+                  "payments": {
+                    "default": [],
+                    "maxItems": 60,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "label": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 80
+                        },
+                        "amount": {
+                          "type": "number",
+                          "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                        },
+                        "quantity": {
+                          "type": "number"
+                        },
+                        "rate": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "label",
+                        "amount"
+                      ]
+                    }
+                  },
+                  "deductions": {
+                    "default": [],
+                    "maxItems": 60,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "label": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 80
+                        },
+                        "amount": {
+                          "type": "number",
+                          "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                        },
+                        "quantity": {
+                          "type": "number"
+                        },
+                        "rate": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "label",
+                        "amount"
+                      ]
+                    }
+                  },
+                  "totals": {
+                    "default": {},
+                    "type": "object",
+                    "properties": {
+                      "payments": {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      },
+                      "deductions": {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      },
+                      "taxable": {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      },
+                      "nonTaxable": {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      },
+                      "net": {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      }
+                    }
+                  },
+                  "employerCosts": {
+                    "default": {},
+                    "type": "object",
+                    "properties": {
+                      "ni": {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      },
+                      "pension": {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      }
+                    }
+                  },
+                  "yearToDate": {
+                    "default": {},
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string",
+                      "enum": [
+                        "gross",
+                        "taxable",
+                        "tax",
+                        "ni",
+                        "niEmployer",
+                        "niablePay",
+                        "pension",
+                        "pensionEmployer",
+                        "studentLoan",
+                        "ssp",
+                        "smp",
+                        "taxCredit"
+                      ]
+                    },
+                    "additionalProperties": {
+                      "type": "number",
+                      "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                    }
+                  }
+                },
+                "required": [
+                  "employer",
+                  "payDate"
+                ]
+              }
+            },
+            "required": [
+              "key",
+              "include",
+              "record"
+            ]
+          }
+        },
         "notes": {
           "default": [],
           "type": "array",
@@ -4772,6 +5418,11 @@
           "maximum": 9007199254740991
         },
         "hmrcAdded": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "payslipsAdded": {
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991

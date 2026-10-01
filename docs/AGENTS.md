@@ -45,6 +45,8 @@ it is `src/server/records.ts` (validation and writing) and `src/server/agents/` 
 | Tax figures (P60s, payslips, certificates) | `data/figures.jsonl`, `GET /figures` |
 | Jobs: each employer once, with its names, PAYE reference and payroll numbers | `data/employments.json`, `GET /employments` |
 | What HMRC's pages say (tax codes, payments, settlements, NI years, the State Pension forecast) | `data/hmrc.jsonl`, `GET /hmrc` |
+| Payslips in full (every line, the totals, the codes, the year to date) | `data/payslips.jsonl`, `GET /payslips?taxYear=2026/27` |
+| A tax year's figures by job, each with the source that counts and the others | `GET /tax-documents?taxYear=2025/26` |
 
 In-app analysis jobs do not read `data/`. They read a **digest**: the app's own computed figures,
 with the ids of the records behind them (`src/server/agents/digest.ts`). A Claude Code session may

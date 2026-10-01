@@ -63,13 +63,15 @@ async function main() {
   // Pages share the default browser context, so they all use this session.
   const cookie = status.configured && login ? await signIn(browser, login) : '';
   if (cookie) console.log('✓ login');
-  const imports = (await (await fetch(`${base}/api/imports`, { headers: { host: '127.0.0.1', cookie } })).json()) as { pending: { id: string; nothingNew?: unknown; draft?: { sections: unknown[]; hmrc?: unknown[] } }[] };
+  const imports = (await (await fetch(`${base}/api/imports`, { headers: { host: '127.0.0.1', cookie } })).json()) as { pending: { id: string; nothingNew?: unknown; draft?: { sections: unknown[]; hmrc?: unknown[]; payslips?: unknown[] } }[] };
   // An import to review, and the two kinds that add nothing new, when the data has them.
-  const pendingId = (imports.pending.find((p) => !p.nothingNew && !p.draft?.hmrc?.length) ?? imports.pending.find((p) => !p.nothingNew) ?? imports.pending[0])?.id;
+  const pendingId = (imports.pending.find((p) => !p.nothingNew && !p.draft?.hmrc?.length && !p.draft?.payslips?.length) ?? imports.pending.find((p) => !p.nothingNew) ?? imports.pending[0])?.id;
   const repeatsId = imports.pending.find((p) => p.nothingNew && p.draft?.sections.length)?.id;
   const nothingId = imports.pending.find((p) => p.nothingNew && !p.draft?.sections.length)?.id;
   // One of HMRC's pages, with its records and the jobs they are about.
   const hmrcPageId = imports.pending.find((p) => p.draft?.hmrc?.length && p.id !== pendingId)?.id;
+  // A payslip read in full.
+  const payslipId = imports.pending.find((p) => p.draft?.payslips?.length && p.id !== pendingId)?.id;
   // Account pages from whatever data is being shot: the first current account and the first ISA.
   const boot = (await (await fetch(`${base}/api/bootstrap`, { headers: { host: '127.0.0.1', cookie } })).json()) as { accounts: { id: string; type: string }[] };
   const txs = (await (await fetch(`${base}/api/transactions?limit=1`, { headers: { host: '127.0.0.1', cookie } })).json()) as { total: number };
@@ -101,10 +103,12 @@ async function main() {
     ...(repeatsId ? ([['review-already-here', `/import/${repeatsId}`]] as [string, string][]) : []),
     ...(nothingId ? ([['review-nothing-to-record', `/import/${nothingId}`]] as [string, string][]) : []),
     ...(hmrcPageId ? ([['review-hmrc', `/import/${hmrcPageId}`]] as [string, string][]) : []),
+    ...(payslipId ? ([['review-payslip', `/import/${payslipId}`]] as [string, string][]) : []),
     ...(proposalId ? ([['proposal', `/proposals/${proposalId}`]] as [string, string][]) : []),
     ['settings', '/settings'],
     ['settings-extraction', '/settings#extraction'],
     ['settings-rules', '/settings#rules'],
+    ['settings-tax-documents', '/settings#tax-documents'],
     ['settings-access', '/settings#access'],
     ['settings-health', '/settings#health'],
   ];

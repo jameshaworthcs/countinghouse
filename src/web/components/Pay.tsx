@@ -247,6 +247,12 @@ function jobFacts(e: PayEmployer): string {
 }
 
 /** Say a payslip's pay is owed to you (it will be paid), or take that back. */
+/** A month's payslip facts in a line: its tax code and NI letter, and what the employer paid on top. */
+function payslipFacts(m: PayMonth): string {
+  const costs = [m.employerCosts?.pension ? `pension ${money(m.employerCosts.pension)}` : '', m.employerCosts?.ni ? `NI ${money(m.employerCosts.ni)}` : ''].filter(Boolean);
+  return [m.taxCode ? `code ${m.taxCode}` : '', m.niLetter ? `NI letter ${m.niLetter}` : '', costs.length ? `employer ${costs.join(', ')}` : ''].filter(Boolean).join(' · ');
+}
+
 function OwedToggle({ employmentId, m }: { employmentId: string; m: PayMonth }) {
   const mark = useApiMutation(() => api(`/employments/${employmentId}/owed`, { method: 'POST', body: { periodEnd: m.periodEnd } }));
   const unmark = useApiMutation(() => api(`/employments/${employmentId}/owed/${m.periodEnd}`, { method: 'DELETE' }));
@@ -306,7 +312,7 @@ function EmployerCard({ e, choices }: { e: PayEmployer; choices: string[] }) {
               <SortHeader label="NI" sort={sortProps('ni')} numeric />
               <SortHeader label="Pension" sort={sortProps('pension')} numeric />
               <SortHeader label="Student loan" sort={sortProps('studentLoan')} numeric />
-              <SortHeader label="After these" sort={sortProps('net')} numeric />
+              <SortHeader label="Net pay" sort={sortProps('net')} numeric title="The net pay the payslip prints, else its gross less the deductions read from it" />
               <SortHeader label="Into your bank" sort={sortProps('paidIn')} numeric />
               <th className={tableClasses.th} />
             </tr>
@@ -322,6 +328,11 @@ function EmployerCard({ e, choices }: { e: PayEmployer; choices: string[] }) {
                     {m.hmrc && (
                       <div className="text-[11.5px] text-ink-3" title="What the employer reported to HMRC for this pay date">
                         HMRC: <Money value={m.hmrc.taxablePay} className="tabular" /> taxable, <Money value={m.hmrc.tax} className="tabular" /> tax
+                      </div>
+                    )}
+                    {payslipFacts(m) && (
+                      <div className="text-[11.5px] text-ink-3" title="From the payslip: its tax code, National Insurance letter, and what the employer paid on top">
+                        {payslipFacts(m)}
                       </div>
                     )}
                   </td>
@@ -368,7 +379,7 @@ function EmployerCard({ e, choices }: { e: PayEmployer; choices: string[] }) {
       </div>
       )}
       {e.earned && <EarnedSection w={e.earned} choices={choices} />}
-      {(e.months.some((m) => m.note || m.check) || e.document) && (
+      {(e.months.some((m) => m.note || m.check) || e.document || e.gaps?.length) && (
         <div className="flex flex-col gap-1 border-t border-line px-5 py-3 text-[12.5px] text-ink-2">
           {e.document && (
             <span>
@@ -385,6 +396,11 @@ function EmployerCard({ e, choices }: { e: PayEmployer; choices: string[] }) {
                 {m.periodEnd ? formatMonth(m.periodEnd) : formatDate(m.payDate!)}: {m.note}.
               </span>
             ))}
+          {e.gaps?.map((g, i) => (
+            <span key={`gap-${i}`} className="text-warn-ink">
+              <Money value={g.amount} /> of pay is on payslips not imported: the year to date on the payslip of {formatDate(g.before)} shows it, {g.after ? `after the one of ${formatDate(g.after)}` : 'before it in the tax year'}.
+            </span>
+          ))}
           {e.months
             .filter((m) => m.check)
             .map((m, i) => (

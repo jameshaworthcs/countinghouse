@@ -83,6 +83,32 @@ The same record read twice (two printouts of one page) is stored once. To read a
 reader in `govuk.ts`, an invented fixture in `tests/fixtures/govuk/` and a test in
 `tests/govuk.test.ts`. Bump `GOVUK_ENGINE_VERSION` when a reader changes what it reads.
 
+### Payslips read on this machine
+
+A payroll prints the same layout every month, so a payslip PDF in a layout known here is read by
+rule from its text (`src/server/ingest/payslips.ts`, engine `payslip`), in full, and never goes to
+Claude. A scan, or a layout not known here, goes to Claude as before.
+
+| Layout | How it is told | Read from |
+|---|---|---|
+| SAP paystub | a boxed table: `PAYMENTS` and `DEDUCTIONS`, then `CUMULATIVES`; `Week/Month No.`; amounts as `1.234,56`, with a trailing minus for a negative | the page laid out (`pdftotext -layout`), cell by cell |
+| The classic UK payslip | `EMPLOYER`, `DATE`, `TAX CODE`, `PAY METHOD` and `PERIOD` headings; a `YEAR TO DATE` column; `EMPLOYERS N.I.`; `NET PAY` | its text in drawing order (`pdftotext -raw`): the year-to-date lines come first, then the payment and deduction lines. A line with two amounts is a payment and a deduction; a line with one is a deduction when its words say so (tax, NI, pension, student loan, a scheme or loan…), else a payment |
+
+- **Everything printed is kept** (`payslips.jsonl`): every payment and deduction line with its sign,
+  quantity and rate; the totals; the net pay; what the employer paid on top; the tax code and its
+  basis; the NI category letter; the pay date, period and its number; the payroll number, pay
+  method and department; the year-to-date column. Your name and National Insurance number are
+  never kept: only the letter after the number is.
+- **Its tax figures** are what a reader always gave: the total of its payments as gross pay (with the
+  tax code), and the tax, NI, pension and student loan lines, each kind added up.
+- **Checked against itself.** The lines must add up to the totals printed, and the totals to the net
+  pay. A payslip that does not is read with medium confidence, and a note says which total.
+- **Its job** is matched by the payroll number it prints, else its employer's name ("Jobs", below).
+  The same payslip read twice is one record (its id is what identifies it), and is left unticked.
+- To read another layout: a reader in `payslips.ts`, an invented fixture in
+  `tests/fixtures/payslips/` and a test in `tests/payslips.test.ts`. Bump `PAYSLIP_ENGINE_VERSION`
+  when a reader changes what it reads.
+
 ## Documents and screenshots (read by Claude)
 
 PDF statements, P60s, interest certificates, pension statements and screenshots of any banking,

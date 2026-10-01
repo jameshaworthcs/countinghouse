@@ -41,8 +41,8 @@ Source layout:
 |---|---|
 | `src/shared/` | Isomorphic code: schemas (`schema.ts`), money, dates, UK rules, account-type metadata, categories, merchants, categoriser, reconciliation, what a document adds to a recorded payment (`detail.ts`), identifiers kept out of the data (`privacy.ts`), API types |
 | `src/server/` | Store, git, auth, security, migrations, enrichment, routes, app composition; `employments.ts` matches a document's employer to one of your jobs |
-| `src/server/ingest/` | Everything from bytes to committed records; `govuk.ts` reads HMRC's gov.uk pages from their text, on this machine |
-| `src/server/analytics/` | Read-only computations over the store; `model.ts` is pure (no store access); `sources.ts` decides which document's figure counts when several state one job's year |
+| `src/server/ingest/` | Everything from bytes to committed records; `govuk.ts` reads HMRC's gov.uk pages and `payslips.ts` known payslip layouts from their text, on this machine |
+| `src/server/analytics/` | Read-only computations over the store; `model.ts` is pure (no store access); `sources.ts` decides which document's figure counts when several state one job's year; `payslips.ts` reads payslips in full (their year to date, gaps, employer costs); `taxdocuments.ts` is Settings → Tax documents |
 | `src/server/agents/` | Agent jobs: the CLI runner, job kinds and prompts, the digest, the queue |
 | `src/server/records.ts` | The validated write path for agent-maintained records |
 | `src/server/proposals.ts` | Fixes agents propose to your data, checked against it and applied only by you ([AGENTS.md §5](AGENTS.md)) |
@@ -60,7 +60,7 @@ Every number can be traced back, and every derived value can be rebuilt without 
 2. **Extractions.** `data/imports/<yyyy>/<import>.json` keeps the engine's full output (`raw`), the
    engine and prompt version, the reviewed draft, and the result. For deterministic parsers every
    source row is also kept verbatim on the transaction itself (`raw`).
-3. **Records.** Transactions, balances, holdings, figures and HMRC's records, with every source field the document
+3. **Records.** Transactions, balances, holdings, figures, HMRC's records and payslips in full, with every source field the document
    offered: time, bank id, type, reference, merchant details, bank category, FX, fees, running
    balance, plus open-ended `attributes`.
 4. **Enrichment.** `payee`, `category`, `transferGroup` and `counterpartyAccountId` are
@@ -127,8 +127,9 @@ The equations are in [FORMULAS.md](FORMULAS.md); the rules for writing these rec
    - CSV: header signature → profile (yours first, then built-in). Unknown layouts are
      auto-mapped when confident, otherwise marked `needs_mapping`.
    - OFX/QFX, QIF, Santander TXT: dedicated parsers.
-   - A PDF that is one of HMRC's gov.uk pages: read from its text on this machine (`govuk`), never
-     sent to Claude (INGESTION.md, "HMRC's pages").
+   - A PDF that is one of HMRC's gov.uk pages, or a payslip in a layout known here: read from its
+     text on this machine (`govuk`, `payslip`), never sent to Claude (INGESTION.md, "HMRC's pages"
+     and "Payslips read on this machine").
    - Other PDFs and images, via `claude-cli` (`claude -p --json-schema … --tools Read --safe-mode`, run in
      an empty scratch directory), `claude-api` (Messages API with structured outputs and
      server-side refusal fallback) or `ocr` (offline).

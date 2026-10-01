@@ -25,6 +25,23 @@ export function hmrcId(record: { type: string; employer?: string | undefined }):
   return `hmrc_${shortHash('hmrc', who, stableJson(rest))}`;
 }
 
+/**
+ * A payslip's id is what identifies it, with no import in it: who paid it (your payroll number there,
+ * else the employer's name reduced), its pay date and period, and its pay. The same payslip read
+ * from two copies, or by two readers, is one record.
+ */
+export function payslipId(p: { employer: string; payrollNumber?: string | undefined; payDate: string; periodEnd?: string | undefined; periodLabel?: string | undefined; periodNumber?: number | undefined; totals: { payments?: number | undefined; net?: number | undefined } }): string {
+  const who =
+    p.payrollNumber ??
+    p.employer
+      .toLowerCase()
+      .replace(/\b(ltd|limited|plc|llp|uk)\b/g, '')
+      .replace(/[^a-z0-9]/g, '');
+  const period = p.periodEnd ?? p.periodLabel ?? String(p.periodNumber ?? '');
+  const pay = p.totals.net ?? p.totals.payments;
+  return `pay_${shortHash('payslip', who, p.payDate, period, pay === undefined ? '' : pay.toFixed(2))}`;
+}
+
 /** JSON with keys in order, so equal records give equal text. */
 function stableJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;

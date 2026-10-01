@@ -13,17 +13,18 @@ import { loadConfig, PROJECT_ROOT } from '../src/server/config';
 import { enrich } from '../src/server/enrich';
 import sharp from 'sharp';
 import { nowISO, sha256 } from '../src/server/fsutil';
-import { balanceId, documentId, figureId, hmrcId, holdingsId, transactionId } from '../src/server/ids';
+import { balanceId, documentId, figureId, hmrcId, holdingsId, payslipId, transactionId } from '../src/server/ids';
 import { GOVUK_ENGINE_VERSION, readGovUkPage } from '../src/server/ingest/govuk';
+import { PAYSLIP_ENGINE_VERSION, readUkPayslip } from '../src/server/ingest/payslips';
 import { ImportService } from '../src/server/ingest/service';
 import { applyRecords, researchIdOf, setOwnerAssumption } from '../src/server/records';
 import { WorkArea } from '../src/server/ingest/workarea';
 import { Store } from '../src/server/store';
-import { addDays, addMonths, endOfMonth, startOfMonth, today, weekday } from '../src/shared/dates';
+import { addDays, addMonths, endOfMonth, formatMonth, startOfMonth, today, weekday } from '../src/shared/dates';
 import { roundMoney } from '../src/shared/money';
-import { employeeNi, parseTaxCode, payeTax } from '../src/shared/paye';
+import { employeeNi, parseTaxCode, payeTax, taxMonth } from '../src/shared/paye';
 import { taxYearOf } from '../src/shared/uk';
-import { EmploymentSchema, ExtractionSchema, HmrcRecordSchema, type Account, type BalanceSnapshot, type Employment, type ExtractedHmrc, type Figure, type HmrcRecord, type HoldingsSnapshot, type ImportRecord, type Transaction } from '../src/shared/schema';
+import { EmploymentSchema, ExtractionSchema, HmrcRecordSchema, PayslipRecordSchema, type Account, type BalanceSnapshot, type Employment, type ExtractedHmrc, type ExtractedPayslip, type Figure, type HmrcRecord, type HoldingsSnapshot, type ImportRecord, type PayslipRecord, type Transaction } from '../src/shared/schema';
 // A PDF with a text layer, as a saved gov.uk page has (the tests' helper).
 import { textPdf } from '../tests/pdf';
 
@@ -135,7 +136,14 @@ async function main() {
       payslipFigures.push({ id: figureId(kind, amount, month, payer, kind), kind, label: kind, amount, currency: 'GBP', taxYear: taxYearOf(payDate).label, periodStart: month, periodEnd: endOfMonth(month), date: payDate, payer, employmentId, source: {}, createdAt: stamp });
   };
   const acmeCode = parseTaxCode('1257L')!;
-  let acmeYear = { pay: 0, tax: 0 };
+  let acmeYear = { pay: 0, tax: 0, ni: 0, studentLoan: 0 };
+  // The same payslips in full, as an upload of them keeps them (payslips.jsonl).
+  const fullSlips: PayslipRecord[] = [];
+  const fullSlip = (p: Omit<ExtractedPayslip, 'otherNames' | 'frequency'> & { employmentId: string }) => {
+    const { employmentId, ...rest } = p;
+    const record = { ...rest, otherNames: [], frequency: 'monthly' as const };
+    fullSlips.push(PayslipRecordSchema.parse({ ...record, id: payslipId(record), employmentId, taxYear: taxYearOf(p.payDate).label, source: {}, createdAt: stamp }));
+  };
   const marking = SPARSE ? [] : [-4, -3, -2].map((k) => ({ month: startOfMonth(addMonths(END, k)), gross: [900, 1_275, 600][k + 4]! }));
   const missed = marking[1];
   const groceries = ['TESCO STORES 3297 LONDON', "SAINSBURY'S S/MKT LONDON", 'ALDI 84 LONDON', 'WAITROSE 721 LONDON', 'LIDL GB LONDON', 'M&S SIMPLY FOOD LONDON'];
@@ -155,10 +163,32 @@ async function main() {
       const gross = 8_083.33;
       const tax = payeTax({ gross, payDate: salaryDay, code: acmeCode, previousPay: acmeYear.pay, previousTax: acmeYear.tax }) ?? 0;
       const ni = employeeNi(gross, salaryDay) ?? 0;
-      acmeYear = { pay: roundMoney(acmeYear.pay + gross), tax: roundMoney(acmeYear.tax + tax) };
+      acmeYear = { pay: roundMoney(acmeYear.pay + gross), tax: roundMoney(acmeYear.tax + tax), ni: roundMoney(acmeYear.ni + ni), studentLoan: roundMoney(acmeYear.studentLoan + 507) };
       // Plan 2 student loan: 9% of the month's pay over £2,448.75, rounded down to the pound.
       salary = roundMoney(gross - tax - ni - 507);
       payslip('ACME ANALYTICS LTD', 'acme-analytics', m, salaryDay, [['gross_pay', gross], ['tax_deducted', tax], ['national_insurance', ni], ['student_loan_deducted', 507]]);
+      fullSlip({
+        employer: 'ACME ANALYTICS LTD',
+        employmentId: 'acme-analytics',
+        payrollNumber: '40021',
+        payDate: salaryDay,
+        periodStart: m,
+        periodEnd: endOfMonth(m),
+        periodNumber: taxMonth(salaryDay),
+        taxCode: '1257L',
+        niLetter: 'A',
+        payMethod: 'BACS',
+        department: 'Data Science',
+        payments: [{ label: 'Basic Salary', amount: 9_583.33 }, { label: 'Pension salary sacrifice', amount: -1_500 }],
+        deductions: [
+          { label: 'PAYE Tax', amount: tax },
+          { label: 'National Insurance', amount: ni },
+          { label: 'Student Loan (Plan 2)', amount: 507 },
+        ],
+        totals: { payments: gross, deductions: roundMoney(tax + ni + 507), taxable: gross, net: salary },
+        employerCosts: { pension: 2_075 },
+        yearToDate: { gross: acmeYear.pay, taxable: acmeYear.pay, tax: acmeYear.tax, ni: acmeYear.ni, studentLoan: acmeYear.studentLoan, pensionEmployer: roundMoney(2_075 * taxMonth(salaryDay)) },
+      });
       hmrc.push(hmrcRecord({ type: 'payment', employer: 'ACME ANALYTICS LIMITED', payDate: salaryDay, taxablePay: gross, tax, ni, taxYear: thisYear.label }, 'acme-analytics'));
     }
     tx('current-account', salaryDay, salary, 'ACME ANALYTICS LTD SALARY', { payee: 'Acme Analytics Ltd' });
@@ -167,6 +197,28 @@ async function main() {
       const payDate = `${addMonths(m, 1).slice(0, 7)}-25`;
       const tax = roundMoney(marked.gross * 0.2);
       payslip('EXAMPLE MARKING LTD', 'example-marking', m, payDate, [['gross_pay', marked.gross], ['tax_deducted', tax], ['national_insurance', 0]]);
+      const before = marking.slice(0, marking.indexOf(marked)).filter((x) => taxYearOf(`${addMonths(x.month, 1).slice(0, 7)}-25`).label === taxYearOf(payDate).label);
+      const ytdPay = roundMoney(before.reduce((x, y) => x + y.gross, marked.gross));
+      fullSlip({
+        employer: 'EXAMPLE MARKING LTD',
+        employmentId: 'example-marking',
+        payrollNumber: '773104',
+        payDate,
+        periodStart: m,
+        periodEnd: endOfMonth(m),
+        periodLabel: formatMonth(m).replace(' ', '-'),
+        taxCode: 'BR',
+        niLetter: 'A',
+        payMethod: 'Bank Transfer',
+        payments: [{ label: 'Marking fees', amount: marked.gross }],
+        deductions: [
+          { label: 'Income Tax', amount: tax },
+          { label: 'National Insurance', amount: 0 },
+        ],
+        totals: { payments: marked.gross, deductions: tax, taxable: marked.gross, nonTaxable: 0, net: roundMoney(marked.gross - tax) },
+        employerCosts: { ni: 0 },
+        yearToDate: { gross: ytdPay, taxable: ytdPay, tax: roundMoney(ytdPay * 0.2), ni: 0, niEmployer: 0 },
+      });
       if (marked !== missed) tx('current-account', payDate, roundMoney(marked.gross - tax), 'EXAMPLE MARKING LTD SALARY 773104', { payee: 'Example Marking Ltd' });
     }
     tx('current-account', `${m.slice(0, 7)}-01`, -1_800, 'OPENRENT LTD RENT REF FLAT 4B');
@@ -365,6 +417,7 @@ async function main() {
   // The code HMRC issued Acme for the year, in its annual notice.
   if (!SPARSE) hmrc.push(hmrcRecord({ type: 'tax-code', employer: 'ACME ANALYTICS LIMITED', date: addDays(thisYear.start, -40), code: '1257L', cumulative: true, taxYear: thisYear.label }, 'acme-analytics'));
   if (hmrc.length) await store.upsertRecords('hmrc', hmrc, 'demo: HMRC records');
+  if (fullSlips.length) await store.upsertRecords('payslips', fullSlips, 'demo: payslips in full');
   const res = await enrich(store);
   console.log(`demo: ${txs.length} transactions, ${snapshots.length} balances; enrich: ${res.recategorised} categorised, ${res.transfersLinked} transfers linked`);
   // A first import has no research or insights yet: the agents have not run.
@@ -376,10 +429,12 @@ async function main() {
   const work = new WorkArea(WORK);
   const prizes = await demoPrizeHistory(work);
   const page = marking.length ? await demoHmrcPage(work, marking) : null;
+  const slipPage = marking.length ? await demoPayslip(work, marking) : null;
   const svc = new ImportService(store, config, work);
   await svc.init();
   await svc.refreshDraft(prizes);
   if (page) await svc.refreshDraft(page);
+  if (slipPage) await svc.refreshDraft(slipPage);
   const recent = txs.filter((t) => t.accountId === 'current-account' && t.date >= addDays(END, -12)).sort((a, b) => (a.date < b.date ? -1 : 1));
   const lines = ['Transaction ID,Date,Time,Type,Name,Emoji,Category,Amount,Currency,Local amount,Local currency,Notes and #tags,Address,Receipt,Description,Category split,Money Out,Money In'];
   recent.forEach((t, i) => {
@@ -557,6 +612,82 @@ async function demoHmrcPage(work: WorkArea, marking: { month: string; gross: num
     origin: 'upload',
     document: { id: documentId(sha), sha256: sha, fileName: 'Check your Income Tax - GOV.UK.pdf', mediaType: 'application/pdf', size: bytes.length },
     extraction: { engine: 'govuk', engineVersion: GOVUK_ENGINE_VERSION, detail: 'gov.uk page, read on this machine', warnings: [], raw: reading },
+  };
+  await work.init();
+  await work.saveFile(record.document, bytes);
+  await work.saveRecord(record);
+  return record.id;
+}
+
+/**
+ * The marking job's next payslip, saved as a PDF and waiting for review: read on this machine from
+ * its text, in full (ingest/payslips.ts), as an upload of it would be.
+ */
+async function demoPayslip(work: WorkArea, marking: { month: string; gross: number }[]): Promise<string> {
+  const month = addMonths(marking.at(-1)!.month, 1);
+  const payDate = `${addMonths(month, 1).slice(0, 7)}-25`;
+  const [mon, year] = [formatMonth(month).split(' ')[0]!, month.slice(0, 4)];
+  const paid = marking.filter((x) => taxYearOf(`${addMonths(x.month, 1).slice(0, 7)}-25`).label === taxYearOf(payDate).label).reduce((x, y) => x + y.gross, 0);
+  const money = (n: number) => n.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const [gross, tax] = [780, 156];
+  const lines = [
+    'EMPLOYER',
+    'EXAMPLE MARKING LTD',
+    'EMPLOYEE',
+    'J Bloggs',
+    'DATE',
+    `25-${formatMonth(addMonths(month, 1)).split(' ')[0]}-${payDate.slice(0, 4)}`,
+    'DEPARTMENT (IF APPLICABLE) N.I. NUMBER AND TABLE',
+    'Exams QQ 12 34 56 C - A',
+    'TAX CODE',
+    'BR',
+    'PAY METHOD',
+    'Bank Transfer',
+    'PERIOD',
+    `${mon}-${year}`,
+    'YEAR TO DATE RATE HOURS PAYMENTS DEDUCTIONS',
+    `Total Pay ${money(paid + gross)}`,
+    `Taxable Pay ${money(paid + gross)}`,
+    `Tax ${money((paid + gross) * 0.2)}`,
+    'Tax Credit 0.00',
+    'N.I. Employee 0.00',
+    'N.I. Employer 0.00',
+    `N.I. Pay ${money(paid + gross)}`,
+    'SSP 0.00',
+    'SMP 0.00',
+    'Pension Employee 0.00',
+    'Pension Employer 0.00',
+    `Marking fees 26.00 30.00 ${money(gross)} Income Tax ${money(tax)}`,
+    'National Insurance 0.00',
+    'TOTAL',
+    'HOURS',
+    'EMPLOYERS',
+    'N.I. 0.00',
+    'TAXABLE PAY',
+    money(gross),
+    'NON-TAXABLE PAY',
+    '0.00',
+    'TOTAL PAY',
+    money(gross),
+    'DEDUCTIONS',
+    money(tax),
+    'NET',
+    `PAY ${money(gross - tax)}`,
+  ];
+  const text = lines.join('\n');
+  const reading = readUkPayslip(text);
+  if (!reading) throw new Error('demo: the payslip reader did not read the demo payslip');
+  const bytes = textPdf(lines);
+  const sha = sha256(bytes);
+  const stamp = nowISO();
+  const record: ImportRecord = {
+    id: `imp_${END.replace(/-/g, '')}_073000_d3a2`,
+    status: 'review',
+    createdAt: stamp,
+    updatedAt: stamp,
+    origin: 'upload',
+    document: { id: documentId(sha), sha256: sha, fileName: `EXAMPLE MARKING LTD - Payslip ${mon}-${year}.pdf`, mediaType: 'application/pdf', size: bytes.length },
+    extraction: { engine: 'payslip', engineVersion: PAYSLIP_ENGINE_VERSION, detail: 'payslip, read on this machine', warnings: [], raw: reading },
   };
   await work.init();
   await work.saveFile(record.document, bytes);

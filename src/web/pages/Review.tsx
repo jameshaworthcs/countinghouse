@@ -6,7 +6,7 @@ import type { NothingNewView } from '../../shared/api';
 import { formatDate, formatMonth } from '../../shared/dates';
 import { describeDetail, describeDifference, fieldsInWords } from '../../shared/detail';
 import { sectionChecks, type ReviewCheck } from '../../shared/review';
-import { FIGURE_KINDS, type CsvProfile, type Draft, type DraftJob, type DraftSection, type DraftTransaction, type Employment, type ExtractedHmrc, type Figure, type ImportRecord } from '../../shared/schema';
+import { FIGURE_KINDS, type CsvProfile, type Draft, type DraftJob, type DraftSection, type DraftTransaction, type Employment, type ExtractedHmrc, type Figure, type ImportRecord, type PayslipLine, type PayslipYtdKey } from '../../shared/schema';
 import { AccountTypeSelect } from '../components/AccountForms';
 import { CategorySelect } from '../components/TransactionList';
 import { Badge, Button, Callout, Card, Checkbox, ErrorNote, Field, Input, KeyValue, Loading, Money, Select, StatusBadge, tableClasses, useToast } from '../components/ui';
@@ -598,48 +598,164 @@ function FiguresEditor({ draft, onChange }: { draft: Draft; onChange: (d: Draft)
           ))}
         </div>
       )}
-      <table className={tableClasses.table}>
-        <thead>
-          <tr>
-            <th className={tableClasses.th} />
-            <th className={tableClasses.th}>What</th>
-            <th className={tableClasses.th}>Label on document</th>
-            <th className={tableClasses.th}>Tax year</th>
-            <th className={cn(tableClasses.th, 'text-right')}>Amount</th>
-          </tr>
-        </thead>
-        <tbody>
-          {shown.map((f) => (
-            <tr key={f.key} className={f.include ? '' : 'opacity-55'}>
-              <td className={tableClasses.td}>
-                <Checkbox checked={f.include} onChange={(v) => set(f.key, { include: v })} />
-              </td>
-              <td className={tableClasses.td}>
-                <Select value={f.kind} onChange={(e) => set(f.key, { kind: e.target.value as typeof f.kind })} className="h-8 text-[12.5px]">
-                  {FIGURE_KINDS.map((k) => (
-                    <option key={k} value={k}>
-                      {k.replace(/_/g, ' ')}
-                    </option>
-                  ))}
-                </Select>
-                {f.duplicateOf && <Badge tone="muted">already stored</Badge>}
-              </td>
-              <td className={tableClasses.td}>
-                {f.label}
-                {f.payer && payers.length > 1 && <div className="text-[12px] text-ink-3">{f.payer}</div>}
-                {f.taxCode && <div className="text-[12px] text-ink-3">Tax code {f.taxCode}</div>}
-              </td>
-              <td className={tableClasses.td}>
-                <Input value={f.taxYear ?? ''} onChange={(e) => set(f.key, { taxYear: e.target.value || undefined })} placeholder="2025/26" className="h-8 w-24" />
-              </td>
-              <td className={cn(tableClasses.td, tableClasses.num)}>
-                <Input value={String(f.amount)} onChange={(e) => set(f.key, { amount: Number(e.target.value) || 0 })} inputMode="decimal" className="h-8 w-28 text-right" />
-              </td>
+      {/* On a phone the label and tax year go under what it is, so the table fits. */}
+      <div className="overflow-x-auto">
+        <table className={tableClasses.table}>
+          <thead>
+            <tr>
+              <th className={tableClasses.th} />
+              <th className={tableClasses.th}>What</th>
+              <th className={cn(tableClasses.th, 'hidden sm:table-cell')}>Label on document</th>
+              <th className={cn(tableClasses.th, 'hidden sm:table-cell')}>Tax year</th>
+              <th className={cn(tableClasses.th, 'text-right')}>Amount</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {shown.map((f) => {
+              const label = (
+                <>
+                  {f.label}
+                  {f.payer && payers.length > 1 && <div className="text-[12px] text-ink-3">{f.payer}</div>}
+                  {f.taxCode && <div className="text-[12px] text-ink-3">Tax code {f.taxCode}</div>}
+                </>
+              );
+              const year = <Input value={f.taxYear ?? ''} onChange={(e) => set(f.key, { taxYear: e.target.value || undefined })} placeholder="2025/26" className="h-8 w-24" aria-label="Tax year" />;
+              return (
+                <tr key={f.key} className={f.include ? '' : 'opacity-55'}>
+                  <td className={cn(tableClasses.td, 'align-top sm:align-middle')}>
+                    <Checkbox checked={f.include} onChange={(v) => set(f.key, { include: v })} />
+                  </td>
+                  <td className={tableClasses.td}>
+                    <Select value={f.kind} onChange={(e) => set(f.key, { kind: e.target.value as typeof f.kind })} className="h-8 text-[12.5px]">
+                      {FIGURE_KINDS.map((k) => (
+                        <option key={k} value={k}>
+                          {k.replace(/_/g, ' ')}
+                        </option>
+                      ))}
+                    </Select>
+                    {f.duplicateOf && <Badge tone="muted">already stored</Badge>}
+                    <div className="mt-1 flex flex-col gap-1 text-[12.5px] sm:hidden">
+                      <div>{label}</div>
+                      {year}
+                    </div>
+                  </td>
+                  <td className={cn(tableClasses.td, 'hidden sm:table-cell')}>{label}</td>
+                  <td className={cn(tableClasses.td, 'hidden sm:table-cell')}>{year}</td>
+                  <td className={cn(tableClasses.td, tableClasses.num, 'align-top sm:align-middle')}>
+                    <Input value={String(f.amount)} onChange={(e) => set(f.key, { amount: Number(e.target.value) || 0 })} inputMode="decimal" className="h-8 w-24 text-right sm:w-28" />
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </Card>
+  );
+}
+
+const YTD_LABELS: Record<PayslipYtdKey, string> = {
+  gross: 'Gross pay',
+  taxable: 'Taxable pay',
+  tax: 'Tax',
+  ni: 'National Insurance',
+  niEmployer: 'Employer’s NI',
+  niablePay: 'Pay for NI',
+  pension: 'Pension (you)',
+  pensionEmployer: 'Pension (employer)',
+  studentLoan: 'Student loan',
+  ssp: 'Statutory sick pay',
+  smp: 'Statutory maternity pay',
+  taxCredit: 'Tax credit',
+};
+
+function PayslipLines({ title, lines, total }: { title: string; lines: PayslipLine[]; total?: number | undefined }) {
+  return (
+    <div>
+      <div className="mb-1 text-[12px] font-medium text-ink-3">{title}</div>
+      <ul className="flex flex-col gap-0.5 text-[13px]">
+        {lines.map((l, i) => (
+          <li key={i} className="flex justify-between gap-3">
+            <span className="min-w-0 truncate text-ink-2">
+              {l.label}
+              {l.quantity !== undefined && l.rate !== undefined && <span className="text-ink-3"> ({l.quantity} × {money(l.rate)})</span>}
+            </span>
+            <span className="tabular">{money(l.amount)}</span>
+          </li>
+        ))}
+        {!lines.length && <li className="text-ink-3">None</li>}
+        {total !== undefined && (
+          <li className="mt-1 flex justify-between gap-3 border-t border-line pt-1 font-medium">
+            <span>Total</span>
+            <span className="tabular">{money(total)}</span>
+          </li>
+        )}
+      </ul>
+    </div>
+  );
+}
+
+/**
+ * A payslip read in full: its lines, totals, codes and year-to-date column, kept beside its tax
+ * figures (docs/DATA_FORMAT.md, payslips.jsonl).
+ */
+function PayslipEditor({ draft, onChange }: { draft: Draft; onChange: (d: Draft) => void }) {
+  if (!draft.payslips?.length) return null;
+  const set = (key: string, include: boolean) => onChange({ ...draft, payslips: draft.payslips!.map((p) => (p.key === key ? { ...p, include } : p)) });
+  return (
+    <>
+      {draft.payslips.map((d) => {
+        const p = d.record;
+        const facts = [
+          p.periodLabel ?? (p.periodEnd ? formatMonth(p.periodEnd) : ''),
+          p.periodNumber ? `month ${p.periodNumber}` : '',
+          `paid ${formatDate(p.payDate)}`,
+          p.taxCode ? `code ${p.taxCode}${p.cumulative === false ? ' M1' : ''}` : '',
+          p.niLetter ? `NI letter ${p.niLetter}` : '',
+          p.payrollNumber ? `payroll no. ${p.payrollNumber}` : '',
+          p.payMethod ?? '',
+          p.department ?? '',
+        ].filter(Boolean);
+        const ytd = (Object.keys(YTD_LABELS) as PayslipYtdKey[]).filter((k) => p.yearToDate[k] !== undefined);
+        const employer = [p.employerCosts.ni !== undefined ? `NI ${money(p.employerCosts.ni)}` : '', p.employerCosts.pension !== undefined ? `pension ${money(p.employerCosts.pension)}` : ''].filter(Boolean);
+        return (
+          <Card key={d.key} title="The payslip in full" description={`${p.employer}${p.otherNames.length ? ` (also ${p.otherNames.join(', ')})` : ''}: ${facts.join(' · ')}. Kept beside its tax figures, with the lines that are not tax figures (a cycle scheme, say) and its year to date.`}>
+            <label className="mb-3 flex flex-wrap items-center gap-2 text-[13px] text-ink-2">
+              <Checkbox checked={d.include} onChange={(v) => set(d.key, v)} />
+              Keep the payslip in full
+              {d.duplicateOf && <Badge tone="muted">already stored</Badge>}
+            </label>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <PayslipLines title="Payments" lines={p.payments} total={p.totals.payments} />
+              <PayslipLines title="Deductions" lines={p.deductions} total={p.totals.deductions} />
+            </div>
+            <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-[13px] text-ink-2">
+              {p.totals.net !== undefined && (
+                <span>
+                  Net pay <span className="font-semibold text-ink tabular">{money(p.totals.net)}</span>
+                </span>
+              )}
+              {p.totals.taxable !== undefined && <span>Taxable pay {money(p.totals.taxable)}</span>}
+              {p.totals.nonTaxable ? <span>Not taxed {money(p.totals.nonTaxable)}</span> : null}
+              {employer.length > 0 && <span>Employer paid: {employer.join(', ')}</span>}
+            </div>
+            {ytd.length > 0 && (
+              <div className="mt-3">
+                <div className="mb-1 text-[12px] font-medium text-ink-3">Year to date</div>
+                <dl className="grid grid-cols-1 gap-x-6 gap-y-0.5 text-[13px] sm:grid-cols-2">
+                  {ytd.map((k) => (
+                    <div key={k} className="flex justify-between gap-3">
+                      <dt className="text-ink-2">{YTD_LABELS[k]}</dt>
+                      <dd className="tabular">{money(p.yearToDate[k])}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </div>
+            )}
+          </Card>
+        );
+      })}
+    </>
   );
 }
 
@@ -1090,9 +1206,10 @@ export default function Review() {
     // A forecast with no balance (a State Pension forecast) is recorded as its income per year.
     const p = draft.sections.filter((s) => s.target.mode !== 'skip' && s.annualIncome !== undefined && s.balanceDate && !(s.recordBalance && s.balance !== undefined)).length;
     const r = (draft.hmrc ?? []).filter((x) => x.include).length;
-    const used = new Set([...draft.figures, ...(draft.hmrc ?? [])].flatMap((x) => (x.include && x.jobKey ? [x.jobKey] : [])));
+    const ps = (draft.payslips ?? []).filter((x) => x.include).length;
+    const used = new Set([...draft.figures, ...(draft.hmrc ?? []), ...(draft.payslips ?? [])].flatMap((x) => (x.include && x.jobKey ? [x.jobKey] : [])));
     const j = (draft.jobs ?? []).filter((x) => x.target.mode === 'new' && used.has(x.key)).length;
-    return [n ? plural(n, 'transaction') : '', d ? `details on ${plural(d, 'recorded payment')}` : '', b ? plural(b, 'balance') : '', h ? 'holdings' : '', f ? plural(f, 'tax figure') : '', w ? `earned pay for ${plural(w, 'month')}` : '', p ? plural(p, 'pension forecast') : '', r ? plural(r, 'HMRC record') : '', j ? plural(j, 'new job') : ''].filter(Boolean).join(', ') || 'nothing';
+    return [n ? plural(n, 'transaction') : '', d ? `details on ${plural(d, 'recorded payment')}` : '', b ? plural(b, 'balance') : '', h ? 'holdings' : '', f ? plural(f, 'tax figure') : '', w ? `earned pay for ${plural(w, 'month')}` : '', p ? plural(p, 'pension forecast') : '', r ? plural(r, 'HMRC record') : '', ps ? `${plural(ps, 'payslip')} in full` : '', j ? plural(j, 'new job') : ''].filter(Boolean).join(', ') || 'nothing';
   }, [draft]);
 
   if (q.error) return <ErrorNote error={q.error} />;
@@ -1113,7 +1230,7 @@ export default function Review() {
           <h1 className="truncate text-[20px] font-semibold text-ink">{rec.document.fileName}</h1>
           <div className="mt-1 flex flex-wrap items-center gap-2 text-[12.5px] text-ink-3">
             {importStatus(rec)}
-            {rec.extraction.engine && <span>read by {rec.extraction.engine === 'csv' ? `CSV parser (${rec.extraction.detail})` : rec.extraction.engine === 'govuk' ? 'the gov.uk page reader' : rec.extraction.engine}{rec.extraction.model ? ` · ${rec.extraction.model}` : ''}</span>}
+            {rec.extraction.engine && <span>read by {rec.extraction.engine === 'csv' ? `CSV parser (${rec.extraction.detail})` : rec.extraction.engine === 'govuk' ? 'the gov.uk page reader' : rec.extraction.engine === 'payslip' ? 'the payslip reader, on this machine' : rec.extraction.engine}{rec.extraction.model ? ` · ${rec.extraction.model}` : ''}</span>}
             {rec.extraction.durationMs !== undefined && <span>· {(rec.extraction.durationMs / 1000).toFixed(1)}s</span>}
             {rec.extraction.costUsd !== undefined && <span>· ~${rec.extraction.costUsd.toFixed(3)}</span>}
             {draft?.confidence && <Badge tone={draft.confidence === 'high' ? 'good' : draft.confidence === 'medium' ? 'neutral' : 'warn'}>{draft.confidence} confidence</Badge>}
@@ -1240,6 +1357,13 @@ export default function Review() {
                   />
                 ))}
                 <FiguresEditor
+                  draft={draft}
+                  onChange={(d) => {
+                    setDirty(true);
+                    setDraft(d);
+                  }}
+                />
+                <PayslipEditor
                   draft={draft}
                   onChange={(d) => {
                     setDirty(true);

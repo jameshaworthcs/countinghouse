@@ -21,6 +21,7 @@ import {
   ContextSchema,
   EmploymentSchema,
   HmrcRecordSchema,
+  PayslipRecordSchema,
   CsvProfileSchema,
   FigureSchema,
   CaptureItemSchema,
@@ -47,6 +48,7 @@ import {
   type ContextRecord,
   type Employment,
   type HmrcRecord,
+  type PayslipRecord,
   type CsvProfile,
   type Figure,
   type CaptureItem,
@@ -70,7 +72,7 @@ import {
 import { atomicWrite, Mutex, nowISO, readTextIfExists, sha256 } from './fsutil';
 
 /** Bump when the on-disk format changes, and add a migration in migrations.ts. */
-export const FORMAT_VERSION = 5;
+export const FORMAT_VERSION = 6;
 
 export interface DataIssue {
   file: string;
@@ -144,6 +146,7 @@ const JSONL_FILES = {
   notes: { file: 'notes.jsonl', schema: NoteSchema },
   receipts: { file: 'receipts.jsonl', schema: ReceiptSchema },
   hmrc: { file: 'hmrc.jsonl', schema: HmrcRecordSchema },
+  payslips: { file: 'payslips.jsonl', schema: PayslipRecordSchema },
 } as const;
 
 interface State {
@@ -169,6 +172,7 @@ interface State {
   notes: Note[];
   receipts: Receipt[];
   hmrc: HmrcRecord[];
+  payslips: PayslipRecord[];
   transactions: Map<string, Transaction[]>;
   balances: Map<string, BalanceSnapshot[]>;
   holdings: Map<string, HoldingsSnapshot[]>;
@@ -199,6 +203,7 @@ function emptyState(): State {
     notes: [],
     receipts: [],
     hmrc: [],
+    payslips: [],
     transactions: new Map(),
     balances: new Map(),
     holdings: new Map(),
@@ -591,6 +596,9 @@ export class Store extends EventEmitter {
   get hmrc(): HmrcRecord[] {
     return this.state.hmrc;
   }
+  get payslips(): PayslipRecord[] {
+    return this.state.payslips;
+  }
   get instruments(): Instrument[] {
     return this.state.instruments;
   }
@@ -802,7 +810,7 @@ export class Store extends EventEmitter {
     });
   }
 
-  upsertRecords<K extends 'insights' | 'context' | 'notes' | 'receipts' | 'hmrc'>(name: K, records: State[K], message: string): Promise<void> {
+  upsertRecords<K extends 'insights' | 'context' | 'notes' | 'receipts' | 'hmrc' | 'payslips'>(name: K, records: State[K], message: string): Promise<void> {
     return this.exclusive(async () => {
       const def = JSONL_FILES[name];
       const list = [...(this.state[name] as unknown as { id: string }[])];

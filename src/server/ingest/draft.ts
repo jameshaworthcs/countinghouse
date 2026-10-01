@@ -27,7 +27,7 @@ import { isNiNumber, withoutNiNumbers } from '../../shared/privacy';
 import { DraftSchema, WorkDetailSchema, type DraftJob, type Employment, type WorkDetail } from '../../shared/schema';
 import { isPayslipFigure, payeReference, payerKey } from '../analytics/sources';
 import { jobOfFigure, jobOfHmrc, matchEmployment, newEmploymentId, type JobIdentity } from '../employments';
-import { hmrcId } from '../ids';
+import { hmrcId, payslipId } from '../ids';
 import { earnedReplaced, inferPayroll } from '../analytics/earned';
 import type { Store } from '../store';
 import { classifyDuplicates, storedTwice } from './dedup';
@@ -474,6 +474,8 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
     const who = jobOfHmrc(r);
     if (who) identities.push({ ref: `h${hi}`, who });
   });
+  // A payslip in full: its job by the payroll number it prints, else its employer's name.
+  extraction.payslips.forEach((p, si) => identities.push({ ref: `s${si}`, who: { employer: p.employer, ...(p.payeReference ? { payeReference: p.payeReference } : {}), ...(p.payrollNumber ? { payrollNumber: p.payrollNumber } : {}) } }));
   const { jobs, jobKeyOf } = documentJobs(store, identities, extraction.figures);
   const employmentOf = (ref: string) => {
     const job = jobs.find((j) => j.key === jobKeyOf.get(ref));
@@ -535,12 +537,18 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
     const dup = store.hmrc.find((x) => x.id === id);
     return { key: `h${hi}`, include: !dup, ...(jobKeyOf.has(`h${hi}`) ? { jobKey: jobKeyOf.get(`h${hi}`)! } : {}), ...(dup ? { duplicateOf: dup.id } : {}), record };
   });
+  // Payslips in full, each ticked unless the same payslip is stored already.
+  const payslips = extraction.payslips.map((record, si) => {
+    const dup = store.payslips.find((x) => x.id === payslipId(record));
+    return { key: `s${si}`, include: !dup, ...(jobKeyOf.has(`s${si}`) ? { jobKey: jobKeyOf.get(`s${si}`)! } : {}), ...(dup ? { duplicateOf: dup.id } : {}), record };
+  });
   return DraftSchema.parse({
     documentType: extraction.documentType,
     sections: importable,
     figures,
     ...(jobs.length ? { jobs } : {}),
     ...(hmrc.length ? { hmrc } : {}),
+    ...(payslips.length ? { payslips } : {}),
     notes,
     ...(extraction.nothingToRecord?.trim() ? { nothingToRecord: extraction.nothingToRecord.trim().slice(0, 300) } : {}),
     ...(batchMatch && importable.some((s) => s.target.mode === 'existing' && s.target.accountId === batchMatch!.accountId) ? { batchMatch } : {}),
@@ -615,8 +623,8 @@ export function draftIsClean(draft: Draft): { clean: boolean; reasons: string[] 
     if (s.transactions.some((t) => t.status === 'possible_duplicate')) reasons.push('possible duplicates to check');
     if (s.balanceDateSource === 'upload') reasons.push('balance date unknown');
   }
-  if (!draft.sections.length && !draft.figures.length && !draft.hmrc?.length) reasons.push('nothing extracted');
-  if (draft.jobs?.some((j) => j.target.mode === 'new' && [...draft.figures, ...(draft.hmrc ?? [])].some((x) => x.include && x.jobKey === j.key))) reasons.push('sets up a new job');
+  if (!draft.sections.length && !draft.figures.length && !draft.hmrc?.length && !draft.payslips?.length) reasons.push('nothing extracted');
+  if (draft.jobs?.some((j) => j.target.mode === 'new' && [...draft.figures, ...(draft.hmrc ?? []), ...(draft.payslips ?? [])].some((x) => x.include && x.jobKey === j.key))) reasons.push('sets up a new job');
   if (draft.figures.some((f) => f.include && f.replaces)) reasons.push('replaces earned pay recorded from an earlier upload');
   return { clean: reasons.length === 0, reasons: [...new Set(reasons)] };
 }

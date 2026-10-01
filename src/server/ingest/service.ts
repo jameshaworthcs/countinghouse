@@ -28,6 +28,7 @@ import { StoreError, type ImportSummary, type Store } from '../store';
 import { extractWithClaudeApi } from './claude-api';
 import { extractWithClaudeCli } from './claude-cli';
 import { GOVUK_ENGINE_VERSION, pdfText, readGovUkPage } from './govuk';
+import { PAYSLIP_ENGINE_VERSION, readPayslipPage } from './payslips';
 import { commitDraft } from './commit';
 import { linkTransfers } from '../enrich';
 import { BUILTIN_CSV_PROFILES } from './csv-profiles';
@@ -104,10 +105,18 @@ export interface ProcessOptions {
   readAs?: 'document' | 'columns' | undefined;
 }
 
-/** A PDF that is one of HMRC's gov.uk pages, read from its text, or null (ingest/govuk.ts). */
-async function readGovUkPdf(file: string): Promise<Extraction | null> {
+/**
+ * A PDF read from its text on this machine: one of HMRC's gov.uk pages (ingest/govuk.ts), or a
+ * payslip in a layout known here (ingest/payslips.ts). Null for anything else, which Claude reads.
+ */
+async function readTextPdf(file: string): Promise<{ extraction: Extraction; engine: 'govuk' | 'payslip'; engineVersion: string; detail: string } | null> {
   const text = await pdfText(file, path.dirname(file));
-  return text ? readGovUkPage(text) : null;
+  if (!text) return null;
+  const govuk = readGovUkPage(text);
+  if (govuk) return { extraction: govuk, engine: 'govuk', engineVersion: GOVUK_ENGINE_VERSION, detail: 'gov.uk page, read on this machine' };
+  const payslip = readPayslipPage(text);
+  if (payslip) return { extraction: payslip.extraction, engine: 'payslip', engineVersion: PAYSLIP_ENGINE_VERSION, detail: `${payslip.layout === 'sap' ? 'SAP paystub' : 'payslip'}, read on this machine` };
+  return null;
 }
 
 export class ImportService extends EventEmitter {
@@ -272,7 +281,7 @@ export class ImportService extends EventEmitter {
       // like a PDF, when Claude is available; otherwise its first table is mapped like a CSV.
       let sheets: Sheet[] | undefined;
       let noClaude: string | undefined;
-      let govuk: Extraction | null = null;
+      let local: Awaited<ReturnType<typeof readTextPdf>> = null;
       if (kind === 'xlsx' && opts.readAs !== 'columns') {
         const { rows } = sheetRows(bytes);
         const known = opts.readAs === 'document' ? false : Boolean(findProfile(rows, this.store.csvProfiles) ?? parseHoldingsCsv(rows, record.document.fileName));
@@ -348,12 +357,12 @@ export class ImportService extends EventEmitter {
         result = { extraction: parseSantanderTxt(decodeText(bytes)), warnings: [], durationMs: Date.now() - started };
         engine = 'santander-txt';
         engineVersion = SANTANDER_ENGINE_VERSION;
-      } else if (kind === 'pdf' && (govuk = await readGovUkPdf(this.work.filePath(record.document)))) {
-        // One of HMRC's gov.uk pages, read from its text on this machine (ingest/govuk.ts).
-        result = { extraction: govuk, warnings: [], durationMs: Date.now() - started };
-        engine = 'govuk';
-        engineVersion = GOVUK_ENGINE_VERSION;
-        detail = 'gov.uk page, read on this machine';
+      } else if (kind === 'pdf' && (local = await readTextPdf(this.work.filePath(record.document)))) {
+        // One of HMRC's gov.uk pages or a known payslip, read from its text on this machine.
+        result = { extraction: local.extraction, warnings: [], durationMs: Date.now() - started };
+        engine = local.engine;
+        engineVersion = local.engineVersion;
+        detail = local.detail;
       } else if (kind === 'pdf' || kind === 'image') {
         const read = await this.readDocument(record, kind, bytes, this.work.filePath(record.document), opts, abort.signal);
         ({ result, engine, engineVersion, verified } = read);

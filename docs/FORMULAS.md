@@ -402,9 +402,14 @@ Deterministic rules with named thresholds (`SIGNAL_RULES` in `analytics/spending
   relief the provider added separately (`pension_contribution_employee`, `pension_tax_relief`):
   their sum is your gross contribution, and a statement that shows relief is relief at source.
   Salary sacrifice is an employer contribution.
-- **Payslip deductions** are their employer's scheme. When they add up to a statement's figure to
-  the penny (your contributions, else the employer's), they are that statement's money and count
-  once. Otherwise they are a scheme of their own.
+- **Payslip deductions** are their job's scheme (else their employer's). For a job whose payslips
+  were read in full, the year so far is the year to date they print (your contributions and the
+  employer's, "Payslips in full" in §17), so contributions the employer makes, which payslips show
+  only in that column, count. When they add up to a statement's figure to the penny (your
+  contributions, else the employer's), they are that statement's money and count once. A job whose
+  pension goes into an account that has its own rows or statement for the year (the job's
+  `pensionAccountId`, or an account whose `pension.employer` is the job) is counted there, not
+  again. Otherwise they are a scheme of their own.
 - The total is every scheme's: a SIPP's employer contributions and a workplace scheme's both count.
 - **Not yet known** (`incomplete`) when a pension account's data does not cover the tax year so
   far (±45 days) and no statement figures exist for it: the amount used is then a minimum.
@@ -466,16 +471,21 @@ it.
     leaving date, a pay date);
   - your own figures typed in Settings;
   - HMRC's record of the job's payments (`payment` records) added up, as at the last pay date: its
-    taxable pay for pay, its tax and NI for those. It states no student loan.
+    taxable pay for pay, its tax and NI for those. It states no student loan;
+  - the payroll's own count: the year-to-date column on the job's latest payslip read in full (its
+    taxable pay for pay, else its gross; its tax, NI and student loan), plus the figures of any
+    payslips paid after it that were not read in full, as at the last of their dates.
 - **A job that has ended** (on your date, else HMRC's: an employment page's end date, or the
   account's "ended" event) has nothing more to come that year. A source as at or after the day it
   ended is final: the year's figure for it, and Self Assessment says so.
 - **The one that counts:**
   1. yours;
   2. a document for the whole tax year (its figures reach the year's end), a P60 first;
-  3. else the most recent, as at its date. On the same date a document (or HMRC's record), which
-     states the total, wins over the payslips added up, and an imported document over HMRC's
-     record.
+  3. else the most recent, as at its date. On the same date a document (or HMRC's record, or a
+     payslip's year to date), which states the total, wins over the payslips added up, and an
+     imported document over HMRC's record. So the precedence is: yours, a P60, a P45 or other
+     document for the whole year, then the latest of HMRC's record, a document to a date and the
+     payslips' year to date, then the payslips added up.
 - So a P45 and an HMRC page to a later date state one job's year so far once, and a page to a date
   never stops later payslips counting.
 
@@ -708,6 +718,20 @@ pay", below).
   employer works a new code from the first pay day after it gets the notice, and runs the payroll a
   while before). When it differs from the tax taken by more than £1, the month says so, with the
   code and when it was issued.
+- **Payslips in full** (`analytics/payslips.ts`, `payslips.jsonl`). A payslip read in full keeps
+  every line, its totals and its year-to-date column. Its pay period's figures are the ones the
+  calculations above use; the record adds:
+  - **Net pay**: the net the payslip prints is the pay looked for in the bank (*after these* is
+    then that net, and the Pay tab says it is printed), so deductions that are not tax figures (a
+    cycle scheme) never show as a difference.
+  - **Payslips not imported**: a payroll's year to date of pay is the sum of its payslips that tax
+    year. So the first payslip imported, less its own pay, is pay on earlier payslips; and a rise
+    between two that is more than the later one's pay is pay on payslips between them. Each gap is
+    shown under the job, with its amount.
+  - **What the employer paid on top** in a period (its NI and pension): as printed, else the year
+    to date's whole value on the year's first payslip (with no pay before it), else its rise from
+    the payslip before, when nothing is missing between them.
+  - Each month shows the tax code and NI category letter its payslip prints.
 - **Owed pay** (`owedPayslips`): periods of this tax year and the last that you said are owed (either way),
   with no pay yet, count in the Overview's owed line (their *after these* and gross) beside
   timesheet work not yet paid. They are never the next payment expected: that is the timesheet

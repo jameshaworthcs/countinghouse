@@ -25,6 +25,8 @@ import type { Store } from '../store';
 import { covers, importIntervals, mergeIntervals, type Interval } from './coverage';
 import { fromEmployer, isPayslipFigure, pairPay, payerKey } from './pay';
 import { payByEmployer } from './sources';
+import { yearSoFar } from './payslips';
+import { namesOf } from '../employments';
 
 export { payByEmployer };
 
@@ -289,21 +291,31 @@ export function pensionTotals(store: Store, ty: TaxYear) {
       ...(before?.note && !employee.length && !relief.length ? { note: before.note } : {}),
     });
   }
-  // Payslip deductions: by employer. The same money as a statement's when they add up to it to the penny.
+  // Payslip deductions: by job (else employer). A job whose payslips were read in full counts the year
+  // to date they print (analytics/payslips.ts), which has the employer's contributions too. The same
+  // money as a statement's when they add up to it to the penny.
   const payslips = new Map<string, Figure[]>();
   for (const f of figs.filter((x) => isPayslipFigure(store, x))) {
-    const key = payerKey(f.payer);
+    const key = f.employmentId ? `job:${f.employmentId}` : payerKey(f.payer);
     (payslips.get(key) ?? payslips.set(key, []).get(key)!).push(f);
   }
+  for (const p of store.payslips) if (p.taxYear === ty.label && p.employmentId && (p.yearToDate.pension || p.yearToDate.pensionEmployer) && !payslips.has(`job:${p.employmentId}`)) payslips.set(`job:${p.employmentId}`, []);
   for (const [key, list] of payslips) {
-    const employee = minorOf(of(list, 'pension_contribution_employee'));
-    const employer = minorOf(of(list, 'pension_contribution_employer'));
+    const job = key.startsWith('job:') ? key.slice(4) : undefined;
+    // A job whose pension goes into an account that has its own records this year (its rows or its
+    // statement) is counted there: the job says which (`pensionAccountId`), or the account names it.
+    const employment = store.employment(job);
+    const linked = employment ? pensionAccounts.filter((a) => a.id === employment.pensionAccountId || (a.pension?.employer && namesOf(employment).some((n) => payerKey(n) === payerKey(a.pension!.employer)))) : [];
+    if (linked.some((a) => schemes.has(a.id))) continue;
+    const soFar = (kind: 'pension_contribution_employee' | 'pension_contribution_employer') => (job ? yearSoFar(store, job, ty, kind, list) : undefined);
+    const employee = soFar('pension_contribution_employee') ? toMinor(soFar('pension_contribution_employee')!.amount) : minorOf(of(list, 'pension_contribution_employee'));
+    const employer = soFar('pension_contribution_employer') ? toMinor(soFar('pension_contribution_employer')!.amount) : minorOf(of(list, 'pension_contribution_employer'));
     const statementOf = [...statements.keys()].map((k) => schemes.get(k)!).find((s) => (employee && s.personal === employee) || (!employee && employer && s.employer === employer));
     if (statementOf) continue;
     if (!employee && !employer) continue;
     schemes.set(`payslips:${key}`, {
       key: `payslips:${key}`,
-      label: `${list.find((f) => f.payer)?.payer ?? 'Your employer'} (payslips)`,
+      label: `${store.employment(job)?.employer ?? list.find((f) => f.payer)?.payer ?? 'Your employer'} (payslips)`,
       personal: employee,
       personalGross: employee,
       employer,

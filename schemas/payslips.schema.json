@@ -1,0 +1,249 @@
+{
+  "$id": "payslips.schema.json",
+  "title": "payslips",
+  "description": "Schema for one line of data/payslips.jsonl (a payslip in full). Generated from src/shared/schema.ts by `npm run schemas`; do not edit.",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "employer": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "otherNames": {
+      "default": [],
+      "maxItems": 5,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200
+      }
+    },
+    "payeReference": {
+      "type": "string",
+      "pattern": "^\\d{3}\\/[A-Z0-9]{1,10}$"
+    },
+    "payrollNumber": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9]{1,20}$"
+    },
+    "payDate": {
+      "type": "string",
+      "description": "Calendar date, YYYY-MM-DD"
+    },
+    "periodStart": {
+      "type": "string",
+      "description": "Calendar date, YYYY-MM-DD"
+    },
+    "periodEnd": {
+      "type": "string",
+      "description": "Calendar date, YYYY-MM-DD"
+    },
+    "periodLabel": {
+      "type": "string",
+      "maxLength": 40
+    },
+    "periodNumber": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 56
+    },
+    "frequency": {
+      "type": "string",
+      "enum": [
+        "weekly",
+        "fortnightly",
+        "four-weekly",
+        "monthly"
+      ]
+    },
+    "taxCode": {
+      "type": "string",
+      "maxLength": 20
+    },
+    "cumulative": {
+      "type": "boolean"
+    },
+    "niLetter": {
+      "type": "string",
+      "pattern": "^[A-Z]$"
+    },
+    "payMethod": {
+      "type": "string",
+      "maxLength": 40
+    },
+    "department": {
+      "type": "string",
+      "maxLength": 80
+    },
+    "payments": {
+      "default": [],
+      "maxItems": 60,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "amount": {
+            "type": "number",
+            "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+          },
+          "quantity": {
+            "type": "number"
+          },
+          "rate": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "label",
+          "amount"
+        ]
+      }
+    },
+    "deductions": {
+      "default": [],
+      "maxItems": 60,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "amount": {
+            "type": "number",
+            "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+          },
+          "quantity": {
+            "type": "number"
+          },
+          "rate": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "label",
+          "amount"
+        ]
+      }
+    },
+    "totals": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "payments": {
+          "type": "number",
+          "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+        },
+        "deductions": {
+          "type": "number",
+          "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+        },
+        "taxable": {
+          "type": "number",
+          "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+        },
+        "nonTaxable": {
+          "type": "number",
+          "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+        },
+        "net": {
+          "type": "number",
+          "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+        }
+      }
+    },
+    "employerCosts": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "ni": {
+          "type": "number",
+          "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+        },
+        "pension": {
+          "type": "number",
+          "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+        }
+      }
+    },
+    "yearToDate": {
+      "default": {},
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "enum": [
+          "gross",
+          "taxable",
+          "tax",
+          "ni",
+          "niEmployer",
+          "niablePay",
+          "pension",
+          "pensionEmployer",
+          "studentLoan",
+          "ssp",
+          "smp",
+          "taxCredit"
+        ]
+      },
+      "additionalProperties": {
+        "type": "number",
+        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+      }
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^pay_[0-9a-f]{16}$"
+    },
+    "employmentId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+      "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+    },
+    "taxYear": {
+      "type": "string",
+      "pattern": "^\\d{4}\\/\\d{2}$"
+    },
+    "source": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "importId": {
+          "type": "string"
+        },
+        "documentId": {
+          "type": "string"
+        },
+        "row": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      }
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+      "description": "ISO 8601 timestamp"
+    }
+  },
+  "required": [
+    "employer",
+    "payDate",
+    "id",
+    "taxYear",
+    "createdAt"
+  ]
+}

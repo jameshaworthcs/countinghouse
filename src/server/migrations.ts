@@ -15,10 +15,13 @@ import path from 'node:path';
 import { today } from '../shared/dates';
 import { isNiNumber, withoutNiNumbers } from '../shared/privacy';
 import { atomicWrite, nowISO, shortHash } from './fsutil';
-import { figureId, hmrcId } from './ids';
+import { figureId, hmrcId, payslipId } from './ids';
 import { Employers, PAY_KINDS, payerKey } from './analytics/sources';
 import { pdfText, readGovUkPage } from './ingest/govuk';
-import { HmrcRecordSchema } from '../shared/schema';
+import { readPayslipPage } from './ingest/payslips';
+import { HmrcRecordSchema, PayslipRecordSchema } from '../shared/schema';
+import { toMinor } from '../shared/money';
+import { taxYearOf } from '../shared/uk';
 import { FORMAT_VERSION } from './store';
 
 export interface MigrationContext {
@@ -365,6 +368,103 @@ export const MIGRATIONS: Migration[] = [
       await ctx.writeText('figures.jsonl', figures.length ? `${figures.map((f) => JSON.stringify(f)).join('\n')}\n` : '');
       await ctx.writeText('hmrc.jsonl', hmrcLines.length ? `${hmrcLines.join('\n')}\n` : '');
       ctx.log(`[migrate] ${employments.length} job${employments.length === 1 ? '' : 's'} set up; ${placed} pay figure${placed === 1 ? '' : 's'} put under ${placed === 1 ? 'its job' : 'their jobs'}`);
+    },
+  },
+  {
+    from: 5,
+    description: 'Payslips in full (payslips.jsonl): stored payslips in a layout read on this machine are read again, and figures their first reading got wrong or missed are put right',
+    async run(ctx) {
+      interface Rec {
+        id?: string;
+        status?: string;
+        committedAt?: string;
+        document?: { id?: string; path?: string; mediaType?: string };
+        draft?: { documentType?: string };
+      }
+      const payslipImports: Rec[] = [];
+      for await (const file of walk(path.join(ctx.dataDir, 'imports'))) {
+        if (!file.endsWith('.json')) continue;
+        try {
+          const rec = JSON.parse(await readFile(file, 'utf8')) as Rec;
+          if (rec.id && rec.status === 'committed' && rec.draft?.documentType === 'payslip' && rec.document?.mediaType === 'application/pdf' && rec.document.path) payslipImports.push(rec);
+        } catch {
+          // An unreadable record says nothing.
+        }
+      }
+      type Fig = Record<string, unknown> & { id: string; kind: string; amount: number; label: string; payer?: string; date?: string; employmentId?: string; taxCode?: string; notes?: string; source?: { importId?: string } };
+      const read = async (name: string) => ((await ctx.exists(name)) ? (await readFile(path.join(ctx.dataDir, name), 'utf8')).split('\n').filter((l) => l.trim()) : []);
+      const figures = (await read('figures.jsonl')).map((l) => JSON.parse(l) as Fig);
+      const payslipLines = await read('payslips.jsonl');
+      const have = new Set(payslipLines.map((l) => (JSON.parse(l) as { id: string }).id));
+      let reread = 0;
+      let corrected = 0;
+      let added = 0;
+      let coded = 0;
+      const unsure: string[] = [];
+      for (const rec of payslipImports.sort((a, b) => a.id!.localeCompare(b.id!))) {
+        const file = path.join(ctx.dataDir, rec.document!.path!);
+        const text = await pdfText(file, path.dirname(file));
+        const got = text ? readPayslipPage(text) : null;
+        if (!got) continue;
+        reread++;
+        const mine = figures.filter((f) => f.source?.importId === rec.id);
+        const job = mine.find((f) => f.employmentId)?.employmentId;
+        const source = { importId: rec.id, ...(rec.document?.id ? { documentId: rec.document.id } : {}) };
+        for (const p of got.extraction.payslips) {
+          const id = payslipId(p);
+          if (have.has(id)) continue;
+          have.add(id);
+          payslipLines.push(JSON.stringify(PayslipRecordSchema.parse({ ...p, id, ...(job ? { employmentId: job } : {}), taxYear: taxYearOf(p.payDate).label, source, createdAt: rec.committedAt ?? nowISO() })));
+        }
+        // Its figures, put right from this reading when every line on it adds up to what it prints.
+        if (got.extraction.confidence !== 'high' || got.extraction.payslips.length !== 1) continue;
+        const slip = got.extraction.payslips[0]!;
+        for (const f of got.extraction.figures) {
+          const same = mine.filter((x) => x.kind === f.kind);
+          // Several figures of one kind (one per line printed) are right when they add up to it; when
+          // they do not, which is wrong cannot be told, and they are left for you.
+          if (same.length > 1) {
+            if (same.reduce((x, y) => x + toMinor(y.amount), 0) !== toMinor(f.amount)) unsure.push(`${rec.id} ${f.kind}`);
+            continue;
+          }
+          const stored = same[0];
+          if (!stored) {
+            const payer = mine.find((x) => x.payer)?.payer ?? f.payer ?? undefined;
+            figures.push({
+              id: figureId(f.kind, f.amount, f.taxYear ?? f.periodEnd ?? '', payer ?? '', f.label, rec.id),
+              kind: f.kind,
+              label: f.label,
+              amount: f.amount,
+              currency: 'GBP',
+              ...(f.taxYear ? { taxYear: f.taxYear } : {}),
+              ...(f.periodStart ? { periodStart: f.periodStart } : {}),
+              ...(f.periodEnd ? { periodEnd: f.periodEnd } : {}),
+              date: mine.find((x) => x.date)?.date ?? slip.payDate,
+              ...(payer ? { payer } : {}),
+              ...(job ? { employmentId: job } : {}),
+              ...(f.taxCode ? { taxCode: f.taxCode } : {}),
+              notes: 'Read again on this machine (format v6): the first reading left it out.',
+              source,
+              createdAt: rec.committedAt ?? nowISO(),
+            });
+            added++;
+            continue;
+          }
+          if (toMinor(stored.amount) !== toMinor(f.amount)) {
+            stored.notes = [stored.notes, `Read again on this machine (format v6): the first reading had ${stored.amount.toFixed(2)}.`].filter(Boolean).join(' ');
+            stored.amount = f.amount;
+            corrected++;
+          }
+          if (f.kind === 'gross_pay' && f.taxCode && !stored.taxCode) {
+            stored.taxCode = f.taxCode;
+            coded++;
+          }
+        }
+      }
+      await ctx.writeText('figures.jsonl', figures.length ? `${figures.map((f) => JSON.stringify(f)).join('\n')}\n` : '');
+      await ctx.writeText('payslips.jsonl', payslipLines.length ? `${payslipLines.join('\n')}\n` : '');
+      ctx.log(`[migrate] ${reread} payslip${reread === 1 ? '' : 's'} read again on this machine; ${corrected} figure${corrected === 1 ? '' : 's'} put right, ${added} added, ${coded} given ${coded === 1 ? 'its' : 'their'} tax code`);
+      if (unsure.length) ctx.log(`[migrate] figures that do not add up to their payslip, left as they are: ${unsure.join(', ')}`);
     },
   },
 ];

@@ -1174,3 +1174,38 @@ joined them. Pay owed to the owner (a missed month the employer will pay) had no
     name, and those are not pay.
   - Considered: re-running enrichment on all history. That would also apply rules you chose not to
     apply to history.
+
+## 2026-10-01: Payslips in full, read on this machine; Tax documents by year and job (format v6)
+
+The third slice. A payslip prints far more than the figures kept from it:
+- every payment and deduction line, the taxable and net pay;
+- the employer's NI and pension, the tax code and NI letter, the pay date and period number;
+- the year-to-date column.
+
+All of it was read and dropped. The two layouts behind the stored payslips (SAP paystubs, and those from
+one UK payroll package) are the same every month.
+
+- **A payslip is kept in full** (`payslips.jsonl`), beside its tax figures rather than instead of
+  them. The figures stay what every calculation reads; the record keeps the rest: the lines (signed
+  as printed), the totals, the codes and the year to date. Never your name or NI number: only the
+  NI letter.
+  - Considered: replacing a payslip's figures with the record and deriving them. Every calculation
+    and proposal that reads figures would change at once, for no gain in what is stored.
+- **Known layouts are read by rule, on this machine** (`ingest/payslips.ts`). Their figures are
+  exact, a reading checks itself against the printed totals and net, and nothing goes to Claude. The
+  v6 migration read the stored payslips again. All read cleanly and agreed with their first
+  reading; each pay figure got the tax code it prints.
+  - Considered: correcting stored figures silently. The migration corrects a figure only when the
+    payslip read again adds up to every total it prints, keeps the old amount in the figure's note,
+    and leaves several figures of one kind alone.
+- **The net pay printed is the pay looked for in the bank.** Deductions that are not tax figures (a
+  cycle scheme) no longer show as a difference.
+- **The year-to-date column is a source**, as the approved precedence has it (P60, P45, HMRC,
+  latest year to date, payslips summed). It also shows payslips not imported: a rise more than the
+  later payslip's pay.
+- **Employer pension comes from the payslips' year to date** when no statement or account record
+  covers it. Payslips print it only in that column. A job whose pension goes into an account with
+  its own records that year counts there, not twice.
+- **Settings → Tax documents shows a year by job.** For pay, tax, NI, student loan and payslip
+  pension, it shows the source that counts and the others, each linked to its document. The year's
+  other figures follow, by kind.

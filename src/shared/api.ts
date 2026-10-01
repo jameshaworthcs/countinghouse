@@ -373,8 +373,8 @@ export interface TaxBandEstimate {
 }
 
 export interface SaSource {
-  /** `hmrc`: HMRC's record of a payment an employer reported (hmrc.jsonl). */
-  type: 'figure' | 'transaction' | 'account' | 'hmrc';
+  /** `hmrc`: HMRC's record of a payment an employer reported (hmrc.jsonl); `payslip`: a payslip's year-to-date column (payslips.jsonl). */
+  type: 'figure' | 'transaction' | 'account' | 'hmrc' | 'payslip';
   id: string;
   date?: string;
   label: string;
@@ -819,8 +819,15 @@ export interface PayMonth {
   ni: number | null;
   pension: number | null;
   studentLoan: number | null;
-  /** Gross less the deductions read from the payslip. */
+  /** The net pay the payslip prints (`netPrinted`), else its gross less the deductions read from it. */
   expectedNet: number | null;
+  netPrinted?: boolean;
+  /** The payslip in full (payslips.jsonl), when it was read in full: its id, tax code (with " M1" for week 1/month 1) and NI letter. */
+  payslipId?: string;
+  taxCode?: string;
+  niLetter?: string;
+  /** What the employer paid on top this period: printed, else worked out from the year to date. */
+  employerCosts?: { ni?: number; pension?: number };
   /** The payment into your bank matched to it. */
   paidIn: { amount: number; date: string; transactionId: string; accountId: string } | null;
   /** What the payslip's other deductions come to: expected net less what arrived. */
@@ -897,6 +904,48 @@ export interface EarnedPayroll {
   expected: ExpectedPay[];
 }
 
+/** One source of a job's figure for a year (analytics/sources.ts): the one that counts, or another. */
+export interface TaxDocSource {
+  /** `year`: for the whole tax year; `to-date`: the year so far; `payslips`: the payslips added up; `yours`: typed by you. */
+  kind: 'yours' | 'year' | 'to-date' | 'payslips';
+  label: string;
+  amount: number;
+  asOf: string;
+  final: boolean;
+  /** The document it came from, when one did. */
+  importId?: string;
+  fileName?: string;
+  /** The figures it adds up, HMRC's payment records it adds up, or the payslip whose year to date it is. */
+  figureIds: string[];
+  hmrcRecords?: number;
+  payslipId?: string;
+}
+
+/** Settings → Tax documents: a tax year's tax figures, by job, each value with its sources. */
+export interface TaxDocumentsResponse {
+  taxYear: { label: string; start: string; end: string };
+  /** Tax years with anything in them, newest first. */
+  years: string[];
+  jobs: {
+    key: string;
+    employmentId?: string;
+    employer: string;
+    names: string[];
+    payeReference?: string;
+    payrollNumbers?: string[];
+    startedOn?: string;
+    endedOn?: string;
+    /** Pay, tax, NI and student loan: the source that counts, and the others that state it. */
+    values: { kind: string; label: string; chosen: TaxDocSource; others: TaxDocSource[] }[];
+    /** Its payslips this year, oldest first: read in full (`id`), or only as tax figures. */
+    payslips: { id?: string; importId?: string; fileName?: string; payDate: string; period?: string; gross: number | null; net: number | null; taxCode?: string }[];
+    /** HMRC's records of its payments this year. */
+    hmrcPayments: number;
+  }[];
+  /** The year's other tax figures (interest, dividends, pension statements, gift aid…), by kind. */
+  other: { kind: string; label: string; total: number; figures: { id: string; label: string; amount: number; payer?: string; accountId?: string; date?: string; importId?: string; fileName?: string; yours: boolean }[] }[];
+}
+
 /** Pay owed to you and not yet in the bank: shown beside the estate value, never counted in it. */
 export interface OwedPay {
   gross: number;
@@ -919,6 +968,11 @@ export interface PayEmployer {
   endedOn?: string;
   /** Tax codes HMRC issued for the job that apply in the year, oldest first. */
   codes?: { date: string; code: string; cumulative: boolean }[];
+  /**
+   * Pay the year-to-date column shows on no imported payslip (FORMULAS §17, "Payslips in full"):
+   * between the payslips paid on `after` and `before`, or before the first (`after` absent).
+   */
+  gaps?: { after?: string; before: string; amount: number }[];
   months: PayMonth[];
   /** Timesheet work this payroll pays (FORMULAS §17, "Earned pay"). */
   earned?: EarnedPayroll;

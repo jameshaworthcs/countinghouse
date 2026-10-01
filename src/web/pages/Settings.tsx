@@ -1,7 +1,7 @@
 import { CircleAlert, CircleCheck, Copy, GitCommitHorizontal, KeyRound, Plus, RefreshCw, Trash2, Wand2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
-import type { AllowancesResponse, DataHealthResponse, SystemResponse, TokensResponse } from '../../shared/api';
+import type { AllowancesResponse, DataHealthResponse, SystemResponse, TaxDocSource, TaxDocumentsResponse, TokensResponse } from '../../shared/api';
 import { formatDate, today } from '../../shared/dates';
 import { FIGURE_KINDS, type Category, type Figure, type Profile, type Rule, type Settings as SettingsT } from '../../shared/schema';
 import { taxYearOf } from '../../shared/uk';
@@ -439,9 +439,36 @@ function CsvProfilesCard() {
   );
 }
 
+/** How a source of a job's figure is named on the page. */
+function sourceName(s: TaxDocSource): string {
+  const name =
+    s.label === 'P60'
+      ? 'P60'
+      : s.kind === 'yours'
+        ? 'Your figure'
+        : s.hmrcRecords
+          ? `HMRC’s record of ${s.hmrcRecords} payment${s.hmrcRecords === 1 ? '' : 's'}, ${s.label.replace(/^HMRC /, '')}`
+          : s.label === 'the whole year'
+            ? 'For the whole year'
+            : s.label.charAt(0).toUpperCase() + s.label.slice(1);
+  return `${name}${s.final && s.kind !== 'year' && s.kind !== 'yours' ? ' (the job has ended)' : ''}`;
+}
+
+function SourceDoc({ s }: { s: TaxDocSource }) {
+  if (!s.importId) return null;
+  return (
+    <Link to={`/import/${s.importId}`} className="text-ink-3 hover:underline">
+      {s.fileName ?? 'the document'}
+    </Link>
+  );
+}
+
+/** Settings → Tax documents: a tax year's figures by job, each value with the source that counts and the others. */
 function TaxDocuments() {
   const toast = useToast();
   const { data } = useAppData();
+  const [year, setYear] = useState('');
+  const docs = useApi<TaxDocumentsResponse>(['tax-documents', year], `/tax-documents${year ? `?taxYear=${encodeURIComponent(year)}` : ''}`);
   const figures = useApi<Figure[]>(['figures'], '/figures');
   const [kind, setKind] = useState<Figure['kind']>('gross_pay');
   const [label, setLabel] = useState('');
@@ -460,8 +487,193 @@ function TaxDocuments() {
     },
   );
   const del = useApiMutation((id: string) => api(`/figures/${id}`, { method: 'DELETE' }));
+  const d = docs.data;
+  const yearFigures = (figures.data ?? []).filter((f) => d && f.taxYear === d.taxYear.label);
+  const accountName = (id: string | undefined) => (id ? (data.accounts.find((a) => a.id === id)?.name ?? id) : undefined);
   return (
     <div className="flex flex-col gap-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="max-w-2xl text-[13px] text-ink-2">Each job’s pay, tax and NI for the year, from the one source that counts, with the others that state it. Then the year’s other tax figures. Every value links to the document it came from.</p>
+        {d && (
+          <Select value={d.taxYear.label} onChange={(e) => setYear(e.target.value)} className="w-auto" aria-label="Tax year">
+            {d.years.map((y) => (
+              <option key={y} value={y}>
+                {y}
+              </option>
+            ))}
+          </Select>
+        )}
+      </div>
+      {!d ? (
+        <Loading />
+      ) : (
+        <>
+          {d.jobs.map((job) => (
+            <Card
+              key={job.key}
+              title={job.employer || 'An employer'}
+              description={[
+                job.payeReference ? `PAYE ${job.payeReference}` : '',
+                job.payrollNumbers?.length ? `payroll no. ${job.payrollNumbers.join(', ')}` : '',
+                job.startedOn ? `started ${formatDate(job.startedOn)}` : '',
+                job.endedOn ? `ended ${formatDate(job.endedOn)}` : '',
+                job.names.length > 1 ? `also called ${job.names.filter((n) => n !== job.employer).join(', ')}` : '',
+              ]
+                .filter(Boolean)
+                .join(' · ')}
+              padded={false}
+            >
+              <div className="overflow-x-auto border-t border-line">
+                <table className={tableClasses.table}>
+                  <thead>
+                    <tr>
+                      <th className={tableClasses.th}>What</th>
+                      <th className={tableClasses.th}>Counts, and other sources</th>
+                      <th className={cn(tableClasses.th, 'hidden text-right sm:table-cell')}>Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {job.values.map((v) => (
+                      <tr key={v.kind}>
+                        <td className={cn(tableClasses.td, 'align-top sm:whitespace-nowrap')}>
+                          {v.label}
+                          {/* On a phone the amount goes under what it is. */}
+                          <div className="mt-0.5 font-medium sm:hidden">
+                            <Money value={v.chosen.amount} className="tabular" />
+                          </div>
+                        </td>
+                        <td className={cn(tableClasses.td, 'align-top')}>
+                          <div>
+                            {sourceName(v.chosen)} <SourceDoc s={v.chosen} />
+                          </div>
+                          {v.others.map((o, i) => (
+                            <div key={i} className="text-[12px] text-ink-3">
+                              Also: {sourceName(o)}, <Money value={o.amount} className="tabular" /> <SourceDoc s={o} />
+                            </div>
+                          ))}
+                        </td>
+                        <td className={cn(tableClasses.td, tableClasses.num, 'hidden align-top sm:table-cell')}>
+                          <Money value={v.chosen.amount} />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {(job.payslips.length > 0 || job.hmrcPayments > 0) && (
+                <div className="flex flex-col gap-1 border-t border-line px-5 py-3 text-[12.5px] text-ink-2">
+                  {job.payslips.length > 0 && (
+                    <div>
+                      <span className="font-medium text-ink">
+                        {job.payslips.length} payslip{job.payslips.length === 1 ? '' : 's'}
+                      </span>
+                      {job.payslips.some((p) => p.id) && <span className="text-ink-3"> ({job.payslips.filter((p) => p.id).length} kept in full)</span>}:{' '}
+                      {job.payslips.map((p, i) => (
+                        <span key={i}>
+                          {i > 0 && ', '}
+                          {p.importId ? (
+                            <Link to={`/import/${p.importId}`} className="hover:underline">
+                              {p.period ?? formatDate(p.payDate)}
+                            </Link>
+                          ) : (
+                            (p.period ?? formatDate(p.payDate))
+                          )}
+                          {p.taxCode && <span className="text-ink-3"> ({p.taxCode})</span>}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {job.hmrcPayments > 0 && (
+                    <div>
+                      HMRC’s record of {job.hmrcPayments} payment{job.hmrcPayments === 1 ? '' : 's'} this year. <Link to="/tax/pay" className="text-accent hover:underline">Pay tab</Link>
+                    </div>
+                  )}
+                </div>
+              )}
+            </Card>
+          ))}
+          {d.other.length > 0 && (
+            <Card title="Other tax figures" description="Interest, dividends, pension statements and the rest, as their documents give them." padded={false}>
+              <div className="overflow-x-auto border-t border-line">
+                <table className={tableClasses.table}>
+                  <tbody>
+                    {d.other.map((group) => (
+                      <Fragment key={group.kind}>
+                        <tr className="bg-panel-2">
+                          <td className={cn(tableClasses.td, 'font-medium')}>{group.label}</td>
+                          <td className={cn(tableClasses.td, 'hidden sm:table-cell')} />
+                          <td className={cn(tableClasses.td, tableClasses.num, 'font-medium')}>
+                            <Money value={group.total} />
+                          </td>
+                          <td className={tableClasses.td} />
+                        </tr>
+                        {group.figures.map((f) => (
+                          <tr key={f.id}>
+                            <td className={tableClasses.td}>
+                              {f.label}
+                              {(f.payer ?? accountName(f.accountId)) && <div className="text-[12px] text-ink-3">{f.payer ?? accountName(f.accountId)}</div>}
+                            </td>
+                            <td className={cn(tableClasses.td, 'hidden text-[12.5px] text-ink-3 sm:table-cell')}>
+                              {f.importId ? (
+                                <Link to={`/import/${f.importId}`} className="hover:underline">
+                                  {f.fileName ?? 'the document'}
+                                </Link>
+                              ) : (
+                                'your figure'
+                              )}
+                            </td>
+                            <td className={cn(tableClasses.td, tableClasses.num)}>
+                              <Money value={f.amount} />
+                            </td>
+                            <td className={cn(tableClasses.td, 'text-right')}>
+                              <button className="text-ink-3 hover:text-bad-ink" aria-label="Delete figure" onClick={() => confirm('Delete this figure?') && del.mutate(f.id)}>
+                                <Trash2 className="size-4" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </Fragment>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          )}
+          {!d.jobs.length && !d.other.length && <Card><div className="text-[13px] text-ink-3">No tax figures for {d.taxYear.label} yet.</div></Card>}
+          {yearFigures.length > 0 && (
+            <details className="rounded-xl border border-line bg-panel">
+              <summary className="cursor-pointer px-5 py-3 text-[13px] font-medium text-ink-2">Every figure stored for {d.taxYear.label} ({yearFigures.length})</summary>
+              <div className="overflow-x-auto border-t border-line">
+                <table className={tableClasses.table}>
+                  <tbody>
+                    {yearFigures.map((f) => (
+                      <tr key={f.id}>
+                        <td className={tableClasses.td}>
+                          {f.label}
+                          <div className="text-[12px] text-ink-3">
+                            {f.kind.replace(/_/g, ' ')}
+                            {f.periodEnd ? ` · ${formatDate(f.periodEnd)}` : ''}
+                            <span className="sm:hidden">{(f.payer ?? accountName(f.accountId)) ? ` · ${f.payer ?? accountName(f.accountId)}` : ''}</span>
+                          </div>
+                        </td>
+                        <td className={cn(tableClasses.td, 'hidden sm:table-cell')}>{f.payer ?? accountName(f.accountId) ?? '—'}</td>
+                        <td className={cn(tableClasses.td, tableClasses.num)}>
+                          <Money value={f.amount} />
+                        </td>
+                        <td className={cn(tableClasses.td, 'text-right')}>
+                          <button className="text-ink-3 hover:text-bad-ink" aria-label="Delete figure" onClick={() => confirm('Delete this figure?') && del.mutate(f.id)}>
+                            <Trash2 className="size-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </details>
+          )}
+        </>
+      )}
       <Card title="Add a figure by hand" description="For documents you only have on paper, such as a P60 or an annual interest statement. Uploading the document extracts these automatically.">
         <div className="grid gap-3 sm:grid-cols-3">
           <Field label="What">
@@ -502,49 +714,6 @@ function TaxDocuments() {
             Add figure
           </Button>
         </div>
-      </Card>
-      <Card title="Stored figures" padded={false}>
-        {!figures.data ? (
-          <Loading />
-        ) : figures.data.length ? (
-          <Sorted rows={[...figures.data].reverse()} columns={{ taxYear: { value: (f) => f.taxYear ?? f.periodEnd, first: 'desc' }, what: { value: (f) => f.label }, payer: { value: (f) => f.payer }, amount: { value: (f) => f.amount } }}>
-            {({ rows, sortProps }) => (
-              <table className={tableClasses.table}>
-                <thead>
-                  <tr>
-                    <SortHeader label="Tax year" sort={sortProps('taxYear')} />
-                    <SortHeader label="What" sort={sortProps('what')} />
-                    <SortHeader label="Payer" sort={sortProps('payer')} />
-                    <SortHeader label="Amount" sort={sortProps('amount')} numeric />
-                    <th className={tableClasses.th} />
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((f) => (
-                    <tr key={f.id}>
-                      <td className={tableClasses.td}>{f.taxYear ?? (f.periodEnd ? formatDate(f.periodEnd) : '—')}</td>
-                      <td className={tableClasses.td}>
-                        {f.label}
-                        <div className="text-[12px] text-ink-3">{f.kind.replace(/_/g, ' ')}</div>
-                      </td>
-                      <td className={tableClasses.td}>{f.payer ?? '—'}</td>
-                      <td className={cn(tableClasses.td, tableClasses.num)}>
-                        <Money value={f.amount} />
-                      </td>
-                      <td className={cn(tableClasses.td, 'text-right')}>
-                        <button className="text-ink-3 hover:text-bad-ink" aria-label="Delete figure" onClick={() => confirm('Delete this figure?') && del.mutate(f.id)}>
-                          <Trash2 className="size-4" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </Sorted>
-        ) : (
-          <div className="border-t border-line px-5 py-6 text-[13px] text-ink-3">No tax figures yet.</div>
-        )}
       </Card>
     </div>
   );

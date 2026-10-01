@@ -9,12 +9,12 @@ import { tidyPlace } from '../../shared/places';
 import { formatMoney, fromMinor, toMinor } from '../../shared/money';
 import { taxYearOf } from '../../shared/uk';
 import { detailToAdd, fillIn, seenInEntry, stillAdds } from '../../shared/detail';
-import type { Account, BalanceSnapshot, DetailField, Draft, DraftSection, Employment, Extraction, Figure, HmrcRecord, Holding, HoldingsSnapshot, ImportRecord, Transaction } from '../../shared/schema';
-import { AccountSchema, BalanceSnapshotSchema, DraftSchema, EmploymentSchema, FigureSchema, HmrcRecordSchema, HoldingsSnapshotSchema, TransactionSchema } from '../../shared/schema';
+import type { Account, BalanceSnapshot, DetailField, Draft, DraftSection, Employment, Extraction, Figure, HmrcRecord, Holding, HoldingsSnapshot, ImportRecord, PayslipRecord, Transaction } from '../../shared/schema';
+import { AccountSchema, BalanceSnapshotSchema, DraftSchema, EmploymentSchema, FigureSchema, HmrcRecordSchema, HoldingsSnapshotSchema, PayslipRecordSchema, TransactionSchema } from '../../shared/schema';
 import { learn, matchEmployment } from '../employments';
 import { payeReference } from '../analytics/sources';
 import { nowISO, safeFileName } from '../fsutil';
-import { balanceId, figureId, hmrcId, holdingsId, transactionId, transferGroupId } from '../ids';
+import { balanceId, figureId, hmrcId, holdingsId, payslipId, transactionId, transferGroupId } from '../ids';
 import { categoriserFor } from '../categoriser';
 import { linkTransfers, rederive, salaryByPayroll } from '../enrich';
 import { StoreError, type Store } from '../store';
@@ -303,7 +303,7 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
   // 3b. Jobs: the job of yours each draft job is, or a new one, and what an existing job learns from
   // the document (another name, its PAYE reference, a payroll number). Only a job something ticked
   // is about is set up or changed.
-  const used = new Set([...draft.figures, ...(draft.hmrc ?? [])].flatMap((x) => (x.include && x.jobKey ? [x.jobKey] : [])));
+  const used = new Set([...draft.figures, ...(draft.hmrc ?? []), ...(draft.payslips ?? [])].flatMap((x) => (x.include && x.jobKey ? [x.jobKey] : [])));
   const jobIds = new Map<string, string>();
   const jobsToWrite = new Map<string, Employment>();
   const employmentsCreated: string[] = [];
@@ -376,6 +376,11 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
       }),
     );
   const hmrcFresh = hmrcRecords.filter((r) => !store.hmrc.some((x) => x.id === r.id));
+  // Payslips in full, under their job: an id from what identifies each, so one read twice is stored once.
+  const payslipRecords: PayslipRecord[] = (draft.payslips ?? [])
+    .filter((p) => p.include)
+    .map((p) => PayslipRecordSchema.parse({ ...p.record, id: payslipId(p.record), ...(jobOf(p.jobKey) ? { employmentId: jobOf(p.jobKey)! } : {}), taxYear: taxYearOf(p.record.payDate).label, source, createdAt: stamp }));
+  const payslipsFresh = payslipRecords.filter((r, i) => !store.payslips.some((x) => x.id === r.id) && payslipRecords.findIndex((x) => x.id === r.id) === i);
   // A forecast with no balance (a State Pension forecast) is its income per year on its account
   // (FORMULAS.md §9). With a balance, the balance carries it.
   for (const section of draft.sections) {
@@ -453,6 +458,8 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
   const figuresAdded = figures.length ? await store.addFigures(figures, `import: ${label} figures`) : 0;
   if (hmrcFresh.length) await store.upsertRecords('hmrc', hmrcFresh, `import: ${label} HMRC records`);
   const hmrcAdded = hmrcFresh.length;
+  if (payslipsFresh.length) await store.upsertRecords('payslips', payslipsFresh, `import: ${label} payslips`);
+  const payslipsAdded = payslipsFresh.length;
 
   const sha = record.document.sha256;
   const docPath = await store.storeDocument(input.workFile, sha, safeFileName(record.document.fileName));
@@ -472,6 +479,7 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
       holdingsAdded,
       figuresAdded,
       ...(hmrcAdded ? { hmrcAdded } : {}),
+      ...(payslipsAdded ? { payslipsAdded } : {}),
       ...(employmentsCreated.length ? { employmentsCreated } : {}),
       ...(jobIds.size ? { jobs: [...jobIds].map(([key, employmentId]) => ({ key, employmentId })) } : {}),
       ...(nothingNew ? { nothingNew: nothingNew.slice(0, 500) } : {}),
@@ -492,6 +500,7 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
     holdingsAdded ? 'holdings' : '',
     figuresAdded ? `${figuresAdded} figures` : '',
     hmrcAdded ? `${hmrcAdded} HMRC record${hmrcAdded === 1 ? '' : 's'}` : '',
+    payslipsAdded ? `${payslipsAdded} payslip${payslipsAdded === 1 ? '' : 's'} in full` : '',
     employmentsCreated.length ? `${employmentsCreated.length} new job${employmentsCreated.length === 1 ? '' : 's'}` : '',
     salaried ? `${salaried} payment${salaried === 1 ? '' : 's'} with its payroll number now salary` : '',
   ].filter(Boolean);
