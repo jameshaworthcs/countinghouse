@@ -1021,13 +1021,22 @@ export interface CompanyView {
   dividendsTotal: number;
 }
 
+/** Where one part of an account's terms is from: the latest document that gives it. */
+export interface TermsFrom {
+  asOf: string;
+  importId?: string;
+  fileName?: string;
+}
+
 /** GET /accounts/:id/terms: an account's terms as its documents give them (FORMULAS §4, "Terms"). */
 export interface TermsResponse {
-  /** Its latest terms, with the name of the document they are from. */
-  latest?: Terms & { fileName?: string };
+  /** The latest of each part, from the latest document that gives it: its rates, its limit, a card's minimum payment. */
+  rates?: TermsFrom & { rates: TermsRate[] };
+  limit?: TermsFrom & { value: number };
+  minimum?: TermsFrom & { amount: number; due?: string };
   /** How its limit and each kind of rate changed, oldest first: each time one differs from the one before. */
   changes: { asOf: string; what: 'limit' | TermsRateApplies; from?: number; to: number }[];
-  /** Rates in its latest terms that end within 60 days or have ended, with the days left (below 0: since). */
+  /** Its latest rates that end within 60 days or have ended, with the days left (below 0: since). */
   ending: { rate: TermsRate; days: number }[];
   /** How many documents gave its terms. */
   records: number;

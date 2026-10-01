@@ -34,7 +34,13 @@ const standing = (t: Terms, applies: TermsRateApplies) => {
 
 export function termsView(store: Store, accountId: string, now: ISODate = today()): TermsResponse {
   const all = store.terms(accountId);
-  const latest = all.at(-1);
+  // Each part from the latest document that gives it: a screenshot showing only the limit does not
+  // hide the rates the statement before it gave.
+  const fileNames = new Map(store.imports.map((i) => [i.id, i.fileName]));
+  const from = (t: Terms) => ({ asOf: t.asOf, ...(t.source.importId ? { importId: t.source.importId, ...(fileNames.has(t.source.importId) ? { fileName: fileNames.get(t.source.importId)! } : {}) } : {}) });
+  const withRates = all.filter((t) => t.rates.length).at(-1);
+  const withLimit = all.filter((t) => t.limit !== undefined).at(-1);
+  const withMinimum = all.filter((t) => t.minimumPayment !== undefined).at(-1);
   const changes: TermsResponse['changes'] = [];
   const last = new Map<string, number>();
   const note = (asOf: string, what: 'limit' | TermsRateApplies, value: number | undefined, scale: (n: number) => number) => {
@@ -47,13 +53,19 @@ export function termsView(store: Store, accountId: string, now: ISODate = today(
     note(t.asOf, 'limit', t.limit, toMinor);
     for (const applies of new Set(t.rates.map((r) => r.applies))) note(t.asOf, applies, standing(t, applies)?.rate, (n) => Math.round(n * 1000));
   }
-  const ending = (latest?.rates ?? []).flatMap((rate) => {
+  const ending = (withRates?.rates ?? []).flatMap((rate) => {
     if (!rate.until) return [];
     const days = diffDays(now, rate.until);
     return days <= TERMS_ENDING_DAYS ? [{ rate, days }] : [];
   });
-  const fileName = latest?.source.importId ? store.imports.find((i) => i.id === latest.source.importId)?.fileName : undefined;
-  return { ...(latest ? { latest: { ...latest, ...(fileName ? { fileName } : {}) } } : {}), changes, ending, records: all.length };
+  return {
+    ...(withRates ? { rates: { ...from(withRates), rates: withRates.rates } } : {}),
+    ...(withLimit ? { limit: { ...from(withLimit), value: withLimit.limit! } } : {}),
+    ...(withMinimum ? { minimum: { ...from(withMinimum), amount: withMinimum.minimumPayment!, ...(withMinimum.paymentDue ? { due: withMinimum.paymentDue } : {}) } } : {}),
+    changes,
+    ending,
+    records: all.length,
+  };
 }
 
 /** Rates on open accounts that end within 60 days, as alerts for the overview. */

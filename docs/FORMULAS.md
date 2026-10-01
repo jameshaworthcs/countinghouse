@@ -42,7 +42,7 @@ in this order:
 |---|---|
 | Fund charge | your `fee.fund` record → researched OCF → agents' `fee.fund` → fallback |
 | Platform fee | your `fee.platform` → researched fee schedule (tiers on the account value, then cap and flat fee) → agents' → fallback |
-| Interest | your `interest.rate` → the rate on the account → the interest rate in the account's latest terms, unless it has ended (§4, "Terms") → researched product rate (best name match) → agents' → fallback by account type |
+| Interest | your `interest.rate` → the rate on the account → the interest rate the latest of the account's terms to give one gives, unless it has ended (§4, "Terms") → researched product rate (best name match) → agents' → fallback by account type |
 | Fund make-up | your allocation on the instrument → researched allocation → the asset class on the statement (when the latest holdings give none, as a platform's export does not: the latest holdings in any account that gave one for the same fund, by instrument, else ISIN, SEDOL, ticker or name) → "mixed" (unknown) |
 
 ## 2. Money
@@ -156,10 +156,12 @@ rates, its limit and a card's minimum payment, as each document gives them on it
   what the account's type makes it (an AER is interest paid to you; a card's rate, its purchase
   rate; a loan's, interest charged), with every rate in detail when the reading keeps everything.
   The same terms already given for the account that day are not kept again.
-- **The latest** are those with the latest date. **How they changed:** the limit, and each kind of
-  rate's standing rate (the one with no end, else the first), each time it differs from the one
-  before.
-- **Ending:** a rate in the latest terms whose last day (`until`) is within 60 days
+- **The latest** of each part comes from the latest document that gives it: the rates, the limit
+  and a card's minimum payment, each with its date and document. A screenshot showing only the
+  limit does not hide the rates the statement before it gave. **How they changed:** the limit, and
+  each kind of rate's standing rate (the one with no end, else the first), each time it differs
+  from the one before.
+- **Ending:** a rate among the latest rates whose last day (`until`) is within 60 days
   (`TERMS_ENDING_DAYS`) is shown on the account's page with what applies after it (the standing
   rate of its kind, when the document gives one), or as ended once past. On an open account, one
   that has not ended is an alert on the overview.

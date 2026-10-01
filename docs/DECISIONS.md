@@ -1342,9 +1342,10 @@ rest was in the readings' notes.
 - **A rate that has ended is not used** by projections: what follows a boost or a fixed term is
   not on the document, so the next source stands in and says which rate ended. It is not worked
   out (a boosted rate less its boost) either.
-- **The account's page shows them**, how the limit and each kind of rate changed, and any rate
-  ending within 60 days, with what applies after it when the document says; the overview alerts on
-  open accounts.
+- **The account's page shows them**, each part (rates, limit, minimum payment) from the latest
+  document that gives it, so a screenshot showing only the limit does not hide the statement's
+  rates; how the limit and each kind of rate changed; and any rate ending within 60 days, with what
+  applies after it when the document says. The overview alerts on open accounts.
 - **The reader that keeps everything reads them in full** (`extract-13`, rule 23, still off until
   its evaluation runs); the reader in use keeps the limit and one rate, as before. The evaluation
   scores terms on two cases, so one run covers it.

@@ -3,7 +3,7 @@
 
 import { Percent } from 'lucide-react';
 import { Link } from 'react-router';
-import type { TermsResponse } from '../../shared/api';
+import type { TermsFrom, TermsResponse } from '../../shared/api';
 import { diffDays, today } from '../../shared/dates';
 import type { Account, Terms, TermsRate } from '../../shared/schema';
 import { RATE_NAMES } from '../../shared/terms';
@@ -88,12 +88,33 @@ function Changes({ changes, type }: { changes: TermsResponse['changes']; type: A
   );
 }
 
+/** A document gives them; your own figures give them. */
+const gives = (from: TermsFrom) => (from.importId ? 'gives' : 'give');
+
+/** "your statement.pdf of 1 Sep 2026", linking to the document. */
+function FromDoc({ from }: { from: TermsFrom }) {
+  return (
+    <>
+      {from.importId ? (
+        <Link to={`/import/${from.importId}`} className="hover:underline">
+          {from.fileName ?? 'your document'}
+        </Link>
+      ) : (
+        'your own figures'
+      )}{' '}
+      of {formatDate(from.asOf)}
+    </>
+  );
+}
+
 export function TermsCard({ account }: { account: Account }) {
   const q = useApi<TermsResponse>(['terms', account.id], `/accounts/${account.id}/terms`);
   const t = q.data;
-  if (!t?.latest && !account.maturesOn && account.interestRate === undefined) return null;
-  const latest = t?.latest;
+  const parts: TermsFrom[] = [t?.rates, t?.limit, t?.minimum].flatMap((x) => (x ? [x] : []));
+  if (!parts.length && !account.maturesOn && account.interestRate === undefined) return null;
   const coming = (t?.ending ?? []).filter((e) => e.days >= 0);
+  // The parts come from one document, or each from the latest that gives it.
+  const one = parts.every((p) => p.asOf === parts[0]!.asOf && p.importId === parts[0]!.importId);
   return (
     <Card
       id="terms"
@@ -103,24 +124,50 @@ export function TermsCard({ account }: { account: Account }) {
           <Percent className="size-4 text-ink-3" /> Terms
         </span>
       }
-      description={latest ? <>As {latest.source.importId ? <Link to={`/import/${latest.source.importId}`} className="hover:underline">{latest.fileName ?? 'your document'}</Link> : 'your own figures'} of {formatDate(latest.asOf)} {latest.source.importId ? 'gives' : 'give'} them.</> : 'As you gave them.'}
+      description={
+        !parts.length ? (
+          'As you gave them.'
+        ) : one ? (
+          <>
+            As <FromDoc from={parts[0]!} /> {gives(parts[0]!)} them.
+          </>
+        ) : (
+          <>
+            {t?.rates && (
+              <>
+                Rates as <FromDoc from={t.rates} /> {gives(t.rates)} them.{' '}
+              </>
+            )}
+            {t?.limit && (
+              <>
+                {limitName(account.type)} as <FromDoc from={t.limit} />.{' '}
+              </>
+            )}
+            {t?.minimum && (
+              <>
+                Minimum payment as <FromDoc from={t.minimum} />.
+              </>
+            )}
+          </>
+        )
+      }
     >
       {coming.map(({ rate, days }) => (
         <Callout key={`${rate.applies}-${rate.until}`} tone="warn" className="mb-3" title={`${rate.label ?? RATE_NAMES[rate.applies]} at ${rate.rate}% ends ${days === 0 ? 'today' : days === 1 ? 'tomorrow' : `in ${days} days`}`}>
           Its last day is {formatDate(rate.until!)}.
-          {rate.balance !== undefined && (
+          {rate.balance !== undefined && t?.rates && (
             <>
               {' '}
-              <span className="sensitive">{money(rate.balance)}</span> was at this rate on {formatDate(latest!.asOf)}.
+              <span className="sensitive">{money(rate.balance)}</span> was at this rate on {formatDate(t.rates.asOf)}.
             </>
           )}
           {(() => {
-            const after = latest?.rates.find((r) => r.applies === rate.applies && !r.until);
+            const after = t?.rates?.rates.find((r) => r.applies === rate.applies && !r.until);
             return after ? ` After it, ${rateText(after)} applies.` : ' What applies after it is not on the document.';
           })()}
         </Callout>
       ))}
-      {latest && <RatesList terms={latest} type={account.type} />}
+      {parts.length > 0 && <RatesList terms={{ rates: t?.rates?.rates ?? [], ...(t?.limit ? { limit: t.limit.value } : {}), ...(t?.minimum ? { minimumPayment: t.minimum.amount, ...(t.minimum.due ? { paymentDue: t.minimum.due } : {}) } : {}) }} type={account.type} />}
       {(account.interestRate !== undefined || account.maturesOn) && (
         <div className="mt-2 text-[12.5px] text-ink-3">
           {account.interestRate !== undefined && <>Your own rate for it: {account.interestRate}%, which projections use. </>}

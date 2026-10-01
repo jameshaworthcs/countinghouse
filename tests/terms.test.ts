@@ -159,7 +159,7 @@ describe('an account’s terms over time', () => {
 
   it('shows the latest, how the limit and rates changed, and what ends within 60 days', () => {
     const v = termsView(store, 'card', '2026-10-01');
-    expect(v.latest).toMatchObject({ asOf: '2026-09-01', limit: 2400, minimumPayment: 5 });
+    expect(v).toMatchObject({ limit: { asOf: '2026-09-01', value: 2400 }, minimum: { amount: 5, due: '2026-09-27' }, rates: { asOf: '2026-09-01' } });
     expect(v.records).toBe(3);
     expect(v.changes.map((c) => [c.what, c.from ?? null, c.to])).toEqual([
       ['limit', null, 500],
@@ -172,6 +172,15 @@ describe('an account’s terms over time', () => {
     // On the overview: open accounts only, and only what has not ended.
     expect(termsAlerts(store, '2026-10-01').map((a) => a.title)).toEqual(['card: Promotional purchases at 0% ends on 20 Oct 2026', 'saver: Boosted rate at 4.25% ends today']);
     expect(termsAlerts(store, '2026-10-02').map((a) => a.title)).toEqual(['card: Promotional purchases at 0% ends on 20 Oct 2026']);
+  });
+
+  it('a later document that gives only the limit does not hide the rates the one before gave', async () => {
+    await store.upsertRecords('terms', [terms('card', '2026-09-30', { limit: 3000 }, 'imp_20260930_120000_0002')], 'test: a screenshot');
+    const v = termsView(store, 'card', '2026-10-01');
+    expect(v.limit).toMatchObject({ asOf: '2026-09-30', value: 3000 });
+    expect(v.rates).toMatchObject({ asOf: '2026-09-01', rates: [{ rate: 34.94 }, { label: 'Promotional purchases' }] });
+    expect(v.minimum).toMatchObject({ asOf: '2026-09-01' });
+    expect(v.ending).toHaveLength(1);
   });
 
   it('projections take the rate a saver’s latest terms give, and not once it has ended', () => {
