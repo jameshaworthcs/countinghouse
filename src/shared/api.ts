@@ -400,10 +400,54 @@ export interface SaSection {
   items: SaItem[];
 }
 
+/** One job's SA102 Employment page for the year: one page per job. */
+export interface SaEmployment {
+  key: string;
+  employmentId?: string;
+  employer: string;
+  payeReference?: string;
+  pay: number | null;
+  tax: number | null;
+  studentLoan: number | null;
+  /** When it started or ended within the year: the return asks for those dates. */
+  startedOn?: string;
+  endedOn?: string;
+  /** The year's figure, nothing more to come (a P60, or a job that ended). */
+  final: boolean;
+  /** Where its pay comes from, in words ("its P60"). */
+  basis: string;
+  sources: SaSource[];
+}
+
+/** A payment matched to the bank: the transaction that made it. */
+export interface SaPaymentLink {
+  transactionId: string;
+  accountId: string;
+  date: string;
+  amount: number;
+}
+
 export interface SelfAssessmentResponse {
   taxYear: { label: string; start: string; end: string; filingDeadline: string; paymentDeadline: string };
   disclaimer: string;
   sections: SaSection[];
+  /** One SA102 page per job, from the one source that counts for each (FORMULAS §11). */
+  employments: SaEmployment[];
+  /** The year's return deadlines (UK rules: `saDeadlines`), each with whether it has passed. */
+  deadlines: { date: string; kind: string; what: string; passed: boolean }[];
+  /** HMRC's working out of the year (its settlement record), with the bank payments that settled it. */
+  settlement?: {
+    outcome: 'underpaid' | 'overpaid' | 'settled';
+    amount?: number;
+    calculatedOn?: string;
+    outstanding: number;
+    asOf: string;
+    payments: { date: string; amount: number; how: string; paidFrom?: SaPaymentLink }[];
+    /** A refund HMRC paid into your bank, when it overpaid and one is found. */
+    refund?: SaPaymentLink;
+  };
+  /** The year on your National Insurance record, as HMRC's page last showed it. */
+  ni?: { status: 'full' | 'not-full' | 'not-available' | 'other'; voluntaryCost?: number; payBy?: string; text?: string; asOf: string };
   checklist: { id: string; done: boolean; label: string; detail?: string }[];
   mayNeedToFile: { reason: string; detail: string }[];
 }
@@ -453,7 +497,16 @@ export interface InvestmentsResponse {
     pot: Band | null;
     income: Band | null;
     withdrawalRate: AssumptionInUse;
-    statePension: { annual: number; source: 'forecast' | 'fallback'; basis: string; startsOn: string | null } | null;
+    statePension: {
+      annual: number;
+      source: 'forecast' | 'fallback';
+      basis: string;
+      startsOn: string | null;
+      /** HMRC's forecast in full, when it is the one used. */
+      hmrc?: { asOf: string; weekly: number; monthly?: number; annual: number; payableFrom?: string; recordTo?: string; qualifyingYears?: number; yearsNeeded?: number; assumesYears?: number; maximum?: boolean };
+    } | null;
+    /** Your National Insurance record, year by year as HMRC's page last showed each, newest first. */
+    niRecord: { taxYear: string; status: 'full' | 'not-full' | 'not-available' | 'other'; contributions: { kind: string; amount?: number }[]; voluntaryCost?: number; payBy?: string; text?: string; asOf: string }[];
     /** Defined-benefit pensions' yearly income, from their statements. */
     dbIncome: number;
     taxFreeCash: { share: number; lumpSumAllowance: number | null };

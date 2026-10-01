@@ -230,6 +230,13 @@ within 5%, percentiles within 3–6%.
   - else the full new State Pension for the current tax year (52 × weekly rate, UK tables);
   - from the State Pension age that forecast gives, else yours by the legislated timetable
     (`statePensionDate`).
+  - HMRC's forecast is shown in full beside it: per week, from when, the qualifying years so far
+    and those it assumes, the years needed for any State Pension, and whether it is the most you
+    can get, as the page says.
+- **National Insurance record**: each tax year as HMRC's page last showed it (`ni-year` records,
+  the latest `asOf` per year), newest first, with a year that is not full given with the voluntary
+  contribution that fills it and the day to pay it by. Nothing is worked out: the costs and dates
+  are HMRC's.
 - DB pensions: their recorded yearly income.
 - Tax-free cash: 25% of each pot, up to the Lump Sum Allowance (UK tables).
 
@@ -488,6 +495,18 @@ it.
      payslips' year to date, then the payslips added up.
 - So a P45 and an HMRC page to a later date state one job's year so far once, and a page to a date
   never stops later payslips counting.
+
+**Self Assessment, a page per job** (`selfAssessment`). Each job with pay in the year has its SA102
+page: its pay, tax and student loan from the one source that counts for each (above), its PAYE
+reference, and the days it started or ended when they fall in the year (yours, else HMRC's). It is
+the year's figure when that source is final. The totals above are the sum of these pages.
+
+**HMRC's working out of a year** (a `settlement` record, the latest for the year): the outcome,
+the amount and when it was worked out, what is outstanding, and each payment the page lists. A
+payment is matched to the money out of your bank that made it: the same amount to the penny, within
+7 days of the day the page gives, worded as a payment to HMRC; the nearest such. A refund HMRC owed
+you is matched to a credit of that amount from HMRC, on or after the day it was worked out and
+within 120 days of it.
 
 **Dividends** (`dividendsOf`): dividends outside ISAs and pensions against the dividend allowance,
 **each counted once**. A dividend voucher and the bank credit that paid it are one dividend: a

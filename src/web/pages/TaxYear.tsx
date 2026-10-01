@@ -1,5 +1,5 @@
 import { ChevronRight, CircleCheck, CircleDashed, Download, FileWarning, Printer, TriangleAlert } from 'lucide-react';
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import type { AllowanceLine, AllowancesResponse, PayResponse, SaItem, SelfAssessmentResponse, TaxBandEstimate } from '../../shared/api';
 import { formatDate } from '../../shared/dates';
@@ -213,6 +213,153 @@ function statusBadge(item: SaItem) {
   }
 }
 
+/** The year's return deadlines: the next one first in weight, those passed muted. */
+function SaDeadlines({ sa }: { sa: SelfAssessmentResponse }) {
+  const next = sa.deadlines.find((d) => !d.passed);
+  return (
+    <Card title={`Deadlines for the ${sa.taxYear.label} return`} description="From GOV.UK’s Self Assessment deadlines. Registering late gives you a later filing date, but the tax is still due on 31 January.">
+      <ul className="flex flex-col gap-1.5 text-[13px]">
+        {sa.deadlines.map((d, i) => (
+          <li key={i} className={cn('flex gap-3', d.passed ? 'text-ink-3' : d === next ? 'font-medium text-ink' : 'text-ink-2')}>
+            <span className="w-28 shrink-0 tabular">{formatDate(d.date)}</span>
+            <span>
+              {d.what}
+              {d.passed && ' (passed)'}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
+}
+
+/** One SA102 page per job: what goes on each, from the source that counts. */
+function EmploymentPages({ sa }: { sa: SelfAssessmentResponse }) {
+  if (!sa.employments.length) return null;
+  return (
+    <Card title="Employment pages (SA102): one per job" description="Each job’s page, as its figures stand. A P60 (or a P45 for a job you left) gives the figures to enter; check each against it." padded={false}>
+      <ul className="divide-y divide-line border-t border-line">
+        {sa.employments.map((e) => (
+          <li key={e.key} className="px-5 py-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="font-medium text-ink">{e.employer}</div>
+                <div className="text-[12.5px] text-ink-3">{[e.payeReference ? `PAYE reference ${e.payeReference}` : 'PAYE reference not known', e.startedOn ? `started ${formatDate(e.startedOn)}` : '', e.endedOn ? `left ${formatDate(e.endedOn)}` : ''].filter(Boolean).join(' · ')}</div>
+              </div>
+              {e.final ? <StatusBadge status="good">The year’s figures</StatusBadge> : <StatusBadge status="warn">So far</StatusBadge>}
+            </div>
+            <KeyValue
+              className="mt-2"
+              items={[
+                ['Pay', e.pay !== null ? <Money value={e.pay} /> : '—'],
+                ['UK tax taken off', e.tax !== null ? <Money value={e.tax} /> : 'Not known'],
+                ...(e.studentLoan !== null ? ([['Student loan deducted', <Money value={e.studentLoan} />]] as [string, React.ReactNode][]) : []),
+                ['From', e.basis],
+              ]}
+            />
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
+}
+
+/** HMRC's working out of the year, and the payments that settled it. */
+function Settlement({ sa }: { sa: SelfAssessmentResponse }) {
+  const s = sa.settlement;
+  if (!s) return null;
+  const paid = (l: { date: string; amount: number; accountId: string }) => (
+    <Link to={`/transactions?accounts=${l.accountId}&period=custom&from=${l.date}&to=${l.date}`} className="text-accent hover:underline">
+      paid in your bank on {formatDate(l.date)}
+    </Link>
+  );
+  return (
+    <Card title={`HMRC’s working out of ${sa.taxYear.label}`} description={`As HMRC’s page showed it on ${formatDate(s.asOf)}.`}>
+      <div className="flex flex-col gap-1.5 text-[13px] text-ink-2">
+        <div>
+          {s.outcome === 'underpaid' ? 'You paid too little tax' : s.outcome === 'overpaid' ? 'You paid too much tax' : 'Nothing owed either way'}
+          {s.amount !== undefined && (
+            <>
+              : <Money value={s.amount} />
+            </>
+          )}
+          {s.calculatedOn && `, worked out on ${formatDate(s.calculatedOn)}`}.{' '}
+          {s.outstanding > 0 ? (
+            <span className="font-medium text-warn-ink">
+              <Money value={s.outstanding} /> still to pay.
+            </span>
+          ) : s.outstanding < 0 ? (
+            <span>
+              <Money value={-s.outstanding} /> to be repaid to you.
+            </span>
+          ) : (
+            <span>Nothing outstanding.</span>
+          )}
+        </div>
+        {s.payments.map((p, i) => (
+          <div key={i}>
+            You paid <Money value={p.amount} /> by {p.how} on {formatDate(p.date)}
+            {p.paidFrom ? <>, {paid(p.paidFrom)}</> : <span className="text-ink-3">; not found in your bank data</span>}.
+          </div>
+        ))}
+        {s.refund && (
+          <div>
+            HMRC’s refund of <Money value={s.refund.amount} /> was {paid(s.refund)}.
+          </div>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+/** One section of the return: its items, each with where it goes, its basis, notes and sources. */
+function SaSectionCard({ section, items }: { section: SelfAssessmentResponse['sections'][number]; items: SaItem[] }) {
+  return (
+    <Card title={section.title} description={section.description} padded={false}>
+      <ul className="divide-y divide-line border-t border-line">
+        {items.map((item) => (
+          <li key={item.id} className="px-5 py-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-[14px] font-semibold text-ink">{item.label}</div>
+                <div className="mt-0.5 text-[12.5px] text-ink-3">{item.where}</div>
+              </div>
+              <div className="flex items-center gap-3">
+                {statusBadge(item)}
+                <div className="text-right text-[18px] font-semibold text-ink">{item.amount !== null ? <Money value={item.amount} /> : <span className="text-ink-3">—</span>}</div>
+              </div>
+            </div>
+            <div className="mt-1 text-[12.5px] text-ink-2">Basis: {item.basis}</div>
+            <Notes notes={item.notes} />
+            {item.sources.length > 0 && (
+              <details className="mt-2 text-[12.5px]">
+                <summary className="cursor-pointer text-ink-3 hover:text-ink">Sources ({item.sources.length})</summary>
+                <ul className="mt-1 flex flex-col gap-0.5">
+                  {item.sources.map((s) => (
+                    <li key={s.type + s.id} className="flex justify-between gap-3 text-ink-2">
+                      <span className="truncate">
+                        {s.date ? `${formatDate(s.date)} · ` : ''}
+                        {s.type === 'account' ? (
+                          <Link to={`/accounts/${s.id}`} className="hover:underline">
+                            {s.label}
+                          </Link>
+                        ) : (
+                          s.label
+                        )}
+                      </span>
+                      {s.amount !== undefined && <Money value={s.amount} className="tabular" />}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
+}
+
 function SelfAssessment({ sa, taxYear }: { sa: SelfAssessmentResponse; taxYear: string }) {
   const [showNA, setShowNA] = useState(false);
   return (
@@ -239,6 +386,23 @@ function SelfAssessment({ sa, taxYear }: { sa: SelfAssessmentResponse; taxYear: 
         </div>
       </div>
 
+      <SaDeadlines sa={sa} />
+      <Settlement sa={sa} />
+      {sa.ni && (
+        <Callout tone={sa.ni.status === 'not-full' ? 'warn' : 'neutral'} title={`National Insurance for ${sa.taxYear.label}`}>
+          {sa.ni.status === 'full' ? 'A full year on your record.' : sa.ni.status === 'not-full' ? 'Not a full year on your record.' : sa.ni.status === 'not-available' ? 'Not on your record yet.' : (sa.ni.text ?? '')}{' '}
+          {sa.ni.voluntaryCost !== undefined && (
+            <>
+              A voluntary contribution of <Money value={sa.ni.voluntaryCost} /> would fill it{sa.ni.payBy ? `, by ${formatDate(sa.ni.payBy)}` : ''}.{' '}
+            </>
+          )}
+          <span className="text-ink-3">As HMRC’s page showed it on {formatDate(sa.ni.asOf)}.</span>{' '}
+          <Link to="/investments" className="text-accent hover:underline">
+            Your whole record
+          </Link>
+        </Callout>
+      )}
+
       {sa.mayNeedToFile.length > 0 && (
         <Card title="Why you might need to file" description="Hints only; check gov.uk/check-if-you-need-tax-return">
           <ul className="flex flex-col gap-2 text-[13px]">
@@ -257,50 +421,15 @@ function SelfAssessment({ sa, taxYear }: { sa: SelfAssessmentResponse; taxYear: 
       {sa.sections.map((section) => {
         const items = section.items.filter((i) => showNA || i.status !== 'not-applicable');
         if (!items.length) return null;
-        return (
-          <Card key={section.id} title={section.title} description={section.description} padded={false}>
-            <ul className="divide-y divide-line border-t border-line">
-              {items.map((item) => (
-                <li key={item.id} className="px-5 py-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-[14px] font-semibold text-ink">{item.label}</div>
-                      <div className="mt-0.5 text-[12.5px] text-ink-3">{item.where}</div>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      {statusBadge(item)}
-                      <div className="text-right text-[18px] font-semibold text-ink">{item.amount !== null ? <Money value={item.amount} /> : <span className="text-ink-3">—</span>}</div>
-                    </div>
-                  </div>
-                  <div className="mt-1 text-[12.5px] text-ink-2">Basis: {item.basis}</div>
-                  <Notes notes={item.notes} />
-                  {item.sources.length > 0 && (
-                    <details className="mt-2 text-[12.5px]">
-                      <summary className="cursor-pointer text-ink-3 hover:text-ink">Sources ({item.sources.length})</summary>
-                      <ul className="mt-1 flex flex-col gap-0.5">
-                        {item.sources.map((s) => (
-                          <li key={s.type + s.id} className="flex justify-between gap-3 text-ink-2">
-                            <span className="truncate">
-                              {s.date ? `${formatDate(s.date)} · ` : ''}
-                              {s.type === 'account' ? (
-                                <Link to={`/accounts/${s.id}`} className="hover:underline">
-                                  {s.label}
-                                </Link>
-                              ) : (
-                                s.label
-                              )}
-                            </span>
-                            {s.amount !== undefined && <Money value={s.amount} className="tabular" />}
-                          </li>
-                        ))}
-                      </ul>
-                    </details>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </Card>
-        );
+        // Each job's own page follows the employment totals.
+        if (section.id === 'employment')
+          return (
+            <Fragment key={section.id}>
+              <SaSectionCard section={section} items={items} />
+              <EmploymentPages sa={sa} />
+            </Fragment>
+          );
+        return <SaSectionCard key={section.id} section={section} items={items} />;
       })}
       <div className="no-print">
         <Button size="sm" variant="ghost" onClick={() => setShowNA((v) => !v)}>

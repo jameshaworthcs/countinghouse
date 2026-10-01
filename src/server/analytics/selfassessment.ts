@@ -3,14 +3,15 @@
 // tax advice; every figure must be checked against your own records before you submit.
 
 import { ACCOUNT_TYPE_META, balanceModeOf } from '../../shared/accounts';
-import type { SaItem, SaSection, SaSource, SelfAssessmentResponse } from '../../shared/api';
-import { addDays, formatDate, maxDate, minDate, today } from '../../shared/dates';
+import type { SaEmployment, SaItem, SaPaymentLink, SaSection, SaSource, SelfAssessmentResponse } from '../../shared/api';
+import { addDays, diffDays, formatDate, maxDate, minDate, today } from '../../shared/dates';
 import { formatMoney, fromMinor, toMinor } from '../../shared/money';
-import type { Figure, FigureKind } from '../../shared/schema';
-import { parseTaxYear, taxYearOf, taxYearParams, untaxedIncomeNoticeBy, type TaxYear } from '../../shared/uk';
+import type { Figure, FigureKind, HmrcRecord } from '../../shared/schema';
+import { parseTaxYear, saDeadlines, taxYearOf, taxYearParams, untaxedIncomeNoticeBy, type TaxYear } from '../../shared/uk';
 import type { Store } from '../store';
 import { allowances, giftAid, pensionTotals, reliefAtSource } from './allowances';
 import { employerYears, type PaySource } from './sources';
+import { jobStartedOn } from './pay';
 
 export const SA_DISCLAIMER =
   'This page gathers figures from your own data to help you fill in your Self Assessment return. It is not tax advice and it can be incomplete or wrong: bank data shows net pay, may miss interest paid into accounts you have not imported, and cannot know which donations were Gift Aided. Check every figure against your P60, P11D, bank interest statements, pension and dividend statements before you submit. You are responsible for your return.';
@@ -328,6 +329,71 @@ export function selfAssessment(store: Store, label?: string): SelfAssessmentResp
     detail: 'Import your P60 so the band, the Personal Savings Allowance and the pension relief hints rest on your gross pay.',
   });
 
+  // ── One SA102 page per job: its pay, tax and student loan from the source that counts, its PAYE
+  // reference, and the days it started or ended within the year. ──
+  const employments: SaEmployment[] = withPay.map((e) => {
+    const p = e.chosen.gross_pay!;
+    const t = e.chosen.tax_deducted;
+    const sl = e.chosen.student_loan_deducted;
+    const started = e.employmentId ? jobStartedOn(store, e.employmentId) : undefined;
+    return {
+      key: e.key,
+      ...(e.employmentId ? { employmentId: e.employmentId } : {}),
+      employer: e.payer || 'An employer',
+      ...(e.payeReference ? { payeReference: e.payeReference } : {}),
+      pay: p.amount,
+      tax: t ? t.amount : null,
+      studentLoan: sl ? sl.amount : null,
+      ...(started && started >= ty.start && started <= ty.end ? { startedOn: started } : {}),
+      ...(e.endedOn && e.endedOn >= ty.start && e.endedOn <= ty.end ? { endedOn: e.endedOn } : {}),
+      final: p.final,
+      basis: fromWhat(p),
+      sources: [...sourcesOf([p], 'pay'), ...(t ? sourcesOf([t], 'tax') : [])],
+    };
+  });
+
+  // ── HMRC's working out of the year (a settlement record), and the bank payments that settled it:
+  // a payment of the amount, to HMRC, within 7 days of the day the page gives; a refund of the amount
+  // from HMRC, after the calculation and within 120 days of it. ──
+  const settled = store.hmrc
+    .filter((r): r is Extract<HmrcRecord, { type: 'settlement' }> => r.type === 'settlement' && r.taxYear === ty.label)
+    .sort((a, b) => a.asOf.localeCompare(b.asOf))
+    .at(-1);
+  const toHmrc = store.transactions().filter((t) => /\bHMRC\b|HM REVENUE|INLAND REVENUE/i.test(`${t.description} ${t.payee ?? ''} ${t.counterpartyName ?? ''}`));
+  const link = (t: { id: string; accountId: string; date: string; amount: number }): SaPaymentLink => ({ transactionId: t.id, accountId: t.accountId, date: t.date, amount: t.amount });
+  const settlement: SelfAssessmentResponse['settlement'] = settled
+    ? (() => {
+        const used = new Set<string>();
+        const payments = settled.payments.map((p) => {
+          const t = toHmrc
+            .filter((x) => !used.has(x.id) && x.amount < 0 && toMinor(-x.amount) === toMinor(p.amount) && Math.abs(diffDays(x.date, p.date)) <= 7)
+            .sort((a, b) => Math.abs(diffDays(a.date, p.date)) - Math.abs(diffDays(b.date, p.date)))[0];
+          if (t) used.add(t.id);
+          return { date: p.date, amount: p.amount, how: p.how, ...(t ? { paidFrom: link(t) } : {}) };
+        });
+        const refund =
+          settled.outcome === 'overpaid' && settled.amount
+            ? toHmrc.filter((x) => x.amount > 0 && toMinor(x.amount) === toMinor(settled.amount!) && (!settled.calculatedOn || (x.date >= settled.calculatedOn && diffDays(settled.calculatedOn, x.date) <= 120))).sort((a, b) => a.date.localeCompare(b.date))[0]
+            : undefined;
+        return {
+          outcome: settled.outcome,
+          ...(settled.amount !== undefined ? { amount: settled.amount } : {}),
+          ...(settled.calculatedOn ? { calculatedOn: settled.calculatedOn } : {}),
+          outstanding: settled.outstanding,
+          asOf: settled.asOf,
+          payments,
+          ...(refund ? { refund: link(refund) } : {}),
+        };
+      })()
+    : undefined;
+
+  // ── The year on your National Insurance record, as HMRC's page last showed it. ──
+  const niYear = store.hmrc
+    .filter((r): r is Extract<HmrcRecord, { type: 'ni-year' }> => r.type === 'ni-year' && r.taxYear === ty.label)
+    .sort((a, b) => a.asOf.localeCompare(b.asOf))
+    .at(-1);
+
+  const now = today();
   return {
     taxYear: {
       label: ty.label,
@@ -338,6 +404,10 @@ export function selfAssessment(store: Store, label?: string): SelfAssessmentResp
     },
     disclaimer: SA_DISCLAIMER,
     sections,
+    employments,
+    deadlines: saDeadlines(ty).map((d) => ({ ...d, passed: d.date < now })),
+    ...(settlement ? { settlement } : {}),
+    ...(niYear ? { ni: { status: niYear.status, ...(niYear.voluntaryCost !== undefined ? { voluntaryCost: niYear.voluntaryCost } : {}), ...(niYear.payBy ? { payBy: niYear.payBy } : {}), ...(niYear.text ? { text: niYear.text } : {}), asOf: niYear.asOf } } : {}),
     checklist,
     mayNeedToFile,
   };

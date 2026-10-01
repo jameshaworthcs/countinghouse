@@ -192,6 +192,8 @@ async function main() {
       hmrc.push(hmrcRecord({ type: 'payment', employer: 'ACME ANALYTICS LIMITED', payDate: salaryDay, taxablePay: gross, tax, ni, taxYear: thisYear.label }, 'acme-analytics'));
     }
     tx('current-account', salaryDay, salary, 'ACME ANALYTICS LTD SALARY', { payee: 'Acme Analytics Ltd' });
+    // HMRC's refund of last year's overpaid tax.
+    if (!SPARSE && m === `${thisYear.startYear}-08-01`) tx('current-account', `${thisYear.startYear}-08-04`, 248.6, 'HMRC PAYE REFUND', { payee: 'HMRC' });
     const marked = marking.find((x) => x.month === m);
     if (marked) {
       const payDate = `${addMonths(m, 1).slice(0, 7)}-25`;
@@ -416,6 +418,30 @@ async function main() {
   ]);
   // The code HMRC issued Acme for the year, in its annual notice.
   if (!SPARSE) hmrc.push(hmrcRecord({ type: 'tax-code', employer: 'ACME ANALYTICS LIMITED', date: addDays(thisYear.start, -40), code: '1257L', cumulative: true, taxYear: thisYear.label }, 'acme-analytics'));
+  // What HMRC's pages say of you: last year worked out (a refund, paid in), your National Insurance
+  // record with a year to fill, and the State Pension forecast.
+  if (!SPARSE) {
+    const last = taxYearOf(addDays(thisYear.start, -1));
+    const asOf = addDays(END, -14);
+    const record = (r: ExtractedHmrc) => HmrcRecordSchema.parse({ ...r, id: hmrcId(r), source: {}, createdAt: stamp });
+    hmrc.push(record({ type: 'settlement', taxYear: last.label, asOf, outcome: 'overpaid', amount: 248.6, calculatedOn: `${thisYear.startYear}-07-14`, outstanding: 0, payments: [] }));
+    for (let k = 0; k < 6; k++) {
+      const y = taxYearOf(`${thisYear.startYear - k}-06-01`);
+      const gap = y.startYear === thisYear.startYear - 5;
+      hmrc.push(
+        record(
+          k === 0
+            ? { type: 'ni-year', asOf, taxYear: y.label, status: 'not-available', contributions: [], text: 'Your record for this year is not available yet' }
+            : gap
+              ? { type: 'ni-year', asOf, taxYear: y.label, status: 'not-full', contributions: [{ kind: 'Paid employment', amount: 212.4 }], voluntaryCost: 523.6, payBy: `${y.startYear + 7}-04-05` }
+              : { type: 'ni-year', asOf, taxYear: y.label, status: 'full', contributions: [{ kind: 'Paid employment', amount: [3_909.96, 3_909.96, 5_214.4, 5_382.75][k - 1]! }] },
+        ),
+      );
+    }
+    // The forecast page's year is the week's rate × 365.25 / 7, and its month a twelfth of that.
+    const spYear = roundMoney((241.3 * 365.25) / 7);
+    hmrc.push(record({ type: 'state-pension-forecast', asOf, weekly: 241.3, monthly: roundMoney(spYear / 12), annual: spYear, payableFrom: '2058-05-14', recordTo: `${thisYear.startYear}-04-05`, qualifyingYears: 13, yearsNeeded: 10, assumesYears: 22, maximum: true }));
+  }
   if (hmrc.length) await store.upsertRecords('hmrc', hmrc, 'demo: HMRC records');
   if (fullSlips.length) await store.upsertRecords('payslips', fullSlips, 'demo: payslips in full');
   const res = await enrich(store);

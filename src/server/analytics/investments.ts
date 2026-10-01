@@ -7,7 +7,7 @@ import type { InvestmentAccountSummary, InvestmentsResponse } from '../../shared
 import { EXTERNAL_FLOW_CATEGORIES } from '../../shared/categories';
 import { diffDays, formatDate, today } from '../../shared/dates';
 import { fromMinor, roundMoney, subMoney, toMinor } from '../../shared/money';
-import type { Account } from '../../shared/schema';
+import type { Account, HmrcRecord } from '../../shared/schema';
 import { ageOn, birthdayAt, lisaPenaltyAdjustedValue, pensionAccessDate, statePensionDate, statePensionFullYearly, taxYearOf, taxYearParams } from '../../shared/uk';
 import type { Store } from '../store';
 import { flowsFromStart, type BalanceEngine } from './balances';
@@ -224,16 +224,38 @@ export function investments(store: Store, engine: BalanceEngine): InvestmentsRes
     ...store.accounts
       .filter((a) => a.type === 'state_pension')
       .flatMap((a) => [
-        ...store.balances(a.id).flatMap((b) => (b.annualIncome !== undefined ? [{ date: b.date, annualIncome: b.annualIncome, payableFrom: undefined, hmrc: false }] : [])),
-        ...store.figures.flatMap((f) => (f.kind === 'pension_income_forecast' && f.accountId === a.id && f.date ? [{ date: f.date, annualIncome: f.amount, payableFrom: undefined, hmrc: false }] : [])),
+        ...store.balances(a.id).flatMap((b) => (b.annualIncome !== undefined ? [{ date: b.date, annualIncome: b.annualIncome, payableFrom: undefined, hmrc: undefined }] : [])),
+        ...store.figures.flatMap((f) => (f.kind === 'pension_income_forecast' && f.accountId === a.id && f.date ? [{ date: f.date, annualIncome: f.amount, payableFrom: undefined, hmrc: undefined }] : [])),
       ]),
-    ...store.hmrc.flatMap((r) => (r.type === 'state-pension-forecast' ? [{ date: r.asOf, annualIncome: r.annual, payableFrom: r.payableFrom, hmrc: true }] : [])),
+    ...store.hmrc.flatMap((r) => (r.type === 'state-pension-forecast' ? [{ date: r.asOf, annualIncome: r.annual, payableFrom: r.payableFrom, hmrc: r }] : [])),
   ]
     .sort((a, b) => a.date.localeCompare(b.date))
     .at(-1);
   const spDate = forecast?.payableFrom ?? (dob ? statePensionDate(dob) : null);
+  const h = forecast?.hmrc;
   const statePension = forecast
-    ? { annual: forecast.annualIncome, source: 'forecast' as const, basis: forecast.hmrc ? `HMRC’s forecast of ${formatDate(forecast.date)} (in today's money)` : `Your forecast recorded on ${forecast.date} (in today's money)`, startsOn: spDate }
+    ? {
+        annual: forecast.annualIncome,
+        source: 'forecast' as const,
+        basis: h ? `HMRC’s forecast of ${formatDate(forecast.date)} (in today's money)` : `Your forecast recorded on ${forecast.date} (in today's money)`,
+        startsOn: spDate,
+        ...(h
+          ? {
+              hmrc: {
+                asOf: h.asOf,
+                weekly: h.weekly,
+                annual: h.annual,
+                ...(h.monthly !== undefined ? { monthly: h.monthly } : {}),
+                ...(h.payableFrom ? { payableFrom: h.payableFrom } : {}),
+                ...(h.recordTo ? { recordTo: h.recordTo } : {}),
+                ...(h.qualifyingYears !== undefined ? { qualifyingYears: h.qualifyingYears } : {}),
+                ...(h.yearsNeeded !== undefined ? { yearsNeeded: h.yearsNeeded } : {}),
+                ...(h.assumesYears !== undefined ? { assumesYears: h.assumesYears } : {}),
+                ...(h.maximum !== undefined ? { maximum: h.maximum } : {}),
+              },
+            }
+          : {}),
+      }
     : dob
       ? { annual: statePensionFullYearly(taxYearOf(now)), source: 'fallback' as const, basis: `Fallback: the full new State Pension for ${taxYearOf(now).label}. Your gov.uk forecast replaces it (it depends on your National Insurance record).`, startsOn: spDate }
       : null;
@@ -271,6 +293,7 @@ export function investments(store: Store, engine: BalanceEngine): InvestmentsRes
       income,
       withdrawalRate: withdrawal,
       statePension,
+      niRecord: niRecord(store),
       dbIncome,
       taxFreeCash: { share: ty.pensionTaxFreeShare, lumpSumAllowance: ty.lumpSumAllowance },
       pool: { mu: pool.mu, sigma: pool.sigma, fee: pool.fee },
@@ -282,4 +305,21 @@ export function investments(store: Store, engine: BalanceEngine): InvestmentsRes
 
 function fmtPct(v: number): string {
   return `${(v * 100).toLocaleString('en-GB', { maximumFractionDigits: 1 })}%`;
+}
+
+/** Your National Insurance record: each tax year as HMRC's page last showed it, newest first. */
+function niRecord(store: Store): InvestmentsResponse['retirement']['niRecord'] {
+  const latest = new Map<string, Extract<HmrcRecord, { type: 'ni-year' }>>();
+  for (const r of store.hmrc) if (r.type === 'ni-year' && (!latest.has(r.taxYear) || latest.get(r.taxYear)!.asOf < r.asOf)) latest.set(r.taxYear, r);
+  return [...latest.values()]
+    .sort((a, b) => b.taxYear.localeCompare(a.taxYear))
+    .map((r) => ({
+      taxYear: r.taxYear,
+      status: r.status,
+      contributions: r.contributions.map((c) => ({ kind: c.kind, ...(c.amount !== undefined ? { amount: c.amount } : {}) })),
+      ...(r.voluntaryCost !== undefined ? { voluntaryCost: r.voluntaryCost } : {}),
+      ...(r.payBy ? { payBy: r.payBy } : {}),
+      ...(r.text ? { text: r.text } : {}),
+      asOf: r.asOf,
+    }));
 }

@@ -433,6 +433,35 @@ export function untaxedIncomeNoticeBy(ty: TaxYear): ISODate {
   return `${ty.startYear + 1}-10-05`;
 }
 
+/** One Self Assessment deadline for a tax year's return (docs/UK_RULES.md, "Self Assessment"). */
+export interface SaDeadline {
+  date: ISODate;
+  kind: 'register' | 'paper' | 'online-through-code' | 'online' | 'pay' | 'second-payment-on-account';
+  what: string;
+}
+
+/**
+ * The deadlines for `ty`'s Self Assessment return, from GOV.UK's "Self Assessment tax returns:
+ * deadlines": register by 5 October after the year ends; a paper return by 31 October; online by
+ * 30 December to have a bill under `codingOutLimit` collected through your tax code; online, and
+ * the tax paid (with any first payment on account for the next year), by 31 January; any second
+ * payment on account by 31 July.
+ */
+export function saDeadlines(ty: TaxYear): SaDeadline[] {
+  const y = ty.startYear;
+  return [
+    { date: untaxedIncomeNoticeBy(ty), kind: 'register', what: 'Tell HMRC you need to send a return, if you have not sent one before (or tell it of income it does not know about)' },
+    { date: `${y + 1}-10-31`, kind: 'paper', what: 'A paper return must reach HMRC' },
+    { date: `${y + 1}-12-30`, kind: 'online-through-code', what: `Send the return online by now to have a bill under £${codingOutLimit.toLocaleString('en-GB')} collected through your tax code, if you pay tax through PAYE` },
+    { date: `${y + 2}-01-31`, kind: 'online', what: 'Send the return online' },
+    { date: `${y + 2}-01-31`, kind: 'pay', what: 'Pay the tax you owe, and the first payment on account for the next year if you make them' },
+    { date: `${y + 2}-07-31`, kind: 'second-payment-on-account', what: 'The second payment on account, if you make them' },
+  ];
+}
+
+/** A Self Assessment bill under this can be collected through your tax code (GOV.UK, "Pay your Self Assessment tax bill: through your tax code"). */
+export const codingOutLimit = 3000;
+
 export function statePensionFullYearly(ty: TaxYear): number {
   return Math.round(taxYearParams(ty).statePensionFullWeekly * 52 * 100) / 100;
 }

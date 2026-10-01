@@ -26,6 +26,60 @@ const ASSET_LABELS: Record<string, string> = {
 };
 const ASSET_ORDER = ['equity', 'mixed', 'bond', 'property', 'commodity', 'crypto', 'cash', 'other', 'unclassified', 'unknown'];
 
+/** HMRC's State Pension forecast in full, and your National Insurance record year by year. */
+function StatePensionCard({ r }: { r: InvestmentsResponse['retirement'] }) {
+  const h = r.statePension?.hmrc;
+  if (!h && !r.niRecord.length) return null;
+  const gaps = r.niRecord.filter((y) => y.status === 'not-full');
+  return (
+    <Card title="State Pension and National Insurance" description={h ? `HMRC’s forecast of ${formatDate(h.asOf)}, in today’s money` : 'Your National Insurance record, as HMRC’s pages showed it'}>
+      {h && (
+        <KeyValue
+          items={[
+            ['Forecast', <span><Money value={h.weekly} /> a week (<Money value={h.annual} decimals={0} /> a year){h.maximum ? ', the most you can get' : ''}</span>],
+            ...(h.payableFrom ? ([['From', formatDate(h.payableFrom)]] as [string, React.ReactNode][]) : []),
+            ...(h.qualifyingYears !== undefined
+              ? ([
+                  [
+                    'Qualifying years',
+                    `${h.qualifyingYears} so far${h.recordTo ? ` (to ${formatDate(h.recordTo)})` : ''}${h.assumesYears !== undefined ? `; the forecast assumes ${h.assumesYears} more` : ''}${h.yearsNeeded !== undefined ? `; ${h.yearsNeeded} are needed for any State Pension` : ''}`,
+                  ],
+                ] as [string, React.ReactNode][])
+              : []),
+          ]}
+        />
+      )}
+      {r.niRecord.length > 0 && (
+        <div className="mt-3">
+          <div className="mb-1 text-[12px] font-medium text-ink-3">National Insurance record</div>
+          <ul className="flex flex-col gap-0.5 text-[13px]">
+            {r.niRecord.map((y) => (
+              <li key={y.taxYear} className="flex flex-wrap justify-between gap-x-3">
+                <span className="tabular text-ink-2">{y.taxYear}</span>
+                <span className={cn('text-right', y.status === 'not-full' ? 'text-warn-ink' : y.status === 'full' ? 'text-ink-2' : 'text-ink-3')}>
+                  {y.status === 'full' ? 'Full year' : y.status === 'not-full' ? 'Not full' : y.status === 'not-available' ? 'Not available yet' : (y.text ?? 'See HMRC')}
+                  {y.voluntaryCost !== undefined && (
+                    <>
+                      {' '}
+                      · <Money value={y.voluntaryCost} /> fills it{y.payBy ? `, by ${formatDate(y.payBy)}` : ''}
+                    </>
+                  )}
+                </span>
+              </li>
+            ))}
+          </ul>
+          {gaps.length > 0 && (
+            <p className="mt-2 text-[12.5px] text-ink-3">
+              {gaps.length} year{gaps.length === 1 ? ' is' : 's are'} not full.{' '}
+              {h?.maximum ? 'HMRC’s forecast already says it is the most you can get, so filling them would not raise it unless you have fewer qualifying years than it assumes.' : 'Filling one raises your State Pension only if it brings you closer to the qualifying years the full amount needs: check with the Future Pension Centre before you pay.'}
+            </p>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 export default function Investments() {
   const q = useApi<InvestmentsResponse>(['investments'], '/investments');
   const [selected, setSelected] = useState<string>('');
@@ -285,6 +339,7 @@ export default function Investments() {
             </li>
           </ul>
         </Card>
+        <StatePensionCard r={r} />
         {lisas.length > 0 ? (
           <Card title="Lifetime ISA">
             {lisas.map((a) => (

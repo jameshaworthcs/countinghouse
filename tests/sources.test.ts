@@ -206,7 +206,7 @@ describe('a pension forecast with no balance', () => {
     await importDocument('pension_statement', [], { accounts: [{ accountName: 'State Pension', accountType: 'state_pension', annualIncome: 11500.5, balanceDate: '2026-09-30' }], hintAccountId: 'state' });
     const forecast = { type: 'state-pension-forecast' as const, asOf: '2026-10-01', weekly: 230.25, annual: 12006.75, payableFrom: '2058-03-01' };
     await store.upsertRecords('hmrc', [{ ...forecast, id: hmrcId(forecast), accountId: 'state', source: {}, createdAt: stamp }], 'test: HMRC forecast');
-    expect(investments(store, new BalanceEngine(store)).retirement.statePension).toEqual({ annual: 12006.75, source: 'forecast', basis: 'HMRC’s forecast of 1 Oct 2026 (in today\'s money)', startsOn: '2058-03-01' });
+    expect(investments(store, new BalanceEngine(store)).retirement.statePension).toEqual({ annual: 12006.75, source: 'forecast', basis: 'HMRC’s forecast of 1 Oct 2026 (in today\'s money)', startsOn: '2058-03-01', hmrc: { asOf: '2026-10-01', weekly: 230.25, annual: 12006.75, payableFrom: '2058-03-01' } });
   });
 });
 

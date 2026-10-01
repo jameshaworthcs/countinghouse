@@ -168,10 +168,23 @@ Used only to estimate the deductions on pay that is owed and not yet paid ([FORM
 ## Self Assessment
 
 The Self Assessment prep page maps your data to SA100/SA102/SA103/SA108 sections. Box numbers
-change between years, so the page names sections, not boxes. Filing and payment are due online by
-**31 January** after the tax year ends. Check-if-you-need-to-file hints are only hints; see
-[gov.uk/check-if-you-need-tax-return](https://www.gov.uk/check-if-you-need-tax-return).
+change between years, so the page names sections, not boxes. Check-if-you-need-to-file hints are
+only hints; see [gov.uk/check-if-you-need-tax-return](https://www.gov.uk/check-if-you-need-tax-return).
 **Everything on that page must be checked by you against your own documents before you submit.**
+
+**Deadlines for a tax year's return** (`saDeadlines` in `src/shared/uk.ts`), the year ending on 5
+April:
+
+- **5 October** after the year: tell HMRC you need to send a return (register), if you have not
+  sent one before. Registering later gives you a later date to send it by (3 months from HMRC's
+  letter), but the tax is still due on 31 January.
+- **31 October**: a paper return must reach HMRC.
+- **30 December**: send it online by then to pay a bill through your tax code, if you already pay
+  tax through PAYE and owe less than **£3,000** (`codingOutLimit`), with no part payment to get
+  under it.
+- **31 January**: send it online, and pay the tax you owe (with the first payment on account for
+  the next year, if you make them).
+- **31 July**: the second payment on account, if you make them.
 
 **Dividends over the allowance** (`dividendsReturnThreshold`, `untaxedIncomeNoticeBy` in
 `src/shared/uk.ts`):
@@ -186,6 +199,9 @@ change between years, so the page names sections, not boxes. Filing and payment 
 ## Sources
 
 Checked 1 October 2026:
+
+- GOV.UK, [Self Assessment tax returns: deadlines](https://www.gov.uk/self-assessment-tax-returns/deadlines) (5 October, 31 October, 30 December, 31 January, 31 July)
+- GOV.UK, [Pay your Self Assessment tax bill: through your tax code](https://www.gov.uk/pay-self-assessment-tax-bill/through-your-tax-code) (under £3,000, online by 30 December, already paying through PAYE)
 
 - GOV.UK, [Rates and thresholds for employers 2026 to 2027](https://www.gov.uk/guidance/rates-and-thresholds-for-employers-2026-to-2027) (Class 1 NI thresholds and rates, emergency tax code)
 - GOV.UK, [Tax on dividends: how to report tax on dividends](https://www.gov.uk/tax-on-dividends/how-to-report-tax-on-dividends) (up to £10,000 through your tax code by 5 October; over £10,000 a return, registering by 5 October; 2026/27 dividend rates 10.75%, 35.75%, 39.35%)

@@ -1232,3 +1232,20 @@ every other labelled value (`printed`).
   readers use.
 - **No personal identifier is kept**, by the prompt's rule and by the normaliser, which takes NI
   numbers out of all of it.
+
+## 2026-10-01: The tax year in full: a page per job, deadlines, HMRC's working out, the NI record
+
+The fifth slice, first part. HMRC's records (slice 2) held a year's settlement, every NI year and
+the State Pension forecast, but nothing showed them, and Self Assessment gave one total for all of
+a year's jobs although the return wants a page for each.
+
+- **One SA102 page per job** on the Self Assessment tab: pay, tax and student loan from the source
+  that counts, the PAYE reference, and the dates a job started or ended in the year. The totals stay
+  as the sum.
+- **The year's deadlines** are UK rules in `uk.ts` (`saDeadlines`, `codingOutLimit`), from GOV.UK,
+  with the next one first in weight.
+- **HMRC's working out of the year** is shown with the bank payment that settled it, matched by
+  amount, nearness and wording (FORMULAS §11). The match is computed, not stored, as for dividends.
+- **The NI record and the forecast in full** go beside the retirement outlook. Each gap shows
+  HMRC's cost and pay-by date. Whether filling one would help is left to HMRC's own words: the
+  forecast says when it is already the most you can get.
