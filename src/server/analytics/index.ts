@@ -10,6 +10,7 @@ import { allowances } from './allowances';
 import { BalanceEngine } from './balances';
 import { budgetAlerts, budgets } from './budgets';
 import { goalsProgress } from './goals';
+import { earnedPay, owedPay } from './earned';
 import { pay } from './pay';
 import { cashflow } from './cashflow';
 import { AssumptionSet } from '../../shared/assumptions';
@@ -76,7 +77,12 @@ export class Analytics {
   }
 
   pay(taxYear?: string) {
-    return this.cached(`pay:${taxYear ?? ''}:${today()}`, () => pay(this.store, this.coverageIndex, taxYear));
+    return this.cached(`pay:${taxYear ?? ''}:${today()}`, () => pay(this.store, this.coverageIndex, taxYear, today(), this.earned()));
+  }
+
+  /** Timesheet work followed to payslips and the bank, and what is owed (FORMULAS §17, "Earned pay"). */
+  earned() {
+    return this.cached(`earned:${today()}`, () => earnedPay(this.store));
   }
 
   goals() {
@@ -218,6 +224,18 @@ export class Analytics {
       if (!this.store.profile.dateOfBirth) {
         alerts.push({ id: 'profile', level: 'info', title: 'Add your date of birth', detail: 'It drives LISA, cash-ISA and pension-age rules.', action: { label: 'Settings', href: '/settings' } });
       }
+      // Pay owed for timesheet work: pending beside the estate, never in it.
+      const owed = owedPay(this.earned());
+      if (owed?.late) {
+        const late = owed.items.filter((i) => i.status === 'late');
+        alerts.push({
+          id: 'owed-pay',
+          level: 'warning',
+          title: `Pay owed by ${[...new Set(late.map((i) => i.payroll))].join(' and ')} has not arrived`,
+          detail: `${formatMoney(late.reduce((s, i) => s + i.gross, 0))} before tax, expected about ${late.map((i) => i.payDate).join(', ')}. Import the payslip or the statement it went into.`,
+          action: { label: 'Pay', href: '/tax/pay' },
+        });
+      }
       const daysLeft = daysLeftInTaxYear(now);
       if (daysLeft <= 60) {
         const al = this.allowances();
@@ -237,6 +255,7 @@ export class Analytics {
         kpis,
         monthToDate,
         coverage: { lastCompleteMonth: cov.lastCompleteMonth, jointTo: cov.jointTo, limiting: b.basis.limiting.slice(0, 5) },
+        owed,
       };
     });
   }

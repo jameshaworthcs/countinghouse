@@ -21,7 +21,7 @@ point at them with `"$schema"` so editors validate as you type.
 ```
 data/
   meta.json            format + version + base currency
-  profile.json         you: date of birth, region, salary, retirement age (the tax band is computed)
+  profile.json         you: date of birth, region, salary, retirement age (the tax band is computed), and `employers`: how many months after the work a payroll pays a timesheet (`[{name, payLagMonths}]`, optional)
   settings.json        extraction engine/model (and reading receipts or stored documents again, both off by default), agents (with the background budget), git behaviour, stale threshold, FX rates
   institutions.json    { institutions: [...] }   banks, platforms, providers (+ FSCS group)
   accounts.json        { accounts: [...] }
@@ -154,16 +154,22 @@ day, else the holdings plus cash.
 
 ## figures.jsonl
 
-Standalone figures from documents, used for Self Assessment:
+Standalone figures from documents, used for Self Assessment and the Pay tab:
 
 - `kind` is one of: `interest_paid` `interest_tax_deducted` `dividends_paid` `gross_pay`
   `tax_deducted` `national_insurance` `pension_contribution_employee`
   `pension_contribution_employer` `pension_tax_relief` `student_loan_deducted` `benefit_in_kind`
   `gift_aid_donation` `child_benefit` `self_employment_income` `self_employment_expenses`
-  `capital_gain` `capital_loss` `rental_income` `other_income` `other`.
+  `capital_gain` `capital_loss` `rental_income` `other_income` `earned_pay` `other`.
 - Other fields: `label` (as printed), `amount`, `currency`, `taxYear` (`2025/26`), `periodStart`,
-  `periodEnd`, `date`, `accountId`, `payer`, `payerReference`, `notes`, `attributes`, `source`,
-  `createdAt`.
+  `periodEnd`, `date`, `accountId`, `payer`, `payerReference`, `taxCode` (a payslip's or P60's
+  PAYE code, `1257L M1`), `notes`, `attributes`, `source`, `createdAt`.
+- `earned_pay` is a timesheet's pay for one period of work, before it is paid. It has no
+  `taxYear` and is never income for tax: the payslip that pays it is. It has `work` (`role`,
+  `daysWorked`, `holidayDays`, `hoursWorked`, `rate`, `ratePer`: `day` or `hour`) and, when the
+  timesheet names another entity than the payslips, `paidBy`: the payroll as its payslips name it.
+  For one timesheet (`payer` and `work.role`) and period, the figure committed last counts; an
+  earlier one stays as the record of what that upload said ([FORMULAS.md §17](FORMULAS.md)).
 
 ## imports/&lt;yyyy&gt;/&lt;id&gt;.json
 

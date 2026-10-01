@@ -84,6 +84,8 @@ export interface SummaryResponse {
    * figure is missing.
    */
   monthToDate: { spending: number | null; change: number | null; note: string | null };
+  /** Pay earned on timesheets and not yet paid: pending, not counted in the estate. */
+  owed: OwedPay | null;
   coverage: { lastCompleteMonth: string | null; jointTo: string | null; limiting: { accountId: string; name: string; missingDays: number }[] };
 }
 
@@ -828,10 +830,74 @@ export interface PayMonth {
   figureIds: string[];
 }
 
+/** A timesheet's period: what was earned, and the payslip that paid it or when it should come (FORMULAS §17, "Earned pay"). */
+export interface EarnedPeriod {
+  figureId: string;
+  label: string;
+  /** The employer or entity the timesheet names. */
+  payer: string;
+  role?: string;
+  periodStart: string | null;
+  periodEnd: string;
+  amount: number;
+  daysWorked?: number;
+  holidayDays?: number;
+  hoursWorked?: number;
+  rate?: number;
+  ratePer?: 'day' | 'hour';
+  /** paid: on a payslip; arrived: in the bank before its payslip was imported; owed; late: owed past its expected pay day. */
+  status: 'paid' | 'arrived' | 'owed' | 'late';
+  payslip?: { periodEnd: string | null; payDate: string | null; gross: number; periods: number; figureIds: string[] };
+  paidIn?: { amount: number; date: string; transactionId: string; accountId: string };
+  expected?: { month: string | null; payDate: string | null };
+  note?: string;
+}
+
+/** Owed pay expected together, on one payslip: its estimate is computed from the payroll's payslips and the UK rules. */
+export interface ExpectedPay {
+  /** The payslip month (YYYY-MM); null when when it comes cannot be told. */
+  month: string | null;
+  payDate: string | null;
+  gross: number;
+  /** The work periods it pays, by their last day. */
+  periods: string[];
+  figureIds: string[];
+  status: 'owed' | 'late' | 'arrived';
+  arrived?: { amount: number; date: string; transactionId: string; accountId: string };
+  estimate: { tax: number | null; ni: number | null; pension: number | null; net: number | null; basis: string | null; notes: string[] };
+  /** With two periods or more: the deductions if each had been paid in a month of its own, and what paying them together adds. */
+  apart: { tax: number | null; ni: number | null; extraTax: number | null; extraNi: number | null } | null;
+}
+
+/** A payroll that pays timesheet work. */
+export interface EarnedPayroll {
+  key: string;
+  /** The employer as its payslips name it. */
+  payroll: string;
+  /** The timesheets it pays: "Halden Systems Limited, Role A". */
+  timesheets: string[];
+  /** Months between the work and the payslip: yours (Settings), or learned from payslips matched to timesheets. */
+  lag: { months: number | null; source: 'yours' | 'learned' | null };
+  periods: EarnedPeriod[];
+  expected: ExpectedPay[];
+}
+
+/** Pay owed to you and not yet in the bank: shown beside the estate value, never counted in it. */
+export interface OwedPay {
+  gross: number;
+  /** After the estimated deductions; null when some cannot be estimated. */
+  net: number | null;
+  next: string | null;
+  late: boolean;
+  items: { payroll: string; gross: number; net: number | null; payDate: string | null; periods: string[]; status: 'owed' | 'late' }[];
+}
+
 export interface PayEmployer {
   key: string;
   payer: string;
   months: PayMonth[];
+  /** Timesheet work this payroll pays (FORMULAS §17, "Earned pay"). */
+  earned?: EarnedPayroll;
   /** The year's P60, when there is one: the whole year, which the payslips should add up to, and whether they do. */
   p60: { gross: number | null; tax: number | null; ni: number | null; note: string } | null;
   totals: { gross: number | null; tax: number | null; ni: number | null; pension: number | null; studentLoan: number | null; paidIn: number };

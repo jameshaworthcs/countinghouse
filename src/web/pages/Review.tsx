@@ -3,10 +3,10 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { ACCOUNT_TYPE_META, slugify } from '../../shared/accounts';
 import type { NothingNewView } from '../../shared/api';
-import { formatDate } from '../../shared/dates';
+import { formatDate, formatMonth } from '../../shared/dates';
 import { describeDetail, describeDifference, fieldsInWords } from '../../shared/detail';
 import { sectionChecks, type ReviewCheck } from '../../shared/review';
-import { FIGURE_KINDS, type CsvProfile, type Draft, type DraftSection, type DraftTransaction, type ImportRecord } from '../../shared/schema';
+import { FIGURE_KINDS, type CsvProfile, type Draft, type DraftSection, type DraftTransaction, type Figure, type ImportRecord } from '../../shared/schema';
 import { AccountTypeSelect } from '../components/AccountForms';
 import { CategorySelect } from '../components/TransactionList';
 import { Badge, Button, Callout, Card, Checkbox, ErrorNote, Field, Input, KeyValue, Loading, Money, Select, StatusBadge, tableClasses, useToast } from '../components/ui';
@@ -74,7 +74,7 @@ function VerificationNote({ rec }: { rec: Rec }) {
   if (v.method === 'checks') {
     return (
       <Callout tone="good" title={`Read by ${first}; the document’s own figures confirm it`}>
-        The balances, totals or holdings on the document add up with what was read.
+        {rec.draft?.documentType === 'timesheet' ? 'Each month’s pay is on its sheet, to the penny, and every sheet with pay on it was read.' : 'The balances, totals or holdings on the document add up with what was read.'}
       </Callout>
     );
   }
@@ -121,7 +121,8 @@ function DocumentViewer({ rec }: { rec: Rec }) {
   const isSheet = /spreadsheet|ms-excel/.test(rec.document.mediaType);
   const isText = !isSheet && !rec.document.mediaType.startsWith('image/') && rec.document.mediaType !== 'application/pdf';
   const text = useApi<string>(['import-file', rec.id], isText ? `/imports/${rec.id}/file` : null);
-  const sheet = useApi<{ sheet: string; sheets: string[]; rows: string[][]; total: number }>(['import-table', rec.id], isSheet ? `/imports/${rec.id}/table` : null);
+  const [sheetName, setSheetName] = useState('');
+  const sheet = useApi<{ sheet: string; sheets: string[]; rows: string[][]; total: number }>(['import-table', rec.id, sheetName], isSheet ? `/imports/${rec.id}/table${sheetName ? `?sheet=${encodeURIComponent(sheetName)}` : ''}` : null);
   return (
     <div className="flex h-full flex-col overflow-hidden rounded-xl border border-line bg-panel">
       <div className="flex items-center gap-2 border-b border-line px-3 py-2 text-[12.5px]">
@@ -145,9 +146,20 @@ function DocumentViewer({ rec }: { rec: Rec }) {
           <div className="sensitive p-2">
             {sheet.data ? (
               <>
-                <div className="px-1 pb-2 text-[11.5px] text-ink-3">
-                  Sheet “{sheet.data.sheet}”{sheet.data.sheets.length > 1 ? ` (the first with a table, of ${sheet.data.sheets.length})` : ''}
-                  {sheet.data.total > sheet.data.rows.length ? `; the first ${sheet.data.rows.length} of ${sheet.data.total} rows` : ''}
+                <div className="flex flex-wrap items-center gap-2 px-1 pb-2 text-[11.5px] text-ink-3">
+                  {sheet.data.sheets.length > 1 ? (
+                    <Select value={sheet.data.sheet} onChange={(e) => setSheetName(e.target.value)} className="h-7 w-auto text-[12px]" aria-label="Sheet">
+                      {sheet.data.sheets.map((n) => (
+                        <option key={n} value={n}>
+                          {n}
+                        </option>
+                      ))}
+                    </Select>
+                  ) : (
+                    <span>Sheet “{sheet.data.sheet}”</span>
+                  )}
+                  {sheet.data.sheets.length > 1 && <span>{sheet.data.sheets.length} sheets with a table</span>}
+                  {sheet.data.total > sheet.data.rows.length ? <span>the first {sheet.data.rows.length} of {sheet.data.total} rows</span> : null}
                 </div>
                 <table className="border-collapse font-mono text-[11.5px] text-ink-2">
                   <tbody>
@@ -557,10 +569,12 @@ function SectionEditor({ section, index, total, latest, periodFromRows, onChange
 }
 
 function FiguresEditor({ draft, onChange }: { draft: Draft; onChange: (d: Draft) => void }) {
-  if (!draft.figures.length) return null;
+  // A timesheet's earned pay has its own card (EarnedEditor).
+  const shown = draft.figures.filter((f) => f.kind !== 'earned_pay');
+  if (!shown.length) return null;
   const set = (key: string, patch: Partial<Draft['figures'][number]>) => onChange({ ...draft, figures: draft.figures.map((f) => (f.key === key ? { ...f, ...patch } : f)) });
   // Who paid, as one name per payer on the document: renaming it renames it on all its figures.
-  const payers = [...new Set(draft.figures.flatMap((f) => (f.payer ? [f.payer] : [])))];
+  const payers = [...new Set(shown.flatMap((f) => (f.payer ? [f.payer] : [])))];
   const rename = (from: string, to: string) => {
     const name = to.trim();
     if (name && name !== from) onChange({ ...draft, figures: draft.figures.map((f) => (f.payer === from ? { ...f, payer: name } : f)) });
@@ -587,7 +601,7 @@ function FiguresEditor({ draft, onChange }: { draft: Draft; onChange: (d: Draft)
           </tr>
         </thead>
         <tbody>
-          {draft.figures.map((f) => (
+          {shown.map((f) => (
             <tr key={f.key} className={f.include ? '' : 'opacity-55'}>
               <td className={tableClasses.td}>
                 <Checkbox checked={f.include} onChange={(v) => set(f.key, { include: v })} />
@@ -605,6 +619,7 @@ function FiguresEditor({ draft, onChange }: { draft: Draft; onChange: (d: Draft)
               <td className={tableClasses.td}>
                 {f.label}
                 {f.payer && payers.length > 1 && <div className="text-[12px] text-ink-3">{f.payer}</div>}
+                {f.taxCode && <div className="text-[12px] text-ink-3">Tax code {f.taxCode}</div>}
               </td>
               <td className={tableClasses.td}>
                 <Input value={f.taxYear ?? ''} onChange={(e) => set(f.key, { taxYear: e.target.value || undefined })} placeholder="2025/26" className="h-8 w-24" />
@@ -617,6 +632,103 @@ function FiguresEditor({ draft, onChange }: { draft: Draft; onChange: (d: Draft)
         </tbody>
       </table>
     </Card>
+  );
+}
+
+/**
+ * A timesheet's earned pay, period by period, and the payroll that pays it: the employer as its
+ * payslips name it, whose payslips its months are matched to (FORMULAS.md §17, "Earned pay").
+ */
+function EarnedEditor({ draft, onChange }: { draft: Draft; onChange: (d: Draft) => void }) {
+  const earned = draft.figures.filter((f) => f.kind === 'earned_pay');
+  const stored = useApi<Figure[]>(['figures'], earned.length ? '/figures' : null);
+  if (!earned.length) return null;
+  const set = (key: string, patch: Partial<Draft['figures'][number]>) => onChange({ ...draft, figures: draft.figures.map((f) => (f.key === key ? { ...f, ...patch } : f)) });
+  const payers = [...new Set(earned.map((f) => f.payer ?? ''))];
+  // Payrolls: the employers your payslips name.
+  const payrolls = [...new Set((stored.data ?? []).filter((f) => f.kind === 'gross_pay' && f.periodStart && f.payer).map((f) => f.payer!))].sort();
+  const link = (payer: string, paidBy: string) => onChange({ ...draft, figures: draft.figures.map((f) => (f.kind === 'earned_pay' && (f.payer ?? '') === payer ? { ...f, paidBy: paidBy || undefined } : f)) });
+  const days = (v: number | undefined) => (v === undefined ? '—' : String(Math.round(v * 100) / 100));
+  return (
+    <Card title="Work and pay earned" description="Pay for work on a timesheet, before it is paid. It is not income until a payslip pays it, so it counts in no tax year; until then the overview shows it as pending, beside your estate rather than in it.">
+      <div className="mb-3 grid gap-3 sm:grid-cols-2">
+        {payers.map((p) => {
+          const paidBy = earned.find((f) => (f.payer ?? '') === p)?.paidBy ?? '';
+          const options = [...new Set([...payrolls, ...(paidBy ? [paidBy] : [])])].filter((x) => x !== p);
+          return (
+            <Field key={p} label={payers.length > 1 ? `Paid through (${p || 'no name'})` : 'Paid through'} hint="The employer as its payslips name it: these months are matched to its payslips">
+              <Select value={paidBy} onChange={(e) => link(p, e.target.value)}>
+                <option value="">{p ? `${p}, as on the timesheet` : 'Not linked'}</option>
+                {options.map((o) => (
+                  <option key={o} value={o}>
+                    {o}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          );
+        })}
+      </div>
+      <div className="overflow-x-auto">
+        <table className={tableClasses.table}>
+          <thead>
+            <tr>
+              <th className={tableClasses.th} />
+              <th className={tableClasses.th}>Work in</th>
+              <th className={cn(tableClasses.th, 'text-right')}>Days worked</th>
+              <th className={cn(tableClasses.th, 'text-right')}>Holiday</th>
+              <th className={cn(tableClasses.th, 'text-right')}>Rate</th>
+              <th className={cn(tableClasses.th, 'text-right')}>Earned</th>
+            </tr>
+          </thead>
+          <tbody>
+            {earned.map((f) => (
+              <tr key={f.key} className={f.include ? '' : 'opacity-55'}>
+                <td className={tableClasses.td}>
+                  <Checkbox checked={f.include} onChange={(v) => set(f.key, { include: v })} />
+                </td>
+                <td className={tableClasses.td}>
+                  {f.periodEnd ? formatMonth(f.periodEnd) : '—'}
+                  <div className="text-[12px] text-ink-3">
+                    {[f.work?.role, f.label].filter(Boolean).join(' · ')}
+                  </div>
+                  {f.duplicateOf && <Badge tone="muted">already stored</Badge>}
+                  {f.replaces && (
+                    <Badge tone="warn">
+                      replaces {money(f.replaces.amount)} from an earlier upload
+                    </Badge>
+                  )}
+                </td>
+                <td className={cn(tableClasses.td, tableClasses.num)}>{f.work?.hoursWorked !== undefined && f.work.daysWorked === undefined ? `${days(f.work.hoursWorked)} h` : days(f.work?.daysWorked)}</td>
+                <td className={cn(tableClasses.td, tableClasses.num)}>{days(f.work?.holidayDays)}</td>
+                <td className={cn(tableClasses.td, tableClasses.num)}>{f.work?.rate !== undefined ? `${money(f.work.rate)} a ${f.work.ratePer ?? 'day'}` : '—'}</td>
+                <td className={cn(tableClasses.td, tableClasses.num)}>
+                  <Input value={String(f.amount)} onChange={(e) => set(f.key, { amount: Number(e.target.value) || 0 })} inputMode="decimal" className="h-8 w-28 text-right" />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
+/**
+ * A spreadsheet is read one of two ways: its first table mapped like a CSV, or, when it is not a list
+ * of payments (a timesheet, a sheet a month), every sheet read by Claude like a document.
+ */
+function SheetReadAs({ rec }: { rec: Rec }) {
+  const byClaude = rec.extraction.engine === 'claude-cli' || rec.extraction.engine === 'claude-api';
+  const redo = useApiMutation(() => api(`/imports/${rec.id}/reprocess`, { body: { readAs: byClaude ? 'columns' : 'document' } }));
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-line bg-panel px-4 py-2.5 text-[12.5px] text-ink-2">
+      <span className="min-w-0 flex-1">{byClaude ? `Every sheet was read by Claude, as this spreadsheet is not a list of payments.` : 'Its first table is read as a list of payments, column by column.'}</span>
+      <Button size="sm" variant="secondary" loading={redo.isPending} onClick={() => redo.mutate(undefined)}>
+        {byClaude ? 'Map its columns instead' : 'Read it with Claude instead'}
+      </Button>
+      {redo.error && <span className="w-full text-bad-ink">{redo.error.message}</span>}
+    </div>
   );
 }
 
@@ -758,8 +870,9 @@ function MappingEditor({ rec, onApplied }: { rec: Rec; onApplied?: (r: ImportRec
 function Retry({ rec }: { rec: Rec }) {
   const [engine, setEngine] = useState('auto');
   const [model, setModel] = useState('');
-  const retry = useApiMutation(() => api(`/imports/${rec.id}/reprocess`, { body: { engine, ...(model ? { model } : {}) } }));
-  const isDoc = rec.document.mediaType.startsWith('image/') || rec.document.mediaType === 'application/pdf';
+  const sheetRead = /spreadsheet|ms-excel/.test(rec.document.mediaType) && (rec.extraction.engine === 'claude-cli' || rec.extraction.engine === 'claude-api');
+  const retry = useApiMutation(() => api(`/imports/${rec.id}/reprocess`, { body: { engine, ...(model ? { model } : {}), ...(sheetRead ? { readAs: 'document' } : {}) } }));
+  const isDoc = rec.document.mediaType.startsWith('image/') || rec.document.mediaType === 'application/pdf' || sheetRead;
   return (
     <div className="flex flex-wrap items-end gap-2">
       {isDoc && (
@@ -826,9 +939,10 @@ export default function Review() {
     const n = draft.sections.filter((s) => s.target.mode !== 'skip').reduce((s, sec) => s + sec.transactions.filter((t) => t.include).length, 0);
     const b = draft.sections.filter((s) => s.target.mode !== 'skip' && s.recordBalance && s.balance !== undefined).length;
     const h = draft.sections.filter((s) => s.target.mode !== 'skip' && s.recordHoldings && s.holdings.length).length;
-    const f = draft.figures.filter((x) => x.include).length;
+    const f = draft.figures.filter((x) => x.include && x.kind !== 'earned_pay').length;
+    const w = draft.figures.filter((x) => x.include && x.kind === 'earned_pay').length;
     const d = draft.sections.filter((s) => s.target.mode === 'existing').reduce((s, sec) => s + sec.transactions.filter((t) => !t.include && t.adds?.include).length, 0);
-    return [n ? plural(n, 'transaction') : '', d ? `details on ${plural(d, 'recorded payment')}` : '', b ? plural(b, 'balance') : '', h ? 'holdings' : '', f ? plural(f, 'tax figure') : ''].filter(Boolean).join(', ') || 'nothing';
+    return [n ? plural(n, 'transaction') : '', d ? `details on ${plural(d, 'recorded payment')}` : '', b ? plural(b, 'balance') : '', h ? 'holdings' : '', f ? plural(f, 'tax figure') : '', w ? `earned pay for ${plural(w, 'month')}` : ''].filter(Boolean).join(', ') || 'nothing';
   }, [draft]);
 
   if (q.error) return <ErrorNote error={q.error} />;
@@ -915,6 +1029,16 @@ export default function Review() {
             <DocumentViewer rec={rec} />
           </div>
           <div className="flex min-w-0 flex-col gap-4">
+            {(rec.status === 'needs_mapping' || rec.status === 'review') && /spreadsheet|ms-excel/.test(rec.document.mediaType) && <SheetReadAs rec={rec} />}
+            {rec.status === 'needs_mapping' && rec.extraction.warnings.length > 0 && (
+              <Callout tone="warn" title="While reading the document">
+                <ul className="list-disc pl-4">
+                  {rec.extraction.warnings.map((w) => (
+                    <li key={w}>{w}</li>
+                  ))}
+                </ul>
+              </Callout>
+            )}
             {(rec.status === 'needs_mapping' || rec.status === 'review') && rec.mapping && (
               <MappingEditor
                 rec={rec}
@@ -966,6 +1090,13 @@ export default function Review() {
                   />
                 ))}
                 <FiguresEditor
+                  draft={draft}
+                  onChange={(d) => {
+                    setDirty(true);
+                    setDraft(d);
+                  }}
+                />
+                <EarnedEditor
                   draft={draft}
                   onChange={(d) => {
                     setDirty(true);

@@ -1,11 +1,12 @@
 // Pay, month by month: each payslip's figures (gross, tax, NI, pension, student loan), what reached
 // your bank, and pay seen in the bank with no payslip (docs/FORMULAS.md §17).
 
-import type { PayEmployer, PayMonth, PayResponse } from '../../shared/api';
-import { addDays, diffDays, maxDate, today, type ISODate } from '../../shared/dates';
+import type { EarnedPayroll, PayEmployer, PayMonth, PayResponse } from '../../shared/api';
+import { addDays, diffDays, formatMonth, maxDate, today, type ISODate } from '../../shared/dates';
 import { formatMoney, fromMinor, toMinor } from '../../shared/money';
 import type { Figure, Transaction } from '../../shared/schema';
 import { taxYearOf, type TaxYear } from '../../shared/uk';
+import { earnedPay } from './earned';
 import type { Store } from '../store';
 import { covers, type Coverage } from './coverage';
 
@@ -74,7 +75,7 @@ const nothingDue = (p: PayPeriod) => p.expectedNet !== null && toMinor(p.expecte
  * Pay tab shows this; the tax band counts pay it puts under an employer as that employer's.
  */
 export function pairPay(store: Store, ty: TaxYear): { periods: PayPeriod[]; others: { t: Transaction; employer: { key: string; payer: string } | null }[]; salary: Transaction[] } {
-  const payslipFigures = store.figures.filter((f) => isPayslipFigure(store, f) && (f.taxYear === ty.label || (!f.taxYear && inYear(f.periodEnd ?? f.date, ty))));
+  const payslipFigures = store.figures.filter((f) => f.kind !== 'earned_pay' && isPayslipFigure(store, f) && (f.taxYear === ty.label || (!f.taxYear && inYear(f.periodEnd ?? f.date, ty))));
   // Pay received: salary credits in the year, plus the days either side of it for pay dates near its edges.
   const salary = store.transactions().filter((t) => t.category === 'salary' && t.amount > 0 && t.date >= addDays(ty.start, -PAY_MATCH_DAYS) && t.date <= addDays(ty.end, PAY_MATCH_DAYS));
 
@@ -167,7 +168,7 @@ function p60Note(p60: { gross: number | null; tax: number | null; ni: number | n
   return 'The payslips add up to it.';
 }
 
-export function pay(store: Store, coverage: Coverage, taxYear?: string, now: ISODate = today()): PayResponse {
+export function pay(store: Store, coverage: Coverage, taxYear?: string, now: ISODate = today(), earned: EarnedPayroll[] = earnedPay(store, now)): PayResponse {
   const ty = taxYear ? taxYearOf(`${taxYear.slice(0, 4)}-06-01`) : taxYearOf(now);
   const { periods, others, salary } = pairPay(store, ty);
   const p60Figures = store.figures.filter((f) => !isPayslipFigure(store, f) && f.taxYear === ty.label && (f.kind === 'gross_pay' || f.kind === 'tax_deducted' || f.kind === 'national_insurance'));
@@ -221,9 +222,21 @@ export function pay(store: Store, coverage: Coverage, taxYear?: string, now: ISO
   }
 
   // Pay into the bank with no payslip: under its employer when known, else the name it comes with.
+  // A payment for timesheet work whose payslip is not imported yet goes under that payroll.
+  const forWork = new Map(earned.flatMap((p) => p.expected.filter((e) => e.arrived).map((e) => [e.arrived!.transactionId, { p, e }] as const)));
   for (const { t, employer: known } of others) {
     const name = t.payee ?? t.counterpartyName ?? t.description;
-    employer(known?.key ?? payerKey(name), known?.payer ?? name).months.push({ periodStart: null, periodEnd: null, payDate: t.date, gross: null, tax: null, ni: null, pension: null, studentLoan: null, expectedNet: null, paidIn: { amount: t.amount, date: t.date, transactionId: t.id, accountId: t.accountId }, otherDeductions: null, status: 'no-payslip', figureIds: [] });
+    const work = forWork.get(t.id);
+    const note = work ? `Pay for the work to ${work.e.periods.map((d) => formatMonth(d)).join(' and ')} on your timesheet, by the look of it: its payslip is not imported yet` : undefined;
+    employer(work?.p.key ?? known?.key ?? payerKey(name), work?.p.payroll ?? known?.payer ?? name).months.push({ periodStart: null, periodEnd: null, payDate: t.date, gross: null, tax: null, ni: null, pension: null, studentLoan: null, expectedNet: null, paidIn: { amount: t.amount, date: t.date, transactionId: t.id, accountId: t.accountId }, otherDeductions: null, status: 'no-payslip', ...(note ? { note } : {}), figureIds: [] });
+  }
+
+  // Timesheet work: the periods of this tax year's work or payslips, and whatever is still owed.
+  for (const p of earned) {
+    const periods = p.periods.filter((x) => inYear(x.periodEnd, ty) || inYear(x.payslip?.payDate ?? x.payslip?.periodEnd ?? undefined, ty) || x.status !== 'paid');
+    const expected = p.expected.filter((x) => (x.payDate ? inYear(x.payDate, ty) || x.status === 'late' : ty.label === taxYearOf(now).label));
+    if (!periods.length && !expected.length) continue;
+    employer(p.key, p.payroll).earned = { ...p, periods, expected };
   }
 
   for (const e of employers) {
@@ -246,6 +259,7 @@ export function pay(store: Store, coverage: Coverage, taxYear?: string, now: ISO
   employers.sort((a, b) => (b.totals.gross ?? b.totals.paidIn) - (a.totals.gross ?? a.totals.paidIn));
 
   const notes: string[] = [];
+  if (earned.length) notes.push('Timesheet work is matched to the payslip whose gross is exactly a run of its unpaid months, oldest first. What is owed is expected with the next payslip after the usual delay; its tax and NI are estimates from the payroll’s last payslip and the UK rates.');
   if (!periods.length) notes.push('No payslips for this tax year: import them to see gross pay, tax and NI month by month. Pay into your bank is shown on its own.');
   notes.push('Pay is matched to a payment into your bank within 10 days of the pay date: from the same employer, or of exactly the pay after the deductions read. Deductions not read from a payslip (a cycle scheme, say) show as the difference.');
   return { taxYear: { label: ty.label, start: ty.start, end: ty.end }, employers, notes };

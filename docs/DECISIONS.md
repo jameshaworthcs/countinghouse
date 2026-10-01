@@ -1034,3 +1034,41 @@ account's opening balance became the old one's last, a day after it closed.
   you gave or changed is yours. `before.balances` keeps it as it was (additive, no format change).
   - Considered: deleting it (the new account's statement already has the figure). Moving keeps the
     letter's evidence, and its interest rate, on the account it describes.
+
+## 2026-10-01: Timesheets: earned pay, followed to the payslip and the bank; owed pay is pending
+
+A timesheet workbook (a sheet a month, days worked, a day rate with holiday pay rolled in) went to
+column mapping as if it were a bank export, and only its first sheet (an empty month) was read.
+Its pay comes through another employer's payroll a month after the work, and a timesheet that goes
+in late is paid with the next month's.
+
+- **A spreadsheet that is not a list of payments is read by Claude**, every sheet as text
+  (`looksLikeLedger`: no amount column, or several sheets and no confident mapping). The owner
+  allowed Claude for spreadsheets. Bank exports keep the local route; either way round can be
+  chosen on the review page. Without Claude it falls back to mapping, and says so.
+  - Considered: a parser for this template. Templates differ by employer, and the reading is
+    checked against the cells anyway: each month's pay must be on its sheet to the penny, and a
+    sheet with pay must have been read. A reading that passes needs no second one.
+- **`earned_pay` is a figure kind, with no tax year.** It is never income: the payslip that pays it
+  is, when it is paid. Additive (a new enum value and optional `work`, `paidBy`, `taxCode`), so no
+  format change. The last committed figure for a timesheet's period counts, so an upload of the
+  grown timesheet can correct a month without rewriting the earlier one.
+- **Matched by amount, not by date.** A payslip pays the run of unpaid months whose pay adds up to
+  its gross to the penny, so a £0 payslip and a two-month payslip need no rule of their own. The
+  delay is learned from those matches; the owner can set it (`profile.employers`), as they said
+  this payroll always pays a month later.
+  - Considered: a fixed one-month delay. It would be a hard-coded constant, and wrong for other
+    payrolls.
+- **The payroll is linked per timesheet (`paidBy`), not by merging employer names.** The timesheet's
+  entity (Halden Systems Limited) is also the name on an earlier salaried job's payslips, which are another
+  employment: an alias would have merged them.
+- **Owed pay is pending beside the estate, never in it** (the owner's choice: visible, not
+  counted). It shows its estimated take-home and when it should come, and leaves once a payment
+  from that payroll arrives, before its payslip is imported.
+- **Deductions are estimated from UK rules plus the payroll's own last payslip.** Employee NI is
+  now in `uk.ts` (from 2024/25). The tax basis is the printed code, else whichever of `1257L` month 1
+  or cumulative gives the last payslip's tax: this payroll's matched month 1, which no other basis
+  does. Paying two months at once is shown with what it costs: NI per pay period is never
+  refunded.
+- There is no short-term cash forecast to add the expected payment to; the projections use average
+  income and would count it twice.

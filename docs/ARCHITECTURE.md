@@ -20,6 +20,7 @@ Hono server  (Node 24, tsx; 127.0.0.1:4750 live, 4760 in development)
    │    data comes to say all of closes by itself as already done)
    ├─ ImportService (queue) ─► work area .work/<data-dir>/   (uploads + drafts, never committed)
    │    ├─ detect → csv profiles (and spreadsheets' first table) · ofx · qif · santander-txt   (deterministic, local)
+   │    ├─ spreadsheets that are not a list of payments (timesheets) → every sheet as text → Claude
    │    ├─ images: capture date (EXIF/filename/mtime), tiling of long screenshots
    │    ├─ engines: claude-cli · claude-api · ocr (tesseract/pdftotext)
    │    ├─ normalise → buildDraft (match accounts, categorise, dedup and what it adds to a recorded payment, transfers)
@@ -28,6 +29,7 @@ Hono server  (Node 24, tsx; 127.0.0.1:4750 live, 4760 in development)
    ├─ InboxWatcher: inbox/ → ImportService
    └─ Analytics (cached per store version)
         BalanceEngine · Coverage · estate · cashflow · spending (+ computed signals) · recurring · budgets · goals · pay
+        · earned pay (timesheets → payslips → bank, owed pay pending beside the estate)
         params (per account and fund, from assumptions, research and statements) · model (pure
         projection, bands, retirement, fee drag) · projections · investments · allowances
         selfassessment · monthly · capture list · health (+coverage, FSCS)

@@ -31,6 +31,28 @@
       "type": "integer",
       "minimum": 50,
       "maximum": 80
+    },
+    "employers": {
+      "maxItems": 50,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "payLagMonths": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 3
+          }
+        },
+        "required": [
+          "name"
+        ]
+      }
     }
   }
 }

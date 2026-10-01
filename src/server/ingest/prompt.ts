@@ -4,9 +4,9 @@
 
 import { ACCOUNT_TYPES, ASSET_CLASSES, EXTRACTION_DOC_TYPES, FIGURE_KINDS } from '../../shared/schema';
 
-export const PROMPT_VERSION = 'extract-10';
+export const PROMPT_VERSION = 'extract-11';
 
-export const SYSTEM_PROMPT = `You are the extraction engine of a private UK personal-finance tracker. You read one financial document — a bank, credit-card or savings statement; an investment, ISA, LISA, SIPP or pension statement; a P60, payslip, P11D or interest certificate; or a screenshot of a banking, savings, investment or pension app — and return its contents as JSON that matches the provided schema exactly.
+export const SYSTEM_PROMPT = `You are the extraction engine of a private UK personal-finance tracker. You read one financial document — a bank, credit-card or savings statement; an investment, ISA, LISA, SIPP or pension statement; a P60, payslip, P11D or interest certificate; a timesheet; or a screenshot of a banking, savings, investment or pension app — and return its contents as JSON that matches the provided schema exactly.
 
 Accuracy matters more than completeness:
 1. Report only what is visible. Never guess, and never compute a value that is not shown unless a rule below says so. Use null for anything not present.
@@ -50,6 +50,7 @@ Accuracy matters more than completeness:
     - Interest certificates → one interest_paid per account: the gross interest, before any tax. Never a second figure for the net amount. Interest paid on a statement is a transaction, not a figure.
     - A P60 → gross_pay, tax_deducted, national_insurance and student_loan_deducted, with the employer as payer.
     - Payslips → the same kinds for this pay period only, never the year-to-date column: gross_pay is the period's total pay, with periodStart and periodEnd for the pay period (the month for "Period: Aug-2026"), the tax year it falls in, and the employer as payer. A figure of 0.00 that is printed (no tax, no NI) is still reported.
+    - taxCode is the PAYE tax code printed on a payslip or P60 ("1257L", "1257L M1", "BR"), on its gross_pay figure only; otherwise null.
     - A P11D → benefit_in_kind.
     - Pension statements and valuations that state contributions for a tax year → pension_contribution_employee (what you paid in, as printed; for a SIPP or personal pension, before the basic-rate relief the provider adds), pension_tax_relief (that relief, when shown) and pension_contribution_employer. When only a gross total is printed, it is pension_contribution_employee. Contributions made by salary sacrifice are employer contributions, however they are labelled: no personal tax relief can be claimed on them.
     - Dividend vouchers → dividends_paid.
@@ -57,7 +58,14 @@ Accuracy matters more than completeness:
 15. notes holds brief remarks about anything uncertain: cut-off rows, illegible values, figures you could not place. Say only what the document shows: never where money went, why, or what became of it, unless the document says so in words. confidence is high if everything was clearly legible, medium if some values were uncertain, and low if the document was hard to read.
 16. On a row you could not read with certainty, say briefly what in uncertain ("year not shown", "amount partly cut off", "sign unclear"); otherwise uncertain is null. Do not use it for rows that are simply pending.
 17. statedMoneyIn and statedMoneyOut are the statement's own printed totals for the period ("Total paid in", "Payments in", "Money out", "Total debits"), as positive numbers. Use null when the document prints no such total; never add them up yourself.
-18. nothingToRecord: when you understood the document but it shows nothing to record for any account (no balance or value, no movements, no holdings, no tax figures), say in one short sentence what it shows, in its own terms ("A prize history: prizes won, by bond number and month."). A history or list from rule 5, a settings, help or sign-in screen are such documents. Still report the account the screen belongs to, if it names one, with nothing in it. Otherwise nothingToRecord is null.`;
+18. nothingToRecord: when you understood the document but it shows nothing to record for any account (no balance or value, no movements, no holdings, no tax figures), say in one short sentence what it shows, in its own terms ("A prize history: prizes won, by bond number and month."). A history or list from rule 5, a settings, help or sign-in screen are such documents. Still report the account the screen belongs to, if it names one, with nothing in it. Otherwise nothingToRecord is null.
+19. A timesheet records work: days or hours worked, often a sheet or page per month, with a day or hourly rate and pay worked out by day. Its documentType is "timesheet", and it has no accounts. It gives one earned_pay figure for each period (usually a month) in which any work or holiday is recorded; periods with nothing recorded are left out.
+    - amount is the period's total pay as the timesheet totals it, holiday pay included when the total includes it (the total of a "Total Pay" column). Copy a printed total; only when none is printed, add up the period's days.
+    - periodStart and periodEnd are the period's first and last day: the whole month for a sheet named "July" or one with "Month Ending 31/07/2026" (2026-07-01 to 2026-07-31). label is the total's label as printed, after the period's name ("July: Total Pay").
+    - payer is the employer, legal entity or agency named on it. taxYear is null: the pay is taxed when it is paid, which a timesheet does not show.
+    - work: role is the assignment, job or project the timesheet is for, as its title or a field names it; daysWorked and holidayDays are the period's totals of days worked and of holiday days taken (null when not shown); hoursWorked when it counts hours; rate and ratePer are the printed day or hourly rate ("Day Rate Including holiday pay" is a day rate).
+    - Holiday balances (accrued, taken, carried over, left) are not figures.
+    For every figure that is not earned_pay, work is null.`;
 
 const nullable = (schema: Record<string, unknown>) => ({ anyOf: [schema, { type: 'null' }] });
 const str = (description?: string) => ({ type: 'string', ...(description ? { description } : {}) });
@@ -141,6 +149,17 @@ export function extractionJsonSchema(): Record<string, unknown> {
     payer: nullable(str('Employer, bank or payer')),
     payerReference: nullable(str()),
     accountLast4: nullable(str()),
+    taxCode: nullable(str('PAYE tax code on a payslip or P60, e.g. 1257L')),
+    work: nullable(
+      object({
+        role: nullable(str('Assignment, job or project the timesheet is for')),
+        daysWorked: nullable(num()),
+        holidayDays: nullable(num()),
+        hoursWorked: nullable(num()),
+        rate: nullable(num('Day or hourly rate as printed')),
+        ratePer: nullable({ type: 'string', enum: ['day', 'hour'] }),
+      }),
+    ),
   });
   return object({
     documentType: { type: 'string', enum: [...EXTRACTION_DOC_TYPES] },
@@ -165,6 +184,8 @@ export interface PromptContext {
   categoryIds: string[];
   /** The account the user says this document belongs to, if they said. */
   accountHint?: string | undefined;
+  /** The document is a spreadsheet, given as text (ingest/xlsx.ts, `workbookText`). */
+  spreadsheet?: boolean;
 }
 
 export function userPrompt(ctx: PromptContext): string {
@@ -176,6 +197,7 @@ export function userPrompt(ctx: PromptContext): string {
     lines.push('Extract the attached document.');
   }
   if (ctx.tiled) lines.push('The images are consecutive, overlapping slices of one long screenshot, top to bottom.');
+  if (ctx.spreadsheet) lines.push('It is a spreadsheet, given as text: every sheet, row by row, each non-empty cell as CELL=value. Read every sheet.');
   lines.push('', `Original file name: ${ctx.fileName}`);
   lines.push(`Uploaded on: ${ctx.uploadedOn}`);
   if (ctx.capturedOn) lines.push(`Captured on (from ${ctx.capturedOnSource ?? 'metadata'}): ${ctx.capturedOn}. Use it only to resolve partial dates; leave balanceDate null unless a date is visible.`);

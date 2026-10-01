@@ -1,7 +1,7 @@
 // Extraction through the Anthropic Messages API (used when ANTHROPIC_API_KEY is set, or when chosen
-// in Settings). Images and PDFs are sent as content blocks; the reply is constrained with structured
-// outputs. Server-side refusal fallback is enabled so a policy decline is retried on the
-// recommended fallback model instead of failing the import.
+// in Settings). Images and PDFs are sent as content blocks, a spreadsheet as text; the reply is
+// constrained with structured outputs. Server-side refusal fallback is enabled so a policy decline is
+// retried on the recommended fallback model instead of failing the import.
 
 import { readFile } from 'node:fs/promises';
 import Anthropic from '@anthropic-ai/sdk';
@@ -38,6 +38,11 @@ export async function extractWithClaudeApi(opts: ApiOptions): Promise<EngineResu
   const client = new Anthropic({ apiKey: opts.apiKey, timeout: opts.timeoutMs, maxRetries: 2, ...(opts.fetch ? { fetch: opts.fetch } : {}) });
   const content: BetaContentBlockParam[] = [];
   for (const f of opts.files) {
+    if (f.mediaType === 'text/plain') {
+      // A spreadsheet, as text (ingest/xlsx.ts, `workbookText`).
+      content.push({ type: 'document', source: { type: 'text', media_type: 'text/plain', data: (await readFile(f.path)).toString('utf8') } });
+      continue;
+    }
     const data = (await readFile(f.path)).toString('base64');
     if (f.mediaType === 'application/pdf') {
       content.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data } });

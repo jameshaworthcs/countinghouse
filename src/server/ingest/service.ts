@@ -1,7 +1,7 @@
 // The import pipeline: upload → (queue) → parse or extract → draft → review → commit.
 
 import { EventEmitter } from 'node:events';
-import { copyFile, readFile } from 'node:fs/promises';
+import { copyFile, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { slugify } from '../../shared/accounts';
 import type { Reread } from '../../shared/api';
@@ -45,7 +45,8 @@ import { extractionJsonSchema, PROMPT_VERSION, SYSTEM_PROMPT, userPrompt } from 
 import { parseQif, QIF_ENGINE_VERSION } from './qif';
 import { parseSantanderTxt, SANTANDER_ENGINE_VERSION } from './santander';
 import { WorkArea } from './workarea';
-import { sheetRows, XLSX_ENGINE_VERSION } from './xlsx';
+import { checkEarnedPay } from './timesheet';
+import { looksLikeLedger, sheetRows, workbookSheets, workbookText, XLSX_ENGINE_VERSION, type Sheet } from './xlsx';
 
 export interface CreateImportInput {
   fileName: string;
@@ -94,6 +95,11 @@ export interface ProcessOptions {
   model?: string | undefined;
   /** The model that checks the reading; empty to skip the check. Defaults to the setting. */
   verifyModel?: string | undefined;
+  /**
+   * A spreadsheet: read by Claude like a document, or its columns mapped like a CSV. Unset, a
+   * spreadsheet that is not a list of payments is read by Claude (ingest/xlsx.ts, `looksLikeLedger`).
+   */
+  readAs?: 'document' | 'columns' | undefined;
 }
 
 export class ImportService extends EventEmitter {
@@ -254,7 +260,27 @@ export class ImportService extends EventEmitter {
       let detail: string | undefined;
       let engineVersion: string;
       let verified: Awaited<ReturnType<ImportService['verifyReading']>> | undefined;
-      if (kind === 'csv' || kind === 'xlsx') {
+      // A spreadsheet that is not a list of payments (a timesheet, a sheet a month) is read by Claude,
+      // like a PDF, when Claude is available; otherwise its first table is mapped like a CSV.
+      let sheets: Sheet[] | undefined;
+      let noClaude: string | undefined;
+      if (kind === 'xlsx' && opts.readAs !== 'columns') {
+        const { rows } = sheetRows(bytes);
+        const known = opts.readAs === 'document' ? false : Boolean(findProfile(rows, this.store.csvProfiles) ?? parseHoldingsCsv(rows, record.document.fileName));
+        if (!known) {
+          const all = workbookSheets(bytes);
+          if (opts.readAs === 'document' || !looksLikeLedger(suggestMapping(rows, { accountType: record.hintAccountId ? this.store.account(record.hintAccountId)?.type : undefined }), all.length)) {
+            if (await this.claudeAvailable(opts)) sheets = all;
+            else if (opts.readAs === 'document') throw new Error('Reading a spreadsheet as a document needs Claude: see Settings → Extraction.');
+            else noClaude = 'This spreadsheet does not look like a list of payments, but Claude is not available to read it: map its columns, or set up Claude in Settings → Extraction and read it again.';
+          }
+        }
+      }
+      if (sheets) {
+        const read = await this.readDocument(record, 'sheet', bytes, this.work.filePath(record.document), opts, abort.signal, record.id, sheets);
+        ({ result, engine, engineVersion, verified } = read);
+        detail = `${sheets.length} sheet${sheets.length === 1 ? '' : 's'}${result.model ? `, ${result.model}` : ''}`;
+      } else if (kind === 'csv' || kind === 'xlsx') {
         // A spreadsheet's first table goes through the same profiles and mapping as a CSV.
         const table = kind === 'xlsx' ? sheetRows(bytes) : undefined;
         const { rows } = table ?? readCsvRows(decodeText(bytes));
@@ -274,11 +300,11 @@ export class ImportService extends EventEmitter {
           detail = match.profile.id;
         } else {
           const suggestion = suggestMapping(rows, { accountType: record.hintAccountId ? this.store.account(record.hintAccountId)?.type : undefined });
-          if (!suggestion) throw new Error('Could not find a date and description column in this CSV.');
+          if (!suggestion) throw new Error(noClaude ?? 'Could not find a date and description column in this CSV.');
           if (!suggestion.confident) {
             record.mapping = { profile: suggestion.profile, headers: suggestion.headers, sample: suggestion.sample, headerIndex: suggestion.headerIndex };
             record.status = 'needs_mapping';
-            record.extraction = { ...record.extraction, engine: 'csv', finishedAt: nowISO(), durationMs: Date.now() - started };
+            record.extraction = { ...record.extraction, engine: 'csv', finishedAt: nowISO(), durationMs: Date.now() - started, ...(noClaude ? { warnings: [noClaude] } : {}) };
             await this.save(record);
             return;
           }
@@ -287,6 +313,7 @@ export class ImportService extends EventEmitter {
             extraction: parsed.extraction,
             warnings: [
               'This CSV layout was not recognised; columns were detected automatically. Check signs and dates carefully, then save the mapping for next time.',
+              ...(noClaude ? [noClaude] : []),
               ...(suggestion.profile.amountSign === 'inverted' ? [CARD_STYLE_WARNING] : []),
             ],
             durationMs: Date.now() - started,
@@ -351,19 +378,27 @@ export class ImportService extends EventEmitter {
     }
   }
 
+  /** Is Claude the engine documents would be read with? A spreadsheet is read by nothing else. */
+  private async claudeAvailable(opts: ProcessOptions): Promise<boolean> {
+    const { engines } = await detectEngines({ apiKey: this.config.anthropicApiKey });
+    const chosen = pickEngine(opts.engine ?? this.store.settings.extraction.engine, engines);
+    return chosen === 'claude-cli' || chosen === 'claude-api';
+  }
+
   /**
-   * Read a PDF or image with the chosen engine, checked by a second reading when the settings ask
-   * for one (docs/INGESTION.md, "Checking every figure"). For an upload, and for reading a stored
-   * document again (the scratch directory is named by `scratchId`).
+   * Read a PDF, image or spreadsheet (its sheets as text) with the chosen engine, checked by a second
+   * reading when the settings ask for one (docs/INGESTION.md, "Checking every figure"). For an
+   * upload, and for reading a stored document again (the scratch directory is named by `scratchId`).
    */
   private async readDocument(
     record: ImportRecord,
-    kind: 'pdf' | 'image',
+    kind: 'pdf' | 'image' | 'sheet',
     bytes: Buffer,
     source: string,
     opts: ProcessOptions,
     signal: AbortSignal,
     scratchId: string = record.id,
+    sheets?: Sheet[],
   ): Promise<{ result: EngineResult & { ocrText?: string; candidates?: { amounts: number[]; dates: string[] } }; engine: EngineId; engineVersion: string; verified?: Awaited<ReturnType<ImportService['verifyReading']>> | undefined }> {
     let result: EngineResult & { ocrText?: string; candidates?: { amounts: number[]; dates: string[] } };
     let engineVersion: string;
@@ -372,6 +407,7 @@ export class ImportService extends EventEmitter {
     const { engines, claudeBin } = await detectEngines({ apiKey: this.config.anthropicApiKey });
     const chosen = pickEngine(opts.engine ?? settings.engine, engines);
     if (!chosen) throw new Error('No extraction engine is available for PDFs and images. See Settings → Extraction.');
+    if (kind === 'sheet' && chosen === 'ocr') throw new Error('A spreadsheet that is not a list of payments is read by Claude, which is not available. See Settings → Extraction.');
     const model = opts.model ?? settings.model;
     const scratch = await this.work.scratch(scratchId);
     let files: { path: string; mediaType: string }[];
@@ -380,6 +416,11 @@ export class ImportService extends EventEmitter {
       const prepared = await prepareImage(bytes, scratch, 'page');
       files = prepared.files.map((p) => ({ path: p, mediaType: 'image/png' }));
       tiled = prepared.tiled;
+    } else if (kind === 'sheet') {
+      sheets ??= workbookSheets(bytes);
+      const p = path.join(scratch, 'workbook.txt');
+      await writeFile(p, workbookText(sheets, record.document.fileName), 'utf8');
+      files = [{ path: p, mediaType: 'text/plain' }];
     } else {
       const p = path.join(scratch, 'document.pdf');
       await copyFile(source, p);
@@ -394,6 +435,7 @@ export class ImportService extends EventEmitter {
       uploadedOn: record.createdAt.slice(0, 10),
       categoryIds: new CategoryIndex(this.store.categories).list.filter((c) => c.parent).map((c) => c.id),
       accountHint: hint ? `${hint.name} (${hint.type}${hint.last4 ? `, ending ${hint.last4}` : ''})` : undefined,
+      spreadsheet: kind === 'sheet',
     };
     const timeoutMs = settings.timeoutSeconds * 1000;
     const readWith = async (m: string): Promise<EngineResult> => {
@@ -428,12 +470,18 @@ export class ImportService extends EventEmitter {
       engineVersion = OCR_ENGINE_VERSION;
     } else {
       result = await readWith(model);
-      engineVersion = PROMPT_VERSION;
+      engineVersion = kind === 'sheet' ? `${XLSX_ENGINE_VERSION}+${PROMPT_VERSION}` : PROMPT_VERSION;
       const verifyModel = opts.verifyModel !== undefined ? opts.verifyModel : settings.verifyModel;
       if (verifyModel && verifyModel !== model) {
-        const checked = await this.verifyReading(record, result, { model, verifyModel, readWith, batch: await this.batchEvidence(record) });
+        const checked = await this.verifyReading(record, result, { model, verifyModel, readWith, batch: await this.batchEvidence(record), sheets });
         result = checked.result;
         verified = checked;
+      }
+      // What the spreadsheet's own cells still contradict in the reading kept, for the review page.
+      if (sheets) {
+        const kept = verified?.draft ?? this.draftOf(record, result);
+        const problems = checkEarnedPay(kept.figures, sheets).problems;
+        if (problems.length) result = { ...result, warnings: [...result.warnings, ...problems] };
       }
     }
     await this.work.clearScratch(scratchId);
@@ -521,11 +569,11 @@ export class ImportService extends EventEmitter {
       const file = this.store.documentAbsPath(record.document.path!);
       const bytes = await readFile(file);
       const kind = detectKind(record.document.fileName, bytes);
-      if (kind !== 'pdf' && kind !== 'image') throw new Error('Only PDFs and screenshots are read again.');
+      if (kind !== 'pdf' && kind !== 'image' && kind !== 'xlsx') throw new Error('Only PDFs, screenshots and spreadsheets are read again.');
       // The account it went to, as if you had pinned the upload to it.
       const accountIds = record.result?.accountIds ?? [];
       const ctx: ImportRecord = { ...record, ...(accountIds.length === 1 ? { hintAccountId: accountIds[0] } : {}) };
-      const read = await this.readDocument(ctx, kind, bytes, file, {}, abort.signal, `reread-${record.id}`);
+      const read = await this.readDocument(ctx, kind === 'xlsx' ? 'sheet' : kind, bytes, file, {}, abort.signal, `reread-${record.id}`);
       const draft = read.verified?.draft ?? this.draftOf(ctx, read.result);
       const { sections, notes } = compareReading(this.store, record, draft);
       await this.saveReread({
@@ -789,11 +837,12 @@ export class ImportService extends EventEmitter {
     return buildDraft(result.extraction, { store: this.store, document: record.document, hintAccountId: record.hintAccountId, uploadedOn: record.createdAt.slice(0, 10), warnings: result.warnings, batch });
   }
 
-  private assess(record: ImportRecord, draft: Draft, warnings: string[]) {
+  private assess(record: ImportRecord, draft: Draft, warnings: string[], sheets?: Sheet[]) {
     return assessReading(draft, {
       accountTypeOf: (s) => (s.target.mode === 'existing' ? this.store.account(s.target.accountId)?.type : s.target.mode === 'new' ? s.target.account.type : undefined),
       latest: record.createdAt.slice(0, 10),
       warnings,
+      sheetCheck: sheets ? checkEarnedPay(draft.figures, sheets) : undefined,
     });
   }
 
@@ -803,9 +852,9 @@ export class ImportService extends EventEmitter {
    * checked against) the document is read again with the checking model, the two readings are
    * compared figure by figure, the better one is kept, and rows they disagree on are marked.
    */
-  private async verifyReading(record: ImportRecord, first: EngineResult, opts: { model: string; verifyModel: string; readWith: (m: string) => Promise<EngineResult>; batch?: BatchEvidence | undefined }) {
+  private async verifyReading(record: ImportRecord, first: EngineResult, opts: { model: string; verifyModel: string; readWith: (m: string) => Promise<EngineResult>; batch?: BatchEvidence | undefined; sheets?: Sheet[] | undefined }) {
     const firstDraft = this.draftOf(record, first, opts.batch);
-    const a1 = this.assess(record, firstDraft, first.warnings);
+    const a1 = this.assess(record, firstDraft, first.warnings, opts.sheets);
     const firstModel = first.model ?? opts.model;
     if (!a1.problems.length && !a1.unconfirmed.length) {
       return { result: first, draft: firstDraft, otherCostUsd: 0, alternative: undefined, verification: { method: 'checks' as const, firstModel, reasons: [], disagreements: [], kept: 'first' as const } };
@@ -819,7 +868,7 @@ export class ImportService extends EventEmitter {
       return { result: first, draft: firstDraft, otherCostUsd: 0, alternative: undefined, verification: { method: 'second-reading' as const, firstModel, secondModel: opts.verifyModel, reasons, disagreements: [], kept: 'first' as const, error: (err as Error).message.slice(0, 300) } };
     }
     const secondDraft = this.draftOf(record, second, opts.batch);
-    const a2 = this.assess(record, secondDraft, second.warnings);
+    const a2 = this.assess(record, secondDraft, second.warnings, opts.sheets);
     const kept = chooseReading(a1, a2);
     const names = { first: shortModel(firstModel), second: shortModel(second.model ?? opts.verifyModel) };
     const [keptResult, keptDraft, other, otherDraft] = kept === 'second' ? [second, secondDraft, first, firstDraft] : [first, firstDraft, second, secondDraft];

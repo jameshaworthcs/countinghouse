@@ -23,7 +23,8 @@ import type {
   Holding,
   Transaction,
 } from '../../shared/schema';
-import { DraftSchema } from '../../shared/schema';
+import { DraftSchema, WorkDetailSchema, type WorkDetail } from '../../shared/schema';
+import { earnedReplaced, inferPayroll } from '../analytics/earned';
 import type { Store } from '../store';
 import { classifyDuplicates, storedTwice } from './dedup';
 import { dateFromFileName } from './images';
@@ -448,6 +449,14 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
   });
 
   // Figures, matched to accounts by last 4 digits and checked against what is already stored.
+  // A timesheet's earned pay is linked to the payroll that pays it (FORMULAS.md §17, "Earned pay").
+  const workOf = (w: (typeof extraction.figures)[number]['work']): WorkDetail | undefined => {
+    if (!w) return undefined;
+    const out = Object.fromEntries(Object.entries({ role: w.role?.trim() || null, daysWorked: w.daysWorked, holidayDays: w.holidayDays, hoursWorked: w.hoursWorked, rate: w.rate, ratePer: w.ratePer }).filter(([, v]) => v !== null && v !== undefined));
+    const parsed = WorkDetailSchema.safeParse(out);
+    return parsed.success && Object.keys(parsed.data).length ? parsed.data : undefined;
+  };
+  const payrolls = inferPayroll(store, extraction.figures.map((f) => ({ kind: f.kind, payer: f.payer ?? undefined, periodEnd: f.periodEnd ?? undefined, amount: f.amount, work: workOf(f.work) })));
   const figures: DraftFigure[] = extraction.figures.map((f, fi) => {
     // Matched by last 4 digits only when exactly one account has them.
     const byLast4 = f.accountLast4 ? store.accounts.filter((a) => a.last4 === f.accountLast4) : [];
@@ -457,10 +466,15 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
         x.kind === f.kind &&
         toMinor(x.amount) === toMinor(f.amount) &&
         // The same tax year and, for a payslip, the same pay period: two months' equal pay are two figures.
-        (x.taxYear ?? x.periodEnd ?? '') === (f.taxYear ?? f.periodEnd ?? '') &&
+        (x.taxYear ?? x.periodEnd ?? '') === ((f.kind === 'earned_pay' ? null : f.taxYear) ?? f.periodEnd ?? '') &&
         (x.periodEnd ?? '') === (f.periodEnd ?? '') &&
         (x.payer ?? '').toLowerCase() === (f.payer ?? '').toLowerCase(),
     );
+    const earned = f.kind === 'earned_pay';
+    const work = earned ? workOf(f.work) : undefined;
+    const paidBy = earned ? payrolls.get(f.payer ?? '') : undefined;
+    const replaced = earned && !dup ? earnedReplaced(store, { kind: f.kind, payer: f.payer ?? undefined, work, periodStart: f.periodStart ?? undefined, periodEnd: f.periodEnd ?? undefined, amount: f.amount }) : undefined;
+    const taxCode = f.taxCode?.trim().toUpperCase().slice(0, 20);
     return {
       key: `f${fi}`,
       include: !dup,
@@ -470,11 +484,16 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
       currency: f.currency ?? 'GBP',
       ...(f.periodStart ? { periodStart: f.periodStart } : {}),
       ...(f.periodEnd ? { periodEnd: f.periodEnd } : {}),
-      ...(f.taxYear && /^\d{4}\/\d{2}$/.test(f.taxYear) ? { taxYear: f.taxYear } : {}),
+      // Earned pay belongs to no tax year until it is paid.
+      ...(!earned && f.taxYear && /^\d{4}\/\d{2}$/.test(f.taxYear) ? { taxYear: f.taxYear } : {}),
       ...(f.payer ? { payer: f.payer } : {}),
       ...(f.payerReference ? { payerReference: f.payerReference } : {}),
       ...(account ? { accountId: account.id } : {}),
+      ...(taxCode && !earned ? { taxCode } : {}),
+      ...(paidBy && paidBy !== f.payer ? { paidBy } : {}),
+      ...(work ? { work } : {}),
       ...(dup ? { duplicateOf: dup.id } : {}),
+      ...(replaced ? { replaces: { id: replaced.id, amount: replaced.amount } } : {}),
     };
   });
 
@@ -505,6 +524,7 @@ export function draftIsClean(draft: Draft): { clean: boolean; reasons: string[] 
     if (s.balanceDateSource === 'upload') reasons.push('balance date unknown');
   }
   if (!draft.sections.length && !draft.figures.length) reasons.push('nothing extracted');
+  if (draft.figures.some((f) => f.include && f.replaces)) reasons.push('replaces earned pay recorded from an earlier upload');
   return { clean: reasons.length === 0, reasons: [...new Set(reasons)] };
 }
 

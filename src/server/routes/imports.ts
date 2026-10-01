@@ -154,7 +154,7 @@ export function importRoutes(ctx: AppContext): Hono {
   });
 
   app.post('/:id/reprocess', async (c) => {
-    const body = await readJson(c, z.object({ engine: z.enum(EXTRACTION_ENGINES).optional(), model: z.string().max(80).optional(), verifyModel: z.string().max(80).optional() }));
+    const body = await readJson(c, z.object({ engine: z.enum(EXTRACTION_ENGINES).optional(), model: z.string().max(80).optional(), verifyModel: z.string().max(80).optional(), readAs: z.enum(['document', 'columns']).optional() }));
     return c.json(await svc.reprocess(c.req.param('id'), body));
   });
 
@@ -175,7 +175,7 @@ export function importRoutes(ctx: AppContext): Hono {
     return c.json({ ok: true });
   });
 
-  /** A spreadsheet's table, as the import reads it, for side-by-side review. */
+  /** A spreadsheet's table (its first, or the sheet named by `?sheet=`), for side-by-side review. */
   app.get('/:id/table', async (c) => {
     const rec = await svc.get(c.req.param('id'));
     if (!rec) throw new StoreError('Unknown import', 404);
@@ -184,7 +184,7 @@ export function importRoutes(ctx: AppContext): Hono {
     if (!file) throw new StoreError('Document not available', 404);
     const bytes = await readFile(file);
     if (detectKind(rec.document.fileName, bytes) !== 'xlsx') throw new StoreError('Not a spreadsheet', 404);
-    const { rows, sheet, sheets } = sheetRows(bytes);
+    const { rows, sheet, sheets } = sheetRows(bytes, c.req.query('sheet') || undefined);
     return c.json({ sheet, sheets, rows: rows.slice(0, 500), total: rows.length });
   });
 

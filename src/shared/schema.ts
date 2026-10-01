@@ -420,9 +420,24 @@ export const FIGURE_KINDS = [
   'capital_loss',
   'rental_income',
   'other_income',
+  /** Pay earned for work done (a timesheet), not paid yet: never income for tax, which counts pay when it is paid. */
+  'earned_pay',
   'other',
 ] as const;
 export type FigureKind = (typeof FIGURE_KINDS)[number];
+
+/** What a timesheet says about one period's work: an `earned_pay` figure's detail. */
+export const WorkDetailSchema = z.object({
+  /** The job, assignment or role the timesheet is for, as printed ("Role A"). */
+  role: z.string().max(120).optional(),
+  daysWorked: z.number().min(0).max(400).optional(),
+  holidayDays: z.number().min(-400).max(400).optional(),
+  hoursWorked: z.number().min(0).max(5000).optional(),
+  /** Pay per day or hour, as printed. */
+  rate: MoneySchema.optional(),
+  ratePer: z.enum(['day', 'hour']).optional(),
+});
+export type WorkDetail = z.infer<typeof WorkDetailSchema>;
 
 export const FigureSchema = z.object({
   id: z.string().regex(/^fig_[0-9a-f]{16}$/),
@@ -445,6 +460,12 @@ export const FigureSchema = z.object({
   payer: z.string().optional(),
   /** Payer reference (e.g. employer PAYE reference) if shown. */
   payerReference: z.string().optional(),
+  /** PAYE tax code printed on a payslip or P60 ("1257L", "1257L M1"). */
+  taxCode: z.string().max(20).optional(),
+  /** `earned_pay`: the employer as its payslips name it, when another name is on the timesheet (FORMULAS.md §17). */
+  paidBy: z.string().max(200).optional(),
+  /** `earned_pay`: days, holiday and rate from the timesheet. */
+  work: WorkDetailSchema.optional(),
   notes: z.string().optional(),
   attributes: AttributesSchema.optional(),
   source: SourceRefSchema.default({}),
@@ -615,6 +636,15 @@ export const ProfileSchema = z.object({
   grossSalary: MoneySchema.optional(),
   /** When you plan to stop work: drives the retirement outlook. */
   retirementAge: z.number().int().min(50).max(80).default(67),
+  /**
+   * What you have told the app about an employer's payroll, by the name its payslips give:
+   * `payLagMonths` is how many months after the work a timesheet's pay comes (0: the same month).
+   * Unset, it is learned from payslips matched to timesheets (FORMULAS.md §17).
+   */
+  employers: z
+    .array(z.object({ name: z.string().min(1).max(200), payLagMonths: z.number().int().min(0).max(3).optional() }))
+    .max(50)
+    .optional(),
   // Returns, inflation and other modelling parameters are assumption records (assumptions.jsonl),
   // not profile fields. Format v1's `assumedRealReturn` was moved there by the v2 migration.
 });
@@ -733,6 +763,7 @@ export const EXTRACTION_DOC_TYPES = [
   'payslip',
   'p60',
   'p11d',
+  'timesheet',
   'tax_document',
   'csv_export',
   'other',
@@ -830,6 +861,19 @@ export const ExtractedFigureSchema = z.object({
   payerReference: z.string().nullable().default(null),
   /** last4 of the account this figure relates to, if any. */
   accountLast4: z.string().nullable().default(null),
+  taxCode: z.string().nullable().default(null),
+  /** A timesheet's period: days, holiday and rate. */
+  work: z
+    .object({
+      role: z.string().nullable().default(null),
+      daysWorked: z.number().nullable().default(null),
+      holidayDays: z.number().nullable().default(null),
+      hoursWorked: z.number().nullable().default(null),
+      rate: z.number().nullable().default(null),
+      ratePer: z.enum(['day', 'hour']).nullable().default(null),
+    })
+    .nullable()
+    .default(null),
 });
 export type ExtractedFigure = z.infer<typeof ExtractedFigureSchema>;
 
@@ -1037,8 +1081,14 @@ export const DraftFigureSchema = z.object({
   payer: z.string().optional(),
   payerReference: z.string().optional(),
   accountId: SlugSchema.optional(),
+  taxCode: z.string().max(20).optional(),
+  /** `earned_pay`: the employer as its payslips name it (FORMULAS.md §17). */
+  paidBy: z.string().max(200).optional(),
+  work: WorkDetailSchema.optional(),
   /** An identical figure already stored. */
   duplicateOf: z.string().optional(),
+  /** `earned_pay`: the figure an earlier upload of the timesheet gave for the same period, which this one replaces. */
+  replaces: z.object({ id: z.string(), amount: MoneySchema }).optional(),
 });
 export type DraftFigure = z.infer<typeof DraftFigureSchema>;
 

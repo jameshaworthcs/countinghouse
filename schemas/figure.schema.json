@@ -31,6 +31,7 @@
         "capital_loss",
         "rental_income",
         "other_income",
+        "earned_pay",
         "other"
       ]
     },
@@ -75,6 +76,49 @@
     },
     "payerReference": {
       "type": "string"
+    },
+    "taxCode": {
+      "type": "string",
+      "maxLength": 20
+    },
+    "paidBy": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "work": {
+      "type": "object",
+      "properties": {
+        "role": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "daysWorked": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 400
+        },
+        "holidayDays": {
+          "type": "number",
+          "minimum": -400,
+          "maximum": 400
+        },
+        "hoursWorked": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 5000
+        },
+        "rate": {
+          "type": "number",
+          "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+        },
+        "ratePer": {
+          "type": "string",
+          "enum": [
+            "day",
+            "hour"
+          ]
+        }
+      }
     },
     "notes": {
       "type": "string"

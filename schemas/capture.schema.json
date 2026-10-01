@@ -146,6 +146,7 @@
                               "capital_loss",
                               "rental_income",
                               "other_income",
+                              "earned_pay",
                               "other"
                             ]
                           }

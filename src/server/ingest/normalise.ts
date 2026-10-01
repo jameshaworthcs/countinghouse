@@ -26,6 +26,8 @@ const MONEY_KEYS = new Set([
   'gain',
   'statedMoneyIn',
   'statedMoneyOut',
+  // A timesheet's day or hourly rate.
+  'rate',
 ]);
 const DATE_KEYS = new Set(['date', 'transactionDate', 'periodStart', 'periodEnd', 'balanceDate', 'documentDate']);
 

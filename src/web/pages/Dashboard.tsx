@@ -262,6 +262,18 @@ function Onboarding() {
   );
 }
 
+/** Pay earned on timesheets and not yet paid: pending beside the estate, not counted in it (FORMULAS §17). */
+function OwedLine({ owed }: { owed: NonNullable<SummaryResponse['owed']> }) {
+  return (
+    <Link to="/tax/pay" className="-mx-2 mt-2 flex items-start gap-2 rounded-lg px-2 py-1.5 text-[12.5px] hover:bg-panel-2">
+      <Badge tone={owed.late ? 'warn' : 'muted'}>Pending</Badge>
+      <span className="min-w-0 flex-1 text-ink-3">
+        <span className="font-medium text-ink-2">{owed.net !== null ? <Money value={owed.net} decimals={0} /> : <Money value={owed.gross} decimals={0} />}</span> pay owed to you{owed.net !== null ? <> after estimated tax and NI (<Money value={owed.gross} decimals={0} /> before)</> : ' before tax'}, {owed.late ? 'late' : owed.next ? `expected about ${formatDate(owed.next, { year: false })}` : 'when its payslip comes'}. Not counted until it arrives.
+      </span>
+    </Link>
+  );
+}
+
 const ALERT_ICON = { info: Info, warning: TriangleAlert, critical: CircleAlert };
 
 export default function Dashboard() {
@@ -315,6 +327,7 @@ export default function Dashboard() {
                   Includes estimates for {estimates.length} account{estimates.length > 1 ? 's' : ''}: <Money value={estimates.reduce((sum, a) => sum + (a.balanceGBP ?? 0), 0)} decimals={0} />
                 </div>
               )}
+              {s.owed && <OwedLine owed={s.owed} />}
               <ul className="mt-4 flex flex-col gap-1.5 border-t border-line pt-3">
                 {s.deltas.map((d) => (
                   <li key={d.id} className="flex items-center justify-between gap-2 text-[13px]">

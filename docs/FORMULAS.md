@@ -308,6 +308,9 @@ years), both paths grow at the median:
 - Σ over included accounts of balance(D) in GBP (manual FX).
 - A balance's sign decides assets or liabilities: an overdraft is a debt; a card in credit is cash.
 - Before an account's first data it adds nothing, so a total on D can leave accounts out.
+- **Pay owed is never in it.** Pay earned on timesheets and not yet in the bank (§17, "Earned
+  pay") is shown beside the headline as pending: its estimated take-home (else its gross), and
+  when it is expected. It counts once it arrives, as the bank balance it lands in.
 
 **Known on D** (`estateKnownOn`): every included account with data has data on or before D, or
 opened after D (`openedOn`), so it held nothing then. Accounts with no data at all don't count.
@@ -607,7 +610,9 @@ earliest likely month, and the p10 path the latest.
 ## 17. Pay (`analytics/pay.ts`)
 
 The Tax year page's **Pay** tab covers each employer in the year. A figure counts as a payslip's
-when its document was a payslip, or, failing that, when its period is under 200 days.
+when its document was a payslip, or, failing that, when its period is under 200 days. Earned pay
+from a timesheet is never a payslip's figure: it is shown under the payroll that pays it ("Earned
+pay", below).
 
 - **A pay period** is an employer's payslip figures with one period, where two employers' names
   match once reduced (`payerKey`: case, spaces and "Ltd" go).
@@ -638,3 +643,71 @@ when its document was a payslip, or, failing that, when its period is under 200 
 - A payslip or P60 names its employer as the document does. On the review page the payer can be
   renamed for all of a document's figures, so a payslip that prints a group name and a P60 that
   prints the employing company count as one employer.
+
+### Earned pay (`analytics/earned.ts`)
+
+A timesheet gives `earned_pay` figures: what a period's work earned, before it is paid. They are
+followed to the payslip that paid them and to the bank. They are never income for tax: the
+payslip that pays them is, in the tax year it is paid.
+
+- **The figure that counts** for one timesheet (payer and role) and period is the one committed
+  last (`effectiveEarned`).
+- **Payroll.** A figure is paid through `paidBy` (the employer as its payslips name it), else its
+  own payer; names compare as `payerKey` does.
+- **Which payslip paid which months** (`matchEarned`), payslips in order of their period's end:
+  - a payslip with gross > 0 pays the run of consecutive unpaid months, oldest first, all ending
+    by the payslip's own end, whose earned pay adds up to its gross to the penny: the first such
+    run, then the shortest;
+  - a £0 payslip pays nothing. A month the usual delay put on it is noted as not on it (a
+    timesheet that went in late);
+  - a payslip no run adds up to (expenses, a bonus, a correction) pays none of them.
+- **The delay** *L*, in months, from the work to the payslip that pays it: yours
+  (`profile.employers[].payLagMonths`, set on the Pay tab), else learned from the latest payslip
+  that paid some months (its month − the month of the latest work on it).
+- **What is owed**: the months no payslip paid. Each is expected with the payslip of month
+  max(work month + *L*, the month after this payroll's latest payslip), so a late timesheet's month
+  comes with the next payslip. Months expected on the same payslip are one expected payment. With
+  no *L* the month is unknown.
+- **Pay day**: the day of the month this payroll's pay last reached the bank, else its latest
+  payslip's date, in the expected month (its last day when shorter); a Saturday or Sunday becomes
+  the Friday before. Bank holidays are not known.
+- **Status** of an expected payment, first that applies:
+  1. **arrived**: a salary credit no payslip explains, from a name the bank gave this payroll's
+     earlier pay (or naming it), after the latest work it pays and no more than 15 days before the
+     pay day. It is no longer owed; the Pay tab lists the credit under the payroll and says what
+     it is for;
+  2. **late**: the pay day has passed;
+  3. **owed**.
+
+### Expected pay (`analytics/earned.ts`, `shared/paye.ts`)
+
+The deductions on an expected payment are estimates, labelled as such. *G* is its gross and the
+pay day is *D*.
+
+- **NI** (employee Class 1, category A, `employeeNi`): 8% of *G* between the monthly primary
+  threshold and upper earnings limit, 2% above (`uk.ts`, `employeeNi`), to the penny, a half penny
+  down. NI is worked out pay period by pay period, never over the year.
+- **Tax basis** (`taxBasis`), from this payroll's latest payslip with pay and a tax figure:
+  1. the tax code it prints (`taxCode`);
+  2. else the standard code (personal allowance ÷ 10, `1257L`) on a month-1 basis, then
+     cumulatively, whichever gives that payslip's tax within £1;
+  3. else no tax estimate.
+- **PAYE** (`payeTax`), England, Wales and Northern Ireland rates; a Scottish code is not worked
+  out:
+  - allowance for *m* months = (code number × 10 + 9) × *m* ÷ 12, *m* = 1 on a month-1 basis, else
+    the tax month of *D* (month 1 runs 6 April to 5 May);
+  - taxable = ⌊pay − allowance⌋ in whole pounds, pay being *G*, or on a cumulative code *G* plus
+    this payroll's earlier pay in the tax year (a K code adds the allowance instead);
+  - tax = 20% up to ⌈basic-rate band × *m* ÷ 12⌉, 40% up to ⌈(additional-rate threshold −
+    personal allowance) × *m* ÷ 12⌉, 45% above; BR, D0 and D1 tax everything at one rate; NT
+    nothing;
+  - this payment's tax = that − the tax already paid in the year (cumulative codes; negative is a
+    refund). A K code's is at most half of *G*.
+- **Pension**: the latest payslip's pension ÷ its gross × *G*, when it had one.
+- **Student loan**: not estimated; said when the latest payslip had one.
+- **Take-home** = *G* − tax − NI − pension, when tax and NI are both estimated.
+- **Paid at once**: when one payment pays two months or more, the same deductions with each
+  month's pay as a payment of its own on *D*. NI adds what the extra threshold would have spared;
+  a month-1 code taxes each alone; a cumulative code's tax is the same either way. The difference
+  is shown: the NI part is never refunded, the tax part is settled after the tax year.
+

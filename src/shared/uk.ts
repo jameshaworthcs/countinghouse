@@ -105,6 +105,12 @@ export interface TaxYearParams {
   cgtReportingProceeds: number | null;
   /** Full new State Pension, per week. */
   statePensionFullWeekly: number;
+  /**
+   * Employee (primary) Class 1 National Insurance, category A, on monthly pay: nothing up to the
+   * primary threshold, `mainRate` up to the upper earnings limit, `upperRate` above. Null for years
+   * not modelled (2022/23 and 2023/24 changed rates part-way through).
+   */
+  employeeNi: { primaryThresholdMonthly: number; upperEarningsLimitMonthly: number; mainRate: number; upperRate: number } | null;
 }
 
 type ParamsRow = { from: number } & Partial<TaxYearParams>;
@@ -149,6 +155,7 @@ export const TAX_YEAR_PARAMS: ParamsRow[] = [
     propertyAllowance: 0,
     cgtReportingProceeds: null,
     statePensionFullWeekly: 155.65,
+    employeeNi: null,
   },
   {
     from: 2017,
@@ -196,6 +203,8 @@ export const TAX_YEAR_PARAMS: ParamsRow[] = [
     lumpSumAndDeathBenefitAllowance: 1_073_100,
     hicbc: { threshold: 60_000, fullAt: 80_000 },
     statePensionFullWeekly: 221.2,
+    // Employee NI 8% from 6 April 2024; thresholds frozen (gov.uk "Rates and thresholds for employers").
+    employeeNi: { primaryThresholdMonthly: 1_048, upperEarningsLimitMonthly: 4_189, mainRate: 0.08, upperRate: 0.02 },
   },
   { from: 2025, statePensionFullWeekly: 230.25 },
   // Budget 2025: dividend ordinary and upper rates +2pp from April 2026 (additional unchanged).

@@ -27,6 +27,7 @@ import {
   RuleSchema,
   SettingsSchema,
   SlugSchema,
+  WorkDetailSchema,
   type Account,
   type BalanceSnapshot,
   type Figure,
@@ -40,6 +41,7 @@ import { categoriserFor } from '../categoriser';
 import { enrich } from '../enrich';
 import { nowISO } from '../fsutil';
 import { balanceId, figureId, ruleId, transactionId } from '../ids';
+import { payerKey } from '../analytics/pay';
 import { StoreError } from '../store';
 import { accountSummary } from '../analytics/estate';
 
@@ -140,6 +142,9 @@ const FigureBody = z.object({
   accountId: SlugSchema.optional(),
   payer: z.string().max(200).optional(),
   payerReference: z.string().max(100).optional(),
+  taxCode: z.string().max(20).optional(),
+  paidBy: z.string().max(200).optional(),
+  work: WorkDetailSchema.optional(),
   notes: z.string().max(2000).optional(),
 });
 
@@ -701,6 +706,22 @@ export function dataRoutes(ctx: AppContext): Hono {
   app.patch('/figures/:id', async (c) => {
     const body = await readJson(c, FigureBody.partial());
     return c.json(await store.updateFigure(c.req.param('id'), body, 'figure: edit'));
+  });
+
+  /**
+   * The payroll that pays a timesheet's work: set on every earned-pay figure of that timesheet (its
+   * payer, and role when given). `paidBy: null` takes the timesheet's own name again.
+   */
+  app.post('/earned/link', async (c) => {
+    const body = await readJson(c, z.object({ payer: z.string().max(200), role: z.string().max(120).optional(), paidBy: z.string().min(1).max(200).nullable() }));
+    const targets = store.figures.filter((f) => f.kind === 'earned_pay' && payerKey(f.payer) === payerKey(body.payer) && (body.role === undefined || payerKey(f.work?.role) === payerKey(body.role)));
+    if (!targets.length) throw new StoreError('No earned pay from that timesheet', 404);
+    for (const f of targets) {
+      const { paidBy: _old, ...rest } = f;
+      const next = body.paidBy && body.paidBy !== f.payer ? { ...rest, paidBy: body.paidBy } : rest;
+      await store.replaceFigure(next, `earned pay: paid through ${body.paidBy ?? body.payer}`);
+    }
+    return c.json({ updated: targets.length });
   });
 
   app.delete('/figures/:id', async (c) => {

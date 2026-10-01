@@ -499,6 +499,7 @@
                 "payslip",
                 "p60",
                 "p11d",
+                "timesheet",
                 "tax_document",
                 "csv_export",
                 "other"
@@ -1223,6 +1224,7 @@
                       "capital_loss",
                       "rental_income",
                       "other_income",
+                      "earned_pay",
                       "other"
                     ]
                   },
@@ -1296,6 +1298,76 @@
                     "type": [
                       "string",
                       "null"
+                    ]
+                  },
+                  "taxCode": {
+                    "default": null,
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "work": {
+                    "default": null,
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "role": {
+                            "default": null,
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "daysWorked": {
+                            "default": null,
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "holidayDays": {
+                            "default": null,
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "hoursWorked": {
+                            "default": null,
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "rate": {
+                            "default": null,
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "ratePer": {
+                            "default": null,
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "enum": [
+                                  "day",
+                                  "hour"
+                                ]
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        }
+                      },
+                      {
+                        "type": "null"
+                      }
                     ]
                   }
                 },
@@ -1399,6 +1471,7 @@
                 "payslip",
                 "p60",
                 "p11d",
+                "timesheet",
                 "tax_document",
                 "csv_export",
                 "other"
@@ -2123,6 +2196,7 @@
                       "capital_loss",
                       "rental_income",
                       "other_income",
+                      "earned_pay",
                       "other"
                     ]
                   },
@@ -2197,6 +2271,76 @@
                       "string",
                       "null"
                     ]
+                  },
+                  "taxCode": {
+                    "default": null,
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "work": {
+                    "default": null,
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "role": {
+                            "default": null,
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "daysWorked": {
+                            "default": null,
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "holidayDays": {
+                            "default": null,
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "hoursWorked": {
+                            "default": null,
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "rate": {
+                            "default": null,
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "ratePer": {
+                            "default": null,
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "enum": [
+                                  "day",
+                                  "hour"
+                                ]
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        }
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 },
                 "required": [
@@ -2253,6 +2397,7 @@
             "payslip",
             "p60",
             "p11d",
+            "timesheet",
             "tax_document",
             "csv_export",
             "other"
@@ -3109,6 +3254,7 @@
                   "capital_loss",
                   "rental_income",
                   "other_income",
+                  "earned_pay",
                   "other"
                 ]
               },
@@ -3149,8 +3295,67 @@
                 "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
                 "description": "Stable, human-readable identifier (lowercase-hyphenated)"
               },
+              "taxCode": {
+                "type": "string",
+                "maxLength": 20
+              },
+              "paidBy": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "work": {
+                "type": "object",
+                "properties": {
+                  "role": {
+                    "type": "string",
+                    "maxLength": 120
+                  },
+                  "daysWorked": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 400
+                  },
+                  "holidayDays": {
+                    "type": "number",
+                    "minimum": -400,
+                    "maximum": 400
+                  },
+                  "hoursWorked": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 5000
+                  },
+                  "rate": {
+                    "type": "number",
+                    "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                  },
+                  "ratePer": {
+                    "type": "string",
+                    "enum": [
+                      "day",
+                      "hour"
+                    ]
+                  }
+                }
+              },
               "duplicateOf": {
                 "type": "string"
+              },
+              "replaces": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "amount": {
+                    "type": "number",
+                    "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                  }
+                },
+                "required": [
+                  "id",
+                  "amount"
+                ]
               }
             },
             "required": [

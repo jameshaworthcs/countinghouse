@@ -56,6 +56,29 @@ Other parameters:
     proceeds exceed £50,000, even with no tax due. Before 2023/24 the threshold was 4 × the
     exempt amount.
 
+### Payroll: PAYE and employee NI
+
+Used only to estimate the deductions on pay that is owed and not yet paid ([FORMULAS.md §17](FORMULAS.md),
+"Expected pay"); a payslip's own figures always stand. Monthly pay only.
+
+- **Employee Class 1 NI, category A** (`employeeNi`), from 2024/25 (2026/27 checked on 1 October
+  2026):
+
+  | | a week | a month | a year |
+  |---|---|---|---|
+  | Primary threshold | £242 | £1,048 | £12,570 |
+  | Upper earnings limit | £967 | £4,189 | £50,270 |
+
+  8% between them, 2% above. It is worked out for each pay period on its own, never over the year,
+  so two months' pay in one payslip uses one threshold, not two. Years before 2024/25 are not
+  modelled (2022/23 and 2023/24 changed rates part-way through).
+- **PAYE tax codes** (`shared/paye.ts`): `L`, `M`, `N` and `T` codes and `0T` give an allowance of
+  (number × 10 + 9) a year; `K` codes add that to pay instead, and the tax they take is at most
+  half the pay; `BR`, `D0` and `D1` tax all pay at 20%, 40% and 45%; `NT` takes none. `M1`, `W1`
+  or `X` after a code means each month is taxed on its own (the emergency basis, `1257L M1`);
+  otherwise it is cumulative over the tax year. Bands are pro rata to the months counted. A `C`
+  (Welsh) code uses these rates; an `S` (Scottish) code is not worked out.
+
 ### ISA reform, April 2027 (Autumn Budget 2025)
 
 - The overall ISA allowance stays £20,000, but at most **£12,000 a year may go into cash ISAs** for
@@ -151,6 +174,10 @@ change between years, so the page names sections, not boxes. Filing and payment 
 **Everything on that page must be checked by you against your own documents before you submit.**
 
 ## Sources
+
+Checked 1 October 2026:
+
+- GOV.UK, [Rates and thresholds for employers 2026 to 2027](https://www.gov.uk/guidance/rates-and-thresholds-for-employers-2026-to-2027) (Class 1 NI thresholds and rates, emergency tax code)
 
 Checked 29 September 2026:
 

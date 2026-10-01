@@ -6,6 +6,7 @@
 import { formatMoney } from '../../shared/money';
 import { sectionChecks } from '../../shared/review';
 import type { AccountType, Draft, DraftSection } from '../../shared/schema';
+import type { TimesheetCheck } from './timesheet';
 
 /** Checks whose failure means a figure was probably misread. */
 const READING_CHECKS = new Set(['reconcile', 'totals', 'period', 'future', 'balance-date', 'card-signs', 'uncertain', 'holdings']);
@@ -80,11 +81,16 @@ const labelOf = (s: DraftSection, i: number) => s.detected.accountName ?? s.dete
  * up to the value. Contribution and allowance figures, a balance on its own and tax figures have
  * nothing to be checked against.
  */
-export function assessReading(draft: Draft, ctx: { accountTypeOf: (s: DraftSection) => AccountType | undefined; latest: string; warnings: string[]; periodFromRows?: boolean }): ReadingAssessment {
+export function assessReading(
+  draft: Draft,
+  ctx: { accountTypeOf: (s: DraftSection) => AccountType | undefined; latest: string; warnings: string[]; periodFromRows?: boolean; sheetCheck?: TimesheetCheck | undefined },
+): ReadingAssessment {
   const problems: string[] = [];
   const unconfirmed: string[] = [];
   if (draft.confidence === 'low') problems.push('The reader was not confident');
   problems.push(...ctx.warnings);
+  // A spreadsheet's own cells confirm the earned pay read from it (./timesheet.ts).
+  if (ctx.sheetCheck) problems.push(...ctx.sheetCheck.problems);
   draft.sections.forEach((s, i) => {
     const label = labelOf(s, i);
     const checks = sectionChecks(s, { accountType: ctx.accountTypeOf(s), latest: ctx.latest, periodFromRows: ctx.periodFromRows });
@@ -96,7 +102,9 @@ export function assessReading(draft: Draft, ctx: { accountTypeOf: (s: DraftSecti
     if (s.holdings.length && !passed.has('holdings')) unconfirmed.push(`${label}: holdings with no total to check them against`);
     if ([s.contributions, s.bonusToDate, s.taxYearContributions, s.gain, s.annualIncome].some((v) => v !== undefined)) unconfirmed.push(`${label}: contribution and allowance figures`);
   });
-  if (draft.figures.length) unconfirmed.push('Tax figures');
+  const unchecked = draft.figures.filter((f) => !ctx.sheetCheck?.confirmed.has(f.key));
+  if (unchecked.some((f) => f.kind !== 'earned_pay')) unconfirmed.push('Tax figures');
+  if (unchecked.some((f) => f.kind === 'earned_pay')) unconfirmed.push('Earned pay');
   // Finding nothing to record is a reading too, and a missed balance or row would be dismissed with
   // it: a second reader has to find nothing as well.
   if (!draft.sections.length && !draft.figures.length) unconfirmed.push('Nothing to record');
@@ -190,9 +198,13 @@ export function compareReadings(first: Draft, second: Draft, names: { first: str
     });
   });
   const usedFigures = new Set<number>();
+  // A period's figure pairs with the same period's first (two months of equal pay are two figures).
+  const samePeriod = (x: Draft['figures'][number], f: Draft['figures'][number]) => (x.periodEnd ?? '') === (f.periodEnd ?? '');
   for (const f of second.figures) {
-    const k = first.figures.findIndex((x, n) => !usedFigures.has(n) && x.kind === f.kind && sameMoney(x.amount, f.amount));
-    const j = k >= 0 ? k : first.figures.findIndex((x, n) => !usedFigures.has(n) && x.kind === f.kind);
+    const k = [(x: Draft['figures'][number]) => samePeriod(x, f) && sameMoney(x.amount, f.amount), (x: Draft['figures'][number]) => sameMoney(x.amount, f.amount), (x: Draft['figures'][number]) => samePeriod(x, f), () => true]
+      .map((pass) => first.figures.findIndex((x, n) => !usedFigures.has(n) && x.kind === f.kind && pass(x)))
+      .find((i) => i >= 0);
+    const j = k ?? -1;
     if (j < 0) {
       disagreements.push(`${f.label}: only ${names.second} read it`);
       continue;
@@ -201,6 +213,7 @@ export function compareReadings(first: Draft, second: Draft, names: { first: str
     const o = first.figures[j]!;
     if (!sameMoney(o.amount, f.amount)) disagreements.push(`${f.label}: ${names.first} read ${money(o.amount)}, ${names.second} ${money(f.amount)}`);
     if ((o.taxYear ?? '') !== (f.taxYear ?? '')) disagreements.push(`${f.label}: tax year ${o.taxYear ?? 'none'} in ${names.first}, ${f.taxYear ?? 'none'} in ${names.second}`);
+    if (!samePeriod(o, f)) disagreements.push(`${f.label}: period ending ${o.periodEnd ?? 'none'} in ${names.first}, ${f.periodEnd ?? 'none'} in ${names.second}`);
   }
   first.figures.forEach((f, n) => {
     if (!usedFigures.has(n)) disagreements.push(`${f.label}: only ${names.first} read it`);

@@ -37,7 +37,7 @@ The same file twice (by SHA-256) is recognised as already imported.
 | Trading 212 CSV | `trading-212` | Buys and withdrawals are money out; deposits count as contributions |
 | Holdings exports (interactive investor's portfolio export, and any CSV with a name, quantity and value column but no dates) | `holdings-csv` | One holdings snapshot: units, price (pence or pounds), value, book cost and gain per holding, SEDOL or ticker from the symbol; the account's value is what the holdings are worth (cash is not in the file), and its growth the totals line's gain; the wrapper from the file name (`…-ISA.csv`, `…-SIPP.csv`). With no date in it, it is dated by the date in its file name, else the day the file was saved: an export is made as it is downloaded. It gives no asset classes, so the model takes each fund's from the latest statement that gave one ([FORMULAS.md §1](FORMULAS.md)) |
 | Anything else CSV | auto-detected mapping | Confident mappings import straight away (flagged), and the review page can change their columns and signs and save them as a profile; otherwise you map the columns once and save them. The description is a column named for it ("description", "details", "narrative"…) before one naming the other party, and never a type column ("Transaction Type") while another will do. A file for a credit card (the one you upload it to, or the one a committed import went to when it is read again) reads a single amount column card style, money out positive, when its rows fail the card-signs check ([FORMULAS.md §13](FORMULAS.md)) as they stand and pass it flipped: a card's own export lists purchases as positive |
-| Excel `.xlsx`, `.xls`, and HTML tables saved as `.xls` | `xlsx` → the CSV profiles | The first sheet with a table becomes rows (`src/server/ingest/xlsx.ts`, SheetJS), which go through the same profiles, holdings detection and column mapping as a CSV. Date cells become `YYYY-MM-DD`; text cells stay text, so "01/09/2026" is read day first; numbers keep full precision. The review page shows the sheet as a table |
+| Excel `.xlsx`, `.xls`, and HTML tables saved as `.xls` | `xlsx` → the CSV profiles | The first sheet with a table becomes rows (`src/server/ingest/xlsx.ts`, SheetJS), which go through the same profiles, holdings detection and column mapping as a CSV. Date cells become `YYYY-MM-DD`; text cells stay text, so "01/09/2026" is read day first; numbers keep full precision. The review page shows the sheets as tables, one at a time. A spreadsheet that is not a list of payments (a timesheet, a sheet a month) is read by Claude instead: see "Spreadsheets that are not a list of payments" below |
 | OFX / QFX (1.x SGML and 2.x XML) | `ofx` | Bank and credit-card statements, FITID as id, ledger/available balance; foreign amounts per `<ORIGCURRENCY>` (already converted) or `<CURRENCY>` (converted at CURRATE) |
 | QIF | `qif` | Day/month order detected across the whole file |
 | Santander text export | `santander-txt` | Newest-first, running balances. Santander exports at most 600 transactions: a file with 600 covers from its oldest row, not from the "From" date in its header, and a note says which days to download separately (otherwise the days it lacks would count as covered) |
@@ -77,6 +77,43 @@ document again whenever a figure cannot be confirmed from the document itself. B
 Settings → Import & extraction. You can re-read any draft with a different engine or model from the
 review screen.
 
+### Spreadsheets that are not a list of payments
+
+A spreadsheet no layout knows, that is not a holdings export, and that is not a list of payments
+goes to the reader like a PDF (`looksLikeLedger`, `src/server/ingest/xlsx.ts`). It is not a list of
+payments when no column could hold an amount, or when it has several sheets with tables and its
+columns could not be worked out with confidence. A timesheet with a sheet a month is both.
+
+- **What is sent** is the workbook as text (`workbookText`): every sheet with two rows or more,
+  row by row, each non-empty cell as `CELL=value`, with how the sheet shows it in brackets
+  (`P10=115 [£115.00]`). Dates are `YYYY-MM-DD`. Nothing else of the file is sent. The CLI reads it
+  as `workbook.txt` in its scratch directory; the API gets it as a text document.
+- **Claude only.** With no Claude engine (Settings → Extraction set to offline OCR, or none
+  installed) the first table is mapped like a CSV, and the review page says why.
+- **Either way round**: the review page can *Map its columns instead*, or *Read it with Claude
+  instead* for one mapped like a CSV (`POST /api/imports/:id/reprocess` with `readAs`).
+- The import records `engineVersion` as `xlsx-1+extract-11` and the sheets it read in `detail`.
+
+**Timesheets** (`extract-11`). A timesheet is `documentType: "timesheet"`. It gives one `earned_pay`
+figure for each period with work or holiday recorded: the period's total pay as the timesheet
+totals it, holiday pay included, with the period's days worked, holiday days, rate and role
+(`work`), and the employer or entity it names as `payer`. It has no tax year: pay is taxed when it
+is paid ([FORMULAS.md §17](FORMULAS.md), "Earned pay").
+
+- **The sheets check the reading** (`src/server/ingest/timesheet.ts`). Each period's amount must be
+  a cell, to the penny, on a sheet dated in that period. A sheet with money on two dated days or
+  more must have had its period read. What passes needs no second reading; what fails is read
+  again by the checking model, and what still fails is listed on the review page.
+- **The payroll that pays it** (`paidBy`): the employer as its payslips name it, when the timesheet
+  names another (a legal entity, an agency). The draft takes the one an earlier upload of the
+  timesheet was linked to, else the one with a payslip whose gross is exactly a run of its
+  consecutive months. The review page's *Work and pay earned* card can change it, and so can the
+  Pay tab later (`POST /api/earned/link`, all of that timesheet's figures).
+- **The same timesheet uploaded again** (it grows a month at a time): a period it gives as already
+  stored is a duplicate; one with another amount replaces the stored figure for that period, which
+  stays in `figures.jsonl` and no longer counts. The draft says what it replaces, and is held back
+  from "Commit all ready".
+
 ### Checking every figure
 
 `src/server/ingest/verify.ts`, after each Claude reading:
@@ -94,13 +131,14 @@ review screen.
    - a balance on its own;
    - contribution and allowance figures;
    - tax figures;
+   - a timesheet's earned pay that its sheets do not confirm (above);
    - a reading that finds nothing to record (a second reader has to find nothing too, or the two
      disagree and you are asked).
 4. **The two readings are compared figure by figure:**
    - each account's balances and dates;
    - every row's date, amount, pending flag and running balance;
    - each holding's value and units;
-   - each tax figure.
+   - each tax figure, paired by its period first (two months of equal pay are two figures).
 
    Wording may differ; figures may not.
 5. **The stronger reading (Opus's) is kept** unless the arithmetic finds more wrong with it. Rows
@@ -154,9 +192,12 @@ on every import):
   when no rows run past it (`extract-7`).
 - **Tax figures** from P60s, payslips, P11Ds, interest certificates, pension and dividend
   statements. A payslip gives the figures for its own pay period, never its year-to-date column
-  (`extract-6`); a P60 gives the year's. Two payslips of equal pay are two figures: a figure is a
+  (`extract-6`); a P60 gives the year's. A payslip's or P60's tax code goes on its gross pay
+  (`taxCode`, `extract-11`). Two payslips of equal pay are two figures: a figure is a
   duplicate only for the same payer, amount, tax year and period. For the tax band and Self
   Assessment, an employer's P60 replaces its payslips rather than adding to them.
+- **Timesheets** (`extract-11`): earned pay for each period with work in it, holiday balances
+  left out, and no tax year (above).
 - **Overlapping tiles.** Long scrolling screenshots are cut into overlapping tiles, and rows in the
   overlaps are reported once.
 - **Only this account's movements** (`extract-9`). Apps have lists with dates and amounts that are
@@ -498,14 +539,15 @@ No analyst job follows a dismissal.
 
 ## Reading a stored document again
 
-The reader improves (`PROMPT_VERSION`: `extract-4` … `extract-10`), and a document read by an earlier
+The reader improves (`PROMPT_VERSION`: `extract-4` … `extract-11`), and a document read by an earlier
 version may hold something it missed or misread. A CSV whose columns were worked out automatically
 may have been read with the wrong ones, and a layout may fit it now. A committed document can be
 read again from its page (Import → History → the document → *Read it again*). The Import page lists
 the documents worth reading again: those an earlier reader read, and CSVs whose columns were worked
 out.
 
-- **A PDF or screenshot is read with the current reader and its check.** That is off until you
+- **A PDF or screenshot, or a spreadsheet Claude read, is read with the current reader and its
+  check.** That is off until you
   turn it on (Settings → Import & extraction → *Read stored documents again*). A reading costs what
   an upload does. Nothing reads by itself.
 - **A CSV or spreadsheet is parsed again on this machine**, at once, whatever that setting says:

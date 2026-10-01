@@ -1082,6 +1082,19 @@ export class Store extends EventEmitter {
     });
   }
 
+  /** Put a figure in place of the stored one with its id: unlike `updateFigure`, a field it leaves out is removed. */
+  replaceFigure(figure: Figure, message: string): Promise<Figure> {
+    return this.exclusive(async () => {
+      const i = this.state.figures.findIndex((f) => f.id === figure.id);
+      if (i < 0) throw new StoreError(`Unknown figure ${figure.id}`, 404);
+      const next = FigureSchema.parse(figure);
+      this.state.figures[i] = next;
+      await this.writeJsonl('figures.jsonl', this.state.figures);
+      this.changed(message, ['figures.jsonl']);
+      return next;
+    });
+  }
+
   deleteFigure(id: string, message: string): Promise<void> {
     return this.exclusive(async () => {
       const before = this.state.figures.length;

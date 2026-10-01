@@ -315,6 +315,9 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
       ...(f.accountId ? { accountId: f.accountId } : {}),
       ...(f.payer ? { payer: f.payer } : {}),
       ...(f.payerReference ? { payerReference: f.payerReference } : {}),
+      ...(f.taxCode ? { taxCode: f.taxCode } : {}),
+      ...(f.paidBy && f.paidBy !== f.payer ? { paidBy: f.paidBy } : {}),
+      ...(f.work ? { work: f.work } : {}),
     }));
 
   // Validate everything before the first write.
