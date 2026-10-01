@@ -9,6 +9,7 @@ import type {
   CsvProfile,
   Figure,
   Goal,
+  PensionArrangement,
   Budget,
   HoldingsSnapshot,
   ImportRecord,
@@ -1010,6 +1011,24 @@ export interface CompanyView {
   /** Each dividend: a voucher (with the credit that paid it, when found), or a credit with no voucher. */
   dividends: { date: string; amount: number; taxYear?: string; figureId?: string; importId?: string; paidIn?: { transactionId: string; accountId: string; date: string } }[];
   dividendsTotal: number;
+}
+
+/** A pension account's arrangements with your employers, each checked against what arrived (FORMULAS §11). */
+export interface PensionArrangementsResponse {
+  arrangements: {
+    employmentId: string;
+    employer: string;
+    arrangement: PensionArrangement;
+    /** A single payment: when it arrived. */
+    arrived?: { date: string; transactionId: string };
+    /** A monthly one: each collection, and the months since the first with none (YYYY-MM). */
+    collected?: { date: string; transactionId: string }[];
+    missing?: string[];
+    /** False when its first collection was not found within two months of the form. */
+    firstSeen?: boolean;
+  }[];
+  /** Employer contributions into the account that no arrangement accounts for. */
+  others: { date: string; amount: number; transactionId: string }[];
 }
 
 /** Pay owed to you and not yet in the bank: shown beside the estate value, never counted in it. */

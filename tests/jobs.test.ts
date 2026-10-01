@@ -175,7 +175,7 @@ describe('HMRC’s pages, uploaded', () => {
   });
 });
 
-const job = (id: string, employer: string, extra: Partial<Employment> = {}): Employment => ({ id, employer, aliases: [], payrollNumbers: [], owed: [], createdBy: 'owner', createdAt: stamp, updatedAt: stamp, ...extra });
+const job = (id: string, employer: string, extra: Partial<Employment> = {}): Employment => ({ id, employer, aliases: [], payrollNumbers: [], owed: [], pensionArrangements: [], createdBy: 'owner', createdAt: stamp, updatedAt: stamp, ...extra });
 
 describe('jobs, HMRC’s records and the Pay tab', () => {
   let dir: string;

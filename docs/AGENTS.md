@@ -189,6 +189,7 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
       { "kind": "remove_internal_move", "transaction": "tx_…", "why": "…" },
       { "kind": "set_account_dates", "account": "example-fixed", "closedOn": "2026-02-01", "why": "…" },
       { "kind": "move_balance", "balance": "bal_…", "to": "example-easy-access", "why": "…" },
+      { "kind": "add_pension_arrangement", "employmentId": "example-job", "arrangement": { "accountId": "example-sipp", "kind": "monthly", "amount": 250, "from": "2024-11-14" }, "why": "…" },
       { "kind": "add_company", "company": { "id": "example-ltd", "name": "Example Ltd", "number": "01234567", "holdings": [{ "shareClass": "A ordinary", "shares": 4, "totalShares": 120, "certificate": "12" }] }, "valuation": { "asOf": "2025-12-31", "method": "net-assets", "netAssets": 100000, "value": 3333.33, "note": "…" }, "account": { "id": "example-ltd-shares", "name": "Example Ltd shares" }, "why": "…" }
     ]
   }
@@ -217,6 +218,9 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
     account was not open that day, or the strong balances either side of it there do not add up
     with it. Where it goes, the account is open that day, has a strong balance on at least one
     side, and they add up with it (and any balance of that day agrees).
+  - A pension arrangement (`add_pension_arrangement`) is for a job and a pension account you pay
+    into (not a State or defined-benefit pension), does not start in the future, and is not there
+    already.
   - A company added (`add_company`) is new: no company with its id or number, and no account with
     the id its account would take. Its valuation is not in the future. A book value's `why` names
     the documents its figures come from (the share certificate, the accounts, the confirmation

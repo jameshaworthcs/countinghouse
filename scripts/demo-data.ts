@@ -407,7 +407,15 @@ async function main() {
     'demo: figures',
   );
   await store.setEmployments([
-    job('acme-analytics', 'Acme Analytics Ltd', { aliases: ['ACME ANALYTICS LTD', 'ACME ANALYTICS LIMITED'], payeReference: '123/AB456', payrollNumbers: ['40021'], startedOn: '2022-09-05', pensionAccountId: 'workplace-pension' }),
+    job('acme-analytics', 'Acme Analytics Ltd', {
+      aliases: ['ACME ANALYTICS LTD', 'ACME ANALYTICS LIMITED'],
+      payeReference: '123/AB456',
+      payrollNumbers: ['40021'],
+      startedOn: '2022-09-05',
+      pensionAccountId: 'workplace-pension',
+      // Its salary sacrifice: Acme pays the whole contribution each month, more from April 2026.
+      ...(SPARSE ? {} : { pensionArrangements: [{ accountId: 'workplace-pension', kind: 'monthly' as const, amount: 1_800, from: START, until: '2026-03-31', note: 'Salary sacrifice: the whole contribution, paid by Acme', source: {} }, { accountId: 'workplace-pension', kind: 'monthly' as const, amount: 2_075, from: '2026-04-01', note: 'Salary sacrifice after the pay rise', source: {} }] }),
+    }),
     ...(marking.length
       ? [
           job('example-marking', 'Example Marking Ltd', {

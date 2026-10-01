@@ -487,6 +487,24 @@ export const PayeReferenceSchema = z.string().regex(/^\d{3}\/[A-Z0-9]{1,10}$/);
 const TaxYearLabelSchema = z.string().regex(/^\d{4}\/\d{2}$/);
 
 /**
+ * An employer's contribution to a pension account of yours, as a form set it up (a SIPP's contribution
+ * form, say): a single payment, or one each month. Gross: an employer's contribution has no tax relief
+ * to add (FORMULAS.md §11, "Pension arrangements").
+ */
+export const PensionArrangementSchema = z.object({
+  accountId: SlugSchema,
+  kind: z.enum(['single', 'monthly']),
+  amount: MoneySchema,
+  /** The form's date. A single payment is expected within 60 days of it; a monthly one's first collection within two months. */
+  from: ISODateSchema,
+  /** The last month a monthly one is for, when it was set to end. */
+  until: ISODateSchema.optional(),
+  note: z.string().max(300).optional(),
+  source: SourceRefSchema.default({}),
+});
+export type PensionArrangement = z.infer<typeof PensionArrangementSchema>;
+
+/**
  * A job: one employment with one employer, as its documents and HMRC know it (docs/DATA_FORMAT.md,
  * employments.json). Its documents name the employer in several ways (a group name on the
  * payslips, the employing company on the P60, a payroll company in the bank). They are one job when
@@ -509,6 +527,8 @@ export const EmploymentSchema = z.object({
   payLagMonths: z.number().int().min(0).max(3).optional(),
   /** Pay periods (by their last day) whose pay has not arrived and that you say is owed to you. */
   owed: z.array(z.object({ periodEnd: ISODateSchema, note: z.string().max(500).optional(), markedAt: TimestampSchema })).max(36).default([]),
+  /** Pension contributions the employer pays into a pension account of yours, as a form set them up. */
+  pensionArrangements: z.array(PensionArrangementSchema).max(20).default([]),
   /** How the record began: from an import, by you, or by a data migration. */
   createdBy: z.enum(['import', 'owner', 'migration']).default('import'),
   notes: z.string().max(2000).optional(),
@@ -1614,6 +1634,8 @@ const changeUnion = <K extends z.ZodType<string | undefined>>(key: K) =>
      * Add a company you hold shares in, from its documents (a share certificate, its accounts): your
      * holding, and its value as a new "other asset" account in your estate, valued on `valuation.asOf`.
      */
+    /** Add a pension arrangement to a job: what its employer said it would pay into a pension account of yours. */
+    z.object({ key, kind: z.literal('add_pension_arrangement'), why: ChangeWhySchema, employmentId: SlugSchema, arrangement: PensionArrangementSchema }),
     z.object({
       key,
       kind: z.literal('add_company'),

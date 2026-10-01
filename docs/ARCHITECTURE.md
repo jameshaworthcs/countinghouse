@@ -42,7 +42,7 @@ Source layout:
 | `src/shared/` | Isomorphic code: schemas (`schema.ts`), money, dates, UK rules, account-type metadata, categories, merchants, categoriser, reconciliation, what a document adds to a recorded payment (`detail.ts`), identifiers kept out of the data (`privacy.ts`), API types |
 | `src/server/` | Store, git, auth, security, migrations, enrichment, routes, app composition; `employments.ts` matches a document's employer to one of your jobs |
 | `src/server/ingest/` | Everything from bytes to committed records; `govuk.ts` reads HMRC's gov.uk pages and `payslips.ts` known payslip layouts from their text, on this machine |
-| `src/server/analytics/` | Read-only computations over the store; `model.ts` is pure (no store access); `sources.ts` decides which document's figure counts when several state one job's year; `payslips.ts` reads payslips in full (their year to date, gaps, employer costs); `taxdocuments.ts` is Settings → Tax documents; `companies.ts` is your shares in companies |
+| `src/server/analytics/` | Read-only computations over the store; `model.ts` is pure (no store access); `sources.ts` decides which document's figure counts when several state one job's year; `payslips.ts` reads payslips in full (their year to date, gaps, employer costs); `taxdocuments.ts` is Settings → Tax documents; `companies.ts` is your shares in companies; `arrangements.ts` checks what employers set up to pay into your pensions |
 | `src/server/agents/` | Agent jobs: the CLI runner, job kinds and prompts, the digest, the queue |
 | `src/server/records.ts` | The validated write path for agent-maintained records |
 | `src/server/proposals.ts` | Fixes agents propose to your data, checked against it and applied only by you ([AGENTS.md §5](AGENTS.md)) |

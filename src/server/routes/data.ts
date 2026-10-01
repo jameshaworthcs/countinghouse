@@ -46,6 +46,7 @@ import { balanceId, figureId, ruleId, transactionId } from '../ids';
 import { payerKey } from '../analytics/pay';
 import { payeReference } from '../analytics/sources';
 import { companiesView, companyView } from '../analytics/companies';
+import { arrangementsInto } from '../analytics/arrangements';
 import { taxDocuments } from '../analytics/taxdocuments';
 import { matchEmployment } from '../employments';
 import { StoreError } from '../store';
@@ -803,6 +804,12 @@ export function dataRoutes(ctx: AppContext): Hono {
   // ─── Companies you hold shares in (companies.json) ───────────────────────────────────────────
 
   app.get('/companies', (c) => c.json(companiesView(store)));
+
+  /** A pension account's arrangements with your employers, checked against what arrived. */
+  app.get('/accounts/:id/arrangements', (c) => {
+    if (!store.account(c.req.param('id'))) throw new StoreError('No such account', 404);
+    return c.json(arrangementsInto(store, c.req.param('id')));
+  });
 
   /** Change a company: what you set wins. Its valuations are its account's balances. */
   app.put('/companies/:id', async (c) => {

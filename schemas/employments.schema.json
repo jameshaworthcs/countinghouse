@@ -93,6 +93,69 @@
               ]
             }
           },
+          "pensionArrangements": {
+            "default": [],
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "accountId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64,
+                  "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                  "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "single",
+                    "monthly"
+                  ]
+                },
+                "amount": {
+                  "type": "number",
+                  "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                },
+                "from": {
+                  "type": "string",
+                  "description": "Calendar date, YYYY-MM-DD"
+                },
+                "until": {
+                  "type": "string",
+                  "description": "Calendar date, YYYY-MM-DD"
+                },
+                "note": {
+                  "type": "string",
+                  "maxLength": 300
+                },
+                "source": {
+                  "default": {},
+                  "type": "object",
+                  "properties": {
+                    "importId": {
+                      "type": "string"
+                    },
+                    "documentId": {
+                      "type": "string"
+                    },
+                    "row": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  }
+                }
+              },
+              "required": [
+                "accountId",
+                "kind",
+                "amount",
+                "from"
+              ]
+            }
+          },
           "createdBy": {
             "default": "import",
             "type": "string",

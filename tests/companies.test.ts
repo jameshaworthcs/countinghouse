@@ -27,7 +27,7 @@ describe('shares you hold in a company', () => {
     app = await createApp(config, { version: 'test', env: {}, inbox: false });
     const { store } = app.ctx;
     await store.setAccounts([{ id: 'current', name: 'Current', type: 'current', currency: 'GBP', status: 'open', aliases: [], includeInNetWorth: true, createdAt: stamp, updatedAt: stamp }]);
-    await store.setEmployments([{ id: 'quillon', employer: 'QUILLON SYSTEMS LTD', aliases: [], payrollNumbers: [], owed: [], createdBy: 'owner', createdAt: stamp, updatedAt: stamp }]);
+    await store.setEmployments([{ id: 'quillon', employer: 'QUILLON SYSTEMS LTD', aliases: [], payrollNumbers: [], owed: [], pensionArrangements: [], createdBy: 'owner', createdAt: stamp, updatedAt: stamp }]);
     // A dividend voucher and the credit that paid it; and a dividend credit with no voucher.
     await store.addFigures([{ id: figureId('dividends_paid', 1200, '2025/26', 'QUILLON SYSTEMS LTD', 'Dividend', 'v1'), kind: 'dividends_paid', label: 'Dividend', amount: 1200, currency: 'GBP', taxYear: '2025/26', periodEnd: '2025-09-19', payer: 'QUILLON SYSTEMS LTD', source: {}, createdAt: stamp }], 'test: voucher');
     await store.addTransactions(

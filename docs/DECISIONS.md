@@ -1271,3 +1271,20 @@ quantified.
   other change to their data.
 - **Its dividends are listed with the credits that paid them**, by the rule the dividend allowance
   already uses. The match is computed, not stored.
+
+## 2026-10-01: Pension arrangements: what an employer set up, checked against what arrived
+
+The fifth slice, third part. An employer's contribution form for the owner's SIPP (a single payment
+and a monthly one by Direct Debit) was "nothing to record", although the SIPP's own rows show the
+payments, and when they stopped.
+
+- **An arrangement is kept on the job** (`pensionArrangements`): the account, single or monthly,
+  the gross amount, the form's date and its document.
+  - Considered: a record of its own. It is always one employer's, and the job is where its pay,
+    codes and owed months already are.
+- **The pension's page checks it against the account's employer contributions.** A single payment
+  is looked for within 60 days of the form. A monthly one is checked from its first collection,
+  looked for within two months, so a Direct Debit's start-up wait is not a gap. A month with none is
+  listed, and contributions on no arrangement are listed apart.
+- **It changes no total.** The allowance counts the contributions that arrived, as before.
+- **An agent proposes it** (`add_pension_arrangement`), from the form; the owner applies it.

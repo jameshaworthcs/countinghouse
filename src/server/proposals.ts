@@ -17,11 +17,12 @@ import { EventEmitter } from 'node:events';
 import { mkdir, readdir, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import type { ProposalBalance, ProposalChangeView, ProposalCheckResponse, ProposalDecision, ProposalListResponse, ProposalRow, ProposalSummary, ProposalView } from '../shared/api';
+import { ACCOUNT_TYPE_META } from '../shared/accounts';
 import { CategoryIndex } from '../shared/categories';
 import { transferLegCategory, type Categoriser } from '../shared/categorise';
 import { addDays, diffDays, formatDate, today } from '../shared/dates';
 import { formatMoney, fromMinor, toMinor } from '../shared/money';
-import { AccountSchema, BalanceSnapshotSchema, CompanySchema, ProposalSchema, type Account, type BalanceSnapshot, type Company, type Proposal, type ProposalInput, type ProposalStatus, type ProposedChange, type Provenance, type Transaction } from '../shared/schema';
+import { AccountSchema, BalanceSnapshotSchema, CompanySchema, EmploymentSchema, ProposalSchema, type Account, type BalanceSnapshot, type Company, type Employment, type PensionArrangement, type Proposal, type ProposalInput, type ProposalStatus, type ProposedChange, type Provenance, type Transaction } from '../shared/schema';
 import { BalanceEngine, type BalanceSource } from './analytics/balances';
 import { categoriserFor } from './categoriser';
 import { atomicWrite, Mutex, nowISO } from './fsutil';
@@ -74,6 +75,8 @@ interface Outcome {
   moves: Map<string, { balance: BalanceSnapshot; from: string; to: string }>;
   /** Companies to add, and the balances (their valuations) to record on their new accounts. */
   companies: Map<string, Company>;
+  /** Jobs as they will be (a pension arrangement added). */
+  jobs: Map<string, Employment>;
   balances: BalanceSnapshot[];
 }
 
@@ -103,7 +106,7 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
   const accountName = (id: string) => store.account(id)?.name ?? id;
   let categoriserMemo: Categoriser | undefined;
   const categoriser = () => (categoriserMemo ??= categoriserFor(store));
-  const out: Outcome = { results: new Map(), patches: new Map(), removed: new Map(), accounts: new Map(), touchedRows: new Map(), touchedAccounts: new Map(), moves: new Map(), companies: new Map(), balances: [] };
+  const out: Outcome = { results: new Map(), patches: new Map(), removed: new Map(), accounts: new Map(), touchedRows: new Map(), touchedAccounts: new Map(), moves: new Map(), companies: new Map(), jobs: new Map(), balances: [] };
   const balanceById = new Map(store.balances().map((b) => [b.id, b]));
   // Rows as the changes so far leave them (null: removed), and transfer pairs likewise.
   const rows = new Map<string, Transaction | null>();
@@ -302,6 +305,20 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
         // Whether it is wrong where it is, and fits where it goes, is checked once every change has run.
         return {};
       }
+      case 'add_pension_arrangement': {
+        const job = out.jobs.get(c.employmentId) ?? store.employment(c.employmentId);
+        if (!job) return { problem: `Job ${c.employmentId} is not in your data.` };
+        const acc = account(c.arrangement.accountId);
+        if (!acc) return { problem: `Account ${c.arrangement.accountId} is not in your data.` };
+        if (!ACCOUNT_TYPE_META[acc.type].pension || acc.type === 'state_pension' || acc.type === 'db_pension') return { problem: `${acc.name} is not a pension you pay into.` };
+        if (c.arrangement.from > today()) return { problem: `${formatDate(c.arrangement.from)} is in the future.` };
+        if (c.arrangement.until && c.arrangement.until < c.arrangement.from) return { problem: 'It would end before it starts.' };
+        // The same arrangement there already: done.
+        const same = (a: PensionArrangement) => a.accountId === c.arrangement.accountId && a.kind === c.arrangement.kind && toMinor(a.amount) === toMinor(c.arrangement.amount) && a.from === c.arrangement.from;
+        if (job.pensionArrangements.some(same)) return { alreadySo: true };
+        out.jobs.set(job.id, EmploymentSchema.parse({ ...job, pensionArrangements: [...job.pensionArrangements, c.arrangement], updatedAt: nowISO() }));
+        return {};
+      }
       case 'add_company': {
         const there = out.companies.get(c.company.id) ?? store.company(c.company.id);
         // There already with this holding: what it asks for is done.
@@ -395,7 +412,7 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
 
 /** Applying would leave the data as it is: every change is already so, or they undo each other. */
 function changesNothing(store: Store, o: Outcome): boolean {
-  if (o.removed.size || o.companies.size || o.balances.length) return false;
+  if (o.removed.size || o.companies.size || o.balances.length || o.jobs.size) return false;
   if ([...o.moves.values()].some((m) => m.to !== m.balance.accountId)) return false;
   for (const [id, patch] of o.patches) {
     const t = store.transaction(id) as Record<string, unknown> | undefined;
@@ -436,6 +453,7 @@ function namedRows(c: ProposedChange): string[] {
     case 'set_account_dates':
     case 'move_balance':
     case 'add_company':
+    case 'add_pension_arrangement':
       return [];
   }
 }
@@ -607,6 +625,7 @@ export class ProposalService extends EventEmitter {
       if (outcome.removed.size) await this.store.deleteTransactions([...outcome.removed.keys()], message);
       for (const account of outcome.accounts.values()) await this.store.upsertAccount(account, message);
       for (const company of outcome.companies.values()) await this.store.upsertCompany(company, message);
+      for (const job of outcome.jobs.values()) await this.store.upsertEmployment(job, message);
       if (outcome.balances.length) await this.store.addBalances(outcome.balances, message);
       if (outcome.moves.size) await this.store.moveBalances([...outcome.moves.values()].map((m) => ({ id: m.balance.id, accountId: m.to })), message);
       const balances = [...outcome.moves.values()].map((m) => m.balance);

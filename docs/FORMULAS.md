@@ -432,6 +432,20 @@ Deterministic rules with named thresholds (`SIGNAL_RULES` in `analytics/spending
   `pensionAccountId`, or an account whose `pension.employer` is the job) is counted there, not
   again. Otherwise they are a scheme of their own.
 - The total is every scheme's: a SIPP's employer contributions and a workplace scheme's both count.
+
+**Pension arrangements** (a job's `pensionArrangements`, `analytics/arrangements.ts`): what an
+employer's form set up to pay into a pension account of yours, checked against the account's
+`employer-contribution` credits of that amount, to the penny, each used once:
+
+- **A single payment** arrived when such a credit falls within 60 days of the form's date
+  (`SINGLE_PAYMENT_DAYS`).
+- **A monthly one** is checked from its first collection, looked for within two months of the form
+  (`FIRST_COLLECTION_MONTHS`), to the month it ends or now. Each month has a collection or is
+  listed as having none; this month's may not have come yet, so it is never listed.
+- Employer contributions into the account from the first arrangement on that none accounts for are
+  listed apart.
+- The contributions count for the annual allowance as above, whatever an arrangement says: the
+  arrangement is only what was set up.
 - **Not yet known** (`incomplete`) when a pension account's data does not cover the tax year so
   far (±45 days) and no statement figures exist for it: the amount used is then a minimum.
 - Taper per the UK tables when income is given.

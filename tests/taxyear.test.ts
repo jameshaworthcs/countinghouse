@@ -32,7 +32,7 @@ describe('the Self Assessment deadlines', () => {
 describe('the tax year in full', () => {
   let dir: string;
   let store: Store;
-  const job = (id: string, employer: string, extra: Partial<Employment> = {}): Employment => ({ id, employer, aliases: [], payrollNumbers: [], owed: [], createdBy: 'owner', createdAt: stamp, updatedAt: stamp, ...extra });
+  const job = (id: string, employer: string, extra: Partial<Employment> = {}): Employment => ({ id, employer, aliases: [], payrollNumbers: [], owed: [], pensionArrangements: [], createdBy: 'owner', createdAt: stamp, updatedAt: stamp, ...extra });
   const record = (r: ExtractedHmrc, extra: Partial<HmrcRecord> = {}): HmrcRecord => ({ ...r, id: hmrcId(r), source: {}, createdAt: stamp, ...extra }) as HmrcRecord;
   const fig = (kind: Figure['kind'], amount: number, payer: string, employmentId: string, extra: Partial<Figure> = {}): Figure => ({ id: figureId(kind, amount, '2025/26', payer, kind, employmentId), kind, label: kind, amount, currency: 'GBP', taxYear: '2025/26', payer, employmentId, source: {}, createdAt: stamp, ...extra });
 

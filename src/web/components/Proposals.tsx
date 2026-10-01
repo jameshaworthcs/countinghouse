@@ -26,6 +26,7 @@ export const CHANGE_LABELS: Record<ProposedChangeKind, { title: string; count: (
   set_account_dates: { title: 'Change an account’s dates', count: (n) => (n === 1 ? 'an account’s dates' : `${n} accounts’ dates`), icon: <CalendarDays className="size-4" aria-hidden /> },
   move_balance: { title: 'Move a balance to its account', count: (n) => `${plural(n, 'balance')} moved`, icon: <ArrowRightLeft className="size-4" aria-hidden /> },
   add_company: { title: 'Add shares you hold in a company', count: (n) => plural(n, 'company', 'companies'), icon: <Building2 className="size-4" aria-hidden /> },
+  add_pension_arrangement: { title: 'Add what an employer pays into your pension', count: (n) => plural(n, 'pension arrangement'), icon: <PiggyBank className="size-4" aria-hidden /> },
 };
 
 /** "5 transfers linked, 2 transfer links undone, 1 category" */
@@ -360,6 +361,23 @@ export function ChangeBody({ change, view }: { change: ProposedChange; view: Pro
           {line('Opened', acc?.openedOn, change.openedOn)}
           {line('Closed', acc?.closedOn, change.closedOn)}
           {change.closedOn !== undefined && (acc?.status === 'closed') !== (change.closedOn !== null) && <div className="text-[12.5px] text-ink-3">{change.closedOn ? 'It will show as closed, and stop counting after that day.' : 'It will show as open again.'}</div>}
+        </div>
+      );
+    }
+    case 'add_pension_arrangement': {
+      const a = change.arrangement;
+      return (
+        <div className="grid gap-1 rounded-lg border border-line bg-panel px-3 py-2 text-[13px]">
+          <div className="text-ink">
+            <span className="font-medium">{change.employmentId}</span> pays <span className="sensitive tabular-nums">{money(a.amount)}</span> {a.kind === 'single' ? 'once' : 'a month'}, gross, into{' '}
+            <Link to={`/accounts/${a.accountId}`} className="hover:underline">
+              {view.accounts[a.accountId]?.name ?? accountName(a.accountId)}
+            </Link>
+            , from its form of {formatDate(a.from)}
+            {a.until ? ` to ${formatDate(a.until)}` : ''}.
+          </div>
+          {a.note && <div className="text-[12.5px] text-ink-3">{a.note}</div>}
+          <div className="text-[12.5px] text-ink-3">The account’s page then checks it against the contributions that arrive.</div>
         </div>
       );
     }

@@ -202,6 +202,10 @@ and HMRC's records about it are one employer's.
 - `owed`: `[{periodEnd, note?, markedAt}]`, pay periods whose pay has not arrived and that you say
   is owed to you (a context record of pay not received says so too, below). Pay arriving later
   pairs with it.
+- `pensionArrangements`: `[{accountId, kind, amount, from, until?, note?, source}]`, what the
+  employer set up to pay into a pension account of yours (a SIPP's contribution form, say): `kind`
+  `single` or `monthly`, `amount` gross, `from` the form's date. The account's page checks each
+  against what arrived ([FORMULAS.md §11](FORMULAS.md), "Pension arrangements").
 - `createdBy`: `import` (set up on reviewing a document), `owner` or `migration`. `notes`,
   `createdAt`, `updatedAt`.
 
@@ -348,6 +352,8 @@ lives in the work area (`<work>/proposals/`), never here.
   - `set_account_dates {account, openedOn?, closedOn?}` (`null` clears one).
   - `move_balance {balance, to}`: a balance a document was read into the wrong account, moved to
     the account it is of. It keeps its id and everything else.
+  - `add_pension_arrangement {employmentId, arrangement}`: what a job's employer set up to pay into
+    a pension of yours, added to the job's `pensionArrangements`.
   - `add_company {company, valuation, account}`: shares you hold in a company, from its documents:
     the company (`companies.json`), a new "other asset" account `{id, name}`, and its valuation
     recorded as that account's balance.

@@ -2,7 +2,8 @@ import { FileText, Pencil, Plus, Trash2, TriangleAlert, Upload } from 'lucide-re
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { ACCOUNT_TYPE_META, balanceModeOf } from '../../shared/accounts';
-import type { AccountDetailResponse, CompanyView, CoverageResponse, TransactionsResponse } from '../../shared/api';
+import { formatMonth } from '../../shared/dates';
+import type { AccountDetailResponse, CompanyView, CoverageResponse, PensionArrangementsResponse, TransactionsResponse } from '../../shared/api';
 import { AccountDialog, BalanceDialog } from '../components/AccountForms';
 import { ChartFrame } from '../components/charts/common';
 import { TimeChart } from '../components/charts/TimeChart';
@@ -16,6 +17,45 @@ import { cn, formatDate, money, pct, timeAgo } from '../lib/format';
 import { Sorted } from '../lib/sort';
 
 type Tab = 'transactions' | 'balances' | 'holdings' | 'documents';
+
+/** What your employers said they would pay into this pension, and what arrived. */
+function ArrangementsCard({ accountId }: { accountId: string }) {
+  const q = useApi<PensionArrangementsResponse>(['arrangements', accountId], `/accounts/${accountId}/arrangements`);
+  const d = q.data;
+  if (!d?.arrangements.length) return null;
+  const month = (m: string) => formatMonth(`${m}-01`);
+  return (
+    <Card className="mb-5" title="Paid in by your employer" description="What each employer’s form set up, checked against the contributions that arrived.">
+      <ul className="flex flex-col gap-2 text-[13px] text-ink-2">
+        {d.arrangements.map((x, i) => {
+          const a = x.arrangement;
+          return (
+            <li key={i}>
+              <div>
+                <span className="font-medium text-ink">{x.employer}</span>: <Money value={a.amount} /> {a.kind === 'single' ? 'once' : 'a month'}, gross, from its form of {formatDate(a.from)}
+                {a.until ? ` to ${formatDate(a.until)}` : ''}.{a.note ? <span className="text-ink-3"> {a.note}.</span> : null}
+              </div>
+              <div className="text-[12.5px] text-ink-3">
+                {a.kind === 'single'
+                  ? x.arrived
+                    ? `Arrived on ${formatDate(x.arrived.date)}.`
+                    : 'Not found in this account’s data within 60 days of the form.'
+                  : x.firstSeen === false
+                    ? 'Its first collection was not found within two months of the form.'
+                    : `${x.collected!.length} collected, from ${formatDate(x.collected![0]!.date)} to ${formatDate(x.collected!.at(-1)!.date)}.${x.missing!.length ? ` None in ${x.missing!.length === 1 ? month(x.missing![0]!) : `${x.missing!.length} months since: ${month(x.missing![0]!)} to ${month(x.missing!.at(-1)!)}`}.` : ''}`}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+      {d.others.length > 0 && (
+        <p className="mt-3 text-[12.5px] text-ink-3">
+          Other employer contributions, on no arrangement: {d.others.map((o) => `${money(o.amount)} on ${formatDate(o.date)}`).join(', ')}.
+        </p>
+      )}
+    </Card>
+  );
+}
 
 /** The company whose shares this account holds: the holding, how it is valued, and its dividends. */
 function CompanyCard({ accountId }: { accountId: string }) {
@@ -168,6 +208,7 @@ export default function AccountDetail() {
       )}
 
       <CompanyCard accountId={account.id} />
+      {ACCOUNT_TYPE_META[account.type].pension && <ArrangementsCard accountId={account.id} />}
 
       {empty ? (
         <Card>
