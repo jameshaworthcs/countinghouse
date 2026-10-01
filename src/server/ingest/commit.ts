@@ -9,12 +9,13 @@ import { tidyPlace } from '../../shared/places';
 import { formatMoney, fromMinor, toMinor } from '../../shared/money';
 import { taxYearOf } from '../../shared/uk';
 import { detailToAdd, fillIn, seenInEntry, stillAdds } from '../../shared/detail';
-import type { Account, BalanceSnapshot, DetailField, Draft, DraftSection, Employment, Extraction, Figure, HmrcRecord, Holding, HoldingsSnapshot, ImportRecord, PayslipRecord, Transaction } from '../../shared/schema';
-import { AccountSchema, BalanceSnapshotSchema, DraftSchema, EmploymentSchema, FigureSchema, HmrcRecordSchema, HoldingsSnapshotSchema, PayslipRecordSchema, TransactionSchema } from '../../shared/schema';
+import { sameTerms, termsOfReading } from '../../shared/terms';
+import type { Account, BalanceSnapshot, DetailField, Draft, DraftSection, Employment, Extraction, Figure, HmrcRecord, Holding, HoldingsSnapshot, ImportRecord, PayslipRecord, Terms, Transaction } from '../../shared/schema';
+import { AccountSchema, BalanceSnapshotSchema, DraftSchema, EmploymentSchema, FigureSchema, HmrcRecordSchema, HoldingsSnapshotSchema, PayslipRecordSchema, TermsSchema, TransactionSchema } from '../../shared/schema';
 import { learn, matchEmployment } from '../employments';
 import { payeReference } from '../analytics/sources';
 import { nowISO, safeFileName } from '../fsutil';
-import { balanceId, figureId, hmrcId, holdingsId, payslipId, transactionId, transferGroupId } from '../ids';
+import { balanceId, figureId, hmrcId, holdingsId, payslipId, termsId, transactionId, transferGroupId } from '../ids';
 import { categoriserFor } from '../categoriser';
 import { linkTransfers, rederive, salaryByPayroll } from '../enrich';
 import { StoreError, type Store } from '../store';
@@ -258,13 +259,11 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
         ...(byYou ? { enteredBy: 'user' as const } : {}),
         ...(section.balanceDateSource ? { dateSource: section.balanceDateSource } : {}),
         ...(section.availableBalance !== undefined ? { availableBalance: section.availableBalance } : {}),
-        ...(section.creditLimit !== undefined ? { creditLimit: section.creditLimit } : {}),
         ...(section.contributions !== undefined ? { contributions: section.contributions } : {}),
         ...(section.gain !== undefined ? { gain: section.gain } : {}),
         ...(section.cash !== undefined ? { cash: section.cash } : {}),
         ...(section.bonusToDate !== undefined ? { bonusToDate: section.bonusToDate } : {}),
         ...(section.annualIncome !== undefined ? { annualIncome: section.annualIncome } : {}),
-        ...(section.interestRate !== undefined ? { interestRate: section.interestRate } : {}),
         ...(section.taxYearContributions !== undefined
           ? { taxYearContributions: section.taxYearContributions, taxYear: taxYearOf(section.balanceDate).label }
           : {}),
@@ -449,7 +448,22 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
     newTx.filter((t) => !t.transferGroup).map((t) => t.id),
     `import: ${label} (transfers linked)`,
   );
+  // Each account's terms on the day the document gives them for (its rates, its limit and a card's
+  // minimum payment), kept whether or not its balance is; not when the same terms are given already.
+  const termsFresh: Terms[] = [];
+  if (!nothingNew) {
+    for (const section of draft.sections) {
+      const account = resolved.get(section.key);
+      const asOf = section.balanceDate ?? section.periodEnd ?? draft.documentDate;
+      const content = account && asOf ? termsOfReading(section, account.type) : undefined;
+      if (!account || !asOf || !content) continue;
+      if ([...store.terms(account.id), ...termsFresh].some((t) => t.accountId === account.id && t.asOf === asOf && sameTerms(t, content))) continue;
+      termsFresh.push(TermsSchema.parse({ id: termsId(account.id, asOf, source), accountId: account.id, asOf, ...content, source, createdAt: stamp }));
+    }
+  }
   const balancesAdded = balances.length ? await store.addBalances(balances, `import: ${label} balance`) : 0;
+  if (termsFresh.length) await store.upsertRecords('terms', termsFresh, `import: ${label} terms`);
+  const termsAdded = termsFresh.length;
   const holdingsAdded = holdings.length ? await store.addHoldings(holdings, `import: ${label} holdings`, replacedHoldings) : 0;
   // A payroll number the document taught a job: the pay already recorded with it, uncategorised, is salary.
   const learned = [...jobsToWrite.values()].flatMap((e) => e.payrollNumbers.filter((n) => !(store.employment(e.id)?.payrollNumbers ?? []).includes(n)));
@@ -480,6 +494,7 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
       figuresAdded,
       ...(hmrcAdded ? { hmrcAdded } : {}),
       ...(payslipsAdded ? { payslipsAdded } : {}),
+      ...(termsAdded ? { termsAdded } : {}),
       ...(employmentsCreated.length ? { employmentsCreated } : {}),
       ...(jobIds.size ? { jobs: [...jobIds].map(([key, employmentId]) => ({ key, employmentId })) } : {}),
       ...(nothingNew ? { nothingNew: nothingNew.slice(0, 500) } : {}),
@@ -501,6 +516,7 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
     figuresAdded ? `${figuresAdded} figures` : '',
     hmrcAdded ? `${hmrcAdded} HMRC record${hmrcAdded === 1 ? '' : 's'}` : '',
     payslipsAdded ? `${payslipsAdded} payslip${payslipsAdded === 1 ? '' : 's'} in full` : '',
+    termsAdded ? 'terms' : '',
     employmentsCreated.length ? `${employmentsCreated.length} new job${employmentsCreated.length === 1 ? '' : 's'}` : '',
     salaried ? `${salaried} payment${salaried === 1 ? '' : 's'} with its payroll number now salary` : '',
   ].filter(Boolean);

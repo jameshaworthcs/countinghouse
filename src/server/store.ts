@@ -24,6 +24,7 @@ import {
   AgreementSchema,
   HmrcRecordSchema,
   PayslipRecordSchema,
+  TermsSchema,
   CsvProfileSchema,
   FigureSchema,
   CaptureItemSchema,
@@ -53,6 +54,7 @@ import {
   type Agreement,
   type HmrcRecord,
   type PayslipRecord,
+  type Terms,
   type CsvProfile,
   type Figure,
   type CaptureItem,
@@ -76,7 +78,7 @@ import {
 import { atomicWrite, Mutex, nowISO, readTextIfExists, sha256 } from './fsutil';
 
 /** Bump when the on-disk format changes, and add a migration in migrations.ts. */
-export const FORMAT_VERSION = 6;
+export const FORMAT_VERSION = 7;
 
 export interface DataIssue {
   file: string;
@@ -153,6 +155,7 @@ const JSONL_FILES = {
   receipts: { file: 'receipts.jsonl', schema: ReceiptSchema },
   hmrc: { file: 'hmrc.jsonl', schema: HmrcRecordSchema },
   payslips: { file: 'payslips.jsonl', schema: PayslipRecordSchema },
+  terms: { file: 'terms.jsonl', schema: TermsSchema },
 } as const;
 
 interface State {
@@ -181,6 +184,7 @@ interface State {
   receipts: Receipt[];
   hmrc: HmrcRecord[];
   payslips: PayslipRecord[];
+  terms: Terms[];
   transactions: Map<string, Transaction[]>;
   balances: Map<string, BalanceSnapshot[]>;
   holdings: Map<string, HoldingsSnapshot[]>;
@@ -214,6 +218,7 @@ function emptyState(): State {
     receipts: [],
     hmrc: [],
     payslips: [],
+    terms: [],
     transactions: new Map(),
     balances: new Map(),
     holdings: new Map(),
@@ -620,6 +625,11 @@ export class Store extends EventEmitter {
   get hmrc(): HmrcRecord[] {
     return this.state.hmrc;
   }
+  /** Every account's terms, or one account's, oldest first. */
+  terms(accountId?: string): Terms[] {
+    const list = accountId ? this.state.terms.filter((t) => t.accountId === accountId) : this.state.terms;
+    return [...list].sort((a, b) => a.asOf.localeCompare(b.asOf) || a.createdAt.localeCompare(b.createdAt));
+  }
   get payslips(): PayslipRecord[] {
     return this.state.payslips;
   }
@@ -839,9 +849,8 @@ export class Store extends EventEmitter {
     });
   }
 
-  /** Insert or replace records by id in a rewritable collection (insights, context, notes). */
-  /** Remove records by id from a JSONL collection that is not append-only (receipts). */
-  removeRecords<K extends 'receipts'>(name: K, ids: string[], message: string): Promise<number> {
+  /** Remove records by id from a JSONL collection that is not append-only (receipts, terms). */
+  removeRecords<K extends 'receipts' | 'terms'>(name: K, ids: string[], message: string): Promise<number> {
     return this.exclusive(async () => {
       const def = JSONL_FILES[name];
       const before = this.state[name] as unknown as { id: string }[];
@@ -854,7 +863,8 @@ export class Store extends EventEmitter {
     });
   }
 
-  upsertRecords<K extends 'insights' | 'context' | 'notes' | 'receipts' | 'hmrc' | 'payslips'>(name: K, records: State[K], message: string): Promise<void> {
+  /** Insert or replace records by id in a rewritable collection (insights, context, notes, …). */
+  upsertRecords<K extends 'insights' | 'context' | 'notes' | 'receipts' | 'hmrc' | 'payslips' | 'terms'>(name: K, records: State[K], message: string): Promise<void> {
     return this.exclusive(async () => {
       const def = JSONL_FILES[name];
       const list = [...(this.state[name] as unknown as { id: string }[])];

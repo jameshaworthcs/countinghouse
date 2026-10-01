@@ -12,6 +12,7 @@ import { candidateOf, classifyDuplicates, type DedupResult } from './dedup';
 import { sameHolding } from './match';
 import { sameMoney, sameText } from './verify';
 import { hmrcId, payslipId } from '../ids';
+import { sameTerms, termsOfReading, type TermsContent } from '../../shared/terms';
 
 export interface NothingNew {
   /** Why, in words, for the review page. */
@@ -21,13 +22,15 @@ export interface NothingNew {
 }
 
 /** The figures recorded with a balance (commitDraft writes them into one snapshot). */
-const BALANCE_FIELDS = ['balance', 'availableBalance', 'creditLimit', 'contributions', 'gain', 'cash', 'bonusToDate', 'taxYearContributions', 'annualIncome', 'interestRate'] as const;
+const BALANCE_FIELDS = ['balance', 'availableBalance', 'contributions', 'gain', 'cash', 'bonusToDate', 'taxYearContributions', 'annualIncome'] as const;
 type BalanceField = (typeof BALANCE_FIELDS)[number];
 
 type Fact =
   // `adds`: what the row fills in on the payment it matches (shared/detail.ts).
   | { kind: 'row'; account: string; date: string; amount: number; description: string; adds?: DetailFields }
   | { kind: 'balance'; account: string; date: string; values: Partial<Record<BalanceField, number>> }
+  // An account's terms on a day (its rates, limit and minimum payment): kept whether or not its balance is.
+  | { kind: 'terms'; account: string; date: string; terms: TermsContent }
   | { kind: 'holding'; account: string; date: string; holding: Holding }
   | { kind: 'figure'; figure: DraftFigure }
   // An HMRC record is known by what it says (ids.ts, `hmrcId`).
@@ -73,6 +76,13 @@ function factsOf(record: ImportRecord, store: Store): Placed[] {
       const held = stored ? store.balances(stored).some((b) => b.date === date && !b.approximate && BALANCE_FIELDS.every((k) => values[k] === undefined || sameMoney(values[k], b[k]))) : false;
       out.push({ fact: { kind: 'balance', account, date, values }, stored: held });
     }
+    const type = s.target.mode === 'new' ? s.target.account.type : ((stored ? store.account(stored)?.type : undefined) ?? s.detected.accountType ?? 'current');
+    const terms = termsOfReading(s, type);
+    const termsDate = s.balanceDate ?? s.periodEnd ?? draft.documentDate;
+    if (terms && termsDate) {
+      const held = stored ? store.terms(stored).some((t) => t.asOf === termsDate && sameTerms(t, terms)) : false;
+      out.push({ fact: { kind: 'terms', account, date: termsDate, terms }, stored: held });
+    }
     // A forecast with no balance is recorded as a figure on its account (ingest/commit.ts).
     if (s.annualIncome !== undefined && s.balanceDate && !(s.recordBalance && s.balance !== undefined)) {
       const figure: DraftFigure = { key: `${s.key}:forecast`, include: true, kind: 'pension_income_forecast', label: 'Forecast income per year', amount: s.annualIncome, currency: s.currency, periodEnd: s.balanceDate, payer: account };
@@ -112,6 +122,7 @@ function covers(k: Fact, f: Fact): boolean {
   if (k.kind === 'row' && f.kind === 'row') return k.account === f.account && k.date === f.date && sameMoney(k.amount, f.amount) && sameText(k.description, f.description) && addsNoMore(f.adds, k.adds);
   if (k.kind === 'balance' && f.kind === 'balance') return k.account === f.account && k.date === f.date && BALANCE_FIELDS.every((x) => f.values[x] === undefined || sameMoney(f.values[x], k.values[x]));
   if (k.kind === 'holding' && f.kind === 'holding') return k.account === f.account && k.date === f.date && holdingKnown(f.holding, k.holding);
+  if (k.kind === 'terms' && f.kind === 'terms') return k.account === f.account && k.date === f.date && sameTerms(k.terms, f.terms);
   if (k.kind === 'hmrc' && f.kind === 'hmrc') return k.id === f.id;
   if (k.kind === 'payslip' && f.kind === 'payslip') return k.id === f.id;
   if (k.kind === 'figure' && f.kind === 'figure') {
@@ -149,6 +160,7 @@ function describe(facts: { fact: Fact; where: string }[]): string {
       return `${list.length === 1 ? 'its transaction is' : `its ${plural(list.length, 'transaction')} are`} ${where === 'stored' ? 'already imported' : place}${detail}`;
     }
     if (kind === 'holding') return `${list.length === 1 ? 'its holding is' : `its ${plural(list.length, 'holding')} are`} ${place}`;
+    if (kind === 'terms') return `${list.length === 1 ? 'its terms (rates and limit) are' : `its terms for ${plural(list.length, 'account')} are`} ${place}`;
     if (kind === 'hmrc') return `${list.length === 1 ? 'its HMRC record is' : `its ${plural(list.length, 'HMRC record')} are`} ${place}`;
     if (kind === 'payslip') return `${list.length === 1 ? 'the payslip is' : `its ${plural(list.length, 'payslip')} are`} ${place}`;
     return `${list.length === 1 ? 'its tax figure is' : `its ${plural(list.length, 'tax figure')} are`} ${place}`;

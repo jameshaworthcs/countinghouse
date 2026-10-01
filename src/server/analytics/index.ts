@@ -20,6 +20,7 @@ import { accountSummary, estateKnownOn, estateOn, estateSeries, firstDataDate } 
 import { dataHealth } from './health';
 import { investments } from './investments';
 import { captureList } from './capture';
+import { termsAlerts } from './terms';
 import { monthlyChecklist } from './monthly';
 import { projections, type ProjectionOptions } from './projections';
 import { detectRecurring } from './recurring';
@@ -224,6 +225,8 @@ export class Analytics {
       if (!this.store.profile.dateOfBirth) {
         alerts.push({ id: 'profile', level: 'info', title: 'Add your date of birth', detail: 'It drives LISA, cash-ISA and pension-age rules.', action: { label: 'Settings', href: '/settings' } });
       }
+      // Rates that end soon (a promotional rate, a boost, a fixed term), from the accounts' latest terms.
+      alerts.push(...termsAlerts(this.store, now));
       // Pay owed (timesheet work, and payslips you said are owed): pending beside the estate, never in it.
       const owed = owedPay(this.earned(), owedPayslips(this.store));
       if (owed?.late) {

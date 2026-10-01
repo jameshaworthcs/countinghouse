@@ -13,7 +13,7 @@ import { loadConfig, PROJECT_ROOT } from '../src/server/config';
 import { enrich } from '../src/server/enrich';
 import sharp from 'sharp';
 import { nowISO, sha256 } from '../src/server/fsutil';
-import { balanceId, documentId, figureId, hmrcId, holdingsId, payslipId, transactionId } from '../src/server/ids';
+import { balanceId, documentId, figureId, hmrcId, holdingsId, payslipId, termsId, transactionId } from '../src/server/ids';
 import { GOVUK_ENGINE_VERSION, readGovUkPage } from '../src/server/ingest/govuk';
 import { PAYSLIP_ENGINE_VERSION, readUkPayslip } from '../src/server/ingest/payslips';
 import { ImportService } from '../src/server/ingest/service';
@@ -509,6 +509,21 @@ async function main() {
         },
       ],
       'demo: agreements',
+    );
+  }
+  // The saver's terms from its statements: a bonus that ends in a few weeks, and the rate before it.
+  // The student loan's rate.
+  if (!SPARSE) {
+    const asOf = endOfMonth(addMonths(END, -1));
+    const earlier = endOfMonth(addMonths(END, -7));
+    await store.upsertRecords(
+      'terms',
+      [
+        { id: termsId('easy-access', earlier, {}), accountId: 'easy-access', asOf: earlier, rates: [{ applies: 'interest', rate: 4.35, basis: 'AER', variable: true }], source: {}, createdAt: stamp },
+        { id: termsId('easy-access', asOf, {}), accountId: 'easy-access', asOf, rates: [{ applies: 'interest', rate: 4.1, basis: 'AER', variable: true, until: addDays(END, 40), label: 'Rate with a 12-month bonus' }], source: {}, createdAt: stamp },
+        { id: termsId('student-loan', asOf, {}), accountId: 'student-loan', asOf, rates: [{ applies: 'loan', rate: 7.3, variable: true, label: 'RPI plus up to 3%' }], source: {}, createdAt: stamp },
+      ],
+      'demo: terms',
     );
   }
   const res = await enrich(store);

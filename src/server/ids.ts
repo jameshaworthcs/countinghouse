@@ -59,6 +59,11 @@ export function balanceId(accountId: string, date: string, balance: number, kind
   return `bal_${shortHash('bal', accountId, date, balance.toFixed(2), kind, salt)}`;
 }
 
+/** One account's terms from one document on one day; those you give (no document) are one a day. */
+export function termsId(accountId: string, asOf: string, source: { importId?: string | undefined; documentId?: string | undefined }): string {
+  return `trm_${shortHash('trm', accountId, asOf, source.documentId ?? source.importId ?? 'yours')}`;
+}
+
 export function holdingsId(accountId: string, date: string, totalValue: number, salt = ''): string {
   return `hld_${shortHash('hld', accountId, date, totalValue.toFixed(2), salt)}`;
 }

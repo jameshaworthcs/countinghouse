@@ -9,6 +9,7 @@ import { ChartFrame } from '../components/charts/common';
 import { TimeChart } from '../components/charts/TimeChart';
 import { CoverageGrid } from '../components/Coverage';
 import { InsightsPanel } from '../components/Intel';
+import { TermsCard } from '../components/Terms';
 import { TransactionList } from '../components/TransactionList';
 import { Badge, Button, Callout, Card, EmptyState, ErrorNote, Loading, Money, PageHeader, SortHeader, Stat, Tabs, tableClasses, useToast } from '../components/ui';
 import { FilePickerButton } from '../components/Upload';
@@ -209,6 +210,7 @@ export default function AccountDetail() {
 
       <CompanyCard accountId={account.id} />
       {ACCOUNT_TYPE_META[account.type].pension && <ArrangementsCard accountId={account.id} />}
+      <TermsCard account={account} />
 
       {empty ? (
         <Card>

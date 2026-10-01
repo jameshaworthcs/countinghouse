@@ -42,7 +42,7 @@ in this order:
 |---|---|
 | Fund charge | your `fee.fund` record → researched OCF → agents' `fee.fund` → fallback |
 | Platform fee | your `fee.platform` → researched fee schedule (tiers on the account value, then cap and flat fee) → agents' → fallback |
-| Interest | your `interest.rate` → the rate on the account → the latest statement's rate → researched product rate (best name match) → agents' → fallback by account type |
+| Interest | your `interest.rate` → the rate on the account → the interest rate in the account's latest terms, unless it has ended (§4, "Terms") → researched product rate (best name match) → agents' → fallback by account type |
 | Fund make-up | your allocation on the instrument → researched allocation → the asset class on the statement (when the latest holdings give none, as a platform's export does not: the latest holdings in any account that gave one for the same fund, by instrument, else ISIN, SEDOL, ticker or name) → "mixed" (unknown) |
 
 ## 2. Money
@@ -148,6 +148,25 @@ combines the classes' ranges the same way.
 
 **Combined portfolio** (market and pension accounts, `poolStats`): the same sums over every holding
 in every account, weighted by value.
+
+**Terms** (`terms.jsonl`; `shared/terms.ts`, `analytics/terms.ts`). An account's terms are its
+rates, its limit and a card's minimum payment, as each document gives them on its date.
+
+- **From a reading:** the credit limit (or overdraft) and the one rate every reading gives, read as
+  what the account's type makes it (an AER is interest paid to you; a card's rate, its purchase
+  rate; a loan's, interest charged), with every rate in detail when the reading keeps everything.
+  The same terms already given for the account that day are not kept again.
+- **The latest** are those with the latest date. **How they changed:** the limit, and each kind of
+  rate's standing rate (the one with no end, else the first), each time it differs from the one
+  before.
+- **Ending:** a rate in the latest terms whose last day (`until`) is within 60 days
+  (`TERMS_ENDING_DAYS`) is shown on the account's page with what applies after it (the standing
+  rate of its kind, when the document gives one), or as ended once past. On an open account, one
+  that has not ended is an alert on the overview.
+- **The rate projections use** (the interest row above): the first interest rate in the latest
+  terms that give one that is still running on the day projected from. When every one has ended
+  (a boost, a fixed term), what follows is not known from the documents, and the next source
+  stands in, its basis saying which rate ended when.
 
 ## 5. Projection (`analytics/model.ts`, `simulate`)
 

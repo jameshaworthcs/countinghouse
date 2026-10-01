@@ -15,11 +15,12 @@ import path from 'node:path';
 import { today } from '../shared/dates';
 import { isNiNumber, withoutNiNumbers } from '../shared/privacy';
 import { atomicWrite, nowISO, shortHash } from './fsutil';
-import { figureId, hmrcId, payslipId } from './ids';
+import { figureId, hmrcId, payslipId, termsId } from './ids';
 import { Employers, PAY_KINDS, payerKey } from './analytics/sources';
 import { pdfText, readGovUkPage } from './ingest/govuk';
 import { readPayslipPage } from './ingest/payslips';
-import { HmrcRecordSchema, PayslipRecordSchema } from '../shared/schema';
+import { HmrcRecordSchema, PayslipRecordSchema, TermsSchema, type AccountType, type Terms } from '../shared/schema';
+import { sameTerms, termsOfReading } from '../shared/terms';
 import { toMinor } from '../shared/money';
 import { taxYearOf } from '../shared/uk';
 import { FORMAT_VERSION } from './store';
@@ -465,6 +466,40 @@ export const MIGRATIONS: Migration[] = [
       await ctx.writeText('payslips.jsonl', payslipLines.length ? `${payslipLines.join('\n')}\n` : '');
       ctx.log(`[migrate] ${reread} payslip${reread === 1 ? '' : 's'} read again on this machine; ${corrected} figure${corrected === 1 ? '' : 's'} put right, ${added} added, ${coded} given ${coded === 1 ? 'its' : 'their'} tax code`);
       if (unsure.length) ctx.log(`[migrate] figures that do not add up to their payslip, left as they are: ${unsure.join(', ')}`);
+    },
+  },
+  {
+    from: 6,
+    description: "Terms (terms.jsonl): the credit limit and rate each balance kept become the account's terms, as its document gave them that day",
+    async run(ctx) {
+      const accounts = ((await ctx.readJson('accounts.json')) as { accounts?: { id: string; type: AccountType }[] } | undefined)?.accounts ?? [];
+      const typeOf = new Map(accounts.map((a) => [a.id, a.type]));
+      const lines = (await ctx.exists('terms.jsonl')) ? (await readFile(path.join(ctx.dataDir, 'terms.jsonl'), 'utf8')).split('\n').filter((l) => l.trim()) : [];
+      const terms = lines.map((l) => JSON.parse(l) as Terms);
+      let moved = 0;
+      const kept: string[] = [];
+      await ctx.mapJsonl('balances', (b) => {
+        if (!('creditLimit' in b) && !('interestRate' in b)) return null;
+        const { creditLimit, interestRate, ...rest } = b;
+        const accountId = String(b.accountId);
+        const asOf = String(b.date);
+        const source = (b.source ?? {}) as Terms['source'];
+        const content = termsOfReading({ creditLimit: typeof creditLimit === 'number' ? creditLimit : undefined, interestRate: typeof interestRate === 'number' ? interestRate : undefined }, typeOf.get(accountId) ?? 'current');
+        const id = termsId(accountId, asOf, source);
+        const record = content ? TermsSchema.safeParse({ id, accountId, asOf, ...content, source, createdAt: typeof b.createdAt === 'string' ? b.createdAt : nowISO() }) : undefined;
+        // What cannot be made a terms record stays where it is, for you to see.
+        if (!record?.success) {
+          kept.push(`${accountId} ${asOf}`);
+          return null;
+        }
+        // The same terms from two balances of one day (a statement and a screenshot) are kept once.
+        if (!terms.some((t) => t.id === id || (t.accountId === accountId && t.asOf === asOf && sameTerms(t, record.data)))) terms.push(record.data);
+        moved++;
+        return rest;
+      });
+      await ctx.writeText('terms.jsonl', terms.length ? `${terms.map((t) => JSON.stringify(t)).join('\n')}\n` : '');
+      ctx.log(`[migrate] the credit limit or rate on ${moved} balance${moved === 1 ? '' : 's'} kept as ${terms.length} terms record${terms.length === 1 ? '' : 's'}`);
+      if (kept.length) ctx.log(`[migrate] a limit or rate that could not be kept as terms, left on its balance: ${kept.join(', ')}`);
     },
   },
 ];

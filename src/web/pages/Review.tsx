@@ -6,6 +6,7 @@ import type { NothingNewView } from '../../shared/api';
 import { formatDate, formatMonth } from '../../shared/dates';
 import { describeDetail, describeDifference, fieldsInWords } from '../../shared/detail';
 import { sectionChecks, type ReviewCheck } from '../../shared/review';
+import { headlineApplies, RATE_NAMES } from '../../shared/terms';
 import { FIGURE_KINDS, type CsvProfile, type Draft, type DraftJob, type DraftSection, type DraftTransaction, type Employment, type ExtractedHmrc, type Figure, type ImportRecord, type PayslipLine, type PayslipYtdKey } from '../../shared/schema';
 import { AccountTypeSelect } from '../components/AccountForms';
 import { CategorySelect } from '../components/TransactionList';
@@ -15,6 +16,7 @@ import { useAppData } from '../lib/data';
 import { cn, fileSize, money, plural } from '../lib/format';
 import { importStatus } from './Import';
 import { ReadAgainCard } from '../components/ReadAgain';
+import { limitName, RatesList } from '../components/Terms';
 
 type Rec = ImportRecord & { readiness?: { ready: boolean; reasons: string[] }; nothingNew?: NothingNewView };
 
@@ -455,10 +457,10 @@ function SectionEditor({ section, index, total, latest, periodFromRows, onChange
                 <Field label="On" hint={section.balanceDateSource ? DATE_SOURCE_LABEL[section.balanceDateSource] : undefined} error={section.balanceDateSource === 'upload' ? 'The date could not be read; set the date the screenshot was taken' : undefined}>
                   <Input type="date" value={section.balanceDate ?? ''} onChange={(e) => set({ balanceDate: e.target.value, balanceDateSource: 'manual' })} />
                 </Field>
-                {(['contributions', 'gain', 'bonusToDate', 'taxYearContributions', 'cash', 'availableBalance', 'creditLimit', 'annualIncome'] as const)
+                {(['contributions', 'gain', 'bonusToDate', 'taxYearContributions', 'cash', 'availableBalance', 'annualIncome'] as const)
                   .filter((k) => section[k] !== undefined)
                   .map((k) => (
-                    <Field key={k} label={{ contributions: 'Total paid in', gain: 'Growth (as shown)', bonusToDate: 'LISA bonus received', taxYearContributions: 'Paid in this tax year', cash: 'Uninvested cash', availableBalance: 'Available', creditLimit: 'Credit limit', annualIncome: 'Income per year' }[k]}>
+                    <Field key={k} label={{ contributions: 'Total paid in', gain: 'Growth (as shown)', bonusToDate: 'LISA bonus received', taxYearContributions: 'Paid in this tax year', cash: 'Uninvested cash', availableBalance: 'Available', annualIncome: 'Income per year' }[k]}>
                       <Input value={section[k] ?? ''} onChange={(e) => set({ [k]: e.target.value === '' ? undefined : Number(e.target.value) })} inputMode="decimal" />
                     </Field>
                   ))}
@@ -469,6 +471,31 @@ function SectionEditor({ section, index, total, latest, periodFromRows, onChange
                 </Callout>
               )}
             </div>
+            {(section.creditLimit !== undefined || section.interestRate !== undefined || section.terms) && (
+              <div className="rounded-lg border border-line p-3">
+                <div className="text-[13px] font-medium text-ink">Its terms</div>
+                <div className="text-[12.5px] text-ink-3">Kept as the account’s terms{section.balanceDate ?? section.periodEnd ? ` on ${formatDate((section.balanceDate ?? section.periodEnd)!)}` : ''}, whether or not the {market ? 'value' : 'balance'} is recorded.</div>
+                {(section.creditLimit !== undefined || section.interestRate !== undefined) && (
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                    {section.creditLimit !== undefined && (
+                      <Field label={limitName(type)}>
+                        <Input value={section.creditLimit} onChange={(e) => set({ creditLimit: e.target.value === '' ? undefined : Number(e.target.value) })} inputMode="decimal" />
+                      </Field>
+                    )}
+                    {section.interestRate !== undefined && (
+                      <Field label={`${RATE_NAMES[headlineApplies(type ?? 'current')]} (% a year)`}>
+                        <Input value={section.interestRate} onChange={(e) => set({ interestRate: e.target.value === '' ? undefined : Number(e.target.value) })} inputMode="decimal" />
+                      </Field>
+                    )}
+                  </div>
+                )}
+                {section.terms && (section.terms.rates.length > 0 || section.terms.minimumPayment !== undefined) && (
+                  <div className="mt-2">
+                    <RatesList terms={section.terms} type={type} now={section.balanceDate ?? section.periodEnd} />
+                  </div>
+                )}
+              </div>
+            )}
             <ChecksPanel checks={checks} />
             {section.transactions.length > 0 && (
               <div>

@@ -42,6 +42,7 @@ data/
   employments.json     { employments: [...] }    your jobs: each employer once, under every name it comes by
   hmrc.jsonl           what HMRC's pages say: tax codes, payments, employments, settlements, NI years, the State Pension forecast
   payslips.jsonl       payslips in full: every line, the totals, the codes and the year to date
+  terms.jsonl          each account's terms as each document gives them: its rates, its limit and a card's minimum payment
   companies.json       { companies: [...] }      companies you hold shares in: the holding and its valuations
   agreements.json      { agreements: [...] }     agreements to pay: an offer's or contract's schedule, and what its document says
   transactions/<account-id>/<yyyy>.jsonl    one transaction per line, by posting date
@@ -131,7 +132,7 @@ A balance or valuation at the end of `date`, or at `at` on it when that is known
 | `id`, `accountId`, `date`, `balance`, `currency` | |
 | `kind` | `statement` `screenshot` `export` `manual` |
 | `dateSource` | `document` `exif` `filename` `file-modified` `upload` `manual`: how the date was known |
-| `availableBalance`, `creditLimit` | optional |
+| `availableBalance` | optional |
 | `contributions`, `gain`, `cash` | provider-reported total paid in, growth and uninvested cash (optional) |
 | `bonusToDate` | LISA government bonus received (optional) |
 | `taxYearContributions`, `taxYear` | provider-reported "allowance used this tax year" (optional) |
@@ -139,7 +140,39 @@ A balance or valuation at the end of `date`, or at `at` on it when that is known
 | `approximate` | `true` for a rough figure you gave: it stands in only for what is newer than the account's real data (optional) |
 | `at` | when on `date` it was seen, when known (optional): a screenshot's capture time, or when you gave a balance for that same day. Without it a statement's, an export's or your own balance is the day's close, and a screenshot's some time that day. Of two on one day, the later stands for it (FORMULAS.md §9) |
 | `enteredBy` | `"user"`: you typed or changed this figure yourself, while reviewing an import or by editing it. It weighs as your own balance whatever document it came with (optional) |
-| `interestRate`, `note`, `attributes`, `source`, `createdAt` | |
+| `note`, `attributes`, `source`, `createdAt` | |
+
+A balance keeps the account's money, not its terms: the credit limit and rates its document gives
+are in `terms.jsonl` (since format 7).
+
+## terms.jsonl
+
+An account's terms as one document gives them on its date, one record per account, document and
+day:
+
+| Field | Notes |
+|---|---|
+| `id` | `trm_…`, from the account, the day and the document (your own share one a day) |
+| `accountId`, `asOf` | the account, and the day they are given for: a statement's balance date |
+| `rates` | every rate it gives, `[{applies, rate, basis?, variable?, until?, balance?, label?}]` |
+| `limit` | a card's credit limit, or a current account's arranged overdraft (optional) |
+| `minimumPayment`, `paymentDue` | a card's minimum payment, and the day it is due (optional) |
+| `source`, `createdAt` | the document (`importId`, `documentId`) |
+
+- `applies`: `interest` (paid to you on what the account holds: a saver's AER, a current account's
+  credit interest, an investment account's cash), `purchases`, `cash` and `balance-transfers` (a
+  card's), `overdraft`, `loan` (charged on a loan or mortgage), `other`.
+- `rate` is a percentage a year as printed (`34.94`). `basis` is how it is stated: `AER`, `APR`,
+  `EAR`, `simple` (a card's annual simple rate) or `gross`. `variable` is false for a fixed rate.
+- `until` is the last day a rate applies when it ends: a promotional rate, a boost, a fixed term.
+  `balance` is the amount at that rate when the document gives it. `label` is its name as printed.
+
+A committed import records its accounts' terms whether or not their balances are recorded: the
+limit and the one rate every reading gives (an AER is interest paid; a card's rate is its purchase
+rate), with every rate in detail when the reading keeps everything. The same terms already given
+for the account that day are not recorded again. An agent sets a document's terms in full with
+`set_terms`. How they are shown, and which rate projections use: [FORMULAS.md §4](FORMULAS.md),
+"Terms".
 
 ## holdings/&lt;account&gt;.jsonl
 
@@ -320,8 +353,8 @@ number. Its pay, tax, NI, pension and student loan for the period are also tax f
 - `extraction`: `{engine, engineVersion, detail, model, durationMs, costUsd, warnings, raw,
   verification?, alternative?}`.
   - `raw` is the engine's complete output, kept for audit and re-derivation. A reading that read
-    everything (`extract-12`) also has `payslips`, `hmrc` and `printed`: every other labelled value
-    the document prints, `{section?, label, value}` as printed.
+    everything (`extract-13`) also has `payslips`, `hmrc`, each account's `terms` and `printed`:
+    every other labelled value the document prints, `{section?, label, value}` as printed.
   - `verification` records how the reading was checked (docs/INGESTION.md, "Checking every
     figure"): `{method: checks|second-reading, firstModel, secondModel?, reasons, disagreements,
     kept: first|second, error?}`.
@@ -377,7 +410,8 @@ lives in the work area (`<work>/proposals/`), never here.
     Spaces, which the balances either side of it add up only without.
   - `set_account_dates {account, openedOn?, closedOn?}` (`null` clears one).
   - `move_balance {balance, to}`: a balance a document was read into the wrong account, moved to
-    the account it is of. It keeps its id and everything else.
+    the account it is of. It keeps its id and everything else, and the terms its reading gave that
+    day (`terms.jsonl`) go with it.
   - `add_pension_arrangement {employmentId, arrangement}`: what a job's employer set up to pay into
     a pension of yours, added to the job's `pensionArrangements`.
   - `add_company {company, valuation, account}`: shares you hold in a company, from its documents:
@@ -386,9 +420,12 @@ lives in the work area (`<work>/proposals/`), never here.
   - `add_agreement {agreement}`: an agreement to pay, from its document (`agreements.json`). The
     payments already recorded that it schedules take its category, except one you, a rule of yours
     or a transfer link categorised.
+  - `set_terms {account, asOf, importId, terms}`: an account's terms as one of its documents gives
+    them on its date (`{rates, limit?, minimumPayment?, paymentDue?}`), in place of what its reading
+    kept for that account and day.
 - `applied`: the keys of the changes you applied. `dismissedReason`: what you said, if anything.
-- `before`: `{transactions, accounts, balances?}`, the rows, accounts and balances the applied
-  changes touched, as they were before: the audit trail, and a way back.
+- `before`: `{transactions, accounts, balances?, terms?}`, the rows, accounts, balances and terms
+  the applied changes touched, as they were before: the audit trail, and a way back.
 
 ## goals.json
 
@@ -589,6 +626,7 @@ An ask without a check is ticked by you (`doneAt`). Agents cannot set `doneAt` o
 | 4 | A pension forecast with no balance (a State Pension forecast) is kept as a `pension_income_forecast` figure. Backfilled from each committed import whose section had income per year and recorded no balance. National Insurance numbers are taken out of figures (a `payerReference` that is one is removed) and of the readings and drafts kept with imports (replaced by "[NI number]"); bank descriptions keep theirs, as source facts | `from: 3` in `src/server/migrations.ts` |
 | 5 | Jobs and HMRC's records. Added `employments.json` and `hmrc.jsonl`, the figures' `employmentId`, and the imports' `draft.jobs`, `draft.hmrc` and `result.hmrcAdded`/`employmentsCreated`/`jobs`. HMRC's pages already imported are read again on this machine into `hmrc.jsonl`; the figures their earlier reading made for what the records now hold (a National Insurance record's amounts, a State Pension forecast) are taken out, and a forecast's record keeps its account. Jobs are set up from the pay figures: figures whose employer names (reduced) or PAYE references meet are one job's, named as its P60 names it. Pay, payslip pension and earned pay figures get their job. `profile.employers` (pay lag) moves to the jobs | `from: 4` in `src/server/migrations.ts` |
 | 6 | Payslips in full. Added `payslips.jsonl`, the readings' and drafts' `payslips`, `result.payslipsAdded`, and the `payslip` engine. Payslips already imported, in a layout read on this machine, are read again from their stored PDFs: each is kept in full under its job, its pay figure gets the tax code it prints, and, when every line on it adds up to the totals it prints, a figure its first reading got wrong is put right (its note keeps the old amount) and one it left out is added. Several figures of one kind are left as they are | `from: 5` in `src/server/migrations.ts` |
+| 7 | Terms. Added `terms.jsonl`, the readings' and drafts' `terms`, `result.termsAdded`, the `set_terms` proposal and `before.terms`. The credit limit and rate each balance kept move into the account's terms for that day and document (the same terms from two balances of one day kept once); balances no longer have `creditLimit` or `interestRate`. One that cannot be made a terms record stays on its balance, and the migration says which | `from: 6` in `src/server/migrations.ts` |
 
 Data written by a newer version of the app than the one running is read-only until the app is
 updated.

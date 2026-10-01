@@ -4,7 +4,7 @@
 import { isISODate, parseFlexibleDate } from '../../shared/dates';
 import { parseAmount, roundMoney } from '../../shared/money';
 import { isNiNumber, withoutNiNumbers } from '../../shared/privacy';
-import { ExtractedHmrcSchema, ExtractedPayslipSchema, ExtractionSchema, type Extraction } from '../../shared/schema';
+import { ExtractedHmrcSchema, ExtractedPayslipSchema, ExtractionSchema, TermsRateSchema, type Extraction } from '../../shared/schema';
 import { payeReference } from '../analytics/sources';
 import { formatZodError } from '../store';
 
@@ -74,8 +74,8 @@ const HMRC_FIELDS: Record<string, string[]> = {
 };
 
 /**
- * A payslip in full, HMRC's records and the other values printed (extract-12), as the reader gives
- * them, made into what an extraction keeps. One that cannot be made valid is left out, with a
+ * A payslip in full, HMRC's records, an account's terms and the other values printed (extract-13),
+ * as the reader gives them, made into what an extraction keeps. One that cannot be made valid is left out, with a
  * warning; a National Insurance number in any of them is taken out.
  */
 function readEverything(fixed: Record<string, unknown>, original: Record<string, unknown>, warnings: string[]): void {
@@ -122,6 +122,34 @@ function readEverything(fixed: Record<string, unknown>, original: Record<string,
       return [];
     });
   }
+  // Each account's terms. Its rates are taken as the reading gives them, not as amounts (34.940% is
+  // not £34.94), with their dates and balances repaired; one that cannot be kept is left out.
+  const originals = Array.isArray(original.accounts) ? (original.accounts as Record<string, unknown>[]) : [];
+  (Array.isArray(fixed.accounts) ? (fixed.accounts as Record<string, unknown>[]) : []).forEach((acc, i) => {
+    const raw = originals[i]?.terms;
+    delete acc.terms;
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return;
+    const t = raw as Record<string, unknown>;
+    const money = (v: unknown) => {
+      const x = fixValue('amount', v);
+      return typeof x === 'number' ? x : undefined;
+    };
+    const day = (v: unknown) => {
+      const x = fixValue('date', v);
+      return typeof x === 'string' ? x : undefined;
+    };
+    const rates = (Array.isArray(t.rates) ? (t.rates as Record<string, unknown>[]) : []).flatMap((r, ri) => {
+      const rate = typeof r.rate === 'number' ? r.rate : typeof r.rate === 'string' ? Number.parseFloat(r.rate.replace(/[%\s]/g, '')) : Number.NaN;
+      const label = typeof r.label === 'string' && r.label.trim() ? withoutNiNumbers(r.label.trim()).slice(0, 120) : undefined;
+      const parsed = TermsRateSchema.safeParse(present({ applies: r.applies, rate: Number.isFinite(rate) ? Math.round(rate * 1000) / 1000 : undefined, basis: r.basis, variable: r.variable, until: day(r.until), balance: money(r.balance), label }));
+      if (parsed.success) return [parsed.data];
+      warnings.push(`Account ${i + 1}: a rate it prints could not be kept (${ri + 1}): ${formatZodError(parsed.error)}`);
+      return [];
+    });
+    const minimumPayment = money(t.minimumPayment);
+    const paymentDue = day(t.paymentDue);
+    if (rates.length || minimumPayment !== undefined) acc.terms = { rates, ...(minimumPayment !== undefined ? { minimumPayment } : {}), ...(paymentDue ? { paymentDue } : {}) };
+  });
   // Printed values are text as printed: taken from the reading before amounts and dates were
   // repaired (a value is not an amount).
   if (Array.isArray(original.printed)) {

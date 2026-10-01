@@ -47,6 +47,7 @@ import { balanceId, figureId, ruleId, transactionId } from '../ids';
 import { payerKey } from '../analytics/pay';
 import { payeReference } from '../analytics/sources';
 import { agreementsView, agreementView } from '../analytics/agreements';
+import { termsView } from '../analytics/terms';
 import { companiesView, companyView } from '../analytics/companies';
 import { arrangementsInto } from '../analytics/arrangements';
 import { taxDocuments } from '../analytics/taxdocuments';
@@ -107,7 +108,6 @@ const ManualBalance = z.object({
     .regex(/^\d{4}\/\d{2}$/)
     .optional(),
   annualIncome: MoneySchema.optional(),
-  interestRate: z.number().optional(),
   note: z.string().max(500).optional(),
   approximate: z.boolean().optional(),
 });
@@ -806,6 +806,12 @@ export function dataRoutes(ctx: AppContext): Hono {
   // ─── Companies you hold shares in (companies.json) ───────────────────────────────────────────
 
   app.get('/companies', (c) => c.json(companiesView(store)));
+
+  /** An account's terms as its documents give them: the latest, how they changed, what ends soon. */
+  app.get('/accounts/:id/terms', (c) => {
+    if (!store.account(c.req.param('id'))) throw new StoreError('No such account', 404);
+    return c.json(termsView(store, c.req.param('id')));
+  });
 
   /** A pension account's arrangements with your employers, checked against what arrived. */
   app.get('/accounts/:id/arrangements', (c) => {

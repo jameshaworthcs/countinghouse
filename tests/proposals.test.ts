@@ -12,7 +12,7 @@ import type { Account, ProposalInput, Transaction } from '../src/shared/schema';
 import { createApp, type App } from '../src/server/app';
 import { loadConfig } from '../src/server/config';
 import { GitCommitter } from '../src/server/git';
-import { transactionId, transferGroupId } from '../src/server/ids';
+import { termsId, transactionId, transferGroupId } from '../src/server/ids';
 import { ProposalService } from '../src/server/proposals';
 import { Store, type ChangeEvent } from '../src/server/store';
 
@@ -224,8 +224,11 @@ describe('an agent proposes, the owner decides', () => {
       [tx('access', '2026-02-04', 120, 'Interest Added', { balanceAfter: 10620.5 }), tx('access', '2026-03-05', -10000, 'To 12-34-56 00012345678', { balanceAfter: 620.5 })],
       'test: the easy-access account',
     );
-    const snap = (id: string, accountId: string, balance: number, kind: 'statement' | 'manual' = 'statement') => ({ id, accountId, date: '2026-02-04', balance, currency: 'GBP', kind, interestRate: 2.1, source: kind === 'manual' ? {} : { importId: 'imp_20260301_090000_0001' }, createdAt: stamp });
+    const snap = (id: string, accountId: string, balance: number, kind: 'statement' | 'manual' = 'statement') => ({ id, accountId, date: '2026-02-04', balance, currency: 'GBP', kind, source: kind === 'manual' ? {} : { importId: 'imp_20260301_090000_0001' }, createdAt: stamp });
     await store.addBalances([snap('bal_00000000000000d1', 'fixed', 10620.5), snap('bal_00000000000000d2', 'fixed', 9999), snap('bal_00000000000000d3', 'fixed', 10620.5, 'manual')], 'test: balances');
+    // The letter's rate, read with its balance into the fixed account.
+    const letter = { importId: 'imp_20260301_090000_0001' };
+    await store.upsertRecords('terms', [{ id: termsId('fixed', '2026-02-04', letter), accountId: 'fixed', asOf: '2026-02-04', rates: [{ applies: 'interest', rate: 2.1, basis: 'AER' }], source: letter, createdAt: stamp }], 'test: terms');
     const move = (balance: string, to = 'access') => ({ kind: 'move_balance', balance, to, why: 'The maturity letter names the easy-access account.' });
     const problem = async (change: Record<string, unknown>) => ((await (await propose({ title: 'A balance', summary: 'A test.', changes: [change] })).json()) as { problems: { problem: string }[] }).problems[0]!.problem;
 
@@ -242,11 +245,15 @@ describe('an agent proposes, the owner decides', () => {
     expect(view.changes[0]!.moved).toEqual({ misfit: 'fixed closed on 3 Feb 2026, before it.', beside: [{ date: '2026-03-05', balance: 620.5 }] });
     expect((await owner(`/api/proposals/${view.proposal.id}/apply`)).status).toBe(200);
     expect(store.balances('access').map((b) => b.id)).toEqual(['bal_00000000000000d1']);
-    expect(store.balances('access')[0]).toMatchObject({ balance: 10620.5, interestRate: 2.1, kind: 'statement' });
+    expect(store.balances('access')[0]).toMatchObject({ balance: 10620.5, kind: 'statement' });
+    // Its rate went with it.
+    expect(store.terms('fixed')).toEqual([]);
+    expect(store.terms('access')).toMatchObject([{ id: termsId('access', '2026-02-04', letter), asOf: '2026-02-04', rates: [{ applies: 'interest', rate: 2.1 }] }]);
     expect(store.balances('fixed').map((b) => b.id).sort()).toEqual(['bal_00000000000000d2', 'bal_00000000000000d3']);
     // Kept with the balance as it was, and shown from that once decided.
-    const file = JSON.parse(await readFile(path.join(dir, 'data', store.proposals[0]!.path), 'utf8')) as { before: { balances: { accountId: string }[] } };
+    const file = JSON.parse(await readFile(path.join(dir, 'data', store.proposals[0]!.path), 'utf8')) as { before: { balances: { accountId: string }[]; terms: { accountId: string }[] } };
     expect(file.before.balances).toEqual([expect.objectContaining({ id: 'bal_00000000000000d1', accountId: 'fixed' })]);
+    expect(file.before.terms).toEqual([expect.objectContaining({ accountId: 'fixed' })]);
     const decided = (await (await req(`/api/proposals/${view.proposal.id}`)).json()) as ProposalView;
     expect(decided.balances.bal_00000000000000d1!.accountId).toBe('fixed');
   });

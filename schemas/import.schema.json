@@ -763,6 +763,76 @@
                       "null"
                     ]
                   },
+                  "terms": {
+                    "type": "object",
+                    "properties": {
+                      "rates": {
+                        "default": [],
+                        "maxItems": 20,
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "applies": {
+                              "type": "string",
+                              "enum": [
+                                "interest",
+                                "purchases",
+                                "cash",
+                                "balance-transfers",
+                                "overdraft",
+                                "loan",
+                                "other"
+                              ]
+                            },
+                            "rate": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 100
+                            },
+                            "basis": {
+                              "type": "string",
+                              "enum": [
+                                "AER",
+                                "APR",
+                                "EAR",
+                                "simple",
+                                "gross"
+                              ]
+                            },
+                            "variable": {
+                              "type": "boolean"
+                            },
+                            "until": {
+                              "type": "string",
+                              "description": "Calendar date, YYYY-MM-DD"
+                            },
+                            "balance": {
+                              "type": "number",
+                              "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                            },
+                            "label": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120
+                            }
+                          },
+                          "required": [
+                            "applies",
+                            "rate"
+                          ]
+                        }
+                      },
+                      "minimumPayment": {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      },
+                      "paymentDue": {
+                        "type": "string",
+                        "description": "Calendar date, YYYY-MM-DD"
+                      }
+                    }
+                  },
                   "statedMoneyIn": {
                     "default": null,
                     "anyOf": [
@@ -2359,6 +2429,76 @@
                       "null"
                     ]
                   },
+                  "terms": {
+                    "type": "object",
+                    "properties": {
+                      "rates": {
+                        "default": [],
+                        "maxItems": 20,
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "applies": {
+                              "type": "string",
+                              "enum": [
+                                "interest",
+                                "purchases",
+                                "cash",
+                                "balance-transfers",
+                                "overdraft",
+                                "loan",
+                                "other"
+                              ]
+                            },
+                            "rate": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 100
+                            },
+                            "basis": {
+                              "type": "string",
+                              "enum": [
+                                "AER",
+                                "APR",
+                                "EAR",
+                                "simple",
+                                "gross"
+                              ]
+                            },
+                            "variable": {
+                              "type": "boolean"
+                            },
+                            "until": {
+                              "type": "string",
+                              "description": "Calendar date, YYYY-MM-DD"
+                            },
+                            "balance": {
+                              "type": "number",
+                              "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                            },
+                            "label": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120
+                            }
+                          },
+                          "required": [
+                            "applies",
+                            "rate"
+                          ]
+                        }
+                      },
+                      "minimumPayment": {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      },
+                      "paymentDue": {
+                        "type": "string",
+                        "description": "Calendar date, YYYY-MM-DD"
+                      }
+                    }
+                  },
                   "statedMoneyIn": {
                     "default": null,
                     "anyOf": [
@@ -3947,6 +4087,76 @@
               "interestRate": {
                 "type": "number"
               },
+              "terms": {
+                "type": "object",
+                "properties": {
+                  "rates": {
+                    "default": [],
+                    "maxItems": 20,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "applies": {
+                          "type": "string",
+                          "enum": [
+                            "interest",
+                            "purchases",
+                            "cash",
+                            "balance-transfers",
+                            "overdraft",
+                            "loan",
+                            "other"
+                          ]
+                        },
+                        "rate": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 100
+                        },
+                        "basis": {
+                          "type": "string",
+                          "enum": [
+                            "AER",
+                            "APR",
+                            "EAR",
+                            "simple",
+                            "gross"
+                          ]
+                        },
+                        "variable": {
+                          "type": "boolean"
+                        },
+                        "until": {
+                          "type": "string",
+                          "description": "Calendar date, YYYY-MM-DD"
+                        },
+                        "balance": {
+                          "type": "number",
+                          "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                        },
+                        "label": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 120
+                        }
+                      },
+                      "required": [
+                        "applies",
+                        "rate"
+                      ]
+                    }
+                  },
+                  "minimumPayment": {
+                    "type": "number",
+                    "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                  },
+                  "paymentDue": {
+                    "type": "string",
+                    "description": "Calendar date, YYYY-MM-DD"
+                  }
+                }
+              },
               "transactions": {
                 "default": [],
                 "type": "array",
@@ -5480,6 +5690,11 @@
           "maximum": 9007199254740991
         },
         "payslipsAdded": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "termsAdded": {
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991

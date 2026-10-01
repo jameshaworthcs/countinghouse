@@ -23,12 +23,13 @@ import { CategoryIndex } from '../shared/categories';
 import { isWrapperAccount, transferLegCategory, type Categoriser } from '../shared/categorise';
 import { addDays, diffDays, formatDate, today } from '../shared/dates';
 import { formatMoney, fromMinor, toMinor } from '../shared/money';
-import { AccountSchema, AgreementSchema, BalanceSnapshotSchema, CompanySchema, EmploymentSchema, ProposalSchema, type Account, type Agreement, type BalanceSnapshot, type Company, type Employment, type PensionArrangement, type Proposal, type ProposalInput, type ProposalStatus, type ProposedChange, type Provenance, type Transaction } from '../shared/schema';
+import { sameTerms, type TermsContent } from '../shared/terms';
+import { AccountSchema, AgreementSchema, BalanceSnapshotSchema, CompanySchema, EmploymentSchema, ProposalSchema, TermsSchema, type Account, type Agreement, type BalanceSnapshot, type Company, type Terms, type Employment, type PensionArrangement, type Proposal, type ProposalInput, type ProposalStatus, type ProposedChange, type Provenance, type Transaction } from '../shared/schema';
 import { paidToText } from './analytics/agreements';
 import { BalanceEngine, type BalanceSource } from './analytics/balances';
 import { categoriserFor } from './categoriser';
 import { atomicWrite, Mutex, nowISO } from './fsutil';
-import { balanceId, proposalId, transferGroupId } from './ids';
+import { balanceId, proposalId, termsId, transferGroupId } from './ids';
 import { StoreError, type DecidedProposalSummary, type Store } from './store';
 
 /** Days apart the two rows of a proposed transfer may be: a card payment can take a few days. */
@@ -62,6 +63,8 @@ interface ChangeResult {
   moved?: { misfit: string; beside: { date: string; balance: number }[] };
   /** An agreement added: the payments in your data it files under its category, with the category each has now. */
   files?: { transactionId: string; accountId: string; date: string; amount: number; category?: string }[];
+  /** Terms set: the document they are from, and the terms its reading kept, which they replace. */
+  terms?: { fileName?: string; before?: TermsContent };
 }
 
 interface Outcome {
@@ -84,6 +87,9 @@ interface Outcome {
   balances: BalanceSnapshot[];
   /** Agreements to add. */
   agreements: Map<string, Agreement>;
+  /** Terms records to write, by id; those to take away (a balance's moved with it), as they are now. */
+  terms: Map<string, Terms>;
+  termsRemoved: Map<string, Terms>;
 }
 
 const money = (t: Pick<Transaction, 'amount' | 'currency'>) => formatMoney(t.amount, { currency: t.currency });
@@ -112,7 +118,7 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
   const accountName = (id: string) => store.account(id)?.name ?? id;
   let categoriserMemo: Categoriser | undefined;
   const categoriser = () => (categoriserMemo ??= categoriserFor(store));
-  const out: Outcome = { results: new Map(), patches: new Map(), removed: new Map(), accounts: new Map(), touchedRows: new Map(), touchedAccounts: new Map(), moves: new Map(), companies: new Map(), jobs: new Map(), balances: [], agreements: new Map() };
+  const out: Outcome = { results: new Map(), patches: new Map(), removed: new Map(), accounts: new Map(), touchedRows: new Map(), touchedAccounts: new Map(), moves: new Map(), companies: new Map(), jobs: new Map(), balances: [], agreements: new Map(), terms: new Map(), termsRemoved: new Map() };
   const balanceById = new Map(store.balances().map((b) => [b.id, b]));
   // Rows as the changes so far leave them (null: removed), and transfer pairs likewise.
   const rows = new Map<string, Transaction | null>();
@@ -308,6 +314,13 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
         if (to.openedOn && b.date < to.openedOn) return { problem: `${to.name} opened on ${formatDate(to.openedOn)}, after it (${formatDate(b.date)}).` };
         if (to.closedOn && b.date > to.closedOn) return { problem: `${to.name} closed on ${formatDate(to.closedOn)}, before it (${formatDate(b.date)}).` };
         out.moves.set(b.id, { balance: b, from, to: c.to });
+        // The terms its reading gave go with it: they were read into the wrong account too.
+        for (const t of store.terms(from)) {
+          if (t.asOf !== b.date || !t.source.importId || t.source.importId !== b.source.importId) continue;
+          out.termsRemoved.set(t.id, t);
+          const moved = TermsSchema.parse({ ...t, accountId: c.to, id: termsId(c.to, t.asOf, t.source) });
+          out.terms.set(moved.id, moved);
+        }
         // Whether it is wrong where it is, and fits where it goes, is checked once every change has run.
         return {};
       }
@@ -356,6 +369,22 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
         }
         out.agreements.set(a.id, agreement);
         return files.length ? { files } : {};
+      }
+      case 'set_terms': {
+        const acc = account(c.account);
+        if (!acc) return { problem: `Account ${c.account} is not in your data.` };
+        const imp = store.imports.find((i) => i.id === c.importId);
+        if (!imp) return { problem: `Import ${c.importId} is not one of your documents.` };
+        if (c.asOf > today()) return { problem: `${formatDate(c.asOf)} is in the future.` };
+        if (!c.terms.rates.length && c.terms.limit === undefined && c.terms.minimumPayment === undefined) return { problem: 'It gives no rate, limit or minimum payment.' };
+        const source = { importId: imp.id, ...(imp.documentId ? { documentId: imp.documentId } : {}) };
+        const id = termsId(acc.id, c.asOf, source);
+        const was = out.terms.get(id) ?? store.terms(acc.id).find((t) => t.id === id);
+        const fileName = imp.fileName;
+        if (was && sameTerms(was, c.terms)) return { alreadySo: true };
+        if (was && !out.terms.has(id)) out.termsRemoved.set(id, was);
+        out.terms.set(id, TermsSchema.parse({ id, accountId: acc.id, asOf: c.asOf, ...c.terms, source, createdAt: was?.createdAt ?? nowISO() }));
+        return { terms: { fileName, ...(was ? { before: { rates: was.rates, ...(was.limit !== undefined ? { limit: was.limit } : {}), ...(was.minimumPayment !== undefined ? { minimumPayment: was.minimumPayment } : {}), ...(was.paymentDue ? { paymentDue: was.paymentDue } : {}) } } : {}) } };
       }
       case 'add_company': {
         const there = out.companies.get(c.company.id) ?? store.company(c.company.id);
@@ -450,7 +479,7 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
 
 /** Applying would leave the data as it is: every change is already so, or they undo each other. */
 function changesNothing(store: Store, o: Outcome): boolean {
-  if (o.removed.size || o.companies.size || o.balances.length || o.jobs.size || o.agreements.size) return false;
+  if (o.removed.size || o.companies.size || o.balances.length || o.jobs.size || o.agreements.size || o.terms.size || o.termsRemoved.size) return false;
   if ([...o.moves.values()].some((m) => m.to !== m.balance.accountId)) return false;
   for (const [id, patch] of o.patches) {
     const t = store.transaction(id) as Record<string, unknown> | undefined;
@@ -493,6 +522,7 @@ function namedRows(c: ProposedChange): string[] {
     case 'add_company':
     case 'add_pension_arrangement':
     case 'add_agreement':
+    case 'set_terms':
       return [];
   }
 }
@@ -666,10 +696,14 @@ export class ProposalService extends EventEmitter {
       for (const company of outcome.companies.values()) await this.store.upsertCompany(company, message);
       for (const job of outcome.jobs.values()) await this.store.upsertEmployment(job, message);
       for (const agreement of outcome.agreements.values()) await this.store.upsertAgreement(agreement, message);
+      const termsGone = [...outcome.termsRemoved.keys()].filter((tid) => !outcome.terms.has(tid));
+      if (termsGone.length) await this.store.removeRecords('terms', termsGone, message);
+      if (outcome.terms.size) await this.store.upsertRecords('terms', [...outcome.terms.values()], message);
       if (outcome.balances.length) await this.store.addBalances(outcome.balances, message);
       if (outcome.moves.size) await this.store.moveBalances([...outcome.moves.values()].map((m) => ({ id: m.balance.id, accountId: m.to })), message);
       const balances = [...outcome.moves.values()].map((m) => m.balance);
-      const before = { transactions: [...outcome.touchedRows.values()], accounts: [...outcome.touchedAccounts.values()], ...(balances.length ? { balances } : {}) };
+      const termsBefore = [...outcome.termsRemoved.values()];
+      const before = { transactions: [...outcome.touchedRows.values()], accounts: [...outcome.touchedAccounts.values()], ...(balances.length ? { balances } : {}), ...(termsBefore.length ? { terms: termsBefore } : {}) };
       const decided = await this.decide(p, { status: 'applied', applied: doing.map((c) => c.key), before }, message);
       await this.commit();
       // Another proposal it has left with nothing to do closes now, in a commit of its own.
@@ -752,7 +786,7 @@ export class ProposalService extends EventEmitter {
         ...(t.source?.importId ? { source: { importId: t.source.importId, ...(importName.has(t.source.importId) ? { fileName: importName.get(t.source.importId)! } : {}) } } : {}),
       };
     }
-    for (const c of p.changes) if (c.kind === 'set_account_dates') accountIds.add(c.account);
+    for (const c of p.changes) if (c.kind === 'set_account_dates' || c.kind === 'set_terms') accountIds.add(c.account);
     // A balance a change moves, as it is now (a decided proposal: as it was before it).
     const wasBalance = new Map((before?.balances ?? []).map((b) => [b.id, b]));
     const balances: Record<string, ProposalBalance> = {};
@@ -772,7 +806,11 @@ export class ProposalService extends EventEmitter {
         balance: b.balance,
         currency: b.currency,
         kind: b.kind,
-        ...(b.interestRate !== undefined ? { interestRate: b.interestRate } : {}),
+        ...(() => {
+          // The rate its reading gave, kept with the account's terms for that day.
+          const rate = this.store.terms(b.accountId).find((t) => t.asOf === b.date && t.source.importId !== undefined && t.source.importId === b.source.importId)?.rates[0]?.rate;
+          return rate !== undefined ? { interestRate: rate } : {};
+        })(),
         ...(b.source.importId ? { source: { importId: b.source.importId, ...(importName.has(b.source.importId) ? { fileName: importName.get(b.source.importId)! } : {}) } } : {}),
       };
     }

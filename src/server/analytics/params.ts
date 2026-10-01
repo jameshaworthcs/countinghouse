@@ -10,6 +10,7 @@ import { diffDays, formatDate, today } from '../../shared/dates';
 import { sameHolding } from '../ingest/match';
 import type { Store } from '../store';
 import type { BalanceEngine } from './balances';
+import { interestFromTerms } from './terms';
 import { isStale, latestResearch, matchInstrument } from './research';
 
 export type ParamSource = 'owner' | 'agent' | 'research' | 'statement' | 'account' | 'fallback';
@@ -251,22 +252,26 @@ function platformFee(store: Store, r: Resolver, account: Account, value: number)
   return { rate: fromResolved(rate, 'platform fees'), fixed: fromResolved(fixed, 'flat fees') };
 }
 
-function interestRate(store: Store, r: Resolver, account: Account): Sourced {
+function interestRate(store: Store, r: Resolver, account: Account, on: string): Sourced {
   const target: ResolveTarget = { accountId: account.id, institutionId: account.institutionId, accountType: account.type };
   const resolved = r.set.resolve('interest.rate', target);
   if (resolved.source === 'owner') return fromResolved(resolved, 'this account');
   if (account.interestRate !== undefined) return { value: account.interestRate / 100, source: 'account', basis: 'The rate on the account (Accounts page)' };
-  const snap = store.balances(account.id).findLast((b) => b.interestRate !== undefined);
-  if (snap) return { value: snap.interestRate! / 100, source: 'statement', basis: `Rate on your statement of ${snap.date}`, asOf: snap.date };
+  // The rate its latest document gives, unless it has ended (a boost, a fixed term): then what
+  // follows it is not known from your documents, and the next source stands in.
+  const terms = interestFromTerms(store, account.id, on);
+  if (terms && !terms.ended) return { value: terms.rate.rate / 100, source: 'statement', basis: `Rate on your document of ${formatDate(terms.terms.asOf)}${terms.rate.until ? `, until ${formatDate(terms.rate.until)}` : ''}`, asOf: terms.terms.asOf };
+  const ended = terms ? `; your ${terms.rate.rate}% ended on ${formatDate(terms.rate.until!)}` : '';
   const research = account.institutionId ? latestResearch(store, 'provider.rates', { institutionId: account.institutionId }) : undefined;
   if (research) {
     const products = research.data.products.filter((p) => !p.accountType || p.accountType === account.type);
     const words = new Set(account.name.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2));
     const scored = products.map((p) => ({ p, score: p.name.toLowerCase().split(/[^a-z0-9]+/).filter((w) => words.has(w)).length })).sort((a, b) => b.score - a.score);
     const pick = scored[0]?.p;
-    if (pick) return { value: pick.aer, source: 'research', basis: `Researched rate for ${pick.name} (${research.asOf})${scored[0]!.score === 0 ? ', closest product' : ''}`, recordId: research.id, asOf: research.asOf, stale: isStale(research, r.staleAfterDays) };
+    if (pick) return { value: pick.aer, source: 'research', basis: `Researched rate for ${pick.name} (${research.asOf})${scored[0]!.score === 0 ? ', closest product' : ''}${ended}`, recordId: research.id, asOf: research.asOf, stale: isStale(research, r.staleAfterDays) };
   }
-  return fromResolved(resolved, 'this account');
+  const otherwise = fromResolved(resolved, 'this account');
+  return ended ? { ...otherwise, basis: `${otherwise.basis}${ended}` } : otherwise;
 }
 
 /** Parameters for one account, with its value today. */
@@ -331,7 +336,7 @@ export function accountParams(store: Store, engine: BalanceEngine, r: Resolver, 
     };
   }
   const empty = { ...base, holdingsKnown: false, holdings: [], exposure: zeroExposure(), expectedReturn: none, volatility: none, fundFee: none, platformFee: none, platformFixed: none };
-  if (bucket === 'cash') return { ...empty, exposure: { ...zeroExposure(), cash: 1 }, interest: account.type === 'credit_card' ? { value: 0, source: 'fallback', basis: 'Card balances are assumed repaid each month' } : interestRate(store, r, account) };
+  if (bucket === 'cash') return { ...empty, exposure: { ...zeroExposure(), cash: 1 }, interest: account.type === 'credit_card' ? { value: 0, source: 'fallback', basis: 'Card balances are assumed repaid each month' } : interestRate(store, r, account, on) };
   if (bucket === 'property') return { ...empty, exposure: { ...zeroExposure(), property: 1 }, growth: fromResolved(r.set.resolve('property.growth', { accountId: account.id }), 'this property') };
   return empty;
 }

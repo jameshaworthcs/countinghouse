@@ -27,6 +27,7 @@ import {
   CompaniesFileSchema,
   HmrcRecordSchema,
   PayslipRecordSchema,
+  TermsSchema,
   MetaSchema,
   NoteSchema,
   ProfileSchema,
@@ -70,6 +71,7 @@ const schemas: [string, z.ZodType, string][] = [
   ['agreements', withSchemaKey(AgreementsFileSchema), 'data/agreements.json (agreements to pay: their schedules and what their documents say)'],
   ['hmrc', HmrcRecordSchema, "one line of data/hmrc.jsonl (HMRC's records about you)"],
   ['payslips', PayslipRecordSchema, 'one line of data/payslips.jsonl (a payslip in full)'],
+  ['terms', TermsSchema, "one line of data/terms.jsonl (an account's terms as one document gives them)"],
 ];
 await mkdir(out, { recursive: true });
 for (const [name, schema, describes] of schemas) {

@@ -128,6 +128,7 @@ export function scoreCase(expected: Expected, draft: Draft | undefined, outcome:
       i = sections.findIndex((_, k) => !used.has(k));
       if (i >= 0) used.add(i);
     }
+    matched[n] = i;
     scoreSection(sc, e, i >= 0 ? sections[i] : undefined, typeof e.account === 'string' ? e.account : `new ${e.account.new}`);
   });
   sections.forEach((s, k) => {
@@ -167,6 +168,19 @@ export function scoreCase(expected: Expected, draft: Draft | undefined, outcome:
       for (const [k, v] of Object.entries(e.yearToDate)) sc.check('payslipYtd', sameMoney(r.yearToDate[k as keyof typeof r.yearToDate], v), `payslip year to date ${k}: got ${r.yearToDate[k as keyof typeof r.yearToDate] ?? 'none'}`);
       for (const [k, v] of Object.entries(e.employerCosts ?? {})) sc.check('payslipYtd', sameMoney(r.employerCosts[k as 'ni' | 'pension'], v), `payslip employer ${k}: got ${r.employerCosts[k as 'ni' | 'pension'] ?? 'none'}`);
     }
+    // Each account's terms: its limit, every rate it prints (what it applies to, the rate, when it ends) and a card's minimum payment.
+    expected.sections.forEach((e, n) => {
+      if (!e.terms) return;
+      const s = matched[n]! >= 0 ? sections[matched[n]!] : undefined;
+      const rates = s?.terms?.rates ?? [];
+      if (e.terms.limit !== undefined) sc.check('termsLimit', sameMoney(s?.creditLimit, e.terms.limit), `terms: limit ${s?.creditLimit ?? 'none'}`);
+      for (const r of e.terms.rates) {
+        const found = rates.some((x) => x.applies === r.applies && Math.abs(x.rate - r.rate) < 0.001 && (r.until === undefined || x.until === r.until)) || (r.applies === 'interest' && s?.interestRate !== undefined && Math.abs(s.interestRate - r.rate) < 0.001 && !rates.length);
+        sc.check('termsRate', found, `terms: ${r.applies} ${r.rate}%${r.until ? ` until ${r.until}` : ''} missing`);
+      }
+      sc.check('termsNoExtraRate', rates.length <= e.terms.rates.length, `terms: ${rates.length} rates, ${e.terms.rates.length} printed`);
+      if (e.terms.minimumPayment !== undefined) sc.check('termsMinimum', sameMoney(s?.terms?.minimumPayment, e.terms.minimumPayment) && (e.terms.paymentDue === undefined || s?.terms?.paymentDue === e.terms.paymentDue), `terms: minimum payment ${s?.terms?.minimumPayment ?? 'none'} due ${s?.terms?.paymentDue ?? 'none'}`);
+    });
     for (const e of expected.printed ?? []) sc.check('printed', (opts.printed ?? []).some((p) => e.label.test(p.label) && e.value.test(p.value)), `printed: ${e.label.source} missing`);
     // Never a name or a National Insurance number among the values kept.
     for (const p of opts.printed ?? []) if (/Alex Taylor|[A-Z]{2} ?\d{2} ?\d{2} ?\d{2} ?[A-D]\b/.test(`${p.label} ${p.value}`)) sc.check('printedPrivate', false, `printed a personal identifier: ${p.label}`);

@@ -78,6 +78,18 @@ describe('eval scorer', () => {
     expect(says(['The screen does not say whether the prizes were paid into a bank account.', 'The list continues.'])).toEqual({ correct: 1, total: 1 });
   });
 
+  it('scores an account’s terms when reading everything: its limit, each rate and when it ends, the minimum payment', () => {
+    const expected = { sections: [{ account: 'acc', terms: { limit: 4500, minimumPayment: 25, paymentDue: '2026-09-29', rates: [{ applies: 'purchases' as const, rate: 24.9 }, { applies: 'balance-transfers' as const, rate: 0, until: '2027-03-15' }] } }] };
+    const read = (rates: { applies: 'purchases' | 'balance-transfers' | 'cash'; rate: number; until?: string }[]) => draft('acc', [], { creditLimit: 4500, terms: { rates, minimumPayment: 25, paymentDue: '2026-09-29' } });
+    const right = scoreCase(expected, read([{ applies: 'purchases', rate: 24.9 }, { applies: 'balance-transfers', rate: 0, until: '2027-03-15' }]), {}, { everything: true });
+    expect([right.fields.termsLimit, right.fields.termsRate, right.fields.termsNoExtraRate, right.fields.termsMinimum]).toEqual([{ correct: 1, total: 1 }, { correct: 2, total: 2 }, { correct: 1, total: 1 }, { correct: 1, total: 1 }]);
+    // The promotion's end missed, and a rate the document does not print.
+    const wrong = scoreCase(expected, read([{ applies: 'purchases', rate: 24.9 }, { applies: 'balance-transfers', rate: 0 }, { applies: 'cash', rate: 27.9 }]), {}, { everything: true });
+    expect([wrong.fields.termsRate, wrong.fields.termsNoExtraRate]).toEqual([{ correct: 1, total: 2 }, { correct: 0, total: 1 }]);
+    // Not scored by the reader that does not read everything.
+    expect(scoreCase(expected, read([])).fields.termsRate).toBeUndefined();
+  });
+
   it('every case is well formed: unique ids, known accounts, balances that add up', () => {
     const cases = buildCases();
     expect(new Set(cases.map((c) => c.id)).size).toBe(cases.length);

@@ -2,7 +2,7 @@
 // the app should produce. Documents and expected results come from the same data, so they cannot
 // drift apart. Everything here is invented: names, numbers and references.
 
-import type { AccountType, FigureKind } from '../src/shared/schema';
+import type { AccountType, FigureKind, TermsRateApplies } from '../src/shared/schema';
 import { appActivityHtml, appHoldingHtml, appListHtml, appOverviewHtml, appTabbedHtml, dayName, fmtDate, gbp, simpleDocHtml, statementHtml, type AppRow, type Brand, type StatementSection } from './render';
 
 export interface ExpectedTx {
@@ -35,6 +35,8 @@ export interface ExpectedSection {
   holdings?: { name: string; isin?: string; units?: number; value: number }[];
   /** Nothing on the document is the account's value: none may be recorded. */
   noValue?: boolean;
+  /** Its terms: its limit, every rate it prints and a card's minimum payment (scored when reading everything). */
+  terms?: { limit?: number; rates: { applies: TermsRateApplies; rate: number; until?: string }[]; minimumPayment?: number; paymentDue?: string };
 }
 
 /** A payslip read in full (scored when reading everything, `--everything`). */
@@ -394,8 +396,20 @@ export function buildCases(): EvalCase[] {
       id: 'pdf-barclaycard',
       title: 'Barclaycard-style statement: spending positive, payments negative in print',
       tags: ['pdf', 'card-signs'],
-      file: { name: 'Barclaycard-statement-Sep-2026.pdf', kind: 'pdf', html: statementHtml(brand('Barclaycard-style', '#00395d', 'Barclaycard-style, Northampton NN4 7SG'), 'Your Barclaycard-style Rewards statement', CUSTOMER, [{ title: 'Rewards Visa', accountLine: 'Card ending 6621', period: ['2026-08-05', '2026-09-04'], closing, rows: rows.map((t) => ({ date: t.date, description: t.text, amount: t.amount })), columns: 'card-plus', dateStyle: 'dd/mm/yyyy', balances: 'none', closingLabel: 'Statement balance', summary: [['Previous balance', gbp(-previous)], ['Statement balance', gbp(-closing)]] }]) },
-      expected: { sections: [{ account: 'barclaycard', periodStart: '2026-08-05', periodEnd: '2026-09-04', openingBalance: previous, balance: closing, transactions: exp(rows) }] },
+      file: { name: 'Barclaycard-statement-Sep-2026.pdf', kind: 'pdf', html: statementHtml(brand('Barclaycard-style', '#00395d', 'Barclaycard-style, Northampton NN4 7SG'), 'Your Barclaycard-style Rewards statement', CUSTOMER, [{ title: 'Rewards Visa', accountLine: 'Card ending 6621', period: ['2026-08-05', '2026-09-04'], closing, rows: rows.map((t) => ({ date: t.date, description: t.text, amount: t.amount })), columns: 'card-plus', dateStyle: 'dd/mm/yyyy', balances: 'none', closingLabel: 'Statement balance', summary: [['Previous balance', gbp(-previous)], ['Statement balance', gbp(-closing)], ['Credit limit', '£4,500.00'], ['Minimum payment', '£25.00 by 29/09/2026'], ['Standard purchase rate', '24.9% a year, variable (simple)'], ['Cash rate', '27.9% a year, variable (simple)'], ['Promotional balance transfer rate', '0% until 15/03/2027']] }]) },
+      expected: {
+        sections: [
+          {
+            account: 'barclaycard',
+            periodStart: '2026-08-05',
+            periodEnd: '2026-09-04',
+            openingBalance: previous,
+            balance: closing,
+            transactions: exp(rows),
+            terms: { limit: 4500, minimumPayment: 25, paymentDue: '2026-09-29', rates: [{ applies: 'purchases', rate: 24.9 }, { applies: 'cash', rate: 27.9 }, { applies: 'balance-transfers', rate: 0, until: '2027-03-15' }] },
+          },
+        ],
+      },
     });
   }
   {
@@ -415,7 +429,7 @@ export function buildCases(): EvalCase[] {
       title: 'Savings statement for a quarter: deposits, a withdrawal and monthly interest',
       tags: ['pdf', 'savings'],
       file: { name: 'Marcus_Statement_Q2.pdf', kind: 'pdf', html: statementHtml(brand('Marcus-style Savings', '#2b2b2b', 'Marcus-style, PO Box 12345, Leeds LS1 1AA'), 'Online Savings Account: quarterly statement', CUSTOMER, [{ title: 'Online Savings Account', accountLine: 'Account ending 7733 · 4.10% AER (variable)', period: ['2026-06-01', '2026-08-31'], opening, closing, rows: rows.map((t) => ({ date: t.date, description: t.text, amount: t.amount, balanceAfter: t.balanceAfter })), columns: 'out-in', dateStyle: 'dd/mm/yyyy', balances: 'every' }]) },
-      expected: { sections: [{ account: 'marcus-savings', periodStart: '2026-06-01', periodEnd: '2026-08-31', openingBalance: opening, balance: closing, transactions: exp(rows, { balances: 'every' }) }] },
+      expected: { sections: [{ account: 'marcus-savings', periodStart: '2026-06-01', periodEnd: '2026-08-31', openingBalance: opening, balance: closing, transactions: exp(rows, { balances: 'every' }), terms: { rates: [{ applies: 'interest', rate: 4.1 }] } }] },
     });
   }
   {

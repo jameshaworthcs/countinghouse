@@ -162,13 +162,13 @@ is paid ([FORMULAS.md §17](FORMULAS.md), "Earned pay").
   stays in `figures.jsonl` and no longer counts. The draft says what it replaces, and is held back
   from "Commit all ready".
 
-### Reading everything (`extract-12`)
+### Reading everything (`extract-13`)
 
 The reader keeps every value a document prints when **Read everything a document prints** is on
 (Settings → Import & extraction; `settings.extraction.readEverything`). It is off until its
 evaluation run has passed (`npm run eval -- --everything`, which spends the Claude plan), so until
 then readings are `extract-11`. The gov.uk pages and payslip layouts read on this machine (above)
-are read in full either way. Three rules are added to the prompt (`prompt.ts`), each with its part
+are read in full either way. Four rules are added to the prompt (`prompt.ts`), each with its part
 of the schema:
 
 - **20. Payslips in full**, as the local readers keep them (`payslips.jsonl`): every payment and
@@ -178,10 +178,16 @@ of the schema:
 - **21. HMRC's pages as records** (`hmrc.jsonl`), for a screenshot or scan of HMRC's services or
   app. Each fact is one flat record with the fields of its kind; the normaliser keeps those and
   checks it as the gov.uk readers' records are checked.
-- **22. Every other labelled value** (`extraction.raw.printed`): rates and limits, minimum
-  payments and due dates, plan and policy details, charges, transfer and projected values, a P60's
-  NI table, a P45's details. Each is `{section?, label, value}` as printed, kept with the import and
-  shown on the review page ("Everything else it prints"), though nothing reads it yet.
+- **22. Every other labelled value** (`extraction.raw.printed`): plan and policy details,
+  charges, transfer and projected values, estimated interest, a P60's NI table, a P45's details.
+  Each is `{section?, label, value}` as printed, kept with the import and shown on the review page
+  ("Everything else it prints"), though nothing reads it yet.
+- **23. An account's terms** (`terms` on each account, kept in `terms.jsonl`): every rate it prints,
+  with what it applies to, how it is stated, whether it is variable, when it ends (a promotional
+  rate, a boost, a fixed term) and the amount at it; and a card's minimum payment and due date. The
+  limit and the AER stay in `creditLimit` and `interestRate`, which every reading gives. A rate is
+  taken as the reader gives it, not as an amount (34.940% is not £34.94); one that cannot be kept is
+  left out with a warning.
 - **Never a personal identifier.** The prompt says to leave out names, addresses, dates of birth,
   NI numbers and full account numbers. The normaliser also takes any NI number out of all three,
   drops a payroll number that is one, and keeps only the NI letter.
@@ -633,8 +639,8 @@ click, not left looking failed or stuck (`src/server/ingest/novelty.ts`).
   its words), with no balance, rows, holdings or figures. A reading that found nothing and could not
   say what the document is stays a document to look at ("Nothing was found to record").
 - **Already here.** Everything it would record is already stored (rows already imported, the same
-  balance and figures on the same day for that account, the same holdings, the same tax figures,
-  the same HMRC records),
+  balance and figures on the same day for that account, the same terms that day, the same
+  holdings, the same tax figures, the same HMRC records),
   or is in another import waiting beside it. The reason says which: "its balance (£1,250.00 on 29
   Sep 2026) is also on IMG_0102.PNG, and its 5 transactions are already imported".
   - Of imports waiting together, the one with the most to add is kept and the others are checked

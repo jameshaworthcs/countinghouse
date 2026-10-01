@@ -1320,3 +1320,33 @@ courses, because the merchant list read any "UNIVERSITY" as a course.
   computed, not stored.
 - **An agent proposes it** (`add_agreement`), from the document; the owner applies it, and the
   proposal shows which recorded payments it would file.
+
+## 2026-10-01: An account's terms: one home, dated, with what ends soon (format 7)
+
+The fifth slice, fifth part. The owner's statements print their terms: card limits, purchase and
+cash rates, a 0% promotional rate until 31 Mar 2027, minimum payments, savings AERs and a boost
+ending on 1 Jun 2026, an overdraft limit. Only the limit and one rate were kept, on each balance
+snapshot (the card's rate sometimes its purchase rate, sometimes left out as "not an AER"); the
+rest was in the readings' notes.
+
+- **Terms are a record of their own** (`terms.jsonl`): an account's rates, each with what it
+  applies to, how it is stated, whether it is variable, when it ends and the amount at it; its
+  limit; a card's minimum payment. One record per account, document and day, as `hmrc.jsonl` keeps
+  what a page said on its day.
+  - Considered: more fields on the balance snapshot, where the limit and rate were. A letter about
+    a new rate has no balance, and terms belong with the account whether or not a balance is
+    recorded (a section can leave its balance out).
+- **The limit and rate move off the balances** (migration to format 7), so they are kept once.
+  The same terms from two balances of one day are one record. A moved balance takes its reading's
+  terms with it.
+- **A rate that has ended is not used** by projections: what follows a boost or a fixed term is
+  not on the document, so the next source stands in and says which rate ended. It is not worked
+  out (a boosted rate less its boost) either.
+- **The account's page shows them**, how the limit and each kind of rate changed, and any rate
+  ending within 60 days, with what applies after it when the document says; the overview alerts on
+  open accounts.
+- **The reader that keeps everything reads them in full** (`extract-13`, rule 23, still off until
+  its evaluation runs); the reader in use keeps the limit and one rate, as before. The evaluation
+  scores terms on two cases, so one run covers it.
+- **An agent sets a document's terms in full** (`set_terms`) from the documents already imported;
+  the owner applies it.

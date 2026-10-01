@@ -43,10 +43,6 @@
       "type": "number",
       "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
     },
-    "creditLimit": {
-      "type": "number",
-      "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
-    },
     "contributions": {
       "type": "number",
       "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
@@ -74,9 +70,6 @@
     "annualIncome": {
       "type": "number",
       "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
-    },
-    "interestRate": {
-      "type": "number"
     },
     "note": {
       "type": "string"

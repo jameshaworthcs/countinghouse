@@ -1,7 +1,7 @@
 // Proposed fixes: what an agent proposes changing in your data, each change with its reason and the
 // rows it is about, waiting for you on the Import page (src/server/proposals.ts).
 
-import { ArrowDown, ArrowRight, ArrowRightLeft, ArrowUpDown, Building2, CalendarDays, ChevronRight, CircleCheck, CircleSlash, CopyX, FileText, Handshake, Link2, NotebookPen, PiggyBank, Sparkles, Tag, Unlink, Wand2, X } from 'lucide-react';
+import { ArrowDown, ArrowRight, ArrowRightLeft, ArrowUpDown, Building2, CalendarDays, ChevronRight, CircleCheck, CircleSlash, CopyX, FileText, Handshake, Link2, Percent, NotebookPen, PiggyBank, Sparkles, Tag, Unlink, Wand2, X } from 'lucide-react';
 import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import type { ProposalBalance, ProposalListResponse, ProposalRow, ProposalSummary, ProposalView } from '../../shared/api';
@@ -9,6 +9,8 @@ import type { ProposalStatus, ProposedChange, ProposedChangeKind, Provenance } f
 import { useApi } from '../lib/api';
 import { useAppData } from '../lib/data';
 import { cn, formatDate, money, plural, timeAgo } from '../lib/format';
+import { RATE_NAMES } from '../../shared/terms';
+import { limitName, RatesList, rateText } from './Terms';
 import { Badge, Button, Card, IconButton, StatusBadge } from './ui';
 
 export function useProposals() {
@@ -28,6 +30,7 @@ export const CHANGE_LABELS: Record<ProposedChangeKind, { title: string; count: (
   add_company: { title: 'Add shares you hold in a company', count: (n) => plural(n, 'company', 'companies'), icon: <Building2 className="size-4" aria-hidden /> },
   add_pension_arrangement: { title: 'Add what an employer pays into your pension', count: (n) => plural(n, 'pension arrangement'), icon: <PiggyBank className="size-4" aria-hidden /> },
   add_agreement: { title: 'Add an agreement to pay', count: (n) => plural(n, 'agreement'), icon: <Handshake className="size-4" aria-hidden /> },
+  set_terms: { title: 'Set an account’s terms', count: (n) => `${plural(n, 'account')}’ terms`, icon: <Percent className="size-4" aria-hidden /> },
 };
 
 /** "5 transfers linked, 2 transfer links undone, 1 category" */
@@ -437,6 +440,28 @@ export function ChangeBody({ change, view }: { change: ProposedChange; view: Pro
                 </li>
               ))}
             </ul>
+          )}
+        </div>
+      );
+    }
+    case 'set_terms': {
+      const acc = view.accounts[change.account];
+      const done = view.changes.find((c) => c.change.key === change.key)?.terms;
+      return (
+        <div className="grid gap-2 rounded-lg border border-line bg-panel px-3 py-2 text-[13px]">
+          <div className="text-ink-2">
+            <Link to={`/accounts/${change.account}#terms`} className="font-medium text-ink hover:underline">
+              {acc?.name ?? accountName(change.account)}
+            </Link>
+            , as {done?.fileName ? <Link to={`/import/${change.importId}`} className="hover:underline">{done.fileName}</Link> : 'its document'} of {formatDate(change.asOf)} gives them:
+          </div>
+          <RatesList terms={change.terms} type={acc?.type} now={change.asOf} />
+          {done?.before && (
+            <div className="text-[12.5px] text-ink-3">
+              In place of what its reading kept:{' '}
+              {[...done.before.rates.map((r) => `${r.label ?? RATE_NAMES[r.applies]} ${rateText(r)}`), done.before.limit !== undefined ? `${limitName(acc?.type)} ${money(done.before.limit)}` : '', done.before.minimumPayment !== undefined ? `minimum payment ${money(done.before.minimumPayment)}` : ''].filter(Boolean).join(', ') || 'nothing'}
+              .
+            </div>
           )}
         </div>
       );

@@ -437,6 +437,7 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
       ...(acc.openingBalance !== null ? { openingBalance: acc.openingBalance } : {}),
       ...(acc.availableBalance !== null ? { availableBalance: acc.availableBalance } : {}),
       ...(acc.creditLimit !== null ? { creditLimit: acc.creditLimit } : {}),
+      ...(acc.terms ? { terms: acc.terms } : {}),
       ...(acc.contributionsToDate !== null && !holdingDetail ? { contributions: acc.contributionsToDate } : {}),
       ...(acc.gainLoss !== null && !holdingDetail ? { gain: acc.gainLoss } : {}),
       ...(cash !== undefined ? { cash } : {}),

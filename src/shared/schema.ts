@@ -321,7 +321,6 @@ export const BalanceSnapshotSchema = z.object({
   currency: CurrencySchema,
   kind: z.enum(['statement', 'screenshot', 'export', 'manual']).default('manual'),
   availableBalance: MoneySchema.optional(),
-  creditLimit: MoneySchema.optional(),
   /** Total net contributions to date, as reported by the provider. */
   contributions: MoneySchema.optional(),
   /** Gain / loss to date, as reported by the provider. */
@@ -338,7 +337,6 @@ export const BalanceSnapshotSchema = z.object({
     .optional(),
   /** DB / state pension: forecast annual income. */
   annualIncome: MoneySchema.optional(),
-  interestRate: z.number().optional(),
   note: z.string().optional(),
   /**
    * A figure you gave roughly (a starting snapshot, a range's middle). It stands in only for what
@@ -362,6 +360,56 @@ export const BalanceSnapshotSchema = z.object({
   createdAt: TimestampSchema,
 });
 export type BalanceSnapshot = z.infer<typeof BalanceSnapshotSchema>;
+
+/**
+ * What a rate applies to: `interest` is paid to you on what the account holds (a saver's AER, a
+ * current account's credit interest, an investment account's cash); the others are charged.
+ */
+export const TERMS_RATE_APPLIES = ['interest', 'purchases', 'cash', 'balance-transfers', 'overdraft', 'loan', 'other'] as const;
+export type TermsRateApplies = (typeof TERMS_RATE_APPLIES)[number];
+
+/** A rate an account's document gives, as it gives it. */
+export const TermsRateSchema = z.object({
+  applies: z.enum(TERMS_RATE_APPLIES),
+  /** % a year. */
+  rate: z.number().min(0).max(100),
+  /** How it is stated: AER, APR, EAR (an overdraft's), a simple annual rate (a card's), or gross. */
+  basis: z.enum(['AER', 'APR', 'EAR', 'simple', 'gross']).optional(),
+  /** Whether it can change: false for a fixed rate. */
+  variable: z.boolean().optional(),
+  /** The last day it applies, when it ends: a promotional rate, a boost, a fixed term. */
+  until: ISODateSchema.optional(),
+  /** The balance at this rate, when the document gives it (a promotional balance). */
+  balance: MoneySchema.optional(),
+  /** As printed ("Promotional purchases", "Boosted rate"). */
+  label: z.string().min(1).max(120).optional(),
+});
+export type TermsRate = z.infer<typeof TermsRateSchema>;
+
+/**
+ * An account's terms as one document gives them on its date (terms.jsonl, docs/DATA_FORMAT.md): its
+ * rates, its credit limit or overdraft, and a card's minimum payment. A later document adds a new
+ * record; the history of them is how the terms changed (FORMULAS.md §4, "Terms").
+ */
+export const TermsSchema = z.object({
+  id: z.string().regex(/^trm_[0-9a-f]{16}$/),
+  accountId: SlugSchema,
+  /** The day they are given for: a statement's balance date. */
+  asOf: ISODateSchema,
+  rates: z.array(TermsRateSchema).max(20).default([]),
+  /** A card's credit limit, or a current account's arranged overdraft. */
+  limit: MoneySchema.optional(),
+  /** A card's minimum payment, and the day it is due. */
+  minimumPayment: MoneySchema.optional(),
+  paymentDue: ISODateSchema.optional(),
+  source: SourceRefSchema.default({}),
+  createdAt: TimestampSchema,
+});
+export type Terms = z.infer<typeof TermsSchema>;
+
+/** An account's terms as a reading gives them: with its limit and headline rate, kept as a terms record. */
+export const ExtractedTermsSchema = z.object({ rates: z.array(TermsRateSchema).max(20).default([]), minimumPayment: MoneySchema.optional(), paymentDue: ISODateSchema.optional() });
+export type ExtractedTerms = z.infer<typeof ExtractedTermsSchema>;
 
 export const ASSET_CLASSES = ['equity', 'bond', 'mixed', 'property', 'cash', 'commodity', 'crypto', 'other'] as const;
 
@@ -1008,8 +1056,8 @@ export const SettingsSchema = z.object({
       /** Read stored documents again with the current reader, to compare with what was recorded. Off until you turn it on. */
       rereadDocuments: z.boolean().default(false),
       /**
-       * Read everything a document prints (extract-12): a payslip in full, HMRC's pages as records, and
-       * every other labelled value. Off until its evaluation has passed.
+       * Read everything a document prints (extract-13): a payslip in full, HMRC's pages as records, an
+       * account's terms, and every other labelled value. Off until its evaluation has passed.
        */
       readEverything: z.boolean().default(false),
     })
@@ -1179,6 +1227,8 @@ export const ExtractedAccountSchema = z.object({
   cashBalance: MoneySchema.nullable().default(null),
   annualIncome: MoneySchema.nullable().default(null),
   interestRate: z.number().nullable().default(null),
+  /** Its terms in detail: every rate printed, and a card's minimum payment (the reader that keeps everything). */
+  terms: ExtractedTermsSchema.optional(),
   /** Totals of money in and money out printed on the statement, unsigned. */
   statedMoneyIn: MoneySchema.nullable().default(null),
   statedMoneyOut: MoneySchema.nullable().default(null),
@@ -1229,7 +1279,7 @@ export const ExtractionSchema = z.object({
   /** Payslips in full (ingest/payslips.ts). */
   payslips: z.array(ExtractedPayslipSchema).default([]),
   /**
-   * Every other labelled value the document prints, as printed (extract-12, "read everything"):
+   * Every other labelled value the document prints, as printed (extract-13, "read everything"):
    * kept with the import so nothing on a document is lost, though nothing reads it yet.
    */
   printed: z.array(z.object({ section: z.string().max(120).optional(), label: z.string().min(1).max(200), value: z.string().min(1).max(500) })).max(400).default([]),
@@ -1381,6 +1431,8 @@ export const DraftSectionSchema = z.object({
   taxYearContributions: MoneySchema.optional(),
   annualIncome: MoneySchema.optional(),
   interestRate: z.number().optional(),
+  /** Its terms in detail, when the reading gives them: with the limit and the rate, kept as a terms record. */
+  terms: ExtractedTermsSchema.optional(),
   transactions: z.array(DraftTransactionSchema).default([]),
   /**
    * The opening balance and running balances are the account's uninvested cash, not its value (an
@@ -1583,6 +1635,8 @@ export const ImportRecordSchema = z.object({
       /** HMRC records written, and the jobs it set up or that learned something from it. */
       hmrcAdded: z.number().int().nonnegative().optional(),
       payslipsAdded: z.number().int().nonnegative().optional(),
+      /** Accounts whose terms (rates, limit, minimum payment) it recorded. */
+      termsAdded: z.number().int().nonnegative().optional(),
       employmentsCreated: z.array(SlugSchema).optional(),
       /** The job each draft job was committed to (new jobs get their final id). */
       jobs: z.array(z.object({ key: z.string(), employmentId: SlugSchema })).optional(),
@@ -1682,6 +1736,12 @@ const changeUnion = <K extends z.ZodType<string | undefined>>(key: K) =>
      */
     z.object({ key, kind: z.literal('add_agreement'), why: ChangeWhySchema, agreement: AgreementSchema.omit({ createdBy: true, createdAt: true, updatedAt: true }) }),
     /**
+     * Set an account's terms as one of its documents (an import) gives them on its date: every rate
+     * it prints, with what each applies to and until when, its limit and a card's minimum payment.
+     * They replace the terms its reading kept for that account and day.
+     */
+    z.object({ key, kind: z.literal('set_terms'), why: ChangeWhySchema, account: SlugSchema, asOf: ISODateSchema, importId: z.string().regex(/^imp_\d{8}_\d{6}_[0-9a-f]{4}$/), terms: TermsSchema.pick({ rates: true, limit: true, minimumPayment: true, paymentDue: true }) }),
+    /**
      * Add a company you hold shares in, from its documents (a share certificate, its accounts): your
      * holding, and its value as a new "other asset" account in your estate, valued on `valuation.asOf`.
      */
@@ -1716,7 +1776,7 @@ export const ProposalSchema = z.object({
   /** Why it was dismissed, if you said. */
   dismissedReason: z.string().max(1000).optional(),
   /** The rows, accounts and balances the applied changes touched, as they were before: the audit trail. */
-  before: z.object({ transactions: z.array(TransactionSchema), accounts: z.array(AccountSchema), balances: z.array(BalanceSnapshotSchema).optional() }).optional(),
+  before: z.object({ transactions: z.array(TransactionSchema), accounts: z.array(AccountSchema), balances: z.array(BalanceSnapshotSchema).optional(), terms: z.array(TermsSchema).optional() }).optional(),
 });
 export type Proposal = z.infer<typeof ProposalSchema>;
 

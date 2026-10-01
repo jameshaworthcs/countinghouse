@@ -2,14 +2,15 @@
 // JSON schema. Bump PROMPT_VERSION whenever either changes; it is recorded on every import so old
 // extractions can be told apart (and re-run) later.
 //
-// Reading everything (Settings → Import & extraction, `readEverything`) adds rules 20 to 22 and their
-// part of the schema: a payslip in full, HMRC's pages as records, and every other labelled value the
-// document prints. It is PROMPT_VERSION_EVERYTHING, and stays off until its evaluation has passed.
+// Reading everything (Settings → Import & extraction, `readEverything`) adds rules 20 to 23 and their
+// part of the schema: a payslip in full, HMRC's pages as records, an account's terms (its rates,
+// limit and minimum payment) and every other labelled value the document prints. It is
+// PROMPT_VERSION_EVERYTHING, and stays off until its evaluation has passed.
 
-import { ACCOUNT_TYPES, ASSET_CLASSES, EXTRACTION_DOC_TYPES, FIGURE_KINDS } from '../../shared/schema';
+import { ACCOUNT_TYPES, ASSET_CLASSES, EXTRACTION_DOC_TYPES, FIGURE_KINDS, TERMS_RATE_APPLIES } from '../../shared/schema';
 
 export const PROMPT_VERSION = 'extract-11';
-export const PROMPT_VERSION_EVERYTHING = 'extract-12';
+export const PROMPT_VERSION_EVERYTHING = 'extract-13';
 
 /** The prompt version a reading is made with. */
 export const promptVersion = (everything: boolean) => (everything ? PROMPT_VERSION_EVERYTHING : PROMPT_VERSION);
@@ -75,7 +76,7 @@ Accuracy matters more than completeness:
     - Holiday balances (accrued, taken, carried over, left) are not figures.
     For every figure that is not earned_pay, work is null.`;
 
-/** Rules 20 to 22: everything else the document prints (extract-12). */
+/** Rules 20 to 23: everything else the document prints (extract-13). */
 const EVERYTHING_RULES = `
 20. payslips: each payslip on the document in full, as well as its figures under rule 13.
     - employer as the payslip names it; otherNames for any other company it prints (a group company); payeReference ("123/AB45678") and payrollNumber (your payroll or works number) when printed.
@@ -92,15 +93,19 @@ const EVERYTHING_RULES = `
     - settlement: a tax year worked out: taxYear, asOf, outcome (underpaid, overpaid or settled), amount, calculatedOn, outstanding (to pay positive, to be repaid negative), payments made.
     - ni-year: a year of the National Insurance record: asOf, taxYear, status (full, not-full, not-available, other), contributions by kind, voluntaryCost and payBy to fill it, text.
     - state-pension-forecast: asOf, weekly, monthly, annual, payableFrom, recordTo, qualifyingYears, yearsNeeded, assumesYears, maximum.
-22. printed: every other labelled value the document prints that nothing above holds, so nothing on it is lost: rates and limits, minimum payments and due dates, plan and policy details, charges, transfer and projected values, a P60's National Insurance table and statutory payments, a P45's details, and the like. One entry each: section (the heading it is under, or null), label and value exactly as printed. Leave out transaction rows, holdings and anything already given under figures, payslips or hmrc. Never include a name, address, date of birth, National Insurance number, full account or card number, sort code, or a reference that identifies the account holder.`;
+22. printed: every other labelled value the document prints that nothing above holds, so nothing on it is lost: plan and policy details, charges, transfer and projected values, estimated interest, a P60's National Insurance table and statutory payments, a P45's details, and the like. One entry each: section (the heading it is under, or null), label and value exactly as printed. Leave out transaction rows, holdings and anything already given under figures, payslips, hmrc or an account's terms. Never include a name, address, date of birth, National Insurance number, full account or card number, sort code, or a reference that identifies the account holder.
+23. terms, on each account: its terms as the document gives them; null when it gives none. The credit limit or arranged overdraft stays in creditLimit, and the AER in interestRate as well.
+    - rates: every rate it prints, one each: applies (interest when paid to you on what the account holds; purchases, cash or balance-transfers on a card; overdraft; loan when charged on a loan or mortgage; other), rate as a percentage a year (34.94 for 34.940%), basis as printed (AER, APR, EAR, simple for a card's annual simple rate, gross), variable true or false when it says, until the last day it applies when it ends (a promotional rate "until 31 Mar 2027", a boosted rate, a fixed rate's end), balance the amount at that rate when printed (a promotional balance), and label as printed ("Standard purchases", "Boosted rate").
+    - minimumPayment and paymentDue: a card's minimum payment and the date it is due.`;
 
-/** The system prompt: rules 1 to 19, and 20 to 22 when reading everything. */
+/** The system prompt: rules 1 to 19, and 20 to 23 when reading everything. */
 export const systemPrompt = (everything: boolean) => (everything ? `${SYSTEM_PROMPT}${EVERYTHING_RULES}` : SYSTEM_PROMPT);
 
 const nullable = (schema: Record<string, unknown>) => ({ anyOf: [schema, { type: 'null' }] });
 const str = (description?: string) => ({ type: 'string', ...(description ? { description } : {}) });
 const num = (description?: string) => ({ type: 'number', ...(description ? { description } : {}) });
 const date = (description = 'YYYY-MM-DD') => ({ type: 'string', description });
+const bool = (description?: string) => ({ type: 'boolean', ...(description ? { description } : {}) });
 
 function object(properties: Record<string, unknown>) {
   return { type: 'object', properties, required: Object.keys(properties), additionalProperties: false };
@@ -142,6 +147,22 @@ export function extractionJsonSchema(everything = false): Record<string, unknown
     costBasis: nullable(num('Book cost / amount invested in this holding')),
     gain: nullable(num('Growth / change since invested, in money')),
   });
+  const terms = object({
+    rates: {
+      type: 'array',
+      items: object({
+        applies: { type: 'string', enum: [...TERMS_RATE_APPLIES] },
+        rate: num('% a year, as printed'),
+        basis: nullable({ type: 'string', enum: ['AER', 'APR', 'EAR', 'simple', 'gross'] }),
+        variable: nullable(bool()),
+        until: nullable(date('The last day it applies, when it ends')),
+        balance: nullable(num('The amount at this rate, when printed')),
+        label: nullable(str('As printed')),
+      }),
+    },
+    minimumPayment: nullable(num()),
+    paymentDue: nullable(date()),
+  });
   const account = object({
     institutionName: nullable(str()),
     accountName: nullable(str('Account/product name as shown')),
@@ -162,6 +183,7 @@ export function extractionJsonSchema(everything = false): Record<string, unknown
     cashBalance: nullable(num()),
     annualIncome: nullable(num('DB / State Pension forecast per year')),
     interestRate: nullable(num('AER % if shown')),
+    ...(everything ? { terms: nullable(terms) } : {}),
     statedMoneyIn: nullable(num('Printed total of money in for the period, positive')),
     statedMoneyOut: nullable(num('Printed total of money out for the period, positive')),
     runningBalanceOf: nullable({ type: 'string', enum: ['account', 'cash'], description: 'What a running Balance column tracks' }),
@@ -191,7 +213,6 @@ export function extractionJsonSchema(everything = false): Record<string, unknown
       }),
     ),
   });
-  const bool = (description?: string) => ({ type: 'boolean', ...(description ? { description } : {}) });
   const line = object({ label: str('As printed'), amount: num('Signed as printed: a minus or CR makes it negative'), quantity: nullable(num('Hours or units, if printed')), rate: nullable(num('Rate per hour or unit, if printed')) });
   const payslip = object({
     employer: str('The employer as the payslip names it'),

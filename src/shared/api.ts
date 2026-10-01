@@ -4,6 +4,9 @@ import type { AccessGroup, WrapperGroup } from './accounts';
 import type {
   Account,
   Agreement,
+  Terms,
+  TermsRate,
+  TermsRateApplies,
   BalanceSnapshot,
   Category,
   Company,
@@ -685,6 +688,8 @@ export interface ProposalChangeView {
   moved?: { misfit: string; beside: { date: string; balance: number }[] };
   /** An agreement added: the payments in your data it files under its category, with the category each has now. */
   files?: { transactionId: string; accountId: string; date: string; amount: number; category?: string }[];
+  /** Terms set: the document they are from, and the terms its reading kept, which they replace. */
+  terms?: { fileName?: string; before?: Pick<Terms, 'rates' | 'limit' | 'minimumPayment' | 'paymentDue'> };
 }
 
 /** A balance a proposal moves, as it is now (as it was, once decided). */
@@ -1014,6 +1019,18 @@ export interface CompanyView {
   /** Each dividend: a voucher (with the credit that paid it, when found), or a credit with no voucher. */
   dividends: { date: string; amount: number; taxYear?: string; figureId?: string; importId?: string; paidIn?: { transactionId: string; accountId: string; date: string } }[];
   dividendsTotal: number;
+}
+
+/** GET /accounts/:id/terms: an account's terms as its documents give them (FORMULAS §4, "Terms"). */
+export interface TermsResponse {
+  /** Its latest terms, with the name of the document they are from. */
+  latest?: Terms & { fileName?: string };
+  /** How its limit and each kind of rate changed, oldest first: each time one differs from the one before. */
+  changes: { asOf: string; what: 'limit' | TermsRateApplies; from?: number; to: number }[];
+  /** Rates in its latest terms that end within 60 days or have ended, with the days left (below 0: since). */
+  ending: { rate: TermsRate; days: number }[];
+  /** How many documents gave its terms. */
+  records: number;
 }
 
 /** An agreement, its schedule checked against what you paid (FORMULAS §10, "Agreements"). */
