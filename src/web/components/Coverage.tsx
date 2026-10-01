@@ -20,7 +20,9 @@ export function CoverageGrid({ cov, only }: { cov: CoverageResponse; only?: stri
     else years.push({ year: y, span: 1 });
   }
   return (
-    <div className="overflow-x-auto">
+    // Positioned, so the cells' screen-reader labels (absolutely placed) scroll with the grid
+    // instead of widening the page on a phone.
+    <div className="relative overflow-x-auto">
       <table className="border-separate border-spacing-[2px] text-[12px]">
         <thead>
           <tr>
