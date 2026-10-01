@@ -1161,6 +1161,10 @@ joined them. Pay owed to the owner (a missed month the employer will pay) had no
 - **The State Pension forecast is HMRC's record when there is one.** The retirement outlook takes
   the newest forecast, HMRC's or the owner's, and starts it at the State Pension age the forecast
   gives.
+- **One employer's documents waiting together set up one job.** Drafts were matched again only
+  after a commit set up an account. Now that also happens after a commit that sets up or teaches a
+  job, or adds HMRC's records. A draft you edited, and so is not drafted again, joins the job set up
+  since with the id it proposes when that job is the same employer.
 - **Pay carrying your payroll number is salary.** A payroll's bank reference prints the payroll
   number. A statement export with no categories left months of pay uncategorised, so the Pay tab
   could not find it. The categoriser now knows the jobs' payroll numbers. When a job learns one,

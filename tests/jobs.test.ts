@@ -118,6 +118,38 @@ describe('HMRC’s pages, uploaded', () => {
     ]);
   });
 
+  describe('documents about one new employer, waiting together', () => {
+    const pages = async () => {
+      const income = (await fixture('taxable-income-employer.raw.txt')).split('\n');
+      const details = (await fixture('employment-details.raw.txt')).replaceAll('OAKFIELD', 'LARCHWOOD DATA').replaceAll('ENGINEERING LIMITED', 'LIMITED').replace('Employment details for LARCHWOOD DATA\nLIMITED', 'Employment details for LARCHWOOD DATA LIMITED');
+      const a = await upload('larchwood.pdf', income);
+      const b = await upload('larchwood-details.pdf', details.split('\n'));
+      // Both were drafted before either was committed: each proposes the same new job.
+      for (const r of [a, b]) expect(r.draft!.jobs![0]!.target).toMatchObject({ mode: 'new', employment: { id: 'larchwood-data' } });
+      return { a, b };
+    };
+    const commit = async (id: string) => expect((await req(`/api/imports/${id}/commit`, { method: 'POST', headers: CSRF })).status).toBe(200);
+
+    withPdf('the one still waiting is matched again to the job the first set up', async () => {
+      const { a, b } = await pages();
+      await commit(a.id);
+      const again = (await (await req(`/api/imports/${b.id}`)).json()) as ImportRecord;
+      expect(again.draft!.jobs![0]).toMatchObject({ matchedBy: 'name', target: { mode: 'existing', employmentId: 'larchwood-data' } });
+      await commit(b.id);
+      expect(app.ctx.store.employments.map((e) => [e.id, e.payeReference ?? null])).toEqual([['larchwood-data', '123/AB45678']]);
+    });
+
+    withPdf('one you saved changes to, so not drafted again, still joins that job when committed', async () => {
+      const { a, b } = await pages();
+      expect((await req(`/api/imports/${b.id}/draft`, { method: 'PUT', headers: { ...CSRF, 'content-type': 'application/json' }, body: JSON.stringify(b.draft) })).status).toBe(200);
+      await commit(a.id);
+      expect(((await (await req(`/api/imports/${b.id}`)).json()) as ImportRecord).draft!.jobs![0]!.target).toMatchObject({ mode: 'new' });
+      await commit(b.id);
+      expect(app.ctx.store.employments.map((e) => [e.id, e.payeReference ?? null, e.payrollNumbers])).toEqual([['larchwood-data', '123/AB45678', ['10203040']]]);
+      expect(app.ctx.store.hmrc.every((r) => r.employmentId === 'larchwood-data')).toBe(true);
+    });
+  });
+
   withPdf('a job’s PAYE reference is what matches it, before any name', async () => {
     const { store } = app.ctx;
     await store.setEmployments([job('oakfield', 'Oakfield Group', { payeReference: '123/AB45678' }), job('oakfield-2', 'OAKFIELD ENGINEERING LIMITED')]);

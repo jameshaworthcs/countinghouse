@@ -11,7 +11,8 @@ import { taxYearOf } from '../../shared/uk';
 import { detailToAdd, fillIn, seenInEntry, stillAdds } from '../../shared/detail';
 import type { Account, BalanceSnapshot, DetailField, Draft, DraftSection, Employment, Extraction, Figure, HmrcRecord, Holding, HoldingsSnapshot, ImportRecord, Transaction } from '../../shared/schema';
 import { AccountSchema, BalanceSnapshotSchema, DraftSchema, EmploymentSchema, FigureSchema, HmrcRecordSchema, HoldingsSnapshotSchema, TransactionSchema } from '../../shared/schema';
-import { learn } from '../employments';
+import { learn, matchEmployment } from '../employments';
+import { payeReference } from '../analytics/sources';
 import { nowISO, safeFileName } from '../fsutil';
 import { balanceId, figureId, hmrcId, holdingsId, transactionId, transferGroupId } from '../ids';
 import { categoriserFor } from '../categoriser';
@@ -309,13 +310,25 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
   for (const job of draft.jobs ?? []) {
     if (!used.has(job.key)) continue;
     const who = { employer: job.employer, payeReference: job.payeReference, payrollNumber: job.payrollNumber };
-    if (job.target.mode === 'existing') {
-      const e = jobsToWrite.get(job.target.employmentId) ?? store.employment(job.target.employmentId);
-      if (!e) throw new StoreError(`The job "${job.target.employmentId}" no longer exists`, 409);
+    const attach = (e: Employment) => {
       const next = learn(e, who);
       if (JSON.stringify(next) !== JSON.stringify(e)) jobsToWrite.set(e.id, { ...next, updatedAt: stamp });
       jobIds.set(job.key, e.id);
+    };
+    if (job.target.mode === 'existing') {
+      const e = jobsToWrite.get(job.target.employmentId) ?? store.employment(job.target.employmentId);
+      if (!e) throw new StoreError(`The job "${job.target.employmentId}" no longer exists`, 409);
+      attach(e);
     } else {
+      // The job this draft would set up may have been set up since the draft was made, by another
+      // document about the same employer: its id is taken by a job this employer is (and no other
+      // PAYE reference says otherwise). Then it is that job, not a second one.
+      const since = jobsToWrite.get(job.target.employment.id) ?? store.employment(job.target.employment.id);
+      const ref = payeReference(who.payeReference);
+      if (since && matchEmployment([since], who) && !(ref && since.payeReference && since.payeReference !== ref)) {
+        attach(since);
+        continue;
+      }
       const taken = [...store.employments.map((e) => e.id), ...jobsToWrite.keys()];
       const id = taken.includes(job.target.employment.id) ? slugify(job.target.employment.id, taken) : job.target.employment.id;
       const fresh = EmploymentSchema.parse({ id, employer: job.target.employment.employer, aliases: [], payrollNumbers: [], owed: [], createdBy: 'import', createdAt: stamp, updatedAt: stamp });

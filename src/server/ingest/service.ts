@@ -142,8 +142,8 @@ export class ImportService extends EventEmitter {
   /**
    * Drafts you have not edited are drafted again from their readings when the app starts, so what a
    * newer version matches, categorises or checks applies to imports already waiting, and after a
-   * commit creates an account, so they can match it. Nothing is read again, and a draft you saved
-   * changes to is left alone.
+   * commit sets up an account or a job, teaches a job, or adds HMRC's records, so they can match
+   * them. Nothing is read again, and a draft you saved changes to is left alone.
    */
   private async redraftWaiting(): Promise<void> {
     const waiting = [...this.pending.values()].filter((r) => r.status === 'review' && r.draft && r.extraction.raw && !r.draftEditedAt).sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
@@ -831,10 +831,11 @@ export class ImportService extends EventEmitter {
     const committed = await commitDraft(this.store, { record, draft: checked.draft, workFile: this.work.filePath(record.document) });
     this.pending.delete(id);
     await this.work.remove(record, [...this.pending.values()]);
-    // An account it created may be the one other waiting documents are about (a letter uploaded with
-    // the new account's first statement): drafts you have not edited are matched again, so they are
-    // not committed into another account, or into a second new one.
-    if (committed.result?.accountsCreated.length) await this.redraftWaiting();
+    // An account or job it set up may be the one other waiting documents are about (a letter
+    // uploaded with the new account's first statement, a P60 beside HMRC's page for the same job),
+    // and HMRC's records it added match payslips to their job: drafts you have not edited are matched
+    // again, so they are not committed into another account or job, or into a second new one.
+    if (committed.result?.accountsCreated.length || committed.result?.jobs?.length || committed.result?.hmrcAdded) await this.redraftWaiting();
     // Funds on it become instruments. The import is committed whatever happens here: the app
     // records any it missed when it next starts.
     if (committed.result?.holdingsAdded) {

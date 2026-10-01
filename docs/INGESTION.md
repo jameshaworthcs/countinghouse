@@ -506,6 +506,12 @@ read again.
   choose another or a new one. A new job holds the import back from "Commit all ready". Only a job
   that something ticked is about is set up or changed. Committing teaches it any name, PAYE
   reference or payroll number the document gave that it lacked.
+  - Documents about one employer often wait together (a P60 beside HMRC's page). After a commit
+    that sets up or teaches a job, or adds HMRC's records, the drafts still waiting that you have
+    not edited are matched again.
+  - A draft you edited still proposes the job as new. When it is committed, a job set up since with
+    the id it proposes, which this employer is (and no other PAYE reference says otherwise), is
+    that job: it is not set up twice.
 - **HMRC's records** are ticked unless the same record is stored already.
 - **National Insurance numbers stay out.** A figure's `payerReference` that is one is left out (a
   pension statement prints it as your "Reference"), and one in the reader's notes becomes
