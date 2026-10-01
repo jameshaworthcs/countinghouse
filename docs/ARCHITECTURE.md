@@ -39,10 +39,10 @@ Source layout:
 
 | Path | What lives there |
 |---|---|
-| `src/shared/` | Isomorphic code: schemas (`schema.ts`), money, dates, UK rules, account-type metadata, categories, merchants, categoriser, reconciliation, what a document adds to a recorded payment (`detail.ts`), identifiers kept out of the data (`privacy.ts`), API types |
+| `src/shared/` | Isomorphic code: schemas (`schema.ts`), money, dates, UK rules, account-type metadata, categories, merchants, categoriser, which payments an agreement schedules (`agreements.ts`), reconciliation, what a document adds to a recorded payment (`detail.ts`), identifiers kept out of the data (`privacy.ts`), API types |
 | `src/server/` | Store, git, auth, security, migrations, enrichment, routes, app composition; `employments.ts` matches a document's employer to one of your jobs |
 | `src/server/ingest/` | Everything from bytes to committed records; `govuk.ts` reads HMRC's gov.uk pages and `payslips.ts` known payslip layouts from their text, on this machine |
-| `src/server/analytics/` | Read-only computations over the store; `model.ts` is pure (no store access); `sources.ts` decides which document's figure counts when several state one job's year; `payslips.ts` reads payslips in full (their year to date, gaps, employer costs); `taxdocuments.ts` is Settings → Tax documents; `companies.ts` is your shares in companies; `arrangements.ts` checks what employers set up to pay into your pensions |
+| `src/server/analytics/` | Read-only computations over the store; `model.ts` is pure (no store access); `sources.ts` decides which document's figure counts when several state one job's year; `payslips.ts` reads payslips in full (their year to date, gaps, employer costs); `taxdocuments.ts` is Settings → Tax documents; `companies.ts` is your shares in companies; `arrangements.ts` checks what employers set up to pay into your pensions; `agreements.ts` checks an agreement's schedule against your payments |
 | `src/server/agents/` | Agent jobs: the CLI runner, job kinds and prompts, the digest, the queue |
 | `src/server/records.ts` | The validated write path for agent-maintained records |
 | `src/server/proposals.ts` | Fixes agents propose to your data, checked against it and applied only by you ([AGENTS.md §5](AGENTS.md)) |
@@ -138,9 +138,9 @@ The equations are in [FORMULAS.md](FORMULAS.md); the rules for writing these rec
    - Each extracted account is matched to one of yours by last 4 digits, provider, type and name
      (an account you dropped the file onto wins). A scrolled screen that names no account takes
      the one a screenshot taken and uploaded with it shows, when nothing on it disagrees.
-   - Each row is categorised: your rules, then own-account transfers, then wrapper flows, then the
-     UK merchant list, then pay carrying one of your payroll numbers, then the bank's category,
-     then Claude's suggestion.
+   - Each row is categorised: your rules, then own-account transfers, then wrapper flows, then a
+     payment one of your agreements schedules, then the UK merchant list, then pay carrying one of
+     your payroll numbers, then the bank's category, then Claude's suggestion.
    - Duplicates are found by bank id, then exact multiset match, then fuzzy match.
    - Opposite-amount rows in your other accounts are proposed as the other leg of a transfer.
    - Investment app screens are read as the part of the account they show: an activity list's

@@ -6,6 +6,7 @@ import { addMonths, endOfMonth, formatMonth, startOfMonth, today } from '../../s
 import { taxYearOf } from '../../shared/uk';
 import { BarList, ColumnChart, Heatmap } from '../components/charts/bars';
 import { ChartFrame } from '../components/charts/common';
+import { AgreementsCard } from '../components/Agreements';
 import { BudgetsCard } from '../components/Budgets';
 import { InsightsPanel, SignalList } from '../components/Intel';
 import { TransactionList } from '../components/TransactionList';
@@ -298,6 +299,8 @@ export default function Spending() {
               <EmptyState title="Nothing regular found yet">Needs at least three payments to the same payee.</EmptyState>
             )}
           </Card>
+
+          <AgreementsCard />
 
           <Card title="Largest purchases" padded={false}>
             <TransactionList items={s.largest} />

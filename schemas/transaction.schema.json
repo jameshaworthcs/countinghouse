@@ -219,7 +219,8 @@
         "builtin",
         "bank",
         "ai",
-        "transfer"
+        "transfer",
+        "agreement"
       ]
     },
     "ruleId": {

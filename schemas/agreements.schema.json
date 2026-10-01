@@ -1,0 +1,178 @@
+{
+  "$id": "agreements.schema.json",
+  "title": "agreements",
+  "description": "Schema for data/agreements.json (agreements to pay: their schedules and what their documents say). Generated from src/shared/schema.ts by `npm run schemas`; do not edit.",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "agreements": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+            "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "counterparty": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "names": {
+            "default": [],
+            "maxItems": 10,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 100
+            }
+          },
+          "category": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "from": {
+            "type": "string",
+            "description": "Calendar date, YYYY-MM-DD"
+          },
+          "until": {
+            "type": "string",
+            "description": "Calendar date, YYYY-MM-DD"
+          },
+          "total": {
+            "type": "number",
+            "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+          },
+          "payments": {
+            "minItems": 1,
+            "maxItems": 120,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "due": {
+                  "type": "string",
+                  "description": "Calendar date, YYYY-MM-DD"
+                },
+                "amount": {
+                  "type": "number",
+                  "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                },
+                "label": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120
+                }
+              },
+              "required": [
+                "due",
+                "amount"
+              ]
+            }
+          },
+          "details": {
+            "default": [],
+            "maxItems": 40,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "value": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 400
+                }
+              },
+              "required": [
+                "label",
+                "value"
+              ]
+            }
+          },
+          "agreedOn": {
+            "type": "string",
+            "description": "Calendar date, YYYY-MM-DD"
+          },
+          "reference": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "notes": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "source": {
+            "default": {},
+            "type": "object",
+            "properties": {
+              "importId": {
+                "type": "string"
+              },
+              "documentId": {
+                "type": "string"
+              },
+              "row": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            }
+          },
+          "createdBy": {
+            "default": "owner",
+            "type": "string",
+            "enum": [
+              "owner",
+              "agent"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "description": "ISO 8601 timestamp"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "description": "ISO 8601 timestamp"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "counterparty",
+          "category",
+          "from",
+          "payments",
+          "createdAt",
+          "updatedAt"
+        ]
+      }
+    },
+    "$schema": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "agreements"
+  ]
+}

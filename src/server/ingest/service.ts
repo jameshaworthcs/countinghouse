@@ -653,7 +653,7 @@ export class ImportService extends EventEmitter {
         // you set yourself and what a transfer link decided.
         const account = this.store.account(current.accountId)!;
         const categoriser = categoriserFor(this.store);
-        const cat = categoriser.categorise({ accountId: account.id, description: row.read.description, amount: row.read.amount, type: row.read.type ?? current.type, bankCategory: current.bankCategory });
+        const cat = categoriser.categorise({ accountId: account.id, description: row.read.description, amount: row.read.amount, date: row.read.date, type: row.read.type ?? current.type, bankCategory: current.bankCategory });
         if (current.payeeSetBy !== 'user' && cat.payee) patch.payee = cat.payee;
         if (!current.transferGroup && current.categorisedBy !== 'user' && current.categorisedBy !== 'transfer') {
           patch.category = cat.category;
@@ -666,7 +666,7 @@ export class ImportService extends EventEmitter {
       } else if (row.kind === 'added' && row.read) {
         const account = this.store.account(section.accountId)!;
         const categoriser = categoriserFor(this.store);
-        const cat = categoriser.categorise({ accountId: account.id, description: row.read.description, amount: row.read.amount, type: row.read.type });
+        const cat = categoriser.categorise({ accountId: account.id, description: row.read.description, amount: row.read.amount, date: row.read.date, type: row.read.type });
         let occurrence = 0;
         let id = transactionId(account.id, row.read.date, row.read.amount, row.read.description, occurrence, `${importId}:reread`);
         while (this.store.transaction(id)) id = transactionId(account.id, row.read.date, row.read.amount, row.read.description, ++occurrence, `${importId}:reread`);

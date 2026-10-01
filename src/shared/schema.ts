@@ -152,7 +152,7 @@ export type Account = z.infer<typeof AccountSchema>;
 
 // ─── Transactions ────────────────────────────────────────────────────────────────────────────────
 
-export const CATEGORISED_BY = ['user', 'rule', 'builtin', 'bank', 'ai', 'transfer'] as const;
+export const CATEGORISED_BY = ['user', 'rule', 'builtin', 'bank', 'ai', 'transfer', 'agreement'] as const;
 export type CategorisedBy = (typeof CATEGORISED_BY)[number];
 
 export const SourceRefSchema = z.object({
@@ -583,6 +583,50 @@ export const CompanySchema = z.object({
   updatedAt: TimestampSchema,
 });
 export type Company = z.infer<typeof CompanySchema>;
+
+/**
+ * An agreement that sets out payments you make to someone (agreements.json, docs/DATA_FORMAT.md): an
+ * accommodation offer or tenancy, a contract, a payment plan. Its schedule is kept as its document
+ * gives it, with everything else the document says; its payments are filed under its category as
+ * they come, and checked against the schedule (FORMULAS.md §10, "Agreements").
+ */
+const AgreementPaymentSchema = z.object({
+  due: ISODateSchema,
+  /** What is due, as the document gives it: money you pay, so a positive amount. */
+  amount: MoneySchema.refine((n) => n > 0, { message: 'A payment due is a positive amount' }),
+  /** As the document names it ("Instalment 1"). */
+  label: z.string().min(1).max(120).optional(),
+});
+export const AgreementSchema = z.object({
+  id: SlugSchema,
+  /** What it is, in a few words ("Example College room, 2023/24"). */
+  name: z.string().min(1).max(160),
+  /** Who you pay. */
+  counterparty: z.string().min(1).max(200),
+  /** Other names its payments carry in your accounts ("UNI OF EXAMPLETON"): with the counterparty's, how they are recognised. */
+  names: z.array(z.string().min(3).max(100)).max(10).default([]),
+  /** The category its payments take: a spending category. */
+  category: z.string().min(1).max(64),
+  /** The period it covers (a let's first and last days). */
+  from: ISODateSchema,
+  until: ISODateSchema.optional(),
+  /** Its total cost, as the document gives it. */
+  total: MoneySchema.optional(),
+  /** Its schedule: what is due, and when. */
+  payments: z.array(AgreementPaymentSchema).min(1).max(120),
+  /** Everything else its document says, as it says it ("Bedroom type": "Standard ensuite"). */
+  details: z.array(z.object({ label: z.string().min(1).max(80), value: z.string().min(1).max(400) })).max(40).default([]),
+  /** The day it was offered or signed. */
+  agreedOn: ISODateSchema.optional(),
+  /** Its reference: a booking, contract or account number. */
+  reference: z.string().min(1).max(80).optional(),
+  notes: z.string().max(2000).optional(),
+  source: SourceRefSchema.default({}),
+  createdBy: z.enum(['owner', 'agent']).default('owner'),
+  createdAt: TimestampSchema,
+  updatedAt: TimestampSchema,
+});
+export type Agreement = z.infer<typeof AgreementSchema>;
 
 // What HMRC's services hold about you, as their pages show it (docs/DATA_FORMAT.md, hmrc.jsonl).
 const HmrcWho = {
@@ -1630,12 +1674,17 @@ const changeUnion = <K extends z.ZodType<string | undefined>>(key: K) =>
      * they do.
      */
     z.object({ key, kind: z.literal('move_balance'), why: ChangeWhySchema, balance: BalanceIdSchema, to: SlugSchema }),
+    /** Add a pension arrangement to a job: what its employer said it would pay into a pension account of yours. */
+    z.object({ key, kind: z.literal('add_pension_arrangement'), why: ChangeWhySchema, employmentId: SlugSchema, arrangement: PensionArrangementSchema }),
+    /**
+     * Add an agreement that sets out payments you make (an accommodation offer, a contract), from its
+     * document: its payments already in your data, and those to come, are filed under its category.
+     */
+    z.object({ key, kind: z.literal('add_agreement'), why: ChangeWhySchema, agreement: AgreementSchema.omit({ createdBy: true, createdAt: true, updatedAt: true }) }),
     /**
      * Add a company you hold shares in, from its documents (a share certificate, its accounts): your
      * holding, and its value as a new "other asset" account in your estate, valued on `valuation.asOf`.
      */
-    /** Add a pension arrangement to a job: what its employer said it would pay into a pension account of yours. */
-    z.object({ key, kind: z.literal('add_pension_arrangement'), why: ChangeWhySchema, employmentId: SlugSchema, arrangement: PensionArrangementSchema }),
     z.object({
       key,
       kind: z.literal('add_company'),
@@ -2150,6 +2199,7 @@ export const AccountsFileSchema = z.object({ accounts: z.array(AccountSchema) })
 export const InstrumentsFileSchema = z.object({ instruments: z.array(InstrumentSchema) });
 export const EmploymentsFileSchema = z.object({ employments: z.array(EmploymentSchema) });
 export const CompaniesFileSchema = z.object({ companies: z.array(CompanySchema) });
+export const AgreementsFileSchema = z.object({ agreements: z.array(AgreementSchema) });
 export const InstitutionsFileSchema = z.object({ institutions: z.array(InstitutionSchema) });
 export const CategoriesFileSchema = z.object({ categories: z.array(CategorySchema) });
 export const RulesFileSchema = z.object({ rules: z.array(RuleSchema) });

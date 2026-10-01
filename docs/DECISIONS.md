@@ -1288,3 +1288,35 @@ payments, and when they stopped.
   listed, and contributions on no arrangement are listed apart.
 - **It changes no total.** The allowance counts the contributions that arrived, as before.
 - **An agent proposes it** (`add_pension_arrangement`), from the form; the owner applies it.
+
+## 2026-10-01: Agreements to pay: an offer's schedule, filed and checked
+
+The fifth slice, fourth part. Two University of Exampleton accommodation offers (the college, the room,
+the let, its total and three instalments) were "nothing to record". Their rent was filed as
+courses, because the merchant list read any "UNIVERSITY" as a course.
+
+- **An agreement is a record** (`agreements.json`): who you pay, the period, the total, the
+  schedule as the document gives it, and everything else it says as label and value, in its own
+  words.
+  - Considered: a field for each thing an offer says (college, bedroom type, let length). Every
+    kind of agreement says different things; label and value keeps them all without a schema for
+    each.
+  - Considered: a rule (`rules.json`) for its payments. A rule has no dates or amounts to check
+    against, and would file every £1 printing charge to the university as rent.
+- **Its payments take its category as they come** (categoriser step 3b): money out naming its
+  counterparty, within 45 days of a due date, for that payment's amount or within a tenth of it.
+  The tenth covers a £150 advance taken off an instalment and a £12 charge added to one, as the
+  2023/24 let had; a £1 charge is far outside it. A payment made before the agreement was is never
+  its: last year's bill, a month before this year's first instalment. Its payee is worked out as
+  any other's, so it groups with the payments to the same payee outside the agreement.
+- **The check pairs payments across all agreements at once**, so a tenancy and its renewal never
+  share the month's rent between them.
+- **A university's name alone is not a course any more.** The merchant list kept "UNIVERSITY" for
+  courses, but a person pays a university rent, printing and cafés as well as fees, and is paid
+  wages by it. "TUITION" and the Open University stay. Rows filed by the old pattern keep it until
+  categorisation is re-run (Settings → Rules).
+- **Its card on the Spending page checks the schedule**, each payment due paired with one payment
+  (exactly the amount first), with the other payments in its category around it. The check is
+  computed, not stored.
+- **An agent proposes it** (`add_agreement`), from the document; the owner applies it, and the
+  proposal shows which recorded payments it would file.

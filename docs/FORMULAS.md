@@ -395,6 +395,35 @@ Deterministic rules with named thresholds (`SIGNAL_RULES` in `analytics/spending
 - **Uncategorised:** > 8% of spending.
 - **Top category:** > 25% of spending.
 
+**Agreements** (`agreements.json`; `shared/agreements.ts`, `analytics/agreements.ts`). An agreement
+is what an offer, contract or payment plan says you will pay: a schedule of payments due, each a
+date and an amount.
+
+- **Its payments:** money out of an everyday account (not an investment or pension) whose
+  description, or the merchant or payer its source gives, names its counterparty or one of its
+  other names, as whole words.
+- **A scheduled payment** is one of those within 45 days either side of a due date
+  (`AGREEMENT_PAYMENT_DAYS`), for that payment's amount or within a tenth of it
+  (`AGREEMENT_PAYMENT_TOLERANCE`): an advance taken off an instalment, or a small charge added to
+  one, still makes it that instalment. One made before the agreement was (`agreedOn`, when known)
+  is not: last year's bill paid a month before this year's first instalment.
+- **Filing** (the categoriser's step 3b): a scheduled payment takes the agreement's category
+  (`categorisedBy: "agreement"`). Its payee is worked out as any other's, so it groups with the
+  payments to the same payee before and after the agreement. It comes after your rules, transfers
+  and wrapper flows, and before the merchant list, which knows a name but not what it was paid
+  for. When an agreement is added, the scheduled payments already recorded are filed the same way,
+  except one you, a rule of yours or a transfer link categorised.
+- **The check** pairs payments due with payments, across all your agreements at once, so two never
+  share one (a tenancy and its renewal): pairs of exactly the amount due first, then the fewest
+  days apart, then the nearest amount; each payment pairs once. A payment due with none is *not due
+  yet* before its date, *due* for 45 days after it, then *no payment seen*. A paired payment that
+  differs from what was due shows the difference.
+- **Other payments:** those to its counterparty in its category that no agreement's payment due
+  pairs with, from when it was agreed (its start, if that is not known; its first due date, if
+  earlier) to 45 days after its end (or its last due date, if later), as a charge after a let comes.
+- **Paid** is the paired payments and the other payments added up. Its total is the document's,
+  shown beside it; nothing is worked out from the two.
+
 ## 11. Allowances (`analytics/allowances.ts`)
 
 **ISA:**

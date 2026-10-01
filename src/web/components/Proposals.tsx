@@ -1,8 +1,8 @@
 // Proposed fixes: what an agent proposes changing in your data, each change with its reason and the
 // rows it is about, waiting for you on the Import page (src/server/proposals.ts).
 
-import { ArrowDown, ArrowRight, ArrowRightLeft, ArrowUpDown, Building2, CalendarDays, ChevronRight, CircleCheck, CircleSlash, CopyX, FileText, Link2, NotebookPen, PiggyBank, Sparkles, Tag, Unlink, Wand2, X } from 'lucide-react';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { ArrowDown, ArrowRight, ArrowRightLeft, ArrowUpDown, Building2, CalendarDays, ChevronRight, CircleCheck, CircleSlash, CopyX, FileText, Handshake, Link2, NotebookPen, PiggyBank, Sparkles, Tag, Unlink, Wand2, X } from 'lucide-react';
+import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import type { ProposalBalance, ProposalListResponse, ProposalRow, ProposalSummary, ProposalView } from '../../shared/api';
 import type { ProposalStatus, ProposedChange, ProposedChangeKind, Provenance } from '../../shared/schema';
@@ -27,6 +27,7 @@ export const CHANGE_LABELS: Record<ProposedChangeKind, { title: string; count: (
   move_balance: { title: 'Move a balance to its account', count: (n) => `${plural(n, 'balance')} moved`, icon: <ArrowRightLeft className="size-4" aria-hidden /> },
   add_company: { title: 'Add shares you hold in a company', count: (n) => plural(n, 'company', 'companies'), icon: <Building2 className="size-4" aria-hidden /> },
   add_pension_arrangement: { title: 'Add what an employer pays into your pension', count: (n) => plural(n, 'pension arrangement'), icon: <PiggyBank className="size-4" aria-hidden /> },
+  add_agreement: { title: 'Add an agreement to pay', count: (n) => plural(n, 'agreement'), icon: <Handshake className="size-4" aria-hidden /> },
 };
 
 /** "5 transfers linked, 2 transfer links undone, 1 category" */
@@ -378,6 +379,65 @@ export function ChangeBody({ change, view }: { change: ProposedChange; view: Pro
           </div>
           {a.note && <div className="text-[12.5px] text-ink-3">{a.note}</div>}
           <div className="text-[12.5px] text-ink-3">The account’s page then checks it against the contributions that arrive.</div>
+        </div>
+      );
+    }
+    case 'add_agreement': {
+      const a = change.agreement;
+      const files = view.changes.find((c) => c.change.key === change.key)?.files ?? [];
+      return (
+        <div className="grid gap-1.5 rounded-lg border border-line bg-panel px-3 py-2 text-[13px]">
+          <div className="font-medium text-ink">
+            {a.name}
+            <span className="font-normal text-ink-3"> · {a.counterparty}</span>
+          </div>
+          <div className="text-ink-2">
+            {formatDate(a.from)}
+            {a.until ? ` to ${formatDate(a.until)}` : ''}
+            {a.total !== undefined && (
+              <>
+                , <span className="sensitive tabular-nums">{money(a.total)}</span> in all
+              </>
+            )}
+            {a.agreedOn ? `, agreed ${formatDate(a.agreedOn)}` : ''}.
+          </div>
+          <ul className="grid gap-0.5 text-ink-2">
+            {a.payments.map((p, i) => (
+              <li key={i} className="flex flex-wrap justify-between gap-x-3">
+                <span>
+                  {p.label ?? `Payment ${i + 1}`}, due {formatDate(p.due)}
+                </span>
+                <span className="sensitive tabular-nums">{money(p.amount)}</span>
+              </li>
+            ))}
+          </ul>
+          {a.details.length > 0 && (
+            <dl className="grid gap-x-3 gap-y-0.5 text-[12.5px] sm:grid-cols-[auto_minmax(0,1fr)]">
+              {a.details.map((d, i) => (
+                <Fragment key={i}>
+                  <dt className="text-ink-3">{d.label}</dt>
+                  <dd className="text-ink-2">{d.value}</dd>
+                </Fragment>
+              ))}
+            </dl>
+          )}
+          <div className="text-[12.5px] text-ink-3">
+            Its payments take <Badge tone="accent">{cats.path(a.category)}</Badge> as they come
+            {files.length ? `, and so do ${files.length === 1 ? 'this one' : `these ${files.length}`} in your data:` : '. None in your data needs it now.'}
+          </div>
+          {files.length > 0 && (
+            <ul className="grid gap-0.5 text-[12.5px]">
+              {files.map((f) => (
+                <li key={f.transactionId} className="flex flex-wrap justify-between gap-x-3">
+                  <span className="text-ink-2">
+                    {formatDate(f.date)} · {view.accounts[f.accountId]?.name ?? accountName(f.accountId)}
+                    <span className="text-ink-3"> · now {f.category ? cats.name(f.category) : 'uncategorised'}</span>
+                  </span>
+                  <span className="sensitive tabular-nums">{money(f.amount)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       );
     }

@@ -18,11 +18,13 @@ import { mkdir, readdir, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import type { ProposalBalance, ProposalChangeView, ProposalCheckResponse, ProposalDecision, ProposalListResponse, ProposalRow, ProposalSummary, ProposalView } from '../shared/api';
 import { ACCOUNT_TYPE_META } from '../shared/accounts';
+import { agreementPattern, isScheduledPayment } from '../shared/agreements';
 import { CategoryIndex } from '../shared/categories';
-import { transferLegCategory, type Categoriser } from '../shared/categorise';
+import { isWrapperAccount, transferLegCategory, type Categoriser } from '../shared/categorise';
 import { addDays, diffDays, formatDate, today } from '../shared/dates';
 import { formatMoney, fromMinor, toMinor } from '../shared/money';
-import { AccountSchema, BalanceSnapshotSchema, CompanySchema, EmploymentSchema, ProposalSchema, type Account, type BalanceSnapshot, type Company, type Employment, type PensionArrangement, type Proposal, type ProposalInput, type ProposalStatus, type ProposedChange, type Provenance, type Transaction } from '../shared/schema';
+import { AccountSchema, AgreementSchema, BalanceSnapshotSchema, CompanySchema, EmploymentSchema, ProposalSchema, type Account, type Agreement, type BalanceSnapshot, type Company, type Employment, type PensionArrangement, type Proposal, type ProposalInput, type ProposalStatus, type ProposedChange, type Provenance, type Transaction } from '../shared/schema';
+import { paidToText } from './analytics/agreements';
 import { BalanceEngine, type BalanceSource } from './analytics/balances';
 import { categoriserFor } from './categoriser';
 import { atomicWrite, Mutex, nowISO } from './fsutil';
@@ -58,6 +60,8 @@ interface ChangeResult {
   between?: { from: { date: string; balance: number }; to: { date: string; balance: number } };
   /** A balance moved: why it is not the account's it is in, and the balances it adds up with where it goes. */
   moved?: { misfit: string; beside: { date: string; balance: number }[] };
+  /** An agreement added: the payments in your data it files under its category, with the category each has now. */
+  files?: { transactionId: string; accountId: string; date: string; amount: number; category?: string }[];
 }
 
 interface Outcome {
@@ -78,6 +82,8 @@ interface Outcome {
   /** Jobs as they will be (a pension arrangement added). */
   jobs: Map<string, Employment>;
   balances: BalanceSnapshot[];
+  /** Agreements to add. */
+  agreements: Map<string, Agreement>;
 }
 
 const money = (t: Pick<Transaction, 'amount' | 'currency'>) => formatMoney(t.amount, { currency: t.currency });
@@ -106,7 +112,7 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
   const accountName = (id: string) => store.account(id)?.name ?? id;
   let categoriserMemo: Categoriser | undefined;
   const categoriser = () => (categoriserMemo ??= categoriserFor(store));
-  const out: Outcome = { results: new Map(), patches: new Map(), removed: new Map(), accounts: new Map(), touchedRows: new Map(), touchedAccounts: new Map(), moves: new Map(), companies: new Map(), jobs: new Map(), balances: [] };
+  const out: Outcome = { results: new Map(), patches: new Map(), removed: new Map(), accounts: new Map(), touchedRows: new Map(), touchedAccounts: new Map(), moves: new Map(), companies: new Map(), jobs: new Map(), balances: [], agreements: new Map() };
   const balanceById = new Map(store.balances().map((b) => [b.id, b]));
   // Rows as the changes so far leave them (null: removed), and transfer pairs likewise.
   const rows = new Map<string, Transaction | null>();
@@ -195,7 +201,7 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
         // a payee that was one of your accounts' names is worked out again from its words.
         const untransferred = cat.kind !== 'transfer' && !t.transferGroup;
         const namedYours = untransferred && t.payeeSetBy !== 'user' && store.accounts.some((a) => a.id !== t.accountId && a.name === t.payee);
-        const payee = namedYours ? categoriser().categorise({ accountId: t.accountId, description: t.description, amount: t.amount, type: t.type, bankCategory: t.bankCategory, payee: t.merchant?.name ?? t.counterpartyName }).payee : undefined;
+        const payee = namedYours ? categoriser().categorise({ accountId: t.accountId, description: t.description, amount: t.amount, date: t.date, type: t.type, bankCategory: t.bankCategory, payee: t.merchant?.name ?? t.counterpartyName }).payee : undefined;
         patch(t, { category: c.category, categorisedBy: 'user', ...(untransferred && t.counterpartyAccountId ? { counterpartyAccountId: undefined } : {}), ...(payee && payee !== t.payee ? { payee } : {}) });
         return {};
       }
@@ -319,6 +325,38 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
         out.jobs.set(job.id, EmploymentSchema.parse({ ...job, pensionArrangements: [...job.pensionArrangements, c.arrangement], updatedAt: nowISO() }));
         return {};
       }
+      case 'add_agreement': {
+        const a = c.agreement;
+        const there = out.agreements.get(a.id) ?? store.agreement(a.id);
+        // There already with this schedule: what it asks for is done.
+        const schedule = (x: Pick<Agreement, 'payments'>) => JSON.stringify(x.payments.map((p) => [p.due, toMinor(p.amount)]).sort());
+        if (there) return there.counterparty === a.counterparty && schedule(there) === schedule(a) ? { alreadySo: true } : { problem: `There is an agreement ${a.id} already: ${there.name}.` };
+        const cat = cats.get(a.category);
+        if (!cat) return { problem: `There is no category "${a.category}".` };
+        if (cat.kind !== 'expense') return { problem: `${cat.name} is not a spending category: an agreement's payments are money you pay.` };
+        if (a.until && a.until < a.from) return { problem: 'It would end before it starts.' };
+        const stamp = nowISO();
+        const agreement = AgreementSchema.parse({ ...a, createdBy: 'agent', createdAt: stamp, updatedAt: stamp });
+        // The payments already in your data it schedules are filed as the categoriser will file those
+        // to come, with it after the agreements there already; except one you, a rule of yours or a
+        // transfer link categorised.
+        const pattern = agreementPattern(agreement);
+        const withIt = categoriserFor(store, { agreements: [...store.agreements, ...out.agreements.values(), agreement] });
+        const files: NonNullable<ChangeResult['files']> = [];
+        for (const stored of store.transactions()) {
+          const t = row(stored.id);
+          if (!t || t.transferGroup || t.categorisedBy === 'user' || t.categorisedBy === 'rule' || t.categorisedBy === 'transfer') continue;
+          const acc = account(t.accountId);
+          if (!acc || isWrapperAccount(acc.type) || !isScheduledPayment(agreement, pattern, { date: t.date, amount: t.amount, text: paidToText(t) })) continue;
+          const res = withIt.categorise({ accountId: t.accountId, description: t.description, amount: t.amount, date: t.date, type: t.type, bankCategory: t.bankCategory, aiCategory: t.categorisedBy === 'ai' ? t.category : undefined, payee: t.merchant?.name ?? t.counterpartyName });
+          if (res.categorisedBy !== 'agreement' || res.category !== a.category) continue;
+          if (t.category === a.category && t.categorisedBy === 'agreement') continue;
+          files.push({ transactionId: t.id, accountId: t.accountId, date: t.date, amount: t.amount, ...(t.category ? { category: t.category } : {}) });
+          patch(t, { category: a.category, categorisedBy: 'agreement', ruleId: undefined, ...(t.payeeSetBy !== 'user' && res.payee !== t.payee ? { payee: res.payee } : {}) });
+        }
+        out.agreements.set(a.id, agreement);
+        return files.length ? { files } : {};
+      }
       case 'add_company': {
         const there = out.companies.get(c.company.id) ?? store.company(c.company.id);
         // There already with this holding: what it asks for is done.
@@ -412,7 +450,7 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
 
 /** Applying would leave the data as it is: every change is already so, or they undo each other. */
 function changesNothing(store: Store, o: Outcome): boolean {
-  if (o.removed.size || o.companies.size || o.balances.length || o.jobs.size) return false;
+  if (o.removed.size || o.companies.size || o.balances.length || o.jobs.size || o.agreements.size) return false;
   if ([...o.moves.values()].some((m) => m.to !== m.balance.accountId)) return false;
   for (const [id, patch] of o.patches) {
     const t = store.transaction(id) as Record<string, unknown> | undefined;
@@ -454,6 +492,7 @@ function namedRows(c: ProposedChange): string[] {
     case 'move_balance':
     case 'add_company':
     case 'add_pension_arrangement':
+    case 'add_agreement':
       return [];
   }
 }
@@ -626,6 +665,7 @@ export class ProposalService extends EventEmitter {
       for (const account of outcome.accounts.values()) await this.store.upsertAccount(account, message);
       for (const company of outcome.companies.values()) await this.store.upsertCompany(company, message);
       for (const job of outcome.jobs.values()) await this.store.upsertEmployment(job, message);
+      for (const agreement of outcome.agreements.values()) await this.store.upsertAgreement(agreement, message);
       if (outcome.balances.length) await this.store.addBalances(outcome.balances, message);
       if (outcome.moves.size) await this.store.moveBalances([...outcome.moves.values()].map((m) => ({ id: m.balance.id, accountId: m.to })), message);
       const balances = [...outcome.moves.values()].map((m) => m.balance);

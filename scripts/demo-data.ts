@@ -480,6 +480,37 @@ async function main() {
     const day = `${thisYear.startYear}-06-15`;
     if (day <= END) await store.addFigures([{ id: figureId('dividends_paid', 480, thisYear.label, 'Example Studio Ltd', 'Dividend'), kind: 'dividends_paid', label: 'Dividend', amount: 480, currency: 'GBP', taxYear: thisYear.label, periodEnd: day, date: day, payer: 'Example Studio Ltd', source: {}, createdAt: stamp }], 'demo: dividend voucher');
   }
+  // The flat's tenancy (agreements.json): a year's rent on the 1st of each month, from six months ago.
+  if (!SPARSE) {
+    const from = startOfMonth(addMonths(END, -6));
+    await store.setAgreements(
+      [
+        {
+          id: 'flat-4b-tenancy',
+          name: 'Flat 4B tenancy',
+          counterparty: 'OpenRent Ltd',
+          names: [],
+          category: 'rent',
+          from,
+          until: endOfMonth(addMonths(from, 11)),
+          total: 21_600,
+          payments: Array.from({ length: 12 }, (_, i) => ({ due: addMonths(from, i), amount: 1_800, label: `Rent for ${formatMonth(addMonths(from, i))}` })),
+          details: [
+            { label: 'Property', value: 'Flat 4B, 27 Example Road, London' },
+            { label: 'Rent', value: '£1,800 a month, due on the 1st' },
+            { label: 'Deposit', value: '£2,076, protected by the Deposit Protection Service' },
+            { label: 'Break clause', value: 'After six months, on two months’ notice' },
+          ],
+          agreedOn: addDays(from, -20),
+          source: {},
+          createdBy: 'owner',
+          createdAt: stamp,
+          updatedAt: stamp,
+        },
+      ],
+      'demo: agreements',
+    );
+  }
   const res = await enrich(store);
   console.log(`demo: ${txs.length} transactions, ${snapshots.length} balances; enrich: ${res.recategorised} categorised, ${res.transfersLinked} transfers linked`);
   // A first import has no research or insights yet: the agents have not run.

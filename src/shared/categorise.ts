@@ -6,15 +6,17 @@
 //   2. transfers to/from your own accounts (by account aliases and institution names; never cash
 //      from a machine, whichever bank runs it)
 //   3. wrapper-account flows (contributions, tax relief, LISA bonus, fees) on ISA/pension accounts
+//   3b. a payment one of your agreements schedules (agreements.json)
 //   4. built-in UK merchant list
 //   5. the bank's own category (Monzo/Starling/Revolut/Amex exports)
 //   6. Claude's suggestion (from screenshot/PDF extraction)
 
 import { ACCOUNT_TYPE_META } from './accounts';
+import { agreementPattern, isScheduledPayment } from './agreements';
 import { CategoryIndex, mapBankCategory } from './categories';
 import { INSTITUTION_CATALOG, TRANSFER_WORDS } from './institutions';
 import { cleanPayee, GENERIC_PAYEES, matchMerchant, normaliseDescription } from './merchants';
-import type { Account, AccountType, CategorisedBy, Institution, Rule } from './schema';
+import type { Account, AccountType, Agreement, CategorisedBy, Institution, Rule } from './schema';
 
 export interface CategoriseInput {
   accountId: string;
@@ -26,6 +28,8 @@ export interface CategoriseInput {
   aiPayee?: string | undefined;
   /** The bank's transaction type, as printed ("Cash withdrawal", "Card payment"). */
   type?: string | undefined;
+  /** The day it was paid: an agreement's payments are recognised by when they were due. */
+  date?: string | undefined;
 }
 
 export interface CategoriseResult {
@@ -158,12 +162,14 @@ export class Categoriser {
   private readonly ownMatchers: { account: Account; aliases: RegExp[]; institution: RegExp[]; ambiguous: boolean; number?: string }[];
   private readonly ownName: RegExp | null;
   private readonly payroll: RegExp | null;
+  private readonly agreements: { agreement: Agreement; pattern: RegExp }[];
 
   /**
    * `ownerName`: the name in your profile, so money to or from you by name is seen as a transfer.
    * `payrollNumbers`: your payroll numbers at your jobs, so pay that carries one is seen as salary.
+   * `agreements`: what you agreed to pay and when, so a payment one schedules takes its category.
    */
-  constructor(rules: Rule[], categories: CategoryIndex, accounts: Account[], institutions: Institution[], opts: { ownerName?: string | undefined; payrollNumbers?: readonly string[] } = {}) {
+  constructor(rules: Rule[], categories: CategoryIndex, accounts: Account[], institutions: Institution[], opts: { ownerName?: string | undefined; payrollNumbers?: readonly string[]; agreements?: readonly Agreement[] } = {}) {
     this.rules = rules
       .filter((r) => r.enabled)
       .sort((a, b) => a.priority - b.priority || a.createdAt.localeCompare(b.createdAt))
@@ -171,6 +177,7 @@ export class Categoriser {
     this.categories = categories;
     this.ownName = ownNamePattern(opts.ownerName);
     this.payroll = payrollPattern(opts.payrollNumbers);
+    this.agreements = (opts.agreements ?? []).map((agreement) => ({ agreement, pattern: agreementPattern(agreement) }));
     this.accountsById = new Map(accounts.map((a) => [a.id, a]));
     const instById = new Map(institutions.map((i) => [i.id, i]));
     this.ownMatchers = accounts
@@ -291,6 +298,16 @@ export class Categoriser {
           return { payee: investment || fallbackPayee, category, categorisedBy: 'builtin' };
         }
       }
+    }
+
+    // 3b. A payment one of your agreements schedules: to its counterparty, near a due date, for about
+    // what was due. It takes the agreement's category, whatever the merchant list says of the name
+    // (a university is paid rent as well as fees). Its payee is worked out as any other's, so it
+    // groups with the payments to the same payee before and after the agreement.
+    if (!isWrapper && input.date && input.amount < 0) {
+      const text = `${input.payee ?? ''} ${input.description}`;
+      const hit = this.agreements.find(({ agreement, pattern }) => this.known(agreement.category) && isScheduledPayment(agreement, pattern, { date: input.date!, amount: input.amount, text }));
+      if (hit) return { payee: fallbackPayee, category: hit.agreement.category, categorisedBy: 'agreement' };
     }
 
     // 4. Built-in merchants.

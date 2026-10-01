@@ -281,7 +281,9 @@ export const MERCHANTS: MerchantDef[] = [
   // ── Childcare, charity, education ──
   ['NURSERY|CHILDMINDER|CHILDCARE|AFTER SCHOOL CLUB|TAX-?FREE CHILDCARE', 'Childcare', 'childcare'],
   ['JUSTGIVING|GOFUNDME|CHARITIES AID|\\bCAF (DONATE|BANK|CHARITY)|CANCER RESEARCH|BRITISH HEART|\\bOXFAM\\b|\\bRNLI\\b|MACMILLAN|RED CROSS|SAVE THE CHILDREN|NSPCC|UNICEF|SHELTER|\\bMIND\\b|WATERAID|AMNESTY|GREENPEACE|\\bWWF\\b|DONATION|CHARITY', 'Charity', 'charity'],
-  ['UDEMY|COURSERA|OPEN UNIVERSITY|SKILLSHARE|MASTERCLASS|LINKEDIN LEARNING|EDX|UNIVERSITY|TUITION', 'Education', 'courses'],
+  // A university's name alone is not a course: it is paid rent, printing and cafés as well as fees
+  // (an accommodation offer, as an agreement, files its rent: agreements.json).
+  ['UDEMY|COURSERA|OPEN UNIVERSITY|SKILLSHARE|MASTERCLASS|LINKEDIN LEARNING|EDX|TUITION', 'Education', 'courses'],
 
   // ── Insurance & professional ──
   ['INSURANCE|\\bINSURE\\b|ADMIRAL|DIRECT LINE|CHURCHILL|HASTINGS DIRECT|\\bLV=|\\bESURE\\b|SHEILAS.? WHEELS|\\bZURICH\\b|SIMPLY BUSINESS|\\bPOLICY\\b', 'Insurance', 'insurance'],

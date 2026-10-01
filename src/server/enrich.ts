@@ -48,7 +48,7 @@ export async function categoriseInvestmentRows(store: Store): Promise<number> {
   for (const a of wrappers) {
     for (const t of store.transactions(a.id)) {
       if (t.category || t.categorisedBy || t.transferGroup) continue;
-      const res = categoriser.categorise({ accountId: t.accountId, description: t.description, amount: t.amount, type: t.type, bankCategory: t.bankCategory, payee: t.merchant?.name ?? t.counterpartyName });
+      const res = categoriser.categorise({ accountId: t.accountId, description: t.description, amount: t.amount, date: t.date, type: t.type, bankCategory: t.bankCategory, payee: t.merchant?.name ?? t.counterpartyName });
       if (!res.category || res.categorisedBy !== 'builtin') continue;
       const patch: Partial<Transaction> = { category: res.category, categorisedBy: 'builtin' };
       if (t.payeeSetBy !== 'user' && res.payee && res.payee !== t.payee) patch.payee = res.payee;
@@ -72,6 +72,7 @@ export async function enrich(store: Store, opts: { accountIds?: string[]; dryRun
       accountId: t.accountId,
       description: t.description,
       amount: t.amount,
+      date: t.date,
       type: t.type,
       bankCategory: t.bankCategory,
       aiCategory: t.categorisedBy === 'ai' ? t.category : undefined,
@@ -161,6 +162,7 @@ export function rederive(categoriser: Categoriser, t: Transaction, filled: reado
     accountId: t.accountId,
     description: t.description,
     amount: t.amount,
+    date: t.date,
     type: t.type,
     bankCategory: t.bankCategory,
     aiCategory: t.categorisedBy === 'ai' ? t.category : undefined,

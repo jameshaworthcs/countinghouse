@@ -21,6 +21,7 @@ import {
   ContextSchema,
   EmploymentSchema,
   CompanySchema,
+  AgreementSchema,
   HmrcRecordSchema,
   PayslipRecordSchema,
   CsvProfileSchema,
@@ -49,6 +50,7 @@ import {
   type ContextRecord,
   type Employment,
   type Company,
+  type Agreement,
   type HmrcRecord,
   type PayslipRecord,
   type CsvProfile,
@@ -138,6 +140,7 @@ const ARRAY_FILES = {
   instruments: { file: 'instruments.json', key: 'instruments', schema: InstrumentSchema },
   employments: { file: 'employments.json', key: 'employments', schema: EmploymentSchema },
   companies: { file: 'companies.json', key: 'companies', schema: CompanySchema },
+  agreements: { file: 'agreements.json', key: 'agreements', schema: AgreementSchema },
 } as const;
 
 /** Single-file JSONL collections: one record per line. */
@@ -167,6 +170,7 @@ interface State {
   instruments: Instrument[];
   employments: Employment[];
   companies: Company[];
+  agreements: Agreement[];
   /** Append-only: every version of every assumption, in file order. */
   assumptions: Assumption[];
   /** Append-only: every research record, in file order. */
@@ -201,6 +205,7 @@ function emptyState(): State {
     instruments: [],
     employments: [],
     companies: [],
+    agreements: [],
     assumptions: [],
     research: [],
     insights: [],
@@ -291,6 +296,7 @@ export class Store extends EventEmitter {
       ['instruments.json', { $schema: '../schemas/instruments.schema.json', instruments: [] }],
       ['employments.json', { $schema: '../schemas/employments.schema.json', employments: [] }],
       ['companies.json', { $schema: '../schemas/companies.schema.json', companies: [] }],
+      ['agreements.json', { $schema: '../schemas/agreements.schema.json', agreements: [] }],
     ];
     for (const [rel, value] of writes) await this.writeJson(rel, value);
     for (const def of Object.values(JSONL_FILES)) await atomicWrite(this.abs(def.file), '');
@@ -599,6 +605,12 @@ export class Store extends EventEmitter {
   company(id: string | undefined): Company | undefined {
     return id ? this.state.companies.find((c) => c.id === id) : undefined;
   }
+  get agreements(): Agreement[] {
+    return this.state.agreements;
+  }
+  agreement(id: string | undefined): Agreement | undefined {
+    return id ? this.state.agreements.find((a) => a.id === id) : undefined;
+  }
   get employments(): Employment[] {
     return this.state.employments;
   }
@@ -781,6 +793,16 @@ export class Store extends EventEmitter {
     if (existing >= 0) list[existing] = company;
     else list.push(company);
     await this.setCompanies(list, message ?? `${existing >= 0 ? 'company: update' : 'company: add'} ${company.name}`);
+  }
+  setAgreements(list: Agreement[], message = 'agreements: update'): Promise<void> {
+    return this.setArray('agreements', list, message);
+  }
+  async upsertAgreement(agreement: Agreement, message?: string): Promise<void> {
+    const existing = this.state.agreements.findIndex((a) => a.id === agreement.id);
+    const list = [...this.state.agreements];
+    if (existing >= 0) list[existing] = agreement;
+    else list.push(agreement);
+    await this.setAgreements(list, message ?? `${existing >= 0 ? 'agreement: update' : 'agreement: add'} ${agreement.name}`);
   }
   async upsertEmployment(employment: Employment, message?: string): Promise<void> {
     const existing = this.state.employments.findIndex((e) => e.id === employment.id);

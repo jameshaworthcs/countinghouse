@@ -3,6 +3,7 @@
 import type { AccessGroup, WrapperGroup } from './accounts';
 import type {
   Account,
+  Agreement,
   BalanceSnapshot,
   Category,
   Company,
@@ -682,6 +683,8 @@ export interface ProposalChangeView {
   between?: { from: { date: string; balance: number }; to: { date: string; balance: number } };
   /** A balance moved: why it is not the account's it is in, and the balances it adds up with where it goes. */
   moved?: { misfit: string; beside: { date: string; balance: number }[] };
+  /** An agreement added: the payments in your data it files under its category, with the category each has now. */
+  files?: { transactionId: string; accountId: string; date: string; amount: number; category?: string }[];
 }
 
 /** A balance a proposal moves, as it is now (as it was, once decided). */
@@ -1011,6 +1014,27 @@ export interface CompanyView {
   /** Each dividend: a voucher (with the credit that paid it, when found), or a credit with no voucher. */
   dividends: { date: string; amount: number; taxYear?: string; figureId?: string; importId?: string; paidIn?: { transactionId: string; accountId: string; date: string } }[];
   dividendsTotal: number;
+}
+
+/** An agreement, its schedule checked against what you paid (FORMULAS §10, "Agreements"). */
+export interface AgreementView {
+  agreement: Agreement;
+  payments: {
+    due: string;
+    amount: number;
+    label?: string;
+    /**
+     * `paid`: a payment of it was found; `upcoming`: not due yet; `due`: due, and it may still come
+     * (up to 45 days after); `unseen`: no payment of it was found in your accounts.
+     */
+    status: 'paid' | 'upcoming' | 'due' | 'unseen';
+    /** The payment found, as a positive amount, and by how much it is more (or, below 0, less) than what was due: up to a tenth. */
+    paid?: { transactionId: string; accountId: string; date: string; amount: number; difference?: number };
+  }[];
+  /** Other payments to it in its category, from 45 days before it to 45 days after, that no scheduled payment accounts for. */
+  others: { transactionId: string; accountId: string; date: string; amount: number }[];
+  /** What you paid it: the scheduled payments found, and the others. */
+  paid: number;
 }
 
 /** A pension account's arrangements with your employers, each checked against what arrived (FORMULAS §11). */

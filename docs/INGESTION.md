@@ -416,12 +416,17 @@ read again.
      (interactive investor: "12 VANGUARD FTSE GLOB Del 105.20 S Date 03/02/25"), and "Div 250 …" is
      a dividend; both take the investment's name as the payee. "Reg Contribution (E)" is an
      employer's regular payment into a pension;
-  4. the built-in UK merchant list (`src/shared/merchants.ts`, about 200 patterns);
-  5. money in that carries one of your payroll numbers at your jobs (`employments.json`; 5
+  4. a payment one of your agreements schedules (`agreements.json`: to its counterparty, near a
+     due date, for about what was due) takes the agreement's category ([FORMULAS.md §10](FORMULAS.md),
+     "Agreements"). A university is paid rent as well as fees, so its name alone says nothing;
+  5. the built-in UK merchant list (`src/shared/merchants.ts`, about 200 patterns);
+  6. money in that carries one of your payroll numbers at your jobs (`employments.json`; 5
      characters or more, not inside a longer number) is salary. An employer's name alone is not
      enough: a company you own pays you dividends and transfers under its name too;
-  6. the bank's own category;
-  7. Claude's suggestion.
+  7. the bank's own category;
+  8. Claude's suggestion.
+  - When an agreement is added, the payments already recorded that it schedules take its category,
+    except one you, a rule of yours or a transfer link categorised.
   - When a job learns a payroll number (a document gave it, or you added it), money in already
     recorded with that number and no category becomes salary (`salaryByPayroll`). A category set by
     anyone stays.

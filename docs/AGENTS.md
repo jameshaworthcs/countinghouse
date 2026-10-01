@@ -47,6 +47,7 @@ it is `src/server/records.ts` (validation and writing) and `src/server/agents/` 
 | What HMRC's pages say (tax codes, payments, settlements, NI years, the State Pension forecast) | `data/hmrc.jsonl`, `GET /hmrc` |
 | Payslips in full (every line, the totals, the codes, the year to date) | `data/payslips.jsonl`, `GET /payslips?taxYear=2026/27` |
 | Companies you hold shares in, their valuations and dividends | `data/companies.json`, `GET /companies` |
+| Agreements to pay (an offer's or contract's schedule), each checked against the payments | `data/agreements.json`, `GET /agreements` |
 | A tax year's figures by job, each with the source that counts and the others | `GET /tax-documents?taxYear=2025/26` |
 
 In-app analysis jobs do not read `data/`. They read a **digest**: the app's own computed figures,
@@ -190,7 +191,8 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
       { "kind": "set_account_dates", "account": "example-fixed", "closedOn": "2026-02-01", "why": "…" },
       { "kind": "move_balance", "balance": "bal_…", "to": "example-easy-access", "why": "…" },
       { "kind": "add_pension_arrangement", "employmentId": "example-job", "arrangement": { "accountId": "example-sipp", "kind": "monthly", "amount": 250, "from": "2024-11-14" }, "why": "…" },
-      { "kind": "add_company", "company": { "id": "example-ltd", "name": "Example Ltd", "number": "01234567", "holdings": [{ "shareClass": "A ordinary", "shares": 4, "totalShares": 120, "certificate": "12" }] }, "valuation": { "asOf": "2025-12-31", "method": "net-assets", "netAssets": 100000, "value": 3333.33, "note": "…" }, "account": { "id": "example-ltd-shares", "name": "Example Ltd shares" }, "why": "…" }
+      { "kind": "add_company", "company": { "id": "example-ltd", "name": "Example Ltd", "number": "01234567", "holdings": [{ "shareClass": "A ordinary", "shares": 4, "totalShares": 120, "certificate": "12" }] }, "valuation": { "asOf": "2025-12-31", "method": "net-assets", "netAssets": 100000, "value": 3333.33, "note": "…" }, "account": { "id": "example-ltd-shares", "name": "Example Ltd shares" }, "why": "…" },
+      { "kind": "add_agreement", "agreement": { "id": "example-hall-2025-26", "name": "Example Hall room, 2025/26", "counterparty": "Example University", "names": ["EXAMPLE UNI"], "category": "rent", "from": "2025-09-13", "until": "2026-06-20", "total": 6720, "payments": [{ "due": "2025-10-31", "amount": 2240, "label": "Instalment 1" }], "details": [{ "label": "Let length", "value": "40 weeks" }], "source": { "importId": "imp_…" } }, "why": "…" }
     ]
   }
   ```
@@ -225,6 +227,12 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
     the id its account would take. Its valuation is not in the future. A book value's `why` names
     the documents its figures come from (the share certificate, the accounts, the confirmation
     statement that gives the shares in issue).
+  - An agreement added (`add_agreement`) is new (none with its id, unless it has the same schedule:
+    then it is there already), takes a spending category, and does not end before it starts. Its
+    schedule, total and `details` are its document's own words and figures; its `names` are only
+    the names its payments carry in the owner's accounts. The proposal shows the payments already
+    recorded that it would file under its category: not one the owner, a rule of theirs or a
+    transfer link categorised.
   - A category exists, and a row linked as a transfer keeps a transfer category. A category that
     is not a transfer one, on a row not linked as one, also takes away the account of yours the row
     named as the other side, and works its payee out again when that was one of your accounts'

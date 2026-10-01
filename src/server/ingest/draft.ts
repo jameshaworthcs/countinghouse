@@ -288,6 +288,7 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
         accountId: targetId,
         description: t.description,
         amount: t.amount,
+        date: t.date,
         type: t.type ?? undefined,
         payee: t.payee ?? undefined,
         bankCategory: t.bankCategory ?? undefined,

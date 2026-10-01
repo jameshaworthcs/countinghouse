@@ -18,6 +18,7 @@ import {
   CurrencySchema,
   EmploymentSchema,
   CompanySchema,
+  AgreementSchema,
   FIGURE_KINDS,
   GoalSchema,
   BudgetSchema,
@@ -45,6 +46,7 @@ import { nowISO } from '../fsutil';
 import { balanceId, figureId, ruleId, transactionId } from '../ids';
 import { payerKey } from '../analytics/pay';
 import { payeReference } from '../analytics/sources';
+import { agreementsView, agreementView } from '../analytics/agreements';
 import { companiesView, companyView } from '../analytics/companies';
 import { arrangementsInto } from '../analytics/arrangements';
 import { taxDocuments } from '../analytics/taxdocuments';
@@ -618,7 +620,7 @@ export function dataRoutes(ctx: AppContext): Hono {
   app.post('/enrich', async (c) => c.json(await enrich(store)));
 
   app.post('/categorise/preview', async (c) => {
-    const body = await readJson(c, z.object({ accountId: SlugSchema, description: z.string(), amount: MoneySchema }));
+    const body = await readJson(c, z.object({ accountId: SlugSchema, description: z.string(), amount: MoneySchema, date: ISODateSchema.optional() }));
     const categoriser = categoriserFor(store);
     return c.json(categoriser.categorise(body));
   });
@@ -821,6 +823,28 @@ export function dataRoutes(ctx: AppContext): Hono {
     await store.upsertCompany(next, `company: ${next.name}`);
     return c.json(companyView(store, next));
   });
+  // ─── Agreements to pay (agreements.json) ─────────────────────────────────────────────────────
+
+  app.get('/agreements', (c) => c.json(agreementsView(store)));
+
+  /**
+   * Change an agreement: what you set wins. A new category or names apply to its payments as they
+   * come, and to those recorded when you next re-run categorisation.
+   */
+  app.put('/agreements/:id', async (c) => {
+    const agreement = store.agreement(c.req.param('id'));
+    if (!agreement) throw new StoreError('No such agreement', 404);
+    const body = await readJson(c, AgreementSchema.pick({ name: true, counterparty: true, names: true, category: true, until: true, notes: true }).partial());
+    if (body.category) {
+      const cat = new CategoryIndex(store.categories).get(body.category);
+      if (!cat || cat.kind !== 'expense') throw new StoreError('Choose a spending category', 400);
+    }
+    const next = AgreementSchema.parse({ ...agreement, ...body, updatedAt: nowISO() });
+    if (next.until && next.until < next.from) throw new StoreError('It would end before it starts', 400);
+    await store.upsertAgreement(next, `agreement: ${next.name}`);
+    return c.json(agreementView(store, next));
+  });
+
   app.get('/payslips', (c) => {
     const ty = c.req.query('taxYear');
     return c.json(ty ? store.payslips.filter((p) => p.taxYear === ty) : store.payslips);

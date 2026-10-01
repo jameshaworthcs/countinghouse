@@ -43,6 +43,7 @@ data/
   hmrc.jsonl           what HMRC's pages say: tax codes, payments, employments, settlements, NI years, the State Pension forecast
   payslips.jsonl       payslips in full: every line, the totals, the codes and the year to date
   companies.json       { companies: [...] }      companies you hold shares in: the holding and its valuations
+  agreements.json      { agreements: [...] }     agreements to pay: an offer's or contract's schedule, and what its document says
   transactions/<account-id>/<yyyy>.jsonl    one transaction per line, by posting date
   balances/<account-id>.jsonl               balance / valuation snapshots
   holdings/<account-id>.jsonl               holdings snapshots
@@ -108,7 +109,7 @@ depend on).
 | `place` | the merchant's address in one tidy line, worked out from `merchant` (`src/shared/places.ts`); the merchant fields keep what the document said |
 | `payeeSetBy` | `user` when you set the payee: re-running enrichment keeps it |
 | `category` | category id; absent = uncategorised |
-| `categorisedBy` | `user` (never overwritten), `rule`, `builtin`, `bank`, `ai`, `transfer` |
+| `categorisedBy` | `user` (never overwritten), `rule`, `builtin`, `bank`, `ai`, `transfer`, `agreement` (a payment one of your agreements schedules) |
 | `ruleId` | the rule that set it |
 | `transferGroup` | shared by both legs of a transfer between your accounts |
 | `counterpartyAccountId` | the other account |
@@ -259,6 +260,31 @@ notes?, createdBy, createdAt, updatedAt}`:
 An agent proposes a company from its documents (`add_company`); you change one with
 `PUT /api/companies/:id`.
 
+## agreements.json
+
+Agreements that set out payments you make: an accommodation offer or tenancy, a contract, a payment
+plan. Each is `{id, name, counterparty, names, category, from, until?, total?, payments, details,
+agreedOn?, reference?, notes?, source, createdBy, createdAt, updatedAt}`:
+
+- `counterparty`: who you pay. `names`: other names its payments carry in your accounts ("UNI OF
+  EXAMPLETON"); with the counterparty's own, how its payments are recognised, as whole words.
+- `category`: the spending category its payments take.
+- `from`, `until`: the period it covers (a let's first and last days). `total`: its total cost, as
+  its document gives it.
+- `payments`: its schedule, `[{due, amount, label?}]`, each amount what is due (positive: money you
+  pay).
+- `details`: everything else its document says, as `[{label, value}]` in its own words ("Bedroom
+  type": "Standard ensuite"). `agreedOn`: the day it was offered or signed; `reference`: a booking,
+  contract or account number.
+- `source`: the document it is from. `createdBy`: `owner`, or `agent` when a proposal you applied
+  added it.
+
+A payment it schedules takes its category as it comes, ahead of the merchant list
+(`categorisedBy: "agreement"`), and its card on the Spending page checks each scheduled payment
+against what you paid ([FORMULAS.md §10](FORMULAS.md), "Agreements"). An agent proposes one from
+its document (`add_agreement`); you change its name, names, category, end or notes with
+`PUT /api/agreements/:id`.
+
 ## payslips.jsonl
 
 Payslips in full, one per line: everything a payslip prints except your name and National Insurance
@@ -357,6 +383,9 @@ lives in the work area (`<work>/proposals/`), never here.
   - `add_company {company, valuation, account}`: shares you hold in a company, from its documents:
     the company (`companies.json`), a new "other asset" account `{id, name}`, and its valuation
     recorded as that account's balance.
+  - `add_agreement {agreement}`: an agreement to pay, from its document (`agreements.json`). The
+    payments already recorded that it schedules take its category, except one you, a rule of yours
+    or a transfer link categorised.
 - `applied`: the keys of the changes you applied. `dismissedReason`: what you said, if anything.
 - `before`: `{transactions, accounts, balances?}`, the rows, accounts and balances the applied
   changes touched, as they were before: the audit trail, and a way back.
