@@ -1147,10 +1147,11 @@ joined them. Pay owed to the owner (a missed month the employer will pay) had no
   payroll. A difference is a note on the month, never a correction: HMRC settles it after the year.
   - Considered: the code printed on the payslip. It is what the payroll used, so it cannot show
     that the payroll used the wrong one.
-- **Pay owed to you is the owner's word** (`owed` on the job), set from the Pay tab. A late payment
-  of that exact amount from the job pairs with it, and until then it counts in the Overview's owed
-  line. A month is never marked owed by itself: one not seen may be a bank statement not imported
-  yet.
+- **Pay owed to you is the owner's word**: `owed` on the job, set from the Pay tab, or what the
+  owner told the app (an active context record of pay not received for the job and period). A late
+  payment of that exact amount from the job pairs with it, and until then it counts in the
+  Overview's owed line. A month is never marked owed by itself: one not seen may be a bank
+  statement not imported yet.
 - **A payslip that prints no period is looked for at HMRC's pay date**, when HMRC's record of the
   payment matches it to the penny. A last payslip dated the day a job ended, weeks before its pay
   day, was taking the previous month's payment. A payment within £1 of the expected amount is now

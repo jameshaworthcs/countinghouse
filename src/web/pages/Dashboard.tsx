@@ -274,7 +274,7 @@ function OwedLine({ owed }: { owed: NonNullable<SummaryResponse['owed']> }) {
         <span className="font-medium text-ink-2">{owed.net !== null ? <Money value={owed.net} decimals={0} /> : <Money value={owed.gross} decimals={0} />}</span> pay owed to you{owed.net !== null ? <> after {work.length ? 'estimated ' : ''}tax and NI (<Money value={owed.gross} decimals={0} /> before)</> : ' before tax'}
         {payslips.length > 0 && (
           <>
-            : {payslips.map((i) => `${i.payroll}’s ${i.periods[0] ? formatMonth(i.periods[0]) : ''} pay`).join(', ')}, which you said will be paid
+            : {payslips.map((i) => `${i.payroll}’s ${i.periods[0] ? formatMonth(i.periods[0]) : ''} pay`).join(', ')}, which you said is owed to you
             {work.length > 0 && <>, and timesheet work {when}</>}
           </>
         )}

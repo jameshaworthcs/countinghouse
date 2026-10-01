@@ -687,7 +687,10 @@ pay", below).
      the period's days says it arrived late;
   3. **differs**: it is not. The difference is other deductions the reader did not list (a cycle
      scheme, say) or an adjustment;
-  4. **owed**: you said its pay is owed to you (Pay tab, on the job's `owed`), and none has come;
+  4. **owed**: you said its pay is owed to you, and none has come. You say so on the Pay tab (the
+     job's `owed`), or by telling the app it had not arrived: an active context record with
+     `detail.event` `pay_not_received` whose `attributes.employer` is the job and whose days
+     (`from` to `to`) the period ends in;
   5. **due**: the pay date has not come;
   6. **not seen**: none was found. The note says whether your bank data covers those days, in
      the accounts the employer's pay goes into, else any your salary goes into.
@@ -705,7 +708,7 @@ pay", below).
   employer works a new code from the first pay day after it gets the notice, and runs the payroll a
   while before). When it differs from the tax taken by more than £1, the month says so, with the
   code and when it was issued.
-- **Owed pay** (`owedPayslips`): periods of this tax year and the last that you said are owed,
+- **Owed pay** (`owedPayslips`): periods of this tax year and the last that you said are owed (either way),
   with no pay yet, count in the Overview's owed line (their *after these* and gross) beside
   timesheet work not yet paid. They are never the next payment expected: that is the timesheet
   work's.

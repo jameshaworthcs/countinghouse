@@ -839,8 +839,8 @@ export interface PayMonth {
    * £1): the code, its basis, the day HMRC issued it, and that tax.
    */
   check?: { code: string; cumulative: boolean; issuedOn: string; tax: number; taken: number; note: string };
-  /** You said its pay is owed to you (`employments.json` → owed). */
-  owed?: { markedAt: string; note?: string };
+  /** You said its pay is owed to you: on the Pay tab (`employments.json` → owed), or by telling the app it had not arrived (the context record `contextId`). */
+  owed?: { markedAt: string; note?: string; contextId?: string };
 }
 
 /** A timesheet's period: what was earned, and the payslip that paid it or when it should come (FORMULAS §17, "Earned pay"). */
@@ -904,7 +904,7 @@ export interface OwedPay {
   net: number | null;
   next: string | null;
   late: boolean;
-  /** `payslip`: a payslip's pay you said is owed (its pay after deductions is known); else timesheet work. */
+  /** `payslip`: a payslip's pay you said is owed, or told the app had not arrived (its pay after deductions is known); else timesheet work. */
   items: { payroll: string; gross: number; net: number | null; payDate: string | null; periods: string[]; status: 'owed' | 'late'; kind?: 'payslip' | 'timesheet' }[];
 }
 

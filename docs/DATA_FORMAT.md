@@ -198,7 +198,8 @@ and HMRC's records about it are one employer's.
 - `payLagMonths`: how many months after the work its payroll pays a timesheet (yours; unset, it is
   learned: [FORMULAS.md §17](FORMULAS.md)).
 - `owed`: `[{periodEnd, note?, markedAt}]`, pay periods whose pay has not arrived and that you say
-  is owed to you. Pay arriving later pairs with it.
+  is owed to you (a context record of pay not received says so too, below). Pay arriving later
+  pairs with it.
 - `createdBy`: `import` (set up on reviewing a document), `owner` or `migration`. `notes`,
   `createdAt`, `updatedAt`.
 
@@ -437,6 +438,10 @@ One record per line, **append-only**, content-addressed (the same findings get t
 | `status` | `active` `done` `retired` |
 | `origin` | `{kind: form}`, `{kind: note, noteId, interpretedBy}`, or `{kind: document, document, interpretedBy}` for a fact read from a document you gave (an email, a letter) that has nothing to import |
 | `createdAt`, `updatedAt` | |
+
+A record the app acts on: `kind: income` with `detail.event: "pay_not_received"`, `from`/`to` (the
+pay period), `amount` and `attributes.employer` says a job's pay for that period has not arrived.
+While it is active, the Pay tab counts that payslip's pay as owed to you ([FORMULAS.md §17](FORMULAS.md)).
 
 **Notes** are what you told the app in your own words:
 

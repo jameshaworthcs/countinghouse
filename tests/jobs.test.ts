@@ -17,7 +17,7 @@ import { matchEmployment } from '../src/server/employments';
 import { figureId, hmrcId, transactionId } from '../src/server/ids';
 import { runMigrations } from '../src/server/migrations';
 import { Store } from '../src/server/store';
-import type { Account, Employment, Figure, HmrcRecord, ImportRecord, Transaction } from '../src/shared/schema';
+import type { Account, ContextRecord, Employment, Figure, HmrcRecord, ImportRecord, Transaction } from '../src/shared/schema';
 import { CategoryIndex, defaultCategories } from '../src/shared/categories';
 import { Categoriser } from '../src/shared/categorise';
 import { taxYear, taxYearOf } from '../src/shared/uk';
@@ -249,6 +249,24 @@ describe('jobs, HMRC’s records and the Pay tab', () => {
     e = quillon(pay(store, new Coverage(store), '2026/27', '2026-10-21'));
     expect(e.months[1]).toMatchObject({ status: 'paid', paidIn: { date: '2026-10-20' }, note: 'Arrived late, on 20 Oct 2026: you had said it was owed' });
     expect(owedPay([], owedPayslips(store, '2026-10-21'))).toBeNull();
+  });
+
+  it('pay you told the app had not arrived is owed, by that record, while it is active', async () => {
+    const told: ContextRecord = {
+      id: 'ctx_00000000000000a1',
+      kind: 'income',
+      statement: 'Your August 2026 pay from Quillon (£1,062.50) had not arrived by 26 September 2026.',
+      detail: { event: 'pay_not_received', amount: 1062.5, date: '2026-09-26', from: '2026-08-01', to: '2026-08-31', attributes: { employer: 'Quillon Systems Ltd' } },
+      status: 'active',
+      origin: { kind: 'document', document: 'email.pdf' },
+      createdAt: stamp,
+      updatedAt: stamp,
+    };
+    await store.upsertRecords('context', [told, { ...told, id: 'ctx_00000000000000a2', detail: { ...told.detail, attributes: { employer: 'Alder Ltd' } } }], 'test: context');
+    expect(quillon(pay(store, new Coverage(store), '2026/27', '2026-10-01')).months[1]).toMatchObject({ status: 'owed', owed: { contextId: told.id }, note: 'Owed to you: you told the app it had not arrived' });
+    expect(owedPay([], owedPayslips(store, '2026-10-01'))).toMatchObject({ net: 1062.5, items: [{ kind: 'payslip', periods: ['2026-08-31'] }] });
+    await store.upsertRecords('context', [{ ...told, status: 'retired' }], 'test: context retired');
+    expect(quillon(pay(store, new Coverage(store), '2026/27', '2026-10-01')).months[1]).toMatchObject({ status: 'not-seen' });
   });
 
   it('a pay date HMRC has with no pay and no tax is nothing to pay in, not a missing payslip', async () => {

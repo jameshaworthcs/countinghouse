@@ -4,14 +4,14 @@
 import type { EarnedPayroll, PayEmployer, PayMonth, PayResponse } from '../../shared/api';
 import { addDays, diffDays, formatDate, formatMonth, maxDate, today, type ISODate } from '../../shared/dates';
 import { formatMoney, fromMinor, toMinor } from '../../shared/money';
-import type { Figure, HmrcRecord, Transaction } from '../../shared/schema';
+import type { Employment, Figure, HmrcRecord, Transaction } from '../../shared/schema';
 import { taxYearOf, type TaxYear } from '../../shared/uk';
 import { earnedPay } from './earned';
 import type { Store } from '../store';
 import { covers, type Coverage } from './coverage';
 import { employerYears, isPayslipFigure, jobEndedOn, payerKey, type PayKind, type PaySource } from './sources';
 import { parseTaxCode, payeTax, taxMonth } from '../../shared/paye';
-import { namesOf } from '../employments';
+import { matchEmployment, namesOf } from '../employments';
 import { payrollPattern } from '../../shared/categorise';
 
 export { isPayslipFigure, payerKey };
@@ -68,8 +68,8 @@ export interface PayPeriod {
   from: ISODate;
   to: ISODate;
   credit?: Transaction;
-  /** You said its pay is owed to you. */
-  owed?: { markedAt: string; note?: string };
+  /** You said its pay is owed to you: on the Pay tab, or by telling the app it had not arrived (`contextId`). */
+  owed?: { markedAt: string; note?: string; contextId?: string };
   /** HMRC's record of this payment, when its pay and tax are the payslip's to the penny. */
   hmrcId?: string;
 }
@@ -80,6 +80,23 @@ function paymentOf(store: Store, employmentId: string, ty: TaxYear, gross: numbe
   const taxable = [toMinor(gross), toMinor(gross) - toMinor(pension ?? 0)];
   const found = store.hmrc.filter((r): r is Extract<HmrcRecord, { type: 'payment' }> => r.type === 'payment' && r.employmentId === employmentId && r.taxYear === ty.label && toMinor(r.tax) === toMinor(tax) && taxable.includes(toMinor(r.taxablePay)));
   return found.length === 1 ? found[0] : undefined;
+}
+
+/**
+ * Pay you said is owed for a job's period: marked on the Pay tab (the job's `owed`), else told to the
+ * app (an active context record of pay not received that names the employer, the period ending in
+ * its days).
+ */
+function owedFor(store: Store, job: Employment, periodEnd: string | null): PayPeriod['owed'] {
+  if (!periodEnd) return undefined;
+  const marked = job.owed.find((o) => o.periodEnd === periodEnd);
+  if (marked) return { markedAt: marked.markedAt, ...(marked.note ? { note: marked.note } : {}) };
+  const told = store.context.find((c) => {
+    const d = c.detail;
+    const employer = d.attributes?.employer;
+    return c.status === 'active' && d.event === 'pay_not_received' && Boolean(d.to) && periodEnd >= (d.from ?? d.to!) && periodEnd <= d.to! && typeof employer === 'string' && Boolean(matchEmployment([job], { employer }));
+  });
+  return told ? { markedAt: told.createdAt, contextId: told.id } : undefined;
 }
 
 /** Nothing to pay into the bank: the deductions read are as much as the pay (a £0 payslip). */
@@ -127,7 +144,7 @@ export function pairPay(store: Store, ty: TaxYear): { periods: PayPeriod[]; othe
       const undated = !first.periodStart && !first.periodEnd && record ? record.payDate : undefined;
       const periodEnd = first.periodEnd ?? first.date ?? null;
       const payDate = undated ?? first.date ?? periodEnd;
-      const owed = job?.owed.find((o) => o.periodEnd === periodEnd);
+      const owed = job ? owedFor(store, job, periodEnd) : undefined;
       periods.push({
         key,
         payer: e.payer,
@@ -145,7 +162,7 @@ export function pairPay(store: Store, ty: TaxYear): { periods: PayPeriod[]; othe
         payDate,
         from: addDays(undated ?? periodEnd ?? payDate!, -PAY_MATCH_DAYS),
         to: addDays(maxDate(payDate, periodEnd) ?? payDate!, PAY_MATCH_DAYS),
-        ...(owed ? { owed: { markedAt: owed.markedAt, ...(owed.note ? { note: owed.note } : {}) } } : {}),
+        ...(owed ? { owed } : {}),
         ...(record ? { hmrcId: record.id } : {}),
       });
     }
@@ -329,7 +346,7 @@ export function pay(store: Store, coverage: Coverage, taxYear?: string, now: ISO
       else if (p.owed && credit.date > p.to) note = `Arrived late, on ${formatDate(credit.date)}: you had said it was owed`;
     } else if (p.owed) {
       status = 'owed';
-      note = `Owed to you: you said it will be paid${p.owed.note ? ` (${p.owed.note})` : ''}`;
+      note = p.owed.contextId ? 'Owed to you: you told the app it had not arrived' : `Owed to you: you said it will be paid${p.owed.note ? ` (${p.owed.note})` : ''}`;
     } else if (p.payDate && p.payDate > now) {
       status = 'due';
       note = `Due about ${p.payDate}`;

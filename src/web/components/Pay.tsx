@@ -251,6 +251,13 @@ function OwedToggle({ employmentId, m }: { employmentId: string; m: PayMonth }) 
   const mark = useApiMutation(() => api(`/employments/${employmentId}/owed`, { method: 'POST', body: { periodEnd: m.periodEnd } }));
   const unmark = useApiMutation(() => api(`/employments/${employmentId}/owed/${m.periodEnd}`, { method: 'DELETE' }));
   if (!m.periodEnd || (m.status !== 'owed' && m.status !== 'not-seen')) return null;
+  // Owed by what you told the app: changed where you told it.
+  if (m.status === 'owed' && m.owed?.contextId)
+    return (
+      <Link to="/assumptions#about" className="mt-0.5 block text-[11.5px] text-accent hover:underline" title="You told the app this pay had not arrived">
+        What you told the app
+      </Link>
+    );
   const owed = m.status === 'owed';
   return (
     <button
