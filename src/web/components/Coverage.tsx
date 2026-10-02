@@ -180,13 +180,19 @@ export function CoverageGaps({ gaps, confirmations }: { gaps: CoverageGapView[];
                       {span(g.from, g.to)} ({plural(g.days, 'day')}
                       {g.rows ? `, ${plural(g.rows, 'row')} recorded` : ''})
                     </span>
+                    {to && to < g.to && (
+                      <span className="font-medium text-ink">
+                        {' '}
+                        · {g.evidence.status === 'adds-up' ? 'balances confirm' : 'confirms'} to {formatDate(to)}
+                      </span>
+                    )}
                     <div className="text-ink-3">
-                      <EvidenceText e={g.evidence} to={g.to} />
+                      <EvidenceText e={g.evidence} to={g.evidence.through ?? g.to} />
                     </div>
                   </div>
                   {to && (
-                    <Button size="sm" variant="ghost" loading={confirm.isPending} onClick={() => confirm.mutate([{ accountId: g.accountId, from: g.from, to }])}>
-                      {to === g.to ? 'Nothing missing' : `Nothing missing to ${formatDate(to)}`}
+                    <Button size="sm" loading={confirm.isPending} onClick={() => confirm.mutate([{ accountId: g.accountId, from: g.from, to }])}>
+                      Confirm nothing missing
                     </Button>
                   )}
                 </li>
