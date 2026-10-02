@@ -1,6 +1,7 @@
 import { Link } from 'react-router';
 import type { CoverageGapView, CoverageResponse, DataHealthResponse } from '../../shared/api';
-import { addDays, formatDate, today } from '../../shared/dates';
+import { confirmableTo, settledStretches, settledThrough } from '../../shared/coverage';
+import { formatDate, today } from '../../shared/dates';
 import type { BalanceEvidence } from '../../shared/schema';
 import { api, useApiMutation } from '../lib/api';
 import { cn, formatMonth, money, plural } from '../lib/format';
@@ -103,13 +104,6 @@ export function CoverageGrid({ cov, only }: { cov: CoverageResponse; only?: stri
   );
 }
 
-/** The last day a gap can be confirmed to: where its balances stop, and never today (it is still going). */
-function confirmableTo(g: CoverageGapView, now: string): string | null {
-  let end = g.evidence.status === 'adds-up' && g.evidence.through ? g.evidence.through : g.to;
-  if (end >= now) end = addDays(now, -1);
-  return end >= g.from ? end : null;
-}
-
 function span(from: string, to: string): string {
   return from === to ? formatDate(from) : `${formatDate(from)} – ${formatDate(to)}`;
 }
@@ -149,27 +143,27 @@ export function CoverageGaps({ gaps, confirmations }: { gaps: CoverageGapView[];
   // Days up to today with nothing after the last balance yet: newer documents will cover them.
   const waiting = gaps.filter((g) => g.to >= now && g.evidence.status === 'no-balance');
   const listed = gaps.filter((g) => !waiting.includes(g));
-  const addingUp = listed.flatMap((g) => {
-    const to = g.evidence.status === 'adds-up' ? confirmableTo(g, now) : null;
-    return to ? [{ accountId: g.accountId, from: g.from, to }] : [];
-  });
+  // "Confirm all" keeps to settled days; later ones wait for their statements (the monthly update).
+  const settled = settledThrough(now);
+  const addingUp = settledStretches(listed, now);
   return (
     <>
       {gaps.length > 0 && (
         <Card
           title="Days no document covers"
-          description="Days an account was open that no statement, export or screenshot covers. Where the balances either side add up with the rows recorded, nothing is missing on balance: confirm it, and those days count as covered. Balances show only the net, so a payment and its refund inside would cancel out."
+          description={`Days an account was open that no statement, export or screenshot covers. Where the balances either side add up with the rows recorded, nothing is missing on balance: confirm it, and those days count as covered. Balances show only the net, so a payment and its refund inside would cancel out. Confirming all takes days up to ${formatDate(settled)}, the end of the month before last; later days are recent, and their statements are still due through the monthly update.`}
           actions={
-            addingUp.length > 1 && (
+            addingUp.length > 0 && (
               <Button size="sm" variant="primary" loading={confirm.isPending} onClick={() => confirm.mutate(addingUp)}>
-                Confirm the {addingUp.length} that add up
+                Confirm the {addingUp.length} that add up, to {formatDate(settled)}
               </Button>
             )
           }
         >
           <ul className="flex flex-col divide-y divide-line text-[13px]">
             {listed.map((g) => {
-              const to = g.evidence.status === 'unexplained' ? null : confirmableTo(g, now);
+              const to = confirmableTo(g, now);
+              const recent = to !== null && to > settled ? (g.from > settled ? 'all' : g.evidence.status === 'adds-up' ? 'part' : null) : null;
               return (
                 <li key={`${g.accountId}-${g.from}`} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 py-2">
                   <div className="min-w-0">
@@ -189,6 +183,13 @@ export function CoverageGaps({ gaps, confirmations }: { gaps: CoverageGapView[];
                     <div className="text-ink-3">
                       <EvidenceText e={g.evidence} to={g.evidence.through ?? g.to} />
                     </div>
+                    {recent && (
+                      <div className="text-ink-3 italic">
+                        {recent === 'all'
+                          ? 'Recent: its statements are still due, through the monthly update. Confirm it yourself only if you know none is coming.'
+                          : `Confirming all takes it to ${formatDate(settled)}; the days after are recent, and their statements are still due.`}
+                      </div>
+                    )}
                   </div>
                   {to && (
                     <Button size="sm" loading={confirm.isPending} onClick={() => confirm.mutate([{ accountId: g.accountId, from: g.from, to }])}>

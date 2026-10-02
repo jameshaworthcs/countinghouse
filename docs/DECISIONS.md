@@ -1584,3 +1584,10 @@ Later the same day, after the owner's first runs (`label-imports-2`):
     not print its period (`coversFrom`/`coversTo` on the draft section). Past exports are covered
     by confirming the stretches between them, with no re-uploads. So there is no control to edit a
     committed import's period.
+- **Confirm all keeps to settled days** (added the same day). At first it took every stretch that
+  added up, recent ones included, such as a card's last two days of a month. Those rested on a screenshot
+  balance a card payment may not have posted to yet, and the next statement would cover them
+  anyway. The owner chose the end of the month before last as the line, over 7 days (late posting
+  only) or 40 (one statement cycle, which splits months). Recent days are the monthly update's
+  job. A stretch is capped at that line rather than dropped, and each can still be confirmed on its
+  own, marked "recent" when it runs past the line.

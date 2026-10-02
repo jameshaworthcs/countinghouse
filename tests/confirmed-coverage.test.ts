@@ -13,6 +13,8 @@ import { loadConfig } from '../src/server/config';
 import { balanceId, transactionId } from '../src/server/ids';
 import { Store } from '../src/server/store';
 import { requiredScope } from '../src/server/tokens';
+import type { CoverageGapView } from '../src/shared/api';
+import { confirmableTo, settledStretches, settledThrough } from '../src/shared/coverage';
 import type { Account, BalanceSnapshot, DraftSection, Transaction } from '../src/shared/schema';
 
 const stamp = '2026-01-01T00:00:00+00:00';
@@ -158,6 +160,44 @@ describe('coverage beyond documents', () => {
     expect(accountCoverage(store, store.account('card')!).intervals).toEqual([
       { from: '2026-01-01', to: '2026-01-31' },
       { from: '2026-02-03', to: '2026-02-20' },
+    ]);
+  });
+});
+
+describe('what can be confirmed', () => {
+  const gap = (from: string, to: string, evidence: CoverageGapView['evidence']): CoverageGapView => ({ accountId: 'card', name: 'card', from, to, days: 1, rows: 0, evidence });
+  const addsUp = (through: string) => ({ status: 'adds-up' as const, from: '2026-01-31', to: through, through, difference: 0 });
+
+  it('settles at the end of the month before last', () => {
+    expect(settledThrough('2026-10-02')).toBe('2026-08-31');
+    expect(settledThrough('2026-10-31')).toBe('2026-08-31');
+    expect(settledThrough('2026-11-01')).toBe('2026-09-30');
+    expect(settledThrough('2026-03-15')).toBe('2026-01-31');
+    expect(settledThrough('2026-01-05')).toBe('2025-11-30');
+  });
+
+  it('confirms one stretch as far as its balances reach, never today, and never one that leaves something unexplained', () => {
+    expect(confirmableTo(gap('2026-09-05', '2026-10-02', addsUp('2026-09-30')), '2026-10-02')).toBe('2026-09-30');
+    expect(confirmableTo(gap('2026-09-05', '2026-10-02', { status: 'no-balance', from: '2026-09-04' }), '2026-10-02')).toBe('2026-10-01');
+    expect(confirmableTo(gap('2026-10-02', '2026-10-02', { status: 'no-balance', from: '2026-10-01' }), '2026-10-02')).toBeNull();
+    expect(confirmableTo(gap('2026-02-01', '2026-03-31', { status: 'unexplained', from: '2026-01-31', to: '2026-04-30', through: '2026-03-31', difference: -30 }), '2026-10-02')).toBeNull();
+  });
+
+  it('confirming all keeps to settled days: capped, or left for the monthly update', () => {
+    const now = '2026-10-02';
+    expect(
+      settledStretches(
+        [
+          gap('2026-03-29', '2026-10-02', addsUp('2026-09-30')), // capped at 31 Aug
+          gap('2026-09-29', '2026-10-02', addsUp('2026-09-30')), // all recent: left
+          gap('2025-12-12', '2025-12-31', addsUp('2025-12-31')), // settled: whole
+          gap('2026-06-03', '2026-07-01', { status: 'no-balance', from: '2026-06-02' }), // only one at a time
+        ],
+        now,
+      ),
+    ).toEqual([
+      { accountId: 'card', from: '2026-03-29', to: '2026-08-31' },
+      { accountId: 'card', from: '2025-12-12', to: '2025-12-31' },
     ]);
   });
 });

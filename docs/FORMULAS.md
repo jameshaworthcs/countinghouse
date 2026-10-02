@@ -83,9 +83,17 @@ Settings → Data health). For the days from *f* to *t*, with the anchors usable
   not; `no-balance` with no anchor before them, or none after the one before.
 
 Adding up shows only the net: a payment and its refund inside the stretch would cancel out. So the
-evidence never covers days by itself. You confirm a stretch, one at a time or all those that add
-up at once (each to the day its balances reach, and never today), and only then does it count. A
-confirmed stretch whose balances later stop adding up is marked, and stays until you withdraw it.
+evidence never covers days by itself. You confirm a stretch, and only then does it count
+(`shared/coverage.ts`):
+
+- **One at a time:** any stretch except one that leaves something unexplained. It is confirmed to
+  the day its balances reach when they add up, else to its end, and never today.
+- **All that add up, at once:** only settled days, up to the end of the month before last
+  (`settledThrough`: 31 Aug on any day of October). By then every monthly statement that includes
+  those days has been issued. A stretch is capped there, and one that starts later is left out.
+  Later days are recent: their statements are still due, and the monthly update asks for them.
+- A confirmed stretch whose balances later stop adding up is marked, and stays until you withdraw
+  it.
 
 **Joint coverage over [from, to]** is the set of days *d* on which every transaction account in the
 estate that is open on *d* covers *d*. An account counts from `openedOn`, or its first covered day,
