@@ -1,5 +1,5 @@
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Download, Search, StickyNote, X } from 'lucide-react';
+import { Download, Search, StickyNote, Tag, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import type { TransactionsResponse } from '../../shared/api';
@@ -7,11 +7,12 @@ import { addDays, addMonths, endOfMonth, startOfMonth, today } from '../../share
 import type { Transaction } from '../../shared/schema';
 import { formatSortParam, parseSortParam, type SortDir } from '../../shared/sort';
 import { taxYearOf } from '../../shared/uk';
-import { CategorySelect, SelectionBar, TransactionDrawer } from '../components/TransactionList';
+import { CategorySelect, NoteDialog, SelectionBar, TAG_LIST_ID, TagOptions, TAGS_HINT, TransactionDrawer } from '../components/TransactionList';
 import { Button, Checkbox, EmptyState, ErrorNote, Input, Loading, Money, PageHeader, Select, SortHeader, useDebounced, useToast } from '../components/ui';
 import { api, qs, useApi, useApiMutation } from '../lib/api';
 import { useAppData } from '../lib/data';
 import { cn, formatDate, money, plural } from '../lib/format';
+import { useRowSelection } from '../lib/useSelection';
 import type { SortProps } from '../lib/sort';
 
 const PERIODS: { id: string; label: string; range: () => [string | undefined, string | undefined] }[] = [
@@ -51,8 +52,12 @@ export default function Transactions() {
     limit: 5000,
   };
   const query = useApi<TransactionsResponse>(['transactions', filters], `/transactions${qs(filters)}`);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const items = useMemo(() => query.data?.items ?? [], [query.data]);
+  const order = useMemo(() => items.map((t) => t.id), [items]);
+  const { selected, click, set: setSelected, clear: clearSelection } = useRowSelection(order);
   const [open, setOpen] = useState<Transaction | null>(null);
+  // The transactions a note is being written on: one row's, or the selection's.
+  const [noteFor, setNoteFor] = useState<Transaction[] | null>(null);
   const [bulkCategory, setBulkCategory] = useState<string | undefined>();
   const [bulkTag, setBulkTag] = useState('');
   const set = (key: string, value: string | undefined) => {
@@ -60,21 +65,31 @@ export default function Transactions() {
     if (value) next.set(key, value);
     else next.delete(key);
     setParams(next, { replace: true });
-    setSelected(new Set());
+    clearSelection();
   };
 
   const recategorise = useApiMutation((v: { id: string; category: string | undefined }) => api(`/transactions/${v.id}`, { method: 'PATCH', body: { category: v.category ?? null } }));
   const bulk = useApiMutation((body: Record<string, unknown>) => api<{ updated: number }>('/transactions/bulk', { body }), {
     onSuccess: (r) => {
       toast({ tone: 'good', text: `${plural(r.updated, 'transaction')} updated` });
-      setSelected(new Set());
+      setBulkTag('');
     },
   });
-
-  const items = useMemo(() => query.data?.items ?? [], [query.data]);
+  // Esc lets go of the selection, unless a box, a drawer or a dialog has the key.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || !selected.size || open || noteFor) return;
+      const el = document.activeElement;
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) return;
+      clearSelection();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selected.size, open, noteFor, clearSelection]);
   const parentRef = useRef<HTMLDivElement>(null);
   const virtual = useVirtualizer({ count: items.length, getScrollElement: () => parentRef.current, estimateSize: () => 52, overscan: 12 });
   const allSelected = items.length > 0 && selected.size === items.length;
+  const selectedItems = useMemo(() => items.filter((t) => selected.has(t.id)), [items, selected]);
   const exportHref = `/api/transactions/export.csv${qs({ ...filters, sort: undefined, limit: undefined })}`;
   const sort = parseSortParam(filters.sort ?? DEFAULT_SORT) ?? { key: 'date', dir: 'desc' as const };
   const sortProps = (key: string): SortProps => ({
@@ -146,11 +161,18 @@ export default function Transactions() {
           </Button>
         )}
       </div>
-      {filters.tag && <div className="mb-2 text-[13px] text-ink-3">Tagged “{filters.tag}”</div>}
+      {filters.tag && (
+        <div className="mb-2 flex items-center gap-1.5 text-[13px] text-ink-3">
+          <Tag className="size-3.5" aria-hidden /> Tagged “{filters.tag}”
+          <button type="button" className="rounded p-0.5 hover:bg-panel-2 hover:text-ink" onClick={() => set('tag', undefined)} aria-label={`Stop filtering by ${filters.tag}`}>
+            <X className="size-3.5" />
+          </button>
+        </div>
+      )}
       {query.error && <ErrorNote error={query.error} />}
       <div className="print-plain overflow-hidden rounded-xl border border-line bg-panel shadow-card">
         <div className="grid grid-cols-[28px_76px_1fr_120px] items-center gap-3 border-b border-line px-4 py-2 text-[12px] font-medium text-ink-3 md:grid-cols-[28px_84px_1fr_180px_200px_120px]">
-          <Checkbox checked={allSelected} indeterminate={selected.size > 0 && !allSelected} onChange={(v) => setSelected(v ? new Set(items.map((t) => t.id)) : new Set())} />
+          <Checkbox checked={allSelected} indeterminate={selected.size > 0 && !allSelected} onChange={(v) => (v ? setSelected(order) : clearSelection())} ariaLabel="Select all" />
           <SortHeader as="div" label="Date" sort={sortProps('date')} />
           <SortHeader as="div" label="Description" sort={sortProps('payee')} />
           <SortHeader as="div" label="Account" sort={sortProps('account')} className="hidden md:block" />
@@ -170,30 +192,45 @@ export default function Transactions() {
                 return (
                   <div
                     key={t.id}
-                    className={cn('absolute inset-x-0 grid grid-cols-[28px_76px_1fr_120px] items-center gap-3 border-b border-line px-4 md:grid-cols-[28px_84px_1fr_180px_200px_120px]', checked ? 'bg-accent-soft' : 'hover:bg-panel-2')}
+                    className={cn('group absolute inset-x-0 grid grid-cols-[28px_76px_1fr_120px] items-center gap-3 border-b border-line px-4 md:grid-cols-[28px_84px_1fr_180px_200px_120px]', checked ? 'bg-accent-soft' : 'hover:bg-panel-2')}
                     style={{ top: row.start, height: row.size }}
+                    // Shift-clicking rows chooses them, so it must not select their text.
+                    onMouseDown={(e) => e.shiftKey && e.preventDefault()}
                   >
-                    <Checkbox
-                      checked={checked}
-                      onChange={(v) => {
-                        const next = new Set(selected);
-                        if (v) next.add(t.id);
-                        else next.delete(t.id);
-                        setSelected(next);
-                      }}
-                    />
+                    <Checkbox checked={checked} onChange={(_, mods) => click(t.id, mods)} ariaLabel={`Select ${t.payee ?? t.description}`} />
                     <span className="text-[12.5px] text-ink-3 tabular">{formatDate(t.date)}</span>
-                    <button type="button" className="min-w-0 text-left" onClick={() => setOpen(t)}>
-                      <div className="truncate text-[13.5px] font-medium text-ink">
-                        {t.payee ?? t.description}
-                        {t.notes && <StickyNote className="ml-1.5 inline size-3.5 text-ink-3" aria-label="Has notes" />}
-                        {t.pending && <span className="ml-1.5 text-[11px] text-ink-3">pending</span>}
+                    <div className="min-w-0">
+                      <div className="flex min-w-0 items-center gap-1">
+                        <button
+                          type="button"
+                          className="min-w-0 truncate text-left text-[13.5px] font-medium text-ink"
+                          // With Shift or Ctrl/⌘ a click chooses the row, as in a file list; without, it opens it.
+                          onClick={(e) => (e.shiftKey || e.ctrlKey || e.metaKey ? click(t.id, e) : setOpen(t))}
+                        >
+                          {t.payee ?? t.description}
+                          {t.pending && <span className="ml-1.5 text-[11px] font-normal text-ink-3">pending</span>}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setNoteFor([t])}
+                          // Without a note it shows on hover (and to the keyboard); on a phone, notes are in the drawer.
+                          className={cn('shrink-0 rounded p-0.5 text-ink-3 hover:bg-panel-2 hover:text-ink focus:opacity-100', t.notes ? '' : 'hidden opacity-0 group-hover:opacity-100 md:inline-flex')}
+                          aria-label={t.notes ? 'Edit note' : 'Add a note'}
+                          title={t.notes ? `Note: ${t.notes}` : 'Add a note'}
+                        >
+                          <StickyNote className="size-3.5" />
+                        </button>
                       </div>
-                      <div className="truncate text-[12px] text-ink-3">
-                        {t.payee && t.payee.toLowerCase() !== t.description.toLowerCase() ? t.description : null}
-                        {t.tags?.length ? <span className="ml-1.5 text-accent">#{t.tags.join(' #')}</span> : null}
+                      <div className="flex min-w-0 items-center gap-1.5 text-[12px] text-ink-3">
+                        {t.payee && t.payee.toLowerCase() !== t.description.toLowerCase() && <span className="min-w-0 shrink truncate">{t.description}</span>}
+                        {t.notes && <span className="sensitive hidden min-w-0 shrink truncate text-ink-2 italic md:inline" title={t.notes}>{t.notes.split('\n')[0]}</span>}
+                        {t.tags?.map((tag) => (
+                          <button key={tag} type="button" className="shrink-0 text-accent hover:underline" onClick={() => set('tag', tag)} title={`Show everything tagged “${tag}”`}>
+                            #{tag}
+                          </button>
+                        ))}
                       </div>
-                    </button>
+                    </div>
                     <span className="hidden truncate text-[12.5px] text-ink-2 md:block">{accountName(t.accountId)}</span>
                     <div className="hidden md:block">
                       <CategorySelect
@@ -211,18 +248,34 @@ export default function Transactions() {
         )}
       </div>
       {query.data && query.data.total > items.length && <div className="mt-2 text-[12.5px] text-ink-3">Showing the {sort.key === 'date' && sort.dir === 'desc' ? 'newest' : 'first'} {items.length.toLocaleString()} of {query.data.total.toLocaleString()}{sort.key === 'date' && sort.dir === 'desc' ? '' : ' in this order'}. Narrow the filters to see the rest.</div>}
-      <SelectionBar count={selected.size} onClear={() => setSelected(new Set())}>
+      <SelectionBar
+        count={selected.size}
+        onClear={clearSelection}
+        hint={<>Shift-click chooses a range; let go of Shift and hold it again for another group. Ctrl/⌘-click adds or removes one. Esc lets go.</>}
+      >
         <div className="w-48">
           <CategorySelect value={bulkCategory} onChange={setBulkCategory} placeholder="Choose category" />
         </div>
         <Button size="sm" variant="primary" disabled={!bulkCategory} loading={bulk.isPending} onClick={() => bulk.mutate({ ids: [...selected], category: bulkCategory })}>
           Set category
         </Button>
-        <Input value={bulkTag} onChange={(e) => setBulkTag(e.target.value)} placeholder="tag" className="h-8 w-28" aria-label="Tag" />
-        <Button size="sm" disabled={!bulkTag.trim()} onClick={() => bulk.mutate({ ids: [...selected], addTags: [bulkTag.trim()] })}>
-          Add tag
+        <span className="flex items-center gap-1.5" title={TAGS_HINT}>
+          <Input value={bulkTag} onChange={(e) => setBulkTag(e.target.value)} placeholder="tag" className="h-8 w-32" aria-label="Tag" list={TAG_LIST_ID} />
+          <Button size="sm" disabled={!bulkTag.trim()} onClick={() => bulk.mutate({ ids: [...selected], addTags: [bulkTag.trim()] })}>
+            Add tag
+          </Button>
+          {bulkTag.trim() && selectedItems.some((t) => t.tags?.some((x) => x.toLowerCase() === bulkTag.trim().toLowerCase())) && (
+            <Button size="sm" variant="ghost" onClick={() => bulk.mutate({ ids: [...selected], removeTags: [bulkTag.trim()] })}>
+              Remove tag
+            </Button>
+          )}
+        </span>
+        <Button size="sm" icon={<StickyNote className="size-3.5" />} onClick={() => setNoteFor(selectedItems)}>
+          Note
         </Button>
       </SelectionBar>
+      <TagOptions />
+      {noteFor && <NoteDialog txs={noteFor} onClose={() => setNoteFor(null)} onDone={() => noteFor.length > 1 && clearSelection()} />}
       {open && <TransactionDrawer tx={open} onClose={() => setOpen(null)} />}
       <span className="sr-only">{cats.list.length} categories</span>
     </div>

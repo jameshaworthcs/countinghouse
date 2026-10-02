@@ -4308,6 +4308,27 @@
                     "transferMatch": {
                       "type": "string"
                     },
+                    "transferMatchBy": {
+                      "type": "string",
+                      "const": "user"
+                    },
+                    "pendingLink": {
+                      "type": "object",
+                      "properties": {
+                        "importId": {
+                          "type": "string",
+                          "maxLength": 80
+                        },
+                        "key": {
+                          "type": "string",
+                          "maxLength": 40
+                        }
+                      },
+                      "required": [
+                        "importId",
+                        "key"
+                      ]
+                    },
                     "row": {
                       "type": "integer",
                       "minimum": -9007199254740991,

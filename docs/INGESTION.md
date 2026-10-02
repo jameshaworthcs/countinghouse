@@ -535,6 +535,28 @@ read again.
     `contribution`. A commit also links its new rows to other legs already stored (the other
     account's statement committed earlier), without recategorising anything else. Links already
     made are not changed: an agent proposes fixing a wrong one ([AGENTS.md §5](AGENTS.md)).
+- **Linking transfers before commit** (`src/server/ingest/links.ts`). A row's link button on the
+  review page links it as the other leg of a transfer, by hand, to:
+  - a row of another import waiting for review, or another account's row in the same document;
+  - a recorded transaction.
+
+  It offers the opposite amount in another of your accounts within 14 days, the nearest first. It
+  leaves out rows already recorded, rows linked elsewhere and transactions in a transfer already.
+  - Linking two pending rows puts a `pendingLink` on both. When one is committed, the other's link
+    becomes a `transferMatch` to the transaction it recorded. When that one is committed too, both
+    get their `transferGroup`, as for any matched transfer, in either order. Two rows of one
+    document are linked when it is committed.
+  - A row held for a pending link is not paired with anything else at commit.
+  - A link to a recorded transaction is a `transferMatch` with `transferMatchBy: "user"`. Unlinking
+    (yours or the draft's own match) leaves `transferMatchBy: "user"` with no match.
+  - Linking sets both rows' transfer category (unless you chose one). Unlinking puts the category
+    back to what the rules say.
+  - Drafting again or reading again keeps your links on rows that are still the same payment (same
+    key, date and amount). A draft saved from the review page keeps the server's links, because
+    the other import's page may have changed them meanwhile.
+  - An import dismissed or discarded, or committed without the linked row, takes the link away from
+    the row still waiting, with a note on its draft. A link stays only if both rows are ticked in;
+    the review page warns when either is not.
 - **Investment app screens.** On an investment, ISA, LISA or pension account:
   - An activity list whose running balance is the cash (the reader says so, or the closing
     balance is a running balance and there are trades, holdings or an investment provider) records

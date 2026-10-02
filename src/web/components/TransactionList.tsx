@@ -7,7 +7,7 @@ import type { Rule, Transaction } from '../../shared/schema';
 import { api, useApi, useApiMutation } from '../lib/api';
 import { useAppData } from '../lib/data';
 import { cn, formatDate, money } from '../lib/format';
-import { Badge, Button, Callout, Checkbox, Drawer, Field, Input, KeyValue, Money, Select, Textarea, useToast } from './ui';
+import { Badge, Button, Callout, Dialog, Drawer, Field, Input, KeyValue, Money, Select, Textarea, useToast } from './ui';
 import { ReceiptsSection, SplitSection, type SplitLineDraft } from './SplitReceipts';
 
 export function CategorySelect({ value, onChange, allowEmpty = true, className, placeholder = 'Uncategorised', id }: { value: string | undefined; onChange: (v: string | undefined) => void; allowEmpty?: boolean; className?: string; placeholder?: string; id?: string }) {
@@ -40,6 +40,102 @@ export function categoryBadge(t: Transaction, name: string): ReactNode {
     <Badge tone={t.transferGroup ? 'accent' : 'neutral'} icon={t.transferGroup ? <ArrowLeftRight className="size-3" /> : undefined}>
       {name}
     </Badge>
+  );
+}
+
+/** What notes are for, beside tags: said wherever you write either. */
+export const NOTES_HINT = 'Free text for you: what it was, who it was for. Search finds it; nothing groups by it.';
+export const TAGS_HINT = 'Short labels to group and filter by, e.g. holiday-2026. Click one in the list to see everything with it. Gift Aided donations tagged “gift-aid” go to Self Assessment.';
+
+export const TAG_LIST_ID = 'tags-in-use';
+
+/** The tags already in use, offered as you type one (an `<input list={TAG_LIST_ID}>`). */
+export function TagOptions() {
+  const tags = useApi<{ tags: { tag: string; count: number }[] }>(['transactions', 'tags'], '/transactions/tags');
+  return (
+    <datalist id={TAG_LIST_ID}>
+      {(tags.data?.tags ?? []).map((t) => (
+        <option key={t.tag} value={t.tag}>
+          {t.count === 1 ? '1 transaction' : `${t.count} transactions`}
+        </option>
+      ))}
+    </datalist>
+  );
+}
+
+/**
+ * Write a note on one transaction, or on several at once: added to each one's notes on a line of
+ * its own, or replacing them (shared/annotations.ts).
+ */
+export function NoteDialog({ txs, onClose, onDone }: { txs: Transaction[]; onClose: () => void; onDone?: () => void }) {
+  const toast = useToast();
+  const single = txs.length === 1 ? txs[0] : undefined;
+  const withNotes = txs.filter((t) => t.notes).length;
+  const [text, setText] = useState(single?.notes ?? '');
+  const [mode, setMode] = useState<'add' | 'replace'>('add');
+  const save = useApiMutation(
+    () =>
+      single
+        ? api(`/transactions/${single.id}`, { method: 'PATCH', body: { notes: text.trim() || null } })
+        : api<{ updated: number }>('/transactions/bulk', { body: { ids: txs.map((t) => t.id), ...(mode === 'add' ? { appendNotes: text.trim() } : { notes: text.trim() }) } }),
+    {
+      onSuccess: () => {
+        toast({ tone: 'good', text: single ? (text.trim() ? 'Note saved' : 'Note taken away') : `Note ${mode === 'add' ? 'added to' : 'set on'} ${txs.length} transactions` });
+        onDone?.();
+        onClose();
+      },
+    },
+  );
+  const empty = !text.trim();
+  return (
+    <Dialog
+      open
+      onOpenChange={(o) => !o && onClose()}
+      title={single ? `Note on ${single.payee ?? single.description}` : `Note on ${txs.length} transactions`}
+      description={NOTES_HINT}
+      footer={
+        <>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button variant="primary" loading={save.isPending} disabled={!single && mode === 'add' && empty} onClick={() => save.mutate(undefined)}>
+            {single || mode === 'add' || !empty ? 'Save' : 'Take their notes away'}
+          </Button>
+        </>
+      }
+    >
+      <form
+        className="flex flex-col gap-3"
+        onSubmit={(e) => {
+          e.preventDefault();
+          save.mutate(undefined);
+        }}
+      >
+        {!single && (
+          <Field label="Their notes" hint={withNotes ? `${withNotes} of them ${withNotes === 1 ? 'has' : 'have'} notes already.` : 'None of them has a note yet.'}>
+            <Select value={mode} onChange={(e) => setMode(e.target.value as 'add' | 'replace')}>
+              <option value="add">Add this to each one’s notes</option>
+              <option value="replace">Replace each one’s notes with this</option>
+            </Select>
+          </Field>
+        )}
+        <Textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          rows={4}
+          autoFocus
+          aria-label="Note"
+          placeholder="e.g. Shared with Sam: they paid me back half"
+          onKeyDown={(e) => {
+            // Ctrl/⌘+Enter saves, as in most note boxes; Enter alone is a new line.
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+              e.preventDefault();
+              save.mutate(undefined);
+            }
+          }}
+        />
+        <p className="text-[12px] text-ink-3">Ctrl/⌘ + Enter saves.</p>
+        {save.error && <Callout tone="bad">{save.error.message}</Callout>}
+      </form>
+    </Dialog>
   );
 }
 
@@ -188,12 +284,13 @@ export function TransactionDrawer({ tx, onClose }: { tx: Transaction; onClose: (
           <Field label="Category">
             <CategorySelect value={category} onChange={setCategory} />
           </Field>
-          <Field label="Tags" hint='Comma separated. Tag Gift Aided donations "gift-aid" for Self Assessment.'>
-            <Input value={tags} onChange={(e) => setTags(e.target.value)} placeholder="e.g. holiday-2026, gift-aid" />
+          <Field label="Notes" hint={NOTES_HINT}>
+            <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} placeholder="e.g. Dinner with Sam; they paid me back half" />
           </Field>
-          <Field label="Notes">
-            <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
+          <Field label="Tags" hint={<>{TAGS_HINT} Comma separated.</>}>
+            <Input value={tags} onChange={(e) => setTags(e.target.value)} placeholder="e.g. holiday-2026, gift-aid" list={TAG_LIST_ID} />
           </Field>
+          <TagOptions />
           {save.error && <Callout tone="bad">{save.error.message}</Callout>}
           <div className="flex justify-end gap-2">
             <Button onClick={onClose}>Cancel</Button>
@@ -370,13 +467,18 @@ function CorrectSource({ tx, onDone }: { tx: Transaction; onDone: () => void }) 
   );
 }
 
-export function SelectionBar({ count, onClear, children }: { count: number; onClear: () => void; children: ReactNode }) {
+export function SelectionBar({ count, onClear, children, hint }: { count: number; onClear: () => void; children: ReactNode; hint?: ReactNode }) {
   if (!count) return null;
   return (
-    <div className="no-print sticky bottom-4 z-20 mx-auto mt-3 flex w-fit flex-wrap items-center gap-3 rounded-xl border border-line bg-panel px-4 py-2.5 shadow-lg">
-      <span className="text-[13px] font-medium text-ink">{count} selected</span>
-      {children}
-      <Checkbox checked={false} onChange={onClear} label="Clear" />
+    <div className="no-print sticky bottom-4 z-20 mx-auto mt-3 flex w-fit max-w-full flex-col gap-1.5 rounded-xl border border-line bg-panel px-4 py-2.5 shadow-lg">
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="text-[13px] font-medium text-ink">{count} selected</span>
+        {children}
+        <Button size="sm" variant="ghost" onClick={onClear}>
+          Clear
+        </Button>
+      </div>
+      {hint && <div className="hidden text-[11.5px] text-ink-3 md:block">{hint}</div>}
     </div>
   );
 }

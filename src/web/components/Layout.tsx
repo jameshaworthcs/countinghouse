@@ -12,6 +12,7 @@ import {
   Moon,
   Settings,
   Sun,
+  ScrollText,
   Telescope,
   TrendingUp,
   Upload,
@@ -40,6 +41,7 @@ const NAV: { to: string; label: string; icon: ReactNode; end?: boolean }[] = [
   { to: '/tax', label: 'Tax year', icon: <Landmark className="size-[18px]" /> },
   { to: '/assumptions', label: 'Assumptions & research', icon: <Library className="size-[18px]" /> },
   { to: '/import', label: 'Import', icon: <Upload className="size-[18px]" /> },
+  { to: '/sessions', label: 'Claude sessions', icon: <ScrollText className="size-[18px]" /> },
   { to: '/settings', label: 'Settings', icon: <Settings className="size-[18px]" /> },
 ];
 
@@ -63,7 +65,7 @@ function PrivacyButton() {
   );
 }
 
-function NavList({ reviewCount, onNavigate }: { reviewCount: number; onNavigate?: () => void }) {
+function NavList({ reviewCount, running, onNavigate }: { reviewCount: number; running: number; onNavigate?: () => void }) {
   const { pathname } = useLocation();
   return (
     <nav aria-label="Main" className="flex flex-col gap-0.5">
@@ -87,6 +89,12 @@ function NavList({ reviewCount, onNavigate }: { reviewCount: number; onNavigate?
           <span className="text-ink-3">{n.icon}</span>
           <span className="flex-1">{n.label}</span>
           {n.to === '/import' && reviewCount > 0 && <span className="rounded-full bg-accent px-1.5 text-[11px] leading-5 font-semibold text-white">{reviewCount}</span>}
+          {n.to === '/sessions' && running > 0 && (
+            <span className="flex items-center gap-1 text-[11.5px] text-ink-3" title={`${running} Claude session${running === 1 ? '' : 's'} running`}>
+              <span className="size-2 animate-pulse rounded-full bg-accent" aria-hidden />
+              {running} running
+            </span>
+          )}
         </NavLink>
       ))}
     </nav>
@@ -100,6 +108,9 @@ export function Layout() {
   const [menuOpen, setMenuOpen] = useState(false);
   const imports = useApi<ImportListResponse>(['imports'], '/imports', { refetchInterval: 15_000 });
   const proposals = useProposals();
+  // Claude at work (a reading, a job): the live stream refreshes it as sessions start and end.
+  const sessions = useApi<{ running: number }>(['sessions', 'running'], '/sessions/running', { refetchInterval: 60_000 });
+  const running = sessions.data?.running ?? 0;
   // Imports to review and proposed fixes to decide: both wait for you on the Import page.
   const reviewCount = (imports.data?.pending.filter((p) => p.status === 'review' || p.status === 'needs_mapping' || p.status === 'failed').length ?? 0) + (proposals.data?.pending.length ?? 0);
   useEffect(() => setMenuOpen(false), [location.pathname]);
@@ -121,7 +132,7 @@ export function Layout() {
             <div className="text-[11.5px] text-ink-3">{data.demo ? 'Demo data' : 'Private · local'}</div>
           </div>
         </div>
-        <NavList reviewCount={reviewCount} />
+        <NavList reviewCount={reviewCount} running={running} />
         <div className="mt-auto flex items-center gap-1 border-t border-line px-1 pt-3">
           <PrivacyButton />
           <ThemeButton />
@@ -157,7 +168,7 @@ export function Layout() {
                 <X className="size-5" />
               </IconButton>
             </div>
-            <NavList reviewCount={reviewCount} onNavigate={() => setMenuOpen(false)} />
+            <NavList reviewCount={reviewCount} running={running} onNavigate={() => setMenuOpen(false)} />
             {data.user && (
               <button className="mt-auto flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-ink-2 hover:bg-panel-2" onClick={() => void logout()}>
                 <LogOut className="size-4" /> Sign out

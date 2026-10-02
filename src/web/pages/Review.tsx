@@ -1,8 +1,8 @@
 import { Archive, ArrowLeft, CircleCheck, Copy, CopyCheck, ExternalLink, Info, ListChecks, LoaderCircle, Maximize2, Minimize2, Pencil, RefreshCw, Trash2, TriangleAlert } from 'lucide-react';
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { ACCOUNT_TYPE_META, slugify } from '../../shared/accounts';
-import type { NothingNewView } from '../../shared/api';
+import type { DraftLinkView, ImportView, NothingNewView } from '../../shared/api';
 import { formatDate, formatMonth } from '../../shared/dates';
 import { describeDetail, describeDifference, fieldsInWords } from '../../shared/detail';
 import { sectionChecks, type ReviewCheck } from '../../shared/review';
@@ -10,16 +10,19 @@ import { headlineApplies, RATE_NAMES } from '../../shared/terms';
 import { FIGURE_KINDS, type CsvProfile, type Draft, type DraftJob, type DraftSection, type DraftTransaction, type Employment, type ExtractedHmrc, type Figure, type ImportRecord, type PayslipLine, type PayslipYtdKey } from '../../shared/schema';
 import { AccountTypeSelect } from '../components/AccountForms';
 import { CategorySelect } from '../components/TransactionList';
-import { Badge, Button, Callout, Card, Checkbox, ErrorNote, Field, IconButton, Input, KeyValue, Loading, Money, Select, StatusBadge, tableClasses, useToast } from '../components/ui';
+import { Badge, Button, Callout, Card, Checkbox, type ClickModifiers, ErrorNote, Field, IconButton, Input, KeyValue, Loading, Money, Select, StatusBadge, tableClasses, useToast } from '../components/ui';
 import { api, useApi, useApiMutation } from '../lib/api';
 import { useAppData } from '../lib/data';
 import { cn, fileSize, money, plural } from '../lib/format';
+import { nextSelection, type Anchor } from '../lib/selection';
+import { useShiftHold } from '../lib/useSelection';
 import { importStatus } from './Import';
 import { ReadAgainCard } from '../components/ReadAgain';
 import { limitName, RatesList } from '../components/Terms';
 import { SessionsLink } from '../components/SessionsLink';
+import { LinkButton, LinkLine, withServerLinks } from '../components/DraftLinks';
 
-type Rec = ImportRecord & { readiness?: { ready: boolean; reasons: string[] }; nothingNew?: NothingNewView };
+type Rec = ImportView;
 
 /**
  * An import the reader understood that adds nothing: a view of what is already recorded, or of
@@ -272,16 +275,17 @@ function AddsDetail({ t, currency, onChange }: { t: DraftTransaction; currency: 
   );
 }
 
-function TxRow({ t, currency, flags, onChange }: { t: DraftTransaction; currency: string; flags?: string[] | undefined; onChange: (p: Partial<DraftTransaction>) => void }) {
+function TxRow({ t, currency, flags, onChange, onTick, linking }: { t: DraftTransaction; currency: string; flags?: string[] | undefined; onChange: (p: Partial<DraftTransaction>) => void; onTick: (mods: ClickModifiers) => void; linking: Linking }) {
   const [editing, setEditing] = useState(false);
   // A row that fills in a recorded payment is doing something, though it is not recorded again.
   const muted = !t.include && !t.adds?.include;
   const tone = cn(muted ? 'opacity-55' : '', t.status === 'possible_duplicate' || flags?.length ? 'bg-warn-soft/60' : '');
   return (
     <>
-      <tr className={cn(tone, t.adds && '[&>td]:border-b-0')}>
+      {/* Shift-clicking ticks a range, so it must not select the table's text. */}
+      <tr className={cn(tone, t.adds && '[&>td]:border-b-0')} onMouseDown={(e) => e.shiftKey && e.preventDefault()}>
         <td className={cn(tableClasses.td, 'w-8')}>
-          <Checkbox checked={t.include} onChange={(v) => onChange({ include: v, ...(v && t.adds?.include ? { adds: { ...t.adds, include: false } } : {}) })} />
+          <Checkbox checked={t.include} onChange={(_, mods) => onTick(mods)} ariaLabel="Record this row" />
         </td>
         <td className={cn(tableClasses.td, 'whitespace-nowrap')}>
           {editing ? <Input type="date" value={t.date} onChange={(e) => onChange({ date: e.target.value })} className="h-8 w-36" /> : <span className="tabular text-ink-2">{formatDate(t.date)}</span>}
@@ -303,7 +307,7 @@ function TxRow({ t, currency, flags, onChange }: { t: DraftTransaction; currency
               </Badge>
             </div>
           )}
-          {t.transferMatch && <div className="mt-0.5"><Badge tone="accent">Links to a transfer</Badge></div>}
+          <LinkLine importId={linking.importId} row={t} view={linking.views?.[t.key]} onChanged={linking.onChanged} />
           {t.pending && <div className="mt-0.5"><Badge tone="muted">Pending</Badge></div>}
           {t.insideAccount && (
             <div className="mt-0.5" title="The account’s statements count this Space in its balance and list no move to or from it, so recording it would be money in or out they never saw.">
@@ -328,9 +332,12 @@ function TxRow({ t, currency, flags, onChange }: { t: DraftTransaction; currency
           {t.balanceAfter !== undefined && <div className="text-[11px] text-ink-3"><Money value={t.balanceAfter} /></div>}
         </td>
         <td className={cn(tableClasses.td, 'w-8')}>
-          <button className="rounded p-1 text-ink-3 hover:bg-panel-2" onClick={() => setEditing((e) => !e)} aria-label="Edit row">
-            <Pencil className="size-3.5" />
-          </button>
+          <div className="flex flex-col items-center gap-0.5">
+            <button className="rounded p-1 text-ink-3 hover:bg-panel-2" onClick={() => setEditing((e) => !e)} aria-label="Edit row">
+              <Pencil className="size-3.5" />
+            </button>
+            {linking.editable && <LinkButton importId={linking.importId} row={t} linked={Boolean(linking.views?.[t.key])} onLinked={linking.onChanged} />}
+          </div>
         </td>
       </tr>
       {t.adds && (
@@ -344,11 +351,23 @@ function TxRow({ t, currency, flags, onChange }: { t: DraftTransaction; currency
   );
 }
 
-function SectionEditor({ section, index, total, latest, periodFromRows, onChange }: { section: DraftSection; index: number; total: number; latest: string; periodFromRows: boolean; onChange: (s: DraftSection) => void }) {
+/** What a section's rows need to show and change their transfer links (components/DraftLinks.tsx). */
+interface Linking {
+  importId: string;
+  views: Record<string, DraftLinkView> | undefined;
+  /** Waiting for review: links can change. */
+  editable: boolean;
+  onChanged: (r: ImportRecord) => void;
+}
+
+function SectionEditor({ section, index, total, latest, periodFromRows, onChange, linking }: { section: DraftSection; index: number; total: number; latest: string; periodFromRows: boolean; onChange: (s: DraftSection) => void; linking: Linking }) {
   const { data } = useAppData();
   const [showDupes, setShowDupes] = useState(false);
   const set = (patch: Partial<DraftSection>) => onChange({ ...section, ...patch });
   const setTx = (key: string, patch: Partial<DraftTransaction>) => set({ transactions: section.transactions.map((t) => (t.key === key ? { ...t, ...patch } : t)) });
+  // Ticking rows in and out with Shift and Ctrl/⌘, as in the transactions list (lib/selection.ts).
+  const holdOf = useShiftHold();
+  const anchor = useRef<Anchor | undefined>(undefined);
   const target = section.target;
   const targetValue = target.mode === 'existing' ? target.accountId : target.mode === 'new' ? '__new' : '__skip';
   const counts = { new: 0, duplicate: 0, possible_duplicate: 0 };
@@ -358,6 +377,18 @@ function SectionEditor({ section, index, total, latest, periodFromRows, onChange
   const certainAdds = section.transactions.filter((t) => t.adds && !t.include && t.status === 'duplicate');
   // Rows already imported are hidden, unless they have details to add.
   const visible = section.transactions.filter((t) => showDupes || t.status !== 'duplicate' || t.adds);
+  const tick = (key: string, mods: ClickModifiers) => {
+    const included = new Set(section.transactions.filter((t) => t.include).map((t) => t.key));
+    const next = nextSelection({ selected: included, anchor: anchor.current }, visible.map((t) => t.key), key, mods, holdOf(mods));
+    anchor.current = next.anchor;
+    set({
+      transactions: section.transactions.map((t) => {
+        const v = next.selected.has(t.key);
+        // Recorded as a payment of its own, a row adds nothing to the payment it matched.
+        return v === t.include ? t : { ...t, include: v, ...(v && t.adds?.include ? { adds: { ...t.adds, include: false } } : {}) };
+      }),
+    });
+  };
   const type = target.mode === 'existing' ? data.accounts.find((a) => a.id === target.accountId)?.type : target.mode === 'new' ? target.account.type : undefined;
   const market = type ? ACCOUNT_TYPE_META[type].balanceMode === 'market' : false;
   const d = section.detected;
@@ -528,7 +559,11 @@ function SectionEditor({ section, index, total, latest, periodFromRows, onChange
                           <Checkbox
                             checked={visible.every((t) => t.include)}
                             indeterminate={visible.some((t) => t.include) && !visible.every((t) => t.include)}
-                            onChange={(v) => set({ transactions: section.transactions.map((t) => (visible.includes(t) ? { ...t, include: v, ...(v && t.adds?.include ? { adds: { ...t.adds, include: false } } : {}) } : t)) })}
+                            onChange={(v) => {
+                              anchor.current = undefined;
+                              set({ transactions: section.transactions.map((t) => (visible.includes(t) ? { ...t, include: v, ...(v && t.adds?.include ? { adds: { ...t.adds, include: false } } : {}) } : t)) });
+                            }}
+                            ariaLabel="Record every row shown"
                           />
                         </th>
                         <th className={tableClasses.th}>Date</th>
@@ -540,7 +575,7 @@ function SectionEditor({ section, index, total, latest, periodFromRows, onChange
                     </thead>
                     <tbody>
                       {visible.map((t) => (
-                        <TxRow key={t.key} t={t} currency={section.currency} flags={flags.get(t.key)} onChange={(p) => setTx(t.key, p)} />
+                        <TxRow key={t.key} t={t} currency={section.currency} flags={flags.get(t.key)} onChange={(p) => setTx(t.key, p)} onTick={(mods) => tick(t.key, mods)} linking={linking} />
                       ))}
                     </tbody>
                   </table>
@@ -1288,7 +1323,8 @@ export default function Review() {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [dirty, setDirty] = useState(false);
   useEffect(() => {
-    if (rec?.draft && (!draft || !dirty)) setDraft(rec.draft);
+    // With changes not yet saved, only links made meanwhile (perhaps from another import's page) come in.
+    if (rec?.draft) setDraft(!draft || !dirty ? rec.draft : withServerLinks(draft, rec.draft));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rec?.draft, rec?.updatedAt]);
   const commit = useApiMutation(() => api<ImportRecord>(`/imports/${id}/commit`, { body: draft as unknown as Record<string, unknown> }), {
@@ -1328,6 +1364,15 @@ export default function Review() {
 
   if (q.error) return <ErrorNote error={q.error} />;
   if (!rec) return <Loading />;
+  const linking: Linking = {
+    importId: rec.id,
+    views: rec.links,
+    editable: rec.status === 'review',
+    // The server keeps the links: take its rows' links into the draft here, keeping unsaved edits.
+    onChanged: (r) => {
+      setDraft((d) => (d ? withServerLinks(d, r.draft) : (r.draft ?? null)));
+    },
+  };
   const committed = rec.status === 'committed';
   const filed = committed ? rec.result?.nothingNew : undefined;
   const nothingNew = rec.status === 'review' ? rec.nothingNew : undefined;
@@ -1465,6 +1510,7 @@ export default function Review() {
                     total={draft.sections.length}
                     latest={rec.createdAt.slice(0, 10)}
                     periodFromRows={draft.documentType === 'csv_export'}
+                    linking={linking}
                     onChange={(next) => {
                       setDirty(true);
                       setDraft({ ...draft, sections: draft.sections.map((x) => (x.key === next.key ? next : x)) });

@@ -4,15 +4,18 @@ import { EventEmitter } from 'node:events';
 import { copyFile, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { slugify } from '../../shared/accounts';
-import type { Reread } from '../../shared/api';
+import type { DraftLinkView, LinkCandidate, Reread } from '../../shared/api';
 import { CategoryIndex } from '../../shared/categories';
 import { today } from '../../shared/dates';
+import { formatMoney, toMinor } from '../../shared/money';
 import { sectionChecks } from '../../shared/review';
 import {
   CsvProfileSchema,
   DraftSchema,
   type CsvProfile,
   type Draft,
+  type DraftSection,
+  type DraftTransaction,
   type EngineId,
   type Extraction,
   type ExtractionEnginePreference,
@@ -41,6 +44,7 @@ import { CSV_ENGINE_VERSION, findProfile, parseWithProfile, readCsvRows, suggest
 import { HOLDINGS_CSV_VERSION, parseHoldingsCsv } from './holdings-csv';
 import { decodeText, detectKind, MAX_UPLOAD_BYTES, mediaTypeFor } from './detect';
 import { buildDraft, draftIsClean, type BatchEvidence } from './draft';
+import { asTransferLeg, findRow, keepLinks, keepYourLinks, linkCandidates, linkViews, replaceRow, sameAccount, sectionAccount, withoutLink, type FoundRow, type RowRef, type SectionAccount } from './links';
 import { assessNovelty, type NothingNew } from './novelty';
 import { assessReading, chooseReading, compareReadings, shortModel } from './verify';
 import { detectEngines, pickEngine, type EngineResult } from './engines';
@@ -383,7 +387,8 @@ export class ImportService extends EventEmitter {
       const draft = verified?.draft ?? this.draftOf(record, result, kind === 'image' ? await this.batchEvidence(record) : undefined);
       if (result.ocrText) draft.ocrText = result.ocrText;
       if (result.candidates) draft.candidates = result.candidates;
-      record.draft = draft;
+      // Read again: the links you made stay on rows that are still the same payment.
+      record.draft = keepYourLinks(record.draft, draft);
       record.extraction = {
         ...record.extraction,
         engine,
@@ -753,7 +758,7 @@ export class ImportService extends EventEmitter {
     }
     if (record.draft?.ocrText) draft.ocrText = record.draft.ocrText;
     if (record.draft?.candidates) draft.candidates = record.draft.candidates;
-    return draft;
+    return keepYourLinks(record.draft, draft);
   }
 
   /**
@@ -803,12 +808,152 @@ export class ImportService extends EventEmitter {
   async updateDraft(id: string, draft: Draft): Promise<ImportRecord> {
     const record = this.pending.get(id);
     if (!record || record.status !== 'review') throw new StoreError('This import is not awaiting review.', 409);
-    record.draft = DraftSchema.parse(draft);
+    record.draft = keepLinks(record.draft, DraftSchema.parse(draft));
     // Yours now: it is never drafted again by itself.
     record.draftEditedAt = nowISO();
     await this.save(record);
     await this.refreshBatch(record);
     return record;
+  }
+
+  // ─── Linking transfers before commit (./links.ts) ────────────────────────────────────────────
+
+  /** A row of an import waiting for review, to link: in an account, and not one recorded already. */
+  private linkable(ref: RowRef): { record: ImportRecord; found: FoundRow; account: SectionAccount } {
+    const record = this.pending.get(ref.importId);
+    if (!record || record.status !== 'review' || !record.draft) throw new StoreError('That import is not waiting for review.', 409);
+    const found = findRow(record.draft, ref.key);
+    if (!found) throw new StoreError('No such row in that import.', 404);
+    const account = sectionAccount(this.store, found.section);
+    if (!account) throw new StoreError('Choose the account this row goes into first.', 409);
+    if (found.row.status === 'duplicate') throw new StoreError('This row is recorded already: link the recorded transaction instead, from its account.', 409);
+    return { record, found, account };
+  }
+
+  linkCandidates(ref: RowRef): LinkCandidate[] {
+    const self = this.pending.get(ref.importId);
+    if (!self) throw new StoreError('Unknown import', 404);
+    return linkCandidates(this.store, [...this.pending.values()], self, ref.key);
+  }
+
+  linkViews(record: ImportRecord): Record<string, DraftLinkView> {
+    return linkViews(this.store, this.pending, record);
+  }
+
+  /** Change rows of imports waiting for review (several at once, maybe in one import), saving each import once. */
+  private async changeRows(changes: { importId: string; row: DraftTransaction }[]): Promise<void> {
+    const touched = new Set<string>();
+    for (const { importId, row } of changes) {
+      const record = this.pending.get(importId);
+      if (!record?.draft) continue;
+      record.draft = replaceRow(record.draft, row);
+      touched.add(importId);
+    }
+    for (const id of touched) await this.save(this.pending.get(id)!);
+  }
+
+  /**
+   * Link a row as one leg of a transfer: to a row of an import waiting for review (or another
+   * account's row in this one), linked as a transfer once both are committed, or to a recorded
+   * transaction, linked when this one is. What either was linked to before is unlinked.
+   */
+  async linkRow(ref: RowRef, to: RowRef | { transactionId: string }): Promise<ImportRecord> {
+    const mine = this.linkable(ref);
+    if ('transactionId' in to) {
+      const tx = this.store.transaction(to.transactionId);
+      if (!tx) throw new StoreError('Unknown transaction', 404);
+      if (tx.transferGroup) throw new StoreError('That transaction is linked to another already.', 409);
+      if (toMinor(tx.amount) !== -toMinor(mine.found.row.amount)) throw new StoreError('The two legs of a transfer are the same amount, one in and one out.');
+      if (sameAccount(mine.account, { id: tx.accountId })) throw new StoreError('A transfer is between two of your accounts: these are in the same one.');
+      const otherAccount = this.store.account(tx.accountId);
+      if (!otherAccount) throw new StoreError('Unknown account', 404);
+      await this.unlinkRow(ref, { quiet: true });
+      const row = findRow(this.pending.get(ref.importId)!.draft, ref.key)!.row;
+      await this.changeRows([{ importId: ref.importId, row: { ...asTransferLeg(withoutLink(row), mine.account, otherAccount), transferMatch: tx.id } }]);
+      return this.pending.get(ref.importId)!;
+    }
+    if (to.importId === ref.importId && to.key === ref.key) throw new StoreError('A row cannot be linked to itself.');
+    const theirs = this.linkable(to);
+    if (toMinor(theirs.found.row.amount) !== -toMinor(mine.found.row.amount)) throw new StoreError('The two legs of a transfer are the same amount, one in and one out.');
+    if ((to.importId === ref.importId && theirs.found.section.key === mine.found.section.key) || sameAccount(mine.account, theirs.account)) throw new StoreError('A transfer is between two of your accounts: these are in the same one.');
+    await this.unlinkRow(ref, { quiet: true });
+    await this.unlinkRow(to, { quiet: true });
+    // Read again: unlinking may have changed either draft.
+    const a = findRow(this.pending.get(ref.importId)!.draft, ref.key)!.row;
+    const b = findRow(this.pending.get(to.importId)!.draft, to.key)!.row;
+    await this.changeRows([
+      { importId: ref.importId, row: { ...asTransferLeg(withoutLink(a), mine.account, theirs.account), pendingLink: { importId: to.importId, key: to.key } } },
+      { importId: to.importId, row: { ...asTransferLeg(withoutLink(b), theirs.account, mine.account), pendingLink: { importId: ref.importId, key: ref.key } } },
+    ]);
+    return this.pending.get(ref.importId)!;
+  }
+
+  /**
+   * Take a row's link away (yours, or the one the draft found): the other row of a pending link
+   * loses it too. A category the link set goes back to what the rules say. `quiet`: a row with no
+   * link is left as it is (relinking), rather than marked as having none.
+   */
+  async unlinkRow(ref: RowRef, opts: { quiet?: boolean } = {}): Promise<ImportRecord> {
+    const record = this.pending.get(ref.importId);
+    if (!record || record.status !== 'review' || !record.draft) throw new StoreError('That import is not waiting for review.', 409);
+    const found = findRow(record.draft, ref.key);
+    if (!found) throw new StoreError('No such row in that import.', 404);
+    if (opts.quiet && !found.row.pendingLink && !found.row.transferMatch) return record;
+    const changes = [{ importId: ref.importId, row: this.unlinked(found.section, found.row) }];
+    const link = found.row.pendingLink;
+    const other = link ? this.pending.get(link.importId) : undefined;
+    const back = other ? findRow(other.draft, link!.key) : undefined;
+    if (other && back && back.row.pendingLink?.importId === ref.importId && back.row.pendingLink.key === ref.key) {
+      changes.push({ importId: other.id, row: this.unlinked(back.section, back.row) });
+    }
+    await this.changeRows(changes);
+    return this.pending.get(ref.importId)!;
+  }
+
+  /** A row with no link, its transfer category (one a link set) back to what the rules say. */
+  private unlinked(section: DraftSection, row: DraftTransaction): DraftTransaction {
+    const out = withoutLink(row);
+    if (row.categorisedBy !== 'transfer') return out;
+    const accountId = section.target.mode === 'existing' ? section.target.accountId : '';
+    const cat = categoriserFor(this.store).categorise({ accountId, description: row.description, amount: row.amount, date: row.date, type: row.detail?.type, payee: row.payee, bankCategory: row.detail?.bankCategory });
+    delete out.category;
+    delete out.categorisedBy;
+    delete out.ruleId;
+    delete out.counterpartyAccountId;
+    return { ...out, ...(cat.category ? { category: cat.category } : {}), ...(cat.categorisedBy ? { categorisedBy: cat.categorisedBy } : {}), ...(cat.ruleId ? { ruleId: cat.ruleId } : {}), ...(cat.counterpartyAccountId ? { counterpartyAccountId: cat.counterpartyAccountId } : {}) };
+  }
+
+  /**
+   * An import left the queue (committed, dismissed or discarded): rows of imports still waiting that
+   * were linked to its rows now link to the transactions they recorded, to be linked as a transfer
+   * when they are committed. A link to a row it did not record goes, with a note saying so.
+   */
+  private async settleLinks(goneId: string, fileName: string, how: 'committed' | 'dismissed' | 'discarded', rowIds: ReadonlyMap<string, string> = new Map()): Promise<void> {
+    for (const record of [...this.pending.values()]) {
+      if (!record.draft) continue;
+      let draft = record.draft;
+      const notes: string[] = [];
+      for (const section of draft.sections) {
+        for (const row of section.transactions) {
+          if (row.pendingLink?.importId !== goneId) continue;
+          const txId = rowIds.get(row.pendingLink.key);
+          const tx = txId ? this.store.transaction(txId) : undefined;
+          const mine = sectionAccount(this.store, section);
+          const otherAccount = tx ? this.store.account(tx.accountId) : undefined;
+          if (tx && !tx.transferGroup && mine && otherAccount) {
+            draft = replaceRow(draft, { ...asTransferLeg(withoutLink(row), mine, otherAccount), transferMatch: tx.id });
+          } else {
+            const { pendingLink: _gone, ...rest } = row;
+            draft = replaceRow(draft, rest);
+            const why = how !== 'committed' ? `${fileName} was ${how}` : tx ? `the transaction ${fileName} recorded for it is in another transfer now` : `${fileName} was committed without it`;
+            notes.push(`The row of ${formatMoney(row.amount)} on ${row.date} was linked to a row of another import, but ${why}: the link was taken away.`);
+          }
+        }
+      }
+      if (draft === record.draft) continue;
+      record.draft = { ...draft, notes: [...draft.notes, ...notes] };
+      await this.save(record);
+    }
   }
 
   async setHint(id: string, accountId: string | undefined): Promise<ImportRecord> {
@@ -843,7 +988,7 @@ export class ImportService extends EventEmitter {
     }
     // Drafted afresh from the columns you chose, so the warning about ones worked out automatically
     // no longer applies.
-    record.draft = this.draftOf(record, { extraction: parsed.extraction, warnings: [] });
+    record.draft = keepYourLinks(record.draft, this.draftOf(record, { extraction: parsed.extraction, warnings: [] }));
     delete record.draftEditedAt;
     record.extraction = { ...record.extraction, engine: 'csv', engineVersion: CSV_ENGINE_VERSION, detail: saveAs ?? 'custom mapping', warnings: [], raw: parsed.extraction };
     record.mapping = { ...(record.mapping ?? { headers: [], sample: [], headerIndex }), profile };
@@ -856,7 +1001,7 @@ export class ImportService extends EventEmitter {
     const record = this.pending.get(id);
     if (!record) throw new StoreError('Unknown or already committed import', 404);
     if (record.status !== 'review') throw new StoreError(`Cannot commit an import that is ${record.status}.`, 409);
-    const finalDraft = draft ? DraftSchema.parse(draft) : record.draft;
+    const finalDraft = draft ? keepLinks(record.draft, DraftSchema.parse(draft)) : record.draft;
     if (!finalDraft) throw new StoreError('Nothing to commit', 409);
     // Rows another import has recorded since this draft was made are not recorded twice.
     const checked = recheckDraft(finalDraft, (accountId) => this.store.transactions(accountId));
@@ -871,9 +1016,12 @@ export class ImportService extends EventEmitter {
       const n = checked.alreadyStored;
       checked.draft.notes.push(`${n} row${n === 1 ? ' was' : 's were'} already recorded when this was committed (by another import, after this draft was made), so ${n === 1 ? 'it was' : 'they were'} left out.`);
     }
-    const committed = await commitDraft(this.store, { record, draft: checked.draft, workFile: this.work.filePath(record.document) });
+    const rowIds = new Map<string, string>();
+    const committed = await commitDraft(this.store, { record, draft: checked.draft, workFile: this.work.filePath(record.document), rowIds });
     this.pending.delete(id);
     await this.work.remove(record, [...this.pending.values()]);
+    // Rows of other imports linked to this one's now link to what it recorded.
+    await this.settleLinks(id, record.document.fileName, 'committed', rowIds);
     // An account or job it set up may be the one other waiting documents are about (a letter
     // uploaded with the new account's first statement, a P60 beside HMRC's page for the same job),
     // and HMRC's records it added match payslips to their job: drafts you have not edited are matched
@@ -967,6 +1115,7 @@ export class ImportService extends EventEmitter {
     const filed = await commitDraft(this.store, { record, draft, workFile: this.work.filePath(record.document), nothingNew: nothing.reason });
     this.pending.delete(id);
     await this.work.remove(record, [...this.pending.values()]);
+    await this.settleLinks(id, record.document.fileName, 'dismissed');
     this.emit('update', filed);
     return filed;
   }
@@ -1031,6 +1180,7 @@ export class ImportService extends EventEmitter {
     this.aborts.get(id)?.abort();
     this.pending.delete(id);
     await this.work.remove(record, [...this.pending.values()]);
+    await this.settleLinks(id, record.document.fileName, 'discarded');
     this.emit('update', { ...record, status: 'discarded' });
     // Screenshots that took their account from it no longer can.
     await this.refreshBatch(record);

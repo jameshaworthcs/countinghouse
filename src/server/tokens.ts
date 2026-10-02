@@ -21,7 +21,7 @@ export type TokenScope = (typeof TOKEN_SCOPES)[number];
 
 export const TOKEN_SCOPE_LABELS: Record<TokenScope, string> = {
   read: 'Read everything',
-  imports: 'Import upkeep: read a pending import again, draft it again, choose its account, edit its draft',
+  imports: 'Import upkeep: read a pending import again, draft it again, choose its account, edit its draft, link its transfers',
   records: 'Agent records: research, instruments, insights (POST /api/records), and proposed fixes for you to apply or dismiss (POST /api/proposals)',
   jobs: 'Agent jobs: start, rerun, cancel (only while agents are on in Settings)',
 };
@@ -73,6 +73,8 @@ export function requiredScope(method: string, pathname: string): TokenScope | nu
   const routes: [string, RegExp, TokenScope][] = [
     ['POST', /^\/api\/imports\/imp_[0-9a-z_]+\/(reprocess|refresh|hint)$/, 'imports'],
     ['PUT', /^\/api\/imports\/imp_[0-9a-z_]+\/draft$/, 'imports'],
+    ['POST', /^\/api\/imports\/imp_[0-9a-z_]+\/rows\/[0-9a-z-]+\/link$/, 'imports'],
+    ['DELETE', /^\/api\/imports\/imp_[0-9a-z_]+\/rows\/[0-9a-z-]+\/link$/, 'imports'],
     ['POST', /^\/api\/records$/, 'records'],
     // An agent proposes a fix, or withdraws its proposal; only the owner applies or dismisses one.
     ['POST', /^\/api\/proposals$/, 'records'],

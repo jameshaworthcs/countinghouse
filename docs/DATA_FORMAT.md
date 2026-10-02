@@ -114,7 +114,8 @@ depend on).
 | `ruleId` | the rule that set it |
 | `transferGroup` | shared by both legs of a transfer between your accounts |
 | `counterpartyAccountId` | the other account |
-| `notes`, `tags` | yours; tag Gift Aided donations `gift-aid` |
+| `notes` | yours: free text, found by search, never grouped by. Added to many at once on a line of its own, never twice (`src/shared/annotations.ts`) |
+| `tags` | yours: short labels to group and filter by (up to 20, each up to 40 characters, one spelling per tag whatever the case). Tag Gift Aided donations `gift-aid` |
 | `splits` | yours: `[{amount, category, note?}]`, two or more lines adding up to `amount`, each signed like it, in spending or income categories. Spending, income and budgets count the lines ([FORMULAS.md §14](FORMULAS.md)). A transfer is never split, and correcting the amount so the lines no longer add up removes the split |
 
 **Provenance**: `source{importId, documentId, row}`, `createdAt`, `updatedAt`, and:
@@ -376,6 +377,10 @@ number. Its pay, tax, NI, pension and student loan for the period are also tax f
   typed (`enteredBy` on the balance).
   A row's `insideAccount` names the Space it moves money to or from, inside the account: left
   unticked, and remembered on the account's `spaces` when committed so.
+  A row's `pendingLink` (`{importId, key}`) is a transfer leg you linked to a row of another import
+  waiting for review (or of another account in this one). `transferMatchBy: "user"` says you chose
+  its `transferMatch`, or that it has none ([INGESTION.md](INGESTION.md), "Linking transfers before
+  commit"). Both are optional.
 - `draftEditedAt`: when you last saved changes to a pending draft; such a draft is never redrafted
   by itself.
 - `label` (optional, committed imports): the name History shows and searches in place of the file

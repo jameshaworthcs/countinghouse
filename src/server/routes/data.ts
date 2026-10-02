@@ -5,6 +5,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { ACCOUNT_TYPE_META, slugify } from '../../shared/accounts';
 import type { AccountDetailResponse, BootstrapResponse, TransactionsResponse } from '../../shared/api';
+import { addTags, appendNote, removeTags } from '../../shared/annotations';
 import { CategoryIndex } from '../../shared/categories';
 import { ruleMatches } from '../../shared/categorise';
 import { today } from '../../shared/dates';
@@ -490,6 +491,7 @@ export function dataRoutes(ctx: AppContext): Hono {
     const current = store.transaction(c.req.param('id'));
     if (!current) throw new StoreError('Unknown transaction', 404);
     const patch = applyNulls(body) as Partial<Transaction>;
+    if (body.tags) patch.tags = body.tags.length ? addTags([], body.tags) : undefined;
     if (body.splits) checkSplits(body.splits, body.amount ?? current.amount, current, new CategoryIndex(store.categories));
     // A corrected amount the lines no longer add up to takes the split away: split it again.
     if (body.amount !== undefined && body.splits === undefined && current.splits && current.splits.reduce((s, l) => s + toMinor(l.amount), 0) !== toMinor(body.amount)) patch.splits = undefined;
@@ -511,11 +513,15 @@ export function dataRoutes(ctx: AppContext): Hono {
       z.object({
         ids: z.array(z.string()).min(1).max(5000),
         category: z.string().optional().nullable(),
-        addTags: z.array(z.string()).optional(),
-        removeTags: z.array(z.string()).optional(),
-        notes: z.string().optional(),
+        addTags: z.array(z.string().max(40)).max(20).optional(),
+        removeTags: z.array(z.string().max(40)).max(20).optional(),
+        /** Replaces each one's notes ("" takes them away). */
+        notes: z.string().max(2000).optional(),
+        /** Added to each one's notes on a line of its own (shared/annotations.ts). */
+        appendNotes: z.string().min(1).max(2000).optional(),
       }),
     );
+    if (body.notes !== undefined && body.appendNotes !== undefined) throw new StoreError('Replace the notes or add to them, not both.');
     const updates = body.ids.map((id) => {
       const t = store.transaction(id);
       if (!t) throw new StoreError(`Unknown transaction ${id}`, 404);
@@ -526,16 +532,32 @@ export function dataRoutes(ctx: AppContext): Hono {
         patch.ruleId = undefined;
       }
       if (body.addTags || body.removeTags) {
-        const tags = new Set(t.tags ?? []);
-        for (const x of body.addTags ?? []) tags.add(x);
-        for (const x of body.removeTags ?? []) tags.delete(x);
-        patch.tags = tags.size ? [...tags] : undefined;
+        const tags = removeTags(addTags(t.tags, body.addTags ?? []), body.removeTags ?? []);
+        patch.tags = tags.length ? tags : undefined;
       }
-      if (body.notes !== undefined) patch.notes = body.notes || undefined;
+      if (body.notes !== undefined) patch.notes = body.notes.trim() || undefined;
+      if (body.appendNotes !== undefined) {
+        const notes = appendNote(t.notes, body.appendNotes);
+        if (notes.length > 4000) throw new StoreError(`The notes on ${t.description} would be too long: shorten them first.`);
+        patch.notes = notes || undefined;
+      }
       return { id, patch };
     });
     const out = await store.updateTransactions(updates, `transactions: bulk edit (${updates.length})`);
     return c.json({ updated: out.length });
+  });
+
+  /** Every tag in use, the most used first: for choosing one already used rather than a near copy. */
+  app.get('/transactions/tags', (c) => {
+    const counts = new Map<string, { tag: string; count: number }>();
+    for (const t of store.transactions()) {
+      for (const tag of t.tags ?? []) {
+        const k = tag.toLowerCase();
+        const e = counts.get(k) ?? counts.set(k, { tag, count: 0 }).get(k)!;
+        e.count++;
+      }
+    }
+    return c.json({ tags: [...counts.values()].sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag)) });
   });
 
   app.delete('/transactions/:id', async (c) => {

@@ -3,7 +3,7 @@
 import { readFile } from 'node:fs/promises';
 import { Hono } from 'hono';
 import { z } from 'zod';
-import type { ImportHistoryResponse, ImportListResponse } from '../../shared/api';
+import type { ImportHistoryResponse, ImportListResponse, ImportView } from '../../shared/api';
 import { CsvProfileSchema, DraftSchema, EXTRACTION_ENGINES, SlugSchema } from '../../shared/schema';
 import { readJson, type AppContext } from '../context';
 import { detectKind } from '../ingest/detect';
@@ -134,8 +134,23 @@ export function importRoutes(ctx: AppContext): Hono {
     if (!rec) throw new StoreError('Unknown import', 404);
     const pending = svc.getPending(rec.id);
     const nothingNew = pending ? svc.novelty().get(pending.id) : undefined;
-    return c.json({ ...rec, ...(pending ? { readiness: svc.readiness(pending, nothingNew) } : {}), ...(nothingNew ? { nothingNew } : {}) });
+    const body: ImportView = { ...rec, ...(pending ? { readiness: svc.readiness(pending, nothingNew), links: svc.linkViews(pending) } : {}), ...(nothingNew ? { nothingNew } : {}) };
+    return c.json(body);
   });
+
+  // ─── Linking the two legs of a transfer before commit (ingest/links.ts) ──────────────────────
+
+  /** What a row could be linked to: rows of imports waiting for review, and recorded transactions. */
+  app.get('/:id/rows/:key/links', (c) => c.json({ candidates: svc.linkCandidates({ importId: c.req.param('id'), key: c.req.param('key') }) }));
+
+  /** Link a row to a row of an import waiting for review (`importId`, `key`) or a recorded transaction (`transactionId`). */
+  app.post('/:id/rows/:key/link', async (c) => {
+    const body = await readJson(c, z.union([z.object({ importId: z.string().min(1).max(80), key: z.string().min(1).max(40) }), z.object({ transactionId: z.string().min(1).max(80) })]));
+    return c.json(await svc.linkRow({ importId: c.req.param('id'), key: c.req.param('key') }, body));
+  });
+
+  /** Take a row's link away: yours (from both rows) or the one the draft found. */
+  app.delete('/:id/rows/:key/link', async (c) => c.json(await svc.unlinkRow({ importId: c.req.param('id'), key: c.req.param('key') })));
 
   /**
    * Your name for a committed import (`{ "text": "…" }`), which Claude never replaces; `null` takes

@@ -32,6 +32,8 @@ export interface CommitInput {
    * and nothing else is written, not even the last digits an account could learn from it.
    */
   nothingNew?: string | undefined;
+  /** Filled in with the transaction each recorded row became (row key → transaction id). */
+  rowIds?: Map<string, string>;
 }
 
 function balanceKind(draft: Draft, mediaType: string): BalanceSnapshot['kind'] {
@@ -136,6 +138,9 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
   // 2. Transactions.
   const newTx: Transaction[] = [];
   const transferLinks: { newId: string; otherId: string; account: Account }[] = [];
+  // Rows linked by you to a row of another import waiting for review: kept for that link (./links.ts).
+  const heldForLink = new Set<string>();
+  const byKey = new Map<string, { tx: Transaction; row: Draft['sections'][number]['transactions'][number]; account: Account }>();
   let skipped = 0;
   for (const section of draft.sections) {
     const account = resolved.get(section.key);
@@ -172,13 +177,39 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
         source: { ...source, ...(row.row !== undefined ? { row: row.row } : {}) },
         createdAt: stamp,
       };
-      if (row.transferMatch && store.transaction(row.transferMatch)) {
-        tx.transferGroup = transferGroupId(id, row.transferMatch);
-        transferLinks.push({ newId: id, otherId: row.transferMatch, account });
+      // Not one another transfer has taken since the draft was made.
+      const match = row.transferMatch ? store.transaction(row.transferMatch) : undefined;
+      if (match && !match.transferGroup && match.accountId !== account.id && !transferLinks.some((l) => l.otherId === match.id)) {
+        tx.transferGroup = transferGroupId(id, match.id);
+        transferLinks.push({ newId: id, otherId: match.id, account });
       }
+      if (row.pendingLink && row.pendingLink.importId !== record.id) heldForLink.add(id);
+      byKey.set(row.key, { tx, row, account });
       newTx.push(tx);
     }
   }
+
+  // Rows of this import you linked to each other (two accounts' rows of one document): linked now.
+  for (const { tx, row, account } of byKey.values()) {
+    const link = row.pendingLink;
+    if (!link || link.importId !== record.id || tx.transferGroup) continue;
+    const other = byKey.get(link.key);
+    if (!other || other.tx.transferGroup || other.account.id === account.id || other.row.pendingLink?.key !== row.key) continue;
+    const group = transferGroupId(tx.id, other.tx.id);
+    for (const [a, b] of [
+      [{ tx, row, account }, other],
+      [other, { tx, row, account }],
+    ] as const) {
+      a.tx.transferGroup = group;
+      a.tx.counterpartyAccountId = b.account.id;
+      if (a.row.categorisedBy !== 'user') {
+        a.tx.category = transferLegCategory(a.account.type, b.account.type, a.tx.amount);
+        a.tx.categorisedBy = 'transfer';
+        delete a.tx.ruleId;
+      }
+    }
+  }
+  if (input.rowIds) for (const [key, { tx }] of byKey) input.rowIds.set(key, tx.id);
 
   // 2b. Copies of payments recorded twice that the document shows once, ticked to be taken away
   // (the draft's `extraCopies`). Each is checked again: both copies still there, in this account, on
@@ -453,7 +484,7 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
   // The other leg of a transfer may already be stored, from another account's statement: link it.
   await linkTransfers(
     store,
-    newTx.filter((t) => !t.transferGroup).map((t) => t.id),
+    newTx.filter((t) => !t.transferGroup && !heldForLink.has(t.id)).map((t) => t.id),
     `import: ${label} (transfers linked)`,
   );
   // Each account's terms on the day the document gives them for (its rates, its limit and a card's

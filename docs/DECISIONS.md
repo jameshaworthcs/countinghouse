@@ -1479,8 +1479,9 @@ Later the same day, after the owner's first runs (`label-imports-2`):
     them.
   - Each session needs an address of its own, to link from the audit log, a job or an import, and
     room for a long transcript. Settings' tabs are hash-addressed forms.
-  - It is not in the sidebar, which is about money. It is reached from Settings → Agents and Agent
-    access, Agent jobs, each import and receipt, and the audit log.
+  - It was first kept out of the sidebar, which is about money. Since 2026-10-02 it is in the sidebar
+    (see "Notes, tags, choosing rows, and links before commit" below). It is also reached from
+    Settings → Agents and Agent access, Agent jobs, each import and receipt, and the audit log.
 - **Streamed, not rebuilt.** The CLI moved from `--output-format json` to `stream-json --verbose`.
   Its last event is the same result as before, so nothing else changed. Each event is written as
   it arrives, so a running session's page follows it.
@@ -1501,3 +1502,37 @@ Later the same day, after the owner's first runs (`label-imports-2`):
   import's two readings stay one row: only their total cost was recorded.
 - **Token agents** run outside the app. Their requests (the token use log), cut into stretches by a
   30-minute gap, stand in for a session, with no transcript.
+
+## 2026-10-02: Notes, tags, choosing rows, and links before commit
+
+- **Claude sessions in the sidebar**, under Import. The owner asked for it to be easy to find. It is
+  where Claude's spending and work show, and the sidebar now says how many sessions are running
+  (`GET /api/sessions/running`, from the records in memory). This reverses "not in the sidebar"
+  above.
+- **Notes and tags say what each is for**, wherever you write either:
+  - Notes are free text for you, and search finds them.
+  - Tags are labels to group and filter by. A tag in the list filters by it, and tags in use are
+    offered as you type.
+
+  A note can be added from a row's note button or to a whole selection. For a selection it is added
+  on a line of its own (or replaces the notes, if you choose), and never twice. Tags keep one
+  spelling whatever the case (`src/shared/annotations.ts`). No format change: both fields were
+  there already.
+- **Choosing rows with Shift and Ctrl/⌘.** The rules are a file manager's, with one difference the
+  owner asked for: each new hold of Shift starts a group of its own. So several groups can be
+  chosen without the gaps between them, and no Ctrl is needed. A Shift-click straight after a plain
+  click still extends from it. The same rules tick an import's rows in and out.
+- **Links before commit.** A transfer whose two legs arrive in two documents could only be linked
+  after both were committed, and only when the descriptions agreed. Now a row can be linked by
+  hand, while both wait, to:
+  - a row of another pending import (`pendingLink` on both);
+  - another account's row in the same document;
+  - a recorded transaction (`transferMatch`, `transferMatchBy: "user"`).
+
+  How it was built:
+  - A pending link becomes a `transferMatch` when its other side is committed. That reuses the
+    existing commit path, so committing in either order ends the same.
+  - The server owns a row's links. A draft saved from a page opened before a link keeps the link,
+    so linking from one import's page is never undone from the other's.
+  - Links are additive optional fields on a draft row: no format change.
+  - Token "Import upkeep" may link and unlink, since it edits a draft and records nothing.

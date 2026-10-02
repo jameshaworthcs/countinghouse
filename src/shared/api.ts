@@ -631,6 +631,46 @@ export interface NothingNewView {
 
 export type PendingImport = ImportRecord & { readiness?: { ready: boolean; reasons: string[] }; nothingNew?: NothingNewView };
 
+/**
+ * The other side of a draft row's transfer (src/server/ingest/links.ts): a row of an import waiting
+ * for review (`pending`), a recorded transaction (`recorded`), or one no longer there (`gone`).
+ */
+export interface DraftLinkView {
+  kind: 'pending' | 'recorded' | 'gone';
+  /** Chosen by you, or found by the draft itself (a recorded transaction only). */
+  by: 'user' | 'draft';
+  importId?: string;
+  key?: string;
+  /** The import's file, for a pending row. */
+  fileName?: string;
+  transactionId?: string;
+  accountName?: string;
+  date?: string;
+  amount?: number;
+  description?: string;
+  /** A pending row left unticked: the link holds only if both are recorded. */
+  included?: boolean;
+}
+
+/** A row or recorded transaction a draft row could be linked to as the other leg of a transfer. */
+export interface LinkCandidate {
+  kind: 'pending' | 'recorded';
+  importId?: string;
+  key?: string;
+  fileName?: string;
+  transactionId?: string;
+  accountName: string;
+  date: string;
+  amount: number;
+  description: string;
+  /** Days from the row's date. */
+  days: number;
+  included?: boolean;
+}
+
+/** One import, as the review page has it. */
+export type ImportView = PendingImport & { links?: Record<string, DraftLinkView> };
+
 /** The imports waiting for review (committed ones are paged through `ImportHistoryResponse`). */
 export interface ImportListResponse {
   pending: PendingImport[];

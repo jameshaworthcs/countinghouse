@@ -1339,6 +1339,17 @@ export const DraftTransactionSchema = z.object({
   counterpartyAccountId: SlugSchema.optional(),
   /** An existing transaction in another of your accounts that is the other leg of this transfer. */
   transferMatch: z.string().optional(),
+  /**
+   * You chose `transferMatch`, or that there is none: drafting again keeps your choice rather than
+   * looking for one itself.
+   */
+  transferMatchBy: z.literal('user').optional(),
+  /**
+   * The other leg of this transfer as you linked it, while it waits for review too: a row (`key`)
+   * of another import waiting for review, or of another account in this one (docs/INGESTION.md,
+   * "Linking transfers before commit"). The two are linked as a transfer once both are committed.
+   */
+  pendingLink: z.object({ importId: z.string().max(80), key: z.string().max(40) }).optional(),
   row: z.number().int().optional(),
   /** What the reader was unsure of on this row ("year not shown", "amount partly hidden"). */
   uncertain: z.string().max(300).optional(),

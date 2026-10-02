@@ -293,7 +293,14 @@ export function Field({ label, hint, error, children, className }: { label: Reac
   );
 }
 
-export function Checkbox({ checked, onChange, label, className, disabled, indeterminate }: { checked: boolean; onChange: (v: boolean) => void; label?: ReactNode; className?: string; disabled?: boolean; indeterminate?: boolean }) {
+/** The keys held while a box was ticked: a checkbox's change comes from its click, which has them. */
+export interface ClickModifiers {
+  shiftKey: boolean;
+  ctrlKey: boolean;
+  metaKey: boolean;
+}
+
+export function Checkbox({ checked, onChange, label, className, disabled, indeterminate, ariaLabel }: { checked: boolean; onChange: (v: boolean, mods: ClickModifiers) => void; label?: ReactNode; className?: string; disabled?: boolean; indeterminate?: boolean; ariaLabel?: string }) {
   const id = useId();
   return (
     <span className={cn('inline-flex items-center gap-2', className)}>
@@ -306,7 +313,11 @@ export function Checkbox({ checked, onChange, label, className, disabled, indete
         ref={(el) => {
           if (el) el.indeterminate = Boolean(indeterminate);
         }}
-        onChange={(e) => onChange(e.target.checked)}
+        aria-label={ariaLabel}
+        onChange={(e) => {
+          const n = e.nativeEvent as Partial<MouseEvent>;
+          onChange(e.target.checked, { shiftKey: Boolean(n.shiftKey), ctrlKey: Boolean(n.ctrlKey), metaKey: Boolean(n.metaKey) });
+        }}
       />
       {label && (
         <label htmlFor={id} className="text-sm text-ink-2">

@@ -58,7 +58,7 @@ read `data/` directly, but should quote computed figures from the app rather tha
 **The live app's API** is open to an agent that holds a token the owner made (DEPLOY.md, "Agent
 access"): `npm run -s api -- GET /imports`.
 - It is how an agent does upkeep on imports waiting for review. It can read a document again, draft
-  it again, choose its account or edit its draft.
+  it again, choose its account, edit its draft or link its transfers.
 - It can also write records (`POST /records`, the same batches as below), propose fixes
   (`POST /proposals`, §5) and start jobs, but only if the token has those scopes.
 - Committing, dismissing and discarding stay with the owner, and so do applying and dismissing a

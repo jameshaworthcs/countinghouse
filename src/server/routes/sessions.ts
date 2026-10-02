@@ -18,6 +18,9 @@ export function sessionRoutes(ctx: AppContext): Hono {
     } satisfies SessionListResponse);
   });
 
+  /** How many sessions are running now, for the sidebar (cheap: the records are in memory). */
+  app.get('/running', (c) => c.json({ running: ctx.sessions.list().filter((s) => s.status === 'running').length }));
+
   app.get('/:id', async (c) => {
     const detail = await sessionDetail(ctx, c.req.param('id'));
     if (!detail) throw new StoreError('No such session', 404);

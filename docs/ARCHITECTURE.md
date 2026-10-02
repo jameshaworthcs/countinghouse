@@ -369,7 +369,15 @@ and a card in credit counts as cash.
   back to the top, as does any inner list marked `data-scroll-top`.
 - Pages: Overview, Accounts (+ detail), Transactions (virtualised), Spending, Projections,
   Investments & pensions, Tax year (Allowances, Self Assessment prep), Assumptions & research,
-  Import (+ Review), Claude sessions (+ one session; not in the sidebar), Settings, Login.
+  Import (+ Review), Claude sessions (+ one session; the sidebar says how many are running),
+  Settings, Login.
+- Lists you choose rows from (Transactions, an import's rows) share one set of rules
+  (`src/web/lib/selection.ts`):
+  - a click or Ctrl/⌘-click ticks one row;
+  - Shift-click ticks a range from it;
+  - each new hold of Shift starts a group of its own, so separate groups never fill the gap
+    between them;
+  - Esc lets go of a selection.
 
 ## Security model
 
