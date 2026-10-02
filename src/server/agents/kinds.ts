@@ -854,7 +854,7 @@ const labelImports: JobKindDef = {
         skipped++;
         continue;
       }
-      await store.saveImport({ ...r, label: { text, provenance, at: nowISO() } }, `import: ${r.id} named by Claude`);
+      await store.saveImport({ ...r, label: { text, provenance, at: nowISO() } }, `import: ${r.id} named by the agent`);
       named++;
     }
     return { summary: `Named ${named} import${named === 1 ? '' : 's'}${skipped ? `; ${skipped} name${skipped === 1 ? '' : 's'} not kept` : ''}${waiting.size ? `; ${waiting.size} not named` : ''}` };

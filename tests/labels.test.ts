@@ -99,7 +99,7 @@ describe('naming imports', () => {
     expect(runner.enqueue({ kind: 'label-imports', trigger: 'owner' })).toBeUndefined();
     const refused = await startNaming();
     expect(refused.status).toBe(409);
-    expect(((await refused.json()) as { error: string }).error).toMatch(/Naming imports with Claude is off/);
+    expect(((await refused.json()) as { error: string }).error).toMatch(/Naming imports with the agent is off/);
     await setLabelling(true);
     expect(app.ctx.store.settings.agents.enabled).toBe(false);
     const job = runner.enqueue({ kind: 'label-imports', trigger: 'owner' });

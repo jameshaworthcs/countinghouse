@@ -169,9 +169,9 @@ function ExtractionForm() {
           </Field>
         </div>
         <div className="mt-4">
-          <Switch checked={ex.readReceipts} onChange={(v) => setEx({ readReceipts: v })} label="Read receipts with Claude" description="When you attach a receipt to a transaction, Claude reads its lines (with the model above, about $0.05 each) and suggests how to split the payment. Nothing changes until you save the split. Off: receipts are only kept." />
+          <Switch checked={ex.readReceipts} onChange={(v) => setEx({ readReceipts: v })} label="Read receipts with the agent" description="When you attach a receipt to a transaction, the agent reads its lines (with the model above, about $0.05 each) and suggests how to split the payment. Nothing changes until you save the split. Off: receipts are only kept." />
           <Switch checked={ex.rereadDocuments} onChange={(v) => setEx({ rereadDocuments: v })} label="Read stored documents again" description="On a committed import’s page, read its document again with the current reader and see what it finds different from what was recorded (a reading costs what an upload does). You apply each difference yourself." />
-          <Switch checked={ex.readEverything} onChange={(v) => setEx({ readEverything: v })} label="Read everything a document prints" description="Claude also keeps what has nowhere else to go: a scanned payslip in full, HMRC’s pages as their records, and every other labelled value (rates, limits, a P60’s NI table). A reading takes a little longer. Off until its evaluation run has passed; your gov.uk pages and known payslip layouts are read in full on this machine either way." />
+          <Switch checked={ex.readEverything} onChange={(v) => setEx({ readEverything: v })} label="Read everything a document prints" description="The agent also keeps what has nowhere else to go: a scanned payslip in full, HMRC’s pages as their records, and every other labelled value (rates, limits, a P60’s NI table). A reading takes a little longer. Off until its evaluation run has passed; your gov.uk pages and known payslip layouts are read in full on this machine either way." />
         </div>
       </Card>
       <Card title="Agents" description="Jobs that research what you hold, keep assumptions current and write insights, through the same Claude login. Research jobs send only public identifiers (fund names, ISINs, providers); jobs that read your data get no web access.">
@@ -180,7 +180,7 @@ function ExtractionForm() {
           <Switch checked={s.agents.autoResearch} onChange={(v) => setS({ ...s, agents: { ...s.agents, autoResearch: v } })} label="Research by itself too" description="Off: fund, provider and assumption research runs only when you press Run now on Assumptions & research → Agent jobs. On: new funds and providers, stale research (at most three a day) and assumptions on fallbacks (at most weekly) start within the budget." />
           <Switch checked={s.agents.insightsAfterImport} onChange={(v) => setS({ ...s, agents: { ...s.agents, insightsAfterImport: v } })} label="Insights after each import" />
           <Switch checked={s.agents.monthlyReview} onChange={(v) => setS({ ...s, agents: { ...s.agents, monthlyReview: v } })} label="A month in review once a month’s data is complete" />
-          <Switch checked={s.agents.labelImports} onChange={(v) => setS({ ...s, agents: { ...s.agents, labelImports: v } })} label="Name imports with Claude" description="A minute after you commit or file imports, Claude names each from what was read from it (“Monzo current account statement, Sep 2026”), so Import → History can be searched by what a document is. It sees the kind, provider, accounts and dates, never amounts or numbers, and gets no tools; a batch costs a few cents, within the budget below. Your own names are kept. On: History also offers to name the ones from before. This switch is enough on its own." />
+          <Switch checked={s.agents.labelImports} onChange={(v) => setS({ ...s, agents: { ...s.agents, labelImports: v } })} label="Name imports with the agent" description="A minute after you commit or file imports, the agent names each from what was read from it (“Monzo current account statement, Sep 2026”), so Import → History can be searched by what a document is. It sees the kind, provider, accounts and dates, never amounts or numbers, and gets no tools; a batch costs a few cents, within the budget below. Your own names are kept. On: History also offers to name the ones from before. This switch is enough on its own." />
           <div className="grid gap-3 sm:grid-cols-3">
             <Field label="Model">
               <Select value={s.agents.model} onChange={(e) => setS({ ...s, agents: { ...s.agents, model: e.target.value } })}>
@@ -208,7 +208,7 @@ function ExtractionForm() {
             </Field>
           </div>
           <div className="text-[12.5px] text-ink-3">
-            See what is queued, running or stale on <Link to="/assumptions#jobs" className="text-accent hover:underline">Assumptions &amp; research → Agent jobs</Link>. Every session Claude has run (jobs, import readings, receipts) and what it did, with its transcript: <SessionsLink />.
+            See what is queued, running or stale on <Link to="/assumptions#jobs" className="text-accent hover:underline">Assumptions &amp; research → Agent jobs</Link>. Every agent session the app has run (jobs, import readings, receipts) and what it did, with its transcript: <SessionsLink />.
           </div>
         </div>
       </Card>
@@ -1066,7 +1066,7 @@ function AgentAccess() {
           </div>
         )}
       </Card>
-      <Card title="Recent uses" description={<>The latest 30 requests made with a token, including refused ones. Each agent’s activity, request by request: <SessionsLink>Claude sessions</SessionsLink>.</>} padded={false}>
+      <Card title="Recent uses" description={<>The latest 30 requests made with a token, including refused ones. Each agent’s activity, request by request: <SessionsLink>Agent sessions</SessionsLink>.</>} padded={false}>
         {d.uses.length === 0 ? (
           <p className="border-t border-line px-5 py-4 text-[13px] text-ink-3">No token has been used yet.</p>
         ) : (

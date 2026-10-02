@@ -78,7 +78,7 @@ function VerificationNote({ rec }: { rec: Rec }) {
   if (rec.extraction.engine === 'govuk') {
     return (
       <Callout tone={rec.draft?.confidence === 'high' ? 'good' : 'warn'} title="One of HMRC’s pages, read from its own text on this machine">
-        {rec.draft?.confidence === 'high' ? 'No Claude was used. Where the page prints a total, the rows add up to it.' : 'No Claude was used, but something on it did not add up: check the notes and the page.'}
+        {rec.draft?.confidence === 'high' ? 'No agent was used. Where the page prints a total, the rows add up to it.' : 'No agent was used, but something on it did not add up: check the notes and the page.'}
       </Callout>
     );
   }
@@ -1079,9 +1079,9 @@ function SheetReadAs({ rec }: { rec: Rec }) {
   const redo = useApiMutation(() => api(`/imports/${rec.id}/reprocess`, { body: { readAs: byClaude ? 'columns' : 'document' } }));
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-line bg-panel px-4 py-2.5 text-[12.5px] text-ink-2">
-      <span className="min-w-0 flex-1">{byClaude ? `Every sheet was read by Claude, as this spreadsheet is not a list of payments.` : 'Its first table is read as a list of payments, column by column.'}</span>
+      <span className="min-w-0 flex-1">{byClaude ? `Every sheet was read by the agent, as this spreadsheet is not a list of payments.` : 'Its first table is read as a list of payments, column by column.'}</span>
       <Button size="sm" variant="secondary" loading={redo.isPending} onClick={() => redo.mutate(undefined)}>
-        {byClaude ? 'Map its columns instead' : 'Read it with Claude instead'}
+        {byClaude ? 'Map its columns instead' : 'Read it with the agent instead'}
       </Button>
       {redo.error && <span className="w-full text-bad-ink">{redo.error.message}</span>}
     </div>
@@ -1267,7 +1267,7 @@ function ImportName({ rec }: { rec: Rec }) {
       {label && (
         <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[12.5px] text-ink-3">
           <span className="truncate">{rec.document.fileName}</span>
-          <span>· {label.provenance.setBy === 'owner' ? 'your name for it' : 'named by Claude'}</span>
+          <span>· {label.provenance.setBy === 'owner' ? 'your name for it' : 'named by the agent'}</span>
           <button type="button" className="text-accent hover:underline" onClick={() => save.mutate(null)}>
             {label.provenance.setBy === 'owner' ? 'take your name away' : 'take the name away'}
           </button>
@@ -1392,7 +1392,7 @@ export default function Review() {
             {rec.extraction.engine && <span>read by {rec.extraction.engine === 'csv' ? `CSV parser (${rec.extraction.detail})` : rec.extraction.engine === 'govuk' ? 'the gov.uk page reader' : rec.extraction.engine === 'payslip' ? 'the payslip reader, on this machine' : rec.extraction.engine}{rec.extraction.model ? ` · ${rec.extraction.model}` : ''}</span>}
             {rec.extraction.durationMs !== undefined && <span>· {(rec.extraction.durationMs / 1000).toFixed(1)}s</span>}
             {rec.extraction.costUsd !== undefined && <span>· ~${rec.extraction.costUsd.toFixed(3)}</span>}
-            {(rec.extraction.engine === 'claude-cli' || rec.extraction.engine === 'claude-api' || rec.status === 'processing' || rec.status === 'failed') && <SessionsLink of={rec.id}>{rec.status === 'processing' ? 'Watch Claude read it' : 'What Claude did'}</SessionsLink>}
+            {(rec.extraction.engine === 'claude-cli' || rec.extraction.engine === 'claude-api' || rec.status === 'processing' || rec.status === 'failed') && <SessionsLink of={rec.id}>{rec.status === 'processing' ? 'Watch the agent read it' : 'What the agent did'}</SessionsLink>}
             {draft?.confidence && <Badge tone={draft.confidence === 'high' ? 'good' : draft.confidence === 'medium' ? 'neutral' : 'warn'}>{draft.confidence} confidence</Badge>}
           </div>
         </div>

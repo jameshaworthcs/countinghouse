@@ -8,7 +8,7 @@ Hono server  (Node 24, tsx; 127.0.0.1:4750 live, 4760 in development)
    ├─ security: Host allow-list · CSRF (custom header + Origin) · auth gate · CSP
    ├─ AuditLog (audit.ts) ──► work area audit/<yyyy-mm>.jsonl: who did what, from where (Settings → Audit log)
    ├─ SessionLog (sessions.ts) ► every Claude run: work area sessions/<id>.json + its transcript beside its job,
-   │    import or receipt (/sessions, "Claude sessions" below)
+   │    import or receipt (/sessions, "Agent sessions" below)
    ├─ routes/   auth · data (CRUD) · imports · proposals · analytics · records · jobs · sessions · system (SSE, git)
    ├─ Store ─────────────────► data/*.json(l)  (atomic writes, validation, quarantine, file watcher)
    │    └─ 'change' events ──► AuditLog, then GitCommitter ──► git commit -- data/   (debounced, pathspec-limited, main only)
@@ -49,7 +49,7 @@ Source layout:
 | `src/server/agents/` | Agent jobs: the CLI runner, job kinds and prompts, the digest, the queue |
 | `src/server/records.ts` | The validated write path for agent-maintained records |
 | `src/server/audit.ts` | The audit log: who is acting (carried through async work), the request middleware, the hash-chained log, search and the chain check; `auditdiff.ts` says what a write changed, record by record |
-| `src/server/sessions.ts` | Claude sessions: each run's record and transcript in the work area, their caps and retention; `sessionviews.ts` lists them (with earlier ones and agents with tokens) and says what each produced |
+| `src/server/sessions.ts` | Agent sessions: each run's record and transcript in the work area, their caps and retention; `sessionviews.ts` lists them (with earlier ones and agents with tokens) and says what each produced |
 | `src/server/proposals.ts` | Fixes agents propose to your data, checked against it and applied only by you ([AGENTS.md §5](AGENTS.md)) |
 | `src/web/` | The React app: `pages/`, `components/` (UI kit, charts), `lib/` (API client, prefs, data context) |
 | `scripts/` | Demo data, import CLI, records CLI, validate, schema export, screenshots, set-password, deploy |
@@ -155,7 +155,7 @@ waiting for review, jobs, proposals waiting for you, tokens), sign-ins and refus
   - `auth`: signing in (password or jemedia-auth, refused attempts with why) and out.
   - `import`, `job`, `proposal`: each change of state of an import, an agent job (with its cost,
     what it wrote, or its error) and a proposed fix.
-  - `session`: each Claude session's start and end (`session.start`, `session.succeeded`,
+  - `session`: each agent session's start and end (`session.start`, `session.succeeded`,
     `.failed`, `.cancelled`), with its model, cost and what it belongs to.
   - `token`: tokens made and revoked.
   - `app`: start (version, commit) and stop.
@@ -176,12 +176,12 @@ waiting for review, jobs, proposals waiting for you, tokens), sign-ins and refus
   gives the same search as JSON lines, `GET /api/audit/verify` checks the chain. A token with
   `read` can read the log, like everything else. `?q=#123` finds entry 123 alone (folded or not),
   and `?about=<id>,…` keeps the entries that name one of the ids or whose job or token acted. Each
-  entry read carries the Claude sessions it concerns (`sessions`), and the log links to them.
+  entry read carries the agent sessions it concerns (`sessions`), and the log links to them.
 
-## Claude sessions
+## Agent sessions
 
 Every time the app runs Claude is a session (`src/server/sessions.ts`), listed on its own page,
-`/sessions` (*Claude sessions*). The page is linked from Settings → Agents and Agent access, from
+`/sessions` (*Agent sessions*). The page is linked from Settings → Agents and Agent access, from
 Assumptions & research → Agent jobs, from each import's page and its *Read again* card, from a
 receipt's reading, and from the audit log. A session can belong to any of these, so it has a page
 and an address of its own, and links back to each.
@@ -341,7 +341,7 @@ and a card in credit counts as cash.
 - React 19, React Router, TanStack Query with `keepPreviousData` (refetches never flash
   skeletons), and Tailwind v4 with CSS-variable tokens for light and dark.
 - Live updates come over server-sent events (`/api/events`): a `data` event invalidates queries,
-  an `import` event refreshes the import queue, and a `session` event a Claude session's page.
+  an `import` event refreshes the import queue, and a `session` event an agent session's page.
 - A page that fails to show gets `RouteError` (`components/RouteError.tsx`), never React Router's
   developer error page:
   - an ended session (a 401) goes to sign-in, coming back to the same page;
@@ -369,7 +369,7 @@ and a card in credit counts as cash.
   back to the top, as does any inner list marked `data-scroll-top`.
 - Pages: Overview, Accounts (+ detail), Transactions (virtualised), Spending, Projections,
   Investments & pensions, Tax year (Allowances, Self Assessment prep), Assumptions & research,
-  Import (+ Review), Claude sessions (+ one session; the sidebar says how many are running),
+  Import (+ Review), Agent sessions (+ one session; the sidebar says how many are running),
   Settings, Login.
 - Lists you choose rows from (Transactions, an import's rows) share one set of rules
   (`src/web/lib/selection.ts`):
@@ -420,9 +420,9 @@ and a card in credit counts as cash.
   working directory), `--safe-mode` (no hooks, plugins, MCP or CLAUDE.md),
   `--no-session-persistence`, and non-essential traffic disabled, in a scratch directory holding
   only that document. Its streamed events go to the session's transcript in the work area (see
-  "Claude sessions"), with the document's bytes left out.
+  "Agent sessions"), with the document's bytes left out.
 - **Receipts** (`src/server/receipts.ts`) are read by Claude only when Settings → Import &
-  extraction → "Read receipts with Claude" is on (off by default). They run the same way: `Read`
+  extraction → "Read receipts with the agent" is on (off by default). They run the same way: `Read`
   only, in a scratch directory holding just the receipt. The prompt carries the payment's amount,
   date and payee, and your category names. What comes back is a proposal of split lines.
 - **Agent jobs** run the same way, with the tools their privacy class allows:

@@ -26,13 +26,13 @@ const WHAT: [string, string][] = [
   ['auth', 'Signing in and out'],
   ['import', 'Imports'],
   ['job', 'Agent jobs'],
-  ['session', 'Claude sessions'],
+  ['session', 'Agent sessions'],
   ['proposal', 'Proposed fixes'],
   ['token', 'Tokens'],
   ['app', 'App start and stop'],
 ];
 
-const CATEGORY_NAMES: Record<string, string> = { data: 'Data', request: 'Request', auth: 'Sign-in', import: 'Import', job: 'Job', session: 'Claude session', proposal: 'Proposal', token: 'Token', app: 'App' };
+const CATEGORY_NAMES: Record<string, string> = { data: 'Data', request: 'Request', auth: 'Sign-in', import: 'Import', job: 'Job', session: 'Agent session', proposal: 'Proposal', token: 'Token', app: 'App' };
 const STEP = 100;
 
 /** "2 Oct 2026 14:03:07", in this browser's time. */
@@ -183,7 +183,7 @@ function EntryDetails({ e, onSearch, onRequest }: { e: AuditEntry; onSearch: (q:
     ]);
   if (e.sessions?.length)
     items.push([
-      'Claude sessions',
+      'Agent sessions',
       <span key="s" className="flex flex-col gap-0.5">
         {e.sessions.map((s) => (
           <Link key={s.id} to={`/sessions/${s.id}`} className="text-accent hover:underline">
@@ -217,7 +217,7 @@ function Row({ e, open, onToggle, onSearch, onRequest }: { e: AuditEntry; open: 
             {where && <span className="font-mono">{where}</span>}
             <Badge tone="muted">{CATEGORY_NAMES[e.category] ?? e.category}</Badge>
             {e.changes && e.changes.length > 0 && <span>{plural(e.changes.length, 'step')}</span>}
-            {e.sessions && e.sessions.length > 0 && <Badge tone="accent">{e.sessions.length === 1 ? 'Claude session' : `${e.sessions.length} Claude sessions`}</Badge>}
+            {e.sessions && e.sessions.length > 0 && <Badge tone="accent">{e.sessions.length === 1 ? 'Agent session' : `${e.sessions.length} agent sessions`}</Badge>}
             {e.outcome === 'refused' && <StatusBadge status="warn">Refused</StatusBadge>}
             {e.outcome === 'failed' && <StatusBadge status="bad">Failed</StatusBadge>}
           </span>

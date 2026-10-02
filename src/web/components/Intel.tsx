@@ -67,7 +67,7 @@ function EvidenceLinks({ insight }: { insight: Insight }) {
 }
 
 /** Claude's inferences for a page, labelled as such. Renders nothing when there are none and no `empty`. */
-export function InsightsPanel({ page, accountId, title = 'Claude’s notes', empty, className, limit = 6 }: { page: InsightPage; accountId?: string; title?: ReactNode; empty?: ReactNode; className?: string; limit?: number }) {
+export function InsightsPanel({ page, accountId, title = 'Agent notes', empty, className, limit = 6 }: { page: InsightPage; accountId?: string; title?: ReactNode; empty?: ReactNode; className?: string; limit?: number }) {
   const q = useApi<Insight[]>(['insights', page, accountId ?? ''], `/insights?page=${page}${accountId ? `&accountId=${accountId}` : ''}`);
   const dismiss = useApiMutation((id: string) => api(`/insights/${id}/dismiss`, { method: 'POST' }));
   const feedback = useApiMutation((v: { id: string; useful: boolean }) => api(`/insights/${v.id}/feedback`, { method: 'POST', body: { useful: v.useful } }));
@@ -81,7 +81,7 @@ export function InsightsPanel({ page, accountId, title = 'Claude’s notes', emp
           <Bot className="size-4 text-ink-3" aria-hidden /> {title}
         </span>
       }
-      description="Inferred by Claude from your data and research: judgement, not calculation. Each cites what it rests on."
+      description="Inferred by an agent from your data and research: judgement, not calculation. Each cites what it rests on."
     >
       {!items.length ? (
         empty
@@ -99,7 +99,7 @@ export function InsightsPanel({ page, accountId, title = 'Claude’s notes', emp
                       Evidence: <EvidenceLinks insight={i} />
                     </span>
                     <span title={`${i.provenance.model ?? ''} · prompt ${i.provenance.promptVersion ?? ''}`}>
-                      {i.provenance.setBy === 'agent' ? 'Claude' : i.provenance.setBy} · {formatDate(i.createdAt.slice(0, 10))}
+                      {i.provenance.setBy === 'agent' ? 'Agent' : i.provenance.setBy} · {formatDate(i.createdAt.slice(0, 10))}
                     </span>
                   </div>
                 </div>

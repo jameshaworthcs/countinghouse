@@ -508,7 +508,7 @@ const ROUTE_WORDS: [string, RegExp, string][] = [
   ['DELETE', /^\/api\/imports\/[^/]+\/reread$/, 'Put a second reading away'],
   ['POST', /^\/api\/git\/commit$/, 'Committed pending data changes'],
   ['POST', /^\/api\/jobs\/tick$/, 'Checked for agent jobs that are due'],
-  ['POST', /^\/api\/receipts\/[^/]+\/read$/, 'Asked Claude to read a receipt'],
+  ['POST', /^\/api\/receipts\/[^/]+\/read$/, 'Asked the agent to read a receipt'],
 ];
 
 function requestSummary(method: string, pathname: string, children: AuditChild[], outcome: AuditOutcome, error: string | undefined): string {

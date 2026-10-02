@@ -79,7 +79,7 @@ function QueueItem({ p }: { p: Pending }) {
         </div>
         <div className={cn('text-[12.5px] text-ink-3', nothingNew ? 'line-clamp-2' : 'truncate')}>
           {busy
-            ? `${fileSize(p.document.size)} · ${p.document.mediaType.startsWith('image/') || p.document.mediaType === 'application/pdf' ? 'being read by Claude, usually under a minute' : 'parsing'}`
+            ? `${fileSize(p.document.size)} · ${p.document.mediaType.startsWith('image/') || p.document.mediaType === 'application/pdf' ? 'being read by the agent, usually under a minute' : 'parsing'}`
             : p.status === 'failed'
               ? p.extraction.error
               : nothingNew
@@ -317,7 +317,7 @@ function History() {
   // Pressed again before the page knows a run started, it gets that run back (`existing`): no second toast.
   const name = useApiMutation(() => api<{ existing?: true }>('/jobs', { method: 'POST', body: { kind: 'label-imports', params: {} } }), {
     onSuccess: (job) => {
-      if (!job.existing) toast({ tone: 'good', text: 'Claude is naming your imports; History updates as it finishes' });
+      if (!job.existing) toast({ tone: 'good', text: 'The agent is naming your imports; History updates as it finishes' });
     },
   });
   // While a run you started waits or runs, the button says so and cannot start another.
@@ -331,8 +331,8 @@ function History() {
       className="scroll-mt-16 lg:scroll-mt-5"
       actions={
         offer ? (
-          <Button size="sm" icon={<Sparkles className="size-3.5" />} loading={busy} onClick={() => name.mutate(undefined)} title={`Claude names up to ${LABEL_BATCH} at a time, from what was read from each`}>
-            {h.naming === 'queued' ? 'Waiting to name…' : h.naming === 'running' ? 'Naming…' : `Name ${h.unnamed > LABEL_BATCH ? `${LABEL_BATCH} of ${h.unnamed}` : h.unnamed} with Claude`}
+          <Button size="sm" icon={<Sparkles className="size-3.5" />} loading={busy} onClick={() => name.mutate(undefined)} title={`The agent names up to ${LABEL_BATCH} at a time, from what was read from each`}>
+            {h.naming === 'queued' ? 'Waiting to name…' : h.naming === 'running' ? 'Naming…' : `Name ${h.unnamed > LABEL_BATCH ? `${LABEL_BATCH} of ${h.unnamed}` : h.unnamed} with the agent`}
           </Button>
         ) : undefined
       }
@@ -363,7 +363,7 @@ function History() {
                 <div className="min-w-0 flex-1">
                   <Link to={`/import/${c.id}`} className="flex min-w-0 items-center gap-1.5 text-ink hover:underline">
                     <span className={c.label ? 'line-clamp-2 sm:truncate' : 'truncate'}>{c.label?.text ?? c.fileName}</span>
-                    {c.label?.setBy === 'agent' && <Sparkles className="size-3 shrink-0 text-ink-3" aria-label="Named by Claude" />}
+                    {c.label?.setBy === 'agent' && <Sparkles className="size-3 shrink-0 text-ink-3" aria-label="Named by the agent" />}
                   </Link>
                   {c.label && <div className="truncate text-[12px] text-ink-3">{c.fileName}</div>}
                 </div>

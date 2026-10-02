@@ -301,7 +301,7 @@ export default function Projections() {
           </div>
 
           <GoalsCard />
-          <InsightsPanel page="projections" title="Claude’s notes on your plans" />
+          <InsightsPanel page="projections" title="Agent notes on your plans" />
 
           <Card title="What this assumes" description={<>Every value, where it came from, and whether you have overridden it. Change any of them on <AssumptionsLink />.</>} padded={false}>
             <div className="border-b border-line px-5 py-3">

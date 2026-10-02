@@ -302,8 +302,8 @@ extraction:
 | `insights-after-import` | the digest, focused on the new imports | Read (the digest only) | insights | 2 minutes after imports stop arriving |
 | `monthly-review` | the digest, focused on the last complete month | Read (the digest only) | a month in review, plus page insights (superseding the last run's) | once a month's data is complete for every account |
 | `interpret-note` | the owner's note, account and instrument names | none | proposals on the note | when a note is added |
-| `label-imports` | each committed import's file name, kind, provider, accounts (name, type, period) and dates, a payslip's employer, the tax figures' kinds and years; never amounts, account numbers, references or rows | none | a name on each import (`label`) that has none | only with "Name imports with Claude" on (off by default): a minute after imports stop being committed or filed; History offers the ones from before |
-| receipt reading (not a job) | one receipt file, the payment's amount, date and payee, the category names | Read (the receipt only) | a reading on the receipt: proposed split lines | when a receipt is attached, only with "Read receipts with Claude" on (off by default) |
+| `label-imports` | each committed import's file name, kind, provider, accounts (name, type, period) and dates, a payslip's employer, the tax figures' kinds and years; never amounts, account numbers, references or rows | none | a name on each import (`label`) that has none | only with "Name imports with the agent" on (off by default): a minute after imports stop being committed or filed; History offers the ones from before |
+| receipt reading (not a job) | one receipt file, the payment's amount, date and payee, the category names | Read (the receipt only) | a reading on the receipt: proposed split lines | when a receipt is attached, only with "Read receipts with the agent" on (off by default) |
 
 Other behaviour:
 
@@ -315,16 +315,16 @@ Other behaviour:
   from the statement, not agent work. Researching them waits for agents.
 - **Job state** lives in the work area, not `data/`. Assumptions & research → Agent jobs shows
   what is due, queued, running and finished, with rerun and cancel.
-- **Every run is a Claude session** with its full transcript: the system prompt and prompt the job
+- **Every run is an agent session** with its full transcript: the system prompt and prompt the job
   sent, each turn, tool call and tool result, and the output. Its page lists what it wrote,
-  proposed or named, and its rows in the audit log (*Claude sessions*, linked from each job;
-  ARCHITECTURE.md, "Claude sessions"). An agent outside the app, with a token, is seen there by its
+  proposed or named, and its rows in the audit log (*Agent sessions*, linked from each job;
+  ARCHITECTURE.md, "Agent sessions"). An agent outside the app, with a token, is seen there by its
   requests. A job that ends with nothing to do (`NothingToDo`) never runs Claude, so it has no
   session.
 - **No repeats.** A job that succeeded for the same subject within the research staleness window
   (Settings → Agents, 90 days by default) is not started again by itself, even if it found nothing;
   a failed one waits a day. The owner can rerun either at any time.
-- **Naming imports has its own switch.** Settings → Agents → "Name imports with Claude" is off by
+- **Naming imports has its own switch.** Settings → Agents → "Name imports with the agent" is off by
   default, and while it is off no one can start `label-imports`, you included. On, it starts by
   itself without "Let agents start jobs by themselves" (within the background budget), and Import →
   History offers to name the imports from before, up to 40 a job. History and an import's page

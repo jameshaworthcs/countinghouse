@@ -1536,3 +1536,18 @@ Later the same day, after the owner's first runs (`label-imports-2`):
     so linking from one import's page is never undone from the other's.
   - Links are additive optional fields on a draft row: no format change.
   - Token "Import upkeep" may link and unlink, since it edits a draft and records nothing.
+
+## 2026-10-02: "Agent", not "Claude", for who does the work
+
+- **Asked:** the owner wanted "Claude sessions" renamed "Agent sessions", and "Claude" changed to
+  "agent" across the app, except where the text names the model to be used or used.
+- **Done:**
+  - The sessions page, sidebar, audit log labels, insight panels ("Agent notes"), import naming,
+    receipt reading, the review page and transcript steps now say "agent".
+  - So do the errors and audit summaries the server writes from now on. Earlier audit entries keep
+    their wording: the log is hash-chained.
+- **Kept as "Claude":**
+  - the engine choices and their descriptions ("Claude via your Claude Code login", "Claude API");
+  - the login the jobs use, and "Claude usage at API prices" for costs;
+  - Claude Code, the tool an agent with a token runs in;
+  - the model names, and errors from the API about the model itself.

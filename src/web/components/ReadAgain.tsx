@@ -53,7 +53,7 @@ export function ReadAgainCard({ rec, currentVersion }: { rec: ImportRecord; curr
     >
       {!enabled && (
         <p className="text-[12.5px] text-ink-3">
-          Off: reading stored documents again uses Claude (as an upload does). Turn it on in <Link to="/settings#extraction" className="text-accent hover:underline">Settings → Import & extraction</Link>.
+          Off: reading stored documents again runs the agent, on your Claude usage (as an upload does). Turn it on in <Link to="/settings#extraction" className="text-accent hover:underline">Settings → Import & extraction</Link>.
         </p>
       )}
       {start.error && <Callout tone="bad">{start.error.message}</Callout>}
@@ -67,7 +67,7 @@ export function ReadAgainCard({ rec, currentVersion }: { rec: ImportRecord; curr
             {r.engine === 'claude-cli' || r.engine === 'claude-api' ? (
               <>
                 {' '}
-                <SessionsLink of={r.importId}>What Claude did</SessionsLink>
+                <SessionsLink of={r.importId}>What the agent did</SessionsLink>
               </>
             ) : null}
           </div>

@@ -251,7 +251,7 @@ function Onboarding() {
             <p className="mt-2 text-sm text-ink-2">Everything stays on this machine as plain files in <code className="rounded bg-panel-2 px-1">data/</code>, versioned in git. Three steps get you going:</p>
             <ol className="mt-4 flex flex-col gap-3 text-sm text-ink-2">
               <li><span className="font-semibold text-ink">1. Tell it a little about you.</span> Date of birth and tax band unlock the LISA, pension and savings-allowance rules. <button className="text-accent hover:underline" onClick={() => navigate('/settings')}>Open settings</button></li>
-              <li><span className="font-semibold text-ink">2. Drop in last month’s statements.</span> CSV exports are read instantly; PDFs and app screenshots are read by Claude.</li>
+              <li><span className="font-semibold text-ink">2. Drop in last month’s statements.</span> CSV exports are read instantly; PDFs and app screenshots are read by an agent.</li>
               <li><span className="font-semibold text-ink">3. Review and commit.</span> Nothing is saved until you check it against the original.</li>
             </ol>
           </div>

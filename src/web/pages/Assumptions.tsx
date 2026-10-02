@@ -566,7 +566,7 @@ function NoteCard({ note }: { note: Note }) {
       <div className="mt-0.5 text-[11.5px] text-ink-3">{timeAgo(note.createdAt)}</div>
       {pending.length > 0 && note.status === 'proposed' && (
         <div className="mt-3 flex flex-col gap-2">
-          <div className="text-[12.5px] font-medium text-ink-2">Claude proposes to record:</div>
+          <div className="text-[12.5px] font-medium text-ink-2">The agent proposes to record:</div>
           {pending.map((p) => (
             <label key={p.key} className="flex cursor-pointer gap-2 rounded-md bg-panel-2 px-2.5 py-2 text-[13px]">
               <input type="checkbox" className="mt-0.5" checked={chosen.includes(p.key)} onChange={(e) => setChosen((c) => (e.target.checked ? [...c, p.key] : c.filter((k) => k !== p.key)))} />
@@ -597,13 +597,13 @@ function AboutTab() {
   const [text, setText] = useState('');
   const [kind, setKind] = useState<ContextRecord['kind']>('plan');
   const [statement, setStatement] = useState('');
-  const send = useApiMutation(() => api('/notes', { method: 'POST', body: { text } }), { onSuccess: () => (setText(''), toast({ tone: 'good', text: 'Noted. Claude will propose what to record; confirm it below.' })) });
+  const send = useApiMutation(() => api('/notes', { method: 'POST', body: { text } }), { onSuccess: () => (setText(''), toast({ tone: 'good', text: 'Noted. The agent will propose what to record; confirm it below.' })) });
   const addContext = useApiMutation(() => api('/context', { method: 'POST', body: { kind, statement } }), { onSuccess: () => setStatement('') });
   const setStatus = useApiMutation((v: { id: string; status: 'active' | 'done' | 'retired' }) => api(`/context/${v.id}`, { method: 'PATCH', body: { status: v.status } }));
   return (
     <div className="grid gap-5 lg:grid-cols-[1.1fr_1fr]">
       <div className="flex flex-col gap-5">
-        <Card title="Tell the app" description="In plain words: what you hold, your plans, your circumstances. Claude turns it into records you confirm; the agents and insights read them. Nothing goes on the web.">
+        <Card title="Tell the app" description="In plain words: what you hold, your plans, your circumstances. An agent turns it into records you confirm; the agents and insights read them. Nothing goes on the web.">
           <Textarea value={text} onChange={(e) => setText(e.target.value)} rows={4} placeholder="e.g. I hold Vanguard LifeStrategy 80 in my ISA. We plan to buy a house in 2028 for about £400,000, using my LISA for the deposit." />
           <div className="mt-2 flex justify-end">
             <Button variant="primary" disabled={!text.trim()} loading={send.isPending} onClick={() => send.mutate(undefined)} icon={<Bot className="size-4" />}>

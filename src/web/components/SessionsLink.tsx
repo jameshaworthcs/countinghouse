@@ -10,7 +10,7 @@ export function SessionsLink({ of, children, className }: { of?: string; childre
   return (
     <Link to={of ? `/sessions?for=${encodeURIComponent(of)}` : '/sessions'} className={cn('inline-flex items-center gap-1 text-accent hover:underline', className)}>
       <ScrollText className="size-3.5" aria-hidden />
-      {children ?? 'Claude sessions'}
+      {children ?? 'Agent sessions'}
     </Link>
   );
 }

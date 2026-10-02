@@ -107,11 +107,11 @@ function SessionList() {
   const spent = rows.reduce((sum, s) => sum + (s.costUsd ?? 0), 0);
   return (
     <div>
-      <PageHeader title="Claude sessions" subtitle="Every time the app has run Claude, and agents using your tokens, with what each one did" />
+      <PageHeader title="Agent sessions" subtitle="Every time the app has run an agent, and agents using your tokens, with what each one did" />
       <div className="flex flex-col gap-5">
         {d && (
           <Callout tone="neutral">
-            Transcripts include what Claude saw, document contents too, apart from the files’ own bytes. Account and card numbers keep only their last 4 digits. They’re kept in the work area beside their job or import, never in your data, git or logs. Each is deleted after {d.retention.days} days, and each is cut at {fileSize(d.retention.maxBytesPerSession)}. Together they’re held under {fileSize(d.retention.maxBytesTotal)}, oldest deleted first, and they use {fileSize(d.retention.bytes)} now. Sessions from before transcripts were kept show what their job, import or receipt recorded.
+            Transcripts include what the agent saw, document contents too, apart from the files’ own bytes. Account and card numbers keep only their last 4 digits. They’re kept in the work area beside their job or import, never in your data, git or logs. Each is deleted after {d.retention.days} days, and each is cut at {fileSize(d.retention.maxBytesPerSession)}. Together they’re held under {fileSize(d.retention.maxBytesTotal)}, oldest deleted first, and they use {fileSize(d.retention.bytes)} now. Sessions from before transcripts were kept show what their job, import or receipt recorded.
           </Callout>
         )}
         <Card padded={false}>
@@ -153,7 +153,7 @@ function SessionList() {
           {!d ? (
             res.error ? <Callout tone="bad" className="m-5">{res.error.message}</Callout> : <Loading />
           ) : rows.length === 0 ? (
-            <p className="border-t border-line px-5 py-4 text-[13px] text-ink-3">{d.sessions.length ? 'Nothing matches.' : 'Claude has not been run yet.'}</p>
+            <p className="border-t border-line px-5 py-4 text-[13px] text-ink-3">{d.sessions.length ? 'Nothing matches.' : 'No agent has run yet.'}</p>
           ) : (
             <ul>
               {rows.slice(0, limit).map((s) => (
@@ -235,7 +235,7 @@ function ResultContent({ content }: { content: unknown }) {
 }
 
 function ContentBlock({ b, at }: { b: Ev; at: unknown }) {
-  if (b.type === 'text') return <Step label="Claude" at={at}><Pre className="bg-transparent p-0 font-sans text-[13px]">{str(b.text)}</Pre></Step>;
+  if (b.type === 'text') return <Step label="Agent" at={at}><Pre className="bg-transparent p-0 font-sans text-[13px]">{str(b.text)}</Pre></Step>;
   if (b.type === 'thinking' || b.type === 'redacted_thinking')
     return (
       <Step label="Thinking" at={at} tone="muted">
@@ -341,7 +341,7 @@ function Event({ e }: { e: Ev }) {
     case 'assistant':
     case 'user': {
       const content = (e.message as Ev | undefined)?.content;
-      if (typeof content === 'string') return <Step label={e.type === 'user' ? 'Prompt' : 'Claude'} at={at}><Pre>{content}</Pre></Step>;
+      if (typeof content === 'string') return <Step label={e.type === 'user' ? 'Prompt' : 'Agent'} at={at}><Pre>{content}</Pre></Step>;
       if (!Array.isArray(content)) return null;
       return (
         <>
@@ -520,7 +520,7 @@ function SessionPage({ id }: { id: string }) {
   return (
     <div>
       <Link to="/sessions" className="mb-3 inline-flex items-center gap-1 text-[13px] text-ink-3 hover:text-ink">
-        <ArrowLeft className="size-3.5" aria-hidden /> Claude sessions
+        <ArrowLeft className="size-3.5" aria-hidden /> Agent sessions
       </Link>
       <PageHeader title={s.title} subtitle={s.source === 'token' ? 'An agent outside the app, seen by its requests' : s.source === 'earlier' ? 'From before transcripts were kept' : undefined} />
       <div className="flex flex-col gap-5">

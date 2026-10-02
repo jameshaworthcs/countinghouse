@@ -158,7 +158,7 @@ export function ReceiptsSection({ tx, onPropose }: { tx: Transaction; onPropose:
                 {r.status === 'failed' && <Badge tone="warn">Not read</Badge>}
                 {reading && r.status !== 'read' && (
                   <Button size="sm" icon={<ScanText className="size-3.5" />} loading={read.isPending && read.variables === r.id} onClick={() => read.mutate(r.id)}>
-                    Read with Claude
+                    Read with the agent
                   </Button>
                 )}
                 <button className="rounded p-1 text-ink-3 hover:bg-panel-2" onClick={() => remove.mutate(r.id)} aria-label="Remove receipt">
@@ -170,9 +170,9 @@ export function ReceiptsSection({ tx, onPropose }: { tx: Transaction; onPropose:
             {r.reading && (
               <div className="mt-2 flex flex-col gap-1.5">
                 <div className="text-[12px] text-ink-3">
-                  Read by Claude ({r.reading.model.replace(/^claude-/, '')}): {r.reading.merchant ?? 'shop not read'}
+                  Read by the agent ({r.reading.model.replace(/^claude-/, '')}): {r.reading.merchant ?? 'shop not read'}
                   {r.reading.date ? `, ${formatDate(r.reading.date)}` : ''}
-                  {r.reading.total !== null ? `, total ${money(r.reading.total)}` : ''}. A reading, not a record: nothing changes until you save a split. <SessionsLink of={r.id}>What Claude did</SessionsLink>
+                  {r.reading.total !== null ? `, total ${money(r.reading.total)}` : ''}. A reading, not a record: nothing changes until you save a split. <SessionsLink of={r.id}>What the agent did</SessionsLink>
                 </div>
                 <ul className="flex flex-col gap-0.5">
                   {r.reading.lines.map((l, i) => (
@@ -212,7 +212,7 @@ export function ReceiptsSection({ tx, onPropose }: { tx: Transaction; onPropose:
         </label>
         {!reading && (
           <p className="text-[12px] text-ink-3">
-            Receipts are kept with your documents. Reading them with Claude to suggest split lines is off (<Link to="/settings#extraction" className="text-accent hover:underline">Settings → Import & extraction</Link>).
+            Receipts are kept with your documents. Reading them with the agent to suggest split lines is off (<Link to="/settings#extraction" className="text-accent hover:underline">Settings → Import & extraction</Link>).
           </p>
         )}
         {(attach.error || read.error || remove.error) && <Callout tone="bad">{(attach.error ?? read.error ?? remove.error)!.message}</Callout>}

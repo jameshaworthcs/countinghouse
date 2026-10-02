@@ -278,7 +278,7 @@ export default function Investments() {
         </Card>
       )}
 
-      <InsightsPanel page="investments" title="Claude’s notes on your investments" className="mb-5" />
+      <InsightsPanel page="investments" title="Agent notes on your investments" className="mb-5" />
 
       <div className="grid gap-5 lg:grid-cols-2">
         <Card title="Retirement outlook" description={`At age ${r.age}${r.date ? ` (${formatDate(r.date)})` : ''}, in today’s money`}>

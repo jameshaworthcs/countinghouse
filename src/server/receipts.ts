@@ -117,7 +117,7 @@ export type ReceiptReader = (opts: AgentRunOptions) => Promise<AgentRunResult>;
  */
 export async function readReceipt(store: Store, config: Config, id: string, opts: { reader?: ReceiptReader; bin?: string; sessions?: SessionLog | undefined } = {}): Promise<Receipt> {
   const settings = store.settings.extraction;
-  if (!settings.readReceipts) throw new StoreError('Reading receipts with Claude is off: turn it on in Settings → Import & extraction.', 409);
+  if (!settings.readReceipts) throw new StoreError('Reading receipts with the agent is off: turn it on in Settings → Import & extraction.', 409);
   const receipt = store.receipts.find((r) => r.id === id);
   if (!receipt) throw new StoreError('Unknown receipt', 404);
   const t = store.transaction(receipt.transactionId);

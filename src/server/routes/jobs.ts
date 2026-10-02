@@ -28,7 +28,7 @@ export function jobRoutes(ctx: AppContext): Hono {
   // A job an agent's token starts waits for the background budget, and is refused while agents are
   // off in Settings: only you can start one then.
   const AGENTS_OFF = 'Agents are turned off in Settings, so an agent cannot start a job.';
-  const LABELS_OFF = 'Naming imports with Claude is off: turn it on in Settings → Agents.';
+  const LABELS_OFF = 'Naming imports with the agent is off: turn it on in Settings → Agents.';
 
   app.post('/', async (c) => {
     const body = await readJson(c, z.object({ kind: z.enum(JOB_KINDS), params: z.record(z.string(), z.unknown()).default({}) }));

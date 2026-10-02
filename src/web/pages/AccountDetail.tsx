@@ -194,7 +194,7 @@ export default function AccountDetail() {
         )}
       </div>
 
-      <InsightsPanel page="accounts" accountId={id} title="Claude’s notes on this account" className="mb-5" />
+      <InsightsPanel page="accounts" accountId={id} title="Agent notes on this account" className="mb-5" />
       {gaps.length > 0 && (
         <Callout tone="warn" className="mb-5" title={`${gaps.length} gap${gaps.length > 1 ? 's' : ''} in this account’s history`}>
           Balances don’t add up between some statements, which usually means a statement or some transactions are missing:

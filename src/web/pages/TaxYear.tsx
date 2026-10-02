@@ -492,7 +492,7 @@ export default function TaxYear() {
           { value: 'self-assessment', label: 'Self Assessment prep' },
         ]}
       />
-      {tab === 'allowances' && <InsightsPanel page="tax" title="Claude’s notes on your allowances" className="my-5" />}
+      {tab === 'allowances' && <InsightsPanel page="tax" title="Agent notes on your allowances" className="my-5" />}
       {tab === 'pay' ? payQ.data ? <PayView pay={payQ.data} /> : <Loading /> : tab === 'self-assessment' ? sa.data ? <SelfAssessment sa={sa.data} taxYear={ty} /> : <Loading /> : allowances.data ? <Allowances a={allowances.data} /> : <Loading />}
       {tab === 'allowances' && (
         <Link to="/tax/self-assessment" className="no-print mt-6 inline-flex items-center gap-1 text-[13px] font-medium text-accent hover:underline">

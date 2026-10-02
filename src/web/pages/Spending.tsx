@@ -127,7 +127,7 @@ export default function Spending() {
             >
               <SignalList signals={s.signals} empty={<div className="text-[13px] text-ink-3">Nothing stands out by the rules for this period.</div>} />
             </Card>
-            <InsightsPanel page="spending" title="Claude’s notes on your habits" empty={<div className="text-[13px] text-ink-3">No notes yet. They are written after each import and in the monthly review.</div>} />
+            <InsightsPanel page="spending" title="Agent notes on your habits" empty={<div className="text-[13px] text-ink-3">No notes yet. They are written after each import and in the monthly review.</div>} />
           </div>
 
           {cf.data && (

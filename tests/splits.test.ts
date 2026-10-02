@@ -99,7 +99,7 @@ describe('receipts', () => {
     expect(app.ctx.store.receipts).toHaveLength(1);
     const readOff = await req(`/api/receipts/${r.id}/read`, { method: 'POST', headers: CSRF });
     expect(readOff.status).toBe(409);
-    expect(((await readOff.json()) as { error: string }).error).toBe('Reading receipts with Claude is off: turn it on in Settings → Import & extraction.');
+    expect(((await readOff.json()) as { error: string }).error).toBe('Reading receipts with the agent is off: turn it on in Settings → Import & extraction.');
   });
 
   it('only photos and PDFs', async () => {

@@ -41,7 +41,7 @@ const NAV: { to: string; label: string; icon: ReactNode; end?: boolean }[] = [
   { to: '/tax', label: 'Tax year', icon: <Landmark className="size-[18px]" /> },
   { to: '/assumptions', label: 'Assumptions & research', icon: <Library className="size-[18px]" /> },
   { to: '/import', label: 'Import', icon: <Upload className="size-[18px]" /> },
-  { to: '/sessions', label: 'Claude sessions', icon: <ScrollText className="size-[18px]" /> },
+  { to: '/sessions', label: 'Agent sessions', icon: <ScrollText className="size-[18px]" /> },
   { to: '/settings', label: 'Settings', icon: <Settings className="size-[18px]" /> },
 ];
 
@@ -90,7 +90,7 @@ function NavList({ reviewCount, running, onNavigate }: { reviewCount: number; ru
           <span className="flex-1">{n.label}</span>
           {n.to === '/import' && reviewCount > 0 && <span className="rounded-full bg-accent px-1.5 text-[11px] leading-5 font-semibold text-white">{reviewCount}</span>}
           {n.to === '/sessions' && running > 0 && (
-            <span className="flex items-center gap-1 text-[11.5px] text-ink-3" title={`${running} Claude session${running === 1 ? '' : 's'} running`}>
+            <span className="flex items-center gap-1 text-[11.5px] text-ink-3" title={`${running} agent session${running === 1 ? '' : 's'} running`}>
               <span className="size-2 animate-pulse rounded-full bg-accent" aria-hidden />
               {running} running
             </span>

@@ -268,7 +268,7 @@ export class SessionLog extends EventEmitter {
     this.audit?.record({
       category: 'session',
       action: 'session.start',
-      summary: `Claude session started: ${record.title} (${record.model}, ${record.engine})`,
+      summary: `Agent session started: ${record.title} (${record.model}, ${record.engine})`,
       targets: [id, ...(parent ? [parent] : []), ...(record.transactionId ? [record.transactionId] : [])],
       details: { sessionId: id, kind: record.kind, ...(record.jobKind ? { jobKind: record.jobKind } : {}), ...(record.role ? { role: record.role } : {}), engine: record.engine, model: record.model, ...(record.promptVersion ? { promptVersion: record.promptVersion } : {}), tools: record.tools, reason: record.startedBy.reason },
     });
@@ -303,7 +303,7 @@ export class SessionLog extends EventEmitter {
       category: 'session',
       action: `session.${r.status}`,
       outcome: r.status === 'failed' ? 'failed' : 'ok',
-      summary: `Claude session ${r.status === 'succeeded' ? 'finished' : r.status}: ${r.title}${cost}${r.error ? ` (${r.error.slice(0, 200)})` : ''}`,
+      summary: `Agent session ${r.status === 'succeeded' ? 'finished' : r.status}: ${r.title}${cost}${r.error ? ` (${r.error.slice(0, 200)})` : ''}`,
       targets: [r.id, ...(parent ? [parent] : [])],
       details: {
         sessionId: r.id,
