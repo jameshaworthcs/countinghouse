@@ -1423,3 +1423,29 @@ over the file name and searches both, with the accounts.
   for screenshots, HMRC's pages or files the reader understood only in part, which are the ones
   hardest to find.
 
+## 2026-10-02: An audit log beside git's history
+
+- **Asked:** a log in Settings of every action that modifies data, with its actor (you and your
+  address, an agent token, or an agent job), reliable, searchable and detailed.
+- **One choke point per kind of change, not a call in every route.** Every store write already
+  emits `change`; the audit log listens first (so the git commit can name its entries). Requests
+  are recorded by one middleware, placed before the CSRF and auth guards so refusals are recorded
+  too. Imports, jobs and proposals are recorded from their `update` events. A new route or write is
+  covered without anyone remembering to add a line.
+- **The actor travels in `AsyncLocalStorage`**, set by the request middleware, a job's run, the
+  import queue, the inbox and the app's timers. Passing it down every call was the alternative: it
+  would have touched almost every function, and any one missed would be silently wrong.
+- **In the work area, not `data/`.** `data/` is the product and is committed: an audit entry per
+  write would be a commit (or a dirty tree) per write, and would put addresses and device names in
+  git. The work area is private, backed up nightly, and already holds the token log.
+- **Written and synced before answering, hash-chained, never trimmed.** A database was considered;
+  JSON lines match the rest of the app, read with any tool, and are small (a busy day is tens of
+  KB). The chain shows an entry changed or removed later; it is evidence, not prevention.
+- **Request bodies kept, with limits.** Secrets redacted, NI numbers removed, account and card
+  numbers cut to their last 4 digits (they arrive before the app's own rules apply), long values cut, an import's draft only as
+  its shape (it is a document's contents), uploads never read.
+- **Device names from the tailnet** (`tailscale whois` on P360's own daemon): an address alone
+  (100.x.y.z) says little. It is local, so nothing leaves the machine.
+- **Not covered by name:** `npm run records`, hand edits and `git checkout` write `data/` from
+  another process; the live app records them as changed outside the app, with the files, when its
+  watcher sees them.

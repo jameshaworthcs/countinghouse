@@ -40,8 +40,18 @@ async function git(cwd: string, args: string[], allowFail = false): Promise<stri
   }
 }
 
+/** A commit the app made: its hash, subject, and the audit log entries of the changes in it. */
+export interface DataCommit {
+  hash: string;
+  subject: string;
+  auditSeqs: number[];
+}
+
 export class GitCommitter {
   private messages: string[] = [];
+  private auditSeqs: number[] = [];
+  /** Told of each commit made (the audit log records it). */
+  onCommit?: ((commit: DataCommit) => void) | undefined;
   private timer?: NodeJS.Timeout | undefined;
   private committing: Promise<void> = Promise.resolve();
   lastError?: string | undefined;
@@ -78,6 +88,7 @@ export class GitCommitter {
   queue(event: ChangeEvent): void {
     if (!this.enabled) return;
     this.messages.push(event.message);
+    if (event.auditSeq !== undefined) this.auditSeqs.push(event.auditSeq);
     clearTimeout(this.timer);
     this.timer = setTimeout(() => void this.flush(), this.debounceMs);
   }
@@ -86,15 +97,19 @@ export class GitCommitter {
   flush(extraMessage?: string): Promise<void> {
     clearTimeout(this.timer);
     const messages = [...this.messages, ...(extraMessage ? [extraMessage] : [])];
+    const seqs = this.auditSeqs;
     this.messages = [];
-    this.committing = this.committing.then(() => this.commit(messages)).catch((err: Error) => {
+    this.auditSeqs = [];
+    this.committing = this.committing.then(() => this.commit(messages, seqs)).catch((err: Error) => {
       this.lastError = err.message;
       console.error(`[git] ${err.message}`);
+      // The changes stay on disk for the next commit; so do the audit entries that name them.
+      this.auditSeqs.unshift(...seqs);
     });
     return this.committing;
   }
 
-  private async commit(messages: string[]): Promise<void> {
+  private async commit(messages: string[], auditSeqs: number[] = []): Promise<void> {
     if (!this.repoRoot) return;
     // Data commits belong on one branch. If the checkout holding data/ is on another branch or a
     // detached HEAD, hold them (the changes stay on disk) and say so, rather than scatter the audit
@@ -116,9 +131,15 @@ export class GitCommitter {
     const body = unique.length > 1 ? unique.map((m) => `- ${m}`).join('\n') : '';
     const args = ['commit', '--quiet', '-m', subject];
     if (body) args.push('-m', body);
-    args.push('-m', 'Committed by the finance app.', '--', this.dataRel);
+    // The audit log's entries for these changes (Settings → Audit log) say who made each one.
+    const audit = auditSeqs.length ? `\nAudit: ${auditRange(auditSeqs)}` : '';
+    args.push('-m', `Committed by the finance app.${audit}`, '--', this.dataRel);
     await withLockRetry(() => git(this.repoRoot!, args));
     this.lastError = undefined;
+    if (this.onCommit) {
+      const hash = (await git(this.repoRoot, ['rev-parse', '--short', 'HEAD'], true)).trim();
+      if (hash) this.onCommit({ hash, subject, auditSeqs });
+    }
   }
 
   async status(): Promise<GitStatus> {
@@ -158,6 +179,19 @@ export class GitCommitter {
         return { hash, author, date, subject, body: body.trim() };
       });
   }
+}
+
+/** "#12, #14–#16": the audit entries in a commit, runs folded. */
+export function auditRange(seqs: number[]): string {
+  const sorted = [...new Set(seqs)].sort((a, b) => a - b);
+  const runs: string[] = [];
+  for (let i = 0; i < sorted.length; ) {
+    let j = i;
+    while (j + 1 < sorted.length && sorted[j + 1] === sorted[j]! + 1) j++;
+    runs.push(j > i ? `#${sorted[i]}–#${sorted[j]}` : `#${sorted[i]}`);
+    i = j + 1;
+  }
+  return runs.join(', ');
 }
 
 /**

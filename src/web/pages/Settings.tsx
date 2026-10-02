@@ -5,6 +5,7 @@ import type { AllowancesResponse, DataHealthResponse, SystemResponse, TaxDocSour
 import { formatDate, today } from '../../shared/dates';
 import { FIGURE_KINDS, type Category, type Figure, type Profile, type Rule, type Settings as SettingsT } from '../../shared/schema';
 import { taxYearOf } from '../../shared/uk';
+import { AuditLog } from '../components/Audit';
 import { CoverageGrid } from '../components/Coverage';
 import { CategorySelect } from '../components/TransactionList';
 import { Badge, Button, Callout, Card, Checkbox, Dialog, Field, Input, KeyValue, Loading, Money, PageHeader, Select, SortHeader, StatusBadge, Switch, Tabs, tableClasses, useToast } from '../components/ui';
@@ -13,7 +14,7 @@ import { useAppData } from '../lib/data';
 import { bandLabel, cn, money, timeAgo } from '../lib/format';
 import { Sorted } from '../lib/sort';
 
-type Section = 'profile' | 'extraction' | 'categories' | 'rules' | 'tax-documents' | 'data' | 'access' | 'health';
+type Section = 'profile' | 'extraction' | 'categories' | 'rules' | 'tax-documents' | 'data' | 'access' | 'audit' | 'health';
 
 /** The tax band is computed, not set: show this year's and where it comes from. */
 function TaxBandLine() {
@@ -1116,6 +1117,7 @@ export default function Settings() {
     { value: 'tax-documents', label: 'Tax documents' },
     { value: 'data', label: 'Data & git' },
     { value: 'access', label: 'Agent access' },
+    { value: 'audit', label: 'Audit log' },
     { value: 'health', label: 'Data health' },
   ];
   return (
@@ -1129,6 +1131,7 @@ export default function Settings() {
       {section === 'tax-documents' && <TaxDocuments />}
       {section === 'data' && <DataAndGit />}
       {section === 'access' && <AgentAccess />}
+      {section === 'audit' && <AuditLog />}
       {section === 'health' && <Health />}
     </div>
   );

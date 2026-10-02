@@ -31,6 +31,8 @@ export interface Config {
   dataBranch: string;
   /** Allow creating a fresh data directory in production (otherwise a missing one is an error). */
   initData: boolean;
+  /** Name the tailnet device behind each address in the audit log (`tailscale whois`, local only). */
+  auditDevices: boolean;
 }
 
 let envLoaded = false;
@@ -75,6 +77,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, root = PROJECT_
     watch: env.FINANCE_WATCH !== '0',
     dataBranch: env.FINANCE_DATA_BRANCH || 'main',
     initData: env.FINANCE_INIT_DATA === '1',
+    auditDevices: env.FINANCE_AUDIT_DEVICES ? env.FINANCE_AUDIT_DEVICES === '1' : env.NODE_ENV === 'production',
   };
   if (env.ANTHROPIC_API_KEY) config.anthropicApiKey = env.ANTHROPIC_API_KEY;
   return config;

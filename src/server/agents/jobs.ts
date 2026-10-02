@@ -16,6 +16,7 @@ import { LABEL_BATCH } from '../../shared/api';
 import { assumptionDef, AssumptionSet } from '../../shared/assumptions';
 import { addDays, diffDays, today } from '../../shared/dates';
 import type { Analytics } from '../analytics';
+import { runAs } from '../audit';
 import { latestResearch } from '../analytics/research';
 import type { Config } from '../config';
 import type { JobQueue } from '../context';
@@ -63,6 +64,8 @@ const MAX_KEPT = 300;
 /** Jobs that research on the web: they start by themselves only when Settings → Agents allows it. */
 const RESEARCH_KINDS = new Set(['research-instrument', 'research-provider', 'refresh-assumptions']);
 const MAX_STALE_REFRESH_PER_DAY = 3;
+/** Who starts the jobs the app starts by itself (the audit log). */
+const SCHEDULER = { type: 'app', task: 'agent scheduler' } as const;
 
 /**
  * What a job of each kind costs, measured (docs/AGENTS.md): it stands in for a job that ended
@@ -125,9 +128,9 @@ export class JobRunner extends EventEmitter implements JobQueue {
       }
     }
     if (this.opts.autoRun) {
-      this.timer = setInterval(() => void this.tick(), 6 * 3600_000);
+      this.timer = setInterval(() => void runAs(SCHEDULER, () => this.tick()), 6 * 3600_000);
       this.timer.unref();
-      this.firstTick = setTimeout(() => void this.tick(), 20_000);
+      this.firstTick = setTimeout(() => void runAs(SCHEDULER, () => this.tick()), 20_000);
       this.firstTick.unref();
     }
     this.pump();
@@ -217,7 +220,9 @@ export class JobRunner extends EventEmitter implements JobQueue {
     this.labelTimer = setTimeout(() => {
       const ids = [...this.labelIds];
       this.labelIds = [];
-      for (let i = 0; i < ids.length; i += LABEL_BATCH) this.enqueue({ kind: 'label-imports', params: { importIds: ids.slice(i, i + LABEL_BATCH) }, trigger: 'post-import' });
+      runAs(SCHEDULER, () => {
+        for (let i = 0; i < ids.length; i += LABEL_BATCH) this.enqueue({ kind: 'label-imports', params: { importIds: ids.slice(i, i + LABEL_BATCH) }, trigger: 'post-import' });
+      });
     }, 60_000);
     this.labelTimer.unref();
   }
@@ -230,8 +235,10 @@ export class JobRunner extends EventEmitter implements JobQueue {
     this.importTimer = setTimeout(() => {
       const ids = [...this.importIds];
       this.importIds = [];
-      this.enqueue({ kind: 'insights-after-import', params: { importIds: ids }, trigger: 'post-import' });
-      void this.tick();
+      runAs(SCHEDULER, () => {
+        this.enqueue({ kind: 'insights-after-import', params: { importIds: ids }, trigger: 'post-import' });
+        void this.tick();
+      });
     }, 120_000);
     this.importTimer.unref();
   }
@@ -272,7 +279,8 @@ export class JobRunner extends EventEmitter implements JobQueue {
     if (!next) return;
     const abort = new AbortController();
     this.current = { id: next.id, abort };
-    void this.run(next, abort.signal).finally(() => {
+    // Everything the job writes is the job's doing (the audit log), whoever's request started it.
+    void runAs({ type: 'job', jobId: next.id, kind: next.kind, trigger: next.trigger, label: next.label }, () => this.run(next, abort.signal)).finally(() => {
       this.current = undefined;
       this.pump();
     });

@@ -6,9 +6,10 @@ Browser (React SPA, TanStack Query)
    ▼
 Hono server  (Node 24, tsx; 127.0.0.1:4750 live, 4760 in development)
    ├─ security: Host allow-list · CSRF (custom header + Origin) · auth gate · CSP
+   ├─ AuditLog (audit.ts) ──► work area audit/<yyyy-mm>.jsonl: who did what, from where (Settings → Audit log)
    ├─ routes/   auth · data (CRUD) · imports · proposals · analytics · records · jobs · system (SSE, git)
    ├─ Store ─────────────────► data/*.json(l)  (atomic writes, validation, quarantine, file watcher)
-   │    └─ 'change' events ──► GitCommitter ──► git commit -- data/   (debounced, pathspec-limited, main only)
+   │    └─ 'change' events ──► AuditLog, then GitCommitter ──► git commit -- data/   (debounced, pathspec-limited, main only)
    ├─ records.ts: the validated write path for assumptions, research, insights, context, instruments,
    │    the capture list
    │    (in-app jobs · POST /api/records · npm run records)
@@ -45,6 +46,7 @@ Source layout:
 | `src/server/analytics/` | Read-only computations over the store; `model.ts` is pure (no store access); `sources.ts` decides which document's figure counts when several state one job's year; `payslips.ts` reads payslips in full (their year to date, gaps, employer costs); `taxdocuments.ts` is Settings → Tax documents; `companies.ts` is your shares in companies; `arrangements.ts` checks what employers set up to pay into your pensions; `agreements.ts` checks an agreement's schedule against your payments; `terms.ts` is an account's terms over time and what ends soon |
 | `src/server/agents/` | Agent jobs: the CLI runner, job kinds and prompts, the digest, the queue |
 | `src/server/records.ts` | The validated write path for agent-maintained records |
+| `src/server/audit.ts` | The audit log: who is acting (carried through async work), the request middleware, the hash-chained log, search and the chain check; `auditdiff.ts` says what a write changed, record by record |
 | `src/server/proposals.ts` | Fixes agents propose to your data, checked against it and applied only by you ([AGENTS.md §5](AGENTS.md)) |
 | `src/web/` | The React app: `pages/`, `components/` (UI kit, charts), `lib/` (API client, prefs, data context) |
 | `scripts/` | Demo data, import CLI, records CLI, validate, schema export, screenshots, set-password, deploy |
@@ -110,8 +112,64 @@ The equations are in [FORMULAS.md](FORMULAS.md); the rules for writing these rec
   Data health.
 - **External edits** (by hand, `git checkout`, Claude Code) are detected by a recursive `fs.watch`
   plus content hashes of the app's own writes, and trigger a reload.
-- Each mutation emits a `change` event, which feeds git auto-commit and the browser's live-update
-  stream.
+- Each mutation emits a `change` event, which feeds the audit log (with what it changed, record by
+  record), git auto-commit and the browser's live-update stream.
+
+## Audit log
+
+Git's history says what changed in `data/`; the audit log (`src/server/audit.ts`, Settings → Audit
+log) says who did it, from where, and also covers what git never sees: the work area (imports
+waiting for review, jobs, proposals waiting for you, tokens), sign-ins and refused requests.
+
+- **Who.** Every entry has an actor:
+  - you, signed in, with the client's address (from Caddy's `X-Forwarded-For`), the tailnet's name
+    for the device and its tailnet user (`tailscale whois` on the local daemon, remembered for ten
+    minutes; on in production, `FINANCE_AUDIT_DEVICES=0|1` to choose), and the browser;
+  - an agent token (its id, name and scopes, and the same address details);
+  - an agent job (its id, kind and what started it);
+  - the app by itself (start-up upkeep, reading imports, the inbox folder, the job scheduler,
+    closing proposals already done, git);
+  - outside the app (the store's watcher saw a file it did not write: a hand edit, `git checkout`,
+    `npm run records`);
+  - not signed in (a refused request; a token that is not valid is named by its claimed id).
+
+  The actor travels with the work through `AsyncLocalStorage`: the request middleware sets it, and a
+  job run, the import queue, the inbox and the app's timers each set their own, so a write deep in
+  the store knows who asked for it. Work a request started that outlives it keeps the request's
+  actor but not its request id.
+- **What.** Entries, by category:
+  - `request`: every request that could change something (any method but GET, HEAD and OPTIONS,
+    except previews and checks), refused ones too, with method, path, answer, time taken, what it
+    did (`changes`) and the JSON it sent. Secrets (`password`, `token`, `secret`…) are redacted,
+    NI numbers removed, account and card numbers cut to their last 4 digits, long values cut, and
+    an import's draft kept only as its shape, never its contents. Uploads
+    are not read; the import's own entries name the file, its size and its SHA-256.
+  - `data`: each store write (`data.change`) with its files and what it changed: records added
+    and removed, and each changed record's fields before → after (the first 50 records; counts
+    cover the rest); a single file such as settings field by field. Also `data.external`,
+    `data.migrate`, and `git.commit` naming the entries each commit holds (the commit message
+    carries `Audit: #12–#14` back).
+  - `auth`: signing in (password or jemedia-auth, refused attempts with why) and out.
+  - `import`, `job`, `proposal`: each change of state of an import, an agent job (with its cost,
+    what it wrote, or its error) and a proposed fix.
+  - `token`: tokens made and revoked.
+  - `app`: start (version, commit) and stop.
+- **Kept.** Append-only JSON lines, one file per month (UTC), in the work area's `audit/`
+  (a 0700 directory of 0600 files, never in `data/` or git; back it up with the rest of the work
+  area). Nothing is ever trimmed.
+  - Each entry is written and `fdatasync`ed before the request answers.
+  - A write that fails stays queued, is retried every 5 seconds and with the next entry, and
+    Settings says so.
+  - A line cut off by a crash is reported, and the next entry starts on a fresh line.
+- **Tamper-evident.** Each entry has a sequence number and `hash = sha256(previous hash + the
+  entry)`. *Check the chain* walks the log and names any entry altered, removed or out of order.
+  It shows tampering after the fact; it cannot stop someone with the files from rewriting the whole
+  chain.
+- **Searched** on the server (`GET /api/audit`): any words (every field but the hash, plus the git
+  commit), who, what, outcome and dates, newest first. By default one line per action: a request's
+  writes are folded into its entry; *Each step separately* shows them all. `GET /api/audit/export`
+  gives the same search as JSON lines, `GET /api/audit/verify` checks the chain. A token with
+  `read` can read the log, like everything else.
 
 ## Ingestion pipeline
 
@@ -269,6 +327,8 @@ and a card in credit counts as cash.
   - No token can commit, dismiss or discard an import, change source facts or settings, or manage
     tokens. A request with a token ignores any cookie.
   - Every use, refused ones included, is logged in the work area.
+- **Audit log.** Every change, sign-in and refused request, with who and from where (see "Audit
+  log" above).
 - **Claude CLI extraction** runs with `--tools Read`, `--restricted` (file tools confined to the
   working directory), `--safe-mode` (no hooks, plugins, MCP or CLAUDE.md),
   `--no-session-persistence`, and non-essential traffic disabled, in a scratch directory holding

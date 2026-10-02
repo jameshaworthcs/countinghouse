@@ -12,6 +12,7 @@ import { watch, type FSWatcher } from 'node:fs';
 import { copyFile, mkdir, readdir, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import type { z } from 'zod';
+import type { ChangeDiff } from '../shared/audit';
 import { defaultCategories } from '../shared/categories';
 import {
   AccountSchema,
@@ -75,6 +76,7 @@ import {
   type Settings,
   type Transaction,
 } from '../shared/schema';
+import { diffById, DiffCollector, diffFields, listed } from './auditdiff';
 import { atomicWrite, Mutex, nowISO, readTextIfExists, sha256 } from './fsutil';
 
 /** Bump when the on-disk format changes, and add a migration in migrations.ts. */
@@ -130,6 +132,10 @@ export interface ChangeEvent {
   message: string;
   /** Paths (relative to the data dir) that were written. */
   paths: string[];
+  /** What changed, record by record (the audit log keeps it). */
+  diff?: ChangeDiff | undefined;
+  /** The audit log's entry for this change, once it has one (git.ts names it in the commit). */
+  auditSeq?: number | undefined;
 }
 
 const ARRAY_FILES = {
@@ -522,6 +528,7 @@ export class Store extends EventEmitter {
       }
     }
     if (!external) return;
+    this.emit('external', paths);
     await this.mutex.run(async () => {
       console.log(`[store] external change detected (${paths.slice(0, 3).join(', ')}${paths.length > 3 ? '…' : ''}); reloading`);
       await this.load();
@@ -553,9 +560,9 @@ export class Store extends EventEmitter {
     return def.file;
   }
 
-  private changed(message: string, paths: string[]): void {
+  private changed(message: string, paths: string[], diff?: ChangeDiff): void {
     this.version++;
-    this.emit('change', { message, paths } satisfies ChangeEvent);
+    this.emit('change', { message, paths, ...(diff && Object.keys(diff).length ? { diff } : {}) } satisfies ChangeEvent);
   }
 
   /** Run a mutation exclusively. Data written by a newer version of the app is read-only. */
@@ -726,8 +733,9 @@ export class Store extends EventEmitter {
     return this.exclusive(async () => {
       const p = ProfileSchema.parse(profile);
       await this.writeJson('profile.json', p);
+      const before = this.state.profile;
       this.state.profile = p;
-      this.changed('profile: update', ['profile.json']);
+      this.changed('profile: update', ['profile.json'], { fields: diffFields(before, p) });
     });
   }
 
@@ -735,9 +743,10 @@ export class Store extends EventEmitter {
     return this.exclusive(async () => {
       const s = SettingsSchema.parse(settings);
       await this.writeJson('settings.json', s);
+      const before = this.state.settings;
       this.state.settings = s;
       await this.applyDocumentTracking();
-      this.changed('settings: update', ['settings.json']);
+      this.changed('settings: update', ['settings.json'], { fields: diffFields(before, s) });
     });
   }
 
@@ -745,8 +754,9 @@ export class Store extends EventEmitter {
     return this.exclusive(async () => {
       const m = MetaSchema.parse(meta);
       await this.writeJson('meta.json', m);
+      const before = this.state.meta;
       this.state.meta = m;
-      this.changed(`data: format v${m.version}`, ['meta.json']);
+      this.changed(`data: format v${m.version}`, ['meta.json'], { fields: diffFields(before, m) });
     });
   }
 
@@ -761,8 +771,10 @@ export class Store extends EventEmitter {
     return this.exclusive(async () => {
       const file = await this.writeArrayFile(name, items);
       const def = ARRAY_FILES[name];
-      (this.state as unknown as Record<string, unknown>)[name] = (items as unknown[]).map((i) => (def.schema as z.ZodType<unknown>).parse(i));
-      this.changed(message, [file]);
+      const before = this.state[name] as unknown[];
+      const after = (items as unknown[]).map((i) => (def.schema as z.ZodType<unknown>).parse(i));
+      (this.state as unknown as Record<string, unknown>)[name] = after;
+      this.changed(message, [file], diffById(before, after));
     });
   }
 
@@ -845,7 +857,7 @@ export class Store extends EventEmitter {
       }
       if (added.length) {
         await this.writeJsonl(def.file, list);
-        this.changed(message, [def.file]);
+        this.changed(message, [def.file], listed('added', added));
       }
       return added as State[K];
     });
@@ -860,7 +872,7 @@ export class Store extends EventEmitter {
       if (list.length === before.length) return 0;
       await this.writeJsonl(def.file, list);
       (this.state as unknown as Record<string, unknown>)[name] = list;
-      this.changed(message, [def.file]);
+      this.changed(message, [def.file], listed('removed', before.filter((r) => ids.includes(r.id))));
       return before.length - list.length;
     });
   }
@@ -870,15 +882,21 @@ export class Store extends EventEmitter {
     return this.exclusive(async () => {
       const def = JSONL_FILES[name];
       const list = [...(this.state[name] as unknown as { id: string }[])];
+      const diff = new DiffCollector();
       for (const raw of records as unknown as unknown[]) {
         const r = (def.schema as z.ZodType<{ id: string }>).parse(raw);
         const i = list.findIndex((x) => x.id === r.id);
-        if (i >= 0) list[i] = r;
-        else list.push(r);
+        if (i >= 0) {
+          diff.changed(list[i]!, r);
+          list[i] = r;
+        } else {
+          diff.op('added', r);
+          list.push(r);
+        }
       }
       await this.writeJsonl(def.file, list);
       (this.state as unknown as Record<string, unknown>)[name] = list;
-      this.changed(message, [def.file]);
+      this.changed(message, [def.file], diff.result());
     });
   }
 
@@ -939,9 +957,11 @@ export class Store extends EventEmitter {
     return this.exclusive(async () => {
       const touched = new Map<string, Set<string>>();
       let added = 0;
+      const diff = new DiffCollector();
       for (const raw of txs) {
         const t = TransactionSchema.parse(raw);
         if (this.txById.has(t.id)) continue;
+        diff.op('added', t);
         const list = this.state.transactions.get(t.accountId) ?? [];
         list.push(t);
         this.state.transactions.set(t.accountId, list);
@@ -954,7 +974,7 @@ export class Store extends EventEmitter {
         this.state.transactions.set(accountId, sortByDate(this.state.transactions.get(accountId) ?? []));
         paths.push(...(await this.writeTransactionYears(accountId, years)));
       }
-      if (added) this.changed(message, paths);
+      if (added) this.changed(message, paths, diff.result());
       return added;
     });
   }
@@ -965,6 +985,7 @@ export class Store extends EventEmitter {
       const touched = new Map<string, Set<string>>();
       const out: Transaction[] = [];
       const stamp = nowISO();
+      const diff = new DiffCollector();
       for (const { id, patch } of updates) {
         const current = this.txById.get(id);
         if (!current) throw new StoreError(`Unknown transaction ${id}`, 404);
@@ -973,6 +994,7 @@ export class Store extends EventEmitter {
         // `undefined` in a patch means "clear this field".
         for (const [k, v] of Object.entries(rest)) if (v === undefined) delete merged[k];
         const next = TransactionSchema.parse(merged);
+        diff.changed(current, next);
         const list = this.state.transactions.get(current.accountId)!;
         list[list.indexOf(current)] = next;
         this.txById.set(id, next);
@@ -986,7 +1008,7 @@ export class Store extends EventEmitter {
         this.state.transactions.set(accountId, sortByDate(this.state.transactions.get(accountId) ?? []));
         paths.push(...(await this.writeTransactionYears(accountId, years)));
       }
-      if (out.length) this.changed(message, paths);
+      if (out.length) this.changed(message, paths, diff.result());
       return out;
     });
   }
@@ -995,9 +1017,11 @@ export class Store extends EventEmitter {
     return this.exclusive(async () => {
       const touched = new Map<string, Set<string>>();
       let removed = 0;
+      const diff = new DiffCollector();
       for (const id of ids) {
         const t = this.txById.get(id);
         if (!t) continue;
+        diff.op('removed', t);
         const list = this.state.transactions.get(t.accountId)!;
         list.splice(list.indexOf(t), 1);
         this.txById.delete(id);
@@ -1006,7 +1030,7 @@ export class Store extends EventEmitter {
       }
       const paths: string[] = [];
       for (const [accountId, years] of touched) paths.push(...(await this.writeTransactionYears(accountId, years)));
-      if (removed) this.changed(message, paths);
+      if (removed) this.changed(message, paths, diff.result());
       return removed;
     });
   }
@@ -1017,10 +1041,12 @@ export class Store extends EventEmitter {
     return this.exclusive(async () => {
       const touched = new Set<string>();
       let added = 0;
+      const diff = new DiffCollector();
       for (const raw of snaps) {
         const s = BalanceSnapshotSchema.parse(raw);
         const list = this.state.balances.get(s.accountId) ?? [];
         if (list.some((b) => b.id === s.id)) continue;
+        diff.op('added', s);
         list.push(s);
         this.state.balances.set(s.accountId, sortByDate(list));
         touched.add(s.accountId);
@@ -1032,7 +1058,7 @@ export class Store extends EventEmitter {
         await this.writeJsonl(rel, this.state.balances.get(accountId)!);
         paths.push(rel);
       }
-      if (added) this.changed(message, paths);
+      if (added) this.changed(message, paths, diff.result());
       return added;
     });
   }
@@ -1044,11 +1070,13 @@ export class Store extends EventEmitter {
         if (i < 0) continue;
         const { id: _id, accountId: _acc, ...rest } = patch;
         const next = BalanceSnapshotSchema.parse({ ...list[i], ...rest });
+        const diff = new DiffCollector();
+        diff.changed(list[i]!, next);
         list[i] = next;
         this.state.balances.set(accountId, sortByDate(list));
         const rel = `balances/${accountId}.jsonl`;
         await this.writeJsonl(rel, this.state.balances.get(accountId)!);
-        this.changed(message, [rel]);
+        this.changed(message, [rel], diff.result());
         return next;
       }
       throw new StoreError(`Unknown balance ${id}`, 404);
@@ -1060,6 +1088,7 @@ export class Store extends EventEmitter {
     return this.exclusive(async () => {
       const touched = new Set<string>();
       const out: BalanceSnapshot[] = [];
+      const diff = new DiffCollector();
       for (const { id, accountId } of moves) {
         const from = [...this.state.balances].find(([, list]) => list.some((b) => b.id === id));
         if (!from) throw new StoreError(`Unknown balance ${id}`, 404);
@@ -1068,6 +1097,7 @@ export class Store extends EventEmitter {
         if (fromId === accountId) continue;
         list.splice(list.indexOf(was), 1);
         const next = BalanceSnapshotSchema.parse({ ...was, accountId });
+        diff.changed(was, next);
         this.state.balances.set(accountId, sortByDate([...(this.state.balances.get(accountId) ?? []), next]));
         touched.add(fromId).add(accountId);
         out.push(next);
@@ -1078,7 +1108,7 @@ export class Store extends EventEmitter {
         await this.writeJsonl(rel, this.state.balances.get(accountId)!);
         paths.push(rel);
       }
-      if (out.length) this.changed(message, paths);
+      if (out.length) this.changed(message, paths, diff.result());
       return out;
     });
   }
@@ -1088,10 +1118,10 @@ export class Store extends EventEmitter {
       for (const [accountId, list] of this.state.balances) {
         const i = list.findIndex((b) => b.id === id);
         if (i < 0) continue;
-        list.splice(i, 1);
+        const [gone] = list.splice(i, 1);
         const rel = `balances/${accountId}.jsonl`;
         await this.writeJsonl(rel, list);
-        this.changed(message, [rel]);
+        this.changed(message, [rel], listed('removed', [gone]));
         return;
       }
       throw new StoreError(`Unknown balance ${id}`, 404);
@@ -1103,9 +1133,11 @@ export class Store extends EventEmitter {
     return this.exclusive(async () => {
       const touched = new Set<string>();
       let added = 0;
+      const diff = new DiffCollector();
       for (const [accountId, list] of this.state.holdings) {
         const kept = list.filter((h) => !replaces.includes(h.id));
         if (kept.length === list.length) continue;
+        for (const h of list) if (replaces.includes(h.id)) diff.op('removed', h);
         this.state.holdings.set(accountId, kept);
         touched.add(accountId);
       }
@@ -1113,6 +1145,7 @@ export class Store extends EventEmitter {
         const s = HoldingsSnapshotSchema.parse(raw);
         const list = this.state.holdings.get(s.accountId) ?? [];
         if (list.some((h) => h.id === s.id)) continue;
+        diff.op('added', s);
         list.push(s);
         this.state.holdings.set(s.accountId, sortByDate(list));
         touched.add(s.accountId);
@@ -1124,7 +1157,7 @@ export class Store extends EventEmitter {
         await this.writeJsonl(rel, this.state.holdings.get(accountId)!);
         paths.push(rel);
       }
-      if (added || paths.length) this.changed(message, paths);
+      if (added || paths.length) this.changed(message, paths, diff.result());
       return added;
     });
   }
@@ -1134,10 +1167,10 @@ export class Store extends EventEmitter {
       for (const [accountId, list] of this.state.holdings) {
         const i = list.findIndex((h) => h.id === id);
         if (i < 0) continue;
-        list.splice(i, 1);
+        const [gone] = list.splice(i, 1);
         const rel = `holdings/${accountId}.jsonl`;
         await this.writeJsonl(rel, list);
-        this.changed(message, [rel]);
+        this.changed(message, [rel], listed('removed', [gone]));
         return;
       }
       throw new StoreError(`Unknown holdings snapshot ${id}`, 404);
@@ -1147,17 +1180,19 @@ export class Store extends EventEmitter {
   addFigures(figs: Figure[], message: string): Promise<number> {
     return this.exclusive(async () => {
       let added = 0;
+      const diff = new DiffCollector();
       for (const raw of figs) {
         const f = FigureSchema.parse(raw);
         if (this.state.figures.some((x) => x.id === f.id)) continue;
         this.state.figures.push(f);
+        diff.op('added', f);
         added++;
       }
       if (added) {
         const key = (f: Figure) => f.periodEnd ?? f.date ?? f.periodStart ?? '';
         this.state.figures.sort((a, b) => key(a).localeCompare(key(b)));
         await this.writeJsonl('figures.jsonl', this.state.figures);
-        this.changed(message, ['figures.jsonl']);
+        this.changed(message, ['figures.jsonl'], diff.result());
       }
       return added;
     });
@@ -1169,9 +1204,11 @@ export class Store extends EventEmitter {
       if (i < 0) throw new StoreError(`Unknown figure ${id}`, 404);
       const { id: _id, ...rest } = patch;
       const next = FigureSchema.parse({ ...this.state.figures[i], ...rest });
+      const diff = new DiffCollector();
+      diff.changed(this.state.figures[i]!, next);
       this.state.figures[i] = next;
       await this.writeJsonl('figures.jsonl', this.state.figures);
-      this.changed(message, ['figures.jsonl']);
+      this.changed(message, ['figures.jsonl'], diff.result());
       return next;
     });
   }
@@ -1182,20 +1219,22 @@ export class Store extends EventEmitter {
       const i = this.state.figures.findIndex((f) => f.id === figure.id);
       if (i < 0) throw new StoreError(`Unknown figure ${figure.id}`, 404);
       const next = FigureSchema.parse(figure);
+      const diff = new DiffCollector();
+      diff.changed(this.state.figures[i]!, next);
       this.state.figures[i] = next;
       await this.writeJsonl('figures.jsonl', this.state.figures);
-      this.changed(message, ['figures.jsonl']);
+      this.changed(message, ['figures.jsonl'], diff.result());
       return next;
     });
   }
 
   deleteFigure(id: string, message: string): Promise<void> {
     return this.exclusive(async () => {
-      const before = this.state.figures.length;
+      const gone = this.state.figures.filter((f) => f.id === id);
+      if (!gone.length) throw new StoreError(`Unknown figure ${id}`, 404);
       this.state.figures = this.state.figures.filter((f) => f.id !== id);
-      if (this.state.figures.length === before) throw new StoreError(`Unknown figure ${id}`, 404);
       await this.writeJsonl('figures.jsonl', this.state.figures);
-      this.changed(message, ['figures.jsonl']);
+      this.changed(message, ['figures.jsonl'], listed('removed', gone));
     });
   }
 
@@ -1226,8 +1265,9 @@ export class Store extends EventEmitter {
       const r = ImportRecordSchema.parse(record);
       const rel = `imports/${r.id.slice(4, 8)}/${r.id}.json`;
       await this.writeJson(rel, r);
+      const was = this.state.imports.find((i) => i.id === r.id);
       this.state.imports = [summarise(r, rel), ...this.state.imports.filter((i) => i.id !== r.id)];
-      this.changed(message, [rel, ...extraPaths]);
+      this.changed(message, [rel, ...extraPaths], { [was ? 'changed' : 'added']: 1, items: [{ id: r.id, op: was ? 'changed' : 'added', label: `${r.status} ${r.document.fileName}` }] });
     });
   }
 
@@ -1239,7 +1279,7 @@ export class Store extends EventEmitter {
       const rel = `proposals/${p.id.slice(5, 9)}/${p.id}.json`;
       await this.writeJson(rel, p);
       this.state.proposals = [summariseProposal(p, rel), ...this.state.proposals.filter((x) => x.id !== p.id)].sort(latestDecidedFirst);
-      this.changed(message, [rel]);
+      this.changed(message, [rel], { added: 1, items: [{ id: p.id, op: 'added', label: `${p.status} ${p.title}`.slice(0, 160) }] });
     });
   }
 }

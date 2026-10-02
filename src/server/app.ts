@@ -5,8 +5,9 @@ import path from 'node:path';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono, type Context } from 'hono';
 import { ZodError } from 'zod';
-import { JobRunner } from './agents/jobs';
+import { JobRunner, type JobRecord } from './agents/jobs';
 import { Analytics } from './analytics';
+import { AuditLog, auditRequests, DeviceNames, runAs } from './audit';
 import { Auth, loadSessionSecret } from './auth';
 import { categoriseInvestmentRows, refreshPlaces } from './enrich';
 import type { Config } from './config';
@@ -27,11 +28,13 @@ import { jobRoutes } from './routes/jobs';
 import { proposalRoutes } from './routes/proposals';
 import { recordRoutes } from './routes/records';
 import { receiptRoutes } from './routes/receipts';
+import { auditRoutes } from './routes/audit';
 import { systemRoutes } from './routes/system';
 import { tokenRoutes } from './routes/tokens';
 import { AgentTokens } from './tokens';
 import { authGate, csrfGuard, hostGuard, isPageRequest, securityHeaders } from './security';
-import type { ImportRecord } from '../shared/schema';
+import type { AuditActor } from '../shared/audit';
+import type { ImportRecord, Proposal } from '../shared/schema';
 import { Store, StoreError, type ChangeEvent } from './store';
 
 export interface CreateAppOptions {
@@ -56,30 +59,43 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
   if (config.production && !config.initData && !existsSync(path.join(config.dataDir, 'meta.json'))) {
     throw new Error(`No data directory at ${config.dataDir}. Check FINANCE_DATA_DIR, or set FINANCE_INIT_DATA=1 to create a new one.`);
   }
+  // Who did what, beside git's history: open first, so start-up's own changes are in it too.
+  const audit = AuditLog.open(path.join(config.workDir, 'audit'));
+  const startUp: AuditActor = { type: 'app', task: 'start-up' };
+  audit.record({ category: 'app', action: 'app.start', actor: startUp, summary: `Started finance ${opts.version}${opts.commit ? ` (${opts.commit})` : ''}`, details: { version: opts.version, ...(opts.commit ? { commit: opts.commit } : {}), pid: process.pid, dataDir: config.dataDir } });
   const migrated = await runMigrations(config.dataDir);
+  if (migrated) audit.record({ category: 'data', action: 'data.migrate', actor: startUp, summary: `Migrated the data from format v${migrated.from} to v${migrated.to}`, details: { from: migrated.from, to: migrated.to } });
   const store = await Store.open(config.dataDir, { watch: config.watch });
   const git = await GitCommitter.create(config.dataDir, () => store.settings.git.autoCommit, 2500, config.dataBranch);
-  store.on('change', (e: ChangeEvent) => git.queue(e));
-  if (migrated) await git.flush(`data: migrate format v${migrated.from} → v${migrated.to}`);
-  if (store.created) await git.flush('data: initialise data directory');
-  // Enrichment that follows the code: tidy addresses are worked out again from the merchant fields.
-  try {
-    if (await refreshPlaces(store)) await git.flush();
-  } catch (err) {
-    console.warn(`[data] merchant addresses were not tidied: ${(err as Error).message}`);
-  }
-  // …and investment rows nothing categorised get a category once the app knows the provider's words.
-  try {
-    if (await categoriseInvestmentRows(store)) await git.flush();
-  } catch (err) {
-    console.warn(`[data] investment rows were not categorised: ${(err as Error).message}`);
-  }
-  // …and funds in the latest holdings that have no instrument get one, whether or not agents are on.
-  try {
-    if (await recordInstrumentsFromHoldings(store)) await git.flush();
-  } catch (err) {
-    console.warn(`[data] funds were not recorded as instruments: ${(err as Error).message}`);
-  }
+  store.on('change', (e: ChangeEvent) => {
+    // The audit entry first, so the commit can name it.
+    e.auditSeq = audit.record({ category: 'data', action: 'data.change', summary: e.message, paths: e.paths, diff: e.diff, targets: e.diff?.items?.map((i) => i.id) ?? [] }).seq;
+    git.queue(e);
+  });
+  store.on('external', (paths: string[]) => audit.record({ category: 'data', action: 'data.external', actor: { type: 'outside' }, requestId: undefined, summary: `Files in the data changed outside the app (a hand edit, git or a script); reloaded`, paths }));
+  git.onCommit = (c) => audit.record({ category: 'data', action: 'git.commit', actor: { type: 'app', task: 'git' }, summary: `Committed ${c.hash}: ${c.subject}`, details: { hash: c.hash, subject: c.subject, changes: c.auditSeqs } });
+  await runAs(startUp, async () => {
+    if (migrated) await git.flush(`data: migrate format v${migrated.from} → v${migrated.to}`);
+    if (store.created) await git.flush('data: initialise data directory');
+    // Enrichment that follows the code: tidy addresses are worked out again from the merchant fields.
+    try {
+      if (await refreshPlaces(store)) await git.flush();
+    } catch (err) {
+      console.warn(`[data] merchant addresses were not tidied: ${(err as Error).message}`);
+    }
+    // …and investment rows nothing categorised get a category once the app knows the provider's words.
+    try {
+      if (await categoriseInvestmentRows(store)) await git.flush();
+    } catch (err) {
+      console.warn(`[data] investment rows were not categorised: ${(err as Error).message}`);
+    }
+    // …and funds in the latest holdings that have no instrument get one, whether or not agents are on.
+    try {
+      if (await recordInstrumentsFromHoldings(store)) await git.flush();
+    } catch (err) {
+      console.warn(`[data] funds were not recorded as instruments: ${(err as Error).message}`);
+    }
+  });
 
   const analytics = new Analytics(store);
   const work = new WorkArea(config.workDir);
@@ -114,7 +130,7 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
   // A proposal the data comes to say all of (an import got there first) closes as already done: one
   // that did while the app was stopped now, and from then on whenever the data changes.
   try {
-    await proposals.closeDone();
+    await runAs(startUp, () => proposals.closeDone());
   } catch (err) {
     console.warn(`[proposals] could not close the ones already done: ${(err as Error).message}`);
   }
@@ -124,6 +140,7 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
   // git), never in tests, scripts, the demo or a throwaway copy: they spend the owner's Claude plan.
   const runner = new JobRunner(store, analytics, config, { autoRun: config.watch && opts.inbox !== false && git.tracked, proposals });
   await runner.init();
+  auditLifecycles(audit, imports, runner, proposals);
   imports.on('update', (r: ImportRecord) => {
     // A document filed as adding nothing new has nothing for the analyst to look at.
     if (r.status === 'committed' && !r.result?.nothingNew) runner.onImportCommitted(r.id);
@@ -138,13 +155,16 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
 
   const tokens = AgentTokens.forWorkDir(config.workDir);
   await tokens.load();
+  const devices = config.auditDevices ? new DeviceNames() : undefined;
 
-  const ctx: AppContext = { config, store, analytics, imports, proposals, git, auth, oidc, inbox, jobs: runner, runner, tokens, version: opts.version };
+  const ctx: AppContext = { config, store, analytics, imports, proposals, git, auth, oidc, inbox, jobs: runner, runner, tokens, audit, devices, version: opts.version };
   const app = new Hono();
   const secOpts = { allowedHosts: config.allowedHosts, production: config.production };
 
   app.use('*', securityHeaders(secOpts));
   app.use('*', hostGuard(secOpts));
+  // Before the guards, so what they refuse is recorded too.
+  app.use('/api/*', auditRequests(audit, { auth, tokens, devices }));
   app.use('/api/*', csrfGuard());
   app.use('/api/*', authGate(auth, tokens));
   // With jemedia-auth, opening any page signed out goes straight to it. (The SPA does the same for
@@ -163,6 +183,7 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
   app.route('/api/proposals', proposalRoutes(ctx));
   app.route('/api/jobs', jobRoutes(ctx));
   app.route('/api/tokens', tokenRoutes(ctx));
+  app.route('/api/audit', auditRoutes(ctx));
   app.route('/api/documents', documentRoutes(ctx));
   app.route('/api', dataRoutes(ctx));
   app.route('/api', recordRoutes(ctx));
@@ -216,6 +237,91 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
       inbox?.stop();
       store.stopWatching();
       await git.flush();
+      audit.record({ category: 'app', action: 'app.stop', actor: { type: 'app', task: 'shut-down' }, summary: 'Stopped' });
+      audit.close();
     },
   };
+}
+
+const IMPORT_WORDS: Record<ImportRecord['status'], string> = {
+  queued: 'queued',
+  processing: 'being read',
+  needs_mapping: 'needs its columns mapped',
+  review: 'ready for review',
+  committed: 'committed',
+  failed: 'failed',
+  discarded: 'discarded',
+};
+
+/** Imports, jobs and proposals live in the work area: each change of state is an audit entry. */
+function auditLifecycles(audit: AuditLog, imports: ImportService, runner: JobRunner, proposals: ProposalService): void {
+  const importWas = new Map(imports.listPending().map((r) => [r.id, r.status]));
+  imports.on('update', (r: ImportRecord) => {
+    const was = importWas.get(r.id);
+    if (was === r.status) return;
+    importWas.set(r.id, r.status);
+    if (r.status === 'committed' || r.status === 'discarded') importWas.delete(r.id);
+    const res = r.result;
+    const error = r.status === 'failed' ? r.extraction.error : undefined;
+    const nothingNew = r.status === 'committed' && res?.nothingNew;
+    audit.record({
+      category: 'import',
+      action: `import.${r.status}`,
+      outcome: r.status === 'failed' ? 'failed' : 'ok',
+      summary: `Import ${r.document.fileName}: ${nothingNew ? 'filed, nothing new' : IMPORT_WORDS[r.status]}${error ? ` (${error.slice(0, 200)})` : ''}`,
+      targets: [r.id, r.document.id, ...(res?.accountIds ?? [])],
+      details: {
+        importId: r.id,
+        fileName: r.document.fileName,
+        size: r.document.size,
+        sha256: r.document.sha256,
+        origin: r.origin,
+        ...(was ? { from: was } : {}),
+        ...(r.extraction.engine ? { engine: r.extraction.engine } : {}),
+        ...(r.extraction.model ? { model: r.extraction.model } : {}),
+        ...(error ? { error } : {}),
+        ...(res ? { result: { accounts: res.accountIds, transactionsAdded: res.transactionsAdded, transactionsSkipped: res.transactionsSkipped, balancesAdded: res.balancesAdded, holdingsAdded: res.holdingsAdded, figuresAdded: res.figuresAdded, ...(res.nothingNew ? { nothingNew: res.nothingNew } : {}) } } : {}),
+      },
+    });
+  });
+
+  const jobWas = new Map(runner.list().map((j) => [j.id, j.status]));
+  runner.on('update', (j: JobRecord) => {
+    if (jobWas.get(j.id) === j.status) return;
+    jobWas.set(j.id, j.status);
+    const cost = j.costUsd !== undefined ? `, $${j.costUsd.toFixed(2)}` : '';
+    const words = { queued: 'queued', running: 'started', succeeded: `finished${cost}`, failed: `failed${cost}`, cancelled: 'cancelled' }[j.status];
+    audit.record({
+      category: 'job',
+      action: `job.${j.status}`,
+      outcome: j.status === 'failed' ? 'failed' : 'ok',
+      summary: `Agent job ${j.kind}: ${words}${j.status === 'succeeded' && j.summary ? `: ${j.summary}` : ''}${j.error ? ` (${j.error.slice(0, 200)})` : ''}`,
+      targets: [j.id, ...(j.written ?? []).map((w) => w.id)],
+      details: {
+        jobId: j.id,
+        kind: j.kind,
+        label: j.label,
+        trigger: j.trigger,
+        privacy: j.privacy,
+        promptVersion: j.promptVersion,
+        params: j.params,
+        ...(j.model ? { model: j.model } : {}),
+        ...(j.costUsd !== undefined ? { costUsd: j.costUsd } : {}),
+        ...(j.durationMs !== undefined ? { durationMs: j.durationMs } : {}),
+        ...(j.written?.length ? { written: j.written } : {}),
+        ...(j.error ? { error: j.error } : {}),
+      },
+    });
+  });
+
+  proposals.on('update', (p: Proposal) => {
+    const words = { pending: 'proposed', applied: `applied (${p.applied?.length ?? 0} of ${p.changes.length} changes)`, dismissed: 'dismissed', superseded: 'closed: your data already says it' }[p.status];
+    audit.record({
+      category: 'proposal',
+      action: `proposal.${p.status}`,
+      summary: `Proposal “${p.title}”: ${words}`,
+      targets: [p.id],
+      details: { proposalId: p.id, title: p.title, changes: p.changes.length, provenance: p.provenance, ...(p.applied ? { applied: p.applied } : {}) },
+    });
+  });
 }

@@ -4,6 +4,7 @@
 import { watch, type FSWatcher } from 'node:fs';
 import { mkdir, readdir, readFile, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
+import { runAs } from '../audit';
 import { ACCEPTED_EXTENSIONS } from './detect';
 import type { ImportService } from './service';
 
@@ -70,7 +71,7 @@ export class InboxWatcher {
     this.inFlight.add(name);
     try {
       const bytes = await readFile(file);
-      const res = await this.service.create({ fileName: name, bytes, lastModified: mtime.toISOString(), origin: 'inbox' });
+      const res = await runAs({ type: 'app', task: 'inbox folder' }, () => this.service.create({ fileName: name, bytes, lastModified: mtime.toISOString(), origin: 'inbox' }));
       if (res.record || res.duplicateOf) await rm(file, { force: true });
       this.lastError = undefined;
     } catch (err) {

@@ -113,6 +113,7 @@ async function main() {
     ['settings-rules', '/settings#rules'],
     ['settings-tax-documents', '/settings#tax-documents'],
     ['settings-access', '/settings#access'],
+    ['settings-audit', '/settings#audit'],
     ['settings-health', '/settings#health'],
   ];
   const problems: string[] = [];
@@ -158,6 +159,16 @@ async function main() {
   if (txs.total > 0 && (!only || 'transaction-drawer'.includes(only))) {
     await shoot('transaction-drawer', '/transactions', { width: 1440, height: 1500, theme: 'light', act: openDrawer });
     console.log('✓ transaction-drawer');
+  }
+  // The audit log with its latest entry open: who, from where, what it sent and changed.
+  const openEntry = async (page: Page) => {
+    const row = await page.$('main li > button[aria-expanded]');
+    if (!row) throw new Error('settings-audit-entry: no audit entry to open');
+    await row.click();
+  };
+  if (!only || 'settings-audit-entry'.includes(only)) {
+    await shoot('settings-audit-entry', '/settings#audit', { ...(mobile ? { width: 390, height: 1400, mobile: true } : { width: 1440, height: 1400 }), theme: dark ? 'dark' : 'light', act: openEntry });
+    console.log('✓ settings-audit-entry');
   }
   if (!only) {
     if (txs.total > 0) await shoot('transaction-drawer', '/transactions', { width: 390, height: 844, theme: 'dark', mobile: true, act: openDrawer });

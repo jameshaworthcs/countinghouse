@@ -27,6 +27,7 @@ import { sameTerms, type TermsContent } from '../shared/terms';
 import { AccountSchema, AgreementSchema, BalanceSnapshotSchema, CompanySchema, EmploymentSchema, ProposalSchema, TermsSchema, type Account, type Agreement, type BalanceSnapshot, type Company, type Terms, type Employment, type PensionArrangement, type Proposal, type ProposalInput, type ProposalStatus, type ProposedChange, type Provenance, type Transaction } from '../shared/schema';
 import { paidToText } from './analytics/agreements';
 import { BalanceEngine, type BalanceSource } from './analytics/balances';
+import { runAs } from './audit';
 import { categoriserFor } from './categoriser';
 import { atomicWrite, Mutex, nowISO } from './fsutil';
 import { balanceId, proposalId, termsId, transferGroupId } from './ids';
@@ -543,7 +544,7 @@ export class ProposalService extends EventEmitter {
   private sweepTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly onDataChanged = () => {
     clearTimeout(this.sweepTimer);
-    this.sweepTimer = setTimeout(() => void this.closeDone().catch((err: Error) => console.warn(`[proposals] could not close the ones already done: ${err.message}`)), SWEEP_AFTER_MS);
+    this.sweepTimer = setTimeout(() => void runAs({ type: 'app', task: 'closing proposals already done' }, () => this.closeDone()).catch((err: Error) => console.warn(`[proposals] could not close the ones already done: ${err.message}`)), SWEEP_AFTER_MS);
   };
 
   constructor(

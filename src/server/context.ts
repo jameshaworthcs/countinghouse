@@ -4,6 +4,7 @@ import type { Context } from 'hono';
 import { z } from 'zod';
 import type { JobRunner } from './agents/jobs';
 import type { Analytics } from './analytics';
+import type { AuditLog, DeviceNames } from './audit';
 import type { Auth } from './auth';
 import type { Config } from './config';
 import type { GitCommitter } from './git';
@@ -40,6 +41,10 @@ export interface AppContext {
   runner?: JobRunner | undefined;
   /** Agent access tokens (tokens.ts). */
   tokens: AgentTokens;
+  /** Who did what (audit.ts; Settings → Audit log). */
+  audit: AuditLog;
+  /** Names the tailnet device behind an address, when on. */
+  devices?: DeviceNames | undefined;
   version: string;
 }
 

@@ -19,6 +19,7 @@ import {
   type ImportRecord,
   type Transaction,
 } from '../../shared/schema';
+import { runAs } from '../audit';
 import { categoriserFor } from '../categoriser';
 import type { Config } from '../config';
 import { Limiter, nowISO, sha256 } from '../fsutil';
@@ -241,7 +242,8 @@ export class ImportService extends EventEmitter {
 
   private schedule(id: string, opts: ProcessOptions = {}): void {
     this.limiter.setLimit(this.store.settings.extraction.maxConcurrent);
-    void this.limiter.run(() => this.process(id, opts));
+    // Reading is the app's work (the audit log), whoever's upload queued it.
+    void this.limiter.run(() => runAs({ type: 'app', task: 'reading imports' }, () => this.process(id, opts)));
   }
 
   async reprocess(id: string, opts: ProcessOptions = {}): Promise<ImportRecord> {
