@@ -100,12 +100,14 @@ describe('naming imports', () => {
 
     const h = await history();
     expect(h.unnamed).toBe(0);
-    expect(h.items.map((i) => i.label)).toEqual([
+    // Both were committed within the same second here, which History's order leaves to their ids.
+    const items = [...h.items].sort((x, y) => y.fileName.localeCompare(x.fileName));
+    expect(items.map((i) => i.label)).toEqual([
       { text: 'October shop', setBy: 'owner' },
       { text: 'Example Bank current account statement, Sep 2026', setBy: 'agent' },
     ]);
     // The file name stays as it was, and either finds it.
-    expect(h.items.map((i) => i.fileName)).toEqual(['b.csv', 'a.csv']);
+    expect(items.map((i) => i.fileName)).toEqual(['b.csv', 'a.csv']);
     expect((await history('statement sep')).items.map((i) => i.id)).toEqual([a]);
     expect((await history('a.csv')).items.map((i) => i.id)).toEqual([a]);
     expect((await history('nothing like it')).total).toBe(0);
