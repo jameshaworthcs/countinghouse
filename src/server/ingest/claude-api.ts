@@ -2,10 +2,14 @@
 // in Settings). Images and PDFs are sent as content blocks, a spreadsheet as text; the reply is
 // constrained with structured outputs. Server-side refusal fallback is enabled so a policy decline is
 // retried on the recommended fallback model instead of failing the import.
+//
+// The session's transcript (sessions.ts) gets the request as sent (a file's bytes left out), each
+// content block as it completes, the final message, and its usage and cost.
 
 import { readFile } from 'node:fs/promises';
 import Anthropic from '@anthropic-ai/sdk';
 import type { BetaContentBlockParam } from '@anthropic-ai/sdk/resources/beta/messages/messages';
+import type { TranscriptSink } from '../sessions';
 import { normaliseExtraction } from './normalise';
 import type { EngineResult } from './engines';
 
@@ -32,6 +36,8 @@ export interface ApiOptions {
   signal?: AbortSignal | undefined;
   /** Tests only: stands in for the network. */
   fetch?: typeof fetch;
+  /** Where the session's events go as they arrive. */
+  transcript?: TranscriptSink | undefined;
 }
 
 export async function extractWithClaudeApi(opts: ApiOptions): Promise<EngineResult> {
@@ -59,19 +65,34 @@ export async function extractWithClaudeApi(opts: ApiOptions): Promise<EngineResu
 
   const model = apiModelId(opts.model);
   const started = Date.now();
-  const stream = client.beta.messages.stream(
-    {
-      model,
-      max_tokens: 64000,
-      betas: ['server-side-fallback-2026-07-01'],
-      fallbacks: 'default',
-      system: opts.systemPrompt,
-      output_config: { effort: opts.effort, format: { type: 'json_schema', schema: opts.schema } },
-      messages: [{ role: 'user', content }],
-    },
-    { signal: opts.signal },
-  );
-  const message = await stream.finalMessage();
+  const params = {
+    model,
+    max_tokens: 64000,
+    betas: ['server-side-fallback-2026-07-01'],
+    fallbacks: 'default' as const,
+    system: opts.systemPrompt,
+    output_config: { effort: opts.effort, format: { type: 'json_schema' as const, schema: opts.schema } },
+    messages: [{ role: 'user' as const, content }],
+  };
+  const sink = opts.transcript;
+  // The request as sent; the transcript leaves a file's base64 out (sessions.ts).
+  sink?.write({ type: 'finance.request', engine: 'claude-api', model: opts.model, effort: opts.effort, tools: [], systemPrompt: opts.systemPrompt, prompt: opts.userPrompt, schema: opts.schema, files: opts.files.map((f) => ({ name: f.path.split('/').pop(), mediaType: f.mediaType })), request: params });
+  const stream = client.beta.messages.stream(params, { signal: opts.signal });
+  if (sink) {
+    stream.on('streamEvent', (e) => {
+      if (e.type === 'message_start') sink.write({ type: 'system', subtype: 'init', model: e.message.model, id: e.message.id });
+    });
+    stream.on('contentBlock', (block) => sink.write({ type: 'finance.content_block', block }));
+  }
+  let message: Awaited<ReturnType<typeof stream.finalMessage>>;
+  try {
+    message = await stream.finalMessage();
+  } catch (err) {
+    sink?.write({ type: 'finance.api_error', error: (err as Error).message.slice(0, 2000) });
+    throw err;
+  }
+  sink?.write({ type: 'assistant', message });
+  if (message.stop_reason === 'refusal' || message.stop_reason === 'max_tokens') sink?.write({ type: 'result', subtype: message.stop_reason, model: message.model, stop_reason: message.stop_reason, usage: message.usage });
   if (message.stop_reason === 'refusal') {
     throw new Error(`Claude declined to process this document${message.stop_details?.category ? ` (${message.stop_details.category})` : ''}.`);
   }
@@ -99,5 +120,6 @@ export async function extractWithClaudeApi(opts: ApiOptions): Promise<EngineResu
   };
   const [pin, pout] = price[message.model] ?? price[model] ?? [0, 0];
   const costUsd = ((usage.input_tokens ?? 0) * pin + (usage.output_tokens ?? 0) * pout) / 1_000_000;
+  sink?.write({ type: 'result', subtype: 'success', model: message.model, stop_reason: message.stop_reason, usage, total_cost_usd: costUsd, duration_ms: Date.now() - started, num_turns: 1 });
   return { extraction, warnings, model: message.model, costUsd, durationMs: Date.now() - started };
 }

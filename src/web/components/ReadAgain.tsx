@@ -9,6 +9,7 @@ import { api, useApi, useApiMutation } from '../lib/api';
 import { useAppData } from '../lib/data';
 import { cn, formatDate, money } from '../lib/format';
 import { Badge, Button, Callout, Card, StatusBadge, tableClasses } from './ui';
+import { SessionsLink } from './SessionsLink';
 
 const KIND: Record<RereadRow['kind'], { label: string; tone: 'good' | 'warn' | 'info' | 'pending' }> = {
   same: { label: 'Same', tone: 'good' },
@@ -63,6 +64,12 @@ export function ReadAgainCard({ rec, currentVersion }: { rec: ImportRecord; curr
             Read {formatDate(r.finishedAt!.slice(0, 10))} with {r.layout ?? r.engineVersion}
             {r.model ? ` (${r.model.replace(/^claude-/, '')})` : ''}
             {r.costUsd ? `, $${r.costUsd.toFixed(2)}` : ''}. {differences.length ? `${differences.length} difference${differences.length === 1 ? '' : 's'}.` : 'Everything it read is as recorded.'}
+            {r.engine === 'claude-cli' || r.engine === 'claude-api' ? (
+              <>
+                {' '}
+                <SessionsLink of={r.importId}>What Claude did</SessionsLink>
+              </>
+            ) : null}
           </div>
           {r.notes.map((n) => (
             <Callout key={n} tone="neutral" className="text-[12.5px]">

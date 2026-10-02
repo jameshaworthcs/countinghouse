@@ -105,6 +105,8 @@ export interface ImportSummary {
   /** The name to find it by in History (ImportRecord.label), when it has one. */
   label?: ImportRecord['label'];
   result?: ImportRecord['result'];
+  /** How Claude read it: model, cost, timing and its check (the Claude sessions page, for imports read before transcripts were kept). */
+  reading?: Pick<ImportRecord['extraction'], 'model' | 'costUsd' | 'startedAt' | 'finishedAt' | 'durationMs' | 'verification'>;
   /**
    * The period each account's section covered (statement period, or the span of its rows), with
    * its opening and closing balances when read, and whether the start was printed (`fromStated`).
@@ -1351,6 +1353,9 @@ function summarise(r: ImportRecord, rel: string): ImportSummary {
     documentType: r.draft?.documentType,
     label: r.label,
     result: r.result,
+    ...(r.extraction.engine === 'claude-cli' || r.extraction.engine === 'claude-api'
+      ? { reading: { model: r.extraction.model, costUsd: r.extraction.costUsd, startedAt: r.extraction.startedAt, finishedAt: r.extraction.finishedAt, durationMs: r.extraction.durationMs, verification: r.extraction.verification } }
+      : {}),
     path: rel,
   };
 }

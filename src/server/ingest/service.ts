@@ -19,12 +19,14 @@ import {
   type ImportRecord,
   type Transaction,
 } from '../../shared/schema';
-import { runAs } from '../audit';
+import { currentActor, runAs } from '../audit';
 import { categoriserFor } from '../categoriser';
 import type { Config } from '../config';
 import { Limiter, nowISO, sha256 } from '../fsutil';
 import { balanceId, documentId, importId, transactionId } from '../ids';
 import { recordInstrumentsFromHoldings } from '../instruments';
+import type { SessionRecord } from '../../shared/sessions';
+import type { SessionLog } from '../sessions';
 import { StoreError, type ImportSummary, type Store } from '../store';
 import { extractWithClaudeApi } from './claude-api';
 import { extractWithClaudeCli } from './claude-cli';
@@ -104,6 +106,8 @@ export interface ProcessOptions {
    * spreadsheet that is not a list of payments is read by Claude (ingest/xlsx.ts, `looksLikeLedger`).
    */
   readAs?: 'document' | 'columns' | undefined;
+  /** Who asked for the reading, and why (its Claude sessions say so). Set by the service. */
+  startedBy?: SessionRecord['startedBy'] | undefined;
 }
 
 /**
@@ -131,6 +135,8 @@ export class ImportService extends EventEmitter {
     private readonly store: Store,
     private readonly config: Config,
     readonly work: WorkArea,
+    /** Where each Claude reading is recorded, with its transcript (sessions.ts). */
+    private readonly sessions?: SessionLog,
   ) {
     super();
     this.limiter = new Limiter(store.settings.extraction.maxConcurrent);
@@ -140,7 +146,7 @@ export class ImportService extends EventEmitter {
     await this.work.init();
     for (const r of await this.work.loadAll()) {
       this.pending.set(r.id, r);
-      if (r.status === 'queued' || r.status === 'processing') this.schedule(r.id);
+      if (r.status === 'queued' || r.status === 'processing') this.schedule(r.id, { startedBy: { actor: { type: 'app', task: 'start-up' }, reason: 'An upload not yet read when the app stopped' } });
     }
     for (const r of await this.work.loadRereads()) {
       // A reading the app stopped in the middle of is not coming back.
@@ -236,7 +242,8 @@ export class ImportService extends EventEmitter {
     if (kind === 'image') await describeCapture(record, input.bytes);
     await this.work.saveFile(record.document, input.bytes);
     await this.save(record);
-    this.schedule(record.id);
+    const from = { upload: 'Uploaded', inbox: 'Dropped in the inbox folder', cli: 'Queued with npm run import' }[input.origin];
+    this.schedule(record.id, { startedBy: { actor: currentActor(), reason: `${from}: ${record.document.fileName}` } });
     return { record };
   }
 
@@ -256,7 +263,7 @@ export class ImportService extends EventEmitter {
     delete record.draftEditedAt;
     delete record.mapping;
     await this.save(record);
-    this.schedule(id, opts);
+    this.schedule(id, { ...opts, startedBy: { actor: currentActor(), reason: `Read again before review${opts.readAs ? ` (as ${opts.readAs === 'document' ? 'a document' : 'columns'})` : ''}${opts.model ? ` with ${opts.model}` : ''}` } });
     return record;
   }
 
@@ -425,6 +432,7 @@ export class ImportService extends EventEmitter {
     signal: AbortSignal,
     scratchId: string = record.id,
     sheets?: Sheet[],
+    sessionKind: 'reading' | 'reread' = 'reading',
   ): Promise<{ result: EngineResult & { ocrText?: string; candidates?: { amounts: number[]; dates: string[] } }; engine: EngineId; engineVersion: string; verified?: Awaited<ReturnType<ImportService['verifyReading']>> | undefined }> {
     let result: EngineResult & { ocrText?: string; candidates?: { amounts: number[]; dates: string[] } };
     let engineVersion: string;
@@ -466,7 +474,26 @@ export class ImportService extends EventEmitter {
     const timeoutMs = settings.timeoutSeconds * 1000;
     // Everything the document prints, when that is turned on (prompt.ts, extract-14).
     const everything = settings.readEverything;
-    const readWith = async (m: string): Promise<EngineResult> => {
+    const engineVersionOf = () => (kind === 'sheet' ? `${XLSX_ENGINE_VERSION}+${promptVersion(everything)}` : promptVersion(everything));
+    // Each reading is a Claude session of its own, with its transcript (sessions.ts).
+    const readWith = async (m: string, role: 'first' | 'second' = 'first'): Promise<EngineResult> => {
+      const session = await this.sessions?.start({
+        kind: sessionKind,
+        title: `${role === 'first' ? (sessionKind === 'reread' ? 'Read again' : 'Read') : 'Check by a second reading of'} ${record.document.fileName}`,
+        role,
+        importId: record.id,
+        engine: chosen === 'claude-api' ? 'claude-api' : 'claude-cli',
+        model: m,
+        effort: settings.effort,
+        promptVersion: engineVersionOf(),
+        tools: chosen === 'claude-cli' ? ['Read'] : [],
+        privacy: 'personal',
+        ...(opts.startedBy ? { startedBy: opts.startedBy } : {}),
+      });
+      const read = (transcript: Parameters<typeof extractWithClaudeCli>[0]['transcript']) => readOnce(m, transcript);
+      return session ? session.run(read, signal) : read(undefined);
+    };
+    const readOnce = async (m: string, transcript: Parameters<typeof extractWithClaudeCli>[0]['transcript']): Promise<EngineResult> => {
       if (chosen === 'claude-cli') {
         if (!claudeBin) throw new Error('claude CLI not found');
         return extractWithClaudeCli({
@@ -479,6 +506,7 @@ export class ImportService extends EventEmitter {
           effort: settings.effort,
           timeoutMs,
           signal,
+          transcript,
         });
       }
       return extractWithClaudeApi({
@@ -491,6 +519,7 @@ export class ImportService extends EventEmitter {
         effort: settings.effort,
         timeoutMs,
         signal,
+        transcript,
       });
     };
     if (chosen === 'ocr') {
@@ -498,7 +527,7 @@ export class ImportService extends EventEmitter {
       engineVersion = OCR_ENGINE_VERSION;
     } else {
       result = await readWith(model);
-      engineVersion = kind === 'sheet' ? `${XLSX_ENGINE_VERSION}+${promptVersion(everything)}` : promptVersion(everything);
+      engineVersion = engineVersionOf();
       const verifyModel = opts.verifyModel !== undefined ? opts.verifyModel : settings.verifyModel;
       if (verifyModel && verifyModel !== model) {
         const checked = await this.verifyReading(record, result, { model, verifyModel, readWith, batch: await this.batchEvidence(record), sheets });
@@ -549,7 +578,8 @@ export class ImportService extends EventEmitter {
     if (!['claude-cli', 'claude-api', 'ocr'].includes(record.extraction.engine ?? '')) throw new StoreError('OFX, QIF and Santander text files are parsed the same way every time: there is nothing new to read them with.', 409);
     if (!this.store.settings.extraction.rereadDocuments) throw new StoreError('Reading stored documents again is off: turn it on in Settings → Import & extraction.', 409);
     await this.saveReread(reread);
-    void this.limiter.run(() => this.runReread(record, reread));
+    const startedBy = { actor: currentActor(), reason: 'Read a stored document again, to compare with what was recorded' };
+    void this.limiter.run(() => this.runReread(record, reread, startedBy));
     return reread;
   }
 
@@ -591,7 +621,7 @@ export class ImportService extends EventEmitter {
     }
   }
 
-  private async runReread(record: ImportRecord, reread: Reread): Promise<void> {
+  private async runReread(record: ImportRecord, reread: Reread, startedBy: SessionRecord['startedBy']): Promise<void> {
     const abort = new AbortController();
     try {
       const file = this.store.documentAbsPath(record.document.path!);
@@ -601,7 +631,7 @@ export class ImportService extends EventEmitter {
       // The account it went to, as if you had pinned the upload to it.
       const accountIds = record.result?.accountIds ?? [];
       const ctx: ImportRecord = { ...record, ...(accountIds.length === 1 ? { hintAccountId: accountIds[0] } : {}) };
-      const read = await this.readDocument(ctx, kind === 'xlsx' ? 'sheet' : kind, bytes, file, {}, abort.signal, `reread-${record.id}`);
+      const read = await this.readDocument(ctx, kind === 'xlsx' ? 'sheet' : kind, bytes, file, { startedBy }, abort.signal, `reread-${record.id}`, undefined, 'reread');
       const draft = read.verified?.draft ?? this.draftOf(ctx, read.result);
       const { sections, notes } = compareReading(this.store, record, draft);
       await this.saveReread({
@@ -881,7 +911,7 @@ export class ImportService extends EventEmitter {
    * checked against) the document is read again with the checking model, the two readings are
    * compared figure by figure, the better one is kept, and rows they disagree on are marked.
    */
-  private async verifyReading(record: ImportRecord, first: EngineResult, opts: { model: string; verifyModel: string; readWith: (m: string) => Promise<EngineResult>; batch?: BatchEvidence | undefined; sheets?: Sheet[] | undefined }) {
+  private async verifyReading(record: ImportRecord, first: EngineResult, opts: { model: string; verifyModel: string; readWith: (m: string, role: 'first' | 'second') => Promise<EngineResult>; batch?: BatchEvidence | undefined; sheets?: Sheet[] | undefined }) {
     const firstDraft = this.draftOf(record, first, opts.batch);
     const a1 = this.assess(record, firstDraft, first.warnings, opts.sheets);
     const firstModel = first.model ?? opts.model;
@@ -891,7 +921,7 @@ export class ImportService extends EventEmitter {
     const reasons = [...a1.problems, ...a1.unconfirmed.map((u) => `Nothing on the document confirms: ${u}`)];
     let second: EngineResult;
     try {
-      second = await opts.readWith(opts.verifyModel);
+      second = await opts.readWith(opts.verifyModel, 'second');
     } catch (err) {
       // Without a second reading the first stands; the review page says it is unchecked.
       return { result: first, draft: firstDraft, otherCostUsd: 0, alternative: undefined, verification: { method: 'second-reading' as const, firstModel, secondModel: opts.verifyModel, reasons, disagreements: [], kept: 'first' as const, error: (err as Error).message.slice(0, 300) } };

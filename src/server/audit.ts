@@ -82,6 +82,8 @@ export interface AuditQuery {
   limit?: number;
   /** Every entry, rather than one per action: a request's writes are folded into its own entry. */
   all?: boolean;
+  /** Entries about any of these ids: in what they concern, or the job or token that acted. */
+  about?: string[];
 }
 
 const GENESIS = '0'.repeat(64);
@@ -273,7 +275,10 @@ export class AuditLog {
 
   /** Every matching entry, newest first (export). */
   async *scan(q: AuditQuery = {}): AsyncGenerator<AuditEntry> {
-    const terms = (q.q ?? '').toLowerCase().split(/\s+/).filter(Boolean);
+    // "#123": that one entry, folded into a request or not.
+    const seqOnly = /^#(\d+)$/.exec((q.q ?? '').trim());
+    const seq = seqOnly ? Number(seqOnly[1]) : undefined;
+    const terms = seqOnly ? [] : (q.q ?? '').toLowerCase().split(/\s+/).filter(Boolean);
     const commits = new Map<number, string>();
     const fromMonth = q.from ? prevMonth(monthOf(q.from)) : undefined;
     const toMonth = q.to ? monthOf(q.to) : undefined;
@@ -296,14 +301,16 @@ export class AuditLog {
         const e = parseLine(line);
         if (!e) continue;
         if (q.before !== undefined && e.seq >= q.before) continue;
+        if (seq !== undefined && e.seq !== seq) continue;
         if (toMonth && month > toMonth) continue;
         const day = localDate(e.at);
         if (q.to && day > q.to) continue;
         if (q.from && day < q.from) continue;
-        if (!q.all && ((e.requestId && e.category !== 'request') || e.action === 'git.commit')) continue;
+        if (!q.all && seq === undefined && ((e.requestId && e.category !== 'request') || e.action === 'git.commit')) continue;
         if (q.categories?.length && !q.categories.includes(e.category)) continue;
         if (q.actors?.length && !q.actors.includes(e.actor.type)) continue;
         if (q.outcome && e.outcome !== q.outcome) continue;
+        if (q.about?.length && !concerns(e, q.about)) continue;
         const commit = commits.get(e.seq);
         if (commit) e.commit = commit;
         if (e.changes) for (const c of e.changes) if (commits.has(c.seq)) c.commit = commits.get(c.seq)!;
@@ -346,6 +353,13 @@ export class AuditLog {
     return { ok: problems.length === 0, entries, files: files.length, unreadable, problems };
   }
 
+}
+
+/** Whether an entry concerns one of these ids: a target, or the job or token that acted. */
+export function concerns(e: AuditEntry, ids: string[]): boolean {
+  const a = e.actor;
+  const actorId = a.type === 'job' ? a.jobId : a.type === 'token' ? a.tokenId : undefined;
+  return ids.some((id) => e.targets?.includes(id) || id === actorId);
 }
 
 // ─── Devices on the tailnet ──────────────────────────────────────────────────────────────────────
@@ -411,7 +425,7 @@ export function isAudited(method: string, pathname: string): boolean {
 }
 
 /** Account and card numbers (8 digits or more) keep their last 4, as the data does; NI numbers go. */
-function maskIdentifiers(s: string): string {
+export function maskIdentifiers(s: string): string {
   return withoutNiNumbers(s).replace(/\b\d(?: ?\d){7,}\b/g, (m) => `••••${m.replace(/ /g, '').slice(-4)}`);
 }
 

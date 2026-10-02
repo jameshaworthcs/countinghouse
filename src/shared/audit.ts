@@ -19,7 +19,7 @@ export type AuditActor =
 export type AuditActorType = AuditActor['type'];
 export const AUDIT_ACTOR_TYPES: AuditActorType[] = ['owner', 'token', 'job', 'app', 'outside', 'anonymous'];
 
-export const AUDIT_CATEGORIES = ['data', 'request', 'auth', 'import', 'job', 'proposal', 'token', 'app'] as const;
+export const AUDIT_CATEGORIES = ['data', 'request', 'auth', 'import', 'job', 'session', 'proposal', 'token', 'app'] as const;
 export type AuditCategory = (typeof AUDIT_CATEGORIES)[number];
 
 export type AuditOutcome = 'ok' | 'refused' | 'failed';
@@ -72,6 +72,8 @@ export interface AuditEntry {
   diff?: ChangeDiff;
   /** The git commit holding a data change (filled in when read, not stored on the entry). */
   commit?: string;
+  /** The Claude sessions it concerns (filled in when read, not stored on the entry). */
+  sessions?: { id: string; title: string }[];
   /** sha256(previous entry's hash + this entry without its hash): a removed or altered entry breaks the chain. */
   hash: string;
 }

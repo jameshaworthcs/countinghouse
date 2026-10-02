@@ -17,6 +17,7 @@ import { cn, fileSize, money, plural } from '../lib/format';
 import { importStatus } from './Import';
 import { ReadAgainCard } from '../components/ReadAgain';
 import { limitName, RatesList } from '../components/Terms';
+import { SessionsLink } from '../components/SessionsLink';
 
 type Rec = ImportRecord & { readiness?: { ready: boolean; reasons: string[] }; nothingNew?: NothingNewView };
 
@@ -1346,6 +1347,7 @@ export default function Review() {
             {rec.extraction.engine && <span>read by {rec.extraction.engine === 'csv' ? `CSV parser (${rec.extraction.detail})` : rec.extraction.engine === 'govuk' ? 'the gov.uk page reader' : rec.extraction.engine === 'payslip' ? 'the payslip reader, on this machine' : rec.extraction.engine}{rec.extraction.model ? ` · ${rec.extraction.model}` : ''}</span>}
             {rec.extraction.durationMs !== undefined && <span>· {(rec.extraction.durationMs / 1000).toFixed(1)}s</span>}
             {rec.extraction.costUsd !== undefined && <span>· ~${rec.extraction.costUsd.toFixed(3)}</span>}
+            {(rec.extraction.engine === 'claude-cli' || rec.extraction.engine === 'claude-api' || rec.status === 'processing' || rec.status === 'failed') && <SessionsLink of={rec.id}>{rec.status === 'processing' ? 'Watch Claude read it' : 'What Claude did'}</SessionsLink>}
             {draft?.confidence && <Badge tone={draft.confidence === 'high' ? 'good' : draft.confidence === 'medium' ? 'neutral' : 'warn'}>{draft.confidence} confidence</Badge>}
           </div>
         </div>

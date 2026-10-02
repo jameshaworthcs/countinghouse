@@ -60,6 +60,17 @@ export function useLiveUpdates(): void {
         void qc.invalidateQueries({ queryKey: ['import'] });
         void qc.invalidateQueries({ queryKey: ['summary'] });
       });
+      // A Claude session started, wrote to its transcript, or ended.
+      es.addEventListener('session', (ev) => {
+        let id: string | undefined;
+        try {
+          id = (JSON.parse((ev as MessageEvent<string>).data) as { id?: string }).id;
+        } catch {
+          // no id: refresh them all
+        }
+        void qc.invalidateQueries({ queryKey: ['sessions'] });
+        void qc.invalidateQueries({ queryKey: id ? ['session', id] : ['session'] });
+      });
       // An agent proposed a fix, or took one back.
       es.addEventListener('proposal', () => {
         void qc.invalidateQueries({ queryKey: ['proposals'] });

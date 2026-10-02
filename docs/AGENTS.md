@@ -315,6 +315,12 @@ Other behaviour:
   from the statement, not agent work. Researching them waits for agents.
 - **Job state** lives in the work area, not `data/`. Assumptions & research → Agent jobs shows
   what is due, queued, running and finished, with rerun and cancel.
+- **Every run is a Claude session** with its full transcript: the system prompt and prompt the job
+  sent, each turn, tool call and tool result, and the output. Its page lists what it wrote,
+  proposed or named, and its rows in the audit log (*Claude sessions*, linked from each job;
+  ARCHITECTURE.md, "Claude sessions"). An agent outside the app, with a token, is seen there by its
+  requests. A job that ends with nothing to do (`NothingToDo`) never runs Claude, so it has no
+  session.
 - **No repeats.** A job that succeeded for the same subject within the research staleness window
   (Settings → Agents, 90 days by default) is not started again by itself, even if it found nothing;
   a failed one waits a day. The owner can rerun either at any time.

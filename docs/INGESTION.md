@@ -116,7 +116,7 @@ ISA, LISA, SIPP or pension app go to the extraction engine chosen in Settings:
 
 | Engine | When | How |
 |---|---|---|
-| `claude-cli` | Default when the `claude` CLI is installed and logged in | `claude -p` with `--json-schema`, `--tools Read`, `--restricted` (file tools confined to the scratch directory), `--safe-mode`, `--no-session-persistence`, run in a scratch directory containing only the document |
+| `claude-cli` | Default when the `claude` CLI is installed and logged in | `claude -p` with `--json-schema`, `--tools Read`, `--restricted` (file tools confined to the scratch directory), `--safe-mode`, `--no-session-persistence`, `--output-format stream-json`, run in a scratch directory containing only the document. Each reading (the first, and the check) is a Claude session with its transcript (ARCHITECTURE.md, "Claude sessions") |
 | `claude-api` | When `ANTHROPIC_API_KEY` is set (or chosen) | Messages API with structured outputs (`output_config.format`), streaming, and `fallbacks: "default"` so a refusal is retried on the recommended fallback model |
 | `ocr` | Always available offline | tesseract / pdftotext; proposes the headline balance and candidate values, and parses statement-style lines using running balances to infer signs. Low confidence, so review carefully |
 

@@ -7,7 +7,9 @@ Browser (React SPA, TanStack Query)
 Hono server  (Node 24, tsx; 127.0.0.1:4750 live, 4760 in development)
    ├─ security: Host allow-list · CSRF (custom header + Origin) · auth gate · CSP
    ├─ AuditLog (audit.ts) ──► work area audit/<yyyy-mm>.jsonl: who did what, from where (Settings → Audit log)
-   ├─ routes/   auth · data (CRUD) · imports · proposals · analytics · records · jobs · system (SSE, git)
+   ├─ SessionLog (sessions.ts) ► every Claude run: work area sessions/<id>.json + its transcript beside its job,
+   │    import or receipt (/sessions, "Claude sessions" below)
+   ├─ routes/   auth · data (CRUD) · imports · proposals · analytics · records · jobs · sessions · system (SSE, git)
    ├─ Store ─────────────────► data/*.json(l)  (atomic writes, validation, quarantine, file watcher)
    │    └─ 'change' events ──► AuditLog, then GitCommitter ──► git commit -- data/   (debounced, pathspec-limited, main only)
    ├─ records.ts: the validated write path for assumptions, research, insights, context, instruments,
@@ -47,6 +49,7 @@ Source layout:
 | `src/server/agents/` | Agent jobs: the CLI runner, job kinds and prompts, the digest, the queue |
 | `src/server/records.ts` | The validated write path for agent-maintained records |
 | `src/server/audit.ts` | The audit log: who is acting (carried through async work), the request middleware, the hash-chained log, search and the chain check; `auditdiff.ts` says what a write changed, record by record |
+| `src/server/sessions.ts` | Claude sessions: each run's record and transcript in the work area, their caps and retention; `sessionviews.ts` lists them (with earlier ones and agents with tokens) and says what each produced |
 | `src/server/proposals.ts` | Fixes agents propose to your data, checked against it and applied only by you ([AGENTS.md §5](AGENTS.md)) |
 | `src/web/` | The React app: `pages/`, `components/` (UI kit, charts), `lib/` (API client, prefs, data context) |
 | `scripts/` | Demo data, import CLI, records CLI, validate, schema export, screenshots, set-password, deploy |
@@ -152,6 +155,8 @@ waiting for review, jobs, proposals waiting for you, tokens), sign-ins and refus
   - `auth`: signing in (password or jemedia-auth, refused attempts with why) and out.
   - `import`, `job`, `proposal`: each change of state of an import, an agent job (with its cost,
     what it wrote, or its error) and a proposed fix.
+  - `session`: each Claude session's start and end (`session.start`, `session.succeeded`,
+    `.failed`, `.cancelled`), with its model, cost and what it belongs to.
   - `token`: tokens made and revoked.
   - `app`: start (version, commit) and stop.
 - **Kept.** Append-only JSON lines, one file per month (UTC), in the work area's `audit/`
@@ -169,7 +174,81 @@ waiting for review, jobs, proposals waiting for you, tokens), sign-ins and refus
   commit), who, what, outcome and dates, newest first. By default one line per action: a request's
   writes are folded into its entry; *Each step separately* shows them all. `GET /api/audit/export`
   gives the same search as JSON lines, `GET /api/audit/verify` checks the chain. A token with
-  `read` can read the log, like everything else.
+  `read` can read the log, like everything else. `?q=#123` finds entry 123 alone (folded or not),
+  and `?about=<id>,…` keeps the entries that name one of the ids or whose job or token acted. Each
+  entry read carries the Claude sessions it concerns (`sessions`), and the log links to them.
+
+## Claude sessions
+
+Every time the app runs Claude is a session (`src/server/sessions.ts`), listed on its own page,
+`/sessions` (*Claude sessions*). The page is linked from Settings → Agents and Agent access, from
+Assumptions & research → Agent jobs, from each import's page and its *Read again* card, from a
+receipt's reading, and from the audit log. A session can belong to any of these, so it has a page
+and an address of its own, and links back to each.
+
+- **What is a session.** One run of an engine, through the `claude` CLI or the Messages API:
+  - an agent job (each kind; a job interrupted by a restart and run again is two);
+  - reading an upload: the first reading, and the check by a second model when there is one, each
+    a session. Reading again before review (reprocess) makes new sessions;
+  - reading a stored document again, for comparison (first reading and check);
+  - reading a receipt.
+  `claude --version`, which looks for the engine, is not a session. Neither is `eval/` (a
+  development tool that runs outside the app).
+- **Recorded as it runs.** The record (`sessions/<id>.json` in the work area) holds:
+  - who started it (the audit log's actor, carried from the upload, the request or the job's
+    queueing) and why;
+  - its kind, the job, import or receipt it belongs to, the engine, the model asked for and the one
+    that answered, effort, prompt version, tools and privacy class;
+  - status, start, end, turns, tokens and cost (from the engine's result event), and any error.
+- **The transcript** is a JSON-lines file beside what it belongs to: `jobs/<jobId>/`,
+  `imports/<importId>/`, `rereads/<importId>/` or `receipts/<receiptId>/`, as `<sessionId>.jsonl`.
+  Files are 0600 and directories 0700. It is never in `data/`, git or the server's log.
+  - The first event is what the app sent: system prompt, prompt, output schema, tools, model,
+    effort, and the files the run could read (names and sizes). For the API, it is the request as sent.
+  - Then every event the engine gave. The CLI runs with `--output-format stream-json --verbose`:
+    its init, each assistant turn (text, thinking, tool calls), each tool result, the final output
+    and the result with usage and cost. The API gives its content blocks as they complete, the
+    final message, then a result with usage and cost.
+  - Each event is written as it arrives. A running session's page shows them live: the record is
+    saved and a `session` event sent at most once a second.
+  - Claude Code keeps nothing itself (`--no-session-persistence`): this file is the only
+    transcript.
+- **What a transcript leaves out.** It holds what Claude saw, document contents included, except:
+  - a file's bytes (base64 images and PDFs), being the document itself, kept with the import;
+  - account and card numbers, which keep their last 4 digits (`maskIdentifiers`, as in the audit
+    log);
+  - strings over 200,000 characters, which are cut, and events over 1 MB, which are left out and
+    marked.
+- **Capped and kept for a time.**
+  - One transcript stops at 10 MB (`FINANCE_TRANSCRIPT_MAX_MB`) with a marker, but its final result
+    is still written.
+  - Transcripts are deleted 90 days after their session ends (`FINANCE_TRANSCRIPT_DAYS`).
+  - The oldest go first while all of them together pass 1 GB (`FINANCE_TRANSCRIPTS_TOTAL_MB`).
+  - A sweep runs at start-up and every 6 hours. The record stays and says when and why its
+    transcript went. The newest 5,000 records are kept.
+- **Before transcripts.** Sessions that ran before the app first kept them (`sessions/since`) are
+  listed from what their job, import, re-reading or receipt recorded: model, prompt version, timing
+  and cost (an earlier import's two readings are one row, with their cost together). Their page
+  shows that record as it is and says plainly that no transcript was kept. None is ever
+  reconstructed.
+- **Agents with your tokens** run outside the app, so the app sees only their requests. The token
+  use log is split into stretches of activity (a gap of 30 minutes ends one), each listed with its
+  requests, how many changed something or were refused, and its audit rows. They have no transcript.
+- **What it produced**, linked to where each thing lives:
+  - a job: the records it wrote (research, assumptions, insights, instruments, what you told the
+    app), the proposals it made, the note it read, the imports it named, its summary or error;
+  - a reading: the import, its extraction (kept, or stored beside it as the other reading, or
+    replaced by a later reading), the check, the draft, and what was committed;
+  - a re-reading: the comparison;
+  - a receipt: the lines it read, a proposed split.
+- **Audit log.** A session's start and end are entries of their own (category `session`, with
+  model, cost and outcome). A session's page lists those, and its job's, import's, receipt's or
+  token's rows (`about`); each opens in Settings → Audit log. The log, in turn, links every entry
+  that concerns a session (by its id, its job, import or receipt) to that session.
+- **API.** `GET /api/sessions` (the list, and how transcripts are kept), `GET /api/sessions/:id`
+  (one, with what it produced, its audit rows and related sessions), `GET
+  /api/sessions/:id/transcript?from=<n>` (events from the nth, for a page following a run). A
+  token with `read` can read them, like everything else.
 
 ## Ingestion pipeline
 
@@ -262,7 +341,7 @@ and a card in credit counts as cash.
 - React 19, React Router, TanStack Query with `keepPreviousData` (refetches never flash
   skeletons), and Tailwind v4 with CSS-variable tokens for light and dark.
 - Live updates come over server-sent events (`/api/events`): a `data` event invalidates queries,
-  and an `import` event refreshes the import queue.
+  an `import` event refreshes the import queue, and a `session` event a Claude session's page.
 - A page that fails to show gets `RouteError` (`components/RouteError.tsx`), never React Router's
   developer error page:
   - an ended session (a 401) goes to sign-in, coming back to the same page;
@@ -290,7 +369,7 @@ and a card in credit counts as cash.
   back to the top, as does any inner list marked `data-scroll-top`.
 - Pages: Overview, Accounts (+ detail), Transactions (virtualised), Spending, Projections,
   Investments & pensions, Tax year (Allowances, Self Assessment prep), Assumptions & research,
-  Import (+ Review), Settings, Login.
+  Import (+ Review), Claude sessions (+ one session; not in the sidebar), Settings, Login.
 
 ## Security model
 
@@ -332,7 +411,8 @@ and a card in credit counts as cash.
 - **Claude CLI extraction** runs with `--tools Read`, `--restricted` (file tools confined to the
   working directory), `--safe-mode` (no hooks, plugins, MCP or CLAUDE.md),
   `--no-session-persistence`, and non-essential traffic disabled, in a scratch directory holding
-  only that document.
+  only that document. Its streamed events go to the session's transcript in the work area (see
+  "Claude sessions"), with the document's bytes left out.
 - **Receipts** (`src/server/receipts.ts`) are read by Claude only when Settings → Import &
   extraction → "Read receipts with Claude" is on (off by default). They run the same way: `Read`
   only, in a scratch directory holding just the receipt. The prompt carries the payment's amount,

@@ -2,6 +2,7 @@
 
 import { ChevronDown, ChevronRight, Download, ShieldCheck } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
+import { Link, useSearchParams } from 'react-router';
 import { actorName, type AuditActor, type AuditEntry, type AuditResponse, type AuditVerifyResponse, type ChangeDiff, type FieldChanges } from '../../shared/audit';
 import { formatDate } from '../../shared/dates';
 import { api, qs, useApi } from '../lib/api';
@@ -25,16 +26,17 @@ const WHAT: [string, string][] = [
   ['auth', 'Signing in and out'],
   ['import', 'Imports'],
   ['job', 'Agent jobs'],
+  ['session', 'Claude sessions'],
   ['proposal', 'Proposed fixes'],
   ['token', 'Tokens'],
   ['app', 'App start and stop'],
 ];
 
-const CATEGORY_NAMES: Record<string, string> = { data: 'Data', request: 'Request', auth: 'Sign-in', import: 'Import', job: 'Job', proposal: 'Proposal', token: 'Token', app: 'App' };
+const CATEGORY_NAMES: Record<string, string> = { data: 'Data', request: 'Request', auth: 'Sign-in', import: 'Import', job: 'Job', session: 'Claude session', proposal: 'Proposal', token: 'Token', app: 'App' };
 const STEP = 100;
 
 /** "2 Oct 2026 14:03:07", in this browser's time. */
-function when(iso: string): string {
+export function when(iso: string): string {
   const d = new Date(iso);
   const p = (n: number) => String(n).padStart(2, '0');
   return `${formatDate(`${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`)} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
@@ -83,7 +85,7 @@ function Diff({ diff, onSearch }: { diff: ChangeDiff; onSearch: (q: string) => v
           {diff.items.map((it) => (
             <li key={`${it.op}-${it.id}`} className="min-w-0">
               <span className="text-ink-2">{OP_WORDS[it.op]}</span>{' '}
-              <button type="button" className="font-mono text-[12px] text-accent-ink hover:underline" onClick={() => onSearch(it.id)}>
+              <button type="button" className="font-mono text-[12px] text-accent hover:underline" onClick={() => onSearch(it.id)}>
                 {it.id}
               </button>
               {it.label && <span className="sensitive text-ink-2"> {it.label}</span>}
@@ -103,7 +105,7 @@ function Diff({ diff, onSearch }: { diff: ChangeDiff; onSearch: (q: string) => v
 /** A value you can click to search for everything else with it. */
 function Find({ children, q, onSearch, mono }: { children: ReactNode; q: string; onSearch: (q: string) => void; mono?: boolean }) {
   return (
-    <button type="button" title={`Search for ${q}`} className={cn('text-left text-accent-ink hover:underline', mono && 'font-mono text-[12px]')} onClick={() => onSearch(q)}>
+    <button type="button" title={`Search for ${q}`} className={cn('text-left text-accent hover:underline', mono && 'font-mono text-[12px]')} onClick={() => onSearch(q)}>
       {children}
     </button>
   );
@@ -179,10 +181,21 @@ function EntryDetails({ e, onSearch, onRequest }: { e: AuditEntry; onSearch: (q:
         ))}
       </span>,
     ]);
+  if (e.sessions?.length)
+    items.push([
+      'Claude sessions',
+      <span key="s" className="flex flex-col gap-0.5">
+        {e.sessions.map((s) => (
+          <Link key={s.id} to={`/sessions/${s.id}`} className="text-accent hover:underline">
+            {s.title}
+          </Link>
+        ))}
+      </span>,
+    ]);
   if (e.requestId)
     items.push([
       'Request id',
-      <button key="q" type="button" className="font-mono text-[12px] text-accent-ink hover:underline" onClick={() => onRequest(e.requestId!)}>
+      <button key="q" type="button" className="font-mono text-[12px] text-accent hover:underline" onClick={() => onRequest(e.requestId!)}>
         {e.requestId} (everything it did)
       </button>,
     ]);
@@ -204,6 +217,7 @@ function Row({ e, open, onToggle, onSearch, onRequest }: { e: AuditEntry; open: 
             {where && <span className="font-mono">{where}</span>}
             <Badge tone="muted">{CATEGORY_NAMES[e.category] ?? e.category}</Badge>
             {e.changes && e.changes.length > 0 && <span>{plural(e.changes.length, 'step')}</span>}
+            {e.sessions && e.sessions.length > 0 && <Badge tone="accent">{e.sessions.length === 1 ? 'Claude session' : `${e.sessions.length} Claude sessions`}</Badge>}
             {e.outcome === 'refused' && <StatusBadge status="warn">Refused</StatusBadge>}
             {e.outcome === 'failed' && <StatusBadge status="bad">Failed</StatusBadge>}
           </span>
@@ -215,7 +229,9 @@ function Row({ e, open, onToggle, onSearch, onRequest }: { e: AuditEntry; open: 
 }
 
 export function AuditLog() {
-  const [text, setText] = useState('');
+  // Opened from elsewhere (a Claude session's rows): Settings?audit=<search>#audit.
+  const [params] = useSearchParams();
+  const [text, setText] = useState(params.get('audit') ?? '');
   const [who, setWho] = useState('');
   const [what, setWhat] = useState('');
   const [outcome, setOutcome] = useState('');

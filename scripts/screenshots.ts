@@ -78,6 +78,9 @@ async function main() {
   // A proposed fix waiting, when the data has one.
   const proposals = (await (await fetch(`${base}/api/proposals`, { headers: { host: '127.0.0.1', cookie } })).json()) as { pending: { proposal: { id: string } }[] };
   const proposalId = proposals.pending[0]?.proposal.id;
+  // A Claude session with its transcript, when the data has one; else the first listed.
+  const sessions = (await (await fetch(`${base}/api/sessions`, { headers: { host: '127.0.0.1', cookie } })).json()) as { sessions: { id: string; source: string }[] };
+  const sessionId = (sessions.sessions.find((x) => x.source === 'recorded') ?? sessions.sessions[0])?.id;
   const accountPage = (name: string, type: string): [string, string][] => {
     const id = boot.accounts.find((a) => a.type === type)?.id;
     return id ? [[name, `/accounts/${id}`]] : [];
@@ -115,6 +118,8 @@ async function main() {
     ['settings-access', '/settings#access'],
     ['settings-audit', '/settings#audit'],
     ['settings-health', '/settings#health'],
+    ['sessions', '/sessions'],
+    ...(sessionId ? ([['session', `/sessions/${sessionId}`]] as [string, string][]) : []),
   ];
   const problems: string[] = [];
   type Page = Awaited<ReturnType<typeof browser.newPage>>;

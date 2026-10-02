@@ -16,7 +16,8 @@ import { LABEL_BATCH } from '../../shared/api';
 import { assumptionDef, AssumptionSet } from '../../shared/assumptions';
 import { addDays, diffDays, today } from '../../shared/dates';
 import type { Analytics } from '../analytics';
-import { runAs } from '../audit';
+import type { AuditActor } from '../../shared/audit';
+import { currentActor, runAs } from '../audit';
 import { latestResearch } from '../analytics/research';
 import type { Config } from '../config';
 import type { JobQueue } from '../context';
@@ -24,6 +25,7 @@ import { atomicWrite, nowISO, randomHex } from '../fsutil';
 import { detectEngines } from '../ingest/engines';
 import { recordInstrumentsFromHoldings } from '../instruments';
 import type { ProposalService } from '../proposals';
+import type { SessionLog } from '../sessions';
 import type { Store } from '../store';
 import { runAgent } from './claude';
 import { JOB_DEFS, JOB_KINDS, NothingToDo, outputJsonSchema, REFRESHABLE_KEYS, type JobKind } from './kinds';
@@ -48,6 +50,8 @@ export const JobRecordSchema = z.object({
   summary: z.string().optional(),
   written: z.array(z.object({ type: z.string(), id: z.string() })).optional(),
   error: z.string().optional(),
+  /** Who queued it, as the audit log names them (its Claude session says so). */
+  requestedBy: z.custom<AuditActor>((v) => typeof v === 'object' && v !== null && typeof (v as { type?: unknown }).type === 'string').optional(),
 });
 export type JobRecord = z.infer<typeof JobRecordSchema>;
 
@@ -64,6 +68,15 @@ const MAX_KEPT = 300;
 /** Jobs that research on the web: they start by themselves only when Settings → Agents allows it. */
 const RESEARCH_KINDS = new Set(['research-instrument', 'research-provider', 'refresh-assumptions']);
 const MAX_STALE_REFRESH_PER_DAY = 3;
+/** Why a job ran, in words (its Claude session). */
+export const TRIGGER_WORDS: Record<JobRecord['trigger'], string> = {
+  owner: 'You started it',
+  agent: 'An agent with one of your tokens started it',
+  'post-import': 'After imports were committed',
+  schedule: 'Due: started by the app',
+  stale: 'Research gone stale: started by the app',
+};
+
 /** Who starts the jobs the app starts by itself (the audit log). */
 const SCHEDULER = { type: 'app', task: 'agent scheduler' } as const;
 
@@ -109,7 +122,7 @@ export class JobRunner extends EventEmitter implements JobQueue {
      * autoRun: start due jobs by themselves. paused: queue jobs without running them (tests).
      * proposals: where a job proposes fixes for the owner to apply (JobContext.proposals).
      */
-    private readonly opts: { autoRun: boolean; paused?: boolean; proposals?: ProposalService } = { autoRun: true },
+    private readonly opts: { autoRun: boolean; paused?: boolean; proposals?: ProposalService; sessions?: SessionLog } = { autoRun: true },
   ) {
     super();
     this.dir = path.join(config.workDir, 'jobs');
@@ -194,6 +207,7 @@ export class JobRunner extends EventEmitter implements JobQueue {
       privacy: def.privacy,
       promptVersion: def.promptVersion,
       createdAt: nowISO(),
+      requestedBy: currentActor(),
     };
     void this.save(job).then(() => this.pump());
     return job;
@@ -307,18 +321,35 @@ export class JobRunner extends EventEmitter implements JobQueue {
       const { engines, claudeBin } = await detectEngines({ apiKey: this.config.anthropicApiKey });
       if (!claudeBin || !engines.find((e) => e.id === 'claude-cli')?.available) throw new Error('The claude CLI is not available; agent jobs need it.');
       const settings = this.store.settings.agents;
-      const res = await runAgent({
-        bin: claudeBin,
-        cwd: scratch,
-        prompt,
-        systemPrompt: def.systemPrompt,
-        schema: outputJsonSchema(def),
-        tools: def.tools,
+      // The run is a Claude session, with its transcript (sessions.ts).
+      const session = await this.opts.sessions?.start({
+        kind: 'job',
+        title: job.label,
+        jobKind: job.kind,
+        jobId: job.id,
+        engine: 'claude-cli',
         model: settings.model,
         effort: settings.effort,
-        timeoutMs: settings.timeoutSeconds * 1000,
-        signal,
+        promptVersion: def.promptVersion,
+        tools: def.tools,
+        privacy: def.privacy,
+        startedBy: { actor: job.requestedBy ?? currentActor(), reason: TRIGGER_WORDS[job.trigger] },
       });
+      const runOnce = (transcript: Parameters<typeof runAgent>[0]['transcript']) =>
+        runAgent({
+          bin: claudeBin,
+          cwd: scratch,
+          prompt,
+          systemPrompt: def.systemPrompt,
+          schema: outputJsonSchema(def),
+          tools: def.tools,
+          model: settings.model,
+          effort: settings.effort,
+          timeoutMs: settings.timeoutSeconds * 1000,
+          signal,
+          transcript,
+        });
+      const res = session ? await session.run(runOnce, signal) : await runOnce(undefined);
       const output = def.output.parse(res.output);
       const outcome = await def.apply(ctx, output, { setBy: 'agent', model: res.model, promptVersion: def.promptVersion, jobId: job.id });
       job = {

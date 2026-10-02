@@ -1465,3 +1465,39 @@ Later the same day, after the owner's first runs (`label-imports-2`):
 - **Not covered by name:** `npm run records`, hand edits and `git checkout` write `data/` from
   another process; the live app records them as changed outside the app, with the files, when its
   watcher sees them.
+
+## 2026-10-02: Claude sessions, with their transcripts
+
+- **Asked:** a section listing every Claude session the app runs, current and past, so the owner
+  can see exactly what each agent did. Each session should show what started it, its model,
+  timing and cost, its full transcript, everything it produced, and its audit rows, linked both
+  ways. Transcripts are to be captured from now on, for the API engine too, and earlier sessions
+  must never get a made-up one.
+- **A page of its own (`/sessions`), not a Settings tab or a panel on Agent jobs.**
+  - A session can belong to a job (Assumptions & research), an import (Import), a receipt
+    (Transactions) or a token (Settings), and the audit log points at all of them. No one page owns
+    them.
+  - Each session needs an address of its own, to link from the audit log, a job or an import, and
+    room for a long transcript. Settings' tabs are hash-addressed forms.
+  - It is not in the sidebar, which is about money. It is reached from Settings → Agents and Agent
+    access, Agent jobs, each import and receipt, and the audit log.
+- **Streamed, not rebuilt.** The CLI moved from `--output-format json` to `stream-json --verbose`.
+  Its last event is the same result as before, so nothing else changed. Each event is written as
+  it arrives, so a running session's page follows it.
+  - `--no-session-persistence` stays: Claude Code's own copy would sit in `~/.claude`, outside the
+    work area, the backup and the retention period.
+  - The API engine records the request and its reply the same way.
+- **In the work area, beside what it belongs to.** Transcripts hold document contents, so they get
+  the work area's protection (0600, never in `data/`, git or logs, in the encrypted backup). They
+  sit under the job's, import's or receipt's own directory, as the owner asked, with one small
+  record per session in `sessions/` so the list is cheap.
+- **What is left out.** A file's base64 bytes (the document is kept anyway, and a PDF would
+  multiply a transcript's size). Account and card numbers keep their last 4 digits, the data's own
+  rule, as in the audit log.
+- **Capped.** 10 MB per transcript (the final result always kept), 1 GB together (oldest first), 90
+  days. All three can be changed in `.env`, since they are operations, not modelling. The record
+  outlives its transcript and says when and why it went.
+- **Earlier sessions** come from what their job, import, re-reading or receipt recorded. An earlier
+  import's two readings stay one row: only their total cost was recorded.
+- **Token agents** run outside the app. Their requests (the token use log), cut into stretches by a
+  30-minute gap, stand in for a session, with no transcript.

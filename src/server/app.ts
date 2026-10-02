@@ -20,6 +20,7 @@ import { recordInstrumentsFromHoldings } from './instruments';
 import { runMigrations } from './migrations';
 import { LOGIN_PATH, OidcClient, oidcSettingsFromEnv } from './oidc';
 import { ProposalProblems, ProposalService } from './proposals';
+import { SessionLog, sessionLimitsFromEnv } from './sessions';
 import { analyticsRoutes } from './routes/analytics';
 import { authRoutes, safeNext } from './routes/auth';
 import { dataRoutes } from './routes/data';
@@ -28,6 +29,7 @@ import { jobRoutes } from './routes/jobs';
 import { proposalRoutes } from './routes/proposals';
 import { recordRoutes } from './routes/records';
 import { receiptRoutes } from './routes/receipts';
+import { sessionRoutes } from './routes/sessions';
 import { auditRoutes } from './routes/audit';
 import { systemRoutes } from './routes/system';
 import { tokenRoutes } from './routes/tokens';
@@ -101,7 +103,10 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
 
   const analytics = new Analytics(store);
   const work = new WorkArea(config.workDir);
-  const imports = new ImportService(store, config, work);
+  // Every Claude session the app runs, with its transcript, in the work area (sessions.ts).
+  const sessions = new SessionLog(config.workDir, sessionLimitsFromEnv(env), audit);
+  await sessions.init();
+  const imports = new ImportService(store, config, work, sessions);
   await imports.init();
   // Fixes agents propose (an agent with a token, or a job here) wait in the work area for the owner.
   const proposals = ProposalService.forWorkDir(store, config.workDir, () => git.flush());
@@ -140,7 +145,7 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
 
   // Agent jobs start on their own only in a watching (serving) instance over real data (tracked in
   // git), never in tests, scripts, the demo or a throwaway copy: they spend the owner's Claude plan.
-  const runner = new JobRunner(store, analytics, config, { autoRun: config.watch && opts.inbox !== false && git.tracked, ...(opts.pauseJobs ? { paused: true } : {}), proposals });
+  const runner = new JobRunner(store, analytics, config, { autoRun: config.watch && opts.inbox !== false && git.tracked, ...(opts.pauseJobs ? { paused: true } : {}), proposals, sessions });
   await runner.init();
   auditLifecycles(audit, imports, runner, proposals);
   imports.on('update', (r: ImportRecord) => {
@@ -159,7 +164,7 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
   await tokens.load();
   const devices = config.auditDevices ? new DeviceNames() : undefined;
 
-  const ctx: AppContext = { config, store, analytics, imports, proposals, git, auth, oidc, inbox, jobs: runner, runner, tokens, audit, devices, version: opts.version };
+  const ctx: AppContext = { config, store, analytics, imports, proposals, git, auth, oidc, inbox, jobs: runner, runner, tokens, audit, sessions, devices, version: opts.version };
   const app = new Hono();
   const secOpts = { allowedHosts: config.allowedHosts, production: config.production };
 
@@ -186,6 +191,7 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
   app.route('/api/jobs', jobRoutes(ctx));
   app.route('/api/tokens', tokenRoutes(ctx));
   app.route('/api/audit', auditRoutes(ctx));
+  app.route('/api/sessions', sessionRoutes(ctx));
   app.route('/api/documents', documentRoutes(ctx));
   app.route('/api', dataRoutes(ctx));
   app.route('/api', recordRoutes(ctx));
@@ -235,6 +241,7 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
     ctx,
     async close() {
       runner.stop();
+      sessions.stop();
       proposals.stop();
       inbox?.stop();
       store.stopWatching();

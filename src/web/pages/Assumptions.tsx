@@ -8,6 +8,7 @@ import { Badge, Button, Callout, Card, Dialog, EmptyState, Field, Input, Loading
 import { api, useApi, useApiMutation } from '../lib/api';
 import { useAppData } from '../lib/data';
 import { cn, formatDate, timeAgo } from '../lib/format';
+import { SessionsLink } from '../components/SessionsLink';
 
 type Tab = 'assumptions' | 'research' | 'about' | 'jobs';
 
@@ -49,6 +50,7 @@ interface JobView {
   privacy: 'public' | 'personal';
   promptVersion: string;
   createdAt: string;
+  startedAt?: string;
   durationMs?: number;
   model?: string;
   costUsd?: number;
@@ -726,6 +728,12 @@ function JobsTab() {
                     <div className="font-medium text-ink">{j.label}</div>
                     <div className="text-[12px] text-ink-3">
                       {j.privacy === 'public' ? 'Web research, public identifiers only' : 'Reads your data, no web access'} · queued {timeAgo(j.createdAt)} · {j.trigger}
+                      {j.status === 'running' && (
+                        <>
+                          {' · '}
+                          <SessionsLink of={j.id}>Watch it</SessionsLink>
+                        </>
+                      )}
                     </div>
                   </td>
                   <td className={tableClasses.td}>{j.status === 'running' ? <StatusBadge status="pending">Running</StatusBadge> : j.trigger !== 'owner' && !d.budget.open ? <Badge tone="muted">Waiting for budget</Badge> : j.trigger !== 'owner' && !d.autoResearch && RESEARCH_JOB_KINDS.has(j.kind) ? <Badge tone="muted">Waiting for you: Run now, or cancel</Badge> : <Badge tone="neutral">Queued</Badge>}</td>
@@ -740,7 +748,7 @@ function JobsTab() {
           </table>
         )}
       </Card>
-      <Card title="Finished" description="Each job’s records carry its id, model and prompt version. Override any output from the page it appears on." padded={false}>
+      <Card title="Finished" description={<>Each job’s records carry its id, model and prompt version. Override any output from the page it appears on. Every run’s transcript is on <SessionsLink />.</>} padded={false}>
         {!done.length ? (
           <div className="px-5 py-4 text-[13px] text-ink-3">No jobs have run yet.</div>
         ) : (
@@ -755,6 +763,12 @@ function JobsTab() {
                       {formatDate(j.createdAt.slice(0, 10))} · {j.trigger}
                       {j.durationMs !== undefined && ` · ${Math.round(j.durationMs / 1000)}s`}
                       {j.model && ` · ${j.model}`} · {j.promptVersion}
+                      {j.startedAt && (
+                        <>
+                          {' · '}
+                          <SessionsLink of={j.id}>What it did</SessionsLink>
+                        </>
+                      )}
                     </div>
                   </td>
                   <td className={tableClasses.td}>{j.status === 'succeeded' ? <StatusBadge status="good">Done</StatusBadge> : j.status === 'failed' ? <StatusBadge status="bad">Failed</StatusBadge> : <Badge tone="muted">{j.status}</Badge>}</td>

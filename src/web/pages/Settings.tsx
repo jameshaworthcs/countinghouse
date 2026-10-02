@@ -13,6 +13,7 @@ import { api, useApi, useApiMutation } from '../lib/api';
 import { useAppData } from '../lib/data';
 import { bandLabel, cn, money, timeAgo } from '../lib/format';
 import { Sorted } from '../lib/sort';
+import { SessionsLink } from '../components/SessionsLink';
 
 type Section = 'profile' | 'extraction' | 'categories' | 'rules' | 'tax-documents' | 'data' | 'access' | 'audit' | 'health';
 
@@ -207,7 +208,7 @@ function ExtractionForm() {
             </Field>
           </div>
           <div className="text-[12.5px] text-ink-3">
-            See what is queued, running or stale on <Link to="/assumptions#jobs" className="text-accent hover:underline">Assumptions &amp; research → Agent jobs</Link>.
+            See what is queued, running or stale on <Link to="/assumptions#jobs" className="text-accent hover:underline">Assumptions &amp; research → Agent jobs</Link>. Every session Claude has run (jobs, import readings, receipts) and what it did, with its transcript: <SessionsLink />.
           </div>
         </div>
       </Card>
@@ -1065,7 +1066,7 @@ function AgentAccess() {
           </div>
         )}
       </Card>
-      <Card title="Recent uses" description="The latest 30 requests made with a token, including refused ones." padded={false}>
+      <Card title="Recent uses" description={<>The latest 30 requests made with a token, including refused ones. Each agent’s activity, request by request: <SessionsLink>Claude sessions</SessionsLink>.</>} padded={false}>
         {d.uses.length === 0 ? (
           <p className="border-t border-line px-5 py-4 text-[13px] text-ink-3">No token has been used yet.</p>
         ) : (

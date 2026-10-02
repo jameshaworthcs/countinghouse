@@ -14,6 +14,8 @@ import { fromMinor } from '../shared/money';
 import { ReceiptSchema, type Receipt, type Transaction } from '../shared/schema';
 import { runAgent, type AgentRunOptions, type AgentRunResult } from './agents/claude';
 import type { Config } from './config';
+import { currentActor } from './audit';
+import type { SessionLog } from './sessions';
 import { nowISO, safeFileName, sha256 } from './fsutil';
 import { documentId } from './ids';
 import { resolveClaudeBin } from './ingest/claude-cli';
@@ -113,7 +115,7 @@ export type ReceiptReader = (opts: AgentRunOptions) => Promise<AgentRunResult>;
  * Read a receipt with Claude, when that is turned on: its lines, signed like the payment, each with
  * a suggested category. A proposal: the transaction does not change.
  */
-export async function readReceipt(store: Store, config: Config, id: string, opts: { reader?: ReceiptReader; bin?: string } = {}): Promise<Receipt> {
+export async function readReceipt(store: Store, config: Config, id: string, opts: { reader?: ReceiptReader; bin?: string; sessions?: SessionLog | undefined } = {}): Promise<Receipt> {
   const settings = store.settings.extraction;
   if (!settings.readReceipts) throw new StoreError('Reading receipts with Claude is off: turn it on in Settings → Import & extraction.', 409);
   const receipt = store.receipts.find((r) => r.id === id);
@@ -132,17 +134,34 @@ export async function readReceipt(store: Store, config: Config, id: string, opts
   await copyFile(store.documentAbsPath(receipt.document.path!), path.join(scratch, `receipt${ext}`));
   const stamp = nowISO();
   try {
-    const result = await (opts.reader ?? runAgent)({
-      bin,
-      cwd: scratch,
-      prompt: user,
-      systemPrompt: system,
-      schema: receiptJsonSchema(categories.map((c) => c.id)),
-      tools: ['Read'],
+    // The reading is a Claude session, with its transcript (sessions.ts).
+    const session = await opts.sessions?.start({
+      kind: 'receipt',
+      title: `Read a receipt for ${t.payee ?? t.description} on ${t.date}`,
+      receiptId: receipt.id,
+      transactionId: t.id,
+      engine: 'claude-cli',
       model: settings.model,
       effort: settings.effort,
-      timeoutMs: Math.min(settings.timeoutSeconds, 600) * 1000,
+      promptVersion: RECEIPT_PROMPT_VERSION,
+      tools: ['Read'],
+      privacy: 'personal',
+      startedBy: { actor: currentActor(), reason: 'Read the receipt attached to this payment' },
     });
+    const readOnce = (transcript: AgentRunOptions['transcript']) =>
+      (opts.reader ?? runAgent)({
+        bin,
+        cwd: scratch,
+        prompt: user,
+        systemPrompt: system,
+        schema: receiptJsonSchema(categories.map((c) => c.id)),
+        tools: ['Read'],
+        model: settings.model,
+        effort: settings.effort,
+        timeoutMs: Math.min(settings.timeoutSeconds, 600) * 1000,
+        transcript,
+      });
+    const result = session ? await session.run(readOnce) : await readOnce(undefined);
     const out = ReadingOutput.parse(result.output);
     const sign = t.amount < 0 ? -1 : 1;
     const known = new Set(categories.map((c) => c.id));

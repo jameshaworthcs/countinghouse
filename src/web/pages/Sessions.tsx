@@ -1,0 +1,604 @@
+// Claude sessions: every time the app ran Claude (agent jobs, readings of imports, reading stored
+// documents again, receipts), and agents with your tokens by their requests. One session shows what
+// started it, its transcript, everything it produced and its rows in the audit log
+// (src/server/sessions.ts, sessionviews.ts).
+
+import { ArrowLeft, ChevronDown, ChevronRight } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Link, useParams, useSearchParams } from 'react-router';
+import { actorName, type AuditEntry } from '../../shared/audit';
+import type { SessionDetail, SessionListResponse, SessionSummary, TranscriptResponse } from '../../shared/sessions';
+import { when } from '../components/Audit';
+import { Badge, Callout, Card, Checkbox, Field, Input, KeyValue, Loading, PageHeader, Select, StatusBadge, useDebounced } from '../components/ui';
+import { api, useApi } from '../lib/api';
+import { cn, fileSize, plural } from '../lib/format';
+
+const KIND_NAMES: Record<SessionSummary['kind'], string> = { job: 'Agent job', reading: 'Import reading', reread: 'Read again', receipt: 'Receipt', token: 'Agent with a token' };
+const ROLE_NAMES = { first: 'first reading', second: 'second reading (the check)' };
+const ENGINE_NAMES = { 'claude-cli': 'Claude Code CLI', 'claude-api': 'Claude API' };
+
+function duration(ms: number | undefined): string {
+  if (ms === undefined) return '';
+  if (ms < 1000) return `${ms} ms`;
+  const s = Math.round(ms / 1000);
+  return s < 120 ? `${s}s` : s < 7200 ? `${Math.round(s / 60)} min` : `${(s / 3600).toFixed(1)} h`;
+}
+
+const cost = (usd: number | undefined) => (usd === undefined ? '' : `$${usd < 0.01 && usd > 0 ? usd.toFixed(4) : usd.toFixed(2)}`);
+
+export function SessionStatus({ s }: { s: Pick<SessionSummary, 'status' | 'source'> }) {
+  if (s.status === 'running') return <StatusBadge status="pending">{s.source === 'token' ? 'Active' : 'Running'}</StatusBadge>;
+  if (s.status === 'failed') return <StatusBadge status="bad">Failed</StatusBadge>;
+  if (s.status === 'cancelled') return <Badge tone="muted">Cancelled</Badge>;
+  return <StatusBadge status="good">{s.source === 'token' ? 'Ended' : 'Done'}</StatusBadge>;
+}
+
+function TranscriptBadge({ s }: { s: SessionSummary }) {
+  if (s.transcript === 'kept') return null;
+  if (s.transcript === 'truncated') return <Badge tone="muted">Transcript cut at its cap</Badge>;
+  if (s.transcript === 'removed') return <Badge tone="muted">Transcript deleted</Badge>;
+  return <Badge tone="muted">{s.source === 'token' ? 'Requests only' : 'No transcript'}</Badge>;
+}
+
+function Facts({ s }: { s: SessionSummary }) {
+  return (
+    <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-ink-3">
+      <span className="whitespace-nowrap">{when(s.startedAt)}</span>
+      <Badge tone="neutral">{KIND_NAMES[s.kind]}</Badge>
+      <span>{s.startedBy}</span>
+      {s.model && <span className="font-mono">{s.model}</span>}
+      {s.promptVersion && <span className="font-mono">{s.promptVersion}</span>}
+      {s.durationMs !== undefined && <span>{duration(s.durationMs)}</span>}
+      {s.costUsd !== undefined && <span className="tabular">{cost(s.costUsd)}</span>}
+      {s.requests && (
+        <span>
+          {plural(s.requests.total, 'request')}
+          {s.requests.changes ? `, ${plural(s.requests.changes, 'change')}` : ''}
+          {s.requests.refused ? `, ${s.requests.refused} refused` : ''}
+        </span>
+      )}
+      <SessionStatus s={s} />
+      <TranscriptBadge s={s} />
+    </span>
+  );
+}
+
+function Row({ s }: { s: SessionSummary }) {
+  return (
+    <li className="border-t border-line">
+      <Link to={`/sessions/${s.id}`} className="flex items-start gap-3 px-5 py-3 hover:bg-panel-2/60">
+        <ChevronRight className="mt-0.5 size-4 shrink-0 text-ink-3" aria-hidden />
+        <span className="min-w-0 flex-1">
+          <span className="block text-[13px] break-words text-ink">
+            {s.title}
+            {s.role && <span className="text-ink-3"> · {ROLE_NAMES[s.role]}</span>}
+          </span>
+          <Facts s={s} />
+        </span>
+      </Link>
+    </li>
+  );
+}
+
+const STEP = 100;
+
+function SessionList() {
+  const [params, setParams] = useSearchParams();
+  const forId = params.get('for') ?? '';
+  const [text, setText] = useState('');
+  const [kind, setKind] = useState('');
+  const [status, setStatus] = useState('');
+  const [limit, setLimit] = useState(STEP);
+  const q = useDebounced(text.trim().toLowerCase(), 200);
+  const res = useApi<SessionListResponse>(['sessions'], '/sessions');
+  const d = res.data;
+  const rows = useMemo(
+    () =>
+      (d?.sessions ?? []).filter(
+        (s) =>
+          (!forId || [s.id, s.jobId, s.importId, s.receiptId, s.tokenId].includes(forId)) &&
+          (!kind || s.kind === kind) &&
+          (!status || s.status === status) &&
+          (!q || `${s.title} ${s.startedBy} ${s.reason ?? ''} ${s.model ?? ''} ${s.promptVersion ?? ''} ${s.id} ${s.jobKind ?? ''} ${s.jobId ?? ''} ${s.importId ?? ''}`.toLowerCase().includes(q)),
+      ),
+    [d, forId, kind, status, q],
+  );
+  const running = d?.sessions.filter((s) => s.status === 'running' && s.source !== 'token').length ?? 0;
+  const spent = rows.reduce((sum, s) => sum + (s.costUsd ?? 0), 0);
+  return (
+    <div>
+      <PageHeader title="Claude sessions" subtitle="Every time the app has run Claude, and agents using your tokens, with what each one did" />
+      <div className="flex flex-col gap-5">
+        {d && (
+          <Callout tone="neutral">
+            Transcripts include what Claude saw, document contents too, apart from the files’ own bytes. Account and card numbers keep only their last 4 digits. They’re kept in the work area beside their job or import, never in your data, git or logs. Each is deleted after {d.retention.days} days, and each is cut at {fileSize(d.retention.maxBytesPerSession)}. Together they’re held under {fileSize(d.retention.maxBytesTotal)}, oldest deleted first, and they use {fileSize(d.retention.bytes)} now. Sessions from before transcripts were kept show what their job, import or receipt recorded.
+          </Callout>
+        )}
+        <Card padded={false}>
+          <div className="grid gap-3 px-5 py-4 sm:grid-cols-3">
+            <Field label="Search" className="sm:col-span-3">
+              <Input type="search" value={text} onChange={(e) => setText(e.target.value)} placeholder="A file, a job, a model, a prompt version, an id…" />
+            </Field>
+            <Field label="Kind">
+              <Select value={kind} onChange={(e) => setKind(e.target.value)}>
+                <option value="">Every kind</option>
+                {Object.entries(KIND_NAMES).map(([v, l]) => (
+                  <option key={v} value={v}>
+                    {l}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Status">
+              <Select value={status} onChange={(e) => setStatus(e.target.value)}>
+                <option value="">Any</option>
+                <option value="running">Running</option>
+                <option value="succeeded">Done</option>
+                <option value="failed">Failed</option>
+                <option value="cancelled">Cancelled</option>
+              </Select>
+            </Field>
+          </div>
+          {forId && (
+            <div className="flex flex-wrap items-center gap-2 border-t border-line px-5 py-2.5 text-[12.5px] text-ink-2">
+              Only the sessions of <span className="font-mono">{forId}</span>
+              <button type="button" className="text-accent hover:underline" onClick={() => setParams({}, { replace: true })}>
+                Show all
+              </button>
+            </div>
+          )}
+          <p className="border-t border-line px-5 py-2.5 text-[12px] text-ink-3">
+            {d ? `${plural(rows.length, 'session')}${spent ? `, ${cost(spent)} at API prices` : ''}${running ? `; ${running} running now` : ''}.` : ''}
+          </p>
+          {!d ? (
+            res.error ? <Callout tone="bad" className="m-5">{res.error.message}</Callout> : <Loading />
+          ) : rows.length === 0 ? (
+            <p className="border-t border-line px-5 py-4 text-[13px] text-ink-3">{d.sessions.length ? 'Nothing matches.' : 'Claude has not been run yet.'}</p>
+          ) : (
+            <ul>
+              {rows.slice(0, limit).map((s) => (
+                <Row key={s.id} s={s} />
+              ))}
+            </ul>
+          )}
+          {rows.length > limit && (
+            <div className="border-t border-line px-5 py-3 text-[13px]">
+              <button type="button" className="text-accent hover:underline" onClick={() => setLimit((l) => l + STEP * 2)}>
+                Show older ({rows.length - limit} more)
+              </button>
+            </div>
+          )}
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+// ─── The transcript ──────────────────────────────────────────────────────────────────────────────
+
+type Ev = Record<string, unknown>;
+
+function Pre({ children, className }: { children: ReactNode; className?: string }) {
+  return <pre className={cn('sensitive max-h-[32rem] overflow-auto rounded-md bg-panel-2 p-2.5 font-mono text-[12px] whitespace-pre-wrap break-words text-ink', className)}>{children}</pre>;
+}
+
+/** Text for any value from a transcript. */
+const str = (v: unknown): string => (typeof v === 'string' ? v : typeof v === 'number' || typeof v === 'boolean' ? `${v}` : v === null || v === undefined ? '' : JSON.stringify(v));
+
+const json = (v: unknown) => (typeof v === 'string' ? v : JSON.stringify(v, null, 2));
+
+/** A block that opens when clicked: long things start closed. */
+function Fold({ title, open: start = false, children, tone }: { title: ReactNode; open?: boolean; children: ReactNode; tone?: 'bad' }) {
+  const [open, setOpen] = useState(start);
+  return (
+    <div>
+      <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className={cn('flex items-center gap-1.5 text-left text-[12.5px] font-medium hover:underline', tone === 'bad' ? 'text-bad-ink' : 'text-ink-2')}>
+        {open ? <ChevronDown className="size-3.5" aria-hidden /> : <ChevronRight className="size-3.5" aria-hidden />}
+        {title}
+      </button>
+      {open && <div className="mt-1.5">{children}</div>}
+    </div>
+  );
+}
+
+function Step({ label, at, children, tone }: { label: ReactNode; at?: unknown; children: ReactNode; tone?: 'muted' | 'bad' | 'accent' }) {
+  return (
+    <li className="flex flex-col gap-1 border-t border-line px-5 py-3 sm:flex-row sm:gap-3">
+      <div className={cn('shrink-0 text-[12px] sm:w-28', tone === 'bad' ? 'text-bad-ink' : tone === 'accent' ? 'text-accent' : 'text-ink-3')}>
+        <div className="font-medium">{label}</div>
+        {typeof at === 'string' && <div className="font-mono text-[11px] text-ink-3">{at.slice(11, 19)}</div>}
+      </div>
+      <div className="min-w-0 flex-1 text-[13px]">{children}</div>
+    </li>
+  );
+}
+
+/** A tool result's content: text, or blocks of text and files (a file's bytes are not kept). */
+function ResultContent({ content }: { content: unknown }) {
+  if (typeof content === 'string') return <Pre>{content}</Pre>;
+  if (Array.isArray(content))
+    return (
+      <div className="flex flex-col gap-1.5">
+        {content.map((b: Ev, i) =>
+          b.type === 'text' ? (
+            <Pre key={i}>{str(b.text)}</Pre>
+          ) : (
+            <div key={i} className="text-[12px] text-ink-3">
+              {str(b.type)}
+              {b.source && typeof b.source === 'object' ? `: ${str((b.source as Ev).media_type ?? '')} ${str((b.source as Ev).data ?? '')}` : ''}
+            </div>
+          ),
+        )}
+      </div>
+    );
+  return <Pre>{json(content)}</Pre>;
+}
+
+function ContentBlock({ b, at }: { b: Ev; at: unknown }) {
+  if (b.type === 'text') return <Step label="Claude" at={at}><Pre className="bg-transparent p-0 font-sans text-[13px]">{str(b.text)}</Pre></Step>;
+  if (b.type === 'thinking' || b.type === 'redacted_thinking')
+    return (
+      <Step label="Thinking" at={at} tone="muted">
+        {b.type === 'thinking' && str(b.thinking) ? (
+          <Fold title="Show its thinking">
+            <Pre>{str(b.thinking)}</Pre>
+          </Fold>
+        ) : (
+          <span className="text-[12.5px] text-ink-3">It thought first; the engine did not return the text.</span>
+        )}
+      </Step>
+    );
+  if (b.type === 'tool_use') {
+    const name = str(b.name);
+    if (name === 'StructuredOutput')
+      return (
+        <Step label="Final output" at={at} tone="accent">
+          <Fold title="The output it returned" open>
+            <Pre>{json(b.input)}</Pre>
+          </Fold>
+        </Step>
+      );
+    return (
+      <Step label={`Tool call: ${name}`} at={at} tone="accent">
+        <Pre>{json(b.input)}</Pre>
+      </Step>
+    );
+  }
+  if (b.type === 'tool_result')
+    return (
+      <Step label={b.is_error ? 'Tool error' : 'Tool result'} at={at} tone={b.is_error ? 'bad' : undefined}>
+        <Fold title={b.is_error ? 'What the tool said' : 'What the tool gave back'} tone={b.is_error ? 'bad' : undefined}>
+          <ResultContent content={b.content} />
+        </Fold>
+      </Step>
+    );
+  if (b.type === 'server_tool_use' || b.type === 'web_search_tool_result' || b.type === 'web_fetch_tool_result')
+    return (
+      <Step label={str(b.type).replace(/_/g, ' ')} at={at}>
+        <Fold title={str(b.name ?? b.type)}>
+          <Pre>{json(b)}</Pre>
+        </Fold>
+      </Step>
+    );
+  return (
+    <Step label={str(b.type)} at={at} tone="muted">
+      <Fold title="Show">
+        <Pre>{json(b)}</Pre>
+      </Fold>
+    </Step>
+  );
+}
+
+function Event({ e }: { e: Ev }) {
+  const at = e.at;
+  switch (e.type) {
+    case 'finance.request':
+      return (
+        <Step label="Sent by the app" at={at}>
+          <div className="flex flex-col gap-2">
+            <div className="text-[12.5px] text-ink-2">
+              {ENGINE_NAMES[e.engine as 'claude-cli'] ?? str(e.engine)}, model {str(e.model)}
+              {e.effort ? `, effort ${str(e.effort)}` : ''}; tools: {Array.isArray(e.tools) && e.tools.length ? e.tools.join(', ') : 'none'}
+              {Array.isArray(e.files) && e.files.length > 0 && <>; files it could read: {(e.files as Ev[]).map((f) => `${str(f.name)}${typeof f.bytes === 'number' ? ` (${fileSize(f.bytes)})` : ''}`).join(', ')}</>}
+            </div>
+            <Fold title="System prompt">
+              <Pre>{str(e.systemPrompt ?? '')}</Pre>
+            </Fold>
+            <Fold title="Prompt" open>
+              <Pre>{str(e.prompt ?? '')}</Pre>
+            </Fold>
+            {e.schema !== undefined && (
+              <Fold title="Output schema">
+                <Pre>{json(e.schema)}</Pre>
+              </Fold>
+            )}
+            {e.request !== undefined && (
+              <Fold title="The request as sent to the API">
+                <Pre>{json(e.request)}</Pre>
+              </Fold>
+            )}
+          </div>
+        </Step>
+      );
+    case 'system':
+      if (e.subtype === 'init')
+        return (
+          <Step label="Started" at={at} tone="muted">
+            <span className="text-[12.5px] text-ink-2">
+              {e.model ? `Model ${str(e.model)}` : 'Session started'}
+              {Array.isArray(e.tools) ? `; tools ${e.tools.length ? e.tools.join(', ') : 'none'}` : ''}
+              {e.permissionMode ? `; permissions ${str(e.permissionMode)}` : ''}
+            </span>
+          </Step>
+        );
+      return (
+        <Step label={`System: ${str(e.subtype ?? '')}`} at={at} tone="muted">
+          <Fold title="Show">
+            <Pre>{json(e)}</Pre>
+          </Fold>
+        </Step>
+      );
+    case 'assistant':
+    case 'user': {
+      const content = (e.message as Ev | undefined)?.content;
+      if (typeof content === 'string') return <Step label={e.type === 'user' ? 'Prompt' : 'Claude'} at={at}><Pre>{content}</Pre></Step>;
+      if (!Array.isArray(content)) return null;
+      return (
+        <>
+          {(content as Ev[]).map((b, i) => (
+            <ContentBlock key={i} b={b} at={at} />
+          ))}
+        </>
+      );
+    }
+    case 'finance.content_block':
+      return <ContentBlock b={e.block as Ev} at={at} />;
+    case 'result':
+      return (
+        <Step label={e.subtype === 'success' ? 'Finished' : `Ended: ${str(e.subtype ?? 'error')}`} at={at} tone={e.subtype === 'success' ? 'accent' : 'bad'}>
+          <div className="flex flex-col gap-2">
+            <span className="text-[12.5px] text-ink-2">
+              {[typeof e.num_turns === 'number' ? plural(e.num_turns, 'turn') : '', typeof e.duration_ms === 'number' ? duration(e.duration_ms) : '', typeof e.total_cost_usd === 'number' ? cost(e.total_cost_usd) : '', e.stop_reason ? `stopped: ${str(e.stop_reason)}` : ''].filter(Boolean).join(' · ')}
+            </span>
+            {e.structured_output !== undefined && (
+              <Fold title="The final output" open>
+                <Pre>{json(e.structured_output)}</Pre>
+              </Fold>
+            )}
+            {e.structured_output === undefined && typeof e.result === 'string' && e.result && <Pre>{e.result}</Pre>}
+            {e.usage !== undefined && (
+              <Fold title="Tokens used">
+                <Pre>{json(e.usage)}</Pre>
+              </Fold>
+            )}
+          </div>
+        </Step>
+      );
+    case 'finance.truncated':
+    case 'finance.omitted':
+      return (
+        <Step label="Left out" at={at} tone="muted">
+          <span className="text-ink-2">{e.type === 'finance.truncated' ? str(e.note) : `One ${str(e.was)} event of ${fileSize(Number(e.bytes))} was too big to keep.`}</span>
+        </Step>
+      );
+    case 'finance.error':
+    case 'finance.api_error':
+      return (
+        <Step label="Error" at={at} tone="bad">
+          <Pre>{str(e.error)}</Pre>
+        </Step>
+      );
+    case 'finance.stderr':
+    case 'finance.output':
+      return (
+        <Step label={e.type === 'finance.stderr' ? 'Error output' : 'Output'} at={at} tone="muted">
+          <Fold title="Show">
+            <Pre>{str(e.text)}</Pre>
+          </Fold>
+        </Step>
+      );
+    default:
+      return (
+        <Step label={str(e.type ?? 'Event')} at={at} tone="muted">
+          <Fold title="Show">
+            <Pre>{json(e)}</Pre>
+          </Fold>
+        </Step>
+      );
+  }
+}
+
+/** The engine's own bookkeeping (screen refreshes, token estimates, rate limits): hidden unless asked for. */
+const housekeeping = (e: Ev) => e.type === 'rate_limit_event' || (e.type === 'system' && (e.subtype === 'ui_invalidate' || e.subtype === 'thinking_tokens' || e.subtype === 'status'));
+
+/** The transcript so far; a running session's grows as its events arrive. */
+function useTranscript(id: string, total: number | undefined): { events: Ev[]; error?: string } {
+  const [state, setState] = useState<{ id: string; events: Ev[]; error?: string }>({ id, events: [] });
+  const busy = useRef(false);
+  const events = state.id === id ? state.events : [];
+  useEffect(() => {
+    if (total === undefined || busy.current || events.length >= total) return;
+    busy.current = true;
+    api<TranscriptResponse>(`/sessions/${id}/transcript?from=${events.length}`)
+      .then((t) => setState((s) => ({ id, events: [...(s.id === id ? s.events : []).slice(0, t.from), ...(t.events as Ev[])] })))
+      .catch((err: Error) => setState((s) => ({ ...s, id, error: err.message })))
+      .finally(() => {
+        busy.current = false;
+      });
+  }, [id, total, events.length]);
+  return { events, ...(state.id === id && state.error ? { error: state.error } : {}) };
+}
+
+function Transcript({ d }: { d: SessionDetail }) {
+  const r = d.record;
+  const { events, error } = useTranscript(d.session.id, r && !r.transcript.removed ? r.transcript.events : undefined);
+  const [all, setAll] = useState(false);
+  if (!r || r.transcript.removed) return null;
+  const hidden = events.filter(housekeeping).length;
+  const shown = all ? events : events.filter((e) => !housekeeping(e));
+  return (
+    <Card title="Transcript" description={`${plural(r.transcript.events, 'event')}, ${fileSize(r.transcript.bytes)}${r.transcript.truncated ? ': cut at its size cap (the final result is still in it)' : ''}. Kept in the work area at ${r.transcript.path}.`} padded={false}>
+      {error && <Callout tone="bad" className="mx-5 mb-4">{error}</Callout>}
+      {hidden > 0 && (
+        <div className="px-5 pb-3">
+          <Checkbox checked={all} onChange={setAll} label={`Show the engine’s bookkeeping too (${plural(hidden, 'event')}: screen refreshes, token estimates, rate limits)`} />
+        </div>
+      )}
+      <ol className="mt-3">
+        {shown.map((e, i) => (
+          <Event key={i} e={e} />
+        ))}
+      </ol>
+      {d.session.status === 'running' && (
+        <div className="flex items-center gap-2 border-t border-line px-5 py-3 text-[12.5px] text-ink-3">
+          <StatusBadge status="pending">Running</StatusBadge> New events appear here as they arrive.
+        </div>
+      )}
+    </Card>
+  );
+}
+
+// ─── One session ─────────────────────────────────────────────────────────────────────────────────
+
+function AuditRows({ entries }: { entries: AuditEntry[] }) {
+  if (!entries.length) return <p className="border-t border-line px-5 py-4 text-[13px] text-ink-3">No rows in the audit log.</p>;
+  return (
+    <ul>
+      {entries.map((e) => (
+        <li key={e.seq} className="border-t border-line px-5 py-2.5">
+          <Link to={`/settings?audit=${encodeURIComponent(`#${e.seq}`)}#audit`} className="block text-[13px] break-words text-accent hover:underline">
+            {e.summary}
+          </Link>
+          <span className="mt-0.5 flex flex-wrap gap-x-2 text-[12px] text-ink-3">
+            <span className="whitespace-nowrap">{when(e.at)}</span>
+            <span>{actorName(e.actor)}</span>
+            <span className="font-mono">#{e.seq}</span>
+            <span className="font-mono">{e.action}</span>
+            {e.outcome !== 'ok' && <StatusBadge status={e.outcome === 'refused' ? 'warn' : 'bad'}>{e.outcome === 'refused' ? 'Refused' : 'Failed'}</StatusBadge>}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function parentLinks(s: SessionSummary): [ReactNode, ReactNode][] {
+  const rows: [ReactNode, ReactNode][] = [];
+  if (s.jobId) rows.push(['Job', <Link key="j" to="/assumptions#jobs" className="font-mono text-[12px] text-accent hover:underline">{s.jobId}</Link>]);
+  if (s.importId) rows.push(['Import', <Link key="i" to={`/import/${s.importId}`} className="font-mono text-[12px] text-accent hover:underline">{s.importId}</Link>]);
+  if (s.receiptId) rows.push(['Receipt', <span key="r" className="font-mono text-[12px]">{s.receiptId}</span>]);
+  if (s.tokenId) rows.push(['Token', <Link key="t" to="/settings#access" className="font-mono text-[12px] text-accent hover:underline">{s.tokenId}</Link>]);
+  return rows;
+}
+
+function SessionPage({ id }: { id: string }) {
+  const res = useApi<SessionDetail>(['session', id], `/sessions/${encodeURIComponent(id)}`, { refetchInterval: 10_000 });
+  const d = res.data;
+  if (!d) return res.error ? <Callout tone="bad">{res.error.message}</Callout> : <Loading />;
+  const s = d.session;
+  const r = d.record;
+  const items: [ReactNode, ReactNode][] = [
+    ['Kind', `${KIND_NAMES[s.kind]}${s.jobKind ? `: ${s.jobKind}` : ''}${s.role ? `, ${ROLE_NAMES[s.role]}` : ''}`],
+    ['Started by', `${s.startedBy}${s.reason ? `. ${s.reason}` : ''}`],
+    ['Status', <SessionStatus key="st" s={s} />],
+    ['Started', when(s.startedAt)],
+  ];
+  if (s.finishedAt) items.push([s.source === 'token' ? 'Last request' : 'Ended', `${when(s.finishedAt)}${s.durationMs !== undefined ? ` (${duration(s.durationMs)})` : ''}`]);
+  if (s.engine) items.push(['Engine', ENGINE_NAMES[s.engine]]);
+  if (s.model) items.push(['Model', <span key="m" className="font-mono text-[12px]">{r && r.modelUsed && r.modelUsed !== r.model ? `${r.modelUsed} (asked for ${r.model})` : s.model}</span>]);
+  if (r?.effort) items.push(['Effort', r.effort]);
+  if (s.promptVersion) items.push(['Prompt version', <span key="p" className="font-mono text-[12px]">{s.promptVersion}</span>]);
+  if (r) items.push(['Tools', r.tools.length ? r.tools.join(', ') : 'none']);
+  if (r?.privacy) items.push(['Privacy', r.privacy === 'public' ? 'Public identifiers only, with web tools' : 'Your data, no web access']);
+  if (s.costUsd !== undefined) items.push(['Cost', `${cost(s.costUsd)} at API prices${s.source === 'earlier' && s.kind === 'reading' && s.title.includes('checked by') ? ' (both readings together)' : ''}`]);
+  if (r?.turns !== undefined) items.push(['Turns', str(r.turns)]);
+  if (r?.usage) items.push(['Tokens', (Object.entries(r.usage) as [string, number][]).map(([k, v]) => `${k.replace(/Tokens$/, '').replace(/([A-Z])/g, ' $1').toLowerCase()} ${v.toLocaleString()}`).join(' · ')]);
+  if (s.requests) items.push(['Requests', `${plural(s.requests.total, 'request')}: ${s.requests.changes} that changed something, ${s.requests.refused} refused`]);
+  items.push(...parentLinks(s));
+  items.push(['Session id', <span key="id" className="font-mono text-[12px]">{s.id}</span>]);
+  if (r?.error) items.push(['Error', <span key="e" className="text-bad-ink">{r.error}</span>]);
+  return (
+    <div>
+      <Link to="/sessions" className="mb-3 inline-flex items-center gap-1 text-[13px] text-ink-3 hover:text-ink">
+        <ArrowLeft className="size-3.5" aria-hidden /> Claude sessions
+      </Link>
+      <PageHeader title={s.title} subtitle={s.source === 'token' ? 'An agent outside the app, seen by its requests' : s.source === 'earlier' ? 'From before transcripts were kept' : undefined} />
+      <div className="flex flex-col gap-5">
+        <Card>
+          <KeyValue items={items} />
+        </Card>
+        {d.noTranscript && <Callout tone="neutral" title="No transcript">{d.noTranscript}</Callout>}
+        {d.recorded && (
+          <Card title="What was recorded" description="As its job, import or receipt recorded it at the time.">
+            <Pre>{json(d.recorded)}</Pre>
+          </Card>
+        )}
+        {s.source !== 'token' && (
+          <Card title="What it produced" description="Each thing this session made, and where it lives now." padded={false}>
+            {d.produced.length === 0 ? (
+              <p className="border-t border-line px-5 py-4 text-[13px] text-ink-3">{s.status === 'running' ? 'Nothing yet: it is still running.' : 'Nothing.'}</p>
+            ) : (
+              <ul>
+                {d.produced.map((o, i) => (
+                  <li key={i} className="flex flex-wrap items-baseline gap-x-2 border-t border-line px-5 py-2.5 text-[13px]">
+                    <Badge tone="neutral">{o.type}</Badge>
+                    {o.href ? (
+                      <Link to={o.href} className="sensitive min-w-0 break-words text-accent hover:underline">
+                        {o.label}
+                      </Link>
+                    ) : (
+                      <span className="sensitive min-w-0 break-words">{o.label}</span>
+                    )}
+                    {o.note && <span className="text-[12px] text-ink-3">{o.note}</span>}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+        )}
+        {d.requests && (
+          <Card title="Its requests" description="From the token use log: every request it made to the app, refused ones included." padded={false}>
+            <ul>
+              {d.requests.map((u, i) => (
+                <li key={i} className="flex flex-wrap items-baseline gap-x-3 border-t border-line px-5 py-2 text-[12.5px]">
+                  <span className="font-mono text-[11.5px] text-ink-3">{u.at.slice(11, 19)}</span>
+                  <span className="font-mono break-all">
+                    {u.method} {u.path}
+                  </span>
+                  {u.status < 400 ? <StatusBadge status="good">{u.status}</StatusBadge> : <StatusBadge status="bad">{u.status}</StatusBadge>}
+                </li>
+              ))}
+            </ul>
+          </Card>
+        )}
+        <Transcript d={d} />
+        <Card
+          title="In the audit log"
+          description={s.source === 'token' ? 'What its requests did, in this stretch of activity.' : `This session’s own rows, and those of its ${s.kind === 'job' ? 'job' : s.kind === 'receipt' ? 'receipt' : 'import'}. Open one to see it in Settings → Audit log.`}
+          actions={
+            <Link to={`/settings?audit=${encodeURIComponent(s.source === 'recorded' ? s.id : (s.jobId ?? s.importId ?? s.receiptId ?? s.tokenId ?? s.id))}#audit`} className="text-[12.5px] text-accent hover:underline">
+              Search the audit log
+            </Link>
+          }
+          padded={false}
+        >
+          <AuditRows entries={d.audit} />
+        </Card>
+        {d.related.length > 0 && (
+          <Card title={`Other sessions of this ${s.kind === 'job' ? 'job' : s.kind === 'receipt' ? 'receipt' : 'import'}`} padded={false}>
+            <ul>
+              {d.related.map((x) => (
+                <Row key={x.id} s={x} />
+              ))}
+            </ul>
+          </Card>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default function Sessions() {
+  const { id } = useParams();
+  return id ? <SessionPage id={id} /> : <SessionList />;
+}

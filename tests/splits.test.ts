@@ -114,7 +114,9 @@ describe('receipts', () => {
     await store.setSettings({ ...store.settings, extraction: { ...store.settings.extraction, readReceipts: true } });
     const read = await readReceipt(store, config, r.id, {
       bin: '/bin/false',
+      sessions: app.ctx.sessions,
       reader: (opts) => {
+        opts.transcript?.write({ type: 'result', subtype: 'success', total_cost_usd: 0.04 });
         // Only the receipt goes in the scratch directory, and only Read is allowed.
         expect(opts.tools).toEqual(['Read']);
         expect(opts.prompt).toMatch(/payment of £60\.00 on 2026-09-12/);
@@ -133,6 +135,10 @@ describe('receipts', () => {
       { category: 'home-garden', amount: -12 },
     ]);
     expect(store.transaction(shopId)!.splits).toBeUndefined();
+    // The reading is a Claude session, its transcript beside the receipt in the work area.
+    const [session] = app.ctx.sessions.list();
+    expect(session).toMatchObject({ kind: 'receipt', receiptId: r.id, transactionId: shopId, status: 'succeeded', costUsd: 0.04, promptVersion: 'receipt-1' });
+    expect(session!.transcript.path).toBe(path.join('receipts', r.id, `${session!.id}.jsonl`));
   });
 
   it('a reading that fails says why; taking a receipt off removes its file', async () => {

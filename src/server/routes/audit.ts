@@ -6,6 +6,7 @@ import { AUDIT_ACTOR_TYPES, AUDIT_CATEGORIES, type AuditActorType, type AuditCat
 import type { AuditQuery } from '../audit';
 import { queryDate, type AppContext } from '../context';
 import { nowISO } from '../fsutil';
+import { sessionIndex, sessionsOfEntry } from '../sessionviews';
 
 const EXPORT_MAX = 200_000;
 
@@ -33,6 +34,8 @@ function queryOf(c: Context): AuditQuery {
   const limit = Number(c.req.query('limit'));
   if (Number.isInteger(limit) && limit > 0) q.limit = limit;
   if (c.req.query('all') === '1') q.all = true;
+  const about = (c.req.query('about') ?? '').split(',').map((x) => x.trim()).filter(Boolean).slice(0, 10);
+  if (about.length) q.about = about;
   return q;
 }
 
@@ -41,6 +44,12 @@ export function auditRoutes(ctx: AppContext): Hono {
 
   app.get('/', async (c) => {
     const page = await ctx.audit.query(queryOf(c));
+    // Each entry's Claude sessions, so the log links to them.
+    const index = await sessionIndex(ctx);
+    for (const e of page.entries) {
+      const sessions = sessionsOfEntry(index, e);
+      if (sessions.length) e.sessions = sessions;
+    }
     return c.json({ ...page, status: ctx.audit.status() } satisfies AuditResponse);
   });
 

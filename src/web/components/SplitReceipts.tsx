@@ -11,6 +11,7 @@ import { useAppData } from '../lib/data';
 import { cn, formatDate, money } from '../lib/format';
 import { CategorySelect } from './TransactionList';
 import { Badge, Button, Callout, Input, Money, useToast } from './ui';
+import { SessionsLink } from './SessionsLink';
 
 type Line = { category: string | undefined; amount: string; note: string };
 
@@ -171,7 +172,7 @@ export function ReceiptsSection({ tx, onPropose }: { tx: Transaction; onPropose:
                 <div className="text-[12px] text-ink-3">
                   Read by Claude ({r.reading.model.replace(/^claude-/, '')}): {r.reading.merchant ?? 'shop not read'}
                   {r.reading.date ? `, ${formatDate(r.reading.date)}` : ''}
-                  {r.reading.total !== null ? `, total ${money(r.reading.total)}` : ''}. A reading, not a record: nothing changes until you save a split.
+                  {r.reading.total !== null ? `, total ${money(r.reading.total)}` : ''}. A reading, not a record: nothing changes until you save a split. <SessionsLink of={r.id}>What Claude did</SessionsLink>
                 </div>
                 <ul className="flex flex-col gap-0.5">
                   {r.reading.lines.map((l, i) => (

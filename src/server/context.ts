@@ -12,6 +12,7 @@ import type { InboxWatcher } from './ingest/inbox';
 import type { ImportService } from './ingest/service';
 import type { OidcClient } from './oidc';
 import type { ProposalService } from './proposals';
+import type { SessionLog } from './sessions';
 import { StoreError, type Store } from './store';
 import type { AgentTokens } from './tokens';
 
@@ -43,6 +44,8 @@ export interface AppContext {
   tokens: AgentTokens;
   /** Who did what (audit.ts; Settings → Audit log). */
   audit: AuditLog;
+  /** Every Claude session the app runs, with its transcript (sessions.ts). */
+  sessions: SessionLog;
   /** Names the tailnet device behind an address, when on. */
   devices?: DeviceNames | undefined;
   version: string;
