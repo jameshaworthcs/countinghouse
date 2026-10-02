@@ -15,7 +15,7 @@ import { addDays, addMonths, diffDays, endOfMonth, today, type ISODate } from '.
 import { fromMinor, toMinor } from '../../shared/money';
 import type { Account } from '../../shared/schema';
 import type { Store } from '../store';
-import type { BalanceEngine } from './balances';
+import { lastUpdated, type BalanceEngine } from './balances';
 
 /** Sampling dates for a chart over [from, to]: daily, weekly or month-ends depending on span. */
 export function sampleDates(from: ISODate, to: ISODate): ISODate[] {
@@ -143,7 +143,7 @@ export function estateSeries(store: Store, engine: BalanceEngine, from: ISODate,
 export function accountSummary(store: Store, engine: BalanceEngine, account: Account, on: ISODate = today()): AccountSummary {
   const meta = ACCOUNT_TYPE_META[account.type];
   const latest = engine.latest(account.id, on);
-  const asOf = engine.lastDataDate(account.id);
+  const asOf = lastUpdated(store, engine, account.id);
   const staleDays = asOf ? diffDays(asOf, on) : null;
   const info = engine.info(account.id);
   const monthEnds: ISODate[] = [];

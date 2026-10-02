@@ -209,6 +209,16 @@ export function fxRate(currency: string, settings: Settings): number | null {
   return settings.fx[currency] ?? null;
 }
 
+/**
+ * Newest date with any data for an account, for "last updated" and staleness: its balance data, or
+ * HMRC's State Pension forecast on it, which is a yearly update with no balance (docs/FORMULAS.md §9).
+ */
+export function lastUpdated(store: Pick<Store, 'hmrc'>, engine: BalanceEngine, accountId: string): ISODate | null {
+  let last = engine.lastDataDate(accountId);
+  for (const r of store.hmrc) if (r.type === 'state-pension-forecast' && r.accountId === accountId && (!last || r.asOf > last)) last = r.asOf;
+  return last;
+}
+
 export class BalanceEngine {
   private readonly data = new Map<string, AccountData>();
 

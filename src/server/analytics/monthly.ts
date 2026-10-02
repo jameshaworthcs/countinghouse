@@ -5,7 +5,7 @@ import type { MonthlyChecklistResponse, MonthlyItem } from '../../shared/api';
 import { addDays, diffDays, monthKey, startOfMonth, today } from '../../shared/dates';
 import type { Account } from '../../shared/schema';
 import type { Store } from '../store';
-import type { BalanceEngine } from './balances';
+import { lastUpdated, type BalanceEngine } from './balances';
 
 /** How to get a statement export out of each provider's app or website. */
 const TIPS: Record<string, string> = {
@@ -57,7 +57,7 @@ export function monthlyChecklist(store: Store, engine: BalanceEngine): MonthlyCh
   const items: MonthlyItem[] = [];
   for (const a of store.accounts.filter((x) => x.status === 'open')) {
     const want = wantFor(a);
-    const last = engine.lastDataDate(a.id);
+    const last = lastUpdated(store, engine, a.id);
     // Monthly accounts are current once data reaches (nearly) the end of last month; yearly ones
     // once they are under a year old.
     let status: MonthlyItem['status'];

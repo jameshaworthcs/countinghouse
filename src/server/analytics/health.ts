@@ -8,7 +8,7 @@ import { addDays, diffDays, today } from '../../shared/dates';
 import { fromMinor, toMinor } from '../../shared/money';
 import { fscsDepositLimit } from '../../shared/uk';
 import type { Store } from '../store';
-import type { BalanceEngine } from './balances';
+import { lastUpdated, type BalanceEngine } from './balances';
 import { classifyFlow } from './cashflow';
 
 const DEPOSIT_TYPES = new Set(['current', 'savings', 'cash_isa']);
@@ -47,7 +47,7 @@ export function dataHealth(store: Store, engine: BalanceEngine): DataHealthRespo
     for (const g of engine.gaps(a.id)) gaps.push({ accountId: a.id, name: a.name, ...g });
     const info = engine.info(a.id);
     if (balanceModeOf(a) === 'ledger' && info && info.anchors === 0 && store.transactions(a.id).length > 0) noBalance.push({ accountId: a.id, name: a.name });
-    const last = engine.lastDataDate(a.id);
+    const last = lastUpdated(store, engine, a.id);
     if (a.status === 'open' && last && diffDays(last, now) > staleAfterDays(a.type, store.settings.staleAfterDays)) stale.push({ accountId: a.id, name: a.name, days: diffDays(last, now) });
   }
   const since = addDays(now, -365);

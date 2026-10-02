@@ -384,6 +384,11 @@ accounts that were already open before their data starts.
 an annual statement): a year plus a month for the statement to arrive
 (`shared/accounts.ts`, `staleAfterDays`).
 
+- An account's latest data is its newest transaction or balance, or the newest HMRC State Pension
+  forecast on it, which has no balance (`analytics/balances.ts`, `lastUpdated`).
+- The same date drives "last updated" and the monthly update checklist, where a yearly account is
+  up to date while its latest data is ≤ 365 days old.
+
 ## 10. Computed signals (Spending)
 
 Deterministic rules with named thresholds (`SIGNAL_RULES` in `analytics/spending.ts`):

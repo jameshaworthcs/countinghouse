@@ -7,8 +7,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { PayResponse } from '../src/shared/api';
+import { BalanceEngine } from '../src/server/analytics/balances';
 import { Coverage } from '../src/server/analytics/coverage';
 import { owedPay, owedPayslips } from '../src/server/analytics/earned';
+import { accountSummary } from '../src/server/analytics/estate';
+import { dataHealth } from '../src/server/analytics/health';
+import { monthlyChecklist } from '../src/server/analytics/monthly';
 import { pay } from '../src/server/analytics/pay';
 import { payByEmployer } from '../src/server/analytics/sources';
 import { createApp, type App } from '../src/server/app';
@@ -23,6 +27,7 @@ import { ExtractionSchema, type Account, type ContextRecord, type Employment, ty
 import { CategoryIndex, defaultCategories } from '../src/shared/categories';
 import { Categoriser } from '../src/shared/categorise';
 import { taxYear, taxYearOf } from '../src/shared/uk';
+import { addDays, today } from '../src/shared/dates';
 import { textPdf } from './pdf';
 
 const HAVE_PDFTOTEXT = (() => {
@@ -497,5 +502,50 @@ describe('a job learns what its payslips print', () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('a State Pension forecast keeps its account up to date', () => {
+  let dir: string;
+  let store: Store;
+  const state: Account = { id: 'state', name: 'State Pension', type: 'state_pension', currency: 'GBP', status: 'open', aliases: [], includeInNetWorth: false, createdAt: stamp, updatedAt: stamp };
+  const forecast = (asOf: string): HmrcRecord => {
+    const r = { type: 'state-pension-forecast', asOf, weekly: 230.25, annual: 11973 } as const;
+    return { ...r, id: hmrcId(r), accountId: 'state', source: {}, createdAt: stamp };
+  };
+  const status = () => {
+    const engine = new BalanceEngine(store);
+    const item = monthlyChecklist(store, engine).items.find((i) => i.accountId === 'state')!;
+    const summary = accountSummary(store, engine, state);
+    const health = dataHealth(store, engine);
+    return { checklist: item.status, lastData: item.lastData, asOf: summary.asOf, stale: summary.stale, inHealth: health.stale.some((a) => a.accountId === 'state') };
+  };
+
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), 'finance-state-pension-'));
+    store = await Store.open(path.join(dir, 'data'));
+    await store.setAccounts([state]);
+  });
+  afterEach(() => rm(dir, { recursive: true, force: true }));
+
+  it('is never updated until a forecast is on it', () => {
+    expect(status()).toEqual({ checklist: 'never', lastData: null, asOf: null, stale: true, inHealth: false });
+  });
+
+  it('is up to date for a year from the forecast', async () => {
+    const asOf = addDays(today(), -30);
+    await store.upsertRecords('hmrc', [forecast(asOf)], 'test: forecast');
+    expect(status()).toEqual({ checklist: 'up-to-date', lastData: asOf, asOf, stale: false, inHealth: false });
+  });
+
+  it('is overdue once the forecast is over a year old, and stale after 400 days', async () => {
+    const asOf = addDays(today(), -401);
+    await store.upsertRecords('hmrc', [forecast(asOf)], 'test: old forecast');
+    expect(status()).toEqual({ checklist: 'overdue', lastData: asOf, asOf, stale: true, inHealth: true });
+  });
+
+  it('counts only the forecast on that account', async () => {
+    await store.upsertRecords('hmrc', [{ ...forecast(addDays(today(), -30)), accountId: 'other' }], 'test: another account');
+    expect(status().checklist).toBe('never');
   });
 });
