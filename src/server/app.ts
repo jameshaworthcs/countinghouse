@@ -44,6 +44,8 @@ export interface CreateAppOptions {
   env?: NodeJS.ProcessEnv;
   /** Start the inbox watcher (off in tests). */
   inbox?: boolean;
+  /** Queue agent jobs without running them (tests: nothing a test starts can reach Claude). */
+  pauseJobs?: boolean;
 }
 
 export interface App {
@@ -138,7 +140,7 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
 
   // Agent jobs start on their own only in a watching (serving) instance over real data (tracked in
   // git), never in tests, scripts, the demo or a throwaway copy: they spend the owner's Claude plan.
-  const runner = new JobRunner(store, analytics, config, { autoRun: config.watch && opts.inbox !== false && git.tracked, proposals });
+  const runner = new JobRunner(store, analytics, config, { autoRun: config.watch && opts.inbox !== false && git.tracked, ...(opts.pauseJobs ? { paused: true } : {}), proposals });
   await runner.init();
   auditLifecycles(audit, imports, runner, proposals);
   imports.on('update', (r: ImportRecord) => {

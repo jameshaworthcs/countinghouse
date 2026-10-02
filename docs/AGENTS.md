@@ -302,7 +302,7 @@ extraction:
 | `insights-after-import` | the digest, focused on the new imports | Read (the digest only) | insights | 2 minutes after imports stop arriving |
 | `monthly-review` | the digest, focused on the last complete month | Read (the digest only) | a month in review, plus page insights (superseding the last run's) | once a month's data is complete for every account |
 | `interpret-note` | the owner's note, account and instrument names | none | proposals on the note | when a note is added |
-| `label-imports` | each committed import's file name, kind, provider, accounts (name, type, period) and dates, a payslip's employer, the tax figures' kinds and years; never amounts, account numbers, references or rows | none | a name on each import (`label`), never over yours | only with "Name imports with Claude" on (off by default): a minute after imports stop being committed or filed; History offers the ones from before |
+| `label-imports` | each committed import's file name, kind, provider, accounts (name, type, period) and dates, a payslip's employer, the tax figures' kinds and years; never amounts, account numbers, references or rows | none | a name on each import (`label`) that has none | only with "Name imports with Claude" on (off by default): a minute after imports stop being committed or filed; History offers the ones from before |
 | receipt reading (not a job) | one receipt file, the payment's amount, date and payee, the category names | Read (the receipt only) | a reading on the receipt: proposed split lines | when a receipt is attached, only with "Read receipts with Claude" on (off by default) |
 
 Other behaviour:
@@ -323,8 +323,15 @@ Other behaviour:
   itself without "Let agents start jobs by themselves" (within the background budget), and Import →
   History offers to name the imports from before, up to 40 a job. History and an import's page
   show the name, with the file name beside it; you can rename an import or take its name away
-  there (`PUT /api/imports/:id/label`, which no token can reach). Claude never replaces a name you
-  gave.
+  there (`PUT /api/imports/:id/label`, which no token can reach).
+  - **An import is named once.** A run never replaces a name, Claude's or yours; to have Claude name
+    one again, take its name away. A run keeps names only for the imports it showed Claude, each
+    given as a short ref (1, 2, 3…) rather than its id. A run that finds every import it was asked
+    about named already (one queued after a commit, when History's button got there first) ends
+    without calling Claude.
+  - **History's button follows its run.** While a run you started waits or runs, it says so and
+    starts nothing. Asking for a job that is already queued or running, by `POST /api/jobs` with the
+    same kind and params, returns that job with `existing: true` (200) rather than a new one (201).
 - **Research runs when you ask.** Fund, provider and assumption research (`research-instrument`,
   `research-provider`, `refresh-assumptions`) never starts by itself unless Settings → Agents →
   "Research by itself" is on (off by default). Assumptions & research → Agent jobs lists what is due,

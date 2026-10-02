@@ -1423,6 +1423,22 @@ over the file name and searches both, with the accounts.
   for screenshots, HMRC's pages or files the reader understood only in part, which are the ones
   hardest to find.
 
+Later the same day, after the owner's first runs (`label-imports-2`):
+
+- **The first run of 40 named 39.** Claude's answer for one import was not kept, and the job does
+  not keep the answer, so why is not known; an id copied wrong is the likeliest. Imports are now
+  given to Claude as short refs (1, 2, 3…), and a run keeps names for exactly the imports it
+  showed. `label-imports-1` worked out the newest 40 again when keeping the names, so an import
+  committed while Claude was at it could push one out.
+- **An import is named once.** A run asked about particular imports (one queued after a commit)
+  used to name them again even when History's button had named them first. Now no run replaces a
+  name, and one with nothing left to name ends as done, without calling Claude (`NothingToDo`, which
+  any job's `prepare` can throw; the runner now prepares before it looks for the CLI).
+- **Pressing History's button twice** started one run but showed two toasts: the button was only
+  busy while the request was sent, and the run takes 20 to 40 seconds. It now says "Naming…" until
+  the run it started ends, and asking for a job already queued or running returns it with
+  `existing: true`, which shows no toast.
+
 ## 2026-10-02: An audit log beside git's history
 
 - **Asked:** a log in Settings of every action that modifies data, with its actor (you and your

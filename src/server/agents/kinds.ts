@@ -7,7 +7,7 @@
 //   insights-after-import, monthly-review, interpret-note, label-imports → the owner's data, and no
 //     web tools.
 
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { ACCOUNT_TYPE_META } from '../../shared/accounts';
@@ -45,6 +45,12 @@ export interface JobOutcome {
   result?: ApplyResult;
 }
 
+/**
+ * Thrown by a job's `prepare` when what it was asked to do has been done meanwhile: the job ends as
+ * succeeded, with this as its summary, without calling Claude.
+ */
+export class NothingToDo extends Error {}
+
 export interface JobKindDef {
   kind: JobKind;
   promptVersion: string;
@@ -54,6 +60,7 @@ export interface JobKindDef {
   label(ctx: Pick<JobContext, 'store' | 'params'>): string;
   systemPrompt: string;
   output: z.ZodType;
+  /** What Claude is given. Throws `NothingToDo` when nothing is left for it to do. */
   prepare(ctx: JobContext): Promise<string> | string;
   apply(ctx: JobContext, output: unknown, provenance: Provenance): Promise<JobOutcome>;
 }
@@ -723,19 +730,23 @@ const interpretNote: JobKindDef = {
 
 /**
  * The imports a `label-imports` job names: those it was given (`importIds`), or else the latest
- * committed that have no name yet. A name you gave is never replaced.
+ * committed, that have no name yet. A name is never replaced, Claude's or yours: an import named
+ * again has had its name taken away first.
  */
 export function importsToLabel(store: Store, params: Record<string, unknown>): string[] {
   const asked = Array.isArray(params.importIds) ? new Set(params.importIds.map(String)) : undefined;
   return store.imports
-    .filter((i) => i.committedAt && i.label?.provenance.setBy !== 'owner' && (asked ? asked.has(i.id) : !i.label))
+    .filter((i) => i.committedAt && !i.label && (!asked || asked.has(i.id)))
     .sort((a, b) => (b.committedAt ?? '').localeCompare(a.committedAt ?? ''))
     .slice(0, LABEL_BATCH)
     .map((i) => i.id);
 }
 
-/** What the job is told about one import: what it is, never what it says in figures. */
-export function labelFacts(store: Store, r: ImportRecord): Record<string, unknown> {
+/**
+ * What the job is told about one import: what it is, never what it says in figures. It is known by
+ * `ref`, its place in the list (1, 2, 3…), which is easier to give back without a slip than an id.
+ */
+export function labelFacts(store: Store, r: ImportRecord, ref: number): Record<string, unknown> {
   const d = r.draft;
   const accounts = (d?.sections ?? [])
     .filter((s) => s.target.mode !== 'skip')
@@ -761,7 +772,7 @@ export function labelFacts(store: Store, r: ImportRecord): Record<string, unknow
   const hmrc = [...new Set((d?.hmrc ?? []).map((h) => h.record.type))];
   const employers = [...new Set((d?.jobs ?? []).map((j) => j.employer))];
   return {
-    importId: r.id,
+    ref,
     fileName: r.document.fileName,
     fileType: r.document.mediaType,
     uploadedOn: r.createdAt.slice(0, 10),
@@ -788,11 +799,13 @@ export function cleanLabel(text: string): string | undefined {
   return t.length >= 3 && t.length <= 120 ? t : undefined;
 }
 
-const LabelsOut = z.object({ labels: z.array(z.object({ importId: z.string(), label: z.string() })).max(LABEL_BATCH) });
+const LabelsOut = z.object({ labels: z.array(z.object({ ref: z.number().int(), label: z.string() })).max(LABEL_BATCH) });
+/** The imports a run showed Claude, in ref order, kept in its scratch directory until it ends. */
+const SHOWN_FILE = 'imports.json';
 
 const labelImports: JobKindDef = {
   kind: 'label-imports',
-  promptVersion: 'label-imports-1',
+  promptVersion: 'label-imports-2',
   privacy: 'personal',
   tools: [],
   label: ({ params }) => (Array.isArray(params.importIds) ? `Name ${params.importIds.length === 1 ? 'an import' : `${params.importIds.length} imports`}` : 'Name imports that have no name'),
@@ -803,36 +816,48 @@ const labelImports: JobKindDef = {
 - Name the account the way the facts do ("current account", "credit card", "cash ISA", or its own name when that tells it apart). Several accounts: name the provider and say "statements" or the accounts in brief.
 - Use only the facts given. Never include amounts, balances, account or card numbers, references or people's names. When little is known, say what kind of file it is and its date.
 - Imports that are different documents get different names: include what tells them apart.
-- Return every import you were given, by its importId.`,
+- Return one name for every import you were given, by its ref.`,
   output: LabelsOut,
-  async prepare({ store, params }) {
-    const ids = importsToLabel(store, params);
-    if (!ids.length) throw new Error('Every import asked about has a name already, or none is committed.');
+  async prepare({ store, params, scratch }) {
+    const shown: string[] = [];
     const facts: Record<string, unknown>[] = [];
-    for (const id of ids) {
+    for (const id of importsToLabel(store, params)) {
       const r = await store.readImport(id);
-      if (r) facts.push(labelFacts(store, r));
+      if (!r) continue;
+      shown.push(id);
+      facts.push(labelFacts(store, r, shown.length));
     }
+    // A run queued after imports were committed finds them named already when another got there first.
+    if (!shown.length) throw new NothingToDo('Nothing to name: every import it was asked about has a name');
+    // The names are kept for exactly these, whatever is committed while Claude is at it.
+    await writeFile(path.join(scratch, SHOWN_FILE), JSON.stringify(shown));
     return [`Today is ${today()}. Name these ${facts.length} imports:`, '', ...facts.map((f) => JSON.stringify(f))].join('\n');
   },
-  async apply({ store, params }, raw, provenance) {
+  async apply({ store, scratch }, raw, provenance) {
     const out = LabelsOut.parse(raw);
-    const asked = new Set(importsToLabel(store, params));
+    const shown = z.array(z.string()).parse(JSON.parse(await readFile(path.join(scratch, SHOWN_FILE), 'utf8')));
+    const waiting = new Set(shown);
     let named = 0;
     let skipped = 0;
     for (const l of out.labels) {
+      const id = shown[l.ref - 1];
       const text = cleanLabel(l.label);
-      const r = asked.has(l.importId) ? await store.readImport(l.importId) : undefined;
-      // A name you gave meanwhile is kept.
-      if (!text || !r || r.label?.provenance.setBy === 'owner') {
+      const r = id && waiting.has(id) ? await store.readImport(id) : undefined;
+      // A ref it was not given (or gave twice), or a name that is no name.
+      if (!text || !r) {
         skipped++;
         continue;
       }
-      asked.delete(l.importId);
+      waiting.delete(r.id);
+      // A name you gave meanwhile is kept.
+      if (r.label) {
+        skipped++;
+        continue;
+      }
       await store.saveImport({ ...r, label: { text, provenance, at: nowISO() } }, `import: ${r.id} named by Claude`);
       named++;
     }
-    return { summary: `Named ${named} import${named === 1 ? '' : 's'}${skipped ? `; ${skipped} name${skipped === 1 ? '' : 's'} not kept` : ''}${asked.size ? `; ${asked.size} not named` : ''}` };
+    return { summary: `Named ${named} import${named === 1 ? '' : 's'}${skipped ? `; ${skipped} name${skipped === 1 ? '' : 's'} not kept` : ''}${waiting.size ? `; ${waiting.size} not named` : ''}` };
   },
 };
 

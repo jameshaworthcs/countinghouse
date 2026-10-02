@@ -659,6 +659,8 @@ export interface ImportHistoryResponse {
   total: number;
   /** Committed imports with no name yet, of all of them. */
   unnamed: number;
+  /** A naming run you started (History's button) is waiting its turn, or running. */
+  naming?: 'queued' | 'running';
   /** The page these are: the one asked for, or the last there is when it asked past the end. */
   page: number;
   pageSize: number;

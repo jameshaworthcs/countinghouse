@@ -314,10 +314,15 @@ function History() {
     setParam('history', page > 1 ? String(page) : undefined);
     document.getElementById('history')?.scrollIntoView({ block: 'start' });
   };
-  const name = useApiMutation(() => api('/jobs', { method: 'POST', body: { kind: 'label-imports', params: {} } }), {
-    onSuccess: () => toast({ tone: 'good', text: 'Claude is naming your imports; History updates as it finishes' }),
+  // Pressed again before the page knows a run started, it gets that run back (`existing`): no second toast.
+  const name = useApiMutation(() => api<{ existing?: true }>('/jobs', { method: 'POST', body: { kind: 'label-imports', params: {} } }), {
+    onSuccess: (job) => {
+      if (!job.existing) toast({ tone: 'good', text: 'Claude is naming your imports; History updates as it finishes' });
+    },
   });
-  const naming = data.settings.agents.labelImports && h && h.unnamed > 0;
+  // While a run you started waits or runs, the button says so and cannot start another.
+  const busy = name.isPending || Boolean(h?.naming);
+  const offer = data.settings.agents.labelImports && h && (h.unnamed > 0 || h.naming);
   return (
     <Card
       id="history"
@@ -325,9 +330,9 @@ function History() {
       padded={false}
       className="scroll-mt-16 lg:scroll-mt-5"
       actions={
-        naming ? (
-          <Button size="sm" icon={<Sparkles className="size-3.5" />} loading={name.isPending} onClick={() => name.mutate(undefined)} title={`Claude names up to ${LABEL_BATCH} at a time, from what was read from each`}>
-            Name {h.unnamed > LABEL_BATCH ? `${LABEL_BATCH} of ${h.unnamed}` : h.unnamed} with Claude
+        offer ? (
+          <Button size="sm" icon={<Sparkles className="size-3.5" />} loading={busy} onClick={() => name.mutate(undefined)} title={`Claude names up to ${LABEL_BATCH} at a time, from what was read from each`}>
+            {h.naming === 'queued' ? 'Waiting to name…' : h.naming === 'running' ? 'Naming…' : `Name ${h.unnamed > LABEL_BATCH ? `${LABEL_BATCH} of ${h.unnamed}` : h.unnamed} with Claude`}
           </Button>
         ) : undefined
       }

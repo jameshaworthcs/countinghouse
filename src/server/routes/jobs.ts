@@ -32,8 +32,11 @@ export function jobRoutes(ctx: AppContext): Hono {
 
   app.post('/', async (c) => {
     const body = await readJson(c, z.object({ kind: z.enum(JOB_KINDS), params: z.record(z.string(), z.unknown()).default({}) }));
+    const before = runner().pending(body.kind, body.params);
     const job = runner().enqueue({ kind: body.kind, params: body.params, trigger: agentTokenOf(c) ? 'agent' : 'owner' });
     if (!job) throw new StoreError(body.kind === 'label-imports' ? LABELS_OFF : AGENTS_OFF, 409);
+    // The same job was queued or running already: that one is the answer, and nothing new starts.
+    if (job.id === before?.id) return c.json({ ...job, existing: true }, 200);
     return c.json(job, 201);
   });
 

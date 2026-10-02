@@ -53,6 +53,8 @@ export function importRoutes(ctx: AppContext): Hono {
     const haystack = (i: ImportSummary) =>
       [i.label?.text, i.fileName, i.documentType?.replace(/_/g, ' '), ...i.sections.map((s) => ctx.store.account(s.accountId)?.name)].filter(Boolean).join(' ').toLowerCase();
     const all = [...ctx.store.imports].filter((i) => !words.length || words.every((w) => haystack(i).includes(w))).sort(latestCommittedFirst);
+    // A naming run you started, while it waits or runs: History's button says so rather than start another.
+    const naming = ctx.runner?.list().find((j) => j.kind === 'label-imports' && j.trigger === 'owner' && (j.status === 'queued' || j.status === 'running'));
     const pages = Math.max(1, Math.ceil(all.length / HISTORY_PAGE_SIZE));
     const page = Math.min(pages, Math.max(1, Math.trunc(Number(c.req.query('page'))) || 1));
     const body: ImportHistoryResponse = {
@@ -69,6 +71,7 @@ export function importRoutes(ctx: AppContext): Hono {
       })),
       total: all.length,
       unnamed: ctx.store.imports.filter((i) => i.committedAt && !i.label).length,
+      ...(naming ? { naming: naming.status as 'queued' | 'running' } : {}),
       page,
       pageSize: HISTORY_PAGE_SIZE,
     };

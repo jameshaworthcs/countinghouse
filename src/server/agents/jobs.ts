@@ -26,7 +26,7 @@ import { recordInstrumentsFromHoldings } from '../instruments';
 import type { ProposalService } from '../proposals';
 import type { Store } from '../store';
 import { runAgent } from './claude';
-import { JOB_DEFS, JOB_KINDS, outputJsonSchema, REFRESHABLE_KEYS, type JobKind } from './kinds';
+import { JOB_DEFS, JOB_KINDS, NothingToDo, outputJsonSchema, REFRESHABLE_KEYS, type JobKind } from './kinds';
 
 export const JobRecordSchema = z.object({
   id: z.string(),
@@ -170,6 +170,11 @@ export class JobRunner extends EventEmitter implements JobQueue {
     }
   }
 
+  /** The job of this kind and params that is queued or running: starting it again returns this one. */
+  pending(kind: string, params: Record<string, unknown> = {}): JobRecord | undefined {
+    return [...this.jobs.values()].find((j) => j.kind === kind && JSON.stringify(j.params) === JSON.stringify(params) && (j.status === 'queued' || j.status === 'running'));
+  }
+
   enqueue(input: { kind: string; params?: Record<string, unknown>; trigger: JobRecord['trigger'] }): JobRecord | undefined {
     const kind = input.kind as JobKind;
     const def = JOB_DEFS[kind];
@@ -177,7 +182,7 @@ export class JobRunner extends EventEmitter implements JobQueue {
     // Naming imports has its own switch, off until you turn it on; it does not need agents on.
     if (kind === 'label-imports' ? !this.store.settings.agents.labelImports : !this.store.settings.agents.enabled && input.trigger !== 'owner') return undefined;
     const params = input.params ?? {};
-    const same = [...this.jobs.values()].find((j) => j.kind === kind && JSON.stringify(j.params) === JSON.stringify(params) && (j.status === 'queued' || j.status === 'running'));
+    const same = this.pending(kind, params);
     if (same) return same;
     const job: JobRecord = {
       id: `job_${Date.now().toString(36)}${randomHex(3)}`,
@@ -294,12 +299,13 @@ export class JobRunner extends EventEmitter implements JobQueue {
     await this.save(job);
     const scratch = path.join(this.config.workDir, 'agent', job.id);
     try {
-      const { engines, claudeBin } = await detectEngines({ apiKey: this.config.anthropicApiKey });
-      if (!claudeBin || !engines.find((e) => e.id === 'claude-cli')?.available) throw new Error('The claude CLI is not available; agent jobs need it.');
       await rm(scratch, { recursive: true, force: true });
       await mkdir(scratch, { recursive: true, mode: 0o700 });
       const ctx = { store: this.store, analytics: this.analytics, params: job.params, scratch, ...(this.opts.proposals ? { proposals: this.opts.proposals } : {}) };
+      // A job with nothing left to do ends here (NothingToDo), before Claude is looked for.
       const prompt = await Promise.resolve(def.prepare(ctx));
+      const { engines, claudeBin } = await detectEngines({ apiKey: this.config.anthropicApiKey });
+      if (!claudeBin || !engines.find((e) => e.id === 'claude-cli')?.available) throw new Error('The claude CLI is not available; agent jobs need it.');
       const settings = this.store.settings.agents;
       const res = await runAgent({
         bin: claudeBin,
@@ -328,7 +334,8 @@ export class JobRunner extends EventEmitter implements JobQueue {
       };
     } catch (err) {
       const cancelled = signal.aborted || this.jobs.get(job.id)?.status === 'cancelled';
-      job = { ...job, status: cancelled ? 'cancelled' : 'failed', finishedAt: nowISO(), durationMs: Date.now() - started, error: (err as Error).message.slice(0, 2000) };
+      if (err instanceof NothingToDo && !cancelled) job = { ...job, status: 'succeeded', finishedAt: nowISO(), durationMs: Date.now() - started, summary: err.message, written: [] };
+      else job = { ...job, status: cancelled ? 'cancelled' : 'failed', finishedAt: nowISO(), durationMs: Date.now() - started, error: (err as Error).message.slice(0, 2000) };
     } finally {
       await rm(scratch, { recursive: true, force: true });
     }

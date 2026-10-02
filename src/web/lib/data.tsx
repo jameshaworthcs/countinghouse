@@ -52,6 +52,8 @@ export function useLiveUpdates(): void {
       });
       es.addEventListener('job', () => {
         void qc.invalidateQueries({ queryKey: ['jobs'] });
+        // History's naming button follows its run, which may end after the names it wrote arrived.
+        void qc.invalidateQueries({ queryKey: ['imports', 'history'] });
       });
       es.addEventListener('import', () => {
         void qc.invalidateQueries({ queryKey: ['imports'] });
