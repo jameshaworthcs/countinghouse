@@ -338,7 +338,7 @@ export function dataRoutes(ctx: AppContext): Hono {
       figures: store.figures.filter((f) => f.accountId === account.id),
       imports: store.imports
         .filter((i) => i.result?.accountIds.includes(account.id))
-        .map((i) => ({ id: i.id, fileName: i.fileName, documentId: i.documentId, ...(i.committedAt ? { committedAt: i.committedAt } : {}) })),
+        .map((i) => ({ id: i.id, fileName: i.fileName, ...(i.label ? { label: i.label.text } : {}), documentId: i.documentId, ...(i.committedAt ? { committedAt: i.committedAt } : {}) })),
     };
     return c.json(body);
   });

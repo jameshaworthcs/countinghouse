@@ -1,9 +1,10 @@
-import { Archive, ChevronRight, CircleCheck, CircleDashed, CopyCheck, FileImage, FileSpreadsheet, FileText, FolderInput, LoaderCircle, Sparkles, Trash2, TriangleAlert, Upload } from 'lucide-react';
+import { Archive, ChevronRight, CircleCheck, CircleDashed, CopyCheck, FileImage, FileSpreadsheet, FileText, FolderInput, LoaderCircle, Search, Sparkles, Trash2, TriangleAlert, Upload } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useSearchParams } from 'react-router';
 import type { CaptureAskView, CaptureItemView, CaptureResponse, ImportHistoryResponse, ImportListResponse, MonthlyChecklistResponse, SystemResponse } from '../../shared/api';
 import type { ImportRecord } from '../../shared/schema';
-import { Badge, Button, Callout, Card, Checkbox, EmptyState, Loading, PageHeader, Pager, StatusBadge, useToast } from '../components/ui';
+import { Badge, Button, Callout, Card, Checkbox, EmptyState, Input, Loading, PageHeader, Pager, StatusBadge, useDebounced, useToast } from '../components/ui';
+import { LABEL_BATCH } from '../../shared/api';
 import { ProposalQueue } from '../components/Proposals';
 import { DropZone, FilePickerButton } from '../components/Upload';
 import { api, qs, useApi, useApiMutation } from '../lib/api';
@@ -288,24 +289,62 @@ function Monthly() {
 }
 
 /**
- * Every committed import, the latest first, a page at a time. The page is kept in the address
- * (`?history=`), so coming back from an import's page returns to it.
+ * Every committed import, the latest first, a page at a time, by its name when it has one. The page
+ * and the search are kept in the address (`?history=`, `?hq=`), so coming back from an import's
+ * page returns to them.
  */
 function History() {
   const [params, setParams] = useSearchParams();
+  const { data } = useAppData();
+  const toast = useToast();
   const asked = Math.max(1, Math.trunc(Number(params.get('history'))) || 1);
-  const q = useApi<ImportHistoryResponse>(['imports', 'history', asked], `/imports/history${qs({ page: asked > 1 ? asked : undefined })}`);
+  const [search, setSearch] = useState(params.get('hq') ?? '');
+  const term = useDebounced(search.trim());
+  const q = useApi<ImportHistoryResponse>(['imports', 'history', asked, term], `/imports/history${qs({ page: asked > 1 ? asked : undefined, q: term || undefined })}`);
   const h = q.data;
   const pages = h ? Math.max(1, Math.ceil(h.total / h.pageSize)) : 1;
-  const go = (page: number) => {
+  const setParam = (key: string, value: string | undefined) => {
     const next = new URLSearchParams(params);
-    if (page > 1) next.set('history', String(page));
-    else next.delete('history');
+    if (value) next.set(key, value);
+    else next.delete(key);
+    if (key === 'hq') next.delete('history');
     setParams(next, { replace: true });
+  };
+  const go = (page: number) => {
+    setParam('history', page > 1 ? String(page) : undefined);
     document.getElementById('history')?.scrollIntoView({ block: 'start' });
   };
+  const name = useApiMutation(() => api('/jobs', { method: 'POST', body: { kind: 'label-imports', params: {} } }), {
+    onSuccess: () => toast({ tone: 'good', text: 'Claude is naming your imports; History updates as it finishes' }),
+  });
+  const naming = data.settings.agents.labelImports && h && h.unnamed > 0;
   return (
-    <Card id="history" title="History" padded={false} className="scroll-mt-16 lg:scroll-mt-5">
+    <Card
+      id="history"
+      title="History"
+      padded={false}
+      className="scroll-mt-16 lg:scroll-mt-5"
+      actions={
+        naming ? (
+          <Button size="sm" icon={<Sparkles className="size-3.5" />} loading={name.isPending} onClick={() => name.mutate(undefined)} title={`Claude names up to ${LABEL_BATCH} at a time, from what was read from each`}>
+            Name {h.unnamed > LABEL_BATCH ? `${LABEL_BATCH} of ${h.unnamed}` : h.unnamed} with Claude
+          </Button>
+        ) : undefined
+      }
+    >
+      <div className="relative border-t border-line px-5 py-2.5">
+        <Search className="pointer-events-none absolute top-1/2 left-8 size-4 -translate-y-1/2 text-ink-3" aria-hidden />
+        <Input
+          value={search}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            setParam('hq', e.target.value.trim() || undefined);
+          }}
+          placeholder="Search names, files and accounts"
+          className="pl-9"
+          aria-label="Search history"
+        />
+      </div>
       {!h ? (
         <div className="px-5">
           <Loading />
@@ -316,13 +355,17 @@ function History() {
             {h.items.map((c) => (
               <li key={c.id} className="flex items-center gap-3 px-5 py-2.5 text-[13px]">
                 <FileIcon mediaType={c.mediaType} className="size-4" />
-                <Link to={`/import/${c.id}`} className="min-w-0 flex-1 truncate text-ink hover:underline">
-                  {c.fileName}
-                </Link>
+                <div className="min-w-0 flex-1">
+                  <Link to={`/import/${c.id}`} className="flex min-w-0 items-center gap-1.5 text-ink hover:underline">
+                    <span className={c.label ? 'line-clamp-2 sm:truncate' : 'truncate'}>{c.label?.text ?? c.fileName}</span>
+                    {c.label?.setBy === 'agent' && <Sparkles className="size-3 shrink-0 text-ink-3" aria-label="Named by Claude" />}
+                  </Link>
+                  {c.label && <div className="truncate text-[12px] text-ink-3">{c.fileName}</div>}
+                </div>
                 <span className="hidden text-ink-3 sm:inline">
                   {c.result?.nothingNew ? 'filed, nothing new' : c.result ? [c.result.transactionsAdded ? `+${plural(c.result.transactionsAdded, 'transaction')}` : '', c.result.balancesAdded ? 'balance' : '', c.result.holdingsAdded ? 'holdings' : '', c.result.figuresAdded ? plural(c.result.figuresAdded, 'figure') : ''].filter(Boolean).join(', ') : ''}
                 </span>
-                <span className="w-24 text-right text-ink-3">{c.committedAt ? formatDate(c.committedAt.slice(0, 10)) : ''}</span>
+                <span className="w-24 shrink-0 text-right text-ink-3">{c.committedAt ? formatDate(c.committedAt.slice(0, 10)) : ''}</span>
               </li>
             ))}
           </ul>
@@ -334,6 +377,8 @@ function History() {
             </Pager>
           )}
         </>
+      ) : term ? (
+        <EmptyState title="Nothing matches">Try fewer words, or part of a file name.</EmptyState>
       ) : (
         <EmptyState title="Nothing imported yet" />
       )}

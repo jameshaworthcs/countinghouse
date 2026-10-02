@@ -22,7 +22,7 @@ point at them with `"$schema"` so editors validate as you type.
 data/
   meta.json            format + version + base currency
   profile.json         you: date of birth, region, salary, retirement age (the tax band is computed), and `employers`: how many months after the work a payroll with no job yet pays a timesheet (`[{name, payLagMonths}]`, optional; a job keeps its own)
-  settings.json        extraction engine/model (and reading receipts or stored documents again, both off by default), agents (with the background budget), git behaviour, stale threshold, FX rates
+  settings.json        extraction engine/model (and reading receipts or stored documents again, both off by default), agents (with the background budget, and `labelImports`: Claude names imports, off by default), git behaviour, stale threshold, FX rates
   institutions.json    { institutions: [...] }   banks, platforms, providers (+ FSCS group)
   accounts.json        { accounts: [...] }
   categories.json      { categories: [...] }     editable taxonomy (system ones drive calculations)
@@ -378,6 +378,10 @@ number. Its pay, tax, NI, pension and student loan for the period are also tax f
   unticked, and remembered on the account's `spaces` when committed so.
 - `draftEditedAt`: when you last saved changes to a pending draft; such a draft is never redrafted
   by itself.
+- `label` (optional, committed imports): the name History shows and searches in place of the file
+  name, `{text, provenance, at}`. `text` is 1 to 120 characters. Claude gives it (`provenance.setBy:
+  agent`, with the `label-imports` job's model, prompt version and job id), or you do (`owner`),
+  and yours is never replaced. `document.fileName` stays what the file was called.
 - `result`: `{accountIds, accountsCreated, transactionsAdded, transactionsSkipped, balancesAdded, holdingsAdded, figuresAdded, sections}`.
   `sections` maps each draft section to the account it was committed to; with the sections'
   statement periods it gives each account's **coverage** (the days it has data for).

@@ -120,6 +120,7 @@
         "monthlyReview": true,
         "timeoutSeconds": 1200,
         "autoResearch": false,
+        "labelImports": false,
         "backgroundBudgetPerDayUsd": 5,
         "backgroundBudgetPerMonthUsd": 40
       },
@@ -165,6 +166,10 @@
           "maximum": 3600
         },
         "autoResearch": {
+          "default": false,
+          "type": "boolean"
+        },
+        "labelImports": {
           "default": false,
           "type": "boolean"
         },

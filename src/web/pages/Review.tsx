@@ -10,7 +10,7 @@ import { headlineApplies, RATE_NAMES } from '../../shared/terms';
 import { FIGURE_KINDS, type CsvProfile, type Draft, type DraftJob, type DraftSection, type DraftTransaction, type Employment, type ExtractedHmrc, type Figure, type ImportRecord, type PayslipLine, type PayslipYtdKey } from '../../shared/schema';
 import { AccountTypeSelect } from '../components/AccountForms';
 import { CategorySelect } from '../components/TransactionList';
-import { Badge, Button, Callout, Card, Checkbox, ErrorNote, Field, Input, KeyValue, Loading, Money, Select, StatusBadge, tableClasses, useToast } from '../components/ui';
+import { Badge, Button, Callout, Card, Checkbox, ErrorNote, Field, IconButton, Input, KeyValue, Loading, Money, Select, StatusBadge, tableClasses, useToast } from '../components/ui';
 import { api, useApi, useApiMutation } from '../lib/api';
 import { useAppData } from '../lib/data';
 import { cn, fileSize, money, plural } from '../lib/format';
@@ -1187,6 +1187,60 @@ function MappingEditor({ rec, onApplied }: { rec: Rec; onApplied?: (r: ImportRec
   );
 }
 
+/**
+ * A committed import's name, to find it by in History, with its file name under it. You can give
+ * your own (Claude never replaces it) or take it away.
+ */
+function ImportName({ rec }: { rec: Rec }) {
+  const toast = useToast();
+  const [editing, setEditing] = useState<string | undefined>();
+  const save = useApiMutation((text: string | null) => api(`/imports/${rec.id}/label`, { method: 'PUT', body: { text } }), {
+    onSuccess: (_r, text) => {
+      setEditing(undefined);
+      toast({ tone: 'good', text: text ? 'Name saved' : 'Name taken away' });
+    },
+  });
+  const label = rec.label;
+  if (editing !== undefined) {
+    return (
+      <form
+        className="flex flex-wrap items-center gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (editing.trim()) save.mutate(editing.trim());
+        }}
+      >
+        <Input value={editing} onChange={(e) => setEditing(e.target.value)} maxLength={120} autoFocus aria-label="Name" className="w-[min(28rem,80vw)]" />
+        <Button size="sm" variant="primary" type="submit" loading={save.isPending} disabled={!editing.trim()}>
+          Save
+        </Button>
+        <Button size="sm" variant="ghost" type="button" onClick={() => setEditing(undefined)}>
+          Cancel
+        </Button>
+      </form>
+    );
+  }
+  return (
+    <>
+      <div className="flex min-w-0 items-center gap-1">
+        <h1 className="line-clamp-2 text-[20px] font-semibold text-ink sm:truncate">{label?.text ?? rec.document.fileName}</h1>
+        <IconButton label="Rename" className="size-8 shrink-0" onClick={() => setEditing(label?.text ?? '')}>
+          <Pencil className="size-3.5" />
+        </IconButton>
+      </div>
+      {label && (
+        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[12.5px] text-ink-3">
+          <span className="truncate">{rec.document.fileName}</span>
+          <span>· {label.provenance.setBy === 'owner' ? 'your name for it' : 'named by Claude'}</span>
+          <button type="button" className="text-accent hover:underline" onClick={() => save.mutate(null)}>
+            {label.provenance.setBy === 'owner' ? 'take your name away' : 'take the name away'}
+          </button>
+        </div>
+      )}
+    </>
+  );
+}
+
 function Retry({ rec }: { rec: Rec }) {
   const [engine, setEngine] = useState('auto');
   const [model, setModel] = useState('');
@@ -1286,7 +1340,7 @@ export default function Review() {
       </div>
       <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="truncate text-[20px] font-semibold text-ink">{rec.document.fileName}</h1>
+          {committed ? <ImportName rec={rec} /> : <h1 className="truncate text-[20px] font-semibold text-ink">{rec.document.fileName}</h1>}
           <div className="mt-1 flex flex-wrap items-center gap-2 text-[12.5px] text-ink-3">
             {importStatus(rec)}
             {rec.extraction.engine && <span>read by {rec.extraction.engine === 'csv' ? `CSV parser (${rec.extraction.detail})` : rec.extraction.engine === 'govuk' ? 'the gov.uk page reader' : rec.extraction.engine === 'payslip' ? 'the payslip reader, on this machine' : rec.extraction.engine}{rec.extraction.model ? ` · ${rec.extraction.model}` : ''}</span>}

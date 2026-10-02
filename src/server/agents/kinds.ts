@@ -4,15 +4,17 @@
 // Privacy boundary, by construction:
 //   research-instrument, research-provider, refresh-assumptions → web tools; prompts built only from
 //     public identifiers (fund names, ISINs, provider names, asset classes, public account types);
-//   insights-after-import, monthly-review, interpret-note → the owner's data, and no web tools.
+//   insights-after-import, monthly-review, interpret-note, label-imports → the owner's data, and no
+//     web tools.
 
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { ACCOUNT_TYPE_META } from '../../shared/accounts';
+import { LABEL_BATCH } from '../../shared/api';
 import { ASSUMPTION_DEFS, AssumptionSet, formatAssumptionValue } from '../../shared/assumptions';
 import { addDays, today } from '../../shared/dates';
-import { ACCOUNT_TYPES, ASSET_CLASSES, CONTEXT_KINDS, INSIGHT_KINDS, INSIGHT_PAGES, INSTRUMENT_TYPES, type Insight, type Note, type Provenance, type Research } from '../../shared/schema';
+import { ACCOUNT_TYPES, ASSET_CLASSES, CONTEXT_KINDS, INSIGHT_KINDS, INSIGHT_PAGES, INSTRUMENT_TYPES, type ImportRecord, type Insight, type Note, type Provenance, type Research } from '../../shared/schema';
 import type { Analytics } from '../analytics';
 import { nowISO } from '../fsutil';
 import type { ProposalService } from '../proposals';
@@ -21,7 +23,7 @@ import type { Store } from '../store';
 import type { AgentTool } from './claude';
 import { buildDigest } from './digest';
 
-export const JOB_KINDS = ['research-instrument', 'research-provider', 'refresh-assumptions', 'insights-after-import', 'monthly-review', 'interpret-note'] as const;
+export const JOB_KINDS = ['research-instrument', 'research-provider', 'refresh-assumptions', 'insights-after-import', 'monthly-review', 'interpret-note', 'label-imports'] as const;
 export type JobKind = (typeof JOB_KINDS)[number];
 
 export interface JobContext {
@@ -714,6 +716,126 @@ const interpretNote: JobKindDef = {
   },
 };
 
+// ─── label-imports ───────────────────────────────────────────────────────────────────────────────
+// A name for each committed import, to find it by in History. It sees what the import's reading
+// and review said the document was (its kind, provider, accounts, dates, employer), never amounts,
+// account numbers or references, and has no tools.
+
+/**
+ * The imports a `label-imports` job names: those it was given (`importIds`), or else the latest
+ * committed that have no name yet. A name you gave is never replaced.
+ */
+export function importsToLabel(store: Store, params: Record<string, unknown>): string[] {
+  const asked = Array.isArray(params.importIds) ? new Set(params.importIds.map(String)) : undefined;
+  return store.imports
+    .filter((i) => i.committedAt && i.label?.provenance.setBy !== 'owner' && (asked ? asked.has(i.id) : !i.label))
+    .sort((a, b) => (b.committedAt ?? '').localeCompare(a.committedAt ?? ''))
+    .slice(0, LABEL_BATCH)
+    .map((i) => i.id);
+}
+
+/** What the job is told about one import: what it is, never what it says in figures. */
+export function labelFacts(store: Store, r: ImportRecord): Record<string, unknown> {
+  const d = r.draft;
+  const accounts = (d?.sections ?? [])
+    .filter((s) => s.target.mode !== 'skip')
+    .map((s) => {
+      const id = r.result?.sections?.find((x) => x.key === s.key)?.accountId ?? (s.target.mode === 'existing' ? s.target.accountId : s.target.mode === 'new' ? s.target.account.id : undefined);
+      const account = id ? store.account(id) : undefined;
+      const dates = s.transactions.map((t) => t.date).sort();
+      const from = s.periodStart ?? dates[0];
+      const to = s.periodEnd ?? dates[dates.length - 1] ?? s.balanceDate;
+      return {
+        name: account?.name ?? s.detected.accountName ?? null,
+        type: account?.type ?? s.detected.accountType ?? null,
+        provider: (account?.institutionId ? store.institution(account.institutionId)?.name : undefined) ?? s.detected.institutionName ?? null,
+        ...(from ? { from } : {}),
+        ...(to ? { to } : {}),
+        ...(s.transactions.length ? { rows: s.transactions.length } : {}),
+        ...(s.holdings?.length ? { holdings: s.holdings.length } : {}),
+      };
+    });
+  const unique = <T>(list: T[]) => [...new Set(list.map((x) => JSON.stringify(x)))].map((x) => JSON.parse(x) as T);
+  const figures = unique((d?.figures ?? []).map((f) => ({ kind: f.kind, ...(f.taxYear ? { taxYear: f.taxYear } : {}), ...(f.payer ? { payer: f.payer } : {}), ...(f.periodEnd ? { periodEnd: f.periodEnd } : {}) }))).slice(0, 8);
+  const payslips = (d?.payslips ?? []).slice(0, 4).map((p) => ({ employer: p.record.employer, payDate: p.record.payDate, ...(p.record.periodLabel ? { period: p.record.periodLabel } : {}) }));
+  const hmrc = [...new Set((d?.hmrc ?? []).map((h) => h.record.type))];
+  const employers = [...new Set((d?.jobs ?? []).map((j) => j.employer))];
+  return {
+    importId: r.id,
+    fileName: r.document.fileName,
+    fileType: r.document.mediaType,
+    uploadedOn: r.createdAt.slice(0, 10),
+    ...(r.document.capturedOn ? { capturedOn: r.document.capturedOn } : {}),
+    ...(d ? { documentType: d.documentType } : {}),
+    ...(d?.institutionName ? { provider: d.institutionName } : {}),
+    ...(d?.documentDate ? { documentDate: d.documentDate } : {}),
+    ...(accounts.length ? { accounts } : {}),
+    ...(figures.length ? { figures } : {}),
+    ...(payslips.length ? { payslips } : {}),
+    ...(hmrc.length ? { hmrcRecords: hmrc } : {}),
+    ...(employers.length ? { employers } : {}),
+    ...(r.result?.nothingNew ? { filedWithNothingNew: true } : {}),
+  };
+}
+
+/** A name as kept: one line, no wrapping quotes, at most 120 characters. */
+export function cleanLabel(text: string): string | undefined {
+  const t = text
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^["'“‘]+|["'”’]+$/g, '')
+    .trim();
+  return t.length >= 3 && t.length <= 120 ? t : undefined;
+}
+
+const LabelsOut = z.object({ labels: z.array(z.object({ importId: z.string(), label: z.string() })).max(LABEL_BATCH) });
+
+const labelImports: JobKindDef = {
+  kind: 'label-imports',
+  promptVersion: 'label-imports-1',
+  privacy: 'personal',
+  tools: [],
+  label: ({ params }) => (Array.isArray(params.importIds) ? `Name ${params.importIds.length === 1 ? 'an import' : `${params.importIds.length} imports`}` : 'Name imports that have no name'),
+  systemPrompt: `You name the documents imported into a private UK personal-finance app, so the owner can find each one again in a list of hundreds. You are given what the app read from each document (its kind, provider, accounts, dates), not the document itself.
+- One name per import, at most 70 characters, sentence case, in British English: what the document is, whose it is (provider or employer) and when.
+- Lead with the provider or employer, then the document, then its date or period: "Monzo current account statement, Sep 2026", "Vanguard ISA holdings screenshot, 14 Mar 2026", "P60 from Example Ltd, 2025/26", "Example Ltd payslip, 31 Aug 2026", "HMRC tax code notice, 2026/27".
+- Dates: a whole month as "Sep 2026"; a range as "12 Aug – 11 Sep 2026" (or "Aug – Sep 2026" when it runs month to month); one day as "14 Mar 2026"; a tax year as "2025/26". Prefer the period the document covers over the day it was uploaded; use the capture date for a screenshot.
+- Name the account the way the facts do ("current account", "credit card", "cash ISA", or its own name when that tells it apart). Several accounts: name the provider and say "statements" or the accounts in brief.
+- Use only the facts given. Never include amounts, balances, account or card numbers, references or people's names. When little is known, say what kind of file it is and its date.
+- Imports that are different documents get different names: include what tells them apart.
+- Return every import you were given, by its importId.`,
+  output: LabelsOut,
+  async prepare({ store, params }) {
+    const ids = importsToLabel(store, params);
+    if (!ids.length) throw new Error('Every import asked about has a name already, or none is committed.');
+    const facts: Record<string, unknown>[] = [];
+    for (const id of ids) {
+      const r = await store.readImport(id);
+      if (r) facts.push(labelFacts(store, r));
+    }
+    return [`Today is ${today()}. Name these ${facts.length} imports:`, '', ...facts.map((f) => JSON.stringify(f))].join('\n');
+  },
+  async apply({ store, params }, raw, provenance) {
+    const out = LabelsOut.parse(raw);
+    const asked = new Set(importsToLabel(store, params));
+    let named = 0;
+    let skipped = 0;
+    for (const l of out.labels) {
+      const text = cleanLabel(l.label);
+      const r = asked.has(l.importId) ? await store.readImport(l.importId) : undefined;
+      // A name you gave meanwhile is kept.
+      if (!text || !r || r.label?.provenance.setBy === 'owner') {
+        skipped++;
+        continue;
+      }
+      asked.delete(l.importId);
+      await store.saveImport({ ...r, label: { text, provenance, at: nowISO() } }, `import: ${r.id} named by Claude`);
+      named++;
+    }
+    return { summary: `Named ${named} import${named === 1 ? '' : 's'}${skipped ? `; ${skipped} name${skipped === 1 ? '' : 's'} not kept` : ''}${asked.size ? `; ${asked.size} not named` : ''}` };
+  },
+};
+
 export const JOB_DEFS: Record<JobKind, JobKindDef> = {
   'research-instrument': researchInstrument,
   'research-provider': researchProvider,
@@ -721,6 +843,7 @@ export const JOB_DEFS: Record<JobKind, JobKindDef> = {
   'insights-after-import': insightsAfterImport,
   'monthly-review': monthlyReview,
   'interpret-note': interpretNote,
+  'label-imports': labelImports,
 };
 
 /** The JSON Schema handed to --json-schema for a job's output. */

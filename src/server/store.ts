@@ -100,6 +100,8 @@ export interface ImportSummary {
   detail?: string | undefined;
   /** What the document was (a P60, a payslip, a statement…), as read. */
   documentType?: string | undefined;
+  /** The name to find it by in History (ImportRecord.label), when it has one. */
+  label?: ImportRecord['label'];
   result?: ImportRecord['result'];
   /**
    * The period each account's section covered (statement period, or the span of its rows), with
@@ -1307,6 +1309,7 @@ function summarise(r: ImportRecord, rel: string): ImportSummary {
     engineVersion: r.extraction.engineVersion,
     detail: r.extraction.detail,
     documentType: r.draft?.documentType,
+    label: r.label,
     result: r.result,
     path: rel,
   };

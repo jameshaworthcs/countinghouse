@@ -7,6 +7,7 @@ import type { ImportHistoryResponse, ImportListResponse } from '../../shared/api
 import { CsvProfileSchema, DraftSchema, EXTRACTION_ENGINES, SlugSchema } from '../../shared/schema';
 import { readJson, type AppContext } from '../context';
 import { detectKind } from '../ingest/detect';
+import { nowISO } from '../fsutil';
 import { promptVersion } from '../ingest/prompt';
 import { sheetRows } from '../ingest/xlsx';
 import { StoreError, type ImportSummary } from '../store';
@@ -43,9 +44,15 @@ export function importRoutes(ctx: AppContext): Hono {
     return c.json(body);
   });
 
-  /** Every committed import, a page at a time (`?page=`, from 1), for the Import page's History. */
+  /**
+   * Every committed import, a page at a time (`?page=`, from 1), for the Import page's History.
+   * `?q=` keeps those whose name, file name, kind or accounts have every word of it.
+   */
   app.get('/history', (c) => {
-    const all = [...ctx.store.imports].sort(latestCommittedFirst);
+    const words = (c.req.query('q') ?? '').toLowerCase().split(/\s+/).filter(Boolean);
+    const haystack = (i: ImportSummary) =>
+      [i.label?.text, i.fileName, i.documentType?.replace(/_/g, ' '), ...i.sections.map((s) => ctx.store.account(s.accountId)?.name)].filter(Boolean).join(' ').toLowerCase();
+    const all = [...ctx.store.imports].filter((i) => !words.length || words.every((w) => haystack(i).includes(w))).sort(latestCommittedFirst);
     const pages = Math.max(1, Math.ceil(all.length / HISTORY_PAGE_SIZE));
     const page = Math.min(pages, Math.max(1, Math.trunc(Number(c.req.query('page'))) || 1));
     const body: ImportHistoryResponse = {
@@ -53,6 +60,7 @@ export function importRoutes(ctx: AppContext): Hono {
         id: i.id,
         createdAt: i.createdAt,
         fileName: i.fileName,
+        ...(i.label ? { label: { text: i.label.text, setBy: i.label.provenance.setBy } } : {}),
         mediaType: i.mediaType,
         documentId: i.documentId,
         ...(i.committedAt ? { committedAt: i.committedAt } : {}),
@@ -60,6 +68,7 @@ export function importRoutes(ctx: AppContext): Hono {
         ...(i.result ? { result: i.result } : {}),
       })),
       total: all.length,
+      unnamed: ctx.store.imports.filter((i) => i.committedAt && !i.label).length,
       page,
       pageSize: HISTORY_PAGE_SIZE,
     };
@@ -123,6 +132,22 @@ export function importRoutes(ctx: AppContext): Hono {
     const pending = svc.getPending(rec.id);
     const nothingNew = pending ? svc.novelty().get(pending.id) : undefined;
     return c.json({ ...rec, ...(pending ? { readiness: svc.readiness(pending, nothingNew) } : {}), ...(nothingNew ? { nothingNew } : {}) });
+  });
+
+  /**
+   * Your name for a committed import (`{ "text": "…" }`), which Claude never replaces; `null` takes
+   * it away. Only you can: no token's scopes reach this route.
+   */
+  app.put('/:id/label', async (c) => {
+    const body = await readJson(c, z.object({ text: z.string().max(200).nullable() }));
+    const id = c.req.param('id');
+    const rec = svc.getPending(id) ? undefined : await ctx.store.readImport(id);
+    if (!rec) throw new StoreError('Only a committed import can be named.', 404);
+    const text = body.text?.replace(/\s+/g, ' ').trim();
+    if (text !== undefined && (text.length < 1 || text.length > 120)) throw new StoreError('A name is 1 to 120 characters.');
+    const { label: _old, ...rest } = rec;
+    await ctx.store.saveImport(text ? { ...rest, label: { text, provenance: { setBy: 'owner' }, at: nowISO() } } : rest, `import: ${id} ${text ? 'named' : 'name taken away'}`);
+    return c.json({ id, ...(text ? { label: { text, setBy: 'owner' } } : {}) });
   });
 
   app.put('/:id/draft', async (c) => {

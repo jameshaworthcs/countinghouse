@@ -12,6 +12,7 @@ import { mkdir, readdir, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { ACCOUNT_TYPE_META } from '../../shared/accounts';
+import { LABEL_BATCH } from '../../shared/api';
 import { assumptionDef, AssumptionSet } from '../../shared/assumptions';
 import { addDays, diffDays, today } from '../../shared/dates';
 import type { Analytics } from '../analytics';
@@ -74,6 +75,7 @@ const TYPICAL_COST_USD: Record<string, number> = {
   'insights-after-import': 0.3,
   'monthly-review': 0.25,
   'interpret-note': 0.1,
+  'label-imports': 0.1,
 };
 
 export interface BackgroundBudget {
@@ -90,6 +92,8 @@ export class JobRunner extends EventEmitter implements JobQueue {
   private current?: { id: string; abort: AbortController } | undefined;
   private importIds: string[] = [];
   private importTimer?: NodeJS.Timeout | undefined;
+  private labelIds: string[] = [];
+  private labelTimer?: NodeJS.Timeout | undefined;
   private timer?: NodeJS.Timeout | undefined;
   private firstTick?: NodeJS.Timeout | undefined;
   readonly dir: string;
@@ -138,6 +142,7 @@ export class JobRunner extends EventEmitter implements JobQueue {
     clearInterval(this.timer);
     clearTimeout(this.firstTick);
     clearTimeout(this.importTimer);
+    clearTimeout(this.labelTimer);
     this.current?.abort.abort();
   }
 
@@ -166,7 +171,8 @@ export class JobRunner extends EventEmitter implements JobQueue {
     const kind = input.kind as JobKind;
     const def = JOB_DEFS[kind];
     if (!def) throw new Error(`Unknown job kind ${input.kind}`);
-    if (!this.store.settings.agents.enabled && input.trigger !== 'owner') return undefined;
+    // Naming imports has its own switch, off until you turn it on; it does not need agents on.
+    if (kind === 'label-imports' ? !this.store.settings.agents.labelImports : !this.store.settings.agents.enabled && input.trigger !== 'owner') return undefined;
     const params = input.params ?? {};
     const same = [...this.jobs.values()].find((j) => j.kind === kind && JSON.stringify(j.params) === JSON.stringify(params) && (j.status === 'queued' || j.status === 'running'));
     if (same) return same;
@@ -197,6 +203,23 @@ export class JobRunner extends EventEmitter implements JobQueue {
     const job = this.jobs.get(id);
     if (!job) throw new Error('Unknown job');
     return this.enqueue({ kind: job.kind, params: job.params, trigger });
+  }
+
+  /**
+   * An import was committed (or filed with nothing new): with naming on, Claude names it once
+   * imports stop arriving for a while.
+   */
+  onImportFiled(importId: string): void {
+    if (!this.store.settings.agents.labelImports || !this.opts.autoRun) return;
+    if (this.store.imports.find((i) => i.id === importId)?.label || this.labelIds.includes(importId)) return;
+    this.labelIds.push(importId);
+    clearTimeout(this.labelTimer);
+    this.labelTimer = setTimeout(() => {
+      const ids = [...this.labelIds];
+      this.labelIds = [];
+      for (let i = 0; i < ids.length; i += LABEL_BATCH) this.enqueue({ kind: 'label-imports', params: { importIds: ids.slice(i, i + LABEL_BATCH) }, trigger: 'post-import' });
+    }, 60_000);
+    this.labelTimer.unref();
   }
 
   /** An import was committed: insights follow once imports stop arriving for a while. */

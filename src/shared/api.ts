@@ -17,6 +17,7 @@ import type {
   Budget,
   HoldingsSnapshot,
   ImportRecord,
+  SetBy,
   Institution,
   Profile,
   Proposal,
@@ -612,7 +613,7 @@ export interface AccountDetailResponse {
   series: { date: string; value: number | null }[];
   gaps: { from: string; to: string; difference: number }[];
   figures: Figure[];
-  imports: { id: string; fileName: string; committedAt?: string; documentId: string }[];
+  imports: { id: string; fileName: string; label?: string; committedAt?: string; documentId: string }[];
 }
 
 export interface TransactionsResponse {
@@ -640,16 +641,24 @@ export interface CommittedImport {
   createdAt: string;
   committedAt?: string;
   fileName: string;
+  /** The name to find it by: Claude's (`agent`) or yours (`owner`). */
+  label?: { text: string; setBy: SetBy };
   mediaType: string;
   documentId: string;
   engine?: string;
   result?: ImportRecord['result'];
 }
 
-/** GET /imports/history?page=: committed imports, the latest committed first, a page at a time. */
+/** Imports Claude names in one `label-imports` job. */
+export const LABEL_BATCH = 40;
+
+/** GET /imports/history?page=&q=: committed imports, the latest committed first, a page at a time. */
 export interface ImportHistoryResponse {
   items: CommittedImport[];
+  /** How many there are (that match `q`, when given). */
   total: number;
+  /** Committed imports with no name yet, of all of them. */
+  unnamed: number;
   /** The page these are: the one asked for, or the last there is when it asked past the end. */
   page: number;
   pageSize: number;

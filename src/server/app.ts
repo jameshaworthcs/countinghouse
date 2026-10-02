@@ -127,6 +127,7 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
   imports.on('update', (r: ImportRecord) => {
     // A document filed as adding nothing new has nothing for the analyst to look at.
     if (r.status === 'committed' && !r.result?.nothingNew) runner.onImportCommitted(r.id);
+    if (r.status === 'committed') runner.onImportFiled(r.id);
   });
 
   let inbox: InboxWatcher | undefined;

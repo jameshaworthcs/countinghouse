@@ -1396,3 +1396,30 @@ A switch on Settings → Import & extraction changed only the page until Save, a
 long page, was pressed; the owner turned on reading everything and it never reached the data.
 While a form differs from what is saved, its Save bar now stays in view at the foot of the screen,
 says the changes are not saved yet, and offers Undo.
+
+## 2026-10-02: Claude names imports, behind its own switch (off)
+
+Import → History listed committed imports by file name ("IMG_1234.PNG", "statement.ofx",
+"Monzo-export-again.csv"), which says little about what each document is. A `label-imports` job now
+names each one ("Monzo current account export, 1 – 30 Sep 2026"), and History shows the name
+over the file name and searches both, with the accounts.
+
+- **From what was read, not the document.** The job sees each import's kind, provider, accounts
+  (name, type, period), dates, a payslip's employer and the tax figures' kinds and years. It never
+  sees amounts, account numbers, references or rows, and gets no tools. Reading the document again
+  would cost a reading each and add nothing a name needs.
+- **Batched.** One job names up to 40 imports: twelve took 16 s and $0.08 with Opus at high effort;
+  one after a commit, 2 s and under a cent.
+- **Its own switch, off by default.** Settings → Agents → "Name imports with Claude". While it is off
+  no one can start the job, the owner included. On, it starts by itself a minute after imports stop
+  being committed or filed (within the background budget), without "Let agents start jobs by
+  themselves": the switch is the owner's opt-in for this one use, as "Read receipts with Claude" is
+  for receipts.
+- **The owner's name wins.** The name is an optional `label` on the import record (`{text,
+  provenance, at}`; additive, so no format change), and `document.fileName` stays as it was. A name
+  the owner gives on the import's page is never replaced; taking it away lets Claude name it again.
+  No token can rename.
+- A deterministic name (provider, kind, period) was considered: it would do for statements, but not
+  for screenshots, HMRC's pages or files the reader understood only in part, which are the ones
+  hardest to find.
+

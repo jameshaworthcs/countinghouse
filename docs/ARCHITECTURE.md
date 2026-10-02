@@ -14,7 +14,7 @@ Hono server  (Node 24, tsx; 127.0.0.1:4750 live, 4760 in development)
    │    (in-app jobs · POST /api/records · npm run records)
    ├─ JobRunner (agents/) ───► claude CLI, locked down, one job at a time; state in the work area
    │    ├─ research-instrument · research-provider · refresh-assumptions   (web tools, public inputs)
-   │    └─ insights-after-import · monthly-review · interpret-note          (the owner's data, no web)
+   │    └─ insights-after-import · monthly-review · interpret-note · label-imports   (the owner's data, no web)
    ├─ ProposalService ───────► proposed fixes: an agent (token or job) proposes, you apply or dismiss
    │    (pending in the work area; decided → data/proposals/, with what they changed; one the
    │    data comes to say all of closes by itself as already done)

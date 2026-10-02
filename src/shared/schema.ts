@@ -1099,10 +1099,15 @@ export const SettingsSchema = z.object({
        * this is on. Insights after imports and the month in review still follow the switches above.
        */
       autoResearch: z.boolean().default(false),
+      /**
+       * Claude names each committed import (the `label-imports` job), so History can be searched by
+       * what a document is rather than its file name. Off until you turn it on.
+       */
+      labelImports: z.boolean().default(false),
       backgroundBudgetPerDayUsd: z.number().min(0).max(100).default(5),
       backgroundBudgetPerMonthUsd: z.number().min(0).max(1000).default(40),
     })
-    .default({ enabled: true, model: 'opus', effort: 'high', researchStaleAfterDays: 90, insightsAfterImport: true, monthlyReview: true, timeoutSeconds: 1200, autoResearch: false, backgroundBudgetPerDayUsd: 5, backgroundBudgetPerMonthUsd: 40 }),
+    .default({ enabled: true, model: 'opus', effort: 'high', researchStaleAfterDays: 90, insightsAfterImport: true, monthlyReview: true, timeoutSeconds: 1200, autoResearch: false, labelImports: false, backgroundBudgetPerDayUsd: 5, backgroundBudgetPerMonthUsd: 40 }),
 });
 export type Settings = z.infer<typeof SettingsSchema>;
 
@@ -1113,6 +1118,25 @@ export const MetaSchema = z.object({
   createdAt: TimestampSchema,
 });
 export type Meta = z.infer<typeof MetaSchema>;
+
+// ─── Provenance shared by agent-maintained records ───────────────────────────────────────────────
+
+/** Who set a record. The owner's records always win over an agent's (see docs/AGENTS.md). */
+export const SET_BY = ['owner', 'agent', 'system'] as const;
+export type SetBy = (typeof SET_BY)[number];
+
+export const ProvenanceSchema = z.object({
+  setBy: z.enum(SET_BY),
+  /** Model that produced it (agents), e.g. "claude-opus-5-5". */
+  model: z.string().optional(),
+  /** Version of the job prompt that produced it, e.g. "research-instrument-1". */
+  promptVersion: z.string().optional(),
+  /** The in-app job that wrote it. */
+  jobId: z.string().optional(),
+  /** Where an agent ran outside the app, e.g. "claude-code". */
+  session: z.string().optional(),
+});
+export type Provenance = z.infer<typeof ProvenanceSchema>;
 
 // ─── Documents & imports ─────────────────────────────────────────────────────────────────────────
 
@@ -1577,6 +1601,17 @@ export const ImportRecordSchema = z.object({
   document: DocumentRefSchema,
   /** When you last saved changes to the draft: it is never drafted again by itself after that. */
   draftEditedAt: TimestampSchema.optional(),
+  /**
+   * A name to find it by in History, in place of the file's own name: given by Claude (the
+   * `label-imports` job) or by you. Yours is never replaced. The document's `fileName` stays as it was.
+   */
+  label: z
+    .object({
+      text: z.string().min(1).max(120),
+      provenance: ProvenanceSchema,
+      at: TimestampSchema,
+    })
+    .optional(),
   /** CSV files in an unknown layout: the suggested column mapping awaiting confirmation. */
   mapping: z
     .object({
@@ -1654,25 +1689,6 @@ export const ImportRecordSchema = z.object({
     .optional(),
 });
 export type ImportRecord = z.infer<typeof ImportRecordSchema>;
-
-// ─── Provenance shared by agent-maintained records ───────────────────────────────────────────────
-
-/** Who set a record. The owner's records always win over an agent's (see docs/AGENTS.md). */
-export const SET_BY = ['owner', 'agent', 'system'] as const;
-export type SetBy = (typeof SET_BY)[number];
-
-export const ProvenanceSchema = z.object({
-  setBy: z.enum(SET_BY),
-  /** Model that produced it (agents), e.g. "claude-opus-5-5". */
-  model: z.string().optional(),
-  /** Version of the job prompt that produced it, e.g. "research-instrument-1". */
-  promptVersion: z.string().optional(),
-  /** The in-app job that wrote it. */
-  jobId: z.string().optional(),
-  /** Where an agent ran outside the app, e.g. "claude-code". */
-  session: z.string().optional(),
-});
-export type Provenance = z.infer<typeof ProvenanceSchema>;
 
 // ─── Proposed fixes ──────────────────────────────────────────────────────────────────────────────
 // Changes an agent found reasons for in your data, each with its reason (docs/AGENTS.md, "Proposing

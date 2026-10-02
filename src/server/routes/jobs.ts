@@ -28,11 +28,12 @@ export function jobRoutes(ctx: AppContext): Hono {
   // A job an agent's token starts waits for the background budget, and is refused while agents are
   // off in Settings: only you can start one then.
   const AGENTS_OFF = 'Agents are turned off in Settings, so an agent cannot start a job.';
+  const LABELS_OFF = 'Naming imports with Claude is off: turn it on in Settings → Agents.';
 
   app.post('/', async (c) => {
     const body = await readJson(c, z.object({ kind: z.enum(JOB_KINDS), params: z.record(z.string(), z.unknown()).default({}) }));
     const job = runner().enqueue({ kind: body.kind, params: body.params, trigger: agentTokenOf(c) ? 'agent' : 'owner' });
-    if (!job) throw new StoreError(AGENTS_OFF, 409);
+    if (!job) throw new StoreError(body.kind === 'label-imports' ? LABELS_OFF : AGENTS_OFF, 409);
     return c.json(job, 201);
   });
 
@@ -45,6 +46,7 @@ export function jobRoutes(ctx: AppContext): Hono {
   app.post('/:id/rerun', (c) => {
     const agent = Boolean(agentTokenOf(c));
     const job = runner().rerun(c.req.param('id'), agent ? 'agent' : 'owner');
+    if (!job && runner().get(c.req.param('id'))?.kind === 'label-imports') throw new StoreError(LABELS_OFF, 409);
     if (!job && agent) throw new StoreError(AGENTS_OFF, 409);
     return c.json(job ?? null);
   });

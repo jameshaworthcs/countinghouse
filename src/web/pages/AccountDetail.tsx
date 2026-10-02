@@ -386,7 +386,7 @@ export default function AccountDetail() {
                 <li key={i.id} className="flex items-center gap-3 px-5 py-2.5 text-[13px]">
                   <FileText className="size-4 text-ink-3" />
                   <a href={`/api/documents/${i.documentId}`} target="_blank" rel="noreferrer" className="flex-1 truncate text-accent hover:underline">
-                    {i.fileName}
+                    {i.label ?? i.fileName}
                   </a>
                   <span className="text-ink-3">{i.committedAt ? formatDate(i.committedAt.slice(0, 10)) : ''}</span>
                   <Link to={`/import/${i.id}`} className="text-ink-2 hover:underline">
