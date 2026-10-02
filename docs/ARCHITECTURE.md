@@ -96,8 +96,12 @@ The equations are in [FORMULAS.md](FORMULAS.md); the rules for writing these rec
   charges, and computes the p10–p90 range from exact moment recursions (with the uncertainty in
   expected returns integrated), checked against Monte Carlo in the tests.
 - **Coverage** (`analytics/coverage.ts`):
-  - It knows which days each account has data for, from import statement periods.
+  - It knows which days each account has data for, from import statement periods (an export's
+    range when you gave one) and the stretches you confirmed nothing is missing from
+    (`coverage.json`).
   - Averages, baselines and signals use covered time only, and every page can say what is missing.
+  - Data health lists each stretch no document covers, with what its balances say
+    (`BalanceEngine.evidence`). You confirm a stretch; the balances never cover one by themselves.
 - **Research and insights** are written by agent jobs through `records.ts`, with provenance.
   - Pages show insights in a panel labelled as Claude's inferences, apart from computed figures
     and computed signals.
@@ -329,8 +333,9 @@ Per account:
   - Shortly before the first valuation, the value is rolled back from it.
   - Further back, the estimate is contributions plus linearly accrued growth, flagged as
     estimated.
-- **Gaps** are consecutive strong anchors that transactions don't explain, usually a missing
-  statement. They are surfaced in Data health.
+- **Gaps** are consecutive usable anchors that transactions don't explain, usually a missing
+  statement: the strong ones, and each screenshot or mid-day balance that adds up exactly. They
+  are surfaced in Data health.
 
 The estate value on a date is the sum of included accounts, converted to GBP (manual FX rates).
 Groups are assigned by the sign of the balance, so an overdrawn current account counts as a debt

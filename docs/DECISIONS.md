@@ -1551,3 +1551,36 @@ Later the same day, after the owner's first runs (`label-imports-2`):
   - the login the jobs use, and "Claude usage at API prices" for costs;
   - Claude Code, the tool an agent with a token runs in;
   - the model names, and errors from the API about the model itself.
+
+## 2026-10-02: Coverage you confirm, from what the balances show
+
+- **Found:** only a few of the last 365 days counted as covered by every account, so no month was
+  complete. That left the month in review incomplete and the baselines at low confidence. Most of
+  the gaps were quiet periods, not missing data:
+  - card issuers send no statement for a month with no activity and a nil balance;
+  - an export covers only its first row to its last;
+  - screenshots counted only for the days their rows showed.
+
+  The balances proved it to the penny: for example, every HSBC row since the account opened adds
+  up to the next statement's balance.
+- **Asked:** the owner chose:
+  - a stretch whose balances add up should *not* count as covered by itself;
+  - a screenshot, or a balance seen mid-day, *should* count when it adds up exactly;
+  - an export's range can be given on upload, and past data must be put right without uploading
+    files again.
+- **Done:**
+  - **Balance evidence on every gap.** Data health lists each stretch no document covers, with
+    whether its balances add up (FORMULAS.md §3). An account opened on a known day starts from the
+    £0 it opened with, labelled as such.
+  - **You confirm.** "Nothing missing" on one stretch, or "Confirm the N that add up" at once
+    (each only to the day its balances reach). A confirmation goes into a new `coverage.json`,
+    counts as covered, records the evidence it was confirmed on, and is marked if its balances
+    later stop adding up. It is additive data, so there is no format version. No token can confirm
+    or withdraw one.
+  - **Weak balances that add up exactly are usable** in gap checks and evidence (FORMULAS.md §9).
+    One that does not add up is still left out: it may predate rows still to post, so it never
+    shows a gap by itself. `between`, which proposals rely on, still takes only strong balances.
+  - **An export's range.** The review page offers "It covers from … to …" for a document that does
+    not print its period (`coversFrom`/`coversTo` on the draft section). Past exports are covered
+    by confirming the stretches between them, with no re-uploads. So there is no control to edit a
+    committed import's period.

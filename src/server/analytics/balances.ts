@@ -17,7 +17,7 @@ import { ACCOUNT_TYPE_META, balanceModeOf } from '../../shared/accounts';
 import { EXTERNAL_FLOW_CATEGORIES } from '../../shared/categories';
 import { addDays, diffDays, today, type ISODate } from '../../shared/dates';
 import { fromMinor, toMinor } from '../../shared/money';
-import type { Account, Settings } from '../../shared/schema';
+import type { Account, BalanceEvidence, Settings } from '../../shared/schema';
 import type { Store } from '../store';
 
 /** What the engine reads: a store, or a store as a proposal would leave it. */
@@ -158,6 +158,9 @@ function lastAnchorOnOrBefore(anchors: Anchor[], d: ISODate): Anchor | undefined
   return found;
 }
 
+/** A statement's, running or your own balance, as a day's close. */
+const isStrong = (a: Anchor) => a.source !== 'screenshot' && a.source !== 'approximate' && !a.midDay;
+
 function firstAnchorAfter(anchors: Anchor[], d: ISODate): Anchor | undefined {
   return anchors.find((a) => a.date > d);
 }
@@ -221,6 +224,7 @@ export function lastUpdated(store: Pick<Store, 'hmrc'>, engine: BalanceEngine, a
 
 export class BalanceEngine {
   private readonly data = new Map<string, AccountData>();
+  private readonly usable = new Map<string, Anchor[]>();
 
   constructor(store: BalanceSource) {
     for (const account of store.accounts) {
@@ -368,15 +372,45 @@ export class BalanceEngine {
 
   /**
    * Gaps between consecutive anchors that transactions don't explain: usually a missing statement.
+   * A screenshot or a balance seen mid-day takes part when it adds up exactly (`usableAnchors`).
    */
   gaps(accountId: string): { from: ISODate; to: ISODate; difference: number }[] {
-    const strong = this.strongAnchors(accountId);
+    const usable = this.usableAnchors(accountId);
     const out: { from: ISODate; to: ISODate; difference: number }[] = [];
-    for (let i = 1; i < strong.length; i++) {
-      const gap = this.unexplained(accountId, strong[i - 1]!, strong[i]!);
+    for (let i = 1; i < usable.length; i++) {
+      const gap = this.unexplained(accountId, usable[i - 1]!, usable[i]!);
       if (gap.difference) out.push(gap);
     }
     return out;
+  }
+
+  /**
+   * What the balances say about the days from `from` to `to` (docs/FORMULAS.md §3, "Balance
+   * evidence"): whether the balance before them, carried by the rows recorded, comes to each balance
+   * after, through the first on or after `to` (or the last inside them). With nothing recorded
+   * before them, an account that opened on a known day starts from the £0 it opened with.
+   */
+  evidence(accountId: string, from: ISODate, to: ISODate): BalanceEvidence {
+    const d = this.data.get(accountId);
+    if (!d || d.mode !== 'ledger') return { status: 'no-balance' };
+    let list = this.usableAnchors(accountId);
+    const opened = d.account.openedOn ? addDays(d.account.openedOn, -1) : undefined;
+    const fromOpening = opened !== undefined && !(list[0] && list[0].date <= opened) && !(d.tx.dates[0] && d.tx.dates[0] <= opened);
+    if (fromOpening) list = [{ date: opened, minor: 0, source: 'snapshot' }, ...list];
+    const start = list.findLastIndex((a) => a.date < from);
+    if (start < 0) return { status: 'no-balance' };
+    const after = list.findIndex((a) => a.date >= to);
+    const end = after >= 0 ? after : list.findLastIndex((a) => a.date >= from);
+    const opening = fromOpening && start === 0 ? { fromOpening: true } : {};
+    if (end < 0) return { status: 'no-balance', from: list[start]!.date, ...opening };
+    let difference = 0;
+    let unexplained = false;
+    for (let i = start + 1; i <= end; i++) {
+      const pair = this.unexplained(accountId, list[i - 1]!, list[i]!);
+      difference += toMinor(pair.difference);
+      if (pair.difference) unexplained = true;
+    }
+    return { status: unexplained ? 'unexplained' : 'adds-up', from: list[start]!.date, to: list[end]!.date, through: after >= 0 ? to : list[end]!.date, difference: fromMinor(difference), ...opening };
   }
 
   /**
@@ -396,7 +430,40 @@ export class BalanceEngine {
   private strongAnchors(accountId: string): Anchor[] {
     const d = this.data.get(accountId);
     if (!d || d.mode !== 'ledger' || d.tx.dates.length === 0) return [];
-    return d.anchors.filter((a) => a.source !== 'screenshot' && a.source !== 'approximate' && !a.midDay);
+    return d.anchors.filter(isStrong);
+  }
+
+  /**
+   * The strong anchors, with each screenshot or balance seen mid-day that adds up exactly with them
+   * (docs/FORMULAS.md §9, "Gaps"): the anchor before it (or, before the first, the one after),
+   * carried by the rows recorded, comes to it at its day's close, or at the close of the day before
+   * when it was seen before that day's rows. One that does not is left out, as before: it may have
+   * been seen before rows that were still to post.
+   */
+  private usableAnchors(accountId: string): Anchor[] {
+    const cached = this.usable.get(accountId);
+    if (cached) return cached;
+    const d = this.data.get(accountId);
+    const out: Anchor[] = [];
+    if (d && d.mode === 'ledger' && d.tx.dates.length > 0) {
+      const strong = d.anchors.filter(isStrong);
+      // The balance at a day's close, carried from an anchor forwards or back by the rows between.
+      const closeOf = (a: Anchor, day: ISODate) => a.minor + (sumTo(d.tx, day) - sumTo(d.tx, a.date));
+      for (const a of d.anchors) {
+        if (a.source === 'approximate') continue;
+        if (isStrong(a)) {
+          out.push(a);
+          continue;
+        }
+        const ref = out.at(-1) ?? strong.find((s) => s.date > a.date);
+        if (!ref) continue;
+        const dayBefore = addDays(a.date, -1);
+        if (closeOf(ref, a.date) === a.minor) out.push({ date: a.date, minor: a.minor, source: a.source });
+        else if (closeOf(ref, dayBefore) === a.minor && out.at(-1)?.date !== dayBefore) out.push({ date: dayBefore, minor: a.minor, source: a.source });
+      }
+    }
+    this.usable.set(accountId, out);
+    return out;
   }
 
   private unexplained(accountId: string, a: Anchor, b: Anchor): { from: ISODate; to: ISODate; difference: number } {

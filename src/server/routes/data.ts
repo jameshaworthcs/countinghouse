@@ -20,6 +20,7 @@ import {
   EmploymentSchema,
   CompanySchema,
   AgreementSchema,
+  CoverageConfirmationSchema,
   FIGURE_KINDS,
   GoalSchema,
   BudgetSchema,
@@ -34,6 +35,7 @@ import {
   WorkDetailSchema,
   type Account,
   type BalanceSnapshot,
+  type CoverageConfirmation,
   type Figure,
   type Rule,
   type Transaction,
@@ -43,7 +45,7 @@ import { SYSTEM_CATEGORY_IDS } from '../../shared/categories';
 import { csvCell, queryDate, readJson, type AppContext } from '../context';
 import { categoriserFor } from '../categoriser';
 import { enrich, salaryByPayroll } from '../enrich';
-import { nowISO } from '../fsutil';
+import { nowISO, randomHex } from '../fsutil';
 import { balanceId, figureId, ruleId, transactionId } from '../ids';
 import { payerKey } from '../analytics/pay';
 import { payeReference } from '../analytics/sources';
@@ -871,6 +873,41 @@ export function dataRoutes(ctx: AppContext): Hono {
     if (next.until && next.until < next.from) throw new StoreError('It would end before it starts', 400);
     await store.upsertAgreement(next, `agreement: ${next.name}`);
     return c.json(agreementView(store, next));
+  });
+
+  // ─── Coverage you confirmed (coverage.json) ──────────────────────────────────────────────────
+
+  // Nothing is missing from these stretches: each counts as covered (docs/FORMULAS.md §3), with what
+  // its balances showed when you said so. Only you: no token reaches these routes.
+  app.post('/coverage/confirmations', async (c) => {
+    const body = await readJson(c, z.object({ stretches: z.array(CoverageConfirmationSchema.pick({ accountId: true, from: true, to: true, note: true })).min(1).max(200) }));
+    const now = today();
+    const engine = ctx.analytics.engine;
+    const added: CoverageConfirmation[] = [];
+    for (const s of body.stretches) {
+      const account = store.account(s.accountId);
+      if (!account) throw new StoreError(`No account "${s.accountId}"`, 404);
+      if (s.from > s.to) throw new StoreError(`${account.name}: ${s.from} is after ${s.to}`, 400);
+      if (s.to > now) throw new StoreError(`${account.name}: ${s.to} is in the future`, 400);
+      const same = (x: { accountId: string; from: string; to: string }) => x.accountId === s.accountId && x.from === s.from && x.to === s.to;
+      if (store.coverageConfirmations.some(same) || added.some(same)) continue;
+      added.push(CoverageConfirmationSchema.parse({ id: `cov_${randomHex(6)}`, ...s, evidence: engine.evidence(s.accountId, s.from, s.to), confirmedAt: nowISO() }));
+    }
+    if (added.length) {
+      const one = added.length === 1 ? `${store.account(added[0]!.accountId)!.name}, ${added[0]!.from} to ${added[0]!.to}` : `${added.length} stretches`;
+      await store.setCoverageConfirmations([...store.coverageConfirmations, ...added], `coverage: nothing missing from ${one}`);
+    }
+    return c.json({ added });
+  });
+  app.delete('/coverage/confirmations/:id', async (c) => {
+    const id = c.req.param('id');
+    const gone = store.coverageConfirmations.find((x) => x.id === id);
+    if (!gone) throw new StoreError('No such confirmation', 404);
+    await store.setCoverageConfirmations(
+      store.coverageConfirmations.filter((x) => x.id !== id),
+      `coverage: withdrew ${store.account(gone.accountId)?.name ?? gone.accountId}, ${gone.from} to ${gone.to}`,
+    );
+    return c.json({ ok: true });
   });
 
   app.get('/payslips', (c) => {

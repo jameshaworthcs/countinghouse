@@ -4,6 +4,8 @@ import type { AccessGroup, WrapperGroup } from './accounts';
 import type {
   Account,
   Agreement,
+  BalanceEvidence,
+  CoverageConfirmation,
   Terms,
   TermsRate,
   TermsRateApplies,
@@ -578,8 +580,24 @@ export interface CaptureResponse {
   open: number;
 }
 
+/** A stretch of days an account should have data for that nothing covers (docs/FORMULAS.md §3). */
+export interface CoverageGapView {
+  accountId: string;
+  name: string;
+  from: string;
+  to: string;
+  days: number;
+  /** Rows recorded inside it. */
+  rows: number;
+  evidence: BalanceEvidence;
+}
+
 export interface DataHealthResponse {
   coverage?: CoverageResponse;
+  /** Stretches in the coverage grid's months that nothing covers, with what their balances say. */
+  coverageGaps?: CoverageGapView[];
+  /** The stretches you confirmed nothing is missing from, with what their balances say now. */
+  confirmations?: (CoverageConfirmation & { name: string; now: BalanceEvidence })[];
   issues: { file: string; severity: 'error' | 'warning'; message: string }[];
   gaps: { accountId: string; name: string; from: string; to: string; difference: number }[];
   uncategorised: number;

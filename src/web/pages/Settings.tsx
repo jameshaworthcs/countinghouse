@@ -6,7 +6,7 @@ import { formatDate, today } from '../../shared/dates';
 import { FIGURE_KINDS, type Category, type Figure, type Profile, type Rule, type Settings as SettingsT } from '../../shared/schema';
 import { taxYearOf } from '../../shared/uk';
 import { AuditLog } from '../components/Audit';
-import { CoverageGrid } from '../components/Coverage';
+import { CoverageGaps, CoverageGrid } from '../components/Coverage';
 import { CategorySelect } from '../components/TransactionList';
 import { Badge, Button, Callout, Card, Checkbox, Dialog, Field, Input, KeyValue, Loading, Money, PageHeader, Select, SortHeader, StatusBadge, Switch, Tabs, tableClasses, useToast } from '../components/ui';
 import { api, useApi, useApiMutation } from '../lib/api';
@@ -837,7 +837,7 @@ function Health() {
   const q = useApi<DataHealthResponse>(['data-health'], '/data-health');
   const h = q.data;
   if (!h) return <Loading />;
-  const clean = !h.issues.length && !h.gaps.length && !h.noBalance.length && !h.stale.length;
+  const clean = !h.issues.length && !h.gaps.length && !h.noBalance.length && !h.stale.length && !h.coverageGaps?.some((g) => g.evidence.status === 'unexplained');
   const cov = h.coverage;
   return (
     <div className="flex flex-col gap-5">
@@ -853,6 +853,7 @@ function Health() {
           </div>
         </Card>
       )}
+      <CoverageGaps gaps={h.coverageGaps ?? []} confirmations={h.confirmations ?? []} />
       {h.issues.length > 0 && (
         <Card title="Problems in the data files" description="Records that don’t match the format are kept untouched and ignored until fixed.">
           <ul className="flex flex-col gap-1.5 text-[13px]">

@@ -121,7 +121,16 @@ export class Analytics {
   }
 
   health() {
-    return this.cached(`health:${today()}`, () => ({ ...dataHealth(this.store, this.engine), coverage: this.coverage() }));
+    return this.cached(`health:${today()}`, () => {
+      const coverage = this.coverage();
+      const engine = this.engine;
+      return {
+        ...dataHealth(this.store, engine),
+        coverage,
+        coverageGaps: coverage.months.length ? this.coverageIndex.gaps(engine, `${coverage.months[0]}-01`) : [],
+        confirmations: this.store.coverageConfirmations.map((c) => ({ ...c, name: this.store.account(c.accountId)?.name ?? c.accountId, now: engine.evidence(c.accountId, c.from, c.to) })),
+      };
+    });
   }
 
   summary(importCounts: Record<string, number>): SummaryResponse {

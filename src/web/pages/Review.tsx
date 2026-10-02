@@ -392,6 +392,11 @@ function SectionEditor({ section, index, total, latest, periodFromRows, onChange
   const type = target.mode === 'existing' ? data.accounts.find((a) => a.id === target.accountId)?.type : target.mode === 'new' ? target.account.type : undefined;
   const market = type ? ACCOUNT_TYPE_META[type].balanceMode === 'market' : false;
   const d = section.detected;
+  // A document that does not print its period (an export, a screenshot of a list) covers its rows'
+  // span; the range you chose can widen it (docs/FORMULAS.md §3).
+  const rowDates = section.transactions.map((t) => t.date).sort();
+  const [rowsFrom, rowsTo] = [rowDates[0] ?? '', rowDates.at(-1) ?? ''];
+  const coverable = !market && rowDates.length > 0 && (periodFromRows || !section.periodStart);
   const suggested = section.suggestedAccountId ? data.accounts.find((a) => a.id === section.suggestedAccountId) : undefined;
   const checks = target.mode === 'skip' ? [] : sectionChecks(section, { accountType: type, latest, periodFromRows });
   // Rows a check is about carry its title, so the problem is visible where it is.
@@ -529,6 +534,24 @@ function SectionEditor({ section, index, total, latest, periodFromRows, onChange
               </div>
             )}
             <ChecksPanel checks={checks} />
+            {coverable && (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field
+                  label="It covers from (optional)"
+                  hint={`It doesn’t print its period, so it counts from its first row, ${formatDate(rowsFrom)}. Give the first day of the range you exported, if earlier.`}
+                  error={section.coversFrom && section.coversFrom > rowsFrom ? `It has rows from ${formatDate(rowsFrom)}` : undefined}
+                >
+                  <Input type="date" max={rowsFrom} value={section.coversFrom ?? ''} onChange={(e) => set({ coversFrom: e.target.value || undefined })} />
+                </Field>
+                <Field
+                  label="To (optional)"
+                  hint={`Its last row is ${formatDate(rowsTo)}. Give the last day of the range, if later.`}
+                  error={section.coversTo && section.coversTo < rowsTo ? `It has rows up to ${formatDate(rowsTo)}` : section.coversTo && section.coversTo > latest ? 'That’s after it was uploaded' : undefined}
+                >
+                  <Input type="date" min={rowsTo} max={latest} value={section.coversTo ?? ''} onChange={(e) => set({ coversTo: e.target.value || undefined })} />
+                </Field>
+              </div>
+            )}
             {section.transactions.length > 0 && (
               <div>
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">

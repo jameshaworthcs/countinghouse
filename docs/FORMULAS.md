@@ -58,13 +58,34 @@ in this order:
 
 - each committed import's statement period for the account (`periodStart`–`periodEnd`), or the
   span of its rows (a statement with an opening balance and no rows: its closing day);
+  - a document that does not print its period (an export, a screenshot of a list) covers from its
+    first row to its last, widened to the range you gave while reviewing it (`coversFrom`,
+    `coversTo`). A range inside its rows never narrows it;
   - a statement that does not print its start runs from the day after the statement before it
     (the latest-ending one with a closing balance) when it opens on that one's closing balance and
     ends within `STATEMENT_CYCLE_DAYS` = 40 of it (`importIntervals`). The balances chain, so a
     quiet stretch before its first row is covered, not missing. Two cycles apart, a statement is
     missing between, and it is not linked;
 - each hand-entered transaction's day;
+- each stretch you confirmed nothing is missing from (`coverage.json`);
 - for an account with transactions but no import records: from its first to its last transaction.
+
+**Balance evidence** (`BalanceEngine.evidence`, shown with each stretch no document covers, in
+Settings → Data health). For the days from *f* to *t*, with the anchors usable for gaps (§9):
+
+- the balance before them is the last anchor dated before *f*. When nothing is recorded on or
+  before the day before the account opened (`openedOn`), that day counts as an anchor of £0, and
+  the evidence says so (`fromOpening`);
+- the balances after them run to the first anchor dated on or after *t*, or else to the last one
+  inside them (the evidence then speaks only `through` that day);
+- `adds-up` when every consecutive pair from the one before to the last one after has nothing
+  unexplained (§9, **Gaps**); `unexplained`, with the sum of what each pair leaves, when one does
+  not; `no-balance` with no anchor before them, or none after the one before.
+
+Adding up shows only the net: a payment and its refund inside the stretch would cancel out. So the
+evidence never covers days by itself. You confirm a stretch, one at a time or all those that add
+up at once (each to the day its balances reach, and never today), and only then does it count. A
+confirmed stretch whose balances later stop adding up is marked, and stays until you withdraw it.
 
 **Joint coverage over [from, to]** is the set of days *d* on which every transaction account in the
 estate that is open on *d* covers *d*. An account counts from `openedOn`, or its first covered day,
@@ -325,11 +346,23 @@ years), both paths grow at the median:
 
 **Gaps:**
 
-- Consecutive strong anchors (not screenshots or approximate figures) with
-  anchor_b ≠ anchor_a + Σ tx in (a, b], each transaction on the day it counts from.
+- Consecutive usable anchors with anchor_b ≠ anchor_a + Σ tx in (a, b], each transaction on the
+  day it counts from.
+- Usable anchors are the strong ones (not screenshots or approximate figures), and each weak one
+  that adds up exactly (`usableAnchors`).
 - A balance seen mid-day (`at`) is strong only when every row of its day shows a time no later
   than it. A row with no time, or a later one, may follow it, and would look like a gap.
   - Its day's balance(D) is still that balance: rows of the day after it are not added.
+- A weak anchor (a screenshot's balance, or one seen mid-day) on day D is usable when the usable
+  anchor before it (or, before the first, the strong one after it), carried by the rows between,
+  comes to it exactly:
+  - at the close of D: it stands for D;
+  - otherwise at the close of D − 1, as when it was seen before the day's rows posted: it stands
+    for D − 1.
+
+  One that adds up neither way is left out, as before. It may have been seen before rows that
+  were still to post, so it never shows a gap by itself.
+- `between` (used by proposals, AGENTS.md §5) still takes only the strong anchors.
 - The difference is what is unexplained.
 - The strong anchors either side of a day (`between`): the last one before it and the first on or
   after it, and what is unexplained between them. A proposal that takes away a move inside the

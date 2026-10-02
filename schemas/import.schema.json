@@ -4058,6 +4058,14 @@
                 "type": "string",
                 "description": "Calendar date, YYYY-MM-DD"
               },
+              "coversFrom": {
+                "type": "string",
+                "description": "Calendar date, YYYY-MM-DD"
+              },
+              "coversTo": {
+                "type": "string",
+                "description": "Calendar date, YYYY-MM-DD"
+              },
               "openingBalance": {
                 "type": "number",
                 "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."

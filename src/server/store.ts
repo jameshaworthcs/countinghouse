@@ -23,6 +23,7 @@ import {
   EmploymentSchema,
   CompanySchema,
   AgreementSchema,
+  CoverageConfirmationSchema,
   HmrcRecordSchema,
   PayslipRecordSchema,
   TermsSchema,
@@ -53,6 +54,7 @@ import {
   type Employment,
   type Company,
   type Agreement,
+  type CoverageConfirmation,
   type HmrcRecord,
   type PayslipRecord,
   type Terms,
@@ -153,6 +155,7 @@ const ARRAY_FILES = {
   employments: { file: 'employments.json', key: 'employments', schema: EmploymentSchema },
   companies: { file: 'companies.json', key: 'companies', schema: CompanySchema },
   agreements: { file: 'agreements.json', key: 'agreements', schema: AgreementSchema },
+  coverage: { file: 'coverage.json', key: 'confirmations', schema: CoverageConfirmationSchema },
 } as const;
 
 /** Single-file JSONL collections: one record per line. */
@@ -184,6 +187,8 @@ interface State {
   employments: Employment[];
   companies: Company[];
   agreements: Agreement[];
+  /** Stretches you confirmed nothing is missing from (coverage.json). */
+  coverage: CoverageConfirmation[];
   /** Append-only: every version of every assumption, in file order. */
   assumptions: Assumption[];
   /** Append-only: every research record, in file order. */
@@ -220,6 +225,7 @@ function emptyState(): State {
     employments: [],
     companies: [],
     agreements: [],
+    coverage: [],
     assumptions: [],
     research: [],
     insights: [],
@@ -312,6 +318,7 @@ export class Store extends EventEmitter {
       ['employments.json', { $schema: '../schemas/employments.schema.json', employments: [] }],
       ['companies.json', { $schema: '../schemas/companies.schema.json', companies: [] }],
       ['agreements.json', { $schema: '../schemas/agreements.schema.json', agreements: [] }],
+      ['coverage.json', { $schema: '../schemas/coverage.schema.json', confirmations: [] }],
     ];
     for (const [rel, value] of writes) await this.writeJson(rel, value);
     for (const def of Object.values(JSONL_FILES)) await atomicWrite(this.abs(def.file), '');
@@ -627,6 +634,9 @@ export class Store extends EventEmitter {
   agreement(id: string | undefined): Agreement | undefined {
     return id ? this.state.agreements.find((a) => a.id === id) : undefined;
   }
+  get coverageConfirmations(): CoverageConfirmation[] {
+    return this.state.coverage;
+  }
   get employments(): Employment[] {
     return this.state.employments;
   }
@@ -822,6 +832,9 @@ export class Store extends EventEmitter {
   }
   setAgreements(list: Agreement[], message = 'agreements: update'): Promise<void> {
     return this.setArray('agreements', list, message);
+  }
+  setCoverageConfirmations(list: CoverageConfirmation[], message = 'coverage: update'): Promise<void> {
+    return this.setArray('coverage', list, message);
   }
   async upsertAgreement(agreement: Agreement, message?: string): Promise<void> {
     const existing = this.state.agreements.findIndex((a) => a.id === agreement.id);
@@ -1320,8 +1333,11 @@ function sectionsOf(r: ImportRecord): ImportSummary['sections'] {
     const dates = s.transactions.map((t) => t.date).sort();
     // A statement with an opening balance and no rows still covers the day it closed; coverage
     // can link it back to the statement before it.
-    const to = s.periodEnd ?? dates[dates.length - 1] ?? (s.openingBalance !== undefined ? s.balanceDate : undefined);
-    const from = s.periodStart ?? dates[0] ?? to;
+    const readTo = s.periodEnd ?? dates[dates.length - 1] ?? (s.openingBalance !== undefined ? s.balanceDate : undefined);
+    const readFrom = s.periodStart ?? dates[0] ?? readTo;
+    // The range you gave for a document that does not print its period widens what it covers.
+    const from = s.coversFrom && (!readFrom || s.coversFrom < readFrom) ? s.coversFrom : readFrom;
+    const to = s.coversTo && (!readTo || s.coversTo > readTo) ? s.coversTo : readTo;
     if (!from || !to || from > to) continue;
     // With an investment app's activity list, the balances are its cash, and so is `cash`.
     const closing = s.cashLedger ? s.cash : s.balance;
@@ -1329,7 +1345,7 @@ function sectionsOf(r: ImportRecord): ImportSummary['sections'] {
       accountId,
       from,
       to,
-      ...(s.periodStart ? { fromStated: true } : {}),
+      ...(s.periodStart || s.coversFrom ? { fromStated: true } : {}),
       ...(s.openingBalance !== undefined ? { opening: s.openingBalance } : {}),
       ...(closing !== undefined ? { closing } : {}),
     });

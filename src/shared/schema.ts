@@ -678,6 +678,41 @@ export const AgreementSchema = z.object({
 });
 export type Agreement = z.infer<typeof AgreementSchema>;
 
+/**
+ * What the balances showed about a stretch of days no document covers (docs/FORMULAS.md §3,
+ * "Balance evidence"): they add up across it, they leave an amount unexplained, or there is no
+ * balance on one side.
+ */
+export const BalanceEvidenceSchema = z.object({
+  status: z.enum(['adds-up', 'unexplained', 'no-balance']),
+  /** The balances either side: the last before the stretch and the first on or after its end (or the last inside it). */
+  from: ISODateSchema.optional(),
+  to: ISODateSchema.optional(),
+  /** The last day the balances speak for (before the stretch's end when the last balance is inside it). */
+  through: ISODateSchema.optional(),
+  /** What the rows between leave unexplained, summed over each pair of balances. */
+  difference: MoneySchema.optional(),
+  /** The first balance is the £0 the account opened with, not one recorded. */
+  fromOpening: z.boolean().optional(),
+});
+export type BalanceEvidence = z.infer<typeof BalanceEvidenceSchema>;
+
+/**
+ * You confirmed that nothing is missing from an account over a stretch of days no document covers:
+ * it counts as covered, like a statement's period (docs/FORMULAS.md §3).
+ */
+export const CoverageConfirmationSchema = z.object({
+  id: z.string().regex(/^cov_[0-9a-f]{12}$/),
+  accountId: SlugSchema,
+  from: ISODateSchema,
+  to: ISODateSchema,
+  /** What the balances showed when you confirmed it. */
+  evidence: BalanceEvidenceSchema.optional(),
+  note: z.string().max(500).optional(),
+  confirmedAt: TimestampSchema,
+});
+export type CoverageConfirmation = z.infer<typeof CoverageConfirmationSchema>;
+
 // What HMRC's services hold about you, as their pages show it (docs/DATA_FORMAT.md, hmrc.jsonl).
 const HmrcWho = {
   /** The employer as HMRC's page names it. */
@@ -1449,6 +1484,12 @@ export const DraftSectionSchema = z.object({
   currency: CurrencySchema.default('GBP'),
   periodStart: ISODateSchema.optional(),
   periodEnd: ISODateSchema.optional(),
+  /**
+   * The days the document covers as you gave them, when it does not print its period (the range you
+   * chose for an export): coverage runs over them, not just from its first row to its last.
+   */
+  coversFrom: ISODateSchema.optional(),
+  coversTo: ISODateSchema.optional(),
   openingBalance: MoneySchema.optional(),
   /** Totals printed on the statement, for checking the rows against. Money out is positive. */
   statedTotals: z.object({ moneyIn: MoneySchema.optional(), moneyOut: MoneySchema.optional() }).optional(),
@@ -2289,6 +2330,7 @@ export const InstrumentsFileSchema = z.object({ instruments: z.array(InstrumentS
 export const EmploymentsFileSchema = z.object({ employments: z.array(EmploymentSchema) });
 export const CompaniesFileSchema = z.object({ companies: z.array(CompanySchema) });
 export const AgreementsFileSchema = z.object({ agreements: z.array(AgreementSchema) });
+export const CoverageFileSchema = z.object({ confirmations: z.array(CoverageConfirmationSchema) });
 export const InstitutionsFileSchema = z.object({ institutions: z.array(InstitutionSchema) });
 export const CategoriesFileSchema = z.object({ categories: z.array(CategorySchema) });
 export const RulesFileSchema = z.object({ rules: z.array(RuleSchema) });

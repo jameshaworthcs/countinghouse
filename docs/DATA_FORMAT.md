@@ -45,6 +45,7 @@ data/
   terms.jsonl          each account's terms as each document gives them: its rates, its limit and a card's minimum payment
   companies.json       { companies: [...] }      companies you hold shares in: the holding and its valuations
   agreements.json      { agreements: [...] }     agreements to pay: an offer's or contract's schedule, and what its document says
+  coverage.json        { confirmations: [...] }  stretches you confirmed nothing is missing from, which count as covered
   transactions/<account-id>/<yyyy>.jsonl    one transaction per line, by posting date
   balances/<account-id>.jsonl               balance / valuation snapshots
   holdings/<account-id>.jsonl               holdings snapshots
@@ -326,6 +327,25 @@ against what you paid ([FORMULAS.md §10](FORMULAS.md), "Agreements"). An agent 
 its document (`add_agreement`); you change its name, names, category, end or notes with
 `PUT /api/agreements/:id`.
 
+## coverage.json
+
+Stretches of days no document covers that you confirmed nothing is missing from. Each counts as
+covered, like a statement's period ([FORMULAS.md §3](FORMULAS.md)). Each is
+`{id, accountId, from, to, evidence?, note?, confirmedAt}`:
+
+- `id`: `cov_` and 12 hex digits.
+- `from`, `to`: the days, inclusive; never after the day you confirmed it.
+- `evidence`: what the balances showed when you confirmed it, `{status, from?, to?, through?,
+  difference?, fromOpening?}`. `status` is `adds-up`, `unexplained` or `no-balance`. `from` and `to`
+  are the balances either side, and `through` is the last day they speak for. `difference` is what
+  the rows between leave unexplained. `fromOpening` says the first is the £0 the account opened
+  with.
+- `note`: optional, your words.
+
+You confirm or withdraw one in Settings → Data health (`POST /api/coverage/confirmations`,
+`DELETE /api/coverage/confirmations/:id`). No agent token can. Withdrawing takes the record out of
+the file, and git keeps the history. The file is optional: data from before it has none.
+
 ## payslips.jsonl
 
 Payslips in full, one per line: everything a payslip prints except your name and National Insurance
@@ -375,6 +395,9 @@ number. Its pay, tax, NI, pension and student loan for the period are also tax f
   came from another screenshot taken and uploaded with it. A section's `readBalance` is the balance
   the draft proposed from the reading (`null`: none); a committed `balance` that differs is one you
   typed (`enteredBy` on the balance).
+  A section's `coversFrom` and `coversTo` (optional) are the days a document that does not print
+  its period covers, as you gave them while reviewing (the range you chose for an export). They
+  widen its coverage beyond its first and last rows; they never narrow it.
   A row's `insideAccount` names the Space it moves money to or from, inside the account: left
   unticked, and remembered on the account's `spaces` when committed so.
   A row's `pendingLink` (`{importId, key}`) is a transfer leg you linked to a row of another import

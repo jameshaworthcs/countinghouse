@@ -7,6 +7,7 @@
 //     or the span of the rows it contained; a statement that does not print its start, and opens
 //     on the closing balance of the statement before it, runs on from that one (importIntervals);
 //   - a transaction entered by hand covers its own day;
+//   - a stretch you confirmed nothing is missing from covers its days (coverage.json);
 //   - accounts with transactions but no import records (the demo, early data) are covered from
 //     their first to their last transaction.
 
@@ -14,8 +15,9 @@ import { balanceModeOf } from '../../shared/accounts';
 import type { CoverageResponse } from '../../shared/api';
 import { addDays, diffDays, eachMonth, endOfMonth, maxDate, minDate, startOfMonth, today, type ISODate } from '../../shared/dates';
 import { toMinor } from '../../shared/money';
-import type { Account } from '../../shared/schema';
+import type { Account, BalanceEvidence } from '../../shared/schema';
 import type { Store } from '../store';
+import type { BalanceEngine } from './balances';
 
 export interface Interval {
   from: ISODate;
@@ -123,15 +125,28 @@ export function accountCoverage(store: Store, account: Account): AccountCoverage
   const fromImports = importIntervals(store, account.id);
   let intervals: Interval[];
   let source: AccountCoverage['source'];
+  const confirmed = store.coverageConfirmations.filter((c) => c.accountId === account.id).map((c) => ({ from: c.from, to: c.to }));
   if (fromImports.length) {
     const manual = txs.filter((t) => !t.source.importId).map((t) => ({ from: t.date, to: t.date }));
-    intervals = mergeIntervals([...fromImports, ...manual]);
+    intervals = mergeIntervals([...fromImports, ...manual, ...confirmed]);
     source = 'imports';
   } else if (txs.length) {
-    intervals = [{ from: txs[0]!.date, to: txs[txs.length - 1]!.date }];
+    intervals = mergeIntervals([{ from: txs[0]!.date, to: txs[txs.length - 1]!.date }, ...confirmed]);
     source = 'transactions';
   } else return empty;
   return { accountId: account.id, intervals, from: intervals[0]!.from, to: intervals[intervals.length - 1]!.to, source };
+}
+
+/** A stretch of days an account should have data for that nothing covers, with what its balances say. */
+export interface CoverageGap {
+  accountId: string;
+  name: string;
+  from: ISODate;
+  to: ISODate;
+  days: number;
+  /** Rows recorded inside it (a document dated outside its period, or one you entered). */
+  rows: number;
+  evidence: BalanceEvidence;
 }
 
 export interface JointCoverage {
@@ -202,6 +217,24 @@ export class Coverage {
         .sort((a, b) => b.missingDays - a.missingDays),
       completeMonths,
     };
+  }
+
+  /**
+   * Each stretch from `from` to `to` that an account in the estate should have data for (it was
+   * open) and that nothing covers, with what its balances say (docs/FORMULAS.md §3).
+   */
+  gaps(engine: BalanceEngine, from: ISODate, to: ISODate = today()): CoverageGap[] {
+    const out: CoverageGap[] = [];
+    for (const s of this.spans) {
+      const start = maxDate(from, s.from)!;
+      const end = minDate(to, s.to ?? to)!;
+      if (start > end) continue;
+      for (const g of complement(this.byAccount.get(s.account.id)!.intervals, start, end)) {
+        const rows = this.store.transactions(s.account.id).filter((t) => t.date >= g.from && t.date <= g.to).length;
+        out.push({ accountId: s.account.id, name: s.account.name, from: g.from, to: g.to, days: diffDays(g.from, g.to) + 1, rows, evidence: engine.evidence(s.account.id, g.from, g.to) });
+      }
+    }
+    return out;
   }
 
   /** Coverage per account and month over the last `months` months, for the data-health grid. */
