@@ -1591,3 +1591,30 @@ Later the same day, after the owner's first runs (`label-imports-2`):
   only) or 40 (one statement cycle, which splits months). Recent days are the monthly update's
   job. A stretch is capped at that line rather than dropped, and each can still be confirmed on its
   own, marked "recent" when it runs past the line.
+
+## 2026-10-02: What the month in review reads
+
+- **Found:** the digest the analysis jobs read had not changed since data format v4. So the month
+  in review could not see what the document overhaul stored: payslips in full, HMRC's records,
+  jobs, account terms, agreements, pension arrangements and companies. It saw only their effect on
+  transactions and categories.
+- **Done:**
+  - The digest carries the app's own checked views of them (AGENTS.md §2), not the raw records:
+    - pay periods matched to the bank and to HMRC's figures, with the tax code check;
+    - HMRC's tax codes, settlements, events, NI years and State Pension forecast;
+    - each account's terms and the rates ending;
+    - agreement payments due;
+    - pension collections, including one whose first collection never came;
+    - companies' valuations and dividends;
+    - budgets and goals when there are any.
+
+    On the owner's data this added about 13 kB, and the August digest is about 15k tokens.
+  - PAYE references and payroll numbers stay out: the analysis has no use for them.
+  - Insights may cite a payslip, HMRC record, agreement, company or job by id. These are new
+    evidence types: additive, so there is no format version. Both write paths check that the record
+    exists, and the insight panels link them to the Pay tab, Spending or Accounts.
+  - The month in review's prompt names what to look for in each section, and says that anything
+    dated after the month (a tax code issued since) is what has happened since. It is now
+    `monthly-review-3`, and the post-import prompt `insights-after-import-4`.
+  - No job was run on the owner's data to test this: the tests build the digest and apply a job's
+    output without Claude.

@@ -60,6 +60,9 @@ function EvidenceLinks({ insight }: { insight: Insight }) {
     if (e.type === 'transactions') chips.push(<Link key={key} to={`/transactions?ids=${e.ids.join(',')}`} className="text-accent hover:underline">{e.label ?? `${e.ids.length} transaction${e.ids.length > 1 ? 's' : ''}`}</Link>);
     else if (e.type === 'account') chips.push(<Link key={key} to={`/accounts/${e.id}`} className="text-accent hover:underline">{e.label ?? 'account'}</Link>);
     else if (e.type === 'research' || e.type === 'assumption') chips.push(<Link key={key} to={`/assumptions#${e.id}`} className="text-accent hover:underline">{e.label ?? (e.type === 'research' ? 'research' : 'assumption')}</Link>);
+    else if (e.type === 'payslip' || e.type === 'hmrc' || e.type === 'employment') chips.push(<Link key={key} to="/tax/pay" className="text-accent hover:underline">{e.label ?? { payslip: 'payslip', hmrc: 'HMRC record', employment: 'job' }[e.type]}</Link>);
+    else if (e.type === 'agreement') chips.push(<Link key={key} to="/spending" className="text-accent hover:underline">{e.label ?? 'agreement'}</Link>);
+    else if (e.type === 'company') chips.push(<Link key={key} to="/accounts" className="text-accent hover:underline">{e.label ?? 'company'}</Link>);
     else if (e.type === 'computed') chips.push(<span key={key}>{e.label ?? e.metric}</span>);
     else chips.push(<span key={key}>{e.label ?? e.type}</span>);
   });

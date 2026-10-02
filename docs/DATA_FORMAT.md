@@ -580,7 +580,7 @@ One record per line, **append-only**, content-addressed (the same findings get t
 | `pages` | where it shows: `overview` `accounts` `transactions` `spending` `projections` `investments` `tax` `import` |
 | `subject` | `{accountId?, instrumentId?, category?, taxYear?, month?}` |
 | `title`, `body` | |
-| `evidence` | what it rests on: `{type: transactions, ids}`, `{type: balance\|holdings\|figure\|research\|assumption\|context\|account, id}` or `{type: computed, metric, value?}`, each with an optional `label` |
+| `evidence` | what it rests on: `{type: transactions, ids}`, `{type: balance\|holdings\|figure\|research\|assumption\|context\|account\|payslip\|hmrc\|agreement\|company\|employment, id}` or `{type: computed, metric, value?}`, each with an optional `label` |
 | `confidence` | |
 | `period`, `expiresOn` | optional |
 | `provenance` | model, prompt version, job |

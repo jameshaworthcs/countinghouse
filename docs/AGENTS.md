@@ -55,6 +55,25 @@ In-app analysis jobs do not read `data/`. They read a **digest**: the app's own 
 with the ids of the records behind them (`src/server/agents/digest.ts`). A Claude Code session may
 read `data/` directly, but should quote computed figures from the app rather than recompute them.
 
+The digest holds:
+- the estate, accounts, coverage, months, the focus period's spending and income, regular payments,
+  allowances, investments and the projection;
+- what the documents say beyond transactions, as the app has checked it:
+  - `pay`: each pay period of the tax year from the three months before the focus period to its
+    end, with its payslip, the payment into the bank matched to it, what HMRC says the employer
+    reported, and the tax code check; and `owedPay`;
+  - `hmrc`: tax codes of this tax year and the last, settlements, events of the last year, the
+    National Insurance years that are not full, and the latest State Pension forecast;
+  - `terms`: each open account's rates, limit and minimum payment, and the rates ending within 60
+    days;
+  - `agreements` with their payments due around the focus period, `pensionArrangements` with their
+    collections, and `companies` with their valuations and dividends;
+  - `budgets` and `goals`, when there are any;
+- the owner's context and the earlier insights.
+
+It leaves out identifiers the analysis does not need: PAYE references, payroll numbers and account
+numbers.
+
 **The live app's API** is open to an agent that holds a token the owner made (DEPLOY.md, "Agent
 access"): `npm run -s api -- GET /imports`.
 - It is how an agent does upkeep on imports waiting for review. It can read a document again, draft
@@ -156,7 +175,8 @@ Write a **batch**:
   - Never overwrite what the owner set, including `allocation`.
 - **Insights:**
   - `evidence` must cite records that exist: transaction ids, account ids, research, assumption
-    or context ids. A `computed` metric must be named as the digest names it.
+    or context ids, payslips (`pay_…`), HMRC's records (`hmrc_…`), agreements, companies or jobs
+    (`employment`). A `computed` metric must be named as the digest names it.
   - Choose the `pages` it belongs on and an `expiresOn`.
   - With `"supersede": true`, a batch's insights replace the writer's earlier active insights with
     the same kind and subject (a rerun of a job).

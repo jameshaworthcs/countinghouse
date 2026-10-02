@@ -85,7 +85,8 @@ You know only the public identifiers in the request (fund names, ISINs, provider
 
 const ANALYSIS_SYSTEM = `You are the analyst of a private UK personal-finance app. Read ./digest.json (the app's own computed figures about the owner's money) and write a few short, specific insights.
 - Inference, not calculation: interpret and connect the digest's figures. Never recompute totals differently or invent numbers; quote figures as the digest gives them.
-- Every insight cites evidence: ids that appear in the digest (transaction ids, account ids, context ids) or "computed" metrics named after digest fields with their values.
+- Every insight cites evidence: ids that appear in the digest (transaction ids, account ids, context ids; a payslip's payslipId as "payslip", an HMRC record's id or recordId as "hmrc", an agreement's, company's or job's id as "agreement", "company" or "employment") or "computed" metrics named after digest fields with their values.
+- Things dated after the period under review (a tax code issued since, pay owed now) are what has happened since: say so when you mention them.
 - UK context: tax years run 6 April to 5 April; ISA, LISA and pension allowances; the Personal Savings Allowance.
 - Not regulated advice: say what the data shows and what may be worth considering. Never recommend specific products or providers.
 - Respect coverage: where completeData is false or an account's data is missing, say so or avoid the conclusion.
@@ -103,7 +104,7 @@ const InsightOut = z.object({
   confidence: Conf,
   evidence: z.array(
     z.object({
-      type: z.enum(['transactions', 'account', 'context', 'research', 'assumption', 'computed']),
+      type: z.enum(['transactions', 'account', 'context', 'research', 'assumption', 'payslip', 'hmrc', 'agreement', 'company', 'employment', 'computed']),
       ids: z.array(z.string()).nullable(),
       id: z.string().nullable(),
       metric: z.string().nullable(),
@@ -122,6 +123,14 @@ function toInsightRecords(store: Store, list: z.infer<typeof InsightOut>[], defa
   const research = new Set(store.research.map((r) => r.id));
   const assumptions = new Set(store.assumptions.map((a) => a.id));
   const instruments = new Set(store.instruments.map((i) => i.id));
+  // Records an insight may cite by id, each checked to exist.
+  const cited = {
+    payslip: new Set(store.payslips.map((x) => x.id)),
+    hmrc: new Set(store.hmrc.map((x) => x.id)),
+    agreement: new Set(store.agreements.map((x) => x.id)),
+    company: new Set(store.companies.map((x) => x.id)),
+    employment: new Set(store.employments.map((x) => x.id)),
+  };
   const records: RecordInput[] = [];
   let dropped = 0;
   for (const i of list) {
@@ -135,6 +144,7 @@ function toInsightRecords(store: Store, list: z.infer<typeof InsightOut>[], defa
       else if (e.type === 'context' && e.id && context.has(e.id)) evidence.push({ type: 'context', id: e.id, ...(label ? { label } : {}) });
       else if (e.type === 'research' && e.id && research.has(e.id)) evidence.push({ type: 'research', id: e.id, ...(label ? { label } : {}) });
       else if (e.type === 'assumption' && e.id && assumptions.has(e.id)) evidence.push({ type: 'assumption', id: e.id, ...(label ? { label } : {}) });
+      else if ((e.type === 'payslip' || e.type === 'hmrc' || e.type === 'agreement' || e.type === 'company' || e.type === 'employment') && e.id && cited[e.type].has(e.id)) evidence.push({ type: e.type, id: e.id, ...(label ? { label } : {}) });
       else if (e.type === 'computed' && e.metric) evidence.push({ type: 'computed', metric: e.metric.slice(0, 120), ...(e.value !== null ? { value: e.value } : {}), ...(label ? { label } : {}) });
     }
     if (!evidence.length || !i.title.trim()) {
@@ -560,7 +570,7 @@ const refreshAssumptions: JobKindDef = {
 
 const insightsAfterImport: JobKindDef = {
   kind: 'insights-after-import',
-  promptVersion: 'insights-after-import-3',
+  promptVersion: 'insights-after-import-4',
   privacy: 'personal',
   tools: ['Read'],
   label: ({ params }) => `Insights from ${(params.importIds as string[] | undefined)?.length ?? 0} new import(s)`,
@@ -572,6 +582,7 @@ const insightsAfterImport: JobKindDef = {
       'Read ./digest.json with the Read tool.',
       'Imports were just committed (digest.focus.imports). Write up to 4 insights about what they show that you (the owner) would want to know now:',
       'unusual or new spending, a regular payment that changed or stopped, income that looks late or different, a large one-off, allowance progress, or anything that looks like a data problem.',
+      'For a payslip or an HMRC page, digest.pay and digest.hmrc show what it says, checked against your bank and HMRC; for a statement, digest.terms has the account\'s rates and limit as its documents give them.',
       'Each import lists what it added (transactions, balances, holdings, figures). A screenshot of a value or holdings, a payslip or a voucher adds no transactions and is not empty; an import that added nothing at all was kept as a record of a document another import covers, not a failure.',
       'Pick the pages each belongs on (overview, spending, accounts, transactions, tax, investments, projections). Set expiresInDays to how long it stays useful. Return an empty list if nothing is notable.',
     ].join('\n');
@@ -587,7 +598,7 @@ const insightsAfterImport: JobKindDef = {
 
 const monthlyReview: JobKindDef = {
   kind: 'monthly-review',
-  promptVersion: 'monthly-review-2',
+  promptVersion: 'monthly-review-3',
   privacy: 'personal',
   tools: ['Read'],
   label: ({ params }) => `Month in review: ${String(params.month)}`,
@@ -604,7 +615,13 @@ const monthlyReview: JobKindDef = {
       '   - habit changes, for spending;',
       '   - allowance opportunities, for tax (ISA, LISA or pension headroom and days left, Personal Savings Allowance headroom);',
       '   - notes on investments (charges, make-up, drift from what the owner said they want);',
-      '   - how the month bears on the owner’s plans (digest.ownerContext), for projections.',
+      '   - how the month bears on the owner’s plans (digest.ownerContext), for projections;',
+      '   - pay (digest.pay, digest.owedPay), for tax: each pay period is checked against your bank (paidIn, status) and against what HMRC says the employer reported (hmrcReported); taxCodeCheck says when the tax taken is not what HMRC’s code would take. Note pay that differs, is late or owed, a tax code that changed, or a job that started or ended;',
+      '   - what HMRC says (digest.hmrc), for tax: tax owed or repaid (settlements), National Insurance years that are not full and when they can be paid by, the State Pension forecast;',
+      '   - your accounts’ terms (digest.terms), for accounts: a promotional rate ending (until, endingSoon), a card’s limit or minimum payment, a rate that changed;',
+      '   - agreements to pay and pension arrangements (digest.agreements, digest.pensionArrangements): a scheduled payment due, missed or paid differently; contributions an employer said it would pay that have not arrived (missingMonths);',
+      '   - companies you hold shares in (digest.companies): dividends and the latest valuation; budgets and goals when there are any (digest.budgets, digest.goals).',
+      'Weigh these against each other and pick what matters most this month; skip a section with nothing new.',
       'Set subject.month to the month for every insight about it.',
     ].join('\n');
   },

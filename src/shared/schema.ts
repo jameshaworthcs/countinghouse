@@ -2129,6 +2129,12 @@ export const InsightEvidenceSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('assumption'), id: z.string().regex(/^asm_[0-9a-f]{16}$/), label: z.string().max(200).optional() }),
   z.object({ type: z.literal('context'), id: z.string().regex(/^ctx_[0-9a-f]{16}$/), label: z.string().max(200).optional() }),
   z.object({ type: z.literal('account'), id: SlugSchema, label: z.string().max(200).optional() }),
+  /** A payslip in full (payslips.jsonl), a record of HMRC's (hmrc.jsonl), an agreement, a company or a job. */
+  z.object({ type: z.literal('payslip'), id: z.string().regex(/^pay_[0-9a-f]{16}$/), label: z.string().max(200).optional() }),
+  z.object({ type: z.literal('hmrc'), id: z.string().regex(/^hmrc_[0-9a-f]{16}$/), label: z.string().max(200).optional() }),
+  z.object({ type: z.literal('agreement'), id: SlugSchema, label: z.string().max(200).optional() }),
+  z.object({ type: z.literal('company'), id: SlugSchema, label: z.string().max(200).optional() }),
+  z.object({ type: z.literal('employment'), id: SlugSchema, label: z.string().max(200).optional() }),
   /** A computed figure the insight quotes, as the app reported it to the job. */
   z.object({ type: z.literal('computed'), metric: z.string().min(1).max(120), value: z.number().optional(), label: z.string().max(200).optional() }),
 ]);

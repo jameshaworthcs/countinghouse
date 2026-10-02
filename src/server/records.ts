@@ -104,6 +104,11 @@ export function checkRecords(store: Store, batch: RecordBatch): string[] {
   const figures = new Set(store.figures.map((f) => f.id));
   const balances = new Set(store.balances().map((b) => b.id));
   const holdings = new Set(store.holdings().map((h) => h.id));
+  const payslips = new Set(store.payslips.map((x) => x.id));
+  const hmrc = new Set(store.hmrc.map((x) => x.id));
+  const agreements = new Set(store.agreements.map((x) => x.id));
+  const companies = new Set(store.companies.map((x) => x.id));
+  const employments = new Set(store.employments.map((x) => x.id));
 
   const ref = (where: string, kind: string, id: string | undefined, set: Set<string>) => {
     if (id !== undefined && !set.has(id)) problems.push(`${where}: unknown ${kind} "${id}"`);
@@ -152,6 +157,11 @@ export function checkRecords(store: Store, batch: RecordBatch): string[] {
           if (e.type === 'assumption') ref(where, 'assumption', e.id, assumptions);
           if (e.type === 'context') ref(where, 'context record', e.id, context);
           if (e.type === 'account') ref(where, 'account', e.id, accounts);
+          if (e.type === 'payslip') ref(where, 'payslip', e.id, payslips);
+          if (e.type === 'hmrc') ref(where, 'HMRC record', e.id, hmrc);
+          if (e.type === 'agreement') ref(where, 'agreement', e.id, agreements);
+          if (e.type === 'company') ref(where, 'company', e.id, companies);
+          if (e.type === 'employment') ref(where, 'job', e.id, employments);
         }
         break;
       }
