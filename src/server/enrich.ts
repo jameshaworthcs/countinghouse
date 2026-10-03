@@ -286,13 +286,14 @@ export async function salaryByPayroll(store: Store, numbers: readonly string[], 
 }
 
 /** Source fields the categoriser reads: filling one in can change what a row is. */
-const CATEGORISER_READS = ['type', 'counterpartyName', 'merchant', 'bankCategory'] as const;
+const CATEGORISER_READS = ['type', 'counterpartyName', 'merchant', 'bankCategory', 'seenIn'] as const;
 
 /**
  * A recorded row's payee, category and own-account link worked out again after another document
  * filled in some of its source fields (shared/detail.ts), as `enrich` would: only when a field
- * the categoriser reads was filled in, and never on a row you categorised or one linked as a
- * transfer. Returns the patch, empty when nothing changes.
+ * the categoriser reads was filled in (or `seenIn`, when the document called it something new),
+ * and never on a row you categorised or one linked as a transfer. Returns the patch, empty when
+ * nothing changes.
  */
 export function rederive(categoriser: Categoriser, t: Transaction, filled: readonly string[]): Partial<Transaction> {
   if (!filled.some((f) => (CATEGORISER_READS as readonly string[]).includes(f))) return {};

@@ -52,6 +52,26 @@ describe('the same payment from another source', () => {
     // Both show a balance after them, and they differ: two payments.
     expect(alone({ date: '2026-09-15', amount: -34.48, description: 'ATM', balanceAfter: 1000 })).toBe('new');
   });
+
+  it('a statement row that names no one is the same money as the payment the app names, however small', () => {
+    // A card statement prints "Outgoing transaction" on the day the payment posted; the card's app
+    // names the merchant, on the day it was made.
+    const statement = [tx('tx_unnamed', '2026-07-29', -4.08, 'Outgoing transaction'), tx('tx_unnamed2', '2026-08-01', -6.3, 'Outgoing transaction')];
+    const res = classifyDuplicates(
+      [
+        { date: '2026-07-28', amount: -4.08, description: 'EXAMPLE SUPERMARKET' },
+        { date: '2026-07-31', amount: -6.3, description: 'EXAMPLE TRANSPORT' },
+      ],
+      statement,
+    );
+    expect(res.map((r) => [r.status, r.duplicateOf])).toEqual([
+      ['possible_duplicate', 'tx_unnamed'],
+      ['possible_duplicate', 'tx_unnamed2'],
+    ]);
+    expect(res[0]!.reason).toMatch(/names no one/);
+    // Named both sides, small and unlike: still two payments.
+    expect(classifyDuplicates([{ date: '2026-07-28', amount: -4.08, description: 'GREENGROCER' }], [tx('tx_cafe2', '2026-07-29', -4.08, 'CORNER CAFE')])[0]!.status).toBe('new');
+  });
 });
 
 describe('recorded twice', () => {
@@ -143,5 +163,30 @@ describe('an import that corrects the record', () => {
     await store.updateTransactions([{ id: CSV, patch: { notes: 'the card payment' } }], 'test: a note');
     await commitDraft(store, { record: { ...record, id: 'imp_20260930_073000_0b03' }, draft, workFile });
     expect(store.transaction(CSV)).toBeDefined();
+  });
+
+  it('a cancelled row is shown, not recorded; a row that names no one takes the app’s name, and its category', async () => {
+    const UNNAMED = 'tx_00000000000000a3';
+    await store.addTransactions([tx(UNNAMED, '2026-07-29', -4.08, 'Outgoing transaction', { source: { importId: 'imp_20260829_100000_0a01' } })], 'test: a payment a statement names no one for');
+    const app = ExtractionSchema.parse({
+      documentType: 'transactions_screenshot',
+      accounts: [
+        {
+          accountName: 'Current',
+          transactions: [
+            { date: '2026-07-24', description: 'EXAMPLE BUSES', amount: -0.1, uncertain: 'Marked Cancelled with the amount struck through' },
+            { date: '2026-07-28', description: 'ALDI', amount: -4.08, time: '11:55', type: 'Purchase' },
+          ],
+        },
+      ],
+    });
+    const draft = buildDraft(app, { store, document: record.document, hintAccountId: 'current', uploadedOn: '2026-09-30' });
+    const [gone, named] = draft.sections[0]!.transactions;
+    expect(gone).toMatchObject({ status: 'new', include: false });
+    expect(named).toMatchObject({ status: 'possible_duplicate', duplicateOf: UNNAMED, include: false, adds: { include: true, category: { to: 'groceries' } } });
+    await commitDraft(store, { record: { ...record, id: 'imp_20260930_073000_0b05' }, draft, workFile });
+    expect(store.transactions('current').filter((t) => t.date < '2026-08-01').map((t) => t.id)).toEqual([UNNAMED]);
+    expect(store.transaction(UNNAMED)).toMatchObject({ description: 'Outgoing transaction', category: 'groceries', categorisedBy: 'builtin' });
+    expect(store.transaction(UNNAMED)?.seenIn?.[0]?.said?.description).toBe('ALDI');
   });
 });

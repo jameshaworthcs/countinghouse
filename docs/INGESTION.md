@@ -522,7 +522,9 @@ read again.
      cleared two days later) and describe it differently, so a difference in one is not enough to
      call it new; but everyday prices repeat (two £3.50 coffees at different cafés are two
      coffees), and so do round sums on different days. Never when both rows show a balance after
-     them and the balances differ (either sign: sources disagree on a card's).
+     them and the balances differ (either sign: sources disagree on a card's). A row that names no
+     one counts as similar to any description, whatever the amount: Chase's statement prints some
+     card payments as "Outgoing transaction", which its app names ("ALDI"), dated the day before;
   5. from a document that is not a list of transactions (a letter, a confirmation, an annual
      summary), a row that two or three recorded rows add up to exactly, within ±3 days and the same
      way, from £100: a *possible* duplicate. A deposit made in two payments is confirmed by letter as
@@ -543,6 +545,13 @@ read again.
     - The bank id, type, reference, other party, bank category, card, foreign amount, rate and fee;
       the merchant and other details key by key.
     - Nothing from a pending row, or from a row a letter restates as several payments (step 5).
+  - **What it is called there** is kept with the payment (`seenIn`, what that document said) and
+    counts in working out its payee and category, on the review page and on commit: a statement's
+    "Outgoing transaction" that an app calls "ALDI" is groceries. The description it was recorded
+    by stays.
+  - **Ticked by itself** when the match is certain, or when the record names no one (its
+    description says nothing but "Outgoing transaction"): what the document adds is all gain. A
+    possible duplicate is still yours to confirm.
   - **What it says differently** (its own words for the payment, another time) is shown, and kept
     with what it filled in; the record keeps its own. A shorter wording within the record's
     ("Cash withdrawal" in "Cash withdrawal | EUR 40.00 | …") is not a difference.
@@ -641,6 +650,9 @@ read again.
 - **Pending rows** are shown in the draft but not included by default, and reconciliation leaves
   them out. Statement balances are of settled transactions, and the settled row arrives with the
   next statement. Include one only if you know it will never appear settled.
+- **Cancelled rows** (struck through, "Cancelled", "Declined"; the reader says so in `uncertain`)
+  are shown but not included: no money moved. An app lists a card check or a cancelled fare that
+  way.
 - **Figures** are matched to an account by last 4 digits only when exactly one account has them.
   Several documents can state one job's figure for a year; all are kept and exactly one counts
   ([FORMULAS.md §11](FORMULAS.md), "One source per employer and year").

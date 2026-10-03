@@ -50,6 +50,14 @@ export const DIFFERENT_WORDS_FROM = 20;
 /** Below this, a row that stored rows add up to is taken as its own payment (small sums coincide). */
 export const SUM_FROM = 100;
 
+/**
+ * A description that says no more than that money went or came: Chase's statement prints some card
+ * payments as "Outgoing transaction", with no merchant, where its app names them. It can be any
+ * payment of the same amount, so it matches whatever another document calls it.
+ */
+const SAYS_NOTHING = /^\s*(outgoing|incoming) (transaction|payment)s?\s*$/i;
+export const saysNothing = (description: string) => SAYS_NOTHING.test(description);
+
 /** Two or three of `rows` whose amounts add up to `minor` exactly, if any do. */
 function rowsAddingUpTo<T extends { amount: number }>(rows: T[], minor: number): T[] | undefined {
   const m = rows.map((r) => toMinor(r.amount));
@@ -171,7 +179,8 @@ export function classifyDuplicates(incoming: DedupCandidate[], existing: Transac
       // From either of the record's days: when it cleared, or when it was made.
       const days = Math.min(Math.abs(diffDays(t.date, c.date)), t.transactionDate ? Math.abs(diffDays(t.transactionDate, c.date)) : Infinity);
       if (days > fuzzyDays) continue;
-      const sim = similarity(t.description, c.description);
+      // A row that names no one is like any description: the same money, named elsewhere.
+      const sim = saysNothing(t.description) || saysNothing(c.description) ? 0.5 : similarity(t.description, c.description);
       const similar = sim >= 0.4;
       if (!similar && !(large && (days === 0 || pence))) continue;
       const score = sim - days * 0.05;
@@ -179,7 +188,12 @@ export function classifyDuplicates(incoming: DedupCandidate[], existing: Transac
     }
     if (best) {
       used.add(best.t.id);
-      const reason = best.similar ? 'Same amount, similar description, within a few days' : `Same amount ${best.days === 0 ? 'on the same day' : 'within a few days'}, described differently`;
+      const unnamed = saysNothing(best.t.description) || saysNothing(c.description);
+      const reason = unnamed
+        ? `Same amount ${best.days === 0 ? 'on the same day' : 'within a few days'}, where one of them names no one (“${saysNothing(best.t.description) ? best.t.description : c.description}”)`
+        : best.similar
+          ? 'Same amount, similar description, within a few days'
+          : `Same amount ${best.days === 0 ? 'on the same day' : 'within a few days'}, described differently`;
       results[i] = { status: 'possible_duplicate', duplicateOf: best.t.id, reason };
     }
   });

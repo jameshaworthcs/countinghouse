@@ -1853,3 +1853,26 @@ Later the same day, after the owner's first runs (`label-imports-2`):
   - Switching a rule off or deleting it gives back what it categorised (before, its payments kept
     its category). A proposal can remove a rule (`remove_rule`), showing what each payment becomes.
   - A "BP" that ends a description is not the fuel brand.
+
+## 2026-10-03: Chase's "Outgoing transaction" rows take the app's names
+
+- **Owner:** what are the "Outgoing transaction" payments? See the pending screenshots and the
+  Chase statements.
+- **Found:**
+  - One month's Chase statement prints nine card payments as "Outgoing
+    transaction", with no merchant and no "Purchase" line, dated the day each posted. Every other
+    Chase statement names every payment. The reader read it right.
+  - Chase's app names them, dated the day each was made. The screenshot shows three: ALDI £3.15,
+    eBay £48.20 and TfL £2.80, on the month's last days. The six before them (all small) are below
+    where it stops.
+  - Its draft matched only eBay to its "Outgoing transaction": a payment under £20 described
+    differently is taken as another payment, so ALDI and TfL were new and would have been counted
+    twice. Matched, the app's name would not have categorised the row either: it was worked out
+    before the name was kept. And the cancelled card checks it shows (a bus operator's and a ride
+    app's, a few pence each) were drafted to be recorded.
+- **Done** (INGESTION.md, "Duplicates", "Adding detail to a recorded payment", "Cancelled rows"):
+  - A row that names no one ("Outgoing transaction", "Incoming transaction") is similar to any
+    description in the fuzzy match, whatever the amount.
+  - What a matched document calls the payment counts in working out its payee and category, on the
+    review page and on commit. Its details are ticked by itself when the record names no one.
+  - A row the reader says was cancelled or declined is drafted left out, like a pending one.

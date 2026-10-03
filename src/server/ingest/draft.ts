@@ -9,7 +9,7 @@ import { addDays, dateOf, diffDays, formatDate, today } from '../../shared/dates
 import { formatMoney, toMinor } from '../../shared/money';
 import { spaceMove } from '../../shared/spaces';
 import { categoriserFor } from '../categoriser';
-import { addsAnything, detailToAdd, fillIn } from '../../shared/detail';
+import { addsAnything, detailToAdd, fillIn, seenInEntry } from '../../shared/detail';
 import { rederive, transferEvidence, transferReader, type TransferSide } from '../enrich';
 import type {
   Account,
@@ -27,13 +27,13 @@ import type {
   Transaction,
 } from '../../shared/schema';
 import { isNiNumber, withoutNiNumbers } from '../../shared/privacy';
-import { DraftSchema, WorkDetailSchema, type DraftJob, type Employment, type WorkDetail } from '../../shared/schema';
+import { DraftSchema, WorkDetailSchema, type DetailField, type DraftJob, type Employment, type WorkDetail } from '../../shared/schema';
 import { isPayslipFigure, payeReference, payerKey } from '../analytics/sources';
 import { jobOfFigure, jobOfHmrc, matchEmployment, newEmploymentId, type JobIdentity } from '../employments';
 import { hmrcId, payslipId } from '../ids';
 import { earnedReplaced, inferPayroll } from '../analytics/earned';
 import type { Store } from '../store';
-import { classifyDuplicates, storedTwice } from './dedup';
+import { classifyDuplicates, saysNothing, storedTwice } from './dedup';
 import { dateFromFileName } from './images';
 import { fitsAccount, identifies, matchAccount, onlyKind, proposeAccount, sameHolding } from './match';
 import { asAgreement, draftAgreements, isStudentFinance, paymentLabel, STUDENT_FINANCE, studentLoanAccount } from './schedules';
@@ -100,6 +100,13 @@ const DATE_SOURCE_WORDS: Record<DateSource, string> = {
   upload: 'the upload day',
   manual: 'as you set it',
 };
+
+/**
+ * A row the document shows as cancelled or declined (struck through, "Cancelled"): money that never
+ * moved. The reader says so in `uncertain`; it is shown, not recorded, like a pending row.
+ */
+const CANCELLED = /\b(cancell?ed|declined)\b/i;
+const cancelled = (t: { uncertain?: string | null | undefined }) => Boolean(t.uncertain && CANCELLED.test(t.uncertain));
 
 const TRANSFER_CATEGORIES = new Set(['transfer', 'credit-card-payment', 'savings-transfer', 'investment-transfer', 'contribution', 'withdrawal']);
 
@@ -362,8 +369,9 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
       const row: DraftTransaction = {
         key: `s${si}-t${ti}`,
         // Pending rows are shown but not recorded: the settled row arrives with the next statement.
-        // A move to or from one of the account's Spaces is not money in or out.
-        include: dup.status === 'new' && !t.pending && !space,
+        // Nor a cancelled one, which never moved money. A move to or from one of the account's
+        // Spaces is not money in or out.
+        include: dup.status === 'new' && !t.pending && !space && !cancelled(t),
         status: dup.status,
         date: t.date,
         amount: t.amount,
@@ -391,9 +399,14 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
       if (recorded) {
         const found = detailToAdd(row, recorded);
         if (addsAnything(found)) {
-          const change = rederive(categoriser, { ...recorded, ...fillIn(recorded, found.fields).patch }, Object.keys(found.fields));
+          // What this document calls it counts too, as on commit (it is kept as seen in).
+          const named = found.differs.some((d) => d.field === 'description');
+          const seenIn = named ? [...(recorded.seenIn ?? []), seenInEntry({}, Object.keys(found.fields) as DetailField[], found.differs, '')] : recorded.seenIn;
+          const change = rederive(categoriser, { ...recorded, ...fillIn(recorded, found.fields).patch, ...(seenIn ? { seenIn } : {}) }, [...Object.keys(found.fields), ...(named ? ['seenIn'] : [])]);
           row.adds = {
-            include: dup.status === 'duplicate',
+            // Ticked by itself when the match is certain, or when the record names no one ("Outgoing
+            // transaction"): this document's name for it is all gain.
+            include: dup.status === 'duplicate' || saysNothing(recorded.description),
             fields: found.fields,
             differs: found.differs,
             ...('category' in change ? { category: { ...(recorded.category ? { from: recorded.category } : {}), ...(change.category ? { to: change.category } : {}) } } : {}),

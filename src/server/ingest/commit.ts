@@ -256,13 +256,17 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
         const now = detailToAdd(row, recorded);
         const { patch, added } = fillIn(recorded, stillAdds(row.adds.fields, now.fields));
         if (!added.length) continue;
-        const merged: Transaction = { ...recorded, ...patch };
+        // What this document calls it is kept with it (seen in), and counts in working out its payee
+        // and category: a statement's "Outgoing transaction" takes the app's "ALDI".
+        const seenIn = [...(recorded.seenIn ?? []), seenInEntry({ ...source, row: row.row }, added, now.differs, stamp)];
+        const merged: Transaction = { ...recorded, ...patch, seenIn };
         if (added.includes('merchant')) {
           const place = tidyPlace(merged.merchant);
           if (place !== recorded.place) patch.place = place;
         }
-        Object.assign(patch, rederive(categoriser, merged, added));
-        patch.seenIn = [...(recorded.seenIn ?? []), seenInEntry({ ...source, row: row.row }, added, now.differs, stamp)];
+        const named = now.differs.some((d) => d.field === 'description');
+        Object.assign(patch, rederive(categoriser, merged, named ? [...added, 'seenIn'] : added));
+        patch.seenIn = seenIn;
         detailed.push({ t: recorded, patch, added });
       }
     }
