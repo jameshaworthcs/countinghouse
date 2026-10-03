@@ -14,14 +14,40 @@ import { ReceiptsSection, SplitSection, type SplitLineDraft } from './SplitRecei
  * A category to choose. For money in (`direction: "in"`) the income categories come first: a gift to
  * you is Gifts received, and Gifts, further down, is spending.
  */
-export function CategorySelect({ value, onChange, allowEmpty = true, className, placeholder = 'Uncategorised', id, direction }: { value: string | undefined; onChange: (v: string | undefined) => void; allowEmpty?: boolean; className?: string; placeholder?: string; id?: string; direction?: 'in' | 'out' | undefined }) {
+export function CategorySelect({
+  value,
+  onChange,
+  allowEmpty = true,
+  className,
+  placeholder = 'Uncategorised',
+  id,
+  direction,
+  leading,
+  ariaLabel,
+}: {
+  value: string | undefined;
+  onChange: (v: string | undefined) => void;
+  allowEmpty?: boolean;
+  className?: string;
+  placeholder?: string;
+  id?: string;
+  direction?: 'in' | 'out' | undefined;
+  /** Choices above the categories, with values no category has ("@proposed"). */
+  leading?: { value: string; label: string; disabled?: boolean }[];
+  ariaLabel?: string;
+}) {
   const { cats } = useAppData();
   const shown = cats.groups().filter((g) => !g.hidden);
   const income = (id: string) => cats.kindOf(id) === 'income';
   const groups = direction === 'in' ? [...shown.filter((g) => income(g.id)), ...shown.filter((g) => !income(g.id))] : shown;
   return (
-    <Select id={id} value={value ?? ''} onChange={(e) => onChange(e.target.value || undefined)} className={className}>
+    <Select id={id} value={value ?? ''} onChange={(e) => onChange(e.target.value || undefined)} className={className} aria-label={ariaLabel}>
       {allowEmpty && <option value="">{placeholder}</option>}
+      {leading?.map((o) => (
+        <option key={o.value} value={o.value} disabled={o.disabled}>
+          {o.label}
+        </option>
+      ))}
       {groups.map((g) => {
         const children = cats.children(g.id).filter((c) => !c.hidden);
         return (

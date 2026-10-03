@@ -1773,3 +1773,22 @@ Later the same day, after the owner's first runs (`label-imports-2`):
   - cash and cheque payments in to decide, a few of them recent;
   - payee groups of guesses, the largest a rent payment the reader categorised;
   - guessed spending varies widely from month to month, most of it a few large payments.
+
+## 2026-10-03: Re-applying categorisation shows every payment, and takes your choices
+
+- **Owner:** the preview should show the payments behind each change and let them override any,
+  with the override counting from then on. The button should say it only previews.
+- **Done** (FORMULAS.md §10, "Re-applying categorisation"; INGESTION.md, "Categorisation" and
+  "Transfers"):
+  - The button is **Preview re-applying to history**. Each group of the preview opens to its
+    payments by payee.
+  - Any payment, or a payee's at once, can be left as it is this time or given a category of the
+    owner's. "Always" makes a rule for the payee, saying how many payments it matches in all.
+  - Applying writes the owner's categories first, as theirs, so re-applying never changes them
+    again and they count toward the rules To categorise suggests; then the new rules; then the
+    rest, leaving out what the owner left as it is.
+  - A payment the owner put in a category that isn't a transfer is never linked as a transfer. A
+    gift the owner sent had been paired with a gift they received as money moving between their
+    accounts.
+- **Not done:** a payment left as it is is offered again next time. Recording "not that category"
+  would need a new field, and giving it a category of your own does the same job.

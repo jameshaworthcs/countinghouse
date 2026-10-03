@@ -7,7 +7,8 @@
 import { CategoryIndex } from '../shared/categories';
 import { CARD_REFUND_DAYS, Categoriser, purchaseKey, type CardPurchases, type CategoriseInput } from '../shared/categorise';
 import { diffDays } from '../shared/dates';
-import type { Agreement, Transaction } from '../shared/schema';
+import { cleanPayee } from '../shared/merchants';
+import type { Agreement, Rule, Transaction } from '../shared/schema';
 import { paidAs } from './analytics/pay';
 import type { Store } from './store';
 
@@ -58,4 +59,15 @@ export function categoriseInputOf(t: Transaction): CategoriseInput {
     payee: t.merchant?.name ?? t.counterpartyName,
     ...(alsoSaid.length ? { alsoSaid: [...new Set(alsoSaid)] } : {}),
   };
+}
+
+/**
+ * Does a rule catch a recorded transaction, as categorising it would: its description or what other
+ * documents said of it, and the payee the categoriser works out (the other party its source names,
+ * else one cut from the description), not the payee shown.
+ */
+export function ruleCatches(rule: Rule, t: Transaction, categoriser: Categoriser = new Categoriser([rule], new CategoryIndex([]), [], [])): boolean {
+  const input = categoriseInputOf(t);
+  const payee = input.payee ?? cleanPayee(input.description);
+  return [input.description, ...(input.alsoSaid ?? [])].some((description) => categoriser.matchRule(rule, { ...input, description }, payee));
 }

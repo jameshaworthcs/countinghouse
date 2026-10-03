@@ -153,6 +153,21 @@ describe('linking transfers', () => {
     expect(store.transaction(saving!)!.transferGroup).toBeUndefined();
   });
 
+  it('never links a payment you put in a category that is not a transfer', async () => {
+    // £100 from your own name into the saver, which you said was a gift; then £100 out of the bank
+    // naming the saver by its number: no transfer.
+    const [gift] = await commit([['saver', '2026-05-02', 100, 'FROM S R TAYLOR']]);
+    await store.updateTransactions([{ id: gift!, patch: { category: 'gifts-received', categorisedBy: 'user' } }], 'mine');
+    const [out] = await commit([['bank', '2026-05-01', -100, 'To 09-01-28 00012346612']]);
+    expect(partner(out!)).toBeUndefined();
+    expect(store.transaction(gift!)).toMatchObject({ category: 'gifts-received', categorisedBy: 'user' });
+    // One you put in a transfer category still links.
+    const [moved] = await commit([['saver', '2026-06-02', 250, 'FROM S R TAYLOR']]);
+    await store.updateTransactions([{ id: moved!, patch: { category: 'savings-transfer', categorisedBy: 'user' } }], 'mine');
+    const [out2] = await commit([['bank', '2026-06-01', -250, 'To 09-01-28 00012346612']]);
+    expect(partner(out2!)?.id).toBe(moved);
+  });
+
   it('never links a row that names another of your accounts', async () => {
     // A direct debit to the Tesco Bank card, and a £5 refund on the Amex card two days before.
     const [refund] = await commit([['amex', '2026-02-08', 7.5, 'DELIVEROO']]);

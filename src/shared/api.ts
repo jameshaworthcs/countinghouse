@@ -1238,13 +1238,25 @@ export interface Reread {
   error?: string;
 }
 
-/** A row in a preview of re-applying categorisation. */
+/** A payment in a preview of re-applying categorisation. */
 export interface EnrichExample {
   id: string;
   accountId: string;
   date: string;
   amount: number;
   description: string;
+}
+
+/** One payee's payments in a group of a preview of re-applying categorisation. */
+export interface EnrichPayee {
+  payee: string;
+  count: number;
+  /** The amounts added up, ignoring sign. */
+  amount: number;
+  /** Its payments, newest first. */
+  rows: EnrichExample[];
+  /** The rule "always" would make for it, when one catches every one of its payments. */
+  match?: Rule['match'];
 }
 
 /** Rows whose category would change the same way: from one category to another, by the same means. */
@@ -1255,9 +1267,8 @@ export interface EnrichGroup {
   count: number;
   /** The amounts added up, ignoring sign. */
   amount: number;
-  /** Who they are with, the most first. */
-  payees: { payee: string; count: number; amount: number }[];
-  examples: EnrichExample[];
+  /** Who they are with, the most first, each with its payments. */
+  payees: EnrichPayee[];
 }
 
 /** What re-applying categorisation to all history would change (POST /enrich/preview); nothing is written. */

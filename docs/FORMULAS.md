@@ -547,6 +547,14 @@ when the purchase had none.
 - a general word in the merchant list ("COUNCIL", "TICKET") never overrules the category Claude
   gave a row; a brand it knows does.
 
+Its preview lists every payment it would recategorise, by group and payee. Before applying, you can
+leave any of them as it is this time (`skip`: neither changed nor linked, and offered again next
+time), or give it a category of yours (`decided`: written first, as yours, so re-applying never
+changes it again). "Always" adds a rule for a payee, in the category you gave all its payments
+there: a description that holds the payee, else the payee as the categoriser sees it, whichever
+catches every one of them (`payeeRuleMatch`). A payment you put in a category that isn't a transfer
+is never linked as one.
+
 **A rule you make** (`applyRule` in `enrich.ts`) applies at once to the rows it matches, and, when you
 change one, to the rows it categorised before; each takes what the categoriser now says of it. Nothing
 else changes: re-applying everything is its own step, with its preview.

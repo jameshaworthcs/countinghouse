@@ -475,11 +475,18 @@ read again.
     category the built-in wording now gives them, and its payee unless you set one
     (`categoriseInvestmentRows`). Nothing else changes: a category set by anyone stays, and so does
     a row you left uncategorised.
-  - **Re-apply to history** (Settings → Rules) works everything out again for rows you did not
-    categorise. It shows first what would change, grouped by from and to category and what gives
-    it (`POST /enrich/preview`), and changes nothing until you apply it. A payee from elsewhere (the
-    reader's) is kept when all it would get instead is a name cut from the description; one cut by
-    an earlier version of the tidying, or left in the bank's words, is replaced (`nextPayee`).
+  - **Preview re-applying to history** (Settings → Rules) works everything out again for rows you
+    did not categorise. It shows first what would change, grouped by from and to category and what
+    gives it, then by payee with every payment (`POST /enrich/preview`), and changes nothing until
+    you apply it. A payee from elsewhere (the reader's) is kept when all it would get instead is a
+    name cut from the description; one cut by an earlier version of the tidying, or left in the
+    bank's words, is replaced (`nextPayee`).
+    - Before applying, any payment, or all of a payee's, can be left as it is this time, or given a
+      category of yours. "Always" makes a rule for the payee, in that category.
+    - Applying (`POST /enrich`, `reapply`) writes your categories first, as yours, then your rules,
+      then works out the rest, but for the payments you left as they are. Re-applying never changes
+      a category of yours again, and two or more of yours for a payee suggest a rule (To
+      categorise). One you left is offered again next time.
   - **A rule you make** applies at once to the payments it matches, and nothing else (`applyRule`):
     whatever else re-applying would change waits for its preview.
   - **To categorise** (Spending → To categorise, `GET /api/categorise/queue`) lists what's left
@@ -582,6 +589,8 @@ read again.
   - A row naming the other's account counts most; your name or a transfer category counts too.
   - A row naming only other accounts of yours rules a pair out: "AJ BELL" is not a payment to the
     Chase saver, and "TESCO BANK" is not an Amex refund.
+  - So does a row you put in a category that isn't a transfer: you said where the money went (a
+    gift you sent is not money moving between your accounts).
   - Among the rest, the best evidence wins, then the closest date. The busiest day links the same
     whichever statement arrives first.
   - On commit both legs get a `transferGroup`, and money arriving in an ISA or pension becomes a

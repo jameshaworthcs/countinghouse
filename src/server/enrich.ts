@@ -2,17 +2,19 @@
 // fields. Your manual edits (categorisedBy = "user") are never touched. This is what lets new rules,
 // better merchant lists or new categories apply to history without re-importing anything.
 
+import { CategoryIndex } from '../shared/categories';
 import { isWrapperAccount, payrollPattern, transferLegCategory, type Categoriser, type CategoriseInput, type CategoriseResult } from '../shared/categorise';
-import { diffDays } from '../shared/dates';
+import { diffDays, formatDate } from '../shared/dates';
 import { cleanPayee } from '../shared/merchants';
-import { toMinor } from '../shared/money';
+import { formatMoney, toMinor } from '../shared/money';
 import { tidyPlace } from '../shared/places';
-import type { Account, Transaction } from '../shared/schema';
+import type { Account, Rule, Transaction } from '../shared/schema';
 import { categoriseInputOf, categoriserFor } from './categoriser';
-import { transferGroupId } from './ids';
-import type { Store } from './store';
+import { nowISO } from './fsutil';
+import { ruleId, transferGroupId } from './ids';
+import { StoreError, type Store } from './store';
 
-const TRANSFERISH = new Set(['transfer', 'credit-card-payment', 'savings-transfer', 'investment-transfer', 'contribution', 'withdrawal']);
+const TRANSFERISH = new Set(['transfers', 'transfer', 'credit-card-payment', 'savings-transfer', 'investment-transfer', 'contribution', 'withdrawal']);
 
 /**
  * A payee that is the bank's wording rather than a name: the description itself, or one that keeps
@@ -101,15 +103,20 @@ export async function categoriseInvestmentRows(store: Store): Promise<number> {
   return updates.length;
 }
 
-export async function enrich(store: Store, opts: { accountIds?: string[]; dryRun?: boolean; detail?: boolean } = {}): Promise<EnrichResult> {
+/**
+ * Work every row you did not categorise out again, and link transfer pairs. `skip` names rows left as
+ * they are this time: neither changed nor linked.
+ */
+export async function enrich(store: Store, opts: { accountIds?: string[]; dryRun?: boolean; detail?: boolean; skip?: ReadonlySet<string> } = {}): Promise<EnrichResult> {
   const categoriser = categoriserFor(store);
   const scope = opts.accountIds ? new Set(opts.accountIds) : null;
+  const skipped = (t: Transaction) => opts.skip?.has(t.id) ?? false;
   const patches = new Map<string, Partial<Transaction>>();
   let recategorised = 0;
 
   for (const t of store.transactions()) {
     if (scope && !scope.has(t.accountId)) continue;
-    if (t.categorisedBy === 'user' || (t.transferGroup && t.categorisedBy === 'transfer')) continue;
+    if (skipped(t) || t.categorisedBy === 'user' || (t.transferGroup && t.categorisedBy === 'transfer')) continue;
     const input = categoriseInputOf(t);
     const res = categoriser.categorise(input);
     const patch: Partial<Transaction> = {};
@@ -137,10 +144,10 @@ export async function enrich(store: Store, opts: { accountIds?: string[]; dryRun
   const candidates = store
     .transactions()
     .map(view)
-    .filter((t) => !t.transferGroup && (!scope || scope.has(t.accountId)));
+    .filter((t) => !t.transferGroup && !skipped(t) && (!scope || scope.has(t.accountId)));
   const byAmount = new Map<number, Transaction[]>();
   for (const t of store.transactions().map(view)) {
-    if (t.transferGroup) continue;
+    if (t.transferGroup || skipped(t)) continue;
     const k = toMinor(t.amount);
     (byAmount.get(k) ?? byAmount.set(k, []).get(k)!).push(t);
   }
@@ -175,11 +182,57 @@ export async function enrich(store: Store, opts: { accountIds?: string[]; dryRun
   return { recategorised, transfersLinked, changes };
 }
 
+/** Your choices on the preview of re-applying (docs/FORMULAS.md §10, "Re-applying categorisation"). */
+export interface ReapplyChoices {
+  /** Payments you gave a category: yours from now on, so nothing re-categorises them. */
+  decided?: { id: string; category: string }[];
+  /** Payments left as they are this time: neither changed nor linked, and offered again next time. */
+  skip?: string[];
+  /** Rules to make ("always"): a payee's payments, from now on, in the category you chose. */
+  rules?: { match: Rule['match']; category: string; name?: string | undefined }[];
+}
+
+/**
+ * Re-apply categorisation with your choices on its preview: your categories are written first, as
+ * yours; then your new rules; then everything else is worked out again, as `enrich` does, but for the
+ * payments you left as they are. Nothing is written when a choice is wrong.
+ */
+export async function reapply(store: Store, choices: ReapplyChoices = {}): Promise<EnrichResult & { decided: number; rules: number }> {
+  const cats = new CategoryIndex(store.categories);
+  const known = (id: string) => {
+    if (!cats.get(id)) throw new StoreError(`Unknown category "${id}".`);
+  };
+  const decided = choices.decided ?? [];
+  for (const d of decided) {
+    known(d.category);
+    const t = store.transaction(d.id);
+    if (!t) throw new StoreError(`Unknown transaction ${d.id}`, 404);
+    if (t.transferGroup && cats.kindOf(d.category) !== 'transfer') {
+      throw new StoreError(`${formatMoney(t.amount)} on ${formatDate(t.date)} is linked as a transfer between your accounts: unlink it on the Transactions page before putting it in ${cats.name(d.category)}.`);
+    }
+  }
+  for (const id of choices.skip ?? []) if (!store.transaction(id)) throw new StoreError(`Unknown transaction ${id}`, 404);
+  for (const r of choices.rules ?? []) known(r.category);
+
+  if (decided.length) {
+    await store.updateTransactions(
+      decided.map((d) => ({ id: d.id, patch: { category: d.category, categorisedBy: 'user' as const, ruleId: undefined } })),
+      `categorise: ${decided.length} decided while re-applying`,
+    );
+  }
+  const stamp = nowISO();
+  const rules: Rule[] = (choices.rules ?? []).map((r) => ({ id: ruleId(), name: r.name ?? `${r.match.value} → ${cats.name(r.category)}`, enabled: true, priority: 100, match: r.match, set: { category: r.category }, createdAt: stamp, updatedAt: stamp }));
+  if (rules.length) await store.setRules([...store.rules, ...rules], `rule: add ${rules.map((r) => r.name).join('; ')}`);
+  // Re-applying applies every rule, the new ones too.
+  const result = await enrich(store, { skip: new Set(choices.skip ?? []) });
+  return { ...result, decided: decided.length, rules: rules.length };
+}
+
 /**
  * A rule you just made or changed, applied to the rows it matches and to the rows it categorised
  * before, and to nothing else: each takes what the categoriser now says of it (rules come first).
  * Rows you categorised, and transfers linked between your accounts, stay as they are. Re-applying
- * everything is Settings → Rules → Re-apply to history, with its preview, so a rule never brings in other changes
+ * everything is Settings → Rules → Preview re-applying to history, so a rule never brings in other changes
  * unseen. Returns how many rows changed category.
  */
 export async function applyRule(store: Store, ruleId: string): Promise<{ recategorised: number }> {
@@ -268,11 +321,14 @@ export function rederive(categoriser: Categoriser, t: Transaction, filled: reado
  *   move, is not the payment to an exchange that another account made that day).
  * - A row that names only other accounts of yours, or was set to go to another (a rule's
  *   counterparty), rules the pair out: "AJ BELL" is not a payment to the Chase saver.
+ * - So does a row you put in a category that isn't a transfer: you said where the money went (a
+ *   gift you sent is not money moving between your accounts).
  * With nothing for it, the pair is not linked.
  */
-export type TransferSide = Pick<Transaction, 'id' | 'accountId' | 'description' | 'type' | 'category' | 'counterpartyAccountId'>;
+export type TransferSide = Pick<Transaction, 'id' | 'accountId' | 'description' | 'type' | 'category' | 'categorisedBy' | 'counterpartyAccountId'>;
 
 export function transferEvidence(a: TransferSide, b: TransferSide, named: (t: TransferSide) => string[], ownName: (t: TransferSide) => boolean): number | null {
+  if ([a, b].some((t) => t.categorisedBy === 'user' && t.category && !TRANSFERISH.has(t.category))) return null;
   const namesA = named(a);
   const namesB = named(b);
   if ((namesA.length && !namesA.includes(b.accountId)) || (namesB.length && !namesB.includes(a.accountId))) return null;

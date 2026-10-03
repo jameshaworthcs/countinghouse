@@ -18,7 +18,7 @@ import { cleanPayee } from '../../shared/merchants';
 import { fromMinor, toMinor } from '../../shared/money';
 import { PeopleIndex, suggestFor, suggestForCash, tidyName, type CashOut, type PaidOut, type PersonHistory, type PersonParty } from '../../shared/people';
 import type { Person, Rule, Transaction } from '../../shared/schema';
-import { categoriseInputOf } from '../categoriser';
+import { categoriseInputOf, ruleCatches } from '../categoriser';
 import type { Store } from '../store';
 
 /** Your decisions that make a rule: this many for a payee one way, all in one category. */
@@ -63,6 +63,28 @@ export function paidInto(store: Store): Map<string, PaidIn> {
     if (kind) out.set(t.id, kind);
   }
   return out;
+}
+
+/**
+ * The rule "always" makes for a payee's payments one way: money that way whose description holds the
+ * payee (one of 4 letters or more), else whose payee, as the categoriser sees it, is the payee's. The
+ * first that catches every one of `rows`, or none.
+ */
+export function payeeRuleMatch(payee: string, rows: readonly Transaction[], direction?: 'in' | 'out'): Rule['match'] | undefined {
+  const [first] = rows;
+  if (!first) return undefined;
+  const input = categoriseInputOf(first);
+  const way = direction ? { direction } : {};
+  const candidates: Rule['match'][] = [
+    ...(payee.replace(/[^A-Za-z]/g, '').length >= 4 ? [{ field: 'description' as const, op: 'contains' as const, value: payee, caseSensitive: false, ...way }] : []),
+    { field: 'payee', op: 'equals', value: input.payee ?? cleanPayee(input.description), caseSensitive: false, ...way },
+  ];
+  for (const match of candidates) {
+    const rule: Rule = { id: 'rule_check', enabled: true, priority: 100, match, set: {}, createdAt: '', updatedAt: '' };
+    const categoriser = new Categoriser([rule], new CategoryIndex([]), [], []);
+    if (rows.every((t) => ruleCatches(rule, t, categoriser))) return match;
+  }
+  return undefined;
 }
 
 const example = (t: Transaction): QueueExample => ({ id: t.id, accountId: t.accountId, date: t.date, amount: t.amount, description: t.description });
@@ -313,7 +335,7 @@ export function categoriseQueue(store: Store, opts: { from?: string | undefined 
       accountIds: [...new Set(rows.map((t) => t.accountId))],
       ids: rows.map((t) => t.id),
       examples: rows.slice(0, 5).map(example),
-      match: payee.replace(/[^A-Za-z]/g, '').length >= 4 ? { field: 'description' as const, op: 'contains' as const, value: payee, caseSensitive: false, direction } : { field: 'payee' as const, op: 'equals' as const, value: inputOf(rows[0]!).payee, caseSensitive: false, direction },
+      match: payeeRuleMatch(payee, rows, direction) ?? { field: 'payee' as const, op: 'equals' as const, value: inputOf(rows[0]!).payee, caseSensitive: false, direction },
     };
   };
   const largest = (a: PayeeGroup, b: PayeeGroup) => Math.abs(b.amount) - Math.abs(a.amount) || a.payee.localeCompare(b.payee);

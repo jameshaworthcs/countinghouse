@@ -182,10 +182,23 @@ async function main() {
     await shoot('settings-audit-entry', '/settings#audit', { ...(mobile ? { width: 390, height: 1400, mobile: true } : { width: 1440, height: 1400 }), theme: dark ? 'dark' : 'light', act: openEntry });
     console.log('✓ settings-audit-entry');
   }
-  // What re-applying categorisation would change, before anything is written.
+  // What re-applying categorisation would change, before anything is written, with the first
+  // group's payments open to choose for.
   const openReapply = async (page: Page) => {
-    await page.click('main button::-p-text(Re-apply to history)');
+    await page.click('main button::-p-text(Preview re-applying to history)');
     await page.waitForSelector('main ::-p-text(would change)', { timeout: 15_000 });
+    const show = await page.waitForSelector('main button::-p-text(Show the)', { timeout: 5_000 }).catch(() => null);
+    if (show) {
+      await show.click();
+      await page.waitForSelector('main ::-p-text(Hide the payments)', { timeout: 5_000 });
+      // A category of yours for all of the first payee's payments, and "always".
+      const all = await page.$('main select[aria-label^="All "]');
+      if (all) {
+        await page.select('main select[aria-label^="All "]', 'public-transport');
+        await page.click('main ::-p-text(Always: a rule)');
+        await page.waitForSelector('main ::-p-text(in all)', { timeout: 5_000 });
+      }
+    }
   };
   if (!only || 'settings-rules-reapply'.includes(only)) {
     await shoot('settings-rules-reapply', '/settings#rules', { ...(mobile ? { width: 390, height: 1600, mobile: true } : { width: 1440, height: 1400 }), theme: dark ? 'dark' : 'light', act: openReapply });

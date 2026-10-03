@@ -69,7 +69,7 @@ Every number can be traced back, and every derived value can be rebuilt without 
    offered: time, bank id, type, reference, merchant details, bank category, FX, fees, running
    balance, plus open-ended `attributes`.
 4. **Enrichment.** `payee`, `category`, `transferGroup` and `counterpartyAccountId` are
-   recomputable by `enrich()` (Settings → Rules → *Re-apply to history*, with a preview). The owner's manual
+   recomputable by `enrich()` (Settings → Rules → *Preview re-applying to history*). The owner's manual
    edits (`categorisedBy: "user"`) are never overwritten.
 
 "Future changes without re-ingestion" follows from this:

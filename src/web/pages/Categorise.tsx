@@ -71,7 +71,7 @@ export default function Categorise() {
       <Callout tone="neutral" className="mb-4">
         Money with people, and cash and cheques paid in, is yours to decide, one payment at a time: a suggestion only fills in the choice, and nothing is categorised until you confirm it. Re-apply categorisation first (
         <Link className="text-accent underline-offset-2 hover:underline" to="/settings#rules">
-          Settings → Rules → Re-apply to history
+          Settings → Rules → Preview re-applying to history
         </Link>
         ), so the app fills what it can by itself.
       </Callout>

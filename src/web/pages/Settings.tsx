@@ -1,4 +1,4 @@
-import { CircleAlert, CircleCheck, Copy, GitCommitHorizontal, KeyRound, Plus, RefreshCw, Trash2, Wand2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, CircleAlert, CircleCheck, Copy, Eye, GitCommitHorizontal, KeyRound, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { Fragment, useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import type { AllowancesResponse, DataHealthResponse, EnrichGroup, EnrichPreview, SystemResponse, TaxDocSource, TaxDocumentsResponse, TokensResponse } from '../../shared/api';
@@ -366,9 +366,9 @@ function RulesEditor() {
   const del = useApiMutation((id: string) => api(`/rules/${id}`, { method: 'DELETE' }));
   const [preview, setPreview] = useState<EnrichPreview | null>(null);
   const check = useApiMutation(() => api<EnrichPreview>('/enrich/preview', { method: 'POST' }), { onSuccess: setPreview });
-  const rerun = useApiMutation(() => api<{ recategorised: number; transfersLinked: number }>('/enrich', { method: 'POST' }), {
+  const rerun = useApiMutation((body: ReapplyBody) => api<{ recategorised: number; transfersLinked: number; decided: number; rules: number }>('/enrich', { body: body as unknown as Record<string, unknown> }), {
     onSuccess: (r) => {
-      toast({ tone: 'good', text: `${r.recategorised} recategorised, ${r.transfersLinked} transfers linked` });
+      toast({ tone: 'good', text: [`${r.recategorised} recategorised`, r.decided && `${r.decided} with your category`, r.rules && `${r.rules} rule${r.rules === 1 ? '' : 's'} made`, r.transfersLinked && `${r.transfersLinked} transfers linked`].filter(Boolean).join(', ') });
       setPreview(null);
     },
   });
@@ -408,15 +408,16 @@ function RulesEditor() {
       </Card>
       <Card
         title={`Your rules (${data.rules.length})`}
+        description="The preview shows what re-applying categorisation would change. Nothing changes until you apply it."
         padded={false}
         actions={
-          <Button size="sm" icon={<Wand2 className="size-3.5" />} loading={check.isPending} onClick={() => check.mutate(undefined)}>
-            Re-apply to history…
+          <Button size="sm" icon={<Eye className="size-3.5" />} loading={check.isPending} onClick={() => check.mutate(undefined)}>
+            Preview re-applying to history
           </Button>
         }
       >
         {check.error && <Callout tone="bad" className="mx-5 my-3">{check.error.message}</Callout>}
-        {preview && <ReapplyPreview preview={preview} applying={rerun.isPending} error={rerun.error?.message} onApply={() => rerun.mutate(undefined)} onCancel={() => setPreview(null)} />}
+        {preview && <ReapplyPreview key={JSON.stringify([preview.recategorised, preview.groups.length])} preview={preview} applying={rerun.isPending} error={rerun.error?.message} onApply={(body) => rerun.mutate(body)} onCancel={() => setPreview(null)} />}
         {data.rules.length ? (
           <Sorted rows={[...data.rules].sort((a, b) => a.priority - b.priority)} columns={{ when: { value: (r) => r.match.value }, then: { value: (r) => (r.set.category ? cats.path(r.set.category) : r.set.payee) }, on: { value: (r) => (r.enabled ? 0 : 1), first: 'asc' } }}>
             {({ rows, sortProps }) => (
@@ -472,11 +473,71 @@ const BY_WORDS: Record<string, string> = {
   ai: 'the reader’s suggestion',
 };
 
-/** What re-applying categorisation would change, before anything is written. Your own categories are never in it. */
-function ReapplyPreview({ preview, applying, error, onApply, onCancel }: { preview: EnrichPreview; applying: boolean; error: string | undefined; onApply: () => void; onCancel: () => void }) {
+/** What you chose for a payment on the preview: a category of yours, or to leave it as it is this time. Absent, it is as proposed. */
+type ReapplyChoice = { skip: true } | { category: string };
+
+/** Your choices on the preview, as `POST /enrich` takes them. */
+export interface ReapplyBody {
+  decided: { id: string; category: string }[];
+  skip: string[];
+  rules: { name: string; match: Rule['match']; category: string }[];
+}
+
+const PROPOSED = '@proposed';
+const SKIP = '@skip';
+const MIXED = '@mixed';
+
+/** A rule's match in words: "the description holds “X”, money out". */
+function ruleWords(m: Rule['match']): string {
+  const what = m.field === 'payee' ? `the payee is “${m.value}”` : `the description holds “${m.value}”`;
+  return `${what}${m.direction === 'in' ? ', money in' : m.direction === 'out' ? ', money out' : ''}`;
+}
+
+/**
+ * What re-applying categorisation would change, before anything is written. Each group opens to its
+ * payments by payee; any of them can be left as it is this time, or given a category of yours, which
+ * re-applying never changes again. Your own categories are never in it.
+ */
+function ReapplyPreview({ preview, applying, error, onApply, onCancel }: { preview: EnrichPreview; applying: boolean; error: string | undefined; onApply: (body: ReapplyBody) => void; onCancel: () => void }) {
   const { cats } = useAppData();
+  const [choices, setChoices] = useState<Record<string, ReapplyChoice>>({});
+  const [always, setAlways] = useState<Record<string, boolean>>({});
   const nothing = !preview.groups.length && !preview.transfersLinked && !preview.payeesTidied;
   const label = (g: EnrichGroup) => `${g.from ? cats.path(g.from) : 'Uncategorised'} → ${g.to ? cats.path(g.to) : 'Uncategorised'}`;
+  const choose = (ids: string[], value: string | undefined) =>
+    setChoices((cur) => {
+      const next = { ...cur };
+      for (const id of ids) {
+        if (!value || value === PROPOSED) delete next[id];
+        else next[id] = value === SKIP ? { skip: true } : { category: value };
+      }
+      return next;
+    });
+  const valueOf = (id: string) => {
+    const c = choices[id];
+    return !c ? PROPOSED : 'skip' in c ? SKIP : c.category;
+  };
+  const payeeKey = (g: EnrichGroup, payee: string) => `${g.from ?? ''}|${g.to ?? ''}|${g.by ?? ''}|${payee}`;
+
+  const rows = preview.groups.flatMap((g) => g.payees.flatMap((p) => p.rows));
+  const decided = rows.flatMap((r) => {
+    const c = choices[r.id];
+    return c && 'category' in c ? [{ id: r.id, category: c.category }] : [];
+  });
+  const skip = rows.filter((r) => {
+    const c = choices[r.id];
+    return c && 'skip' in c;
+  }).map((r) => r.id);
+  const rules = preview.groups.flatMap((g) =>
+    g.payees.flatMap((p) => {
+      const value = new Set(p.rows.map((r) => valueOf(r.id)));
+      const category = value.size === 1 ? [...value][0]! : undefined;
+      if (!always[payeeKey(g, p.payee)] || !p.match || !category || category === PROPOSED || category === SKIP) return [];
+      return [{ name: `${p.payee} → ${cats.name(category)}`, match: p.match, category }];
+    }),
+  );
+  const asProposed = rows.length - decided.length - skip.length;
+
   return (
     <div className="border-t border-line bg-panel-2 px-5 py-4">
       <div className="mb-1 text-[13.5px] font-medium text-ink">{nothing ? 'Nothing would change' : 'Re-applying would change'}</div>
@@ -484,37 +545,165 @@ function ReapplyPreview({ preview, applying, error, onApply, onCancel }: { previ
         <p className="mb-3 text-[12.5px] text-ink-3">
           {preview.recategorised} row{preview.recategorised === 1 ? '' : 's'} recategorised
           {preview.transfersLinked ? `, ${preview.transfersLinked} transfer${preview.transfersLinked === 1 ? '' : 's'} linked` : ''}
-          {preview.payeesTidied ? `, ${preview.payeesTidied} payee${preview.payeesTidied === 1 ? '' : 's'} tidied` : ''}. Categories you set yourself are never changed.
+          {preview.payeesTidied ? `, ${preview.payeesTidied} payee${preview.payeesTidied === 1 ? '' : 's'} tidied` : ''}. Nothing has changed yet. Open a group to see its payments and change any you disagree with: a category you choose is yours, and
+          re-applying never changes it again; “Leave as it is” skips a payment this time. Categories you set yourself are never in this list.
         </p>
       )}
       {preview.groups.length > 0 && (
         <ul className="mb-3 flex flex-col gap-2">
           {preview.groups.map((g) => (
-            <li key={`${g.from}|${g.to}|${g.by}`} className="rounded-lg border border-line bg-panel px-3 py-2 text-[13px]">
-              <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-                <span className="font-medium text-ink">{label(g)}</span>
-                <span className="tabular text-ink-2">
-                  {g.count} row{g.count === 1 ? '' : 's'} · <Money value={g.amount} />
-                </span>
-              </div>
-              <div className="text-[12px] text-ink-3">
-                {g.to ? `by ${BY_WORDS[g.by ?? ''] ?? 'the app'}` : 'nothing gives it one now'}: {g.payees.map((p) => `${p.payee} (${p.count})`).join(', ')}
-              </div>
-            </li>
+            <ReapplyGroup key={`${g.from}|${g.to}|${g.by}`} group={g} label={label(g)} valueOf={valueOf} choose={choose} always={(p) => always[payeeKey(g, p)] ?? false} setAlways={(p, v) => setAlways((cur) => ({ ...cur, [payeeKey(g, p)]: v }))} />
           ))}
         </ul>
       )}
       {error && <Callout tone="bad" className="mb-3">{error}</Callout>}
-      <div className="flex gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         {!nothing && (
-          <Button variant="primary" size="sm" loading={applying} onClick={onApply}>
+          <Button variant="primary" size="sm" loading={applying} onClick={() => onApply({ decided, skip, rules })}>
             Apply these changes
           </Button>
         )}
         <Button size="sm" onClick={onCancel}>
           {nothing ? 'Close' : 'Cancel'}
         </Button>
+        {(decided.length > 0 || skip.length > 0) && (
+          <span className="text-[12px] text-ink-3">
+            {[`${asProposed} as proposed`, decided.length && `${decided.length} with your category`, skip.length && `${skip.length} left as ${skip.length === 1 ? 'it is' : 'they are'}`, rules.length && `${rules.length} rule${rules.length === 1 ? '' : 's'} to make`].filter(Boolean).join(', ')}
+          </span>
+        )}
       </div>
+    </div>
+  );
+}
+
+function ReapplyGroup({
+  group: g,
+  label,
+  valueOf,
+  choose,
+  always,
+  setAlways,
+}: {
+  group: EnrichGroup;
+  label: string;
+  valueOf: (id: string) => string;
+  choose: (ids: string[], value: string | undefined) => void;
+  always: (payee: string) => boolean;
+  setAlways: (payee: string, v: boolean) => void;
+}) {
+  const { cats } = useAppData();
+  const [open, setOpen] = useState(false);
+  const ids = g.payees.flatMap((p) => p.rows.map((r) => r.id));
+  const changed = ids.filter((id) => valueOf(id) !== PROPOSED).length;
+  const named = g.payees.slice(0, 8).map((p) => `${p.payee} (${p.count})`).join(', ') + (g.payees.length > 8 ? `, and ${g.payees.length - 8} more` : '');
+  return (
+    <li className="rounded-lg border border-line bg-panel text-[13px]">
+      <div className="px-3 py-2">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+          <span className="font-medium text-ink">{label}</span>
+          <span className="tabular text-ink-2">
+            {g.count} row{g.count === 1 ? '' : 's'} · <Money value={g.amount} />
+          </span>
+        </div>
+        <div className="text-[12px] text-ink-3">
+          {g.to ? `by ${BY_WORDS[g.by ?? ''] ?? 'the app'}` : 'nothing gives it one now'}: {named}
+        </div>
+        <button type="button" className="mt-1 inline-flex items-center gap-1 text-[12.5px] text-accent hover:underline" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+          {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+          {open ? 'Hide the payments' : `Show the ${g.count === 1 ? 'payment' : `${g.count} payments`}`}
+          {changed > 0 && <Badge tone="accent">{changed} changed by you</Badge>}
+        </button>
+      </div>
+      {open && (
+        <div className="border-t border-line">
+          {g.payees.map((p) => (
+            <ReapplyPayee key={p.payee} group={g} payee={p} valueOf={valueOf} choose={choose} always={always(p.payee)} setAlways={(v) => setAlways(p.payee, v)} cats={cats} />
+          ))}
+        </div>
+      )}
+    </li>
+  );
+}
+
+function ReapplyPayee({
+  group: g,
+  payee: p,
+  valueOf,
+  choose,
+  always,
+  setAlways,
+  cats,
+}: {
+  group: EnrichGroup;
+  payee: EnrichGroup['payees'][number];
+  valueOf: (id: string) => string;
+  choose: (ids: string[], value: string | undefined) => void;
+  always: boolean;
+  setAlways: (v: boolean) => void;
+  cats: ReturnType<typeof useAppData>['cats'];
+}) {
+  const { accountName } = useAppData();
+  const ids = p.rows.map((r) => r.id);
+  const values = new Set(ids.map(valueOf));
+  const all = values.size === 1 ? [...values][0]! : MIXED;
+  const mine = all !== MIXED && all !== PROPOSED && all !== SKIP ? all : undefined;
+  const direction = p.rows.every((r) => r.amount >= 0) ? 'in' : p.rows.every((r) => r.amount < 0) ? 'out' : undefined;
+  const leading = (forAll: boolean) => [
+    { value: PROPOSED, label: `As proposed: ${g.to ? cats.name(g.to) : 'uncategorised'}` },
+    { value: SKIP, label: `Leave as it is: ${g.from ? cats.name(g.from) : 'uncategorised'}` },
+    ...(forAll && all === MIXED ? [{ value: MIXED, label: 'Some of each', disabled: true }] : []),
+  ];
+  // How many payments the rule would match in all, once "always" is ticked.
+  const [reach, setReach] = useState<number | null>(null);
+  useEffect(() => {
+    if (!always || !p.match) return setReach(null);
+    let live = true;
+    void api<{ count: number }>('/rules/preview', { body: { enabled: true, priority: 100, match: p.match, set: {} } })
+      .then((r) => live && setReach(r.count))
+      .catch(() => live && setReach(null));
+    return () => {
+      live = false;
+    };
+  }, [always, p.match]);
+  return (
+    <div className="border-b border-line px-3 py-2 last:border-b-0">
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
+        <div className="min-w-0">
+          <div className="truncate font-medium text-ink">{p.payee}</div>
+          <div className="text-[12px] text-ink-3">
+            {p.count} payment{p.count === 1 ? '' : 's'} · <Money value={p.amount} />
+          </div>
+        </div>
+        {p.rows.length > 1 && (
+          <label className="flex w-full items-center gap-2 sm:w-auto">
+            <span className="shrink-0 text-[12px] text-ink-3">All {p.count}</span>
+            <CategorySelect value={all} onChange={(v) => choose(ids, v)} allowEmpty={false} leading={leading(true)} direction={direction} className="h-8 w-full text-[12.5px] sm:w-72" ariaLabel={`All ${p.count} from ${p.payee}`} />
+          </label>
+        )}
+      </div>
+      {mine && p.match && (
+        <div className="mt-1.5">
+          <Checkbox checked={always} onChange={setAlways} label={`Always: a rule (${ruleWords(p.match)})${always && reach !== null ? `, which matches ${reach} payment${reach === 1 ? '' : 's'} in all` : ''}`} />
+        </div>
+      )}
+      <ul className="mt-1.5 flex flex-col gap-1.5">
+        {p.rows.map((r) => (
+          <li key={r.id} className="grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1 sm:grid-cols-[1fr_auto_18rem]">
+            <div className="min-w-0 text-[12.5px]">
+              <div className="truncate text-ink-2" title={r.description}>
+                {r.description}
+              </div>
+              <div className="text-[12px] text-ink-3">
+                {formatDate(r.date)} · {accountName(r.accountId)}
+              </div>
+            </div>
+            <Money value={r.amount} className={cn('tabular text-[12.5px]', r.amount > 0 ? 'text-good-ink' : 'text-ink')} />
+            <div className="col-span-2 sm:col-span-1">
+              <CategorySelect value={valueOf(r.id)} onChange={(v) => choose([r.id], v)} allowEmpty={false} leading={leading(false)} direction={r.amount >= 0 ? 'in' : 'out'} className="h-8 w-full text-[12.5px]" ariaLabel={`${formatDate(r.date)} ${money(r.amount)}`} />
+            </div>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

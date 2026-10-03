@@ -11,14 +11,15 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { classifyFlow } from '../src/server/analytics/cashflow';
 import { paidAs } from '../src/server/analytics/pay';
-import { categoriseInputOf, categoriserFor } from '../src/server/categoriser';
-import { enrich, nextPayee } from '../src/server/enrich';
+import { payeeRuleMatch } from '../src/server/analytics/queue';
+import { categoriseInputOf, categoriserFor, ruleCatches } from '../src/server/categoriser';
+import { enrich, nextPayee, reapply } from '../src/server/enrich';
 import { transactionId } from '../src/server/ids';
 import { Store } from '../src/server/store';
 import { CategoryIndex, defaultCategories, mapBankCategory } from '../src/shared/categories';
 import { Categoriser, purchaseKey } from '../src/shared/categorise';
 import { cleanPayee, paymentParts } from '../src/shared/merchants';
-import type { Account, Figure, Transaction } from '../src/shared/schema';
+import type { Account, Figure, Rule, Transaction } from '../src/shared/schema';
 
 const stamp = '2026-09-01T00:00:00+01:00';
 const acct = (id: string, type: Account['type'], extra: Partial<Account> = {}): Account => ({ id, name: id, type, currency: 'GBP', status: 'open', aliases: [], includeInNetWorth: true, createdAt: stamp, updatedAt: stamp, ...extra });
@@ -120,6 +121,16 @@ describe('money that is neither spending nor income', () => {
     // Cash taken out is still a withdrawal, and cash paid onto a card is not cash paid in.
     expect(c.categorise({ accountId: 'current', description: 'CASH WITHDRAWAL LINK ATM', amount: -50 }).category).toBe('cash-withdrawal');
     expect(c.categorise({ accountId: 'card', description: 'POST OFFICE CASH DEPOSIT', amount: 80 }).payee).not.toBe('Cash paid in');
+  });
+
+  it('a rule matches a recorded payment as categorising it would, not by the payee shown', () => {
+    const fare = tx('current', '2026-09-28', -2.8, 'TFL TRAVEL CH TFL.GOV.UK/CP', { payee: 'TfL' });
+    const rule = (match: Rule['match']): Rule => ({ id: 'rule_t', enabled: true, priority: 100, match, set: {}, createdAt: stamp, updatedAt: stamp });
+    expect(ruleCatches(rule({ field: 'payee', op: 'equals', value: cleanPayee(fare.description), caseSensitive: false }), fare)).toBe(true);
+    expect(ruleCatches(rule({ field: 'payee', op: 'equals', value: 'TfL', caseSensitive: false }), fare)).toBe(false);
+    // "Always" for a payee too short to look for in descriptions: the payee as the categoriser sees it.
+    expect(payeeRuleMatch('TfL', [fare], 'out')).toEqual({ field: 'payee', op: 'equals', value: cleanPayee(fare.description), caseSensitive: false, direction: 'out' });
+    expect(payeeRuleMatch('Tfl Travel', [fare], 'out')).toMatchObject({ field: 'description', op: 'contains', value: 'Tfl Travel' });
   });
 
   it('conversion fees, the Underground and a platform’s fee', () => {
@@ -235,5 +246,32 @@ describe('the store as it is', () => {
     expect(byDescription('BANK GIRO CREDIT REF OWN VENTURE, 77')?.category).toBeUndefined();
     expect(byDescription('EXAMPLE OUTFITTERS LONDON')?.category).toBe('clothing');
     expect(categoriserFor(store)).toBeInstanceOf(Categoriser);
+  });
+
+  it('re-applies with your choices: your categories first and kept, one left as it is this time, and your rule', async () => {
+    const id = (d: string) => store.transactions().find((t) => t.description === d && t.categorisedBy !== 'user')!.id;
+    const pay = id('BANK GIRO CREDIT REF ACME WIDGETS, 0420 1234 K');
+    const refund = id('EXAMPLE OUTFITTERS LONDON');
+    const venture = id('BANK GIRO CREDIT REF OWN VENTURE, 77');
+    // Nothing is written when a choice is wrong.
+    await expect(reapply(store, { decided: [{ id: pay, category: 'nonsense' }] })).rejects.toThrow(/Unknown category/);
+    await expect(reapply(store, { skip: ['tx_0000000000000000'] })).rejects.toThrow(/Unknown transaction/);
+    expect(store.transaction(pay)?.category).toBeUndefined();
+    const r = await reapply(store, {
+      decided: [{ id: pay, category: 'bonus' }],
+      skip: [refund],
+      rules: [{ match: { field: 'description', op: 'contains', value: 'OWN VENTURE', caseSensitive: false, direction: 'in' }, category: 'other-income' }],
+    });
+    expect(r).toMatchObject({ decided: 1, rules: 1 });
+    expect(store.transaction(pay)).toMatchObject({ category: 'bonus', categorisedBy: 'user' });
+    expect(store.transaction(refund)?.category).toBeUndefined();
+    expect(store.transaction(venture)).toMatchObject({ category: 'other-income', categorisedBy: 'rule' });
+    expect(store.rules.map((x) => x.name)).toEqual(['OWN VENTURE → Other income']);
+    // Re-applying again keeps yours, and offers again what you left as it was.
+    const again = await enrich(store, { dryRun: true, detail: true });
+    expect((again.changes ?? []).filter((ch) => ch.category).map((ch) => ch.id)).toEqual([refund]);
+    await enrich(store);
+    expect(store.transaction(pay)).toMatchObject({ category: 'bonus', categorisedBy: 'user' });
+    expect(store.transaction(refund)?.category).toBe('clothing');
   });
 });

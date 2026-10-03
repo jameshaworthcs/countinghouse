@@ -571,6 +571,9 @@ async function main() {
   }
   const res = await enrich(store);
   console.log(`demo: ${txs.length} transactions, ${snapshots.length} balances; enrich: ${res.recategorised} categorised, ${res.transfersLinked} transfers linked`);
+  // Three fares as an older version of the app filed them, for re-applying categorisation to change.
+  const stale = store.transactions().filter((t) => t.category === 'public-transport' && t.categorisedBy === 'builtin').slice(-3);
+  if (stale.length) await store.updateTransactions(stale.map((t) => ({ id: t.id, patch: { category: 'other-expense' } })), 'demo: categories an older version gave');
   // A first import has no research or insights yet: the agents have not run.
   if (!SPARSE) await demoIntelligence(store);
 

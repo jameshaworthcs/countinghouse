@@ -18,6 +18,7 @@ import { Store } from '../src/server/store';
 import { CategoryIndex, defaultCategories } from '../src/shared/categories';
 import { cleanPayee } from '../src/shared/merchants';
 import { giftOccasion, itemCategory, parsePersonName, PeopleIndex, referenceWords, shareOf, suggestFor, suggestForCash, tidyName, type PaidOut, type PersonParty } from '../src/shared/people';
+import type { EnrichPreview } from '../src/shared/api';
 import type { Account, Person, Transaction } from '../src/shared/schema';
 
 const stamp = '2026-01-01T00:00:00+00:00';
@@ -471,6 +472,29 @@ describe('deciding on the To categorise page', () => {
     expect(store.people).toEqual([]);
     const queue = (await (await req('/api/categorise/queue')).json()) as { people: unknown[]; guesses: unknown[] };
     expect(queue).toMatchObject({ people: [], guesses: [] });
+  });
+
+  it('previews re-applying with every payment by payee, and applies it with your choices', async () => {
+    const { store } = app.ctx;
+    const bank = { bankCategory: 'Entertainment-Restaurants' };
+    const a = tx('bank', '2026-06-01', -12.5, 'QUILLFEATHER LTD', bank);
+    const b = tx('bank', '2026-06-08', -9, 'QUILLFEATHER LTD', bank);
+    await store.addTransactions([a, b], 't');
+    const preview = (await (await post('/api/enrich/preview', {})).json()) as EnrichPreview;
+    const group = preview.groups.find((g) => g.to === 'eating-out' && g.by === 'bank')!;
+    expect(group.payees).toHaveLength(1);
+    expect(group.payees[0]).toMatchObject({ count: 2, amount: 21.5, match: { direction: 'out' } });
+    expect(group.payees[0]!.rows.map((r) => r.id)).toEqual([b.id, a.id]);
+    // Yours for one; the other as proposed.
+    const res = await post('/api/enrich', { decided: [{ id: a.id, category: 'coffee' }], skip: [], rules: [] });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ decided: 1 });
+    expect(store.transaction(a.id)).toMatchObject({ category: 'coffee', categorisedBy: 'user' });
+    expect(store.transaction(b.id)).toMatchObject({ category: 'eating-out', categorisedBy: 'bank' });
+    // A wrong choice changes nothing; no choices at all re-applies everything.
+    expect((await post('/api/enrich', { decided: [{ id: b.id, category: 'nonsense' }] })).status).toBe(400);
+    expect((await req('/api/enrich', { method: 'POST', headers: CSRF })).status).toBe(200);
+    expect(store.transaction(a.id)?.category).toBe('coffee');
   });
 
   it('refuses a category that doesn’t exist, before changing anything', async () => {

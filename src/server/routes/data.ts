@@ -7,7 +7,6 @@ import { ACCOUNT_TYPE_META, slugify } from '../../shared/accounts';
 import type { AccountDetailResponse, BootstrapResponse, EnrichGroup, EnrichPreview, TransactionsResponse } from '../../shared/api';
 import { addTags, appendNote, removeTags } from '../../shared/annotations';
 import { CategoryIndex } from '../../shared/categories';
-import { ruleMatches } from '../../shared/categorise';
 import { today } from '../../shared/dates';
 import { catalogInstitution, findInstitution, INSTITUTION_CATALOG } from '../../shared/institutions';
 import { cleanPayee, descriptionKey } from '../../shared/merchants';
@@ -47,8 +46,8 @@ import {
 } from '../../shared/schema';
 import { SYSTEM_CATEGORY_IDS } from '../../shared/categories';
 import { csvCell, queryDate, readJson, type AppContext } from '../context';
-import { categoriserFor } from '../categoriser';
-import { applyRule, enrich, salaryByPayroll } from '../enrich';
+import { categoriserFor, ruleCatches } from '../categoriser';
+import { applyRule, enrich, reapply, salaryByPayroll } from '../enrich';
 import { nowISO, randomHex } from '../fsutil';
 import { balanceId, figureId, ruleId, transactionId } from '../ids';
 import { payerKey } from '../analytics/pay';
@@ -61,7 +60,7 @@ import { taxDocuments } from '../analytics/taxdocuments';
 import { matchEmployment } from '../employments';
 import { StoreError } from '../store';
 import { accountSummary } from '../analytics/estate';
-import { categoriseQueue } from '../analytics/queue';
+import { categoriseQueue, payeeRuleMatch } from '../analytics/queue';
 
 const NewAccountBody = z.object({
   name: z.string().min(1).max(120),
@@ -158,6 +157,13 @@ const DecisionsBody = z.object({
       category: z.string().min(1).max(64),
     })
     .optional(),
+});
+
+/** Your choices on the preview of re-applying categorisation (`reapply`). */
+const ReapplyBody = z.object({
+  decided: z.array(z.object({ id: z.string(), category: z.string().min(1).max(64) })).max(20_000).optional(),
+  skip: z.array(z.string()).max(20_000).optional(),
+  rules: z.array(z.object({ name: z.string().max(200).optional(), match: RuleSchema.shape.match, category: z.string().min(1).max(64) })).max(500).optional(),
 });
 
 const NewTx = z.object({
@@ -673,16 +679,38 @@ export function dataRoutes(ctx: AppContext): Hono {
     const stamp = nowISO();
     const { apply: _a, ...rest } = body;
     const rule: Rule = { ...rest, id: 'rule_preview', createdAt: stamp, updatedAt: stamp };
-    const hits = store.transactions().filter((t) => ruleMatches(rule, { accountId: t.accountId, description: t.description, amount: t.amount, payee: t.payee }));
+    const hits = store.transactions().filter((t) => ruleCatches(rule, t));
     return c.json({ count: hits.length, sample: hits.slice(-8).reverse() });
   });
 
-  app.post('/enrich', async (c) => c.json(await enrich(store)));
+  /**
+   * Re-apply categorisation, with your choices on its preview (`reapply`): the categories you gave
+   * payments, those you left as they are, and rules to make. With no body, everything as previewed.
+   */
+  app.post('/enrich', async (c) => {
+    const text = await c.req.text();
+    let choices: z.infer<typeof ReapplyBody> = {};
+    if (text.trim()) {
+      let raw: unknown;
+      try {
+        raw = JSON.parse(text);
+      } catch {
+        throw new StoreError('Request body must be JSON', 400);
+      }
+      const parsed = ReapplyBody.safeParse(raw);
+      if (!parsed.success) throw new StoreError(parsed.error.issues.map((i) => `${i.path.join('.') || 'body'}: ${i.message}`).join('; '), 400);
+      choices = parsed.data;
+    }
+    return c.json(await reapply(store, choices));
+  });
 
-  /** What re-applying categorisation would change, grouped: nothing is written (`enrich`, dry run). */
+  /**
+   * What re-applying categorisation would change, grouped by from and to category and what gives it,
+   * then by payee, with every payment: nothing is written (`enrich`, dry run).
+   */
   app.post('/enrich/preview', async (c) => {
     const result = await enrich(store, { dryRun: true, detail: true });
-    const groups = new Map<string, EnrichGroup>();
+    const groups = new Map<string, { group: EnrichGroup; byPayee: Map<string, Transaction[]> }>();
     let payeesTidied = 0;
     for (const ch of result.changes ?? []) {
       if (!ch.category) {
@@ -690,20 +718,38 @@ export function dataRoutes(ctx: AppContext): Hono {
         continue;
       }
       const key = `${ch.category.from ?? ''}|${ch.category.to ?? ''}|${ch.category.by ?? ''}`;
-      const g = groups.get(key) ?? groups.set(key, { from: ch.category.from, to: ch.category.to, by: ch.category.by, count: 0, amount: 0, payees: [], examples: [] }).get(key)!;
-      g.count++;
-      g.amount = fromMinor(toMinor(g.amount) + Math.abs(toMinor(ch.amount)));
-      const payee = ch.payee?.to ?? store.transaction(ch.id)?.payee ?? ch.description;
-      const p = g.payees.find((x) => x.payee === payee) ?? (g.payees.push({ payee, count: 0, amount: 0 }), g.payees.at(-1)!);
-      p.count++;
-      p.amount = fromMinor(toMinor(p.amount) + Math.abs(toMinor(ch.amount)));
-      if (g.examples.length < 5) g.examples.push({ id: ch.id, accountId: ch.accountId, date: ch.date, amount: ch.amount, description: ch.description });
+      const e = groups.get(key) ?? groups.set(key, { group: { from: ch.category.from, to: ch.category.to, by: ch.category.by, count: 0, amount: 0, payees: [] }, byPayee: new Map() }).get(key)!;
+      e.group.count++;
+      e.group.amount = fromMinor(toMinor(e.group.amount) + Math.abs(toMinor(ch.amount)));
+      const t = store.transaction(ch.id);
+      if (!t) continue;
+      const payee = ch.payee?.to ?? t.payee ?? ch.description;
+      (e.byPayee.get(payee) ?? e.byPayee.set(payee, []).get(payee)!).push(t);
     }
+    const newestFirst = (a: Transaction, b: Transaction) => b.date.localeCompare(a.date) || a.id.localeCompare(b.id);
     const body: EnrichPreview = {
       recategorised: result.recategorised,
       transfersLinked: result.transfersLinked,
       payeesTidied,
-      groups: [...groups.values()].map((g) => ({ ...g, payees: g.payees.sort((a, b) => b.amount - a.amount).slice(0, 8) })).sort((a, b) => b.amount - a.amount),
+      groups: [...groups.values()]
+        .map(({ group, byPayee }) => ({
+          ...group,
+          payees: [...byPayee.entries()]
+            .map(([payee, rows]) => {
+              rows.sort(newestFirst);
+              const ways = new Set(rows.map((t): 'in' | 'out' => (t.amount >= 0 ? 'in' : 'out')));
+              const match = payeeRuleMatch(payee, rows, ways.size === 1 ? [...ways][0] : undefined);
+              return {
+                payee,
+                count: rows.length,
+                amount: fromMinor(rows.reduce((s, t) => s + Math.abs(toMinor(t.amount)), 0)),
+                rows: rows.map((t) => ({ id: t.id, accountId: t.accountId, date: t.date, amount: t.amount, description: t.description })),
+                ...(match ? { match } : {}),
+              };
+            })
+            .sort((a, b) => b.amount - a.amount || a.payee.localeCompare(b.payee)),
+        }))
+        .sort((a, b) => b.amount - a.amount),
     };
     return c.json(body);
   });
