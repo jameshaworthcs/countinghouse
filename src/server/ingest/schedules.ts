@@ -35,6 +35,15 @@ export function scheduleCategory(s: Pick<ExtractedSchedule, 'name' | 'provider' 
   return 'other-expense';
 }
 
+/**
+ * A payment's label, unless all it says is its status: a reader gives the status column's words as
+ * the label when the schedule names its payments no other way ("Paid - We've paid you").
+ */
+export function paymentLabel(label: string | undefined): string | undefined {
+  if (!label) return undefined;
+  return /^\s*\(?\s*(?:paid|due|ready to be paid|awaiting(?: confirmation)?|expected|scheduled|planned|cancelled)\b|we'?ve paid/i.test(label) ? undefined : label;
+}
+
 /** Your student loan: the one open, else the open one Student Finance runs. */
 export function studentLoanAccount(store: Store): Account | undefined {
   const loans = store.accounts.filter((a) => a.type === 'student_loan' && a.status !== 'closed');
@@ -64,7 +73,10 @@ export function scheduleRecord(s: ExtractedSchedule, opts: { loanAccountId?: str
     from: s.from ?? dues[0]!,
     ...(until ? { until } : {}),
     ...(s.total !== undefined ? { total: s.total } : {}),
-    payments: s.payments.map((p) => ({ due: p.date, amount: p.amount, ...(p.label ? { label: p.label } : {}), ...(p.status ? { status: p.status } : {}) })),
+    payments: s.payments.map((p) => {
+      const label = paymentLabel(p.label);
+      return { due: p.date, amount: p.amount, ...(label ? { label } : {}), ...(p.status ? { status: p.status } : {}) };
+    }),
     details: s.details,
     ...(s.reference ? { reference: s.reference } : {}),
     statusAsOf: opts.statusAsOf,

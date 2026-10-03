@@ -16,6 +16,7 @@ import { loadConfig } from '../src/server/config';
 import { sha256 } from '../src/server/fsutil';
 import { documentId, transactionId } from '../src/server/ids';
 import { normaliseExtraction } from '../src/server/ingest/normalise';
+import { paymentLabel } from '../src/server/ingest/schedules';
 import { ImportService } from '../src/server/ingest/service';
 import { WorkArea } from '../src/server/ingest/workarea';
 import { Store } from '../src/server/store';
@@ -93,6 +94,18 @@ describe('schedules in a reading', () => {
         details: [{ label: 'Course year', value: '4' }, { label: 'Course', value: 'Example Studies' }],
       },
     ]);
+  });
+});
+
+describe('what a reader gives that is not a schedule', () => {
+  it('a total with no payment dates is a note, not a warning; a label that only restates the status is dropped', () => {
+    const { extraction, warnings } = normaliseExtraction({ ...studentFinancePage, notes: [], schedules: [{ provider: 'Student Finance England', name: 'Maintenance Loan 2026/27', direction: 'to-you', total: 3000, payments: [], details: [] }] });
+    expect(extraction.schedules).toEqual([]);
+    expect(warnings).toEqual([]);
+    expect(extraction.notes).toEqual(['Maintenance Loan 2026/27: £3,000.00 in all, with no payment dates, so not kept as a schedule.']);
+    expect(paymentLabel("Paid - We've paid you")).toBeUndefined();
+    expect(paymentLabel('Ready to be paid')).toBeUndefined();
+    expect(paymentLabel('Instalment 2')).toBe('Instalment 2');
   });
 });
 
@@ -205,6 +218,22 @@ describe('importing', () => {
       expect((await draftOf(same)).agreements![0]).toMatchObject({ include: false, target: { mode: 'existing' }, adds: { payments: 0, statuses: 0 } });
       expect(svc.novelty().get(same)?.reason).toMatch(/schedule \(Maintenance Loan 2026\/27\) is already recorded/);
       expect((await draftOf(newer)).agreements![0]).toMatchObject({ include: true, target: { mode: 'existing' }, adds: { payments: 0, statuses: 1 } });
+    });
+
+    it('two documents waiting with the same schedule record it once, whichever is committed first', async () => {
+      const letter = await pending({ ...studentFinancePage, schedules: [{ ...studentFinancePage.schedules[1]!, payments: studentFinancePage.schedules[1]!.payments.map((p) => ({ ...p, status: 'scheduled' })) }] });
+      const page = await pending(studentFinancePage);
+      await start();
+      await draftOf(letter);
+      await draftOf(page);
+      expect((await draftOf(letter)).agreements![0]!.target.mode).toBe('new');
+      expect((await draftOf(page)).agreements![1]!.target.mode).toBe('new');
+      await svc.commit(letter);
+      await svc.commit(page);
+      const tuition = store.agreements.filter((a) => a.paidBy);
+      expect(tuition).toHaveLength(1);
+      // The page is the later document: its statuses stand.
+      expect(tuition[0]!.payments.map((p) => p.status)).toEqual(['paid', 'awaiting']);
     });
 
     it('the loan’s balance worked out from its movements away from a statement is an estimate', async () => {

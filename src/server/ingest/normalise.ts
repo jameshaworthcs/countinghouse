@@ -2,7 +2,7 @@
 // drop rows that cannot be salvaged (with a note), and fill defaults.
 
 import { isISODate, parseFlexibleDate } from '../../shared/dates';
-import { parseAmount, roundMoney, toMinor } from '../../shared/money';
+import { formatMoney, parseAmount, roundMoney, toMinor } from '../../shared/money';
 import { isNiNumber, withoutNiNumbers } from '../../shared/privacy';
 import { AGREEMENT_PAYMENT_STATUSES, ExtractedHmrcSchema, ExtractedPayslipSchema, ExtractedScheduleSchema, ExtractionSchema, TermsRateSchema, type ExtractedPayslip, type Extraction } from '../../shared/schema';
 import { payeReference } from '../analytics/sources';
@@ -193,6 +193,12 @@ function readEverything(fixed: Record<string, unknown>, original: Record<string,
         return label && value ? [{ label, value }] : [];
       });
       const total = money(raw.total);
+      // A total with no payment dates (an award letter's maintenance) is not a schedule: said in the notes.
+      if (!payments.length) {
+        const name = text(raw.name, 160);
+        if (name && Array.isArray(fixed.notes)) (fixed.notes as string[]).push(`${name}${total !== undefined ? `: ${formatMoney(total)} in all` : ''}, with no payment dates, so not kept as a schedule.`);
+        return [];
+      }
       const schedule = ExtractedScheduleSchema.safeParse(
         present({ provider: text(raw.provider, 200), name: text(raw.name, 160), direction: raw.direction, paidTo: text(raw.paidTo, 200), from: day(raw.from), until: day(raw.until), reference: text(raw.reference, 80), total, payments, details }),
       );

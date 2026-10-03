@@ -36,7 +36,7 @@ import type { Store } from '../store';
 import { classifyDuplicates, storedTwice } from './dedup';
 import { dateFromFileName } from './images';
 import { fitsAccount, identifies, matchAccount, onlyKind, proposeAccount, sameHolding } from './match';
-import { asAgreement, draftAgreements, isStudentFinance, STUDENT_FINANCE, studentLoanAccount } from './schedules';
+import { asAgreement, draftAgreements, isStudentFinance, paymentLabel, STUDENT_FINANCE, studentLoanAccount } from './schedules';
 
 export { fitsAccount } from './match';
 
@@ -648,7 +648,8 @@ export function splitAtLinks(store: Store, accounts: readonly ExtractedAccount[]
 
 /** A student loan's row for a student finance payment: what it was, and who it was paid to. */
 export function loanRowDescription(s: Pick<ExtractedSchedule, 'name' | 'direction' | 'paidTo'>, p: Pick<ExtractedSchedule['payments'][number], 'label'>): string {
-  const what = `${s.name}${p.label ? ` (${p.label})` : ''}`;
+  const label = paymentLabel(p.label);
+  const what = `${s.name}${label ? ` (${label})` : ''}`;
   return `${what}: paid to ${s.direction === 'to-you' ? 'you' : (s.paidTo ?? 'your university or college')}`;
 }
 
@@ -777,7 +778,7 @@ export function draftIsClean(draft: Draft): { clean: boolean; reasons: string[] 
     if (s.transactions.some((t) => t.status === 'possible_duplicate')) reasons.push('possible duplicates to check');
     if (s.balanceDateSource === 'upload') reasons.push('balance date unknown');
   }
-  if (!draft.sections.length && !draft.figures.length && !draft.hmrc?.length && !draft.payslips?.length) reasons.push('nothing extracted');
+  if (!draft.sections.length && !draft.figures.length && !draft.hmrc?.length && !draft.payslips?.length && !draft.agreements?.length) reasons.push('nothing extracted');
   if (draft.jobs?.some((j) => j.target.mode === 'new' && [...draft.figures, ...(draft.hmrc ?? []), ...(draft.payslips ?? [])].some((x) => x.include && x.jobKey === j.key))) reasons.push('sets up a new job');
   if (draft.figures.some((f) => f.include && f.replaces)) reasons.push('replaces earned pay recorded from an earlier upload');
   return { clean: reasons.length === 0, reasons: [...new Set(reasons)] };

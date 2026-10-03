@@ -22,7 +22,7 @@ import { linkTransfers, rederive, salaryByPayroll } from '../enrich';
 import { StoreError, type Store } from '../store';
 import { hasYourChanges } from './dedup';
 import { sameHolding } from './match';
-import { mergeSchedule } from './schedules';
+import { mergeSchedule, recordedAs } from './schedules';
 
 export interface CommitInput {
   record: ImportRecord;
@@ -527,9 +527,10 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
     };
     for (const d of draft.agreements ?? []) {
       if (!d.include) continue;
-      const base = d.target.mode === 'existing' ? store.agreement(d.target.agreementId) : undefined;
       const accountId = finalId(d.record.accountId);
       const record = { ...d.record, ...(accountId ? { accountId } : {}) };
+      // One recorded meanwhile with the same schedule (another document of it, committed first) is filled in, not made twice.
+      const base = d.target.mode === 'existing' ? store.agreement(d.target.agreementId) : recordedAs(store.agreements, record);
       let agreement: Agreement;
       if (base) {
         const { merged } = mergeSchedule(base, record);
