@@ -555,7 +555,7 @@ describe('rules, categories and guesses', () => {
     const res = await propose({ title: 'A rule for the café', summary: 'Coffee most weeks.', changes: [rule] });
     expect(res.status).toBe(201);
     const view = (await res.json()) as ProposalView;
-    expect(view.changes[0]!.rule).toMatchObject({ count: 2, amount: -9, yours: 1 });
+    expect(view.changes[0]!.rule).toMatchObject({ count: 2, amount: -9, settles: 0, yours: 1 });
     expect(view.changes[0]!.rule!.examples.map((e) => [e.id, e.category])).toEqual([
       [b.id, 'eating-out'],
       [a.id, undefined],
@@ -590,6 +590,11 @@ describe('rules, categories and guesses', () => {
       })
     ).json()) as ProposalView;
     expect(view.changes[1]!.rule).toMatchObject({ count: 1, yours: 1 });
+    // A guess in the rule's category already is settled: the rule's from then on.
+    const guessed = tx('bank', '2026-04-20', -6, 'EXAMPLE BOOKS LTD', { category: 'books', categorisedBy: 'ai' });
+    await store.addTransactions([guessed], 'test');
+    const again = (await (await propose({ title: 'Books again', summary: 'Books.', changes: [{ kind: 'add_rule', why: 'Books.', rule: { match: { value: 'EXAMPLE BOOKS LTD' }, category: 'books' } }], dryRun: true })).json()) as ProposalView;
+    expect(again.changes[0]!.rule).toMatchObject({ count: 2, settles: 1 });
     expect((await owner(`/api/proposals/${view.proposal.id}/apply`)).status).toBe(200);
     expect(store.transaction(a.id)).toMatchObject({ category: 'gifts', categorisedBy: 'user' });
     expect(store.transaction(b.id)).toMatchObject({ category: 'books', categorisedBy: 'rule' });

@@ -762,10 +762,11 @@ export interface ProposalChangeView {
   /** Terms set: the document they are from, and the terms its reading kept, which they replace. */
   terms?: { fileName?: string; before?: Pick<Terms, 'rates' | 'limit' | 'minimumPayment' | 'paymentDue'> };
   /**
-   * A rule made: the payments it categorises now (newest first, a few shown), and how many it matches
-   * that you categorised otherwise yourself, which it leaves as they are.
+   * A rule made: the payments it categorises now (newest first, a few shown); those a guess put in
+   * its category already, which it settles (they become the rule's); and how many it matches that
+   * you categorised otherwise yourself, which it leaves as they are.
    */
-  rule?: { count: number; amount: number; examples: ProposalRuleExample[]; yours: number };
+  rule?: { count: number; amount: number; examples: ProposalRuleExample[]; settles: number; yours: number };
   /** A category added or changed: where it sits after (its group's name), and how it was. */
   category?: { group?: string; was?: { name: string; group?: string } };
 }

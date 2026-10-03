@@ -279,8 +279,8 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
     description (or the payee), with an optional direction, amount range and accounts, and the
     category it sets. The category exists, and no enabled rule of the owner's has the same match (the
     same category: already so; another: the owner's wins, so it does not fit). The proposal shows the
-    payments it categorises now, newest first, and how many of the owner's own categories it matches
-    but leaves. Applied, it is added to the owner's rules (priority 100), and the payments it decides
+    payments it categorises now, newest first, the guesses already in its category that it settles
+    (they become the rule's), and how many of the owner's own categories it matches but leaves. Applied, it is added to the owner's rules (priority 100), and the payments it decides
     are categorised by it now (`categorisedBy: rule`), as making a rule does; the next ones are as
     they come. A rule's words match however a bank spaces them (FORMULAS.md §10). Propose one only
     for a payee that comes again and is always one thing, with its `why` naming the payments that

@@ -295,8 +295,11 @@ export function ChangeBody({ change, view }: { change: ProposedChange; view: Pro
             <div className="text-[12.5px] text-ink-3">
               {reach.count ? (
                 <>
-                  It categorises {plural(reach.count, 'payment')} now (<span className="sensitive">{money(Math.abs(reach.amount))}</span>), and the next ones as they come.
+                  It categorises {plural(reach.count, 'payment')} now (<span className="sensitive">{money(Math.abs(reach.amount))}</span>)
+                  {reach.settles > 0 ? `, settles ${plural(reach.settles, 'guess', 'guesses')} already in ${cats.name(change.rule.category)},` : ''} and the next ones as they come.
                 </>
+              ) : reach.settles > 0 ? (
+                `It settles ${plural(reach.settles, 'payment')} a guess put in ${cats.name(change.rule.category)} already, and categorises the next ones as they come.`
               ) : (
                 'Nothing to categorise now: it is for the next ones as they come.'
               )}

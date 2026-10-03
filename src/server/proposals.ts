@@ -68,8 +68,8 @@ interface ChangeResult {
   files?: { transactionId: string; accountId: string; date: string; amount: number; category?: string }[];
   /** Terms set: the document they are from, and the terms its reading kept, which they replace. */
   terms?: { fileName?: string; before?: TermsContent };
-  /** A rule made: the payments it categorises now, and how many of yours it matches but leaves. */
-  rule?: { count: number; amount: number; examples: ProposalRuleExample[]; yours: number };
+  /** A rule made: the payments it categorises now, the guesses in its category it settles, and how many of yours it matches but leaves. */
+  rule?: { count: number; amount: number; examples: ProposalRuleExample[]; settles: number; yours: number };
   /** A category added or changed: its group after, and how it was. */
   category?: { group?: string; was?: { name: string; group?: string } };
 }
@@ -488,6 +488,7 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
         const withIt = categoriserFor(store, { rules: [...store.rules, ...out.rules], categories: catList });
         const alone = new Categoriser([rule], new CategoryIndex([]), [], []);
         const filled: Transaction[] = [];
+        let settled = 0;
         let yoursLeft = 0;
         for (const now of store.transactions()) {
           const t = row(now.id);
@@ -509,10 +510,11 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
           if (!Object.keys(p).length) continue;
           patch(t, p);
           if ('category' in p) filled.push(t);
+          else if ('categorisedBy' in p) settled++;
         }
         filled.sort((a, b) => b.date.localeCompare(a.date));
         const examples: ProposalRuleExample[] = filled.slice(0, RULE_EXAMPLES).map((t) => ({ id: t.id, accountId: t.accountId, date: t.date, amount: t.amount, description: t.description, ...(t.category ? { category: t.category } : {}) }));
-        return { rule: { count: filled.length, amount: fromMinor(filled.reduce((s, t) => s + toMinor(t.amount), 0)), examples, yours: yoursLeft } };
+        return { rule: { count: filled.length, amount: fromMinor(filled.reduce((s, t) => s + toMinor(t.amount), 0)), examples, settles: settled, yours: yoursLeft } };
       }
       case 'add_category': {
         const there = cats.get(c.category.id);
