@@ -206,6 +206,7 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
       { "kind": "link_transfer", "from": "tx_… (money out)", "to": "tx_… (money in)", "why": "…" },
       { "kind": "set_category", "transaction": "tx_…", "category": "takeaway", "why": "…" },
       { "kind": "add_rule", "rule": { "match": { "field": "description", "op": "contains", "value": "Example Cafe", "direction": "out" }, "category": "coffee" }, "why": "…" },
+      { "kind": "remove_rule", "rule": "rule_…", "why": "…" },
       { "kind": "add_category", "category": { "id": "example-group", "name": "Example group", "kind": "expense" }, "why": "…" },
       { "kind": "change_category", "category": "example-category", "name": "New name", "parent": "example-group", "why": "…" },
       { "kind": "set_note", "transaction": "tx_…", "note": "Room 4, Example Court: instalment 1 of 3", "why": "…" },
@@ -285,6 +286,11 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
     they come. A rule's words match however a bank spaces them (FORMULAS.md §10). Propose one only
     for a payee that comes again and is always one thing, with its `why` naming the payments that
     show it; a one-off takes `set_category`.
+  - A rule removed (`remove_rule`) is one of the owner's (gone already: already so). The proposal
+    shows the rule and the payments it categorised that change without it, with what each becomes:
+    what the app makes of it without the rule (its merchant patterns, the bank's category, another
+    rule). The owner's own categories stay. Propose one when a rule does harm (it catches payments
+    that are something else) or is a duplicate, naming the payments that show it.
   - A category added (`add_category`) has a new id (a slug) and a name no other category in its
     group, or no other group, has. Without `parent` it is a group, of its `kind`; with one, a
     category in that group, which is a group (not a category in another) of the same kind.
@@ -314,7 +320,7 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
 - **Not again.** The same changes cannot be proposed while they wait, or after the owner dismissed
   them. A proposal whose changes undo each other is refused too.
 - **Applying** goes through the store's own writes under one commit message. The proposal is kept
-  in `data/proposals/`, with the rows, accounts and categories it changed as they were before. A
+  in `data/proposals/`, with the rows, accounts, categories and rules it changed as they were before. A
   category it sets counts as the owner's (`categorisedBy: user`); a rule it makes is the owner's
   rule from then on. Another proposal that this leaves with nothing to
   do closes as already done, in a commit of its own.

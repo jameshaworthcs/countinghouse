@@ -644,16 +644,31 @@ you.
   or cash and cheques paid in.
 - **Now, or for the next ones:** offered when the rule would categorise a payment now. When you
   decided every payment from the payee yourself, it is offered for the next ones instead ("For the
-  next ones"), while the payee was paid in the last year (`RULE_RECENT_DAYS`) and no enabled rule of
-  yours catches every payment you decided. Without it, the next payment comes in uncategorised or
-  guessed: a category you set is never a rule by itself.
+  next ones"): a category you set is never a rule by itself. Only for a payee that comes back, one you
+  decided in two months or more (`RULE_NEXT_MONTHS`), one of them in the last year
+  (`RULE_RECENT_DAYS`): a café on one trip, however often, is not. And only when the app would not
+  get the next one right by itself: run on your newest decision, without it, its merchant patterns,
+  your rules or an agreement would not give that category (pay from a job is salary already).
+- **Never** for a payee a rule of yours already answers (an enabled rule catches every payment the
+  suggestion comes from, whatever category you gave it: making the rule ends the suggestion, even in
+  another category); nor for one the app files elsewhere more often than you put it there (payments
+  its merchant patterns, a rule of yours, an agreement or a transfer link categorised otherwise
+  outnumber your decisions). Your decisions there are about when or where, not who: three taxis on
+  holiday don't make every taxi a holiday. A rule that would move more such payments than you
+  decided is too wide too.
 - **The rule:** money that way whose description holds the payee (one of 4 letters or more); else
   whose payee, as the categoriser sees it, is the payee. A rule that would catch a payment you put
-  in another category is too wide and isn't offered. When some payments it would catch are under a
+  in another category is too wide and isn't offered. What it fills leaves out payments a rule of
+  yours catches: that rule comes first. When some payments it would catch are under a
   quarter of the smallest you decided or over four times the largest, it keeps to half the
   smallest to twice the largest.
 - Two payees that are one (a statement's wording and an app's) offer the rule that fills more,
   once.
+
+**Changing or deleting a rule** re-categorises what it catches and what it categorised before
+(`applyRule`): switched off or deleted, its payments go back to what the app makes of them without it.
+Yours stay yours. Making a rule shows what it would move first: the payments it catches that are in
+another category now, by that category (`POST /rules/preview`).
 
 **How a rule's words match** (`shared/categorise.ts`, `compileRule`): case aside (unless the rule
 says), a run of spaces counts as one, in the rule and in what it is matched against. Some cards pad

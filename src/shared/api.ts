@@ -769,9 +769,11 @@ export interface ProposalChangeView {
   rule?: { count: number; amount: number; examples: ProposalRuleExample[]; settles: number; yours: number };
   /** A category added or changed: where it sits after (its group's name), and how it was. */
   category?: { group?: string; was?: { name: string; group?: string } };
+  /** A rule removed: the payments it categorised that change without it, with what each becomes (`after`). */
+  removes?: { count: number; examples: ProposalRuleExample[] };
 }
 
-/** A payment a proposed rule would categorise, with the category it has now. */
+/** A payment a proposed rule would categorise (or a removed one stop categorising), with the category it has now, and after a removal. */
 export interface ProposalRuleExample {
   id: string;
   accountId: string;
@@ -779,6 +781,7 @@ export interface ProposalRuleExample {
   amount: number;
   description: string;
   category?: string;
+  after?: string;
 }
 
 /** A balance a proposal moves, as it is now (as it was, once decided). */
@@ -805,6 +808,8 @@ export interface ProposalView {
   balances: Record<string, ProposalBalance>;
   /** Every account those rows, balances or changes name, by id. */
   accounts: Record<string, { id: string; name: string; type: Account['type']; status: Account['status']; openedOn?: string; closedOn?: string; institutionName?: string }>;
+  /** Every rule a change removes, as it is now (as it was, once decided), by id. */
+  rules?: Record<string, { name?: string; match: Rule['match']; category?: string }>;
   /** Changes that can be applied now, and those that cannot. */
   ready: number;
   problems: number;
@@ -1355,6 +1360,13 @@ export interface RuleSuggestion {
   examples: QueueExample[];
   /** You decided every payment from them: nothing to fill now, the rule is for the next ones. */
   next?: true;
+}
+
+/** What making a rule would move (POST /rules/preview): payments in one category now, or uncategorised. */
+export interface RuleMove {
+  category?: string;
+  count: number;
+  amount: number;
 }
 
 /** Uncategorised payments to or from one payee, one way. */

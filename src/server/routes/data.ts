@@ -661,26 +661,44 @@ export function dataRoutes(ctx: AppContext): Hono {
       store.rules.map((r) => (r.id === next.id ? next : r)),
       `rule: edit ${next.name ?? next.match.value}`,
     );
-    const result = apply ? await applyRule(store, next.id) : null;
+    // A rule changed (its words, its category, switched off or on) re-categorises what it catches
+    // and what it categorised before, unless asked not to.
+    const result = apply !== false ? await applyRule(store, next.id) : null;
     return c.json({ rule: next, result });
   });
 
   app.delete('/rules/:id', async (c) => {
+    const existing = store.rules.find((r) => r.id === c.req.param('id'));
+    if (!existing) throw new StoreError('Unknown rule', 404);
     await store.setRules(
-      store.rules.filter((r) => r.id !== c.req.param('id')),
-      'rule: delete',
+      store.rules.filter((r) => r.id !== existing.id),
+      `rule: delete ${existing.name ?? existing.match.value}`,
     );
-    return c.json({ ok: true });
+    // What it categorised goes back to what the app makes of it without it (yours stays yours).
+    const result = await applyRule(store, existing.id, { label: `${existing.name ?? existing.match.value} (deleted)` });
+    return c.json({ ok: true, result });
   });
 
-  /** How many transactions a (draft) rule would match. */
+  /**
+   * How many transactions a (draft) rule would match, and what making it would move: the payments in
+   * another category now, by that category. Not yours, not linked transfers, and not one another rule
+   * of yours categorised (it comes first).
+   */
   app.post('/rules/preview', async (c) => {
     const body = await readJson(c, RuleBody);
     const stamp = nowISO();
     const { apply: _a, ...rest } = body;
     const rule: Rule = { ...rest, id: 'rule_preview', createdAt: stamp, updatedAt: stamp };
     const hits = store.transactions().filter((t) => ruleCatches(rule, t));
-    return c.json({ count: hits.length, sample: hits.slice(-8).reverse() });
+    const moved = new Map<string, { count: number; minor: number }>();
+    for (const t of hits) {
+      if (t.categorisedBy === 'user' || t.categorisedBy === 'rule' || t.transferGroup || t.category === rule.set.category) continue;
+      const m = moved.get(t.category ?? '') ?? moved.set(t.category ?? '', { count: 0, minor: 0 }).get(t.category ?? '')!;
+      m.count++;
+      m.minor += toMinor(t.amount);
+    }
+    const moves = [...moved].map(([category, m]) => ({ ...(category ? { category } : {}), count: m.count, amount: fromMinor(m.minor) })).sort((a, b) => b.count - a.count);
+    return c.json({ count: hits.length, sample: hits.slice(-8).reverse(), moves });
   });
 
   /**

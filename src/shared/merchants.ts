@@ -179,7 +179,9 @@ export const MERCHANTS: MerchantDef[] = [
   ['STAGECOACH|\\bARRIVA\\b|FIRST BUS|FIRSTBUS|GO AHEAD|NATIONAL EXPRESS|MEGABUS|METROLINK|NEXUS|BUS FARE', 'Bus & coach', 'public-transport'],
   ['\\bLIME\\b|SANTANDER CYCLES|HUMAN FORESTS|\\bVOI\\b|\\bTIER\\b', 'Bike & scooter hire', 'public-transport'],
   ['\\bSHELL\\b(?! ENERGY)', 'Shell', 'fuel'],
-  ['\\bBP\\b(?! PULSE)|BP CONNECT', 'BP', 'fuel'],
+  // Not a "BP" that ends the description: HSBC ends its rows with the payment's type, "BP" for a
+  // bill payment ("EXAMPLE LETTINGS 12 FLAT BP").
+  ['\\bBP\\b(?! PULSE)(?!\\s*$)|BP CONNECT', 'BP', 'fuel'],
   ['\\bESSO\\b', 'Esso', 'fuel'],
   ['TEXACO', 'Texaco', 'fuel'],
   ['\\bJET\\b.*(SERVICE|PETROL|FILLING)', 'JET', 'fuel'],

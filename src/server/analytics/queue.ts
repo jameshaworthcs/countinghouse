@@ -4,7 +4,9 @@
 //   and why;
 // - rules your decisions point to: a payee you put in one category at least twice one way (or the
 //   reader did, three times, when you never did), that would categorise rows now, or, when you
-//   decided them all, the next ones (a payee paid in the last year that no rule of yours catches);
+//   decided them all, the next ones (a payee you decided in two months or more, lately, that the app
+//   would not get right by itself); never one a rule of yours answers already, nor one that would
+//   move more of what the app settled than you decided;
 // - what's left uncategorised, by payee and direction;
 // - what the app categorised from a guess (the bank's category, the reader's suggestion), for you to
 //   confirm or change.
@@ -20,15 +22,24 @@ import { cleanPayee } from '../../shared/merchants';
 import { fromMinor, toMinor } from '../../shared/money';
 import { PeopleIndex, suggestFor, suggestForCash, tidyName, type CashOut, type PaidOut, type PersonHistory, type PersonParty } from '../../shared/people';
 import type { Person, Rule, Transaction } from '../../shared/schema';
-import { categoriseInputOf, ruleCatches } from '../categoriser';
+import { categoriseInputOf, categoriserFor, ruleCatches } from '../categoriser';
 import type { Store } from '../store';
 
 /** Your decisions that make a rule: this many for a payee one way, all in one category. */
 export const RULE_FROM_DECISIONS = 2;
 /** Or the reader's, when you made none for that payee that way. */
 export const RULE_FROM_READER = 3;
-/** A payee you decided every payment of is offered a rule for the next ones while it was paid this recently. */
+/** A payee you decided every payment of is offered a rule for the next ones while you decided one this recently… */
 export const RULE_RECENT_DAYS = 365;
+/** …and in at least this many different months: one trip's café, however often you went, is not a payee that comes back. */
+export const RULE_NEXT_MONTHS = 2;
+
+/**
+ * Categories the app settled without a guess: its merchant patterns, a rule of yours, an agreement,
+ * a transfer link. A suggested rule that would move more of these than you decided is too wide: three
+ * taxis on holiday don't make every taxi a holiday.
+ */
+const SETTLED = new Set<Transaction['categorisedBy']>(['builtin', 'rule', 'agreement', 'transfer']);
 
 /** How a payment with a person, or cash or a cheque paid in, got its category, when that settles it: yours, your rule's, or an agreement's. */
 export const DECIDED = new Set<Transaction['categorisedBy']>(['user', 'rule', 'agreement']);
@@ -239,11 +250,23 @@ export function categoriseQueue(store: Store, opts: { from?: string | undefined 
     (byPayee.get(k) ?? byPayee.set(k, { payee, direction, rows: [] }).get(k)!).rows.push(t);
   }
   const rules: RuleSuggestion[] = [];
-  // A payee that still comes: one paid in the last year. A rule for the next ones is worth making
-  // only for those, and only when no rule of yours catches your decisions already.
   const recent = addDays(today(), -RULE_RECENT_DAYS);
   const yourRules = store.rules.filter((r) => r.enabled).map((r) => ({ rule: r, alone: new Categoriser([r], new CategoryIndex([]), [], []) }));
+  /** A rule of yours catches every payment the suggestion comes from: you have answered it, in whatever category you chose. */
   const covered = (basis: Transaction[]) => yourRules.some(({ rule, alone }) => basis.every((t) => ruleCatches(rule, t, alone)));
+  /** A payment a rule of yours catches: a suggested rule, made after it, would not change it. */
+  const caughtByYours = (t: Transaction) => yourRules.some(({ rule, alone }) => ruleCatches(rule, t, alone));
+  // A payee worth a rule for the next ones comes back: you decided payments of it in two months or
+  // more, one of them in the last year.
+  const recurs = (basis: Transaction[]) => new Set(basis.map((t) => t.date.slice(0, 7))).size >= RULE_NEXT_MONTHS && basis.some((t) => t.date >= recent);
+  // …and the app would not get the next one right by itself: its own patterns, your rules or an
+  // agreement give your newest decision's category without a guess (pay from a job is salary already).
+  let categoriserMemo: Categoriser | undefined;
+  const foreseen = (basis: Transaction[], category: string) => {
+    const newest = [...basis].sort(newestFirst)[0]!;
+    const res = (categoriserMemo ??= categoriserFor(store)).categorise({ ...categoriseInputOf(newest), aiCategory: undefined });
+    return res.category === category && SETTLED.has(res.categorisedBy);
+  };
   const spendingOrIncome = (id: string | undefined) => Boolean(id) && (kindOf(id!) === 'expense' || kindOf(id!) === 'income');
   const unanimous = (list: Transaction[]) => list.length > 0 && list.every((t) => t.category === list[0]!.category);
   for (const { payee, direction, rows } of byPayee.values()) {
@@ -259,7 +282,10 @@ export function categoriseQueue(store: Store, opts: { from?: string | undefined 
       by = 'ai';
     } else continue;
     const category = basis[0]!.category!;
-    if (!spendingOrIncome(category)) continue;
+    if (!spendingOrIncome(category) || covered(basis)) continue;
+    // The app files this payee elsewhere more often than you put it here: your decisions are about
+    // when or where (a taxi on holiday), not who, and no rule can tell those apart.
+    if (rows.filter((t) => t.categorisedBy !== 'user' && SETTLED.has(t.categorisedBy) && t.category !== category).length > basis.length) continue;
     // The description holds the payee (one of 4 letters or more: "BP" is inside too many words);
     // failing that, the payee as the categoriser sees it.
     const candidates: Rule['match'][] = [
@@ -281,7 +307,7 @@ export function categoriseQueue(store: Store, opts: { from?: string | undefined 
       let match = candidate;
       let hits = test(match);
       if (!basis.every(hits)) continue;
-      const fillsOf = () => all.filter((t) => t.categorisedBy !== 'user' && !t.transferGroup && !parties.has(t.id) && !cash.has(t.id) && t.category !== category && hits(t)).sort(newestFirst);
+      const fillsOf = () => all.filter((t) => t.categorisedBy !== 'user' && !t.transferGroup && !parties.has(t.id) && !cash.has(t.id) && t.category !== category && hits(t) && !caughtByYours(t)).sort(newestFirst);
       let fills = fillsOf();
       // Payments far from the sizes you decided (£1 of printing beside £2,000 of rent) are something
       // else: the rule keeps to sizes like yours.
@@ -290,8 +316,11 @@ export function categoriseQueue(store: Store, opts: { from?: string | undefined 
         hits = test(match);
         fills = fillsOf();
       }
-      // A rule that would also catch payments you put somewhere else is too wide.
+      // A rule that would also catch payments you put somewhere else is too wide; so is one that
+      // would move more payments the app settled elsewhere (by its patterns, an agreement) than you
+      // decided.
       if (all.some((t) => t.categorisedBy === 'user' && t.category !== category && hits(t))) continue;
+      if (fills.filter((t) => SETTLED.has(t.categorisedBy)).length > basis.length) continue;
       if (fills.length) {
         rules.push({
           payee,
@@ -302,7 +331,7 @@ export function categoriseQueue(store: Store, opts: { from?: string | undefined 
           fills: { count: fills.length, amount: sumOf(fills), ids: fills.map((t) => t.id) },
           examples: fills.slice(0, 5).map(example),
         });
-      } else if (by === 'user' && rows.some((t) => t.date >= recent) && !covered(basis)) {
+      } else if (by === 'user' && recurs(basis) && !foreseen(basis, category)) {
         // You decided every one of them, and they still come: a rule is for the next ones, which
         // would otherwise arrive uncategorised (or guessed) like the first.
         rules.push({ payee, category, direction, match, from: { by, count: basis.length }, fills: { count: 0, amount: 0, ids: [] }, examples: [...basis].sort(newestFirst).slice(0, 5).map(example), next: true });

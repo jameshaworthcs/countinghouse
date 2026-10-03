@@ -133,6 +133,13 @@ describe('money that is neither spending nor income', () => {
     expect(payeeRuleMatch('Tfl Travel', [fare], 'out')).toMatchObject({ field: 'description', op: 'contains', value: 'Tfl Travel' });
   });
 
+  it('a "BP" ending an HSBC row is its bill-payment code, not the fuel brand', () => {
+    expect(c.categorise({ accountId: 'current', description: 'EXAMPLE LETTINGS 12 FLAT BP', amount: -900 }).category).not.toBe('fuel');
+    expect(c.categorise({ accountId: 'current', description: 'EXAMPLE BNK VSA123456 123456******1234 BP', amount: -150 }).category).not.toBe('fuel');
+    expect(c.categorise({ accountId: 'card', description: 'BP CONNECT EXAMPLETOWN', amount: -45 }).category).toBe('fuel');
+    expect(c.categorise({ accountId: 'card', description: 'BP EXAMPLETOWN SERVICE STN', amount: -45 }).category).toBe('fuel');
+  });
+
   it('a rule’s words match however the bank spaced them', () => {
     const rule = (value: string, op: Rule['match']['op'] = 'contains'): Rule => ({ id: 'rule_s', enabled: true, priority: 100, match: { field: 'description', op, value, caseSensitive: false }, set: { category: 'hair-beauty' }, createdAt: stamp, updatedAt: stamp });
     // One card pads its descriptions to fixed columns; another doesn't.

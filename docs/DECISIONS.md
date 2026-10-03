@@ -1822,3 +1822,34 @@ Later the same day, after the owner's first runs (`label-imports-2`):
 - **Not done:** jobs that run in the app (the month in review among them) still write notes, not
   proposals, though each is given the proposal service. Having the month in review propose the
   fixes it finds is a prompt change and a new output, for the owner to ask for.
+
+## 2026-10-03: Rules to make suggests only rules that make sense, and ends when you answer
+
+- **Owner:** check the rules To categorise suggests make sense, and find why a suggestion stays
+  after "Make this rule".
+- **Found:**
+  - The owner changed "Uber → Holidays" to Taxis and made it; the card stayed, so they made it
+    again (two identical rules). The suggestion was recomputed from the same three decisions in
+    Holidays, and its other Ubers were still not in Holidays.
+  - The three were Ubers on a trip (a proposal put a trip's spending in Holidays). Rules from such
+    decisions would have made every Uber, and every McDonald's, a holiday: the "too wide" check only
+    counted the owner's own categories elsewhere, not the many the merchant list files as taxis. Its
+    match, "Uber" across its range of amounts, also took Uber Eats orders from Takeaway into Taxis.
+  - Rules "for the next ones" came for a trip's one-off cafés and shops (a convenience store, a ride
+    app's wallet, one café abroad paid five times in a day), for pay the app files as salary already,
+    and for a former landlord whose rows share the payee "BP" with fuel.
+  - HSBC ends a row with its type, "BP" for a bill payment; the merchant list read it as BP fuel
+    (two HSBC card payments and a top-up to the owner's Lloyds account, as fuel).
+- **Done** (FORMULAS.md §10, "Rules from your decisions", "Changing or deleting a rule"; AGENTS.md;
+  DATA_FORMAT.md):
+  - No suggestion for a payee an enabled rule of the owner's catches, whatever its category: making
+    the rule ends the suggestion. The card says the rule is made at once, so a second click can't
+    make it twice, and says what making it would move, by category, before the click.
+  - No suggestion when the app files the payee elsewhere more often than the owner put it there,
+    nor when a rule would move more payments the app settled than the owner decided. A rule's
+    fills leave out what a rule of the owner's catches.
+  - A rule for the next ones needs decisions in two months or more, one in the last year, and the
+    app not already getting the newest right by itself.
+  - Switching a rule off or deleting it gives back what it categorised (before, its payments kept
+    its category). A proposal can remove a rule (`remove_rule`), showing what each payment becomes.
+  - A "BP" that ends a description is not the fuel brand.

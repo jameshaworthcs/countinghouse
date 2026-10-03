@@ -639,6 +639,30 @@ describe('rules, categories and guesses', () => {
     expect(await problems([{ kind: 'change_category', why: 'w', category: 'coffee', parent: 'shopping' }])).toEqual([]);
   });
 
+  it('removes a rule: what it categorised goes back to what the app makes of it', async () => {
+    const { store } = app.ctx;
+    const stampNow = '2026-01-01T00:00:00+00:00';
+    await store.setRules([{ id: 'rule_cabs', name: 'Cabs', enabled: true, priority: 100, match: { field: 'description', op: 'contains', value: 'UBER', caseSensitive: false }, set: { category: 'taxis' }, createdAt: stampNow, updatedAt: stampNow }]);
+    // The rule put a food order in Taxis; the merchant list says takeaway.
+    const order = tx('bank', '2026-05-05', -26.66, 'UBER EATS', { category: 'taxis', categorisedBy: 'rule', ruleId: 'rule_cabs' });
+    const mine = tx('bank', '2026-05-06', -20, 'UBER TRIP', { category: 'holidays', categorisedBy: 'user' });
+    await store.addTransactions([order, mine], 'test');
+    const res = await propose({ title: 'Remove the cabs rule', summary: 'The merchant list knows these.', changes: [{ key: 'cabs', kind: 'remove_rule', why: 'The merchant list files Uber already.', rule: 'rule_cabs' }] });
+    expect(res.status).toBe(201);
+    const view = (await res.json()) as ProposalView;
+    expect(view.rules?.rule_cabs).toMatchObject({ name: 'Cabs', match: { value: 'UBER' }, category: 'taxis' });
+    expect(view.changes[0]!.removes).toMatchObject({ count: 1, examples: [{ id: order.id, category: 'taxis', after: 'takeaway' }] });
+    expect((await owner(`/api/proposals/${view.proposal.id}/apply`)).status).toBe(200);
+    expect(store.rules).toEqual([]);
+    expect(store.transaction(order.id)).toMatchObject({ category: 'takeaway', categorisedBy: 'builtin' });
+    expect(store.transaction(order.id)?.ruleId).toBeUndefined();
+    expect(store.transaction(mine.id)).toMatchObject({ category: 'holidays', categorisedBy: 'user' });
+    // Kept as it was, and a rule gone already is so.
+    const file = JSON.parse(await readFile(path.join(dir, 'data', store.proposals[0]!.path), 'utf8')) as { before: { rules: { id: string }[] } };
+    expect(file.before.rules.map((r) => r.id)).toEqual(['rule_cabs']);
+    expect(await problems([{ kind: 'remove_rule', why: 'w', rule: 'rule_cabs' }])).toEqual([expect.stringMatching(/already says this/)]);
+  });
+
   it('confirms a guess: the same category the reader gave becomes yours', async () => {
     const { store } = app.ctx;
     const guessed = tx('bank', '2026-05-02', -30, 'EXAMPLE TRATTORIA', { category: 'eating-out', categorisedBy: 'ai' });

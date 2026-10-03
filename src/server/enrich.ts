@@ -229,13 +229,14 @@ export async function reapply(store: Store, choices: ReapplyChoices = {}): Promi
 }
 
 /**
- * A rule you just made or changed, applied to the rows it matches and to the rows it categorised
- * before, and to nothing else: each takes what the categoriser now says of it (rules come first).
+ * A rule you just made, changed or deleted, applied to the rows it matches and to the rows it
+ * categorised before, and to nothing else: each takes what the categoriser now says of it (rules
+ * come first; a deleted or switched-off rule's rows go back to what the app makes of them).
  * Rows you categorised, and transfers linked between your accounts, stay as they are. Re-applying
  * everything is Settings → Rules → Preview re-applying to history, so a rule never brings in other changes
  * unseen. Returns how many rows changed category.
  */
-export async function applyRule(store: Store, ruleId: string): Promise<{ recategorised: number }> {
+export async function applyRule(store: Store, ruleId: string, opts: { label?: string } = {}): Promise<{ recategorised: number }> {
   const rule = store.rules.find((r) => r.id === ruleId);
   const categoriser = categoriserFor(store);
   const updates: { id: string; patch: Partial<Transaction> }[] = [];
@@ -263,7 +264,7 @@ export async function applyRule(store: Store, ruleId: string): Promise<{ recateg
     updates.push({ id: t.id, patch });
     if ('category' in patch) recategorised++;
   }
-  if (updates.length) await store.updateTransactions(updates, `rule: apply ${rule?.name ?? rule?.match.value ?? ruleId} (${recategorised} recategorised)`);
+  if (updates.length) await store.updateTransactions(updates, `rule: apply ${opts.label ?? rule?.name ?? rule?.match.value ?? ruleId} (${recategorised} recategorised)`);
   return { recategorised };
 }
 

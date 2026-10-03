@@ -1,7 +1,7 @@
 // Proposed fixes: what an agent proposes changing in your data, each change with its reason and the
 // rows it is about, waiting for you on the Import page (src/server/proposals.ts).
 
-import { ArrowDown, ArrowRight, ArrowRightLeft, ArrowUpDown, Building2, CalendarDays, ChevronRight, CircleCheck, CircleSlash, CopyX, FileText, FolderPen, FolderPlus, Handshake, Link2, Percent, NotebookPen, PiggyBank, Sparkles, Tag, Unlink, Wand2, X } from 'lucide-react';
+import { ArrowDown, ArrowRight, ArrowRightLeft, ArrowUpDown, Building2, CalendarDays, ChevronRight, CircleCheck, CircleSlash, CopyX, FileText, FolderPen, FolderPlus, Handshake, Link2, Percent, NotebookPen, PiggyBank, Sparkles, Tag, Trash2, Unlink, Wand2, X } from 'lucide-react';
 import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import type { ProposalBalance, ProposalListResponse, ProposalRow, ProposalSummary, ProposalView } from '../../shared/api';
@@ -22,6 +22,7 @@ export const CHANGE_LABELS: Record<ProposedChangeKind, { title: string; count: (
   link_transfer: { title: 'Link as a transfer', count: (n) => `${plural(n, 'transfer')} linked`, icon: <Link2 className="size-4" aria-hidden /> },
   set_category: { title: 'Change a category', count: (n) => plural(n, 'category', 'categories'), icon: <Tag className="size-4" aria-hidden /> },
   add_rule: { title: 'Make a rule', count: (n) => plural(n, 'rule'), icon: <Wand2 className="size-4" aria-hidden /> },
+  remove_rule: { title: 'Remove a rule', count: (n) => `${plural(n, 'rule')} removed`, icon: <Trash2 className="size-4" aria-hidden /> },
   add_category: { title: 'Add a category', count: (n) => `${plural(n, 'category', 'categories')} added`, icon: <FolderPlus className="size-4" aria-hidden /> },
   change_category: { title: 'Rename or move a category', count: (n) => `${plural(n, 'category', 'categories')} renamed or moved`, icon: <FolderPen className="size-4" aria-hidden /> },
   set_note: { title: 'Add a note', count: (n) => plural(n, 'note'), icon: <NotebookPen className="size-4" aria-hidden /> },
@@ -318,6 +319,46 @@ export function ChangeBody({ change, view }: { change: ProposedChange; view: Pro
                 </li>
               ))}
               {reach.count > reach.examples.length && <li className="text-ink-3">and {plural(reach.count - reach.examples.length, 'more')}</li>}
+            </ul>
+          )}
+        </div>
+      );
+    }
+    case 'remove_rule': {
+      const r = view.rules?.[change.rule];
+      const res = view.changes.find((c) => c.change.key === change.key)?.removes;
+      return (
+        <div className="grid gap-1.5 rounded-lg border border-line bg-panel px-3 py-2 text-[13px]">
+          <div className="text-ink">
+            {r ? (
+              <>
+                Your rule “{r.name ?? r.match.value}”: when {matchWords(r.match)}
+                {r.category && (
+                  <>
+                    , <Badge tone="muted">{cats.path(r.category)}</Badge>
+                  </>
+                )}
+              </>
+            ) : (
+              `Rule ${change.rule}`
+            )}
+          </div>
+          {res && <div className="text-[12.5px] text-ink-3">{res.count ? `Without it, ${plural(res.count, 'payment')} it categorised go back to what the app makes of them:` : 'Nothing it categorised changes without it.'}</div>}
+          {res && res.examples.length > 0 && (
+            <ul className="grid gap-0.5 text-[12.5px]">
+              {res.examples.map((e) => (
+                <li key={e.id} className="flex flex-wrap justify-between gap-x-3">
+                  <span className="min-w-0 truncate text-ink-2" title={e.description}>
+                    {formatDate(e.date)} · <span className="sensitive">{e.description}</span>
+                    <span className="text-ink-3">
+                      {' '}
+                      · {cats.name(e.category)} → {e.after ? cats.name(e.after) : 'uncategorised'}
+                    </span>
+                  </span>
+                  <span className="sensitive tabular-nums">{money(e.amount)}</span>
+                </li>
+              ))}
+              {res.count > res.examples.length && <li className="text-ink-3">and {plural(res.count - res.examples.length, 'more')}</li>}
             </ul>
           )}
         </div>

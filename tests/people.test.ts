@@ -368,7 +368,7 @@ describe('the To categorise queue', () => {
     const ago = (days: number) => addDays(today(), -days);
     await store.addTransactions(
       [
-        tx('card', ago(40), -9.99, 'EXAMPLETV.COM LTD', { category: 'streaming', categorisedBy: 'user' }),
+        tx('card', ago(70), -9.99, 'EXAMPLETV.COM LTD', { category: 'streaming', categorisedBy: 'user' }),
         tx('card', ago(10), -9.99, 'EXAMPLETV.COM LTD', { category: 'streaming', categorisedBy: 'user' }),
         // Decided too, but not paid for a year: there are no next ones to catch.
         tx('card', ago(500), -3, 'EXAMPLE OLD SHOP', { category: 'general-shopping', categorisedBy: 'user' }),
@@ -381,8 +381,37 @@ describe('the To categorise queue', () => {
     );
     await store.setRules([{ id: 'rule_cafe', name: 'Cafe', enabled: true, priority: 100, match: { field: 'description', op: 'contains', value: 'example cafe', caseSensitive: false }, set: { category: 'coffee' }, createdAt: stamp, updatedAt: stamp }]);
     const q = categoriseQueue(store);
-    expect(q.rules.map((r) => [r.payee, r.category, r.next, r.fills.count, r.examples.map((e) => e.date)])).toEqual([['Exampletv.com Ltd', 'streaming', true, 0, [ago(10), ago(40)]]]);
+    expect(q.rules.map((r) => [r.payee, r.category, r.next, r.fills.count, r.examples.map((e) => e.date)])).toEqual([['Exampletv.com Ltd', 'streaming', true, 0, [ago(10), ago(70)]]]);
     expect(q.counts.rules).toBe(1);
+  });
+
+  it('never suggests a rule you answered, one a trip decided, or one the app needs no help with', async () => {
+    const ago = (days: number) => addDays(today(), -days);
+    const holiday = { category: 'holidays', categorisedBy: 'user' as const };
+    await store.addTransactions(
+      [
+        // Three cab rides on holiday, and the app's own merchant list putting the rest in Taxis: the
+        // rule would make every ride a holiday.
+        tx('card', ago(30), -40, 'EXAMPLE CABS TRIP', holiday),
+        tx('card', ago(29), -20, 'EXAMPLE CABS TRIP', holiday),
+        tx('card', ago(28), -30, 'EXAMPLE CABS TRIP', holiday),
+        ...[60, 90, 120, 150].map((d) => tx('card', ago(d), -12, 'EXAMPLE CABS TRIP', { category: 'taxis', categorisedBy: 'builtin' })),
+        // A café on one trip, three times in one month: not a payee that comes back.
+        tx('card', ago(200), -4, 'EXAMPLE CAFE AMSTERDAM LTD', holiday),
+        tx('card', ago(199), -6, 'EXAMPLE CAFE AMSTERDAM LTD', holiday),
+        tx('card', ago(198), -5, 'EXAMPLE CAFE AMSTERDAM LTD', holiday),
+        // You put two in Events and one is left; your rule for it says Hobbies: you answered.
+        tx('card', ago(100), -15, 'EXAMPLE CLIMBING WALL LTD', { category: 'events', categorisedBy: 'user' }),
+        tx('card', ago(40), -15, 'EXAMPLE CLIMBING WALL LTD', { category: 'events', categorisedBy: 'user' }),
+        tx('card', ago(5), -15, 'EXAMPLE CLIMBING WALL LTD'),
+        // Groceries the merchant list knows already: no rule needed for the next ones.
+        tx('card', ago(80), -32.5, 'TESCO STORES 1234', { category: 'groceries', categorisedBy: 'user' }),
+        tx('card', ago(20), -28.1, 'TESCO STORES 1234', { category: 'groceries', categorisedBy: 'user' }),
+      ],
+      't',
+    );
+    await store.setRules([{ id: 'rule_wall', name: 'Wall', enabled: true, priority: 100, match: { field: 'description', op: 'contains', value: 'example climbing wall', caseSensitive: false }, set: { category: 'hobbies' }, createdAt: stamp, updatedAt: stamp }]);
+    expect(categoriseQueue(store).rules).toEqual([]);
   });
 
   it('lists cash and cheques paid in first, each to decide, and what the app guessed by payee and category', async () => {
@@ -544,6 +573,26 @@ describe('deciding on the To categorise page', () => {
     await post(`/api/rules/${body.rule.id}`, { match: { field: 'description', op: 'contains', value: 'nothing like it', caseSensitive: false }, apply: true }, 'PATCH');
     expect(store.transaction(kiosk2.id)?.categorisedBy).not.toBe('rule');
     expect(store.transaction(other.id)).toMatchObject({ category: 'other-expense', categorisedBy: 'builtin' });
+  });
+
+  it('a rule switched off or deleted gives back what it categorised', async () => {
+    const { store } = app.ctx;
+    const a = tx('bank', '2026-06-01', -4.5, 'EXAMPLE KIOSK 1');
+    const b = tx('bank', '2026-06-02', -4.5, 'EXAMPLE KIOSK 2');
+    await store.addTransactions([a, b], 't');
+    const res = await post('/api/rules', { name: 'Kiosk', enabled: true, priority: 100, match: { field: 'description', op: 'contains', value: 'Example Kiosk', caseSensitive: false }, set: { category: 'coffee' }, apply: true });
+    const made = (await res.json()) as { rule: { id: string } };
+    expect(store.transaction(a.id)).toMatchObject({ category: 'coffee', categorisedBy: 'rule', ruleId: made.rule.id });
+    // Switched off from Settings, which sends no "apply": its payments go back all the same.
+    await post(`/api/rules/${made.rule.id}`, { enabled: false }, 'PATCH');
+    expect(store.transaction(a.id)?.categorisedBy).not.toBe('rule');
+    await post(`/api/rules/${made.rule.id}`, { enabled: true }, 'PATCH');
+    expect(store.transaction(b.id)).toMatchObject({ category: 'coffee', categorisedBy: 'rule' });
+    // Deleted: the same.
+    expect((await post(`/api/rules/${made.rule.id}`, {}, 'DELETE')).status).toBe(200);
+    expect(store.rules.find((r) => r.id === made.rule.id)).toBeUndefined();
+    expect(store.transaction(b.id)?.categorisedBy).not.toBe('rule');
+    expect(store.transaction(b.id)?.ruleId).toBeUndefined();
   });
 });
 

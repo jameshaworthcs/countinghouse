@@ -487,6 +487,8 @@ lives in the work area (`<work>/proposals/`), never here.
   - `add_rule {rule: {name?, match, category}}`: a rule (`rules.json`), as one you make in
     Settings → Rules; the payments it decides are categorised by it when applied (`categorisedBy:
     rule`), yours left as they are.
+  - `remove_rule {rule}`: one of your rules removed; what it categorised goes back to what the app
+    makes of it without it (yours left as they are).
   - `add_category {category: {id, name, kind, parent?}}`: a group (no `parent`) or a category in
     one (`categories.json`).
   - `change_category {category, name?, parent?}`: a category renamed, moved into another group of
@@ -517,9 +519,10 @@ lives in the work area (`<work>/proposals/`), never here.
     them on its date (`{rates, limit?, minimumPayment?, paymentDue?}`), in place of what its reading
     kept for that account and day.
 - `applied`: the keys of the changes you applied. `dismissedReason`: what you said, if anything.
-- `before`: `{transactions, accounts, balances?, terms?, categories?}`, the rows, accounts,
-  balances, terms and categories the applied changes touched, as they were before: the audit trail,
-  and a way back. (A rule or category a proposal added has no before: the change itself says it.)
+- `before`: `{transactions, accounts, balances?, terms?, categories?, rules?}`, the rows, accounts,
+  balances, terms, categories and rules the applied changes touched (a rule removed, a category
+  changed), as they were before: the audit trail, and a way back. (A rule or category a proposal
+  added has no before: the change itself says it.)
 
 ## goals.json
 

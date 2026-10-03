@@ -72,6 +72,8 @@ interface ChangeResult {
   rule?: { count: number; amount: number; examples: ProposalRuleExample[]; settles: number; yours: number };
   /** A category added or changed: its group after, and how it was. */
   category?: { group?: string; was?: { name: string; group?: string } };
+  /** A rule removed: the payments it categorised that change without it. */
+  removes?: { count: number; examples: ProposalRuleExample[] };
 }
 
 interface Outcome {
@@ -97,8 +99,9 @@ interface Outcome {
   /** Terms records to write, by id; those to take away (a balance's moved with it), as they are now. */
   terms: Map<string, Terms>;
   termsRemoved: Map<string, Terms>;
-  /** Rules to add, in order. */
+  /** Rules to add, in order; and your rules to remove, as they are now. */
   rules: Rule[];
+  removedRules: Map<string, Rule>;
   /** Your categories as they will be, when a change adds or changes one; those it changes, as they are now. */
   categories?: Category[];
   categoriesBefore: Map<string, Category>;
@@ -151,7 +154,7 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
   const accountName = (id: string) => store.account(id)?.name ?? id;
   let categoriserMemo: Categoriser | undefined;
   const categoriser = () => (categoriserMemo ??= categoriserFor(store));
-  const out: Outcome = { results: new Map(), patches: new Map(), removed: new Map(), accounts: new Map(), touchedRows: new Map(), touchedAccounts: new Map(), moves: new Map(), companies: new Map(), jobs: new Map(), balances: [], agreements: new Map(), terms: new Map(), termsRemoved: new Map(), rules: [], categoriesBefore: new Map() };
+  const out: Outcome = { results: new Map(), patches: new Map(), removed: new Map(), accounts: new Map(), touchedRows: new Map(), touchedAccounts: new Map(), moves: new Map(), companies: new Map(), jobs: new Map(), balances: [], agreements: new Map(), terms: new Map(), termsRemoved: new Map(), rules: [], removedRules: new Map(), categoriesBefore: new Map() };
   /** Change a category, or add one (`was` undefined), in the list the next changes see. */
   const putCategory = (next: Category, was: Category | undefined) => {
     const original = was ? store.categories.find((x) => x.id === was.id) : undefined;
@@ -160,6 +163,8 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
     cats = new CategoryIndex(catList);
     out.categories = catList;
   };
+  /** Your rules as the changes so far leave them: those removed gone, those made added. */
+  const rulesNow = () => [...store.rules.filter((r) => !out.removedRules.has(r.id)), ...out.rules];
   const balanceById = new Map(store.balances().map((b) => [b.id, b]));
   // Rows as the changes so far leave them (null: removed), and transfer pairs likewise.
   const rows = new Map<string, Transaction | null>();
@@ -478,14 +483,14 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
           }
         }
         // A rule of yours that catches the same payments: the same, or yours wins.
-        const there = [...store.rules, ...out.rules].find((r) => r.enabled && sameMatch(r.match, c.rule.match));
+        const there = rulesNow().find((r) => r.enabled && sameMatch(r.match, c.rule.match));
         if (there) return there.set.category === c.rule.category ? { alreadySo: true } : { problem: `Your rule “${there.name ?? there.match.value}” catches the same payments and puts them in ${cats.name(there.set.category)}: change that rule in Settings → Rules instead.` };
         const stamp = nowISO();
         const rule: Rule = { id: proposedRuleId(forProposal, c.key), name: c.rule.name ?? `${c.rule.match.value} → ${cat.name}`, enabled: true, priority: 100, match: c.rule.match, set: { category: c.rule.category }, createdAt: stamp, updatedAt: stamp };
         out.rules.push(rule);
         // The payments it catches, categorised as the categoriser would with it (a rule of yours that
         // comes first still wins), as applying a rule does: yours and linked transfers are left.
-        const withIt = categoriserFor(store, { rules: [...store.rules, ...out.rules], categories: catList });
+        const withIt = categoriserFor(store, { rules: rulesNow(), categories: catList });
         const alone = new Categoriser([rule], new CategoryIndex([]), [], []);
         const filled: Transaction[] = [];
         let settled = 0;
@@ -515,6 +520,31 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
         filled.sort((a, b) => b.date.localeCompare(a.date));
         const examples: ProposalRuleExample[] = filled.slice(0, RULE_EXAMPLES).map((t) => ({ id: t.id, accountId: t.accountId, date: t.date, amount: t.amount, description: t.description, ...(t.category ? { category: t.category } : {}) }));
         return { rule: { count: filled.length, amount: fromMinor(filled.reduce((s, t) => s + toMinor(t.amount), 0)), examples, settles: settled, yours: yoursLeft } };
+      }
+      case 'remove_rule': {
+        const there = store.rules.find((r) => r.id === c.rule);
+        if (!there || out.removedRules.has(there.id)) return { alreadySo: true };
+        out.removedRules.set(there.id, there);
+        // What it categorised takes what the app makes of it without it, as deleting a rule does.
+        const without = categoriserFor(store, { rules: rulesNow(), categories: catList });
+        const changed: ProposalRuleExample[] = [];
+        for (const now of store.transactions()) {
+          const t = row(now.id);
+          if (!t || t.ruleId !== there.id || t.categorisedBy === 'user') continue;
+          const input = categoriseInputOf(t);
+          const res = without.categorise(input);
+          const p: Partial<Transaction> = {};
+          const payee = nextPayee(t, input, res);
+          if (payee !== t.payee) p.payee = payee;
+          if (res.category !== t.category) p.category = res.category;
+          if (res.categorisedBy !== t.categorisedBy) p.categorisedBy = res.categorisedBy;
+          if (res.ruleId !== t.ruleId) p.ruleId = res.ruleId;
+          if (!Object.keys(p).length) continue;
+          patch(t, p);
+          if ('category' in p) changed.push({ id: t.id, accountId: t.accountId, date: t.date, amount: t.amount, description: t.description, ...(t.category ? { category: t.category } : {}), ...(res.category ? { after: res.category } : {}) });
+        }
+        changed.sort((a, b) => b.date.localeCompare(a.date));
+        return { removes: { count: changed.length, examples: changed.slice(0, RULE_EXAMPLES) } };
       }
       case 'add_category': {
         const there = cats.get(c.category.id);
@@ -621,7 +651,7 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
 
 /** Applying would leave the data as it is: every change is already so, or they undo each other. */
 function changesNothing(store: Store, o: Outcome): boolean {
-  if (o.removed.size || o.companies.size || o.balances.length || o.jobs.size || o.agreements.size || o.terms.size || o.termsRemoved.size || o.rules.length || o.categories) return false;
+  if (o.removed.size || o.companies.size || o.balances.length || o.jobs.size || o.agreements.size || o.terms.size || o.termsRemoved.size || o.rules.length || o.removedRules.size || o.categories) return false;
   if ([...o.moves.values()].some((m) => m.to !== m.balance.accountId)) return false;
   for (const [id, patch] of o.patches) {
     const t = store.transaction(id) as Record<string, unknown> | undefined;
@@ -667,6 +697,7 @@ function namedRows(c: ProposedChange): string[] {
     case 'add_agreement':
     case 'set_terms':
     case 'add_rule':
+    case 'remove_rule':
     case 'add_category':
     case 'change_category':
       return [];
@@ -838,7 +869,7 @@ export class ProposalService extends EventEmitter {
       const message = `proposal: ${p.title} (${doing.length} change${doing.length === 1 ? '' : 's'} applied)`;
       // Categories first, then rules: the rows after them use both.
       if (outcome.categories) await this.store.setCategories(outcome.categories, message);
-      if (outcome.rules.length) await this.store.setRules([...this.store.rules, ...outcome.rules], message);
+      if (outcome.rules.length || outcome.removedRules.size) await this.store.setRules([...this.store.rules.filter((r) => !outcome.removedRules.has(r.id)), ...outcome.rules], message);
       if (outcome.patches.size) await this.store.updateTransactions([...outcome.patches].map(([tid, patch]) => ({ id: tid, patch })), message);
       if (outcome.removed.size) await this.store.deleteTransactions([...outcome.removed.keys()], message);
       for (const account of outcome.accounts.values()) await this.store.upsertAccount(account, message);
@@ -853,7 +884,8 @@ export class ProposalService extends EventEmitter {
       const balances = [...outcome.moves.values()].map((m) => m.balance);
       const termsBefore = [...outcome.termsRemoved.values()];
       const categoriesBefore = [...outcome.categoriesBefore.values()];
-      const before = { transactions: [...outcome.touchedRows.values()], accounts: [...outcome.touchedAccounts.values()], ...(balances.length ? { balances } : {}), ...(termsBefore.length ? { terms: termsBefore } : {}), ...(categoriesBefore.length ? { categories: categoriesBefore } : {}) };
+      const rulesBefore = [...outcome.removedRules.values()];
+      const before = { transactions: [...outcome.touchedRows.values()], accounts: [...outcome.touchedAccounts.values()], ...(balances.length ? { balances } : {}), ...(termsBefore.length ? { terms: termsBefore } : {}), ...(categoriesBefore.length ? { categories: categoriesBefore } : {}), ...(rulesBefore.length ? { rules: rulesBefore } : {}) };
       const decided = await this.decide(p, { status: 'applied', applied: doing.map((c) => c.key), before }, message);
       await this.commit();
       // Another proposal it has left with nothing to do closes now, in a commit of its own.
@@ -974,9 +1006,16 @@ export class ProposalService extends EventEmitter {
       const inst = this.store.institution(a.institutionId);
       accounts[id] = { id: a.id, name: a.name, type: a.type, status: a.status, ...(a.openedOn ? { openedOn: a.openedOn } : {}), ...(a.closedOn ? { closedOn: a.closedOn } : {}), ...(inst ? { institutionName: inst.name } : {}) };
     }
+    // A rule a change removes, as it is now (a decided proposal: as it was before it).
+    const rules: NonNullable<ProposalView['rules']> = {};
+    for (const c of p.changes) {
+      if (c.kind !== 'remove_rule') continue;
+      const r = (pending ? undefined : before?.rules?.find((x) => x.id === c.rule)) ?? this.store.rules.find((x) => x.id === c.rule);
+      if (r) rules[r.id] = { ...(r.name ? { name: r.name } : {}), match: r.match, ...(r.set.category ? { category: r.set.category } : {}) };
+    }
     const ready = changes.filter((c) => !c.problem && !c.alreadySo).length;
     const done = outcome !== undefined && leavesNothing(this.store, p, outcome);
-    return { proposal, changes, rows, balances, accounts, ready, problems: changes.filter((c) => c.problem).length, ...(done ? { alreadyDone: true as const } : {}) };
+    return { proposal, changes, rows, balances, accounts, ...(Object.keys(rules).length ? { rules } : {}), ready, problems: changes.filter((c) => c.problem).length, ...(done ? { alreadyDone: true as const } : {}) };
   }
 
   /** Close the waiting proposals your data already says all of. The caller holds the lock. */

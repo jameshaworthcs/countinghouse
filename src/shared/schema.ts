@@ -1899,6 +1899,8 @@ const changeUnion = <K extends z.ZodType<string | undefined>>(key: K) =>
      * and as they come. Yours are left as they are.
      */
     z.object({ key, kind: z.literal('add_rule'), why: ChangeWhySchema, rule: z.object({ name: z.string().trim().min(1).max(120).optional(), match: RuleSchema.shape.match, category: z.string().min(1).max(64) }) }),
+    /** Remove one of your rules: what it categorised goes back to what the app makes of it without it (yours stay yours). */
+    z.object({ key, kind: z.literal('remove_rule'), why: ChangeWhySchema, rule: z.string().regex(/^rule_[0-9a-z]+$/) }),
     /** Add a group to your categories, or a category to one of the groups (`parent`). */
     z.object({ key, kind: z.literal('add_category'), why: ChangeWhySchema, category: z.object({ id: SlugSchema, name: z.string().trim().min(1).max(60), kind: z.enum(CATEGORY_KINDS), parent: SlugSchema.optional() }) }),
     /** Rename a group or a category, or move a category to another group (`parent`; null makes it a group of its own). */
@@ -1977,8 +1979,8 @@ export const ProposalSchema = z.object({
   applied: z.array(z.string()).optional(),
   /** Why it was dismissed, if you said. */
   dismissedReason: z.string().max(1000).optional(),
-  /** The rows, accounts, balances and categories the applied changes touched, as they were before: the audit trail. */
-  before: z.object({ transactions: z.array(TransactionSchema), accounts: z.array(AccountSchema), balances: z.array(BalanceSnapshotSchema).optional(), terms: z.array(TermsSchema).optional(), categories: z.array(CategorySchema).optional() }).optional(),
+  /** The rows, accounts, balances, categories and rules the applied changes touched, as they were before: the audit trail. */
+  before: z.object({ transactions: z.array(TransactionSchema), accounts: z.array(AccountSchema), balances: z.array(BalanceSnapshotSchema).optional(), terms: z.array(TermsSchema).optional(), categories: z.array(CategorySchema).optional(), rules: z.array(RuleSchema).optional() }).optional(),
 });
 export type Proposal = z.infer<typeof ProposalSchema>;
 

@@ -2,10 +2,10 @@
 // payment by payment; rules your decisions point to; what's left uncategorised, by payee; and the categories the
 // app guessed, to confirm or change (docs/FORMULAS.md §10).
 
-import { ArrowDownLeft, ArrowUpRight, ChevronDown, ChevronRight, SearchCheck, Trash2, UserRound, Wand2 } from 'lucide-react';
-import { useState } from 'react';
+import { ArrowDownLeft, ArrowUpRight, ChevronDown, ChevronRight, CircleCheck, SearchCheck, Trash2, UserRound, Wand2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
-import type { CategoriseQueue, GuessGroup, PayeeGroup, PersonGroup, PersonRow, QueueExample, RuleSuggestion } from '../../shared/api';
+import type { CategoriseQueue, GuessGroup, PayeeGroup, PersonGroup, PersonRow, QueueExample, RuleMove, RuleSuggestion } from '../../shared/api';
 import { addMonths, formatDate, startOfMonth, today } from '../../shared/dates';
 import type { Person, Rule } from '../../shared/schema';
 import { CategorySelect } from '../components/TransactionList';
@@ -410,13 +410,33 @@ function RuleCard({ rule }: { rule: RuleSuggestion }) {
   const { cats } = useAppData();
   const toast = useToast();
   const [category, setCategory] = useState<string | undefined>(rule.category);
+  // Made: the card says so until the list comes back without it, so a second click can't make it twice.
+  const [made, setMade] = useState<number | null>(null);
+  // What making it moves, in the category chosen: by the category each payment has now.
+  const [moves, setMoves] = useState<RuleMove[] | null>(null);
+  useEffect(() => {
+    if (!category) return setMoves(null);
+    let live = true;
+    void api<{ moves: RuleMove[] }>('/rules/preview', { body: { enabled: true, priority: 100, match: rule.match, set: { category } } })
+      .then((r) => live && setMoves(r.moves))
+      .catch(() => live && setMoves(null));
+    return () => {
+      live = false;
+    };
+  }, [rule.match, category]);
   const make = useApiMutation(
     () =>
       api<{ rule: Rule; result: { recategorised: number } | null }>('/rules', {
         body: { name: `${rule.payee} → ${cats.name(category)}`, enabled: true, priority: 100, match: rule.match, set: { category }, apply: true },
       }),
-    { onSuccess: (r) => toast({ tone: 'good', text: `Rule made; ${plural(r.result?.recategorised ?? 0, 'payment')} categorised` }) },
+    {
+      onSuccess: (r) => {
+        setMade(r.result?.recategorised ?? 0);
+        toast({ tone: 'good', text: `Rule made; ${plural(r.result?.recategorised ?? 0, 'payment')} categorised` });
+      },
+    },
   );
+  const moved = moves?.reduce((n, m) => n + m.count, 0) ?? 0;
   return (
     <Card padded={false}>
       <div className="px-5 py-4">
@@ -441,12 +461,31 @@ function RuleCard({ rule }: { rule: RuleSuggestion }) {
         </p>
         {rule.next && <div className="mt-2 text-[12px] text-ink-3">Yours so far:</div>}
         <Examples items={rule.examples} more={rule.next ? rule.from.count - rule.examples.length : rule.fills.count - rule.examples.length} />
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <CategorySelect value={category} onChange={setCategory} allowEmpty={false} className="w-full sm:w-64" />
-          <Button variant="primary" size="sm" disabled={!category} loading={make.isPending} onClick={() => make.mutate(undefined)}>
-            Make this rule
-          </Button>
-        </div>
+        {moves && moved > 0 && (
+          <p className="mt-2 text-[12.5px] text-ink-3">
+            Making it in {cats.name(category)} moves {plural(moved, 'payment')}:{' '}
+            {moves.map((m, i) => (
+              <span key={m.category ?? ''}>
+                {i > 0 && ', '}
+                {m.count} {m.category ? `from ${cats.name(m.category)}` : 'uncategorised'}
+              </span>
+            ))}
+            .
+          </p>
+        )}
+        {made !== null ? (
+          <div className="mt-3 flex items-center gap-2 text-[13px] text-good-ink">
+            <CircleCheck className="size-4" aria-hidden />
+            Rule made: {plural(made, 'payment')} categorised.
+          </div>
+        ) : (
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <CategorySelect value={category} onChange={setCategory} allowEmpty={false} className="w-full sm:w-64" />
+            <Button variant="primary" size="sm" disabled={!category} loading={make.isPending} onClick={() => make.mutate(undefined)}>
+              Make this rule
+            </Button>
+          </div>
+        )}
         {make.error && <div className="mt-2 text-[12px] text-bad-ink">{make.error.message}</div>}
       </div>
     </Card>
