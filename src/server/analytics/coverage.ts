@@ -1,8 +1,9 @@
-// Coverage: which days each account has transaction data for. Averages, rates and projections
-// divide by covered time, never by calendar time, so one imported month is never mistaken for a
-// quiet quarter. Formulas: docs/FORMULAS.md §3.
+// Coverage: which days each account has data for. Averages, rates and projections divide by
+// covered time, never by calendar time, so one imported month is never mistaken for a quiet
+// quarter; and a figure for a period (a tax year's interest) is known only when every day it needs
+// is covered. Formulas: docs/FORMULAS.md §3.
 //
-// Sources, for ledger accounts:
+// Sources, for every account (`coveredIntervals`):
 //   - each committed import covers its statement period for the account (periodStart–periodEnd),
 //     or the span of the rows it contained; a statement that does not print its start, and opens
 //     on the closing balance of the statement before it, runs on from that one (importIntervals);
@@ -18,6 +19,14 @@ import { toMinor } from '../../shared/money';
 import type { Account, BalanceEvidence } from '../../shared/schema';
 import type { Store } from '../store';
 import type { BalanceEngine } from './balances';
+
+/**
+ * How far into a period an account with no opening date may start having data and still count as
+ * having opened then: statements and exports seldom begin on a period's first day. Starting later,
+ * it may have been open before, so the period's days before its data are missing until you set its
+ * opening date (docs/FORMULAS.md §3, "Missing days").
+ */
+export const COVERAGE_SLACK_DAYS = 45;
 
 export interface Interval {
   from: ISODate;
@@ -118,23 +127,69 @@ export function isTransactionAccount(a: Account): boolean {
   return balanceModeOf(a) === 'ledger';
 }
 
-export function accountCoverage(store: Store, account: Account): AccountCoverage {
+/**
+ * The days an account's own records cover, whatever kind of account it is (docs/FORMULAS.md §3):
+ * its imports' statement periods, the day of each row entered by hand, and the stretches you
+ * confirmed nothing is missing from. An account with rows but no import records is covered from
+ * its first row to its last.
+ */
+export function coveredIntervals(store: Store, account: Account): Interval[] {
   const txs = store.transactions(account.id);
-  const empty: AccountCoverage = { accountId: account.id, intervals: [], from: null, to: null, source: 'none' };
-  if (!isTransactionAccount(account)) return empty;
-  const fromImports = importIntervals(store, account.id);
-  let intervals: Interval[];
-  let source: AccountCoverage['source'];
   const confirmed = store.coverageConfirmations.filter((c) => c.accountId === account.id).map((c) => ({ from: c.from, to: c.to }));
+  const fromImports = importIntervals(store, account.id);
   if (fromImports.length) {
     const manual = txs.filter((t) => !t.source.importId).map((t) => ({ from: t.date, to: t.date }));
-    intervals = mergeIntervals([...fromImports, ...manual, ...confirmed]);
-    source = 'imports';
-  } else if (txs.length) {
-    intervals = mergeIntervals([{ from: txs[0]!.date, to: txs[txs.length - 1]!.date }, ...confirmed]);
-    source = 'transactions';
-  } else return empty;
+    return mergeIntervals([...fromImports, ...manual, ...confirmed]);
+  }
+  if (txs.length) return mergeIntervals([{ from: txs[0]!.date, to: txs[txs.length - 1]!.date }, ...confirmed]);
+  return mergeIntervals(confirmed);
+}
+
+/** A ledger account's coverage, for the coverage grid and the days every account covers (`Coverage`). */
+export function accountCoverage(store: Store, account: Account): AccountCoverage {
+  const empty: AccountCoverage = { accountId: account.id, intervals: [], from: null, to: null, source: 'none' };
+  if (!isTransactionAccount(account)) return empty;
+  const source: AccountCoverage['source'] = importIntervals(store, account.id).length ? 'imports' : store.transactions(account.id).length ? 'transactions' : 'none';
+  if (source === 'none') return empty;
+  const intervals = coveredIntervals(store, account);
   return { accountId: account.id, intervals, from: intervals[0]!.from, to: intervals[intervals.length - 1]!.to, source };
+}
+
+/** Days an account should have data for that its records do not cover (`missingDays`). */
+export interface MissingStretch extends Interval {
+  /** The account has no data at all: no rows, balances or statement periods. */
+  noData: boolean;
+  /**
+   * It has no opening date and its data starts more than COVERAGE_SLACK_DAYS into the period, so it
+   * may have been open before: this stretch runs from the period's start to its data. Setting its
+   * opening date settles it.
+   */
+  openingUnknown: boolean;
+}
+
+/**
+ * The days of [from, to] an account should have data for that its records do not cover
+ * (docs/FORMULAS.md §3, "Missing days"): the one rule for whether a period's data is complete, used
+ * by Data health, the Tax year page, Self Assessment and the capture list.
+ *
+ * It should have data from its opening date; without one, from its first covered day when that is
+ * within COVERAGE_SLACK_DAYS of `from`, else from `from` (it may have been open before). It needs
+ * none after it closed. `covered` defaults to its records (`coveredIntervals`).
+ */
+export function missingDays(store: Store, account: Account, from: ISODate, to: ISODate, covered: Interval[] = coveredIntervals(store, account)): MissingStretch[] {
+  const first = covered[0]?.from;
+  let start: ISODate;
+  let unknownFrom: ISODate | undefined;
+  if (account.openedOn) start = maxDate(from, account.openedOn)!;
+  else if (first && diffDays(from, first) <= COVERAGE_SLACK_DAYS) start = maxDate(from, first)!;
+  else {
+    start = from;
+    unknownFrom = from;
+  }
+  const end = minDate(to, account.closedOn)!;
+  if (start > end) return [];
+  const noData = !covered.length && !store.transactions(account.id).length && !store.balances(account.id).length;
+  return complement(covered, start, end).map((g) => ({ ...g, noData, openingUnknown: g.from === unknownFrom }));
 }
 
 /** A stretch of days an account should have data for that nothing covers, with what its balances say. */
@@ -147,6 +202,12 @@ export interface CoverageGap {
   /** Rows recorded inside it (a document dated outside its period, or one you entered). */
   rows: number;
   evidence: BalanceEvidence;
+  /** The account has no data at all. */
+  noData?: boolean;
+  /** It has no opening date and its data starts later: it may have opened then (`MissingStretch`). */
+  openingUnknown?: boolean;
+  /** A valued account (an ISA, a pension): its balances cannot show what was paid in or out. */
+  valuations?: boolean;
 }
 
 export interface JointCoverage {
@@ -220,18 +281,31 @@ export class Coverage {
   }
 
   /**
-   * Each stretch from `from` to `to` that an account in the estate should have data for (it was
-   * open) and that nothing covers, with what its balances say (docs/FORMULAS.md §3).
+   * Each stretch from `from` to `to` that an account should have data for and that nothing covers,
+   * by the one rule (`missingDays`), with what its balances say (docs/FORMULAS.md §3). The accounts
+   * are the transaction accounts in the estate, with data or an opening date, and `also`: accounts a
+   * tax figure rests on (their interest, subscriptions or contributions), valued ones included.
    */
-  gaps(engine: BalanceEngine, from: ISODate, to: ISODate = today()): CoverageGap[] {
+  gaps(engine: BalanceEngine, from: ISODate, to: ISODate = today(), also: readonly Account[] = []): CoverageGap[] {
     const out: CoverageGap[] = [];
-    for (const s of this.spans) {
-      const start = maxDate(from, s.from)!;
-      const end = minDate(to, s.to ?? to)!;
-      if (start > end) continue;
-      for (const g of complement(this.byAccount.get(s.account.id)!.intervals, start, end)) {
-        const rows = this.store.transactions(s.account.id).filter((t) => t.date >= g.from && t.date <= g.to).length;
-        out.push({ accountId: s.account.id, name: s.account.name, from: g.from, to: g.to, days: diffDays(g.from, g.to) + 1, rows, evidence: engine.evidence(s.account.id, g.from, g.to) });
+    const listed = this.store.accounts.filter(
+      (a) => also.some((x) => x.id === a.id) || (isTransactionAccount(a) && a.includeInNetWorth && (this.byAccount.get(a.id)!.source !== 'none' || a.openedOn !== undefined)),
+    );
+    for (const a of listed) {
+      for (const g of missingDays(this.store, a, from, to)) {
+        const rows = this.store.transactions(a.id).filter((t) => t.date >= g.from && t.date <= g.to).length;
+        out.push({
+          accountId: a.id,
+          name: a.name,
+          from: g.from,
+          to: g.to,
+          days: diffDays(g.from, g.to) + 1,
+          rows,
+          evidence: engine.evidence(a.id, g.from, g.to),
+          ...(g.noData ? { noData: true } : {}),
+          ...(g.openingUnknown ? { openingUnknown: true } : {}),
+          ...(!isTransactionAccount(a) ? { valuations: true } : {}),
+        });
       }
     }
     return out;

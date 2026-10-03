@@ -1937,3 +1937,53 @@ Later the same day, after the owner's first runs (`label-imports-2`):
     them: an app's "Reed Al&S" for the bank's "REED AL&S", which did not read as a name.
 - **Not done:** the merchant list still reads only descriptions, not the merchant name a bank gives
   apart (Monzo's "Payward Services Ltd." beside a reference). A rule on the payee covers Kraken.
+
+## 2026-10-03: One rule for missing days; linked accounts checked and named by date
+
+- **Owner:** after the Aldermore statement went in, fix what the review of it found: one rule for
+  whether data is complete, a split that gives rates only to the part they are dated in (and a way
+  to take away the rate it misplaced), payees around linked accounts, and guards for linked and
+  closed accounts.
+- **Found:**
+  - Four rules said whether an account's data covered a period, and they disagreed. Data health
+    looked back 13 months. The Tax year page ignored the stretches the owner had confirmed (Chase
+    flagged for 2025/26), needed one unbroken stretch (HSBC flagged for days whose balances add
+    up), and blamed "before your data starts" for gaps inside a year. Self Assessment judged by an
+    account's first and last row, so a savings account paying interest once a year looked
+    uncovered after its last interest. The capture list ignored confirmations and 4-day gaps.
+  - A statement split at a link gave its older part the rate printed as at its end: the fixed rate
+    was recorded as paying 1.50% from 1 Mar 2024 (it paid 5%). No proposal could take a terms
+    record away.
+  - The categoriser never named a closed account, so the fixed rate's first deposits from the bank
+    were named for the easy access, which did not exist yet. Re-applying never touches linked
+    transfers, so that could not right itself.
+  - Nothing checked that a linked account starts from what the other ended with, or that a closed
+    account's money left it: the first year's interest was missing for a year without a sign.
+- **Done** (FORMULAS.md §3 "Missing days", §9 "Linked and closed accounts", §10; INGESTION.md
+  "Linked accounts", "Categorisation"; DATA_FORMAT.md; AGENTS.md §5; UK_RULES.md):
+  - `missingDays` is the one rule, used by Data health, the Tax year page (with each account's
+    missing days, whether they add up, and what settles them), Self Assessment and the capture
+    list. Statement periods, confirmations and the owner's rows count; a year still settling needs
+    its days to the end of the month before last; an account with no opening date whose data starts
+    more than 45 days in may have been open before.
+  - Data health looks back to the start of the oldest tax year whose return can still be corrected
+    (`oldestOpenTaxYear`: 12 months after the 31 January deadline, from GOV.UK), lists accounts with
+    no data, and the valued accounts a tax figure rests on (ISAs, pensions), whose days can be
+    confirmed too. Older stretches are listed apart.
+  - A split statement's older part keeps only its rows, ending on its last day with its running
+    balance; the rate, limit and other figures as at the statement's end are the newer account's.
+    The `remove_terms` proposal takes away terms a reading gave the wrong account.
+  - Account naming follows the row's date: a closed account while it was open (and 7 days after),
+    and of two accounts a number or alias names, the one open that day. A bank's name alone never
+    chooses between open accounts: rehearsed on the owner's data, it would have named the Chase
+    saver for a payment to Santander that carried "Chase" as a reference.
+  - A transfer's payee naming another account of the owner's than the one it is linked with takes
+    that one's name, on linking and when re-applying (listed in the preview, each can be left).
+  - Data health shows each link with what carried over, and closed accounts that still held money
+    with nothing carrying them on; the Overview warns of either. Account pages show the link.
+  - Closing an account from its page uses today's date where the owner is, not UTC.
+- **Rehearsed** on a copy of the owner's data: the savings hand-over adds up to the penny;
+  re-applying would rename the fixed rate's first deposits and name the card a direct debit paid;
+  each tax year lists the accounts still missing days, with how many, and the latest is complete.
+- **Not done:** an account's id cannot be renamed (`new-account-1`); the categoriser does not yet
+  read an account's own name as an alias ("From Chase Saver").

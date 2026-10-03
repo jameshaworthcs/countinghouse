@@ -161,7 +161,7 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
   const entries = splitAtLinks(store, extraction.accounts, (acc) => matchAccount({ institutionName: acc.institutionName ?? extraction.institutionName ?? undefined, accountName: acc.accountName ?? undefined, accountType: acc.accountType ?? undefined, last4: acc.last4 ?? undefined, currency: acc.currency ?? undefined }, store.accounts, store.institutions, extraction.accounts.length === 1 ? ctx.hintAccountId : undefined, held));
   for (const e of entries) if (e.note) notes.push(e.note);
 
-  const sections: DraftSection[] = entries.map(({ acc, force }, si) => {
+  const sections: DraftSection[] = entries.map(({ acc, force, reason }, si) => {
     // A screen about one holding: its value, gain and amount invested are the holding's, not the
     // account's, and the name at the top is the fund's (or the app's nickname for it).
     const holdingDetail =
@@ -179,7 +179,7 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
     };
     if (typeFromRows) notes.push('The screen does not name the account, but its Lifetime ISA bonus rows say it is a Lifetime ISA.');
     const hint = extraction.accounts.length === 1 ? ctx.hintAccountId : undefined;
-    const match = force ? { accountId: force, score: 100, reason: 'Its part of a statement that runs across the day one account carries on from the other' } : matchAccount({ ...detected, holdings: acc.holdings.map((h) => h.name) }, store.accounts, store.institutions, hint, held);
+    const match = force ? { accountId: force, score: 100, reason: reason ?? 'Matched by the account it carries on from' } : matchAccount({ ...detected, holdings: acc.holdings.map((h) => h.name) }, store.accounts, store.institutions, hint, held);
     let existing: Account | undefined = match.accountId && match.score >= 50 ? store.account(match.accountId) : undefined;
     // A scrolled screen seldom names its account; one taken beside it on the same phone and uploaded
     // with it usually does. Only when this screen has no confident match of its own, shows one
@@ -631,8 +631,13 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
  * the rows before for the older account and the rest for the newer, each with the balance it
  * starts or ends with as its running balances give them; one wholly on one side goes to that side's
  * account. `matchOf` is how the account would be matched without the link.
+ *
+ * What the statement gives as at its end (its closing balance, its rates and limit, what was paid
+ * in, the holdings) is the newer account's: the older one closed before that day. The older part
+ * keeps only its rows, and ends on its last day (the day before the link) with the balance its
+ * running balances reach.
  */
-export function splitAtLinks(store: Store, accounts: readonly ExtractedAccount[], matchOf: (acc: ExtractedAccount) => { accountId?: string | undefined; score: number }): { acc: ExtractedAccount; force?: string; note?: string }[] {
+export function splitAtLinks(store: Store, accounts: readonly ExtractedAccount[], matchOf: (acc: ExtractedAccount) => { accountId?: string | undefined; score: number }): { acc: ExtractedAccount; force?: string; reason?: string; note?: string }[] {
   const links = store.accounts.flatMap((n) => {
     const older = n.continues ? store.account(n.continues.accountId) : undefined;
     return older && n.continues ? [{ newer: n, older, from: n.continues.from }] : [];
@@ -645,15 +650,42 @@ export function splitAtLinks(store: Store, accounts: readonly ExtractedAccount[]
     const before = acc.transactions.filter((t) => t.date < link.from);
     const after = acc.transactions.filter((t) => t.date >= link.from);
     const runsAcross = before.length > 0 && (after.length > 0 || Boolean(acc.periodEnd && acc.periodEnd >= link.from));
-    if (!runsAcross) return [{ acc, force: before.length || (acc.periodEnd && acc.periodEnd < link.from) ? link.older.id : link.newer.id }];
+    const day = formatDate(link.from);
+    if (!runsAcross) {
+      const toOlder = before.length > 0 || Boolean(acc.periodEnd && acc.periodEnd < link.from);
+      return [
+        toOlder
+          ? { acc, force: link.older.id, reason: `Dated before ${day}, when ${link.newer.name} took over from ${link.older.name} under the same number` }
+          : { acc, force: link.newer.id, reason: `Dated from ${day}, when ${link.newer.name} took over from ${link.older.name} under the same number` },
+      ];
+    }
     const carried = before.at(-1)?.balanceAfter ?? null;
     const dayBefore = addDays(link.from, -1);
-    const older: ExtractedAccount = { ...acc, transactions: before, holdings: [], ...(acc.periodEnd && acc.periodEnd >= link.from ? { periodEnd: dayBefore } : {}), closingBalance: carried, balanceDate: carried !== null ? (before.at(-1)?.date ?? dayBefore) : null, statedMoneyIn: null, statedMoneyOut: null, cashBalance: null };
+    const { terms: _asAtItsEnd, ...rest } = acc;
+    const older: ExtractedAccount = {
+      ...rest,
+      transactions: before,
+      holdings: [],
+      ...(acc.periodEnd && acc.periodEnd >= link.from ? { periodEnd: dayBefore } : {}),
+      closingBalance: carried,
+      balanceDate: carried !== null ? dayBefore : null,
+      availableBalance: null,
+      creditLimit: null,
+      contributionsToDate: null,
+      gainLoss: null,
+      governmentBonusToDate: null,
+      taxYearContributions: null,
+      cashBalance: null,
+      annualIncome: null,
+      interestRate: null,
+      statedMoneyIn: null,
+      statedMoneyOut: null,
+    };
     const newer: ExtractedAccount = { ...acc, transactions: after, ...(acc.periodStart && acc.periodStart < link.from ? { periodStart: link.from } : {}), openingBalance: carried, statedMoneyIn: null, statedMoneyOut: null };
     const note = `Split at ${formatDate(link.from)}, where ${link.newer.name} carries on from ${link.older.name}: ${before.length === 1 ? 'the row' : `the ${before.length} rows`} before ${before.length === 1 ? 'goes' : 'go'} to ${link.older.name}, ${after.length === 1 ? 'the row' : `the ${after.length} rows`} from it to ${link.newer.name}.${carried !== null ? ` The balance carried over: ${formatMoney(carried)}.` : ''}`;
     return [
-      { acc: older, force: link.older.id, note },
-      { acc: newer, force: link.newer.id },
+      { acc: older, force: link.older.id, reason: `The statement’s rows before ${day}: ${link.newer.name} carries on from ${link.older.name} from that day`, note },
+      { acc: newer, force: link.newer.id, reason: `The statement’s rows from ${day}: ${link.newer.name} carries on from ${link.older.name} from that day` },
     ];
   });
 }

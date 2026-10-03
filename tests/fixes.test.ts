@@ -93,15 +93,21 @@ describe('allowances', () => {
     await store.addBalances([{ id: 'bal_00000000000000aa', accountId: 'lisa', date: '2026-09-20', balance: 9000, currency: 'GBP', kind: 'screenshot', taxYearContributions: 2000, taxYear: '2026/27', source: {}, createdAt: stamp }], 't');
     const a = allowances(store, '2026/27', '2026-09-29');
     expect(a.isa.used).toBe(2700);
-    expect(a.isa.incomplete).toMatch(/^Not counted yet: subscriptions before your data starts, for isa \(data from 1 Sep 2026\)/);
+    // It has no opening date and its data starts in September, so it may have been open before. The
+    // year so far is needed to the end of the month before last (31 July on 29 September).
+    expect(a.isa.incomplete).toMatch(/^Not counted yet: subscriptions on days no document covers: isa, 6 Apr – 31 Jul 2026 \(before its data starts\)\..*if an account opened later, set its opening date\.$/);
+    expect(a.isa.missing).toEqual([{ accountId: 'isa', name: 'isa', from: '2026-04-06', to: '2026-07-31', days: 117, openingUnknown: true, evidence: 'no-balance' }]);
     expect(a.isa.incomplete).not.toContain('new-isa');
     expect(a.lisa!.incomplete).toBeNull();
   });
 
   it('an account that closed during the year needs data only until it closed', async () => {
     await store.setAccounts([acct('isa', 'stocks_isa', { status: 'closed', closedOn: '2026-06-12' })]);
-    await store.addTransactions(['2026-04-10', '2026-05-10', '2026-06-10'].map((d) => tx('isa', d, 500, 'Subscription', { category: 'contribution' })), 't');
+    await store.addTransactions(['2026-04-10', '2026-05-10', '2026-06-12'].map((d) => tx('isa', d, 500, 'Subscription', { category: 'contribution' })), 't');
     expect(allowances(store, '2026/27', '2026-09-29').isa).toMatchObject({ used: 1500, incomplete: null });
+    // Two days before it closed with nothing to cover them are named as such.
+    await store.setAccounts([acct('isa', 'stocks_isa', { status: 'closed', closedOn: '2026-06-14' })]);
+    expect(allowances(store, '2026/27', '2026-09-29').isa.missing.map((m) => [m.from, m.to])).toEqual([['2026-06-13', '2026-06-14']]);
   });
 
   it('a tax year covered from its start is complete', async () => {

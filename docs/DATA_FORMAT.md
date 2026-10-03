@@ -518,6 +518,9 @@ lives in the work area (`<work>/proposals/`), never here.
   - `set_terms {account, asOf, importId, terms}`: an account's terms as one of its documents gives
     them on its date (`{rates, limit?, minimumPayment?, paymentDue?}`), in place of what its reading
     kept for that account and day.
+  - `remove_terms {account, asOf, importId}`: the terms one of its documents was read as giving an
+    account on a day, taken away because they are another account's (a statement split at a link
+    gave the older account the rate it prints for the newer). `before.terms` keeps them.
 - `applied`: the keys of the changes you applied. `dismissedReason`: what you said, if anything.
 - `before`: `{transactions, accounts, balances?, terms?, categories?, rules?}`, the rows, accounts,
   balances, terms, categories and rules the applied changes touched (a rule removed, a category
@@ -704,9 +707,11 @@ while anything is left.
 
 `check` ticks an ask off from the data:
 
-- `{type: "coverage", from, to?}`: the account's imported statements cover the period. `to`
-  defaults to 35 days ago. Gaps of up to 4 days are ignored, and the period is clipped to the
-  account's opening and closing dates.
+- `{type: "coverage", from, to?}`: no day of the period is missing for the account, by the rule
+  the Tax year page and Data health use ([FORMULAS.md §3](FORMULAS.md), "Missing days"): its
+  statements' periods, the days you confirmed nothing is missing from, and its opening and closing
+  dates count. `to` defaults to the end of the month before last, when every statement for those
+  days is out.
 - `{type: "valuation", since, holdings?}`: a balance that is not approximate, dated on or after
   `since`, plus a holdings snapshot when `holdings` is true.
 - `{type: "figures", kinds, taxYear, from?, payer?}`: a tax figure of one of those kinds for that

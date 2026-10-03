@@ -100,8 +100,11 @@ The equations are in [FORMULAS.md](FORMULAS.md); the rules for writing these rec
     range when you gave one) and the stretches you confirmed nothing is missing from
     (`coverage.json`).
   - Averages, baselines and signals use covered time only, and every page can say what is missing.
-  - Data health lists each stretch no document covers, with what its balances say
-    (`BalanceEngine.evidence`). You confirm a stretch; the balances never cover one by themselves.
+  - One rule says which days a period is missing (`missingDays`, FORMULAS.md §3): Data health, the
+    Tax year page, Self Assessment and the capture list all use it, so they never disagree.
+  - Data health lists each stretch no document covers, back to the oldest tax year still open, with
+    what its balances say (`BalanceEngine.evidence`). You confirm a stretch; the balances never
+    cover one by themselves.
 - **Research and insights** are written by agent jobs through `records.ts`, with provenance.
   - Pages show insights in a panel labelled as Claude's inferences, apart from computed figures
     and computed signals.

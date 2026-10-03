@@ -3,7 +3,7 @@
 // better merchant lists or new categories apply to history without re-importing anything.
 
 import { CategoryIndex } from '../shared/categories';
-import { isWrapperAccount, payrollPattern, transferLegCategory, type Categoriser, type CategoriseInput, type CategoriseResult } from '../shared/categorise';
+import { isWrapperAccount, linkedPayee, payrollPattern, transferLegCategory, type Categoriser, type CategoriseInput, type CategoriseResult } from '../shared/categorise';
 import { diffDays, formatDate } from '../shared/dates';
 import { cleanPayee } from '../shared/merchants';
 import { formatMoney, toMinor } from '../shared/money';
@@ -46,6 +46,8 @@ export function nextPayee(t: Transaction, input: CategoriseInput, res: Categoris
 export interface EnrichResult {
   recategorised: number;
   transfersLinked: number;
+  /** Transfers whose payee named another account of yours than the one they are linked with: given that one's name. */
+  accountPayees?: string[];
   /** With `detail`: each row it would change, and how. */
   changes?: EnrichChange[];
 }
@@ -113,10 +115,24 @@ export async function enrich(store: Store, opts: { accountIds?: string[]; dryRun
   const skipped = (t: Transaction) => opts.skip?.has(t.id) ?? false;
   const patches = new Map<string, Partial<Transaction>>();
   let recategorised = 0;
+  // Transfers given the name of the account they are linked with (`linkedPayee`).
+  const accountPayees = new Set<string>();
 
   for (const t of store.transactions()) {
     if (scope && !scope.has(t.accountId)) continue;
-    if (skipped(t) || t.categorisedBy === 'user' || (t.transferGroup && t.categorisedBy === 'transfer')) continue;
+    if (skipped(t)) continue;
+    // A linked transfer keeps its category and its link (yours or the link's): only a payee naming
+    // another account of yours than the one it is linked with is put right.
+    if (t.transferGroup && (t.categorisedBy === 'transfer' || t.categorisedBy === 'user')) {
+      const other = t.counterpartyAccountId ? store.account(t.counterpartyAccountId) : undefined;
+      const payee = other ? linkedPayee(t, other, store.accounts) : undefined;
+      if (payee) {
+        patches.set(t.id, { payee });
+        accountPayees.add(t.id);
+      }
+      continue;
+    }
+    if (t.categorisedBy === 'user') continue;
     const input = categoriseInputOf(t);
     const res = categoriser.categorise(input);
     const patch: Partial<Transaction> = {};
@@ -158,6 +174,11 @@ export async function enrich(store: Store, opts: { accountIds?: string[]; dryRun
       patch.category = transferLegCategory(acc.type, other.type, t.amount);
       patch.categorisedBy = 'transfer';
     }
+    const payee = linkedPayee(t, other, store.accounts);
+    if (payee) {
+      patch.payee = payee;
+      accountPayees.add(t.id);
+    }
     patches.set(t.id, patch);
   }
   const transfersLinked = pairs.count;
@@ -168,7 +189,8 @@ export async function enrich(store: Store, opts: { accountIds?: string[]; dryRun
       `enrich: ${recategorised} recategorised, ${transfersLinked} transfers linked`,
     );
   }
-  if (!opts.detail) return { recategorised, transfersLinked };
+  const named = accountPayees.size ? { accountPayees: [...accountPayees] } : {};
+  if (!opts.detail) return { recategorised, transfersLinked, ...named };
   const changes: EnrichChange[] = [];
   for (const [id, patch] of patches) {
     const t = store.transaction(id);
@@ -179,7 +201,7 @@ export async function enrich(store: Store, opts: { accountIds?: string[]; dryRun
     if (patch.transferGroup) change.linked = true;
     if (change.payee || change.category || change.linked) changes.push(change);
   }
-  return { recategorised, transfersLinked, changes };
+  return { recategorised, transfersLinked, ...named, changes };
 }
 
 /** Your choices on the preview of re-applying (docs/FORMULAS.md §10, "Re-applying categorisation"). */
@@ -327,7 +349,7 @@ export function rederive(categoriser: Categoriser, t: Transaction, filled: reado
  *   gift you sent is not money moving between your accounts).
  * With nothing for it, the pair is not linked.
  */
-export type TransferSide = Pick<Transaction, 'id' | 'accountId' | 'description' | 'type' | 'category' | 'categorisedBy' | 'counterpartyAccountId'>;
+export type TransferSide = Pick<Transaction, 'id' | 'accountId' | 'date' | 'description' | 'type' | 'category' | 'categorisedBy' | 'counterpartyAccountId'>;
 
 export function transferEvidence(a: TransferSide, b: TransferSide, named: (t: TransferSide) => string[], ownName: (t: TransferSide) => boolean): number | null {
   if ([a, b].some((t) => t.categorisedBy === 'user' && t.category && !TRANSFERISH.has(t.category))) return null;
@@ -363,7 +385,8 @@ export function transferReader(store: Store, categoriser = categoriserFor(store)
       const type = store.account(t.accountId)?.type;
       // As when categorising: bank names say nothing inside an investment or pension account.
       const useInstitutions = !type || !isWrapperAccount(type) || type === 'cash_isa';
-      ids = categoriser.ownAccountsMentioned(t.accountId, t.description, useInstitutions, t.type).map((x) => x.id);
+      // By the row's date: of two accounts under one number, the one open that day.
+      ids = categoriser.ownAccountsMentioned(t.accountId, t.description, useInstitutions, t.type, t.date).map((x) => x.id);
       cache.set(t.id, ids);
     }
     return ids;
@@ -423,14 +446,18 @@ export async function linkTransfers(store: Store, ids: string[], message: string
   const pairs = pairTransfers(store, all.filter((t) => want.has(t.id)), byAmount);
   if (!pairs.count) return 0;
   await store.updateTransactions(
-    pairs.legs.map(([t, other, acc]) => ({
-      id: t.id,
-      patch: {
-        transferGroup: pairs.groupOf.get(t.id)!,
-        counterpartyAccountId: other.id,
-        ...(t.categorisedBy !== 'user' ? { category: transferLegCategory(acc.type, other.type, t.amount), categorisedBy: 'transfer' as const } : {}),
-      },
-    })),
+    pairs.legs.map(([t, other, acc]) => {
+      const payee = linkedPayee(t, other, store.accounts);
+      return {
+        id: t.id,
+        patch: {
+          transferGroup: pairs.groupOf.get(t.id)!,
+          counterpartyAccountId: other.id,
+          ...(t.categorisedBy !== 'user' ? { category: transferLegCategory(acc.type, other.type, t.amount), categorisedBy: 'transfer' as const } : {}),
+          ...(payee ? { payee } : {}),
+        },
+      };
+    }),
     message,
   );
   return pairs.count;

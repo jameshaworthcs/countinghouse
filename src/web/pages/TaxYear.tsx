@@ -1,8 +1,8 @@
 import { ChevronRight, CircleCheck, CircleDashed, Download, FileWarning, Printer, TriangleAlert } from 'lucide-react';
 import { Fragment, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
-import type { AllowanceLine, AllowancesResponse, PayResponse, SaItem, SelfAssessmentResponse, TaxBandEstimate } from '../../shared/api';
-import { formatDate } from '../../shared/dates';
+import type { AllowanceLine, AllowancesResponse, MissingDaysView, PayResponse, SaItem, SelfAssessmentResponse, TaxBandEstimate } from '../../shared/api';
+import { formatDate, formatSpan } from '../../shared/dates';
 import { Meter } from '../components/charts/bars';
 import { InsightsPanel } from '../components/Intel';
 import { PayView } from '../components/Pay';
@@ -53,13 +53,50 @@ function Notes({ notes }: { notes: string[] }) {
   );
 }
 
-/** Says which accounts' data does not cover the tax year, so the figure above is a minimum. */
-function Incomplete({ note }: { note: string | null }) {
+/**
+ * Says which accounts' data does not cover the tax year, so the figure above is a minimum: each
+ * account's missing days (docs/FORMULAS.md §3, "Missing days"), and what settles them.
+ */
+function Incomplete({ what, note, missing }: { what: string; note: string | null; missing: MissingDaysView[] }) {
   if (!note) return null;
+  const accounts = [...new Set(missing.map((m) => m.accountId))].map((id) => missing.filter((m) => m.accountId === id));
+  const confirmable = missing.some((m) => m.evidence === 'adds-up');
+  const opening = missing.some((m) => m.openingUnknown);
   return (
     <div className="mt-2 flex items-start gap-1.5 rounded-lg bg-warn-soft px-2.5 py-2 text-[12px] text-ink-2">
       <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-warn-ink" aria-hidden />
-      <span>{note}</span>
+      {accounts.length ? (
+        <div className="min-w-0">
+          <div>Not counted yet: {what} on days no document covers.</div>
+          <ul className="mt-1 flex flex-col gap-0.5">
+            {accounts.map((list) => (
+              <li key={list[0]!.accountId}>
+                <Link to={`/accounts/${list[0]!.accountId}`} className="font-medium text-ink hover:underline">
+                  {list[0]!.name}
+                </Link>
+                :{' '}
+                {list[0]!.noData
+                  ? `no data at all, ${formatSpan(list[0]!.from, list[0]!.to)}`
+                  : list.map((m) => `${formatSpan(m.from, m.to)}${m.openingUnknown ? ' (before its data starts)' : m.evidence === 'adds-up' ? ' (its balances add up)' : ''}`).join(', ')}
+              </li>
+            ))}
+          </ul>
+          <div className="mt-1 text-ink-3">
+            Import statements for those days
+            {confirmable && (
+              <>
+                , or confirm the ones whose balances add up in{' '}
+                <Link to="/settings#health" className="text-accent hover:underline">
+                  Data health
+                </Link>
+              </>
+            )}
+            {opening && <>; if an account opened after the year began, set its opening date on its page</>}.
+          </div>
+        </div>
+      ) : (
+        <span>{note}</span>
+      )}
     </div>
   );
 }
@@ -116,7 +153,7 @@ function Allowances({ a }: { a: AllowancesResponse }) {
     <div className="grid gap-5 lg:grid-cols-2">
       <Card title="ISA allowance" description="All ISAs together, including the LISA">
         <Meter label="Subscriptions" used={a.isa.used} limit={a.isa.allowance} atLeast={a.isa.incomplete !== null} />
-        <Incomplete note={a.isa.incomplete} />
+        <Incomplete what="subscriptions" note={a.isa.incomplete} missing={a.isa.missing} />
         {a.isa.cashLimit < a.isa.allowance && (
           <div className="mt-4">
             <Meter label="Of which cash ISAs" used={a.isa.cashUsed} limit={a.isa.cashLimit} />
@@ -128,7 +165,7 @@ function Allowances({ a }: { a: AllowancesResponse }) {
       {a.lisa ? (
         <Card title="Lifetime ISA" description="Counts within the £20,000 ISA allowance">
           <Meter label="Contributions" used={a.lisa.contributed} limit={a.lisa.allowance} atLeast={a.lisa.incomplete !== null} />
-          <Incomplete note={a.lisa.incomplete} />
+          <Incomplete what="contributions" note={a.lisa.incomplete} missing={a.lisa.missing} />
           <KeyValue
             className="mt-3"
             items={[
@@ -146,7 +183,7 @@ function Allowances({ a }: { a: AllowancesResponse }) {
       )}
       <Card title="Pension annual allowance" description="Your contributions (grossed up for tax relief) plus employer contributions">
         <Meter label="Contributions" used={a.pension.total} limit={a.pension.annualAllowance} atLeast={a.pension.incomplete !== null} />
-        <Incomplete note={a.pension.incomplete} />
+        <Incomplete what="contributions" note={a.pension.incomplete} missing={a.pension.missing} />
         <KeyValue
           className="mt-3"
           items={[
@@ -178,7 +215,7 @@ function Allowances({ a }: { a: AllowancesResponse }) {
       </Card>
       <Card title="Savings interest" description={`Interest outside ISAs vs your Personal Savings Allowance (${bandLabel(a.taxBand)})`}>
         <Meter label="Interest earned" used={a.savings.interest} limit={a.savings.allowance} atLeast={a.savings.incomplete !== null} overLabel="Taxable" />
-        <Incomplete note={a.savings.incomplete} />
+        <Incomplete what="interest" note={a.savings.incomplete} missing={a.savings.missing} />
         <Lines lines={a.savings.lines} />
         <Notes notes={a.savings.notes} />
         <div className="mt-4 border-t border-line pt-4">

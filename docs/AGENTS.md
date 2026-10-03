@@ -219,7 +219,8 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
       { "kind": "add_pension_arrangement", "employmentId": "example-job", "arrangement": { "accountId": "example-sipp", "kind": "monthly", "amount": 250, "from": "2024-11-14" }, "why": "…" },
       { "kind": "add_company", "company": { "id": "example-ltd", "name": "Example Ltd", "number": "01234567", "holdings": [{ "shareClass": "A ordinary", "shares": 4, "totalShares": 120, "certificate": "12" }] }, "valuation": { "asOf": "2025-12-31", "method": "net-assets", "netAssets": 100000, "value": 3333.33, "note": "…" }, "account": { "id": "example-ltd-shares", "name": "Example Ltd shares" }, "why": "…" },
       { "kind": "add_agreement", "agreement": { "id": "example-hall-2025-26", "name": "Example Hall room, 2025/26", "counterparty": "Example University", "names": ["EXAMPLE UNI"], "category": "rent", "from": "2025-09-13", "until": "2026-06-20", "total": 6720, "payments": [{ "due": "2025-10-31", "amount": 2240, "label": "Instalment 1" }], "details": [{ "label": "Let length", "value": "40 weeks" }], "source": { "importId": "imp_…" } }, "why": "…" },
-      { "kind": "set_terms", "account": "example-card", "asOf": "2026-08-14", "importId": "imp_…", "terms": { "limit": 3000, "rates": [{ "applies": "purchases", "rate": 0, "until": "2027-03-31", "balance": 87.4, "label": "Promotional purchases" }, { "applies": "purchases", "rate": 24.9, "basis": "simple", "variable": true }], "minimumPayment": 5, "paymentDue": "2026-09-08" }, "why": "…" }
+      { "kind": "set_terms", "account": "example-card", "asOf": "2026-08-14", "importId": "imp_…", "terms": { "limit": 3000, "rates": [{ "applies": "purchases", "rate": 0, "until": "2027-03-31", "balance": 87.4, "label": "Promotional purchases" }, { "applies": "purchases", "rate": 24.9, "basis": "simple", "variable": true }], "minimumPayment": 5, "paymentDue": "2026-09-08" }, "why": "…" },
+      { "kind": "remove_terms", "account": "example-fixed", "asOf": "2025-01-31", "importId": "imp_…", "why": "…" }
     ]
   }
   ```
@@ -270,6 +271,10 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
     terms again are there already. Each rate is as printed: what it applies to, the rate, how it is
     stated, whether it is variable, when it ends and the amount at it. Never a rate worked out from
     others (a standard rate from a boosted one less its boost).
+  - Terms taken away (`remove_terms`) are the ones a committed import (`importId`) was read as
+    giving the account on that day, still there; gone already, there is nothing to do. Its `why`
+    says whose they are instead: a statement split at a link gave the older account the rate it
+    prints for the newer one as at its end. The proposal shows them, and `before.terms` keeps them.
   - A category exists, and a row linked as a transfer keeps a transfer category. A category that
     is not a transfer one, on a row not linked as one, also takes away the account of yours the row
     named as the other side, and works its payee out again when that was one of your accounts'

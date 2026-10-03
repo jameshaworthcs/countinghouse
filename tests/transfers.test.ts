@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { categoriserFor } from '../src/server/categoriser';
-import { linkTransfers } from '../src/server/enrich';
+import { enrich, linkTransfers, reapply } from '../src/server/enrich';
 import { transactionId } from '../src/server/ids';
 import { buildDraft } from '../src/server/ingest/draft';
 import { Store } from '../src/server/store';
@@ -175,5 +175,78 @@ describe('linking transfers', () => {
     expect(store.transaction(dd!)).toMatchObject({ category: 'credit-card-payment', counterpartyAccountId: 'tesco' });
     expect(store.transaction(dd!)!.transferGroup).toBeUndefined();
     expect(store.transaction(refund!)!.transferGroup).toBeUndefined();
+  });
+});
+
+describe('two of your accounts under one number', () => {
+  // A fixed rate that matured into easy access at the same bank, under the same number.
+  const linked = [
+    acct('bank', 'current', { name: 'Bank current account', institutionId: 'santander', last4: '4455' }),
+    acct('fixed', 'savings', { name: 'Example 2 Year Fixed', institutionId: 'aldermore', last4: '7788', status: 'closed', openedOn: '2023-09-14', closedOn: '2025-09-12' }),
+    acct('easy', 'savings', { name: 'Example Easy Access', institutionId: 'aldermore', last4: '7788', openedOn: '2025-09-13', continues: { accountId: 'fixed', from: '2025-09-13' } }),
+  ];
+  const c = new Categoriser([], new CategoryIndex(defaultCategories()), linked, []);
+  const cat = (description: string, amount: number, date?: string) => c.categorise({ accountId: 'bank', description, amount, ...(date ? { date } : {}) });
+
+  it('a row naming the number is the one open on its day', () => {
+    expect(cat('BILL PAYMENT VIA FASTER PAYMENT TO ALDERMORE BANK REFERENCE 1027788', -500, '2023-09-14')).toMatchObject({ counterpartyAccountId: 'fixed', payee: 'Example 2 Year Fixed' });
+    expect(cat('FASTER PAYMENTS RECEIPT REF.EAV1027788TAY FROM ALDERMORE BANK', 1000, '2025-10-02')).toMatchObject({ counterpartyAccountId: 'easy', payee: 'Example Easy Access' });
+    // Days after the fixed rate closed: the easy access, open that day.
+    expect(cat('FASTER PAYMENTS RECEIPT REF.EAV1027788TAY FROM ALDERMORE BANK', 1000, '2025-09-16')).toMatchObject({ counterpartyAccountId: 'easy' });
+  });
+
+  it('a row naming only the bank can be either while both were open, and never a long-closed one', () => {
+    // The bank's name alone says neither which product nor even another account: it may be a reference.
+    expect(c.ownAccountsMentioned('bank', 'BILL PAYMENT VIA FASTER PAYMENT TO ALDERMORE BANK', true, undefined, '2023-09-14').map((a) => a.id)).toEqual(['fixed', 'easy']);
+    expect(cat('BILL PAYMENT VIA FASTER PAYMENT TO ALDERMORE BANK', -500, '2023-09-14')).not.toHaveProperty('counterpartyAccountId');
+    // Long after it closed, a closed account is never named; with no date to go by, it is left out.
+    expect(c.ownAccountsMentioned('bank', 'TO ALDERMORE BANK', true, undefined, '2026-03-01').map((a) => a.id)).toEqual(['easy']);
+    expect(c.ownAccountsMentioned('bank', 'TO ALDERMORE BANK').map((a) => a.id)).toEqual(['easy']);
+  });
+
+  describe('a linked transfer’s payee', () => {
+    let dir: string;
+    let store: Store;
+    const out = { id: transactionId('bank', '2023-09-14', -500, 'TO ALDERMORE', 0), accountId: 'bank', date: '2023-09-14', amount: -500, currency: 'GBP', description: 'TO ALDERMORE', source: {}, createdAt: stamp };
+    const into = { id: transactionId('fixed', '2023-09-14', 500, 'Faster Payment', 0), accountId: 'fixed', date: '2023-09-14', amount: 500, currency: 'GBP', description: 'Faster Payment', source: {}, createdAt: stamp };
+    beforeEach(async () => {
+      dir = await mkdtemp(path.join(os.tmpdir(), 'finance-linked-payee-'));
+      store = await Store.open(dir);
+      await store.setCategories(defaultCategories());
+      await store.setAccounts(linked);
+    });
+    afterEach(async () => {
+      store.stopWatching();
+      await rm(dir, { recursive: true, force: true });
+    });
+
+    it('takes the name of the account it is linked with, when it named another of yours', async () => {
+      const group = 'tg_00000000000000a1';
+      // Read when the easy access was the only account of that bank's the app knew.
+      await store.addTransactions(
+        [
+          { ...out, payee: 'Example Easy Access', category: 'savings-transfer', categorisedBy: 'transfer', transferGroup: group, counterpartyAccountId: 'fixed' },
+          { ...into, payee: 'Faster Payment', category: 'transfer', categorisedBy: 'transfer', transferGroup: group, counterpartyAccountId: 'bank' },
+        ],
+        't',
+      );
+      const preview = await enrich(store, { dryRun: true, detail: true });
+      expect(preview.accountPayees).toEqual([out.id]);
+      expect(preview.changes).toEqual([expect.objectContaining({ id: out.id, payee: { from: 'Example Easy Access', to: 'Example 2 Year Fixed' } })]);
+      // Left as it is this time, it stays; applied, it takes the name.
+      await reapply(store, { skip: [out.id] });
+      expect(store.transaction(out.id)!.payee).toBe('Example Easy Access');
+      await reapply(store);
+      expect(store.transaction(out.id)).toMatchObject({ payee: 'Example 2 Year Fixed', category: 'savings-transfer', transferGroup: group });
+      // A payee you set is yours.
+      await store.updateTransactions([{ id: out.id, patch: { payee: 'Example Easy Access', payeeSetBy: 'user' } }], 't');
+      expect((await enrich(store, { dryRun: true, detail: true })).accountPayees).toBeUndefined();
+    });
+
+    it('is put right when the two are linked', async () => {
+      await store.addTransactions([{ ...out, payee: 'Example Easy Access', category: 'savings-transfer', categorisedBy: 'transfer' }, { ...into, category: 'transfer', categorisedBy: 'transfer' }], 't');
+      expect(await linkTransfers(store, [out.id, into.id], 't')).toBe(1);
+      expect(store.transaction(out.id)).toMatchObject({ payee: 'Example 2 Year Fixed', counterpartyAccountId: 'fixed' });
+    });
   });
 });

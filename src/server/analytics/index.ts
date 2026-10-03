@@ -2,11 +2,11 @@
 
 import { ACCESS_GROUP_LABELS, ACCESS_GROUPS, WRAPPER_GROUP_LABELS, WRAPPER_GROUPS } from '../../shared/accounts';
 import type { Alert, SummaryResponse } from '../../shared/api';
-import { addDays, addYears, monthKey, today } from '../../shared/dates';
+import { addDays, addYears, formatDate, minDate, monthKey, today } from '../../shared/dates';
 import { formatMoney } from '../../shared/money';
-import { daysLeftInTaxYear, taxYearOf } from '../../shared/uk';
+import { daysLeftInTaxYear, oldestOpenTaxYear, saCorrectBy, taxYearOf } from '../../shared/uk';
 import type { Store } from '../store';
-import { allowances } from './allowances';
+import { allowances, taxFigureAccounts } from './allowances';
 import { BalanceEngine } from './balances';
 import { budgetAlerts, budgets } from './budgets';
 import { goalsProgress } from './goals';
@@ -18,6 +18,7 @@ import { computeBaseline, standardPeriods } from './baseline';
 import { Coverage } from './coverage';
 import { accountSummary, estateKnownOn, estateOn, estateSeries, firstDataDate } from './estate';
 import { dataHealth } from './health';
+import { closedHolding, handovers } from './handover';
 import { investments } from './investments';
 import { captureList } from './capture';
 import { termsAlerts } from './terms';
@@ -112,11 +113,11 @@ export class Analytics {
   }
 
   allowances(taxYear?: string) {
-    return this.cached(`allow:${taxYear ?? ''}:${today()}`, () => allowances(this.store, taxYear));
+    return this.cached(`allow:${taxYear ?? ''}:${today()}`, () => allowances(this.store, taxYear, today(), this.engine));
   }
 
   selfAssessment(taxYear?: string) {
-    return this.cached(`sa:${taxYear ?? ''}:${today()}`, () => selfAssessment(this.store, taxYear));
+    return this.cached(`sa:${taxYear ?? ''}:${today()}`, () => selfAssessment(this.store, taxYear, this.engine));
   }
 
   investments() {
@@ -133,12 +134,21 @@ export class Analytics {
 
   health() {
     return this.cached(`health:${today()}`, () => {
+      const now = today();
       const coverage = this.coverage();
       const engine = this.engine;
+      // Back to the start of the oldest tax year whose return can still be sent or corrected, or the
+      // grid's first month if that is earlier (docs/FORMULAS.md §3). Valued accounts a tax figure
+      // rests on (an ISA's subscriptions, a pension's contributions) are listed beside the ledgers.
+      const open = oldestOpenTaxYear(now);
+      const from = minDate(coverage.months.length ? `${coverage.months[0]}-01` : now, open.start)!;
       return {
         ...dataHealth(this.store, engine),
         coverage,
-        coverageGaps: coverage.months.length ? this.coverageIndex.gaps(engine, `${coverage.months[0]}-01`) : [],
+        coverageGaps: this.coverageIndex.gaps(engine, from, now, taxFigureAccounts(this.store)),
+        handovers: handovers(this.store, engine),
+        closedHolding: closedHolding(this.store, engine),
+        openTaxYear: { label: open.label, start: open.start, correctBy: saCorrectBy(open) },
         confirmations: this.store.coverageConfirmations.map((c) => ({ ...c, name: this.store.account(c.accountId)?.name ?? c.accountId, now: engine.evidence(c.accountId, c.from, c.to) })),
       };
     });
@@ -233,6 +243,23 @@ export class Analytics {
       if (health.gaps.length) {
         const g = health.gaps[0]!;
         alerts.push({ id: 'gaps', level: 'warning', title: `${health.gaps.length} balance gap${health.gaps.length > 1 ? 's' : ''} (missing statements?)`, detail: `${g.name}: ${formatMoney(g.difference)} unexplained between ${g.from} and ${g.to}.`, action: { label: 'Details', href: '/settings#health' } });
+      }
+      // Money that left one account with nowhere for it to go (docs/FORMULAS.md §9).
+      const carried = (health.handovers ?? []).filter((h) => h.status === 'unexplained');
+      const held = health.closedHolding ?? [];
+      if (carried.length || held.length) {
+        const n = carried.length + held.length;
+        const h = carried[0];
+        const c = held[0];
+        alerts.push({
+          id: 'unaccounted',
+          level: 'warning',
+          title: `Money unaccounted for in ${n} account${n > 1 ? 's' : ''}`,
+          detail: h
+            ? `${h.newer.name} starts on ${formatMoney(h.opening!)}, but ${h.older.name}, which it carries on from, ended on ${formatMoney(h.closing!)}.`
+            : `${c!.name} closed on ${formatDate(c!.closedOn)} ${c!.balance > 0 ? 'with' : 'owing'} ${formatMoney(Math.abs(c!.balance))}, and nothing shows the money leaving.`,
+          action: { label: 'Details', href: '/settings#health' },
+        });
       }
       for (const f of health.fscs.filter((x) => x.near)) {
         alerts.push({

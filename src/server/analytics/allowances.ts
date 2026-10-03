@@ -3,8 +3,9 @@
 
 import { ACCOUNT_TYPE_META, balanceModeOf } from '../../shared/accounts';
 import { DIVIDEND_WORDING } from '../../shared/categorise';
-import type { AllowanceLine, AllowancesResponse, TaxBandEstimate } from '../../shared/api';
-import { addDays, diffDays, formatDate, maxDate, minDate, today, type ISODate } from '../../shared/dates';
+import type { AllowanceLine, AllowancesResponse, MissingDaysView, TaxBandEstimate } from '../../shared/api';
+import { settledThrough } from '../../shared/coverage';
+import { addDays, diffDays, formatDate, formatSpan, minDate, today, type ISODate } from '../../shared/dates';
 import { fromMinor, toMinor } from '../../shared/money';
 import type { Account, Figure, Transaction } from '../../shared/schema';
 import {
@@ -22,7 +23,8 @@ import {
   type TaxYear,
 } from '../../shared/uk';
 import type { Store } from '../store';
-import { covers, importIntervals, mergeIntervals, type Interval } from './coverage';
+import { BalanceEngine } from './balances';
+import { covers, coveredIntervals, missingDays } from './coverage';
 import { fromEmployer, isPayslipFigure, pairPay, payerKey } from './pay';
 import { payByEmployer } from './sources';
 import { yearSoFar } from './payslips';
@@ -32,41 +34,84 @@ export { payByEmployer };
 
 const inYear = (t: { date: string }, ty: TaxYear) => t.date >= ty.start && t.date <= ty.end;
 
-/** Slack when deciding whether an account's data covers a stretch: statements arrive on their own dates. */
-export const COVERAGE_SLACK_DAYS = 45;
+/** Accounts whose interest counts against the Personal Savings Allowance: not ISAs, debts or valued accounts. */
+export function interestAccounts(store: Pick<Store, 'accounts'>): Account[] {
+  return store.accounts.filter((a) => !ACCOUNT_TYPE_META[a.type].taxFreeInterest && balanceModeOf(a) === 'ledger' && !ACCOUNT_TYPE_META[a.type].liability);
+}
+
+/** Accounts whose subscriptions count against the ISA allowance (the LISA among them). */
+export function isaAccountsOf(store: Pick<Store, 'accounts'>): Account[] {
+  return store.accounts.filter((a) => ACCOUNT_TYPE_META[a.type].isa);
+}
+
+/** Pension accounts whose contributions count against the annual allowance. */
+export function pensionAccountsOf(store: Pick<Store, 'accounts'>): Account[] {
+  return store.accounts.filter((a) => ACCOUNT_TYPE_META[a.type].pension && a.type !== 'state_pension' && a.type !== 'db_pension');
+}
 
 /**
- * Accounts whose data does not cover the tax year (up to `on` for the current one): what they show
- * for the year is a minimum. Returns a sentence saying which, or null when every account is covered.
+ * Every account a tax figure here rests on (interest, subscriptions, contributions): Settings → Data
+ * health lists their missing days back to the oldest tax year still open (docs/FORMULAS.md §3).
  */
-export function yearCoverageGap(store: Store, accounts: Account[], ty: TaxYear, on: ISODate, what: string): string | null {
-  const short: { name: string; from: ISODate | null }[] = [];
+export function taxFigureAccounts(store: Pick<Store, 'accounts'>): Account[] {
+  const ids = new Set([...interestAccounts(store), ...isaAccountsOf(store), ...pensionAccountsOf(store)].map((a) => a.id));
+  return store.accounts.filter((a) => ids.has(a.id));
+}
+
+/**
+ * The days of a tax year a figure needs that the accounts' data does not cover, by the one rule
+ * (`missingDays`, docs/FORMULAS.md §3): to the year's end or, for a year still settling, to the end
+ * of the month before last (`settledThrough`), by when every statement for those days is out. Each
+ * says what its balances show, so days that add up can be confirmed rather than imported.
+ */
+export function yearMissing(store: Store, accounts: readonly Account[], ty: TaxYear, now: ISODate, engine: () => BalanceEngine = () => new BalanceEngine(store)): MissingDaysView[] {
+  const to = minDate(ty.end, settledThrough(now))!;
+  if (to < ty.start) return [];
+  const out: MissingDaysView[] = [];
+  let balances: BalanceEngine | undefined;
   for (const a of accounts) {
-    if (a.closedOn && a.closedOn < ty.start) continue;
-    // An account's data need only reach from when it opened to when it closed.
-    const start = maxDate(ty.start, a.openedOn) ?? ty.start;
-    const end = minDate(ty.end, on, a.closedOn)!;
-    if (start > end) continue;
-    const span = wrapperDataSpan(store, a);
-    if (span.some((i) => diffDays(start, i.from) <= COVERAGE_SLACK_DAYS && diffDays(i.to, end) <= COVERAGE_SLACK_DAYS)) continue;
-    short.push({ name: a.name, from: span.find((i) => i.to >= start)?.from ?? null });
+    for (const g of missingDays(store, a, ty.start, to)) {
+      balances ??= engine();
+      out.push({
+        accountId: a.id,
+        name: a.name,
+        from: g.from,
+        to: g.to,
+        days: diffDays(g.from, g.to) + 1,
+        ...(g.noData ? { noData: true } : {}),
+        ...(g.openingUnknown ? { openingUnknown: true } : {}),
+        evidence: balances.evidence(a.id, g.from, g.to).status,
+      });
+    }
   }
-  if (!short.length) return null;
-  const who = short.map((x) => (x.from && x.from > ty.start ? `${x.name} (data from ${formatDate(x.from)})` : x.name)).join(', ');
-  return `Not counted yet: ${what} before your data starts, for ${who}. Import statements from ${formatDate(ty.start)}, or set an account's opening date if it opened later.`;
+  return out;
 }
-const TRANSFER_OUT = new Set(['savings-transfer', 'investment-transfer', 'transfer']);
+
+/** Stretches named for one account in a sentence; the rest are counted. */
+const STRETCHES_NAMED = 3;
 
 /**
- * The periods a wrapper account's own records cover: its imported statements' periods, or the span
- * of its transactions when it has no import records.
+ * A figure is a minimum: the sentence naming, account by account, the days no document covers, and
+ * what settles them. Null when there are none.
  */
-export function wrapperDataSpan(store: Store, account: Account): Interval[] {
-  const intervals = importIntervals(store, account.id);
-  const txs = store.transactions(account.id);
-  if (!intervals.length && txs.length) intervals.push({ from: txs[0]!.date, to: txs[txs.length - 1]!.date });
-  return mergeIntervals(intervals);
+export function missingNote(what: string, missing: readonly MissingDaysView[]): string | null {
+  if (!missing.length) return null;
+  const byAccount = new Map<string, MissingDaysView[]>();
+  for (const m of missing) (byAccount.get(m.accountId) ?? byAccount.set(m.accountId, []).get(m.accountId)!).push(m);
+  const parts = [...byAccount.values()].map((list) => {
+    const first = list[0]!;
+    if (first.noData) return `${first.name} (no data at all), ${formatSpan(first.from, first.to)}`;
+    const named = list.slice(0, STRETCHES_NAMED).map((m) => `${formatSpan(m.from, m.to)}${m.openingUnknown ? ' (before its data starts)' : ''}`);
+    const more = list.length - named.length;
+    return `${first.name}, ${named.join(', ')}${more ? ` and ${more} more stretch${more === 1 ? '' : 'es'}` : ''}`;
+  });
+  const settle = ['Import statements for those days'];
+  if (missing.some((m) => m.evidence === 'adds-up')) settle.push('where the balances add up, confirm them in Settings → Data health');
+  if (missing.some((m) => m.openingUnknown)) settle.push('if an account opened later, set its opening date');
+  return `Not counted yet: ${what} on days no document covers: ${parts.join('; ')}. ${settle.join('; ')}.`;
 }
+
+const TRANSFER_OUT = new Set(['savings-transfer', 'investment-transfer', 'transfer']);
 
 /** Money into a wrapper account in the tax year that counts as a new subscription/contribution. */
 export function wrapperContributions(store: Store, account: Account, ty: TaxYear): { minor: number; lines: AllowanceLine[] } {
@@ -83,10 +128,10 @@ export function wrapperContributions(store: Store, account: Account, ty: TaxYear
     for (const t of own) if (t.amount < 0 && t.category === 'withdrawal') minor += toMinor(t.amount);
     minor = Math.max(0, minor);
   }
-  // Payments recorded only in the paying account. Where the wrapper's own statements cover the
-  // date (allowing 10 days for the money to arrive), they are the record and the payment is not
-  // counted again.
-  const span = wrapperDataSpan(store, account);
+  // Payments recorded only in the paying account. Where the wrapper's own records cover the date
+  // (allowing 10 days for the money to arrive), they are the record and the payment is not counted
+  // again: its statements, or days you confirmed nothing is missing from (coveredIntervals).
+  const span = coveredIntervals(store, account);
   const oneSided: Transaction[] = [];
   for (const other of store.accounts) {
     if (other.id === account.id || balanceModeOf(other) !== 'ledger') continue;
@@ -440,14 +485,21 @@ export function taxBandEstimate(store: Store, ty: TaxYear, now: ISODate, found: 
   return { band: r.band, basis, lines, total: r.total, personalAllowance: r.personalAllowance, taxable: r.taxable, higherFrom: r.higherFrom, additionalFrom: r.additionalFrom, notes };
 }
 
-export function allowances(store: Store, label?: string, now: ISODate = today()): AllowancesResponse {
+/**
+ * The year's allowances (docs/FORMULAS.md §11). `engine` (the app's, when it has one) says what the
+ * balances show about the days a figure is missing; one is built when needed.
+ */
+export function allowances(store: Store, label?: string, now: ISODate = today(), engine?: BalanceEngine): AllowancesResponse {
   const ty = (label ? parseTaxYear(label) : null) ?? taxYearOf(now);
   const params = taxYearParams(ty);
   const dob = store.profile.dateOfBirth;
   const current = now >= ty.start && now <= ty.end;
+  // Built only when some day is missing, to say what the balances show about it.
+  let balances = engine;
+  const missingIn = (accounts: readonly Account[]) => yearMissing(store, accounts, ty, now, () => (balances ??= new BalanceEngine(store)));
 
   // ISA.
-  const isaAccounts = store.accounts.filter((a) => ACCOUNT_TYPE_META[a.type].isa);
+  const isaAccounts = isaAccountsOf(store);
   let isaUsed = 0;
   let cashUsed = 0;
   let lisaUsed = 0;
@@ -472,9 +524,10 @@ export function allowances(store: Store, label?: string, now: ISODate = today())
     }
   }
   if (isaAccounts.length && !isaLines.length) isaNotes.push('No ISA subscriptions found for this tax year. Import ISA statements or the transfers from your current account.');
-  // A provider's "paid in this tax year" figure is complete; otherwise the transactions must cover the year.
-  const isaIncomplete = yearCoverageGap(store, isaAccounts.filter((a) => providerFigure(store, a.id, ty) === null), ty, now, 'subscriptions');
-  const lisaIncomplete = yearCoverageGap(store, isaAccounts.filter((a) => a.type === 'lisa' && providerFigure(store, a.id, ty) === null), ty, now, 'contributions');
+  // A provider's "paid in this tax year" figure is complete; otherwise the account's data must cover
+  // the year (docs/FORMULAS.md §3, "Missing days").
+  const isaMissing = missingIn(isaAccounts.filter((a) => providerFigure(store, a.id, ty) === null));
+  const lisaMissing = isaMissing.filter((m) => store.account(m.accountId)?.type === 'lisa');
   isaNotes.push('Transfers between ISAs do not use allowance; they are excluded when recorded as transfers.');
 
   const cashLimit = cashIsaLimit(ty, dob);
@@ -506,7 +559,8 @@ export function allowances(store: Store, label?: string, now: ISODate = today())
       bonusExpected: fromMinor(Math.round(Math.min(lisaUsed, allowance) * params.lisaBonusRate)),
       lines: [...lisaLines, ...bonus.lines.map((l) => ({ ...l, label: `${l.label}: bonus received` }))],
       notes,
-      incomplete: lisaIncomplete,
+      incomplete: missingNote('contributions', lisaMissing),
+      missing: lisaMissing,
     };
   }
 
@@ -515,16 +569,14 @@ export function allowances(store: Store, label?: string, now: ISODate = today())
   // statements gave the year's totals. Otherwise the unused amount is unknown, never assumed.
   const pen = pensionTotals(store, ty);
   const aa = pensionAnnualAllowance(ty);
-  const pensionAccounts = store.accounts.filter((a) => ACCOUNT_TYPE_META[a.type].pension && a.type !== 'state_pension' && a.type !== 'db_pension');
+  const pensionAccounts = pensionAccountsOf(store);
   const carryForward: AllowancesResponse['pension']['carryForward'] = [];
   for (let back = 3; back >= 1; back--) {
     const prev = makeTaxYear(ty.startYear - back);
     const existed = pensionAccounts.filter((a) => store.transactions(a.id).some((t) => t.date <= prev.end) || store.balances(a.id).some((b) => b.date <= prev.end) || (a.openedOn !== undefined && a.openedOn <= prev.end));
     const figures = store.figures.some((f) => f.taxYear === prev.label && (f.kind === 'pension_contribution_employee' || f.kind === 'pension_contribution_employer'));
-    const fullyCovered = existed.length > 0 && existed.every((a) => {
-      const span = wrapperDataSpan(store, a);
-      return span.some((i) => diffDays(prev.start, i.from) <= 45 && diffDays(i.to, prev.end) <= 45);
-    });
+    // Known when no day of the year is missing for any of them (docs/FORMULAS.md §3, "Missing days").
+    const fullyCovered = existed.length > 0 && existed.every((a) => !missingDays(store, a, prev.start, minDate(prev.end, settledThrough(now))!).length);
     if (!existed.length && !figures) {
       carryForward.push({ taxYear: prev.label, unused: null, basis: 'No pension data for this year. If you were in a pension scheme, import its statement to count what you left unused.' });
       continue;
@@ -537,7 +589,7 @@ export function allowances(store: Store, label?: string, now: ISODate = today())
     carryForward.push({ taxYear: prev.label, unused: fromMinor(Math.max(0, toMinor(pensionAnnualAllowance(prev)) - used)), basis: figures ? 'From pension statement totals' : 'From statements covering the whole year' });
   }
   const pensionFigures = store.figures.some((f) => f.taxYear === ty.label && (f.kind === 'pension_contribution_employee' || f.kind === 'pension_contribution_employer'));
-  const pensionIncomplete = pensionFigures ? null : yearCoverageGap(store, pensionAccounts, ty, now, 'contributions');
+  const pensionMissing = pensionFigures ? [] : missingIn(pensionAccounts);
   const pensionNotes = [...pen.notes];
   if ((store.profile.grossSalary ?? 0) > params.pensionTaperThresholdIncome) {
     pensionNotes.push(`Your salary is above £${params.pensionTaperThresholdIncome.toLocaleString('en-GB')}, so the tapered annual allowance may apply (down to £${params.pensionTaperMinimum.toLocaleString('en-GB')}).`);
@@ -561,13 +613,7 @@ export function allowances(store: Store, label?: string, now: ISODate = today())
     }
   }
   // Interest statements for the year are complete; otherwise the accounts' data must cover it.
-  const interestIncomplete = yearCoverageGap(
-    store,
-    taxable.filter((a) => balanceModeOf(a) === 'ledger' && !ACCOUNT_TYPE_META[a.type].liability && !interestFigures.some((f) => f.accountId === a.id)),
-    ty,
-    now,
-    'interest',
-  );
+  const interestMissing = missingIn(interestAccounts(store).filter((a) => !interestFigures.some((f) => f.accountId === a.id)));
   // Dividends outside ISAs and pensions, each counted once: a voucher and the credit that paid it are one.
   const dividends = dividendsOf(store, ty);
   const dividendsMinor = dividends.minor;
@@ -598,7 +644,8 @@ export function allowances(store: Store, label?: string, now: ISODate = today())
       cashUsed: fromMinor(cashUsed),
       lines: isaLines,
       notes: isaNotes,
-      incomplete: isaIncomplete,
+      incomplete: missingNote('subscriptions', isaMissing),
+      missing: isaMissing,
     },
     lisa,
     pension: {
@@ -612,9 +659,10 @@ export function allowances(store: Store, label?: string, now: ISODate = today())
       carryForward,
       lines: pen.lines,
       notes: pensionNotes,
-      incomplete: pensionIncomplete,
+      incomplete: missingNote('contributions', pensionMissing),
+      missing: pensionMissing,
     },
-    savings: { interest: fromMinor(interestMinor), allowance: psa, band, bandBasis: taxBand.basis, remaining: fromMinor(Math.max(0, toMinor(psa) - interestMinor)), lines: interestLines, notes: savingsNotes, incomplete: interestIncomplete },
+    savings: { interest: fromMinor(interestMinor), allowance: psa, band, bandBasis: taxBand.basis, remaining: fromMinor(Math.max(0, toMinor(psa) - interestMinor)), lines: interestLines, notes: savingsNotes, incomplete: missingNote('interest', interestMissing), missing: interestMissing },
     dividends: {
       amount: fromMinor(dividendsMinor),
       allowance: params.dividendAllowance,

@@ -36,6 +36,7 @@ export const CHANGE_LABELS: Record<ProposedChangeKind, { title: string; count: (
   add_pension_arrangement: { title: 'Add what an employer pays into your pension', count: (n) => plural(n, 'pension arrangement'), icon: <PiggyBank className="size-4" aria-hidden /> },
   add_agreement: { title: 'Add an agreement to pay', count: (n) => plural(n, 'agreement'), icon: <Handshake className="size-4" aria-hidden /> },
   set_terms: { title: 'Set an account’s terms', count: (n) => `${plural(n, 'account')}’ terms`, icon: <Percent className="size-4" aria-hidden /> },
+  remove_terms: { title: 'Take away terms read into the wrong account', count: (n) => `${plural(n, 'set')} of terms taken away`, icon: <Percent className="size-4" aria-hidden /> },
 };
 
 /** "5 transfers linked, 2 transfer links undone, 1 category" */
@@ -587,6 +588,21 @@ export function ChangeBody({ change, view }: { change: ProposedChange; view: Pro
               ))}
             </ul>
           )}
+        </div>
+      );
+    }
+    case 'remove_terms': {
+      const acc = view.accounts[change.account];
+      const gone = view.removedTerms?.[change.key];
+      return (
+        <div className="grid gap-2 rounded-lg border border-line bg-panel px-3 py-2 text-[13px]">
+          <div className="text-ink-2">
+            <Link to={`/accounts/${change.account}#terms`} className="font-medium text-ink hover:underline">
+              {acc?.name ?? accountName(change.account)}
+            </Link>
+            : what {gone?.fileName ? <Link to={`/import/${change.importId}`} className="hover:underline">{gone.fileName}</Link> : 'its document'} was read as giving it for {formatDate(change.asOf)}, taken away:
+          </div>
+          {gone ? <RatesList terms={gone} type={acc?.type} now={change.asOf} /> : <div className="text-[12.5px] text-ink-3">They are no longer in your data.</div>}
         </div>
       );
     }

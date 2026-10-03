@@ -54,7 +54,8 @@ in this order:
 
 ## 3. Coverage and baselines
 
-**Coverage of an account** (`analytics/coverage.ts`) is the union of intervals:
+**Coverage of an account** (`coveredIntervals` in `analytics/coverage.ts`), whatever kind of
+account it is, is the union of intervals:
 
 - each committed import's statement period for the account (`periodStart`–`periodEnd`), or the
   span of its rows (a statement with an opening balance and no rows: its closing day);
@@ -69,6 +70,32 @@ in this order:
 - each hand-entered transaction's day;
 - each stretch you confirmed nothing is missing from (`coverage.json`);
 - for an account with transactions but no import records: from its first to its last transaction.
+
+**Missing days** (`missingDays`) are the one rule for whether a period's data is complete. Settings
+→ Data health, the Tax year page (ISA, LISA, pension and interest figures, and pension
+carry-forward), Self Assessment and the capture list's coverage checks all use it. For an account
+and a period [*f*, *t*], the missing days are the days it should have data for that its coverage
+does not include:
+
+- **From** its opening date (`openedOn`). Without one, from its first covered day when that is
+  within `COVERAGE_SLACK_DAYS` = 45 of *f* (statements and exports seldom begin on a period's first
+  day); otherwise from *f*, since it may have been open before. Those days are marked
+  `openingUnknown`: setting the opening date settles them if it opened later.
+- **To** its closing date (`closedOn`), or *t*.
+- An account with no rows, balances or statement periods has every such day missing (`noData`).
+- **A tax year's figures** need its days to its end or, for a year still settling, to the end of
+  the month before last (`settledThrough`, below): by then every statement for those days is out.
+  A figure is a minimum while any day is missing. The page names each account's missing days, says
+  whether their balances add up (so you can confirm them), and how each is settled: a statement for
+  those days, a confirmation, or an opening date. An interest certificate (or a provider's "paid in
+  this tax year") stands for its account's year, and a pension statement's totals for the year's
+  contributions, so their accounts need no days.
+- **Settings → Data health** lists the missing days back to the start of the oldest tax year whose
+  return can still be sent or corrected (`oldestOpenTaxYear`, docs/UK_RULES.md; 6 April 2024 on
+  any day to 31 January 2027), or the coverage grid's first month if that is earlier. It lists
+  every transaction account in the estate that has data or an opening date, and the valued
+  accounts a tax figure rests on (ISAs, the LISA, pensions), whose balances cannot show what moved,
+  so their days are never "adds up". Days before the grid's months are listed apart.
 
 **Balance evidence** (`BalanceEngine.evidence`, shown with each stretch no document covers, in
 Settings → Data health). For the days from *f* to *t*, with the anchors usable for gaps (§9):
@@ -386,6 +413,19 @@ years), both paths grow at the median:
   after it, and what is unexplained between them. A proposal that takes away a move inside the
   account (§ "Proposed fixes" in AGENTS.md) must leave that at nothing.
 
+**Linked and closed accounts** (`analytics/handover.ts`, Settings → Data health, each account's page):
+
+- **What carried over.** An account that carries on from another (`continues`, from day *F*)
+  starts from what the other ended with: closing = balance(older, *F* − 1), opening = the newer
+  one's balance at the start of *F* (`openingOn`: its close on *F* less the rows that count on
+  *F*). They add up when opening = closing to the penny; otherwise the difference is unexplained,
+  a statement or a row missing on one side, and the Overview warns. With no balance on one side,
+  or a valued account (it moves with markets), it is not checked.
+- **Closed with money in it.** A closed ledger account whose balance at the end of its closing day
+  is not £0, and that no account carries on from: nothing shows the money leaving, so it drops out
+  of the estate the day after. Data health lists it (held or owed, and whether the balance is
+  estimated), and the Overview warns.
+
 **Shares in a company** (`companies.json`, `analytics/companies.ts`). Your shares in a company that
 is not listed count in the estate on their own account (an "other asset"), at the account's latest
 balance. Each valuation is recorded as one of its balances, dated, its note saying how it was worked
@@ -547,9 +587,14 @@ when the purchase had none.
 - one cut by an earlier version of the tidying, or left in the bank's words, is replaced
   (`nextPayee`);
 - a general word in the merchant list ("COUNCIL", "TICKET") never overrules the category Claude
-  gave a row; a brand it knows does.
+  gave a row; a brand it knows does;
+- a transfer linked between two of your accounts keeps its category and link, but a payee naming
+  another account of yours than the one it is linked with takes that one's name (`linkedPayee`):
+  two accounts at one bank, or a fixed rate and the easy access it became under one number. The
+  same holds whenever a transfer is linked (an import's commit, a proposal, enrichment).
 
-Its preview lists every payment it would recategorise, by group and payee. Before applying, you can
+Its preview lists every payment it would recategorise, by group and payee, and each transfer whose
+payee it would name for the account it is linked with. Before applying, you can
 leave any of them as it is this time (`skip`: neither changed nor linked, and offered again next
 time), or give it a category of yours (`decided`: written first, as yours, so re-applying never
 changes it again). "Always" adds a rule for a payee, in the category you gave all its payments
@@ -742,18 +787,22 @@ employer's form set up to pay into a pension account of yours, checked against t
   listed apart.
 - The contributions count for the annual allowance as above, whatever an arrangement says: the
   arrangement is only what was set up.
-- **Not yet known** (`incomplete`) when a pension account's data does not cover the tax year so
-  far (±45 days) and no statement figures exist for it: the amount used is then a minimum.
+- **Not yet known** (`incomplete`, with each account's `missing` days) when a pension account has
+  days of the tax year missing (§3, **Missing days**) and no statement figures exist for the year:
+  the amount used is then a minimum.
 - Taper per the UK tables when income is given.
-- **Carry-forward** from each of the previous 3 years is **unknown** (not assumed) unless every
-  pension account that existed then has statements covering that whole year (±45 days), or
-  statement totals exist for it.
+- **Carry-forward** from each of the previous 3 years is **unknown** (not assumed) unless no
+  pension account that existed then has a day of that year missing, or statement totals exist for
+  it.
 
 **Personal Savings Allowance:**
 
 - Interest on taxable accounts: `interest` rows, replaced per account by interest-certificate
   figures.
 - Compared against the allowance for your tax band, which is worked out, not set (below).
+- A minimum while a ledger account outside ISAs (not a debt) without an interest certificate for
+  the year has days of it missing (§3, **Missing days**). The ISA and LISA figures follow the same
+  rule for their accounts without a provider's "paid in this tax year".
 
 **Tax band** (`taxBandEstimate`, with the pure `taxBandFor` in `shared/uk.ts`):
 

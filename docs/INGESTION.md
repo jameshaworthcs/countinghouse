@@ -430,7 +430,11 @@ read again.
      ([FORMULAS.md §10](FORMULAS.md), "Cash and cheques paid in");
   2. transfers to your own accounts (by alias, or by provider name outside investment accounts),
      and money to or from you by name after "to" or "from" (your profile's name, or your surname
-     and initials, "FROM TAYLOR SR"). Never cash from a machine: "Cash withdrawal, Santander, Faro" names the bank that runs the
+     and initials, "FROM TAYLOR SR"). The row's date counts: a closed account is named only while
+     it was open (and up to `CLOSED_POSTING_DAYS` = 7 after, `aliveOn`), and of two accounts a
+     number or an alias names (a fixed rate and the easy access it became, under one number), the
+     one open that day (`openOnTheDay`). A bank's name alone never chooses between your open
+     accounts there: "To Sam Taylor - Chase" may name the bank only as a reference. Never cash from a machine: "Cash withdrawal, Santander, Faro" names the bank that runs the
      machine, not your account there. A row is cash by its words or by the bank's type for it (an
      app lists a withdrawal under the machine's bank, typed "Cash withdrawal"), and a row only its
      type calls cash is categorised as cash;
@@ -779,9 +783,13 @@ it on the newer account's page ("Carries on from"), or apply an agent's `link_ac
 proposal.
 
 - **A statement that runs across the day** is split there (`splitAtLinks` in `draft.ts`):
-  - the rows before go to the older account, ending with the balance its running balances reach;
+  - the rows before go to the older account, ending on its last day (the day before the link)
+    with the balance its running balances reach;
   - the rest go to the newer, starting from that balance (the review says so);
-  - each part is checked for duplicates against its own account.
+  - what the statement gives as at its end is the newer account's alone: its closing balance, its
+    rates and limit, what was paid in, its holdings. The older account had closed by then, so it
+    never takes the newer one's interest rate as its own;
+  - each part is checked for duplicates against its own account, and says why it went there.
 
   A statement wholly on one side goes to that side's account.
 - **Unlinked**, a row another of your accounts under the same number and provider has recorded is

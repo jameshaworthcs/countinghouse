@@ -247,3 +247,58 @@ describe('an agent sets an account’s terms from its document', () => {
     expect(await problems(change({ terms: { rates: [] } }))).toBe('It gives no rate, limit or minimum payment.');
   });
 });
+
+describe('an agent takes away terms read into the wrong account', () => {
+  let app: App;
+  let dir: string;
+  let agent: string;
+  const imp = 'imp_20261002_090000_0b02';
+  const source = { importId: imp, documentId: 'doc_00000000000000b2' };
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), 'finance-remove-terms-'));
+    const config = loadConfig({ FINANCE_DATA_DIR: path.join(dir, 'data'), FINANCE_WORK_DIR: path.join(dir, 'work'), FINANCE_WATCH: '0' });
+    config.webDist = path.join(dir, 'no-web');
+    app = await createApp(config, { version: 'test', env: {}, inbox: false });
+    const { store } = app.ctx;
+    await store.setAccounts([acct('fixed', 'savings', { status: 'closed', openedOn: '2023-09-14', closedOn: '2025-09-12' }), acct('easy', 'savings', { openedOn: '2025-09-13', continues: { accountId: 'fixed', from: '2025-09-13' } })]);
+    await store.saveImport({ id: imp, status: 'committed', createdAt: stamp, updatedAt: stamp, committedAt: stamp, origin: 'upload', document: { id: source.documentId, sha256: 'cd'.repeat(32), fileName: 'Statement.pdf', mediaType: 'application/pdf', size: 1 }, extraction: { warnings: [] } } as unknown as ImportRecord, 'test: import');
+    // The statement prints the easy-access rate as at its end; split at the link, the fixed rate took it too.
+    const rate = [{ applies: 'interest' as const, rate: 2.25, label: 'Interest Rate' }];
+    await store.upsertRecords(
+      'terms',
+      [
+        { id: termsId('fixed', '2024-09-13', source), accountId: 'fixed', asOf: '2024-09-13', rates: rate, source, createdAt: stamp },
+        { id: termsId('easy', '2026-10-01', source), accountId: 'easy', asOf: '2026-10-01', rates: rate, source, createdAt: stamp },
+      ],
+      'test: terms',
+    );
+    agent = `Bearer ${(await app.ctx.tokens.create({ name: 'Test agent', scopes: ['records'], days: 1 })).token}`;
+  });
+  afterEach(async () => {
+    await app.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+  const req = (p: string, init: RequestInit = {}) => app.app.request(`http://localhost${p}`, { ...init, headers: { host: 'localhost', ...(init.headers ?? {}) } });
+  const CSRF = { 'x-finance-csrf': '1', 'content-type': 'application/json' };
+  const change = (extra: Record<string, unknown> = {}) => ({ key: 'rm', kind: 'remove_terms', why: 'The statement prints 2.25%, the easy-access rate as at its end; the fixed rate paid 6% for its whole term.', account: 'fixed', asOf: '2024-09-13', importId: imp, ...extra });
+  const post = (changes: unknown[]) => req('/api/proposals', { method: 'POST', headers: { ...CSRF, authorization: agent }, body: JSON.stringify({ title: 'The fixed rate’s terms', summary: 'From a split statement.', provenance: { model: 'test-model' }, changes }) });
+
+  it('they go; the proposal shows them before and after, and keeps them in before.terms', async () => {
+    const res = await post([change()]);
+    expect(res.status).toBe(201);
+    const view = (await res.json()) as ProposalView;
+    expect(view.changes[0]).not.toHaveProperty('problem');
+    expect(view.removedTerms?.rm).toEqual({ rates: [{ applies: 'interest', rate: 2.25, label: 'Interest Rate' }], fileName: 'Statement.pdf' });
+    expect((await req(`/api/proposals/${view.proposal.id}/apply`, { method: 'POST', headers: CSRF, body: '{}' })).status).toBe(200);
+    expect(app.ctx.store.terms('fixed')).toEqual([]);
+    expect(app.ctx.store.terms('easy')).toHaveLength(1);
+    // Decided, it still shows what it took away.
+    const decided = (await (await req(`/api/proposals/${view.proposal.id}`)).json()) as ProposalView;
+    expect(decided.removedTerms?.rm?.rates[0]?.rate).toBe(2.25);
+    // Again: gone already. Not from a document of yours, nor of an account in your data.
+    const problems = async (c: Record<string, unknown>) => ((await (await post([c])).json()) as { problems: { problem: string }[] }).problems[0]!.problem;
+    expect(await problems(change())).toBe('Your data already says this: leave the change out.');
+    expect(await problems(change({ importId: 'imp_20260101_090000_ffff' }))).toMatch(/is not one of your documents/);
+    expect(await problems(change({ account: 'gone' }))).toMatch(/is not in your data/);
+  });
+});

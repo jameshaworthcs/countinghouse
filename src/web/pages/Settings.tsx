@@ -1,12 +1,13 @@
 import { ChevronDown, ChevronRight, CircleAlert, CircleCheck, Copy, Eye, GitCommitHorizontal, KeyRound, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { Fragment, useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
-import type { AllowancesResponse, DataHealthResponse, EnrichGroup, EnrichPreview, SystemResponse, TaxDocSource, TaxDocumentsResponse, TokensResponse } from '../../shared/api';
+import type { AllowancesResponse, DataHealthResponse, EnrichGroup, EnrichPreview, Handover, SystemResponse, TaxDocSource, TaxDocumentsResponse, TokensResponse } from '../../shared/api';
 import { formatDate, today } from '../../shared/dates';
 import { FIGURE_KINDS, type Category, type Figure, type Profile, type Rule, type Settings as SettingsT } from '../../shared/schema';
 import { taxYearOf } from '../../shared/uk';
 import { AuditLog } from '../components/Audit';
 import { CoverageGaps, CoverageGrid } from '../components/Coverage';
+import { HandoverText } from '../components/Handover';
 import { CategorySelect } from '../components/TransactionList';
 import { Badge, Button, Callout, Card, Checkbox, Dialog, Field, Input, KeyValue, Loading, Money, PageHeader, Segmented, Select, SortHeader, StatusBadge, Switch, Tabs, tableClasses, useToast } from '../components/ui';
 import { api, useApi, useApiMutation } from '../lib/api';
@@ -542,10 +543,12 @@ function ruleWords(m: Rule['match']): string {
  * re-applying never changes again. Your own categories are never in it.
  */
 function ReapplyPreview({ preview, applying, error, onApply, onCancel }: { preview: EnrichPreview; applying: boolean; error: string | undefined; onApply: (body: ReapplyBody) => void; onCancel: () => void }) {
-  const { cats } = useAppData();
+  const { cats, accountName } = useAppData();
   const [choices, setChoices] = useState<Record<string, ReapplyChoice>>({});
   const [always, setAlways] = useState<Record<string, boolean>>({});
-  const nothing = !preview.groups.length && !preview.transfersLinked && !preview.payeesTidied;
+  // Linked transfers whose payee is to take the name of the account they are linked with: any can be left.
+  const [keepPayee, setKeepPayee] = useState<Record<string, boolean>>({});
+  const nothing = !preview.groups.length && !preview.transfersLinked && !preview.payeesTidied && !preview.accountPayees.length;
   const label = (g: EnrichGroup) => `${g.from ? cats.path(g.from) : 'Uncategorised'} → ${g.to ? cats.path(g.to) : 'Uncategorised'}`;
   const choose = (ids: string[], value: string | undefined) =>
     setChoices((cur) => {
@@ -567,10 +570,13 @@ function ReapplyPreview({ preview, applying, error, onApply, onCancel }: { previ
     const c = choices[r.id];
     return c && 'category' in c ? [{ id: r.id, category: c.category }] : [];
   });
-  const skip = rows.filter((r) => {
-    const c = choices[r.id];
-    return c && 'skip' in c;
-  }).map((r) => r.id);
+  const skip = [
+    ...rows.filter((r) => {
+      const c = choices[r.id];
+      return c && 'skip' in c;
+    }).map((r) => r.id),
+    ...preview.accountPayees.filter((r) => keepPayee[r.id]).map((r) => r.id),
+  ];
   const rules = preview.groups.flatMap((g) =>
     g.payees.flatMap((p) => {
       const value = new Set(p.rows.map((r) => valueOf(r.id)));
@@ -588,7 +594,8 @@ function ReapplyPreview({ preview, applying, error, onApply, onCancel }: { previ
         <p className="mb-3 text-[12.5px] text-ink-3">
           {preview.recategorised} row{preview.recategorised === 1 ? '' : 's'} recategorised
           {preview.transfersLinked ? `, ${preview.transfersLinked} transfer${preview.transfersLinked === 1 ? '' : 's'} linked` : ''}
-          {preview.payeesTidied ? `, ${preview.payeesTidied} payee${preview.payeesTidied === 1 ? '' : 's'} tidied` : ''}. Nothing has changed yet. Open a group to see its payments and change any you disagree with: a category you choose is yours, and
+          {preview.payeesTidied ? `, ${preview.payeesTidied} payee${preview.payeesTidied === 1 ? '' : 's'} tidied` : ''}
+          {preview.accountPayees.length ? `, ${preview.accountPayees.length} transfer${preview.accountPayees.length === 1 ? '' : 's'} named for the account ${preview.accountPayees.length === 1 ? 'it is' : 'they are'} linked with` : ''}. Nothing has changed yet. Open a group to see its payments and change any you disagree with: a category you choose is yours, and
           re-applying never changes it again; “Leave as it is” skips a payment this time. Categories you set yourself are never in this list.
         </p>
       )}
@@ -598,6 +605,29 @@ function ReapplyPreview({ preview, applying, error, onApply, onCancel }: { previ
             <ReapplyGroup key={`${g.from}|${g.to}|${g.by}`} group={g} label={label(g)} valueOf={valueOf} choose={choose} always={(p) => always[payeeKey(g, p)] ?? false} setAlways={(p, v) => setAlways((cur) => ({ ...cur, [payeeKey(g, p)]: v }))} />
           ))}
         </ul>
+      )}
+      {preview.accountPayees.length > 0 && (
+        <div className="mb-3 rounded-lg border border-line bg-panel text-[13px]">
+          <div className="px-3 py-2">
+            <div className="font-medium text-ink">Transfers that name the wrong one of your accounts</div>
+            <div className="text-[12px] text-ink-3">Each is linked with one account, but its payee names another of yours (two accounts at one bank, or one under the same number). It takes the name of the account it is linked with.</div>
+          </div>
+          <ul className="divide-y divide-line border-t border-line">
+            {preview.accountPayees.map((r) => (
+              <li key={r.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 px-3 py-2">
+                <div className="min-w-0">
+                  <div className="text-ink-2">
+                    {formatDate(r.date)} · {accountName(r.accountId)} · <Money value={r.amount} className="tabular" />
+                  </div>
+                  <div className="text-[12px] text-ink-3">
+                    {r.from ?? 'no payee'} → <span className="text-ink">{r.to}</span>
+                  </div>
+                </div>
+                <Checkbox label="Leave as it is" checked={keepPayee[r.id] ?? false} onChange={(v) => setKeepPayee((cur) => ({ ...cur, [r.id]: v }))} />
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
       {error && <Callout tone="bad" className="mb-3">{error}</Callout>}
       <div className="flex flex-wrap items-center gap-2">
@@ -1142,11 +1172,39 @@ function InstitutionsCard() {
   );
 }
 
+/** Each link between two of your accounts, with whether the money carried over adds up (docs/FORMULAS.md §9). */
+function Handovers({ list }: { list: Handover[] }) {
+  return (
+    <Card title="Accounts that carry on from another" description="An account that carries on from another under the same number starts from what the other ended with. Where it does not, a statement or a row is missing on one side.">
+      <ul className="flex flex-col divide-y divide-line text-[13px]">
+        {list.map((x) => (
+          <li key={x.newer.accountId} className="py-2">
+            <div>
+              <Link to={`/accounts/${x.newer.accountId}`} className="font-medium text-accent hover:underline">
+                {x.newer.name}
+              </Link>{' '}
+              <span className="text-ink-2">carries on from</span>{' '}
+              <Link to={`/accounts/${x.older.accountId}`} className="font-medium text-accent hover:underline">
+                {x.older.name}
+              </Link>{' '}
+              <span className="text-ink-2">from {formatDate(x.from)}</span>
+            </div>
+            <div className="text-ink-3">
+              <HandoverText h={x} />
+            </div>
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
+}
+
 function Health() {
   const q = useApi<DataHealthResponse>(['data-health'], '/data-health');
   const h = q.data;
   if (!h) return <Loading />;
-  const clean = !h.issues.length && !h.gaps.length && !h.noBalance.length && !h.stale.length && !h.coverageGaps?.some((g) => g.evidence.status === 'unexplained');
+  const clean =
+    !h.issues.length && !h.gaps.length && !h.noBalance.length && !h.stale.length && !h.coverageGaps?.some((g) => g.evidence.status === 'unexplained') && !h.handovers?.some((x) => x.status === 'unexplained') && !h.closedHolding?.length;
   const cov = h.coverage;
   return (
     <div className="flex flex-col gap-5">
@@ -1162,7 +1220,7 @@ function Health() {
           </div>
         </Card>
       )}
-      <CoverageGaps gaps={h.coverageGaps ?? []} confirmations={h.confirmations ?? []} />
+      <CoverageGaps gaps={h.coverageGaps ?? []} confirmations={h.confirmations ?? []} gridFrom={cov?.months[0] ? `${cov.months[0]}-01` : undefined} openTaxYear={h.openTaxYear} />
       {h.issues.length > 0 && (
         <Card title="Problems in the data files" description="Records that don’t match the format are kept untouched and ignored until fixed.">
           <ul className="flex flex-col gap-1.5 text-[13px]">
@@ -1186,6 +1244,24 @@ function Health() {
                 </Link>{' '}
                 <span className="text-ink-3">
                   {formatDate(g.from)} → {formatDate(g.to)}: <span className="sensitive">{money(g.difference)}</span> unexplained
+                </span>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
+      {(h.handovers?.length ?? 0) > 0 && <Handovers list={h.handovers!} />}
+      {(h.closedHolding?.length ?? 0) > 0 && (
+        <Card title="Closed with money still in them" description="Accounts closed while their balance was not £0, with no account carrying on from them: nothing shows the money leaving, so it drops out of your estate the day after.">
+          <ul className="flex flex-col gap-1.5 text-[13px]">
+            {h.closedHolding!.map((c) => (
+              <li key={c.accountId}>
+                <Link to={`/accounts/${c.accountId}`} className="font-medium text-accent hover:underline">
+                  {c.name}
+                </Link>{' '}
+                <span className="text-ink-3">
+                  closed on {formatDate(c.closedOn)} {c.balance > 0 ? 'holding' : 'owing'} <span className="sensitive">{money(Math.abs(c.balance))}</span>
+                  {c.estimated ? ' (estimated: no statement balance to rest on)' : ''}. Record the money leaving (its closing statement), link the account that carries on from it on that account’s page, or correct its closing date.
                 </span>
               </li>
             ))}

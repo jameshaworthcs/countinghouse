@@ -24,7 +24,7 @@ import { CategoryIndex, mapBankCategory } from './categories';
 import { addDays } from './dates';
 import { INSTITUTION_CATALOG, TRANSFER_WORDS } from './institutions';
 import { cleanPayee, GENERIC_PAYEES, matchMerchant, normaliseDescription, saysNothing } from './merchants';
-import type { Account, AccountType, Agreement, CategorisedBy, Institution, Rule } from './schema';
+import type { Account, AccountType, Agreement, CategorisedBy, Institution, Rule, Transaction } from './schema';
 
 export interface CategoriseInput {
   accountId: string;
@@ -249,6 +249,44 @@ export function ownNamePattern(name: string | undefined): RegExp | null {
   return new RegExp(`\\b(?:to|from)\\s+(?:(?:mr|mrs|ms|miss|mx|dr)\\.?\\s+)?(?:${variants.join('|')})\\b`, 'i');
 }
 
+/** How long after closing an account can still be the other side of a row: its last money posting late. */
+export const CLOSED_POSTING_DAYS = 7;
+
+const closedFor = (a: Pick<Account, 'status' | 'closedOn'>) => a.status === 'closed' && a.closedOn !== undefined;
+
+/**
+ * Of the accounts a row names, those it can be on `date`: an open account, or a closed one from its
+ * opening to `CLOSED_POSTING_DAYS` after it closed. Without a date, the open ones (a closed
+ * account's rows are old ones).
+ */
+export function aliveOn<A extends Pick<Account, 'status' | 'openedOn' | 'closedOn'>>(accounts: A[], date: string | undefined): A[] {
+  if (!date) return accounts.filter((a) => !closedFor(a));
+  return accounts.filter((a) => !closedFor(a) || ((!a.openedOn || a.openedOn <= date) && date <= addDays(a.closedOn!, CLOSED_POSTING_DAYS)));
+}
+
+/**
+ * Of the accounts a number or an alias names, those it can be on `date` (`aliveOn`); then, of
+ * several, those open that very day, when any is: a fixed rate and the easy access it became share
+ * one number, and a row is the one's or the other's by when it was.
+ */
+export function openOnTheDay<A extends Pick<Account, 'status' | 'openedOn' | 'closedOn'>>(accounts: A[], date: string | undefined): A[] {
+  const possible = aliveOn(accounts, date);
+  if (!date || possible.length < 2) return possible;
+  const that = possible.filter((a) => (!a.openedOn || a.openedOn <= date) && (!a.closedOn || date <= a.closedOn));
+  return that.length ? that : possible;
+}
+
+/**
+ * The payee a transfer leg takes once linked to `other`, one of your accounts: the other account's
+ * name, when the payee it has names another account of yours (one of two a bank's name fits, or
+ * the account it was read as before the link). Undefined to keep the one it has: yours, or one
+ * that names no account of yours.
+ */
+export function linkedPayee(t: Pick<Transaction, 'payee' | 'payeeSetBy'>, other: Pick<Account, 'id' | 'name'>, accounts: readonly Pick<Account, 'id' | 'name'>[]): string | undefined {
+  if (t.payeeSetBy === 'user' || !t.payee || t.payee === other.name) return undefined;
+  return accounts.some((a) => a.id !== other.id && a.name === t.payee) ? other.name : undefined;
+}
+
 export class Categoriser {
   private readonly rules: CompiledRule[];
   private readonly categories: CategoryIndex;
@@ -286,8 +324,8 @@ export class Categoriser {
     this.cardPurchases = opts.cardPurchases;
     this.accountsById = new Map(accounts.map((a) => [a.id, a]));
     const instById = new Map(institutions.map((i) => [i.id, i]));
+    // Closed accounts too: a row dated while one was open can name it (ownAccountsMentioned).
     this.ownMatchers = accounts
-      .filter((a) => a.status === 'open' || !a.closedOn)
       .map((account) => {
         const aliases: RegExp[] = [];
         for (const alias of account.aliases) {
@@ -332,16 +370,23 @@ export class Categoriser {
    *   investment/pension accounts, where platform names also appear in fund names.
    * - A cash withdrawal names none: the bank in it is the machine's (`type`, the bank's type for the
    *   row, can say it is one).
+   * - By the row's `date`: a closed account only while it was open (`aliveOn`). Of two accounts
+   *   a number or an alias names (a fixed rate and the easy access it became, under one number),
+   *   the one open that day (`openOnTheDay`). A bank's name alone is weaker: it never chooses
+   *   between your open accounts there, so two stay two ("- Chase" may be only a reference).
+   *   Without a date, closed accounts are left out.
    */
-  ownAccountsMentioned(accountId: string, description: string, useInstitutions = true, type?: string): Account[] {
+  ownAccountsMentioned(accountId: string, description: string, useInstitutions = true, type?: string, date?: string): Account[] {
     if (isCashWithdrawal(description, type)) return [];
     const others = this.ownMatchers.filter((m) => m.account.id !== accountId);
     const numbers = longNumbers(description);
     const byNumber = numbers.length ? others.filter((m) => m.number && numbers.some((n) => n.endsWith(m.number!))) : [];
-    if (byNumber.length) return byNumber.map((m) => m.account);
+    if (byNumber.length) return openOnTheDay(byNumber.map((m) => m.account), date);
     const text = normaliseDescription(description);
     const transferish = TRANSFER_WORDS.test(text);
-    return others.filter((m) => m.aliases.some((re) => re.test(text)) || (useInstitutions && (!m.ambiguous || transferish) && m.institution.some((re) => re.test(text)))).map((m) => m.account);
+    const byAlias = others.filter((m) => m.aliases.some((re) => re.test(text)));
+    const byBank = others.filter((m) => !byAlias.includes(m) && useInstitutions && (!m.ambiguous || transferish) && m.institution.some((re) => re.test(text)));
+    return [...openOnTheDay(byAlias.map((m) => m.account), date), ...aliveOn(byBank.map((m) => m.account), date)];
   }
 
   /** Does the description pay you, or come from you, by name? */
@@ -382,7 +427,7 @@ export class Categoriser {
     if (paidIn) return { payee: paidIn === 'cheque' ? CHEQUE_PAID_IN : CASH_PAID_IN };
 
     // 2. Transfers to your own accounts.
-    const mentioned = texts.map((d) => this.ownAccountsMentioned(input.accountId, d, !isWrapper || account?.type === 'cash_isa', input.type)).find((m) => m.length > 0) ?? [];
+    const mentioned = texts.map((d) => this.ownAccountsMentioned(input.accountId, d, !isWrapper || account?.type === 'cash_isa', input.type, input.date)).find((m) => m.length > 0) ?? [];
     if (mentioned.length > 0) {
       const types = new Set(mentioned.map((a) => (account ? transferLegCategory(account.type, a.type, input.amount) : transferCategoryFor(a.type))));
       const [only] = mentioned;

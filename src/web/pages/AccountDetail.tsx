@@ -2,12 +2,13 @@ import { FileText, Pencil, Plus, Trash2, TriangleAlert, Upload } from 'lucide-re
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { ACCOUNT_TYPE_META, balanceModeOf } from '../../shared/accounts';
-import { formatMonth } from '../../shared/dates';
+import { formatMonth, today } from '../../shared/dates';
 import type { AccountDetailResponse, CompanyView, CoverageResponse, PensionArrangementsResponse, TransactionsResponse } from '../../shared/api';
 import { AccountDialog, BalanceDialog } from '../components/AccountForms';
 import { ChartFrame } from '../components/charts/common';
 import { TimeChart } from '../components/charts/TimeChart';
 import { CoverageGrid } from '../components/Coverage';
+import { LinkedAccounts } from '../components/Handover';
 import { InsightsPanel } from '../components/Intel';
 import { TermsCard } from '../components/Terms';
 import { TransactionList } from '../components/TransactionList';
@@ -141,7 +142,8 @@ export default function AccountDetail() {
   const [recording, setRecording] = useState(false);
   const delBalance = useApiMutation((bid: string) => api(`/balances/${bid}`, { method: 'DELETE' }), { onSuccess: () => toast({ tone: 'good', text: 'Balance deleted' }) });
   const delAccount = useApiMutation(() => api(`/accounts/${id}`, { method: 'DELETE' }), { onSuccess: () => void navigate('/accounts') });
-  const close = useApiMutation(() => api(`/accounts/${id}`, { method: 'PATCH', body: { status: 'closed', closedOn: new Date().toISOString().slice(0, 10) } }));
+  // Today where you are (shared/dates.ts), not in UTC: just after midnight in summer that is still yesterday.
+  const close = useApiMutation(() => api(`/accounts/${id}`, { method: 'PATCH', body: { status: 'closed', closedOn: today() } }));
 
   if (q.error) return <ErrorNote error={q.error} />;
   if (!q.data) return <Loading />;
@@ -194,6 +196,7 @@ export default function AccountDetail() {
         )}
       </div>
 
+      <LinkedAccounts links={q.data.links} />
       <InsightsPanel page="accounts" accountId={id} title="Agent notes on this account" className="mb-5" />
       {gaps.length > 0 && (
         <Callout tone="warn" className="mb-5" title={`${gaps.length} gap${gaps.length > 1 ? 's' : ''} in this account’s history`}>

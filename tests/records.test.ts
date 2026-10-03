@@ -243,9 +243,10 @@ describe('the capture list', () => {
 
     const tx = (date: string, n: number) => ({ id: `tx_${n.toString(16).padStart(16, '0')}`, accountId: 'bank', date, amount: -1, currency: 'GBP', description: 'x', source: {}, createdAt: stamp(0) });
     await store.addTransactions([tx('2026-04-06', 1), tx('2026-05-31', 2)], 'test');
-    // "Up to now" is up to about a month ago (25 August), so rows to 31 May cover only part of it.
+    // "Up to now" is up to the end of the month before last (31 July), by when every statement for
+    // those days is out, so rows to 31 May cover only part of it.
     list = captureList(store, '2026-09-29');
-    expect(list.items.find((i) => i.id === 'bank')!.asks[0]).toMatchObject({ state: 'partial', progress: 'Missing 1 Jun 2026 to 25 Aug 2026.' });
+    expect(list.items.find((i) => i.id === 'bank')!.asks[0]).toMatchObject({ state: 'partial', progress: 'Missing 1 Jun – 31 Jul 2026.' });
     await store.addTransactions([tx('2026-07-01', 3), tx('2026-08-28', 4)], 'test');
     // The span of rows stands in for statement periods here (no import records), so it is covered through.
     expect(captureList(store, '2026-09-29').items.find((i) => i.id === 'bank')!.asks[0]!.state).toBe('done');
@@ -277,7 +278,7 @@ describe('the capture list', () => {
     (store as unknown as { state: { imports: unknown[] } }).state.imports.push(summary('2026-04-05', '2026-05-04', 1), summary('2026-06-05', '2026-09-04', 2));
     const ask = captureList(store, '2026-09-29').items.find((i) => i.id === 'bank')!.asks[0]!;
     expect(ask.state).toBe('partial');
-    expect(ask.progress).toMatch(/Missing 5 May 2026 to 4 Jun 2026/);
+    expect(ask.progress).toMatch(/Missing 5 May – 4 Jun 2026/);
   });
 });
 

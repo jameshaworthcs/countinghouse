@@ -227,6 +227,12 @@ export function formatDate(date: ISODate, opts: { year?: boolean } = {}): string
   return opts.year === false ? base : `${base} ${m[1]}`;
 }
 
+/** A stretch of days: "13 Sep 2025", "6 Apr – 31 Dec 2024", "6 Apr 2024 – 29 Jan 2025". */
+export function formatSpan(from: ISODate, to: ISODate): string {
+  if (from === to) return formatDate(from);
+  return `${formatDate(from, { year: from.slice(0, 4) !== to.slice(0, 4) })} – ${formatDate(to)}`;
+}
+
 /** "Sep 2026" from "2026-09" or a full date. */
 export function formatMonth(monthOrDate: string, opts: { short?: boolean } = {}): string {
   const y = monthOrDate.slice(0, 4);

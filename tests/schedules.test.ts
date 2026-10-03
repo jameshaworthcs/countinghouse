@@ -286,6 +286,9 @@ describe('importing', () => {
           periodEnd: '2026-10-01',
           openingBalance: 0,
           closingBalance: 1.23,
+          // The rate as at the statement's end: the easy-access account's.
+          interestRate: 2.25,
+          terms: { rates: [{ applies: 'interest', rate: 2.25, label: 'Interest Rate' }] },
           transactions: [
             { date: '2023-09-14', amount: 500, description: 'Faster Payment', balanceAfter: 500 },
             { date: '2023-09-14', amount: 18750.4, description: 'Faster Payment', balanceAfter: 19250.4 },
@@ -326,13 +329,18 @@ describe('importing', () => {
       await start();
       const draft = await draftOf(id);
       const [older, newer] = draft.sections;
-      expect(older).toMatchObject({ target: { mode: 'existing', accountId: 'fixed' }, balance: 20174.42, balanceDate: '2024-09-13' });
+      // The older part ends on the fixed rate's last day, with the balance its rows reach, and takes
+      // nothing the statement gives as at its end: that is the easy-access account's.
+      expect(older).toMatchObject({ target: { mode: 'existing', accountId: 'fixed' }, periodEnd: '2025-09-12', balance: 20174.42, balanceDate: '2025-09-12' });
+      expect(older).not.toHaveProperty('interestRate');
+      expect(older).not.toHaveProperty('terms');
+      expect(older!.matchReason).toBe('The statement’s rows before 13 Sep 2025: Example Easy Access carries on from Example 2 Year Fixed from that day');
       expect(older!.transactions.map((t) => [t.date, t.status])).toEqual([
         ['2023-09-14', 'duplicate'],
         ['2023-09-14', 'duplicate'],
         ['2024-09-13', 'new'],
       ]);
-      expect(newer).toMatchObject({ target: { mode: 'existing', accountId: 'easy' }, openingBalance: 20174.42, balance: 1.23 });
+      expect(newer).toMatchObject({ target: { mode: 'existing', accountId: 'easy' }, openingBalance: 20174.42, balance: 1.23, interestRate: 2.25, terms: { rates: [{ applies: 'interest', rate: 2.25 }] } });
       expect(newer!.transactions.map((t) => t.date)).toEqual(['2025-09-13', '2025-10-02']);
       expect(draft.notes.join(' ')).toMatch(/Split at 13 Sep 2025, where Example Easy Access carries on from Example 2 Year Fixed/);
       expect(svc.readiness(svc.getPending(id)!).reasons).not.toContain('rows outside the account’s open dates');

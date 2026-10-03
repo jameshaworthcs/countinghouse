@@ -1946,6 +1946,12 @@ const changeUnion = <K extends z.ZodType<string | undefined>>(key: K) =>
      */
     z.object({ key, kind: z.literal('set_terms'), why: ChangeWhySchema, account: SlugSchema, asOf: ISODateSchema, importId: z.string().regex(/^imp_\d{8}_\d{6}_[0-9a-f]{4}$/), terms: TermsSchema.pick({ rates: true, limit: true, minimumPayment: true, paymentDue: true }) }),
     /**
+     * Take away the terms one of an account's documents (an import) was read as giving it on a day,
+     * when they are not that account's: a statement split at a link gave the older account the rate
+     * it prints for the newer.
+     */
+    z.object({ key, kind: z.literal('remove_terms'), why: ChangeWhySchema, account: SlugSchema, asOf: ISODateSchema, importId: z.string().regex(/^imp_\d{8}_\d{6}_[0-9a-f]{4}$/) }),
+    /**
      * Add a company you hold shares in, from its documents (a share certificate, its accounts): your
      * holding, and its value as a new "other asset" account in your estate, valued on `valuation.asOf`.
      */

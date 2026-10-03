@@ -1,7 +1,7 @@
 import { Link } from 'react-router';
 import type { CoverageGapView, CoverageResponse, DataHealthResponse } from '../../shared/api';
 import { confirmableTo, settledStretches, settledThrough } from '../../shared/coverage';
-import { formatDate, today } from '../../shared/dates';
+import { formatDate, formatSpan, today } from '../../shared/dates';
 import type { BalanceEvidence } from '../../shared/schema';
 import { api, useApiMutation } from '../lib/api';
 import { cn, formatMonth, money, plural } from '../lib/format';
@@ -104,10 +104,6 @@ export function CoverageGrid({ cov, only }: { cov: CoverageResponse; only?: stri
   );
 }
 
-function span(from: string, to: string): string {
-  return from === to ? formatDate(from) : `${formatDate(from)} – ${formatDate(to)}`;
-}
-
 /** What the balances say about a stretch, in words (docs/FORMULAS.md §3, "Balance evidence"). */
 function EvidenceText({ e, to }: { e: BalanceEvidence; to: string }) {
   if (e.status === 'adds-up') {
@@ -128,11 +124,30 @@ function EvidenceText({ e, to }: { e: BalanceEvidence; to: string }) {
   return <span>{e.from ? `No balance after ${formatDate(e.from)} to check it against` : 'No balance before it to check it against'}</span>;
 }
 
+/** What is known about a stretch: the account's lack of data, its opening date, or its balances. */
+function StretchText({ g }: { g: CoverageGapView }) {
+  if (g.noData) return <span>No data at all for this account: import its statements, or confirm nothing is missing if it was not used.</span>;
+  if (g.openingUnknown) return <span>Before its data starts, and it has no opening date: set the date on its page if it opened later, or import statements from {formatDate(g.from)}.</span>;
+  if (g.valuations) return <span>It is valued, so its balances cannot show what was paid in or out: import a statement or export for these days, or confirm nothing was.</span>;
+  return <EvidenceText e={g.evidence} to={g.evidence.through ?? g.to} />;
+}
+
 /**
  * The stretches no document covers, with what their balances say, and the ones you confirmed
- * nothing is missing from. A confirmed stretch counts as covered.
+ * nothing is missing from. A confirmed stretch counts as covered. Those before the coverage grid's
+ * months (`gridFrom`) are the days the oldest open tax year's figures rest on, listed apart.
  */
-export function CoverageGaps({ gaps, confirmations }: { gaps: CoverageGapView[]; confirmations: NonNullable<DataHealthResponse['confirmations']> }) {
+export function CoverageGaps({
+  gaps,
+  confirmations,
+  gridFrom,
+  openTaxYear,
+}: {
+  gaps: CoverageGapView[];
+  confirmations: NonNullable<DataHealthResponse['confirmations']>;
+  gridFrom?: string | undefined;
+  openTaxYear?: DataHealthResponse['openTaxYear'];
+}) {
   const now = today();
   const toast = useToast();
   const confirm = useApiMutation((stretches: { accountId: string; from: string; to: string }[]) => api<{ added: unknown[] }>('/coverage/confirmations', { method: 'POST', body: { stretches } }), {
@@ -141,11 +156,51 @@ export function CoverageGaps({ gaps, confirmations }: { gaps: CoverageGapView[];
   });
   const withdraw = useApiMutation((id: string) => api(`/coverage/confirmations/${id}`, { method: 'DELETE' }), { onSuccess: () => toast({ tone: 'good', text: 'Withdrawn' }) });
   // Days up to today with nothing after the last balance yet: newer documents will cover them.
-  const waiting = gaps.filter((g) => g.to >= now && g.evidence.status === 'no-balance');
+  const waiting = gaps.filter((g) => g.to >= now && g.evidence.status === 'no-balance' && !g.noData && !g.openingUnknown);
   const listed = gaps.filter((g) => !waiting.includes(g));
+  const recent = listed.filter((g) => !gridFrom || g.to >= gridFrom);
+  const earlier = listed.filter((g) => !recent.includes(g));
   // "Confirm all" keeps to settled days; later ones wait for their statements (the monthly update).
   const settled = settledThrough(now);
   const addingUp = settledStretches(listed, now);
+  const row = (g: CoverageGapView) => {
+    const to = confirmableTo(g, now);
+    const late = to !== null && to > settled ? (g.from > settled ? 'all' : g.evidence.status === 'adds-up' ? 'part' : null) : null;
+    return (
+      <li key={`${g.accountId}-${g.from}`} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 py-2">
+        <div className="min-w-0">
+          <Link to={`/accounts/${g.accountId}`} className="font-medium text-accent hover:underline">
+            {g.name}
+          </Link>{' '}
+          <span className="text-ink-2">
+            {formatSpan(g.from, g.to)} ({plural(g.days, 'day')}
+            {g.rows ? `, ${plural(g.rows, 'row')} recorded` : ''})
+          </span>
+          {to && to < g.to && (
+            <span className="font-medium text-ink">
+              {' '}
+              · {g.evidence.status === 'adds-up' ? 'balances confirm' : 'confirms'} to {formatDate(to)}
+            </span>
+          )}
+          <div className="text-ink-3">
+            <StretchText g={g} />
+          </div>
+          {late && (
+            <div className="text-ink-3 italic">
+              {late === 'all'
+                ? 'Recent: its statements are still due, through the monthly update. Confirm it yourself only if you know none is coming.'
+                : `Confirming all takes it to ${formatDate(settled)}; the days after are recent, and their statements are still due.`}
+            </div>
+          )}
+        </div>
+        {to && (
+          <Button size="sm" loading={confirm.isPending} onClick={() => confirm.mutate([{ accountId: g.accountId, from: g.from, to }])}>
+            Confirm nothing missing
+          </Button>
+        )}
+      </li>
+    );
+  };
   return (
     <>
       {gaps.length > 0 && (
@@ -160,46 +215,19 @@ export function CoverageGaps({ gaps, confirmations }: { gaps: CoverageGapView[];
             )
           }
         >
-          <ul className="flex flex-col divide-y divide-line text-[13px]">
-            {listed.map((g) => {
-              const to = confirmableTo(g, now);
-              const recent = to !== null && to > settled ? (g.from > settled ? 'all' : g.evidence.status === 'adds-up' ? 'part' : null) : null;
-              return (
-                <li key={`${g.accountId}-${g.from}`} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 py-2">
-                  <div className="min-w-0">
-                    <Link to={`/accounts/${g.accountId}`} className="font-medium text-accent hover:underline">
-                      {g.name}
-                    </Link>{' '}
-                    <span className="text-ink-2">
-                      {span(g.from, g.to)} ({plural(g.days, 'day')}
-                      {g.rows ? `, ${plural(g.rows, 'row')} recorded` : ''})
-                    </span>
-                    {to && to < g.to && (
-                      <span className="font-medium text-ink">
-                        {' '}
-                        · {g.evidence.status === 'adds-up' ? 'balances confirm' : 'confirms'} to {formatDate(to)}
-                      </span>
-                    )}
-                    <div className="text-ink-3">
-                      <EvidenceText e={g.evidence} to={g.evidence.through ?? g.to} />
-                    </div>
-                    {recent && (
-                      <div className="text-ink-3 italic">
-                        {recent === 'all'
-                          ? 'Recent: its statements are still due, through the monthly update. Confirm it yourself only if you know none is coming.'
-                          : `Confirming all takes it to ${formatDate(settled)}; the days after are recent, and their statements are still due.`}
-                      </div>
-                    )}
-                  </div>
-                  {to && (
-                    <Button size="sm" loading={confirm.isPending} onClick={() => confirm.mutate([{ accountId: g.accountId, from: g.from, to }])}>
-                      Confirm nothing missing
-                    </Button>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
+          {recent.length > 0 && <ul className="flex flex-col divide-y divide-line text-[13px]">{recent.map(row)}</ul>}
+          {earlier.length > 0 && (
+            <details className={cn('text-[13px]', recent.length > 0 && 'mt-2 border-t border-line pt-2')} open={!recent.length}>
+              <summary className="cursor-pointer font-medium text-ink-2 hover:text-ink">
+                Earlier, back to {formatDate(earlier.reduce((m, g) => (g.from < m ? g.from : m), earlier[0]!.from))}: {plural(earlier.length, 'stretch', 'stretches')}
+              </summary>
+              <p className="mt-1 text-ink-3">
+                Before the coverage grid’s months.
+                {openTaxYear && ` They still matter: a ${openTaxYear.label} return can be sent or corrected until ${formatDate(openTaxYear.correctBy)}, and its interest, ISA and pension figures rest on these days.`}
+              </p>
+              <ul className="flex flex-col divide-y divide-line">{earlier.map(row)}</ul>
+            </details>
+          )}
           {waiting.length > 0 && (
             <p className={cn('text-[13px] text-ink-3', listed.length > 0 && 'mt-2 border-t border-line pt-2')}>
               Waiting for newer documents:{' '}
@@ -226,7 +254,7 @@ export function CoverageGaps({ gaps, confirmations }: { gaps: CoverageGapView[];
                   <Link to={`/accounts/${c.accountId}`} className="font-medium text-accent hover:underline">
                     {c.name}
                   </Link>{' '}
-                  <span className="text-ink-2">{span(c.from, c.to)}</span> <span className="text-ink-3">· confirmed {formatDate(c.confirmedAt.slice(0, 10))}</span>
+                  <span className="text-ink-2">{formatSpan(c.from, c.to)}</span> <span className="text-ink-3">· confirmed {formatDate(c.confirmedAt.slice(0, 10))}</span>
                   <div className="text-ink-3">
                     {c.now.status === 'unexplained' ? (
                       <StatusBadge status="warn">

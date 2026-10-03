@@ -2,7 +2,7 @@
 // transfers, archive the original document and record the import. Everything lands in one git commit.
 
 import { ACCOUNT_TYPE_META, slugify } from '../../shared/accounts';
-import { transferLegCategory } from '../../shared/categorise';
+import { linkedPayee, transferLegCategory } from '../../shared/categorise';
 import { fullerName } from '../../shared/funds';
 import { catalogInstitution, findInstitution } from '../../shared/institutions';
 import { tidyPlace } from '../../shared/places';
@@ -184,6 +184,10 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
       if (match && !match.transferGroup && match.accountId !== account.id && !transferLinks.some((l) => l.otherId === match.id)) {
         tx.transferGroup = transferGroupId(id, match.id);
         transferLinks.push({ newId: id, otherId: match.id, account });
+        // A payee naming another account of yours than the one it is linked with takes that one's name.
+        const other = store.account(match.accountId);
+        const payee = other ? linkedPayee(tx, other, store.accounts) : undefined;
+        if (payee) tx.payee = payee;
       }
       if (row.pendingLink && row.pendingLink.importId !== record.id) heldForLink.add(id);
       byKey.set(row.key, { tx, row, account });
@@ -204,6 +208,8 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
     ] as const) {
       a.tx.transferGroup = group;
       a.tx.counterpartyAccountId = b.account.id;
+      const payee = linkedPayee(a.tx, b.account, [...store.accounts, ...toCreate.map((x) => x.account)]);
+      if (payee) a.tx.payee = payee;
       if (a.row.categorisedBy !== 'user') {
         a.tx.category = transferLegCategory(a.account.type, b.account.type, a.tx.amount);
         a.tx.categorisedBy = 'transfer';
@@ -482,6 +488,8 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
           patch.category = transferLegCategory(otherAccount.type, account.type, other.amount);
           patch.categorisedBy = 'transfer';
         }
+        const payee = linkedPayee(other, account, store.accounts);
+        if (payee) patch.payee = payee;
         return { id: otherId, patch };
       }),
       `import: link ${transferLinks.length} transfer(s)`,

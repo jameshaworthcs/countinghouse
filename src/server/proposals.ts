@@ -21,7 +21,7 @@ import type { ProposalBalance, ProposalChangeView, ProposalCheckResponse, Propos
 import { ACCOUNT_TYPE_META } from '../shared/accounts';
 import { agreementPattern, isScheduledPayment } from '../shared/agreements';
 import { CategoryIndex } from '../shared/categories';
-import { Categoriser, isWrapperAccount, transferLegCategory } from '../shared/categorise';
+import { Categoriser, isWrapperAccount, linkedPayee, transferLegCategory } from '../shared/categorise';
 import { addDays, diffDays, formatDate, today } from '../shared/dates';
 import { formatMoney, fromMinor, toMinor } from '../shared/money';
 import { sameTerms, type TermsContent } from '../shared/terms';
@@ -53,6 +53,11 @@ export class ProposalProblems extends StoreError {
   ) {
     super(message, status);
   }
+}
+
+/** What a terms record says, without where it is kept. */
+function termsContent(t: Terms): TermsContent {
+  return { rates: t.rates, ...(t.limit !== undefined ? { limit: t.limit } : {}), ...(t.minimumPayment !== undefined ? { minimumPayment: t.minimumPayment } : {}), ...(t.paymentDue ? { paymentDue: t.paymentDue } : {}) };
 }
 
 interface ChangeResult {
@@ -233,7 +238,9 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
         for (const [t, self, other] of [[a, accA, accB], [b, accB, accA]] as const) {
           // A category you set stays (as when an import links a transfer).
           const category = t.categorisedBy === 'user' ? t.category : transferLegCategory(self.type, other.type, t.amount);
-          patch(t, { transferGroup: group, counterpartyAccountId: other.id, ...(t.categorisedBy !== 'user' ? { category, categorisedBy: 'transfer' as const } : {}) });
+          // A payee naming another account of yours than this one takes this one's name.
+          const payee = linkedPayee(t, other, store.accounts);
+          patch(t, { transferGroup: group, counterpartyAccountId: other.id, ...(t.categorisedBy !== 'user' ? { category, categorisedBy: 'transfer' as const } : {}), ...(payee ? { payee } : {}) });
           after[t.id] = { ...(category ? { category } : {}), transferWith: other.id };
         }
         groups.set(group, [a.id, b.id]);
@@ -449,7 +456,20 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
         if (was && sameTerms(was, c.terms)) return { alreadySo: true };
         if (was && !out.terms.has(id)) out.termsRemoved.set(id, was);
         out.terms.set(id, TermsSchema.parse({ id, accountId: acc.id, asOf: c.asOf, ...c.terms, source, createdAt: was?.createdAt ?? nowISO() }));
-        return { terms: { fileName, ...(was ? { before: { rates: was.rates, ...(was.limit !== undefined ? { limit: was.limit } : {}), ...(was.minimumPayment !== undefined ? { minimumPayment: was.minimumPayment } : {}), ...(was.paymentDue ? { paymentDue: was.paymentDue } : {}) } } : {}) } };
+        return { terms: { fileName, ...(was ? { before: termsContent(was) } : {}) } };
+      }
+      case 'remove_terms': {
+        const acc = account(c.account);
+        if (!acc) return { problem: `Account ${c.account} is not in your data.` };
+        const imp = store.imports.find((i) => i.id === c.importId);
+        if (!imp) return { problem: `Import ${c.importId} is not one of your documents.` };
+        const id = termsId(acc.id, c.asOf, { importId: imp.id, ...(imp.documentId ? { documentId: imp.documentId } : {}) });
+        const was = out.terms.get(id) ?? (out.termsRemoved.has(id) ? undefined : store.terms(acc.id).find((t) => t.id === id));
+        // Gone already, or taken away by another change here: nothing left to do.
+        if (!was) return { alreadySo: true };
+        if (!out.terms.has(id)) out.termsRemoved.set(id, was);
+        out.terms.delete(id);
+        return { terms: { fileName: imp.fileName, before: termsContent(was) } };
       }
       case 'add_company': {
         const there = out.companies.get(c.company.id) ?? store.company(c.company.id);
@@ -696,6 +716,7 @@ function namedRows(c: ProposedChange): string[] {
     case 'add_pension_arrangement':
     case 'add_agreement':
     case 'set_terms':
+    case 'remove_terms':
     case 'add_rule':
     case 'remove_rule':
     case 'add_category':
@@ -969,7 +990,7 @@ export class ProposalService extends EventEmitter {
       };
     }
     for (const c of p.changes) {
-      if (c.kind === 'set_account_dates' || c.kind === 'set_terms') accountIds.add(c.account);
+      if (c.kind === 'set_account_dates' || c.kind === 'set_terms' || c.kind === 'remove_terms') accountIds.add(c.account);
       if (c.kind === 'link_accounts') accountIds.add(c.account).add(c.continues);
     }
     // A balance a change moves, as it is now (a decided proposal: as it was before it).
@@ -1013,9 +1034,18 @@ export class ProposalService extends EventEmitter {
       const r = (pending ? undefined : before?.rules?.find((x) => x.id === c.rule)) ?? this.store.rules.find((x) => x.id === c.rule);
       if (r) rules[r.id] = { ...(r.name ? { name: r.name } : {}), match: r.match, ...(r.set.category ? { category: r.set.category } : {}) };
     }
+    // Terms a change takes away, as they are now (a decided proposal: as they were before it), by change.
+    const removedTerms: NonNullable<ProposalView['removedTerms']> = {};
+    for (const c of p.changes) {
+      if (c.kind !== 'remove_terms') continue;
+      const imp = this.store.imports.find((i) => i.id === c.importId);
+      const id = termsId(c.account, c.asOf, { importId: c.importId, ...(imp?.documentId ? { documentId: imp.documentId } : {}) });
+      const t = (pending ? undefined : before?.terms?.find((x) => x.id === id)) ?? this.store.terms(c.account).find((x) => x.id === id);
+      if (t) removedTerms[c.key] = { ...termsContent(t), ...(imp ? { fileName: imp.fileName } : {}) };
+    }
     const ready = changes.filter((c) => !c.problem && !c.alreadySo).length;
     const done = outcome !== undefined && leavesNothing(this.store, p, outcome);
-    return { proposal, changes, rows, balances, accounts, ...(Object.keys(rules).length ? { rules } : {}), ready, problems: changes.filter((c) => c.problem).length, ...(done ? { alreadyDone: true as const } : {}) };
+    return { proposal, changes, rows, balances, accounts, ...(Object.keys(rules).length ? { rules } : {}), ...(Object.keys(removedTerms).length ? { removedTerms } : {}), ready, problems: changes.filter((c) => c.problem).length, ...(done ? { alreadyDone: true as const } : {}) };
   }
 
   /** Close the waiting proposals your data already says all of. The caller holds the lock. */

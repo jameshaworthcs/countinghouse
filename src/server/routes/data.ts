@@ -60,6 +60,7 @@ import { taxDocuments } from '../analytics/taxdocuments';
 import { matchEmployment } from '../employments';
 import { StoreError } from '../store';
 import { accountSummary } from '../analytics/estate';
+import { handoverOf } from '../analytics/handover';
 import { categoriseQueue, payeeRuleMatch } from '../analytics/queue';
 
 const NewAccountBody = z.object({
@@ -369,8 +370,13 @@ export function dataRoutes(ctx: AppContext): Hono {
     const engine = ctx.analytics.engine;
     const first = engine.firstDataDate(account.id);
     const series = first ? ctx.analytics.estateSeries(first, today()).dates.map((d) => ({ date: d, value: engine.balanceOn(account.id, d)?.value ?? null })) : [];
+    // The account it carries on from, and the one that carries on from it (docs/FORMULAS.md §9).
+    const carriesOnFrom = handoverOf(store, engine, account) ?? undefined;
+    const successor = store.accounts.find((a) => a.continues?.accountId === account.id);
+    const carriedOnAs = successor ? (handoverOf(store, engine, successor) ?? undefined) : undefined;
     const body: AccountDetailResponse = {
       account,
+      ...(carriesOnFrom || carriedOnAs ? { links: { ...(carriesOnFrom ? { carriesOnFrom } : {}), ...(carriedOnAs ? { carriedOnAs } : {}) } } : {}),
       summary: accountSummary(store, engine, account),
       balances: store.balances(account.id),
       holdings: store.holdings(account.id),
@@ -732,9 +738,12 @@ export function dataRoutes(ctx: AppContext): Hono {
     const result = await enrich(store, { dryRun: true, detail: true });
     const groups = new Map<string, { group: EnrichGroup; byPayee: Map<string, Transaction[]> }>();
     let payeesTidied = 0;
+    const named = new Set(result.accountPayees ?? []);
+    const accountPayees: EnrichPreview['accountPayees'] = [];
     for (const ch of result.changes ?? []) {
       if (!ch.category) {
-        if (ch.payee) payeesTidied++;
+        if (ch.payee && named.has(ch.id) && ch.payee.to) accountPayees.push({ id: ch.id, accountId: ch.accountId, date: ch.date, amount: ch.amount, description: ch.description, from: ch.payee.from, to: ch.payee.to });
+        else if (ch.payee) payeesTidied++;
         continue;
       }
       const key = `${ch.category.from ?? ''}|${ch.category.to ?? ''}|${ch.category.by ?? ''}`;
@@ -751,6 +760,7 @@ export function dataRoutes(ctx: AppContext): Hono {
       recategorised: result.recategorised,
       transfersLinked: result.transfersLinked,
       payeesTidied,
+      accountPayees: accountPayees.sort((a, b) => b.date.localeCompare(a.date) || a.id.localeCompare(b.id)),
       groups: [...groups.values()]
         .map(({ group, byPayee }) => ({
           ...group,

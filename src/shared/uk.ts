@@ -462,6 +462,24 @@ export function saDeadlines(ty: TaxYear): SaDeadline[] {
 /** A Self Assessment bill under this can be collected through your tax code (GOV.UK, "Pay your Self Assessment tax bill: through your tax code"). */
 export const codingOutLimit = 3000;
 
+/**
+ * The last day a return for `ty` can be corrected: 12 months after its 31 January online deadline
+ * (GOV.UK, "Correct a Self Assessment tax return": 31 January 2027 for 2024/25).
+ */
+export function saCorrectBy(ty: TaxYear): ISODate {
+  return `${ty.startYear + 3}-01-31`;
+}
+
+/**
+ * The oldest tax year whose return can still be sent or corrected on `on` (`saCorrectBy`): its
+ * figures, and the data they rest on, can still matter. 2024/25 on any day of October 2026.
+ */
+export function oldestOpenTaxYear(on: ISODate): TaxYear {
+  let ty = taxYearOf(on);
+  while (saCorrectBy(taxYear(ty.startYear - 1)) >= on) ty = taxYear(ty.startYear - 1);
+  return ty;
+}
+
 export function statePensionFullYearly(ty: TaxYear): number {
   return Math.round(taxYearParams(ty).statePensionFullWeekly * 52 * 100) / 100;
 }

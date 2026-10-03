@@ -336,14 +336,33 @@ export interface AllowanceLine {
   transactionIds?: string[];
 }
 
+/**
+ * Days an account's data does not cover that a figure needs (docs/FORMULAS.md §3, "Missing days"),
+ * and what its balances say about them.
+ */
+export interface MissingDaysView {
+  accountId: string;
+  name: string;
+  from: string;
+  to: string;
+  days: number;
+  /** The account has no data at all. */
+  noData?: boolean;
+  /** It has no opening date and its data starts later: setting the date settles these days if it opened then. */
+  openingUnknown?: boolean;
+  /** What its balances say: days that `adds-up` can be confirmed in Settings → Data health. */
+  evidence: BalanceEvidence['status'];
+}
+
 export interface AllowancesResponse {
   taxYear: { label: string; start: string; end: string; daysLeft: number | null; current: boolean };
   /**
    * `incomplete` (here and below): which accounts' data does not cover the tax year, so the amount
-   * used is a minimum and what is left a maximum. Null when the year is covered.
+   * used is a minimum and what is left a maximum, in a sentence; null when the year is covered.
+   * `missing`: the same days, account by account.
    */
-  isa: { allowance: number; used: number; remaining: number; cashLimit: number; cashUsed: number; lines: AllowanceLine[]; notes: string[]; incomplete: string | null };
-  lisa: { allowance: number; contributed: number; remaining: number; bonusReceived: number; bonusExpected: number; lines: AllowanceLine[]; notes: string[]; incomplete: string | null } | null;
+  isa: { allowance: number; used: number; remaining: number; cashLimit: number; cashUsed: number; lines: AllowanceLine[]; notes: string[]; incomplete: string | null; missing: MissingDaysView[] };
+  lisa: { allowance: number; contributed: number; remaining: number; bonusReceived: number; bonusExpected: number; lines: AllowanceLine[]; notes: string[]; incomplete: string | null; missing: MissingDaysView[] } | null;
   pension: {
     annualAllowance: number;
     personal: number;
@@ -357,9 +376,10 @@ export interface AllowancesResponse {
     lines: AllowanceLine[];
     notes: string[];
     incomplete: string | null;
+    missing: MissingDaysView[];
   };
   /** The allowance follows the tax band worked out from the year's income (`taxBand`). */
-  savings: { interest: number; allowance: number; band: TaxBand; bandBasis: TaxBandEstimate['basis']; remaining: number; lines: AllowanceLine[]; notes: string[]; incomplete: string | null };
+  savings: { interest: number; allowance: number; band: TaxBand; bandBasis: TaxBandEstimate['basis']; remaining: number; lines: AllowanceLine[]; notes: string[]; incomplete: string | null; missing: MissingDaysView[] };
   dividends: { amount: number; allowance: number; remaining: number; lines: AllowanceLine[] };
   taxBand: TaxBandEstimate;
   ruleNotes: string[];
@@ -592,12 +612,60 @@ export interface CoverageGapView {
   /** Rows recorded inside it. */
   rows: number;
   evidence: BalanceEvidence;
+  /** The account has no data at all. */
+  noData?: boolean;
+  /** It has no opening date and its data starts later: setting the date settles this if it opened then. */
+  openingUnknown?: boolean;
+  /** A valued account (an ISA, a pension): its balances cannot show what was paid in or out. */
+  valuations?: boolean;
+}
+
+/**
+ * What carried over when one account took over from another (`Account.continues`): the older one's
+ * balance at the end of its last day against the newer one's at the start of its first (docs/FORMULAS.md §9).
+ */
+export interface Handover {
+  older: { accountId: string; name: string };
+  newer: { accountId: string; name: string };
+  /** The newer account's first day. */
+  from: string;
+  /** The older account's balance at the end of the day before `from`, when known. */
+  closing: number | null;
+  /** The newer account's balance at the start of `from`, before that day's rows, when known. */
+  opening: number | null;
+  /** opening − closing, when both are known. */
+  difference: number | null;
+  /** `unknown`: a side has no data then, or is valued (`valued`). */
+  status: 'adds-up' | 'unexplained' | 'unknown';
+  /** A side is valued (it moves with markets), so what carried over is not checked. */
+  valued?: boolean;
+  /** A side's balance is worked out with no statement balance to rest on. */
+  estimated: boolean;
+}
+
+/** A closed account that still held money (or owed it) on its last day, with nothing carrying it on. */
+export interface ClosedHolding {
+  accountId: string;
+  name: string;
+  closedOn: string;
+  balance: number;
+  estimated: boolean;
 }
 
 export interface DataHealthResponse {
   coverage?: CoverageResponse;
-  /** Stretches in the coverage grid's months that nothing covers, with what their balances say. */
+  /** Each link between your accounts, with what carried over. */
+  handovers?: Handover[];
+  /** Closed accounts that still held money on their last day, with no account carrying it on. */
+  closedHolding?: ClosedHolding[];
+  /**
+   * Stretches that nothing covers, with what their balances say (docs/FORMULAS.md §3, "Missing
+   * days"): from the coverage grid's first month, and for the accounts a tax figure rests on, from
+   * the start of the oldest tax year still open (`openTaxYear`).
+   */
   coverageGaps?: CoverageGapView[];
+  /** The oldest tax year whose return can still be sent or corrected, and until when. */
+  openTaxYear?: { label: string; start: string; correctBy: string };
   /** The stretches you confirmed nothing is missing from, with what their balances say now. */
   confirmations?: (CoverageConfirmation & { name: string; now: BalanceEvidence })[];
   issues: { file: string; severity: 'error' | 'warning'; message: string }[];
@@ -627,6 +695,8 @@ export interface BootstrapResponse {
 
 export interface AccountDetailResponse {
   account: Account;
+  /** The account it carries on from, and the one that carries on from it, with what carried over. */
+  links?: { carriesOnFrom?: Handover; carriedOnAs?: Handover };
   summary: AccountSummary;
   balances: BalanceSnapshot[];
   holdings: HoldingsSnapshot[];
@@ -810,6 +880,8 @@ export interface ProposalView {
   accounts: Record<string, { id: string; name: string; type: Account['type']; status: Account['status']; openedOn?: string; closedOn?: string; institutionName?: string }>;
   /** Every rule a change removes, as it is now (as it was, once decided), by id. */
   rules?: Record<string, { name?: string; match: Rule['match']; category?: string }>;
+  /** The terms each `remove_terms` change takes away, as they are now (as they were, once decided), by change key. */
+  removedTerms?: Record<string, Pick<Terms, 'rates' | 'limit' | 'minimumPayment' | 'paymentDue'> & { fileName?: string }>;
   /** Changes that can be applied now, and those that cannot. */
   ready: number;
   problems: number;
@@ -1300,6 +1372,11 @@ export interface EnrichPreview {
   transfersLinked: number;
   /** Rows whose payee alone would be tidied. */
   payeesTidied: number;
+  /**
+   * Transfers whose payee names another account of yours than the one they are linked with, and
+   * would take that one's name (`linkedPayee`): each listed, as any of them can be left as it is.
+   */
+  accountPayees: { id: string; accountId: string; date: string; amount: number; description: string; from: string | null; to: string }[];
   groups: EnrichGroup[];
 }
 

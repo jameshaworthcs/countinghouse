@@ -3,20 +3,13 @@
 // records in capture.json, written through records.ts; this only works out where each one stands.
 
 import type { CaptureAskView, CaptureItemView, CaptureResponse } from '../../shared/api';
-import { addDays, diffDays, formatDate, maxDate, today, type ISODate } from '../../shared/dates';
+import { settledThrough } from '../../shared/coverage';
+import { formatDate, formatSpan, today, type ISODate } from '../../shared/dates';
 import type { CaptureAsk, CaptureItem } from '../../shared/schema';
 import { parseTaxYear } from '../../shared/uk';
 import type { Store } from '../store';
-import { wrapperDataSpan } from './allowances';
-import { complement } from './coverage';
+import { coveredIntervals, missingDays } from './coverage';
 import { isPayslipFigure, payerKey } from './pay';
-
-/** Gaps this short between statements (or at the ends of the period) do not count as missing. */
-const GAP_SLACK_DAYS = 4;
-/** "Up to now" means up to about a month ago: the latest statement closes some weeks back. */
-const RECENT_DAYS = 35;
-
-const span = (from: ISODate, to: ISODate) => (from === to ? formatDate(from) : `${formatDate(from)} to ${formatDate(to)}`);
 
 function checkAsk(store: Store, item: CaptureItem, ask: CaptureAsk, now: ISODate): Pick<CaptureAskView, 'state' | 'progress'> {
   const check = ask.check;
@@ -25,17 +18,20 @@ function checkAsk(store: Store, item: CaptureItem, ask: CaptureAsk, now: ISODate
   switch (check.type) {
     case 'coverage': {
       if (!account) return { state: 'todo', progress: 'The account is not in your data yet.' };
-      const from = maxDate(check.from, account.openedOn) ?? check.from;
-      const to = check.to ?? addDays(now, -RECENT_DAYS);
-      const end = account.closedOn && account.closedOn < to ? account.closedOn : to;
-      if (from > end) return { state: 'done', progress: 'Nothing to cover in this period.' };
-      const intervals = wrapperDataSpan(store, account);
-      const missing = complement(intervals, from, end).filter((g) => diffDays(g.from, g.to) + 1 > GAP_SLACK_DAYS);
-      if (!missing.length) return { state: 'done', progress: `Covered ${span(from, end)}.` };
-      const had = intervals.filter((i) => i.to >= from && i.from <= end);
+      // The one rule for missing days (docs/FORMULAS.md §3), to the check's day or, by default, to
+      // the end of the month before last: the statements for later days are still due.
+      const to = check.to ?? settledThrough(now);
+      const covered = coveredIntervals(store, account);
+      const missing = missingDays(store, account, check.from, to, covered);
+      if (!missing.length) {
+        const from = account.openedOn && account.openedOn > check.from ? account.openedOn : check.from;
+        const end = account.closedOn && account.closedOn < to ? account.closedOn : to;
+        return { state: 'done', progress: from > end ? 'Nothing to cover in this period.' : `Covered ${formatSpan(from, end)}.` };
+      }
+      const had = covered.filter((i) => i.to >= check.from && i.from <= to);
       if (!had.length) return { state: 'todo' };
-      const gaps = missing.slice(0, 3).map((g) => span(g.from, g.to));
-      return { state: 'partial', progress: `Missing ${gaps.join('; ')}${missing.length > 3 ? ` and ${missing.length - 3} more gaps` : ''}.` };
+      const gaps = missing.slice(0, 3).map((g) => formatSpan(g.from, g.to));
+      return { state: 'partial', progress: `Missing ${gaps.join('; ')}${missing.length > 3 ? ` and ${missing.length - 3} more stretches` : ''}.` };
     }
     case 'valuation': {
       if (!account) return { state: 'todo', progress: 'The account is not in your data yet.' };

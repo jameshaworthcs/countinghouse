@@ -326,8 +326,9 @@ describe('statement dates', () => {
     await store.addTransactions([{ id: 'tx_0000000000000201', accountId: 'fixed', date: '2023-09-14', amount: 1000, currency: 'GBP', description: 'Deposit', category: 'transfer', source: {} }], 't');
     const notes = (ty: string) => selfAssessment(store, ty).sections.find((x) => x.id === 'savings')!.items[0]!.notes.join(' ');
     expect(notes('2026/27')).not.toMatch(/fixed/);
-    // It closed during 2025/26, so interest paid when it closed may be missing then.
-    expect(notes('2025/26')).toMatch(/fixed: transactions cover/);
+    // It closed during 2025/26, and nothing covers its days of that year before it did: interest
+    // paid when it closed may be missing then.
+    expect(notes('2025/26')).toMatch(/fixed: no document covers 6 Apr – 14 Sep 2025, so interest may be missing/);
   });
 });
 

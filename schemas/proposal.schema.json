@@ -1057,6 +1057,47 @@
               },
               "kind": {
                 "type": "string",
+                "const": "remove_terms"
+              },
+              "why": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000
+              },
+              "account": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+              },
+              "asOf": {
+                "type": "string",
+                "description": "Calendar date, YYYY-MM-DD"
+              },
+              "importId": {
+                "type": "string",
+                "pattern": "^imp_\\d{8}_\\d{6}_[0-9a-f]{4}$"
+              }
+            },
+            "required": [
+              "key",
+              "kind",
+              "why",
+              "account",
+              "asOf",
+              "importId"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]{0,39}$"
+              },
+              "kind": {
+                "type": "string",
                 "const": "add_company"
               },
               "why": {

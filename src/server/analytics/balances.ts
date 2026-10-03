@@ -372,6 +372,19 @@ export class BalanceEngine {
     return { value, gbp: d.fx === null ? null : fromMinor(Math.round(minor * d.fx)), estimated, ...(basis ? { basis } : {}) };
   }
 
+  /**
+   * A ledger account's balance at the start of `day`: its close that day less the rows that count
+   * on it (`ledgerDates`). Null for a valued account, or before its data.
+   */
+  openingOn(accountId: string, day: ISODate): BalancePoint | null {
+    const d = this.data.get(accountId);
+    if (!d || d.mode !== 'ledger') return null;
+    const close = this.balanceOn(accountId, day);
+    if (!close) return null;
+    const minor = toMinor(close.value) - (sumTo(d.tx, day) - sumTo(d.tx, addDays(day, -1)));
+    return { value: fromMinor(minor), gbp: d.fx === null ? null : fromMinor(Math.round(minor * d.fx)), estimated: close.estimated };
+  }
+
   latest(accountId: string, on: ISODate = today()): (BalancePoint & { asOf: ISODate | null }) | null {
     const p = this.balanceOn(accountId, on);
     if (!p) return null;

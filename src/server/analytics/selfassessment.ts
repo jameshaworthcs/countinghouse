@@ -2,14 +2,14 @@
 // shows where each one came from, and flags gaps. It is an aid for filling the return yourself, not
 // tax advice; every figure must be checked against your own records before you submit.
 
-import { ACCOUNT_TYPE_META, balanceModeOf } from '../../shared/accounts';
-import type { SaEmployment, SaItem, SaPaymentLink, SaSection, SaSource, SelfAssessmentResponse } from '../../shared/api';
-import { addDays, diffDays, formatDate, maxDate, minDate, today } from '../../shared/dates';
+import type { MissingDaysView, SaEmployment, SaItem, SaPaymentLink, SaSection, SaSource, SelfAssessmentResponse } from '../../shared/api';
+import { diffDays, formatDate, formatSpan, today } from '../../shared/dates';
 import { formatMoney, fromMinor, toMinor } from '../../shared/money';
 import type { Figure, FigureKind, HmrcRecord } from '../../shared/schema';
 import { parseTaxYear, saDeadlines, taxYearOf, taxYearParams, untaxedIncomeNoticeBy, type TaxYear } from '../../shared/uk';
 import type { Store } from '../store';
 import { allowances, giftAid, pensionTotals, reliefAtSource } from './allowances';
+import type { BalanceEngine } from './balances';
 import { employerYears, type PaySource } from './sources';
 import { jobStartedOn } from './pay';
 
@@ -30,10 +30,10 @@ function figureSources(list: Figure[]): SaSource[] {
   return list.map((f) => ({ type: 'figure', id: f.id, label: `${f.label}${f.payer ? `, ${f.payer}` : ''}`, amount: f.amount, ...(f.date ? { date: f.date } : {}) }));
 }
 
-export function selfAssessment(store: Store, label?: string): SelfAssessmentResponse {
+export function selfAssessment(store: Store, label?: string, engine?: BalanceEngine): SelfAssessmentResponse {
   const ty = (label ? parseTaxYear(label) : null) ?? taxYearOf(today());
   const params = taxYearParams(ty);
-  const allow = allowances(store, ty.label);
+  const allow = allowances(store, ty.label, today(), engine);
   const sections: SaSection[] = [];
   const checklist: SelfAssessmentResponse['checklist'] = [];
   const mayNeedToFile: SelfAssessmentResponse['mayNeedToFile'] = [];
@@ -134,29 +134,18 @@ export function selfAssessment(store: Store, label?: string): SelfAssessmentResp
   checklist.push({ id: 'p60', done: withPay.length > 0 && !soFar.length && !taxUnknown.length, label: `P60 for ${ty.label} imported for every job`, detail: 'Drop the PDF on the Import page; the pay and tax figures are extracted.' });
 
   // ── Savings and investment income (SA100 TR 3) ──
+  // The days of the year no document covers are the Tax year page's, by the same rule
+  // (docs/FORMULAS.md §3, "Missing days"): an account with an interest statement for the year needs none.
   const interestItemNotes: string[] = [];
   let interestStatus: SaItem['status'] = allow.savings.interest > 0 ? 'ready' : 'not-applicable';
-  const taxable = store.accounts.filter((a) => !ACCOUNT_TYPE_META[a.type].taxFreeInterest && balanceModeOf(a) === 'ledger' && a.type !== 'credit_card' && a.type !== 'loan' && a.type !== 'mortgage');
-  for (const a of taxable) {
-    // An account closed before the year, or opened after it, paid no interest in it.
-    if ((a.closedOn && a.closedOn < ty.start) || (a.openedOn && a.openedOn > ty.end)) continue;
-    const txs = store.transactions(a.id);
-    const hasInterest = txs.some((t) => t.category === 'interest');
-    if (!hasInterest && a.type !== 'savings') continue;
-    const certificate = figuresOf(store, ty, 'interest_paid').some((f) => f.accountId === a.id);
-    if (certificate) continue;
-    const first = txs[0]?.date;
-    const last = txs[txs.length - 1]?.date;
-    // For a tax year still in progress, coverage up to about a month ago is complete enough.
-    // An account opened or closed during the year needs data only for the part it was open.
-    const needFrom = maxDate(ty.start, a.openedOn)!;
-    const needTo = minDate(ty.end < today() ? ty.end : addDays(today(), -35), a.closedOn)!;
-    if (!first || first > needFrom || !last || last < needTo) {
-      interestStatus = 'check';
-      interestItemNotes.push(
-        `${a.name}: transactions ${first ? `cover ${formatDate(first)} to ${formatDate(last!)}` : 'are missing'}, not the whole tax year, so interest may be missing. The bank's annual interest statement is the reliable figure.`,
-      );
-    }
+  const missingByAccount = new Map<string, MissingDaysView[]>();
+  for (const m of allow.savings.missing) (missingByAccount.get(m.accountId) ?? missingByAccount.set(m.accountId, []).get(m.accountId)!).push(m);
+  for (const [accountId, list] of missingByAccount) {
+    interestStatus = 'check';
+    const first = list[0]!;
+    const days = first.noData ? `there is no data for ${formatSpan(first.from, first.to)}` : `no document covers ${list.map((m) => formatSpan(m.from, m.to)).join(', ')}`;
+    const settle = list.some((m) => m.evidence === 'adds-up') ? ' Where its balances add up, confirm those days in Settings → Data health.' : '';
+    interestItemNotes.push(`${store.account(accountId)?.name ?? first.name}: ${days}, so interest may be missing. The bank's annual interest statement is the reliable figure.${settle}`);
   }
   if (allow.savings.interest > 0) {
     interestItemNotes.unshift(
@@ -188,7 +177,7 @@ export function selfAssessment(store: Store, label?: string): SelfAssessmentResp
     },
   ];
   sections.push({ id: 'savings', title: 'Interest and dividends', description: 'Income outside ISAs and pensions. ISA interest and Premium Bond prizes are tax-free and not entered.', items: savingsItems });
-  checklist.push({ id: 'interest', done: interestStatus !== 'check', label: 'Interest covered for every savings account for the whole year', detail: 'Import the bank’s annual interest statement for any account flagged above.' });
+  checklist.push({ id: 'interest', done: interestStatus !== 'check', label: 'Interest covered for every savings account for the whole year', detail: 'Import the statements, or the bank’s annual interest statement, for any account flagged above; days whose balances add up can be confirmed in Settings → Data health.' });
 
   // ── Tax reliefs (SA100 TR 4) ──
   const pen = pensionTotals(store, ty);

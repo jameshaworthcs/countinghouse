@@ -186,6 +186,12 @@ April:
   the next year, if you make them).
 - **31 July**: the second payment on account, if you make them.
 
+**Correcting a return** (`saCorrectBy`, `oldestOpenTaxYear` in `src/shared/uk.ts`): within 12
+months of the 31 January deadline, so a 2024/25 return can be corrected until **31 January 2027**.
+Until then the year is still open: Settings → Data health lists the days no document covers back
+to the start of the oldest open year, since its figures can still change what you send.
+Overpayment relief can be claimed for 4 years after the year ends; the app does not use that.
+
 **Dividends over the allowance** (`dividendsReturnThreshold`, `untaxedIncomeNoticeBy` in
 `src/shared/uk.ts`):
 
@@ -197,6 +203,10 @@ April:
 - Within the dividend allowance there is nothing to report.
 
 ## Sources
+
+Checked 3 October 2026:
+
+- GOV.UK, [Correct a Self Assessment tax return](https://www.gov.uk/self-assessment-tax-returns/corrections) (within 12 months of the deadline: by 31 January 2027 for 2024/25; overpayment relief up to 4 years after the year)
 
 Checked 1 October 2026:
 
