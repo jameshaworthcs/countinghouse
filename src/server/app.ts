@@ -324,6 +324,11 @@ function auditLifecycles(audit: AuditLog, imports: ImportService, runner: JobRun
   });
 
   proposals.on('update', (p: Proposal) => {
+    // An account changed or an agreement added: the drafts waiting are drafted again to match.
+    const applied = new Set(p.applied ?? []);
+    if (p.status === 'applied' && p.changes.some((c) => applied.has(c.key) && ['link_accounts', 'set_account_dates', 'move_balance', 'add_agreement'].includes(c.kind))) {
+      void imports.redraftWaiting().catch((err: Error) => console.warn(`[imports] drafts waiting could not be drafted again: ${err.message}`));
+    }
     const words = { pending: 'proposed', applied: `applied (${p.applied?.length ?? 0} of ${p.changes.length} changes)`, dismissed: 'dismissed', superseded: 'closed: your data already says it' }[p.status];
     audit.record({
       category: 'proposal',

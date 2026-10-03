@@ -161,11 +161,13 @@ export class ImportService extends EventEmitter {
 
   /**
    * Drafts you have not edited are drafted again from their readings when the app starts, so what a
-   * newer version matches, categorises or checks applies to imports already waiting, and after a
-   * commit sets up an account or a job, teaches a job, or adds HMRC's records, so they can match
-   * them. Nothing is read again, and a draft you saved changes to is left alone.
+   * newer version matches, categorises or checks applies to imports already waiting; after a commit
+   * sets up an account or a job, teaches a job, adds HMRC's records or records an agreement, so they
+   * can match them; and after a proposal you applied changes an account or adds an agreement (an
+   * account linked to the one it carries on from splits a statement waiting). Nothing is read
+   * again, and a draft you saved changes to is left alone.
    */
-  private async redraftWaiting(): Promise<void> {
+  async redraftWaiting(): Promise<void> {
     const waiting = [...this.pending.values()].filter((r) => r.status === 'review' && r.draft && r.extraction.raw && !r.draftEditedAt).sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
     for (const r of waiting) {
       try {
@@ -1026,7 +1028,7 @@ export class ImportService extends EventEmitter {
     // uploaded with the new account's first statement, a P60 beside HMRC's page for the same job),
     // and HMRC's records it added match payslips to their job: drafts you have not edited are matched
     // again, so they are not committed into another account or job, or into a second new one.
-    if (committed.result?.accountsCreated.length || committed.result?.jobs?.length || committed.result?.hmrcAdded) await this.redraftWaiting();
+    if (committed.result?.accountsCreated.length || committed.result?.jobs?.length || committed.result?.hmrcAdded || committed.result?.agreementsAdded) await this.redraftWaiting();
     // Funds on it become instruments. The import is committed whatever happens here: the app
     // records any it missed when it next starts.
     if (committed.result?.holdingsAdded) {

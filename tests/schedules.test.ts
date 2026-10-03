@@ -338,6 +338,15 @@ describe('importing', () => {
       expect(svc.readiness(svc.getPending(id)!).reasons).not.toContain('rows outside the account’s open dates');
     });
 
+    it('a statement waiting is drafted again once the accounts are linked', async () => {
+      const id = await pending(statement);
+      await start();
+      expect((await draftOf(id)).sections).toHaveLength(1);
+      await store.upsertAccount({ ...store.account('easy')!, continues: { accountId: 'fixed', from: '2025-09-13' } });
+      await svc.redraftWaiting();
+      expect(svc.getPending(id)!.draft!.sections.map((s) => (s.target.mode === 'existing' ? s.target.accountId : s.target.mode))).toEqual(['fixed', 'easy']);
+    });
+
     it('a section moved to another account on the review page is checked again against it', async () => {
       const id = await pending(statement);
       await start();
