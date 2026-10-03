@@ -449,9 +449,10 @@ export class Categoriser {
     for (const d of texts) {
       const merchant = matchMerchant(d, input.amount);
       if (merchant && (!isWrapper || this.categories.kindOf(merchant.category) !== 'expense')) {
-        const sourcePayee = input.payee ?? input.aiPayee;
         const generic = GENERIC_PAYEES.has(merchant.payee);
-        const payee = generic ? (sourcePayee ?? cleanPayee(input.description)) : merchant.payee;
+        // A general word ("PHARMACY") names no one: the payee is the row's own, or, when its
+        // description names no one, another document's ("Example Hill Pharmacy").
+        const payee = generic ? fallbackPayee : merchant.payee;
         if (generic && input.aiCategory && input.aiCategory !== merchant.category && this.known(input.aiCategory)) return { payee, category: input.aiCategory, categorisedBy: 'ai' };
         return { payee, category: merchant.category, categorisedBy: 'builtin' };
       }

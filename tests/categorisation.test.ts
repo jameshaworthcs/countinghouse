@@ -136,8 +136,9 @@ describe('money that is neither spending nor income', () => {
   it('a payment its own document names no one for takes the name another document gave it', () => {
     // A statement's "Outgoing transaction"; the app called it after the café, through its card reader.
     expect(c.categorise({ accountId: 'card', description: 'Outgoing transaction', alsoSaid: ['Example Beach Cafe - Zettle / Paypal POS'], amount: -1.8 }).payee).toBe('Example Beach Cafe');
-    // A brand the merchant list knows names it, and categorises it.
+    // A brand the merchant list knows names it, and categorises it; a general word only categorises it.
     expect(c.categorise({ accountId: 'card', description: 'Outgoing transaction', alsoSaid: ['ALDI'], amount: -4.08 })).toMatchObject({ payee: 'Aldi', category: 'groceries' });
+    expect(c.categorise({ accountId: 'card', description: 'Outgoing transaction', alsoSaid: ['Example Hill Pharmacy'], amount: -9.9 })).toMatchObject({ payee: 'Example Hill Pharmacy', category: 'pharmacy' });
     // A description that names someone keeps its own words.
     expect(c.categorise({ accountId: 'card', description: 'EXAMPLE DELI', alsoSaid: ['Example Deli Ltd'], amount: -4 }).payee).toBe('Example Deli');
     expect(cleanPayee('Example Ices - Zettle')).toBe('Example Ices');
