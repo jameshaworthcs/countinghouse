@@ -179,7 +179,7 @@ export async function enrich(store: Store, opts: { accountIds?: string[]; dryRun
  * A rule you just made or changed, applied to the rows it matches and to the rows it categorised
  * before, and to nothing else: each takes what the categoriser now says of it (rules come first).
  * Rows you categorised, and transfers linked between your accounts, stay as they are. Re-applying
- * everything is Settings → Categorisation, with its preview, so a rule never brings in other changes
+ * everything is Settings → Rules → Re-apply to history, with its preview, so a rule never brings in other changes
  * unseen. Returns how many rows changed category.
  */
 export async function applyRule(store: Store, ruleId: string): Promise<{ recategorised: number }> {
