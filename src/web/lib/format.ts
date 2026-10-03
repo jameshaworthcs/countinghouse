@@ -1,11 +1,28 @@
 import { twMerge } from 'tailwind-merge';
 import { formatDate, formatMonth, relativeDays, today } from '../../shared/dates';
 import type { TaxBandEstimate } from '../../shared/api';
+import type { Rule } from '../../shared/schema';
 import { formatMoney, formatPercent } from '../../shared/money';
 
 export { formatDate, formatMonth, formatMoney, formatPercent, relativeDays, today };
 
 export const money = (v: number | null | undefined, opts: Parameters<typeof formatMoney>[1] = {}) => (v === null || v === undefined ? '—' : formatMoney(v, opts));
+
+/** A rule's match in words: "the description holds “Tesco”, money out, £5 to £50". */
+export function matchWords(m: Rule['match']): string {
+  const field = m.field === 'payee' ? 'the payee' : 'the description';
+  const how = { contains: 'holds', equals: 'is', startsWith: 'starts with', endsWith: 'ends with', regex: 'matches the pattern' }[m.op];
+  const dir = m.direction === 'in' ? ', money in' : m.direction === 'out' ? ', money out' : '';
+  const size =
+    m.amountMin !== undefined && m.amountMax !== undefined
+      ? `, ${money(m.amountMin, { decimals: m.amountMin % 1 ? 2 : 0 })} to ${money(m.amountMax, { decimals: m.amountMax % 1 ? 2 : 0 })}`
+      : m.amountMin !== undefined
+        ? `, ${money(m.amountMin, { decimals: m.amountMin % 1 ? 2 : 0 })} or more`
+        : m.amountMax !== undefined
+          ? `, up to ${money(m.amountMax, { decimals: m.amountMax % 1 ? 2 : 0 })}`
+          : '';
+  return `${field} ${how} “${m.value}”${dir}${size}`;
+}
 
 /** £12.3k style, for axes and tiles. */
 export const compact = (v: number | null | undefined) => (v === null || v === undefined ? '—' : formatMoney(v, { compact: true }));

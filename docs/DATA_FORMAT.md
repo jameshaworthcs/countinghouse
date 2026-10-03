@@ -482,7 +482,15 @@ lives in the work area (`<work>/proposals/`), never here.
 - `changes`: in order, each `{key, kind, why, …}`:
   - `unlink_transfer {transaction}`: both rows of its transfer are left unlinked.
   - `link_transfer {from, to}`: money out and the same money in, linked as a transfer.
-  - `set_category {transaction, category}`.
+  - `set_category {transaction, category}`. On a row the bank, the reader or the app's own
+    patterns put in that category already, it confirms it: the category becomes yours.
+  - `add_rule {rule: {name?, match, category}}`: a rule (`rules.json`), as one you make in
+    Settings → Rules; the payments it decides are categorised by it when applied (`categorisedBy:
+    rule`), yours left as they are.
+  - `add_category {category: {id, name, kind, parent?}}`: a group (no `parent`) or a category in
+    one (`categories.json`).
+  - `change_category {category, name?, parent?}`: a category renamed, moved into another group of
+    its kind, or made a group (`parent: null`). Its payments, rules and budgets keep it.
   - `set_note {transaction, note}`: what the payment was for, from a document. Applied, it is your
     note; it never replaces one already there.
   - `remove_duplicate {transaction, sameAs}`: a row that repeats rows adding up to it.
@@ -509,8 +517,9 @@ lives in the work area (`<work>/proposals/`), never here.
     them on its date (`{rates, limit?, minimumPayment?, paymentDue?}`), in place of what its reading
     kept for that account and day.
 - `applied`: the keys of the changes you applied. `dismissedReason`: what you said, if anything.
-- `before`: `{transactions, accounts, balances?, terms?}`, the rows, accounts, balances and terms
-  the applied changes touched, as they were before: the audit trail, and a way back.
+- `before`: `{transactions, accounts, balances?, terms?, categories?}`, the rows, accounts,
+  balances, terms and categories the applied changes touched, as they were before: the audit trail,
+  and a way back. (A rule or category a proposal added has no before: the change itself says it.)
 
 ## goals.json
 

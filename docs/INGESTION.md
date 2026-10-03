@@ -498,7 +498,8 @@ read again.
       payments carry and, if you say, how money with them usually goes;
     - cash and cheques paid in, first among them, each yours to confirm the same way (no one is
       saved);
-    - rules your decisions point to, each with the payments it would categorise;
+    - rules your decisions point to, each with the payments it would categorise, or, when you
+      decided every payment from a payee still paid, for the next ones;
     - the uncategorised rest by payee, with "always" making a rule for the payee;
     - the categories the app guessed, from the bank's category or the reader's suggestion, by payee
       and category, to confirm or change, with "always" making a rule.

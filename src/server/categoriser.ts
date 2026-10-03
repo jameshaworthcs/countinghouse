@@ -8,13 +8,13 @@ import { CategoryIndex } from '../shared/categories';
 import { CARD_REFUND_DAYS, Categoriser, purchaseKey, type CardPurchases, type CategoriseInput } from '../shared/categorise';
 import { diffDays } from '../shared/dates';
 import { cleanPayee } from '../shared/merchants';
-import type { Agreement, Rule, Transaction } from '../shared/schema';
+import type { Agreement, Category, Rule, Transaction } from '../shared/schema';
 import { paidAs } from './analytics/pay';
 import type { Store } from './store';
 
-/** `agreements`: in place of the store's, as when a proposal would add one. */
-export function categoriserFor(store: Store, opts: { agreements?: readonly Agreement[] } = {}): Categoriser {
-  return new Categoriser(store.rules, new CategoryIndex(store.categories), store.accounts, store.institutions, {
+/** `agreements`, `rules`, `categories`: in place of the store's, as when a proposal would add some. */
+export function categoriserFor(store: Store, opts: { agreements?: readonly Agreement[]; rules?: readonly Rule[]; categories?: readonly Category[] } = {}): Categoriser {
+  return new Categoriser([...(opts.rules ?? store.rules)], new CategoryIndex([...(opts.categories ?? store.categories)]), store.accounts, store.institutions, {
     ownerName: store.profile.name,
     payrollNumbers: store.employments.flatMap((e) => e.payrollNumbers),
     agreements: opts.agreements ?? store.agreements,

@@ -133,6 +133,17 @@ describe('money that is neither spending nor income', () => {
     expect(payeeRuleMatch('Tfl Travel', [fare], 'out')).toMatchObject({ field: 'description', op: 'contains', value: 'Tfl Travel' });
   });
 
+  it('a rule’s words match however the bank spaced them', () => {
+    const rule = (value: string, op: Rule['match']['op'] = 'contains'): Rule => ({ id: 'rule_s', enabled: true, priority: 100, match: { field: 'description', op, value, caseSensitive: false }, set: { category: 'hair-beauty' }, createdAt: stamp, updatedAt: stamp });
+    // One card pads its descriptions to fixed columns; another doesn't.
+    const padded = tx('card', '2026-05-31', -29.2, 'EXAMPLE - BARBERS         YORK');
+    const plain = tx('card', '2025-12-19', -25.2, 'Example - Barbers Purchase');
+    expect(ruleCatches(rule('Example - Barbers York'), padded)).toBe(true);
+    expect(ruleCatches(rule('Example - Barbers'), plain)).toBe(true);
+    expect(ruleCatches(rule('example - barbers york', 'equals'), padded)).toBe(true);
+    expect(ruleCatches(rule('Example - Barbers York'), plain)).toBe(false);
+  });
+
   it('conversion fees, the Underground and a platform’s fee', () => {
     expect(c.categorise({ accountId: 'current', description: 'FOREIGN CURRENCY CONVERSION FEE', amount: -0.5 }).category).toBe('bank-fees');
     expect(c.categorise({ accountId: 'card', description: 'LUL TICKET MACHINE EXAMPLE', amount: -10 }).category).toBe('public-transport');

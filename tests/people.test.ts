@@ -16,6 +16,7 @@ import { transactionId } from '../src/server/ids';
 import { runMigrations } from '../src/server/migrations';
 import { Store } from '../src/server/store';
 import { CategoryIndex, defaultCategories } from '../src/shared/categories';
+import { addDays, today } from '../src/shared/dates';
 import { cleanPayee } from '../src/shared/merchants';
 import { giftOccasion, itemCategory, parsePersonName, PeopleIndex, referenceWords, shareOf, suggestFor, suggestForCash, tidyName, type PaidOut, type PersonParty } from '../src/shared/people';
 import type { EnrichPreview } from '../src/shared/api';
@@ -361,6 +362,27 @@ describe('the To categorise queue', () => {
     expect(q.rules.map((r) => [r.payee, r.from.by, r.fills.count])).toEqual([['Example Buses', 'ai', 1]]);
     // The person's third payment is theirs to decide, with what you chose before.
     expect(q.people[0]!.rows[0]!.suggestion).toMatchObject({ category: 'gifts-received', strong: false });
+  });
+
+  it('suggests a rule for the next ones when you decided every payment, while they still come', async () => {
+    const ago = (days: number) => addDays(today(), -days);
+    await store.addTransactions(
+      [
+        tx('card', ago(40), -9.99, 'EXAMPLETV.COM LTD', { category: 'streaming', categorisedBy: 'user' }),
+        tx('card', ago(10), -9.99, 'EXAMPLETV.COM LTD', { category: 'streaming', categorisedBy: 'user' }),
+        // Decided too, but not paid for a year: there are no next ones to catch.
+        tx('card', ago(500), -3, 'EXAMPLE OLD SHOP', { category: 'general-shopping', categorisedBy: 'user' }),
+        tx('card', ago(470), -3, 'EXAMPLE OLD SHOP', { category: 'general-shopping', categorisedBy: 'user' }),
+        // Decided, and a rule of yours catches them already.
+        tx('card', ago(20), -4, 'EXAMPLE CAFE', { category: 'coffee', categorisedBy: 'user' }),
+        tx('card', ago(5), -4, 'EXAMPLE CAFE', { category: 'coffee', categorisedBy: 'user' }),
+      ],
+      't',
+    );
+    await store.setRules([{ id: 'rule_cafe', name: 'Cafe', enabled: true, priority: 100, match: { field: 'description', op: 'contains', value: 'example cafe', caseSensitive: false }, set: { category: 'coffee' }, createdAt: stamp, updatedAt: stamp }]);
+    const q = categoriseQueue(store);
+    expect(q.rules.map((r) => [r.payee, r.category, r.next, r.fills.count, r.examples.map((e) => e.date)])).toEqual([['Exampletv.com Ltd', 'streaming', true, 0, [ago(10), ago(40)]]]);
+    expect(q.counts.rules).toBe(1);
   });
 
   it('lists cash and cheques paid in first, each to decide, and what the app guessed by payee and category', async () => {

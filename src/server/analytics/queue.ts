@@ -3,7 +3,8 @@
 // - payments with people, and cash and cheques paid in, each yours to decide, with what it looks like
 //   and why;
 // - rules your decisions point to: a payee you put in one category at least twice one way (or the
-//   reader did, three times, when you never did), that would categorise rows now;
+//   reader did, three times, when you never did), that would categorise rows now, or, when you
+//   decided them all, the next ones (a payee paid in the last year that no rule of yours catches);
 // - what's left uncategorised, by payee and direction;
 // - what the app categorised from a guess (the bank's category, the reader's suggestion), for you to
 //   confirm or change.
@@ -14,6 +15,7 @@ import { balanceModeOf } from '../../shared/accounts';
 import type { CategoriseQueue, GuessGroup, PayeeGroup, PersonGroup, PersonRow, QueueExample, RuleSuggestion } from '../../shared/api';
 import { CategoryIndex } from '../../shared/categories';
 import { CASH_PAID_IN, Categoriser, CHEQUE_PAID_IN, holdsPaidIn, isCashWithdrawal, isWrapperAccount, paidInKind, type CategoriseInput, type PaidIn } from '../../shared/categorise';
+import { addDays, today } from '../../shared/dates';
 import { cleanPayee } from '../../shared/merchants';
 import { fromMinor, toMinor } from '../../shared/money';
 import { PeopleIndex, suggestFor, suggestForCash, tidyName, type CashOut, type PaidOut, type PersonHistory, type PersonParty } from '../../shared/people';
@@ -25,6 +27,8 @@ import type { Store } from '../store';
 export const RULE_FROM_DECISIONS = 2;
 /** Or the reader's, when you made none for that payee that way. */
 export const RULE_FROM_READER = 3;
+/** A payee you decided every payment of is offered a rule for the next ones while it was paid this recently. */
+export const RULE_RECENT_DAYS = 365;
 
 /** How a payment with a person, or cash or a cheque paid in, got its category, when that settles it: yours, your rule's, or an agreement's. */
 export const DECIDED = new Set<Transaction['categorisedBy']>(['user', 'rule', 'agreement']);
@@ -235,6 +239,11 @@ export function categoriseQueue(store: Store, opts: { from?: string | undefined 
     (byPayee.get(k) ?? byPayee.set(k, { payee, direction, rows: [] }).get(k)!).rows.push(t);
   }
   const rules: RuleSuggestion[] = [];
+  // A payee that still comes: one paid in the last year. A rule for the next ones is worth making
+  // only for those, and only when no rule of yours catches your decisions already.
+  const recent = addDays(today(), -RULE_RECENT_DAYS);
+  const yourRules = store.rules.filter((r) => r.enabled).map((r) => ({ rule: r, alone: new Categoriser([r], new CategoryIndex([]), [], []) }));
+  const covered = (basis: Transaction[]) => yourRules.some(({ rule, alone }) => basis.every((t) => ruleCatches(rule, t, alone)));
   const spendingOrIncome = (id: string | undefined) => Boolean(id) && (kindOf(id!) === 'expense' || kindOf(id!) === 'income');
   const unanimous = (list: Transaction[]) => list.length > 0 && list.every((t) => t.category === list[0]!.category);
   for (const { payee, direction, rows } of byPayee.values()) {
@@ -293,16 +302,21 @@ export function categoriseQueue(store: Store, opts: { from?: string | undefined 
           fills: { count: fills.length, amount: sumOf(fills), ids: fills.map((t) => t.id) },
           examples: fills.slice(0, 5).map(example),
         });
+      } else if (by === 'user' && rows.some((t) => t.date >= recent) && !covered(basis)) {
+        // You decided every one of them, and they still come: a rule is for the next ones, which
+        // would otherwise arrive uncategorised (or guessed) like the first.
+        rules.push({ payee, category, direction, match, from: { by, count: basis.length }, fills: { count: 0, amount: 0, ids: [] }, examples: [...basis].sort(newestFirst).slice(0, 5).map(example), next: true });
       }
       break;
     }
   }
   rules.sort((a, b) => Math.abs(b.fills.amount) - Math.abs(a.fills.amount) || a.payee.localeCompare(b.payee));
-  // Two ways of naming one payee point to one rule: the first that fills each row.
+  // Two ways of naming one payee point to one rule: the first that fills each row. (A rule for the
+  // next ones fills none now: it stays.)
   const claimed = new Set<string>();
   for (let i = 0; i < rules.length; i++) {
     const ids = rules[i]!.fills.ids;
-    if (ids.every((id) => claimed.has(id))) rules.splice(i--, 1);
+    if (!rules[i]!.next && ids.every((id) => claimed.has(id))) rules.splice(i--, 1);
     else for (const id of ids) claimed.add(id);
   }
 

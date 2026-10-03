@@ -1792,3 +1792,33 @@ Later the same day, after the owner's first runs (`label-imports-2`):
     accounts.
 - **Not done:** a payment left as it is is offered again next time. Recording "not that category"
   would need a new field, and giving it a category of your own does the same job.
+
+## 2026-10-03: Proposals make rules and categories, and confirm guesses
+
+- **Owner:** an agent should propose as much of the categorising as it can, rules included ("can you
+  propose rules? If not, add that feature"). A group "Advertising", made by mistake, should become
+  "Business" with an Advertising category in it, by a proposal. And it should be easier to tell
+  adding a group from adding a category: that is how the mistake was made.
+- **Done** (AGENTS.md, "Proposing fixes"; DATA_FORMAT.md, "proposals"; FORMULAS.md §10):
+  - Three new changes. `add_rule` makes a rule as Settings → Rules does, and shows the payments it
+    categorises now and the owner's own it leaves. `add_category` adds a group or a category in
+    one. `change_category` renames one or moves a category to another group. They run in order
+    with the rest, so one proposal can add a group, move a category into it and categorise
+    payments with it. The categories a proposal changed are kept as they were, with its rows.
+  - `set_category` on a row the bank, the reader or the app's own patterns put in that category
+    already confirms it: the category becomes the owner's. Before, it was refused as already so,
+    so a proposal could not settle a guess that was right.
+  - A category or a proposal's category alone never categorises the next payment from the payee:
+    only a rule does. To categorise now offers a rule for the next ones when the owner decided
+    every payment from a payee paid in the last year, where before it offered one only when there
+    were payments left to fill. So deciding a payee's payments one by one, by hand or by applying
+    a proposal, leads to its rule in one click.
+  - A rule's words match however a bank spaces a description: a run of spaces counts as one. The
+    owner's rule for their barber, made from the Amex payee, missed the same barber on another
+    card, whose description is not padded.
+  - Settings → Categories asks first whether to add a category or a group, says what each is, and
+    needs a group chosen for a category. A group can be renamed, and an empty one says so. Before,
+    a name typed with the group left as "(new group)", the default, became a group.
+- **Not done:** jobs that run in the app (the month in review among them) still write notes, not
+  proposals, though each is given the proposal service. Having the month in review propose the
+  fixes it finds is a prompt change and a new output, for the owner to ask for.

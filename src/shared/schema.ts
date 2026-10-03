@@ -1889,8 +1889,20 @@ const changeUnion = <K extends z.ZodType<string | undefined>>(key: K) =>
     z.object({ key, kind: z.literal('unlink_transfer'), why: ChangeWhySchema, transaction: TransactionIdSchema }),
     /** Link money out of one of your accounts with the same money into another, as a transfer. */
     z.object({ key, kind: z.literal('link_transfer'), why: ChangeWhySchema, from: TransactionIdSchema, to: TransactionIdSchema }),
-    /** Give a transaction a category (applied, it is yours: nothing re-categorises it). */
+    /**
+     * Give a transaction a category (applied, it is yours: nothing re-categorises it). One the bank or
+     * the reader guessed already is confirmed: it becomes yours.
+     */
     z.object({ key, kind: z.literal('set_category'), why: ChangeWhySchema, transaction: TransactionIdSchema, category: z.string().min(1).max(64) }),
+    /**
+     * Make a rule, as you would in Settings → Rules: the payments it matches take its category, now
+     * and as they come. Yours are left as they are.
+     */
+    z.object({ key, kind: z.literal('add_rule'), why: ChangeWhySchema, rule: z.object({ name: z.string().trim().min(1).max(120).optional(), match: RuleSchema.shape.match, category: z.string().min(1).max(64) }) }),
+    /** Add a group to your categories, or a category to one of the groups (`parent`). */
+    z.object({ key, kind: z.literal('add_category'), why: ChangeWhySchema, category: z.object({ id: SlugSchema, name: z.string().trim().min(1).max(60), kind: z.enum(CATEGORY_KINDS), parent: SlugSchema.optional() }) }),
+    /** Rename a group or a category, or move a category to another group (`parent`; null makes it a group of its own). */
+    z.object({ key, kind: z.literal('change_category'), why: ChangeWhySchema, category: SlugSchema, name: z.string().trim().min(1).max(60).optional(), parent: SlugSchema.nullable().optional() }),
     /**
      * Give a transaction a note saying what the payment was for, from a document (the room and term
      * a rent instalment paid, say). Applied, it is yours, like a note you typed; it never replaces one.
@@ -1965,8 +1977,8 @@ export const ProposalSchema = z.object({
   applied: z.array(z.string()).optional(),
   /** Why it was dismissed, if you said. */
   dismissedReason: z.string().max(1000).optional(),
-  /** The rows, accounts and balances the applied changes touched, as they were before: the audit trail. */
-  before: z.object({ transactions: z.array(TransactionSchema), accounts: z.array(AccountSchema), balances: z.array(BalanceSnapshotSchema).optional(), terms: z.array(TermsSchema).optional() }).optional(),
+  /** The rows, accounts, balances and categories the applied changes touched, as they were before: the audit trail. */
+  before: z.object({ transactions: z.array(TransactionSchema), accounts: z.array(AccountSchema), balances: z.array(BalanceSnapshotSchema).optional(), terms: z.array(TermsSchema).optional(), categories: z.array(CategorySchema).optional() }).optional(),
 });
 export type Proposal = z.infer<typeof ProposalSchema>;
 

@@ -1,14 +1,14 @@
 // Proposed fixes: what an agent proposes changing in your data, each change with its reason and the
 // rows it is about, waiting for you on the Import page (src/server/proposals.ts).
 
-import { ArrowDown, ArrowRight, ArrowRightLeft, ArrowUpDown, Building2, CalendarDays, ChevronRight, CircleCheck, CircleSlash, CopyX, FileText, Handshake, Link2, Percent, NotebookPen, PiggyBank, Sparkles, Tag, Unlink, Wand2, X } from 'lucide-react';
+import { ArrowDown, ArrowRight, ArrowRightLeft, ArrowUpDown, Building2, CalendarDays, ChevronRight, CircleCheck, CircleSlash, CopyX, FileText, FolderPen, FolderPlus, Handshake, Link2, Percent, NotebookPen, PiggyBank, Sparkles, Tag, Unlink, Wand2, X } from 'lucide-react';
 import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import type { ProposalBalance, ProposalListResponse, ProposalRow, ProposalSummary, ProposalView } from '../../shared/api';
 import type { ProposalStatus, ProposedChange, ProposedChangeKind, Provenance } from '../../shared/schema';
 import { useApi } from '../lib/api';
 import { useAppData } from '../lib/data';
-import { cn, formatDate, money, plural, timeAgo } from '../lib/format';
+import { cn, formatDate, matchWords, money, plural, timeAgo } from '../lib/format';
 import { RATE_NAMES } from '../../shared/terms';
 import { limitName, RatesList, rateText } from './Terms';
 import { Badge, Button, Card, IconButton, StatusBadge } from './ui';
@@ -21,6 +21,9 @@ export const CHANGE_LABELS: Record<ProposedChangeKind, { title: string; count: (
   unlink_transfer: { title: 'Undo a transfer link', count: (n) => `${plural(n, 'transfer link')} undone`, icon: <Unlink className="size-4" aria-hidden /> },
   link_transfer: { title: 'Link as a transfer', count: (n) => `${plural(n, 'transfer')} linked`, icon: <Link2 className="size-4" aria-hidden /> },
   set_category: { title: 'Change a category', count: (n) => plural(n, 'category', 'categories'), icon: <Tag className="size-4" aria-hidden /> },
+  add_rule: { title: 'Make a rule', count: (n) => plural(n, 'rule'), icon: <Wand2 className="size-4" aria-hidden /> },
+  add_category: { title: 'Add a category', count: (n) => `${plural(n, 'category', 'categories')} added`, icon: <FolderPlus className="size-4" aria-hidden /> },
+  change_category: { title: 'Rename or move a category', count: (n) => `${plural(n, 'category', 'categories')} renamed or moved`, icon: <FolderPen className="size-4" aria-hidden /> },
   set_note: { title: 'Add a note', count: (n) => plural(n, 'note'), icon: <NotebookPen className="size-4" aria-hidden /> },
   remove_duplicate: { title: 'Remove a duplicate', count: (n) => `${plural(n, 'duplicate')} removed`, icon: <CopyX className="size-4" aria-hidden /> },
   remove_internal_move: { title: 'Remove a move inside the account', count: (n) => `${plural(n, 'move')} inside an account removed`, icon: <PiggyBank className="size-4" aria-hidden /> },
@@ -259,15 +262,94 @@ export function ChangeBody({ change, view }: { change: ProposedChange; view: Pro
     }
     case 'set_category': {
       const t = row(change.transaction);
+      const confirms = t?.category === change.category;
       return (
         <div className="grid gap-2">
           <TxLine row={t} view={view} />
           <div className="flex flex-wrap items-center gap-2 text-[13px]">
             <span className="text-ink-3">Category</span>
-            <Badge tone="muted">{cats.name(t?.category)}</Badge>
-            <ArrowRight className="size-3.5 text-ink-3" aria-hidden />
-            <Badge tone="accent">{cats.path(change.category)}</Badge>
+            {confirms ? (
+              <>
+                <Badge tone="accent">{cats.path(change.category)}</Badge>
+                <span className="text-ink-3">{t?.categorisedBy === 'bank' ? 'as the bank guessed: confirmed, it becomes yours' : t?.categorisedBy === 'ai' ? 'as the reader guessed: confirmed, it becomes yours' : 'confirmed: it becomes yours'}</span>
+              </>
+            ) : (
+              <>
+                <Badge tone="muted">{cats.name(t?.category)}</Badge>
+                <ArrowRight className="size-3.5 text-ink-3" aria-hidden />
+                <Badge tone="accent">{cats.path(change.category)}</Badge>
+              </>
+            )}
           </div>
+        </div>
+      );
+    }
+    case 'add_rule': {
+      const reach = view.changes.find((c) => c.change.key === change.key)?.rule;
+      return (
+        <div className="grid gap-1.5 rounded-lg border border-line bg-panel px-3 py-2 text-[13px]">
+          <div className="text-ink">
+            When {matchWords(change.rule.match)}: <Badge tone="accent">{cats.path(change.rule.category)}</Badge>
+          </div>
+          {reach && (
+            <div className="text-[12.5px] text-ink-3">
+              {reach.count ? (
+                <>
+                  It categorises {plural(reach.count, 'payment')} now (<span className="sensitive">{money(Math.abs(reach.amount))}</span>), and the next ones as they come.
+                </>
+              ) : (
+                'Nothing to categorise now: it is for the next ones as they come.'
+              )}
+              {reach.yours > 0 && ` ${plural(reach.yours, 'payment')} it matches you put elsewhere yourself; those stay as you set them.`}
+            </div>
+          )}
+          {reach && reach.examples.length > 0 && (
+            <ul className="grid gap-0.5 text-[12.5px]">
+              {reach.examples.map((e) => (
+                <li key={e.id} className="flex flex-wrap justify-between gap-x-3">
+                  <span className="min-w-0 truncate text-ink-2" title={e.description}>
+                    {formatDate(e.date)} · <span className="sensitive">{e.description}</span>
+                    <span className="text-ink-3"> · now {e.category ? cats.name(e.category) : 'uncategorised'}</span>
+                  </span>
+                  <span className="sensitive tabular-nums">{money(e.amount)}</span>
+                </li>
+              ))}
+              {reach.count > reach.examples.length && <li className="text-ink-3">and {plural(reach.count - reach.examples.length, 'more')}</li>}
+            </ul>
+          )}
+        </div>
+      );
+    }
+    case 'add_category': {
+      const where = view.changes.find((c) => c.change.key === change.key)?.category;
+      const group = where?.group ?? (change.category.parent ? cats.name(change.category.parent) : undefined);
+      return (
+        <div className="rounded-lg border border-line bg-panel px-3 py-2 text-[13px] text-ink-2">
+          {group ? (
+            <>
+              A category <Badge tone="accent">{change.category.name}</Badge> in the group <span className="font-medium text-ink">{group}</span>.
+            </>
+          ) : (
+            <>
+              A group <Badge tone="accent">{change.category.name}</Badge> for {change.category.kind === 'expense' ? 'spending' : change.category.kind === 'income' ? 'money in' : `${change.category.kind}s`}, to put categories in.
+            </>
+          )}
+        </div>
+      );
+    }
+    case 'change_category': {
+      const r = view.changes.find((c) => c.change.key === change.key)?.category;
+      const wasName = r?.was?.name ?? cats.name(change.category);
+      const wasGroup = r?.was ? r.was.group : (cats.get(change.category)?.parent ? cats.name(cats.get(change.category)!.parent) : undefined);
+      const nowGroup = change.parent === undefined ? wasGroup : (r?.group ?? (change.parent ? cats.name(change.parent) : undefined));
+      return (
+        <div className="grid gap-1 rounded-lg border border-line bg-panel px-3 py-2 text-[13px]">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge tone="muted">{wasGroup ? `${wasGroup} › ${wasName}` : `${wasName} (a group)`}</Badge>
+            <ArrowRight className="size-3.5 text-ink-3" aria-hidden />
+            <Badge tone="accent">{nowGroup ? `${nowGroup} › ${change.name ?? wasName}` : `${change.name ?? wasName} (a group)`}</Badge>
+          </div>
+          <div className="text-[12.5px] text-ink-3">Its payments, budgets and rules keep it: only its name or its group changes.</div>
         </div>
       );
     }

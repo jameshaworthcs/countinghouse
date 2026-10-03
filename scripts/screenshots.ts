@@ -120,6 +120,7 @@ async function main() {
     ...(proposalId ? ([['proposal', `/proposals/${proposalId}`]] as [string, string][]) : []),
     ['settings', '/settings'],
     ['settings-extraction', '/settings#extraction'],
+    ['settings-categories', '/settings#categories'],
     ['settings-rules', '/settings#rules'],
     ['settings-tax-documents', '/settings#tax-documents'],
     ['settings-access', '/settings#access'],

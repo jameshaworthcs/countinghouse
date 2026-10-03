@@ -8,7 +8,7 @@ import { taxYearOf } from '../../shared/uk';
 import { AuditLog } from '../components/Audit';
 import { CoverageGaps, CoverageGrid } from '../components/Coverage';
 import { CategorySelect } from '../components/TransactionList';
-import { Badge, Button, Callout, Card, Checkbox, Dialog, Field, Input, KeyValue, Loading, Money, PageHeader, Select, SortHeader, StatusBadge, Switch, Tabs, tableClasses, useToast } from '../components/ui';
+import { Badge, Button, Callout, Card, Checkbox, Dialog, Field, Input, KeyValue, Loading, Money, PageHeader, Segmented, Select, SortHeader, StatusBadge, Switch, Tabs, tableClasses, useToast } from '../components/ui';
 import { api, useApi, useApiMutation } from '../lib/api';
 import { useAppData } from '../lib/data';
 import { bandLabel, cn, money, timeAgo } from '../lib/format';
@@ -242,53 +242,102 @@ function ExtractionForm() {
   );
 }
 
+/** Where money of each kind goes, as the add-a-group form says it. */
+const KIND_WORDS: Record<Category['kind'], string> = { expense: 'Spending', income: 'Money in', transfer: 'Transfers', investment: 'Investing' };
+
 function CategoriesEditor() {
   const { data, cats } = useAppData();
   const toast = useToast();
   const [list, setList] = useState<Category[]>(data.categories);
+  // Payments go in categories; a group only holds them. Adding one or the other is a choice made
+  // first, so a new name never becomes a group by default.
+  const [adding, setAdding] = useState<'category' | 'group'>('category');
   const [newName, setNewName] = useState('');
   const [newParent, setNewParent] = useState('');
+  const [newKind, setNewKind] = useState<Category['kind']>('expense');
   const save = useApiMutation((l: Category[]) => api('/categories', { method: 'PUT', body: l }), { onSuccess: () => toast({ tone: 'good', text: 'Categories saved' }) });
   const groups = list.filter((c) => !c.parent);
+  const id = newName
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+  const taken = Boolean(id) && list.some((c) => c.id === id);
+  const parent = adding === 'category' ? list.find((c) => c.id === newParent) : undefined;
+  const ready = Boolean(id) && !taken && (adding === 'group' || Boolean(parent));
   const add = () => {
-    const parent = list.find((c) => c.id === newParent);
-    const id = newName
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-|-$/g, '');
-    if (!id || list.some((c) => c.id === id)) return;
-    const next = [...list, { id, name: newName.trim(), kind: parent?.kind ?? 'expense', ...(parent ? { parent: parent.id } : {}) }];
+    if (!ready) return;
+    const next = [...list, adding === 'group' ? { id, name: newName.trim(), kind: newKind } : { id, name: newName.trim(), kind: parent!.kind, parent: parent!.id }];
     setList(next);
     setNewName('');
     save.mutate(next);
   };
+  const rename = (c: Category, name: string) => {
+    if (!name.trim() || name.trim() === c.name) return;
+    const next = list.map((x) => (x.id === c.id ? { ...x, name: name.trim() } : x));
+    setList(next);
+    save.mutate(next);
+  };
   return (
-    <Card title="Categories" description="Rename, hide or add. System categories (marked) drive calculations and can't be removed." padded={false}>
-      <div className="flex flex-wrap items-end gap-2 border-t border-line px-5 py-3">
-        <Field label="New category">
-          <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="e.g. Climbing" className="w-52" />
-        </Field>
-        <Field label="In group">
-          <Select value={newParent} onChange={(e) => setNewParent(e.target.value)} className="w-52">
-            <option value="">(new group)</option>
-            {groups.map((g) => (
-              <option key={g.id} value={g.id}>
-                {g.name}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        <Button icon={<Plus className="size-4" />} onClick={add} disabled={!newName.trim()}>
-          Add
-        </Button>
+    <Card title="Categories" description="Payments go in categories, and each category sits in a group. Rename, hide or add; system categories (marked) drive calculations and can't be removed." padded={false}>
+      <div className="flex flex-col gap-2 border-t border-line px-5 py-3">
+        <Segmented
+          label="Add"
+          value={adding}
+          onChange={setAdding}
+          options={[
+            { value: 'category', label: 'Add a category' },
+            { value: 'group', label: 'Add a group' },
+          ]}
+          className="self-start"
+        />
+        <p className="text-[12.5px] text-ink-3">
+          {adding === 'category' ? 'A category to put payments in, inside one of your groups (as Groceries is in Food & drink).' : 'A group only holds categories (as Food & drink holds Groceries): add a category to it after, to put payments in.'}
+        </p>
+        <div className="flex flex-wrap items-end gap-2">
+          <Field label={adding === 'category' ? 'Category name' : 'Group name'}>
+            <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder={adding === 'category' ? 'e.g. Climbing' : 'e.g. Business'} className="w-52" />
+          </Field>
+          {adding === 'category' ? (
+            <Field label="In the group">
+              <Select value={newParent} onChange={(e) => setNewParent(e.target.value)} className="w-52">
+                <option value="">Choose a group…</option>
+                {groups.map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          ) : (
+            <Field label="For">
+              <Select value={newKind} onChange={(e) => setNewKind(e.target.value as Category['kind'])} className="w-40">
+                {(Object.keys(KIND_WORDS) as Category['kind'][]).map((k) => (
+                  <option key={k} value={k}>
+                    {KIND_WORDS[k]}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          )}
+          <Button icon={<Plus className="size-4" />} onClick={add} disabled={!ready}>
+            {adding === 'group' ? 'Add the group' : parent ? `Add to ${parent.name}` : 'Add the category'}
+          </Button>
+        </div>
+        {taken && <div className="text-[12px] text-bad-ink">“{cats.name(id)}” is in your categories already.</div>}
       </div>
       <div className="grid gap-x-8 border-t border-line px-5 py-4 md:grid-cols-2 xl:grid-cols-3">
         {groups.map((g) => (
           <div key={g.id} className="mb-4 break-inside-avoid">
             <div className="mb-1 flex items-center gap-2 text-[13px] font-semibold text-ink">
-              {g.name}
-              <Badge tone="muted">{g.kind}</Badge>
+              <input
+                className="min-w-0 flex-1 rounded border border-transparent bg-transparent px-1 py-0.5 font-semibold text-ink hover:border-line focus:border-accent focus:outline-none"
+                defaultValue={g.name}
+                onBlur={(e) => rename(g, e.target.value)}
+                aria-label={`Rename the group ${g.name}`}
+              />
+              <Badge tone="muted">{KIND_WORDS[g.kind]}</Badge>
             </div>
+            {!list.some((c) => c.parent === g.id) && <p className="px-1 text-[12.5px] text-ink-3">No categories in it: payments go in the group itself. Add one above, choosing this group, to split it.</p>}
             <ul className="flex flex-col gap-0.5">
               {list
                 .filter((c) => c.parent === g.id)
@@ -297,13 +346,7 @@ function CategoriesEditor() {
                     <input
                       className={cn('min-w-0 flex-1 rounded border border-transparent bg-transparent px-1 py-0.5 hover:border-line focus:border-accent focus:outline-none', c.hidden ? 'text-ink-3 line-through' : 'text-ink-2')}
                       defaultValue={c.name}
-                      onBlur={(e) => {
-                        if (e.target.value.trim() && e.target.value !== c.name) {
-                          const next = list.map((x) => (x.id === c.id ? { ...x, name: e.target.value.trim() } : x));
-                          setList(next);
-                          save.mutate(next);
-                        }
-                      }}
+                      onBlur={(e) => rename(c, e.target.value)}
                       aria-label={`Rename ${c.name}`}
                     />
                     {c.system ? (

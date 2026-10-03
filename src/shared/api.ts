@@ -761,6 +761,23 @@ export interface ProposalChangeView {
   files?: { transactionId: string; accountId: string; date: string; amount: number; category?: string }[];
   /** Terms set: the document they are from, and the terms its reading kept, which they replace. */
   terms?: { fileName?: string; before?: Pick<Terms, 'rates' | 'limit' | 'minimumPayment' | 'paymentDue'> };
+  /**
+   * A rule made: the payments it categorises now (newest first, a few shown), and how many it matches
+   * that you categorised otherwise yourself, which it leaves as they are.
+   */
+  rule?: { count: number; amount: number; examples: ProposalRuleExample[]; yours: number };
+  /** A category added or changed: where it sits after (its group's name), and how it was. */
+  category?: { group?: string; was?: { name: string; group?: string } };
+}
+
+/** A payment a proposed rule would categorise, with the category it has now. */
+export interface ProposalRuleExample {
+  id: string;
+  accountId: string;
+  date: string;
+  amount: number;
+  description: string;
+  category?: string;
 }
 
 /** A balance a proposal moves, as it is now (as it was, once decided). */
@@ -1333,7 +1350,10 @@ export interface RuleSuggestion {
   from: { by: 'user' | 'ai'; count: number };
   /** The rows it would categorise now: not yours, and not in that category already. */
   fills: { count: number; amount: number; ids: string[] };
+  /** What it would categorise now, or, for a rule for the next ones, the payments you decided. */
   examples: QueueExample[];
+  /** You decided every payment from them: nothing to fill now, the rule is for the next ones. */
+  next?: true;
 }
 
 /** Uncategorised payments to or from one payee, one way. */

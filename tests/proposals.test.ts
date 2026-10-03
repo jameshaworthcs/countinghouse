@@ -537,3 +537,112 @@ describe('each decision is a commit of its own', () => {
     }
   });
 });
+
+describe('rules, categories and guesses', () => {
+  const problems = async (changes: unknown[]) => {
+    const res = await propose({ title: 'A test', summary: 'A test.', changes, dryRun: true });
+    return res.status === 200 ? [] : ((await res.json()) as { problems: { problem: string }[] }).problems.map((p) => p.problem);
+  };
+
+  it('makes a rule: it categorises what it catches now and the next ones, and leaves yours', async () => {
+    const { store } = app.ctx;
+    // The bank pads its descriptions; the rule's words are the payee's, singly spaced.
+    const a = tx('bank', '2026-03-01', -4.5, 'EXAMPLE CAFE         YORK');
+    const b = tx('bank', '2026-03-08', -4.5, 'EXAMPLE CAFE         YORK', { category: 'eating-out', categorisedBy: 'ai' });
+    const mine = tx('bank', '2026-03-15', -4.5, 'EXAMPLE CAFE         YORK', { category: 'groceries', categorisedBy: 'user' });
+    await store.addTransactions([a, b, mine], 'test');
+    const rule = { key: 'cafe', kind: 'add_rule', why: 'Coffee most weeks.', rule: { match: { field: 'description', op: 'contains', value: 'Example Cafe York', caseSensitive: false, direction: 'out' }, category: 'coffee' } };
+    const res = await propose({ title: 'A rule for the café', summary: 'Coffee most weeks.', changes: [rule] });
+    expect(res.status).toBe(201);
+    const view = (await res.json()) as ProposalView;
+    expect(view.changes[0]!.rule).toMatchObject({ count: 2, amount: -9, yours: 1 });
+    expect(view.changes[0]!.rule!.examples.map((e) => [e.id, e.category])).toEqual([
+      [b.id, 'eating-out'],
+      [a.id, undefined],
+    ]);
+    expect((await owner(`/api/proposals/${view.proposal.id}/apply`)).status).toBe(200);
+    const made = store.rules.find((r) => r.match.value === 'Example Cafe York')!;
+    expect(made).toMatchObject({ enabled: true, priority: 100, set: { category: 'coffee' } });
+    expect(made.name).toMatch(/^Example Cafe York → /);
+    expect(store.transaction(a.id)).toMatchObject({ category: 'coffee', categorisedBy: 'rule', ruleId: made.id });
+    expect(store.transaction(b.id)).toMatchObject({ category: 'coffee', categorisedBy: 'rule', ruleId: made.id });
+    // Yours stays as you set it.
+    expect(store.transaction(mine.id)).toMatchObject({ category: 'groceries', categorisedBy: 'user' });
+    // The same rule again is so already; the same words for another category: yours wins.
+    expect(await problems([rule])).toEqual([expect.stringMatching(/already says this/)]);
+    expect(await problems([{ ...rule, rule: { ...rule.rule, category: 'eating-out' } }])).toEqual([expect.stringMatching(/catches the same payments and puts them in/)]);
+    expect(await problems([{ ...rule, rule: { ...rule.rule, category: 'no-such-category' } }])).toEqual([expect.stringMatching(/no category/)]);
+  });
+
+  it('a rule after a category in the same proposal leaves that row to it', async () => {
+    const { store } = app.ctx;
+    const a = tx('bank', '2026-04-01', -12, 'EXAMPLE BOOKS LTD');
+    const b = tx('bank', '2026-04-09', -8, 'EXAMPLE BOOKS LTD');
+    await store.addTransactions([a, b], 'test');
+    const view = (await (
+      await propose({
+        title: 'Books',
+        summary: 'Books, and one present.',
+        changes: [
+          { key: 'present', kind: 'set_category', why: 'A present.', transaction: a.id, category: 'gifts' },
+          { key: 'books', kind: 'add_rule', why: 'Books.', rule: { match: { value: 'EXAMPLE BOOKS' }, category: 'books' } },
+        ],
+      })
+    ).json()) as ProposalView;
+    expect(view.changes[1]!.rule).toMatchObject({ count: 1, yours: 1 });
+    expect((await owner(`/api/proposals/${view.proposal.id}/apply`)).status).toBe(200);
+    expect(store.transaction(a.id)).toMatchObject({ category: 'gifts', categorisedBy: 'user' });
+    expect(store.transaction(b.id)).toMatchObject({ category: 'books', categorisedBy: 'rule' });
+  });
+
+  it('adds a group and moves a category into it, and a later change can use them', async () => {
+    const { store } = app.ctx;
+    await store.setCategories([...store.categories, { id: 'advertising', name: 'Advertising', kind: 'expense' }]);
+    const ad = tx('bank', '2026-02-08', -60, 'EXAMPLE ADS');
+    await store.addTransactions([ad], 'test');
+    const res = await propose({
+      title: 'Business',
+      summary: 'A group for business costs, with Advertising in it.',
+      changes: [
+        { key: 'group', kind: 'add_category', why: 'A group for business costs.', category: { id: 'business', name: 'Business', kind: 'expense' } },
+        { key: 'move', kind: 'change_category', why: 'Advertising was made a group by mistake.', category: 'advertising', parent: 'business' },
+        { key: 'ad', kind: 'set_category', why: 'An ad.', transaction: ad.id, category: 'advertising' },
+      ],
+    });
+    expect(res.status).toBe(201);
+    const view = (await res.json()) as ProposalView;
+    expect(view.changes.find((c) => c.change.key === 'move')!.category).toEqual({ group: 'Business', was: { name: 'Advertising' } });
+    expect((await owner(`/api/proposals/${view.proposal.id}/apply`)).status).toBe(200);
+    expect(store.categories.filter((c) => c.id === 'business' || c.id === 'advertising')).toEqual([
+      { id: 'advertising', name: 'Advertising', kind: 'expense', parent: 'business' },
+      { id: 'business', name: 'Business', kind: 'expense' },
+    ]);
+    expect(store.transaction(ad.id)).toMatchObject({ category: 'advertising', categorisedBy: 'user' });
+    // What it changed, as it was.
+    const file = JSON.parse(await readFile(path.join(dir, 'data', store.proposals[0]!.path), 'utf8')) as { before: { categories: unknown[] } };
+    expect(file.before.categories).toEqual([{ id: 'advertising', name: 'Advertising', kind: 'expense' }]);
+  });
+
+  it('a category goes in a group of its kind, and a group with categories in it stays a group', async () => {
+    expect(await problems([{ kind: 'add_category', why: 'w', category: { id: 'climbing', name: 'Climbing', kind: 'expense', parent: 'groceries' } }])).toEqual([expect.stringMatching(/not a group/)]);
+    expect(await problems([{ kind: 'add_category', why: 'w', category: { id: 'tips', name: 'Tips', kind: 'income', parent: 'food' } }])).toEqual([expect.stringMatching(/holds expense categories/)]);
+    expect(await problems([{ kind: 'change_category', why: 'w', category: 'food', parent: 'housing' }])).toEqual([expect.stringMatching(/only a category goes in a group/)]);
+    expect(await problems([{ kind: 'change_category', why: 'w', category: 'no-such', name: 'X' }])).toEqual([expect.stringMatching(/no category/)]);
+    expect(await problems([{ kind: 'add_category', why: 'w', category: { id: 'groceries', name: 'Groceries', kind: 'expense', parent: 'food' } }])).toEqual([expect.stringMatching(/already says this/)]);
+    // A rename alone, and a group's category moved to another group of its kind, fit.
+    expect(await problems([{ kind: 'change_category', why: 'w', category: 'food', name: 'Food and drink' }])).toEqual([]);
+    expect(await problems([{ kind: 'change_category', why: 'w', category: 'coffee', parent: 'shopping' }])).toEqual([]);
+  });
+
+  it('confirms a guess: the same category the reader gave becomes yours', async () => {
+    const { store } = app.ctx;
+    const guessed = tx('bank', '2026-05-02', -30, 'EXAMPLE TRATTORIA', { category: 'eating-out', categorisedBy: 'ai' });
+    const yours = tx('bank', '2026-05-03', -30, 'EXAMPLE TRATTORIA', { category: 'eating-out', categorisedBy: 'user' });
+    await store.addTransactions([guessed, yours], 'test');
+    expect(await problems([{ kind: 'set_category', why: 'w', transaction: yours.id, category: 'eating-out' }])).toEqual([expect.stringMatching(/already says this/)]);
+    const view = (await (await propose({ title: 'Right guesses', summary: 'Checked.', changes: [{ kind: 'set_category', why: 'A restaurant.', transaction: guessed.id, category: 'eating-out' }] })).json()) as ProposalView;
+    expect(view.ready).toBe(1);
+    expect((await owner(`/api/proposals/${view.proposal.id}/apply`)).status).toBe(200);
+    expect(store.transaction(guessed.id)).toMatchObject({ category: 'eating-out', categorisedBy: 'user' });
+  });
+});

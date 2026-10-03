@@ -205,6 +205,9 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
       { "kind": "unlink_transfer", "transaction": "tx_…", "why": "…" },
       { "kind": "link_transfer", "from": "tx_… (money out)", "to": "tx_… (money in)", "why": "…" },
       { "kind": "set_category", "transaction": "tx_…", "category": "takeaway", "why": "…" },
+      { "kind": "add_rule", "rule": { "match": { "field": "description", "op": "contains", "value": "Example Cafe", "direction": "out" }, "category": "coffee" }, "why": "…" },
+      { "kind": "add_category", "category": { "id": "example-group", "name": "Example group", "kind": "expense" }, "why": "…" },
+      { "kind": "change_category", "category": "example-category", "name": "New name", "parent": "example-group", "why": "…" },
       { "kind": "set_note", "transaction": "tx_…", "note": "Room 4, Example Court: instalment 1 of 3", "why": "…" },
       { "kind": "remove_duplicate", "transaction": "tx_…", "sameAs": ["tx_…", "tx_…"], "why": "…" },
       { "kind": "remove_wrong_sign", "transaction": "tx_…", "recordedAs": ["tx_…"], "why": "…" },
@@ -269,7 +272,27 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
   - A category exists, and a row linked as a transfer keeps a transfer category. A category that
     is not a transfer one, on a row not linked as one, also takes away the account of yours the row
     named as the other side, and works its payee out again when that was one of your accounts'
-    names (unless the owner set the payee).
+    names (unless the owner set the payee). A row the bank, the reader or the app's own patterns
+    put in that category already is **confirmed**: it becomes the owner's. One the owner, a rule of
+    theirs, an agreement or a transfer link put there is already so.
+  - A rule made (`add_rule`) is one the owner could make in Settings → Rules: words to find in the
+    description (or the payee), with an optional direction, amount range and accounts, and the
+    category it sets. The category exists, and no enabled rule of the owner's has the same match (the
+    same category: already so; another: the owner's wins, so it does not fit). The proposal shows the
+    payments it categorises now, newest first, and how many of the owner's own categories it matches
+    but leaves. Applied, it is added to the owner's rules (priority 100), and the payments it decides
+    are categorised by it now (`categorisedBy: rule`), as making a rule does; the next ones are as
+    they come. A rule's words match however a bank spaces them (FORMULAS.md §10). Propose one only
+    for a payee that comes again and is always one thing, with its `why` naming the payments that
+    show it; a one-off takes `set_category`.
+  - A category added (`add_category`) has a new id (a slug) and a name no other category in its
+    group, or no other group, has. Without `parent` it is a group, of its `kind`; with one, a
+    category in that group, which is a group (not a category in another) of the same kind.
+  - A category changed (`change_category`) is renamed (`name`), moved into another group of its
+    kind (`parent`), or made a group of its own (`parent: null`). A group with categories in it
+    stays a group. Its payments, rules and budgets keep it: only its name or its place changes.
+    Changes run in order, so a group added first can take a category moved next, and a later
+    change can use either.
   - The owner wins: a category the owner set is not changed, a note already on a row is not
     replaced (`set_note` adds one only where there is none), and a duplicate with something of
     theirs on it (a category, payee, note, tag, split, correction, receipt or details another
@@ -291,8 +314,9 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
 - **Not again.** The same changes cannot be proposed while they wait, or after the owner dismissed
   them. A proposal whose changes undo each other is refused too.
 - **Applying** goes through the store's own writes under one commit message. The proposal is kept
-  in `data/proposals/`, with the rows and accounts it changed as they were before. A category it sets
-  counts as the owner's (`categorisedBy: user`). Another proposal that this leaves with nothing to
+  in `data/proposals/`, with the rows, accounts and categories it changed as they were before. A
+  category it sets counts as the owner's (`categorisedBy: user`); a rule it makes is the owner's
+  rule from then on. Another proposal that this leaves with nothing to
   do closes as already done, in a commit of its own.
 - **Only the owner decides.** No token can apply, dismiss or close a proposal. An agent can withdraw
   its own while it waits (`DELETE /api/proposals/:id`); one the data has caught up with needs no

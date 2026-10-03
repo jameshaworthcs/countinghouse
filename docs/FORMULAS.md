@@ -641,7 +641,12 @@ you.
 - **When:** a payee you put in one category at least twice one way (`RULE_FROM_DECISIONS`), all in
   that category; or, when you put none of them anywhere, one the reader put in one category three
   times or more (`RULE_FROM_READER`). Only spending and income categories; never a person's payments
-  or cash and cheques paid in; only when the rule would categorise a payment now.
+  or cash and cheques paid in.
+- **Now, or for the next ones:** offered when the rule would categorise a payment now. When you
+  decided every payment from the payee yourself, it is offered for the next ones instead ("For the
+  next ones"), while the payee was paid in the last year (`RULE_RECENT_DAYS`) and no enabled rule of
+  yours catches every payment you decided. Without it, the next payment comes in uncategorised or
+  guessed: a category you set is never a rule by itself.
 - **The rule:** money that way whose description holds the payee (one of 4 letters or more); else
   whose payee, as the categoriser sees it, is the payee. A rule that would catch a payment you put
   in another category is too wide and isn't offered. When some payments it would catch are under a
@@ -649,6 +654,12 @@ you.
   smallest to twice the largest.
 - Two payees that are one (a statement's wording and an app's) offer the rule that fills more,
   once.
+
+**How a rule's words match** (`shared/categorise.ts`, `compileRule`): case aside (unless the rule
+says), a run of spaces counts as one, in the rule and in what it is matched against. Some cards pad
+descriptions to fixed columns ("EXAMPLE - BARBERS         YORK"), so a rule made from the payee's words
+("Example - Barbers York") matches them as it matches another card's. A pattern (`regex`) is
+matched as written.
 
 **What's left** is the uncategorised payments in the period, not a person's, not cash or a cheque paid
 in and not one a suggested rule would fill, grouped by payee and direction, the largest total first.

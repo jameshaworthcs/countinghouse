@@ -172,7 +172,9 @@ interface CompiledRule {
 
 function compileRule(rule: Rule): CompiledRule {
   const { op, value, caseSensitive } = rule.match;
-  const norm = (s: string) => (caseSensitive ? s : s.toLowerCase());
+  // Banks pad descriptions with runs of spaces ("EXAMPLE - BARBERS         YORK"): a run is one space,
+  // so a rule made from the payee's words matches however the bank spaced them.
+  const norm = (s: string) => (caseSensitive ? s : s.toLowerCase()).replace(/\s+/g, ' ');
   const needle = norm(value);
   let test: (text: string) => boolean;
   switch (op) {

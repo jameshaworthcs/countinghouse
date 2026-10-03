@@ -216,7 +216,7 @@ function CategoryTable({ block, view, pending, superseded, leaveOut, applied, re
                         {r?.alreadySo && <div className="text-[11.5px] text-ink-3">Already so</div>}
                       </td>
                       <td className={cn('sensitive px-2 py-1.5 text-right align-top whitespace-nowrap tabular-nums', row && row.amount > 0 && 'text-good-ink')}>{row && !row.missing ? money(row.amount, { currency: row.currency, sign: true }) : ''}</td>
-                      <td className="hidden truncate px-2 py-1.5 align-top md:table-cell">{row && !row.missing ? cats.name(row.category) : ''}</td>
+                      <td className="hidden truncate px-2 py-1.5 align-top md:table-cell">{row && !row.missing ? (row.category === block.category ? `${cats.name(row.category)}, a guess: confirmed` : cats.name(row.category)) : ''}</td>
                     </tr>
                   );
                 })}

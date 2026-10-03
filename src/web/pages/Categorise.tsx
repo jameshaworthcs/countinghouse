@@ -12,7 +12,7 @@ import { CategorySelect } from '../components/TransactionList';
 import { Badge, Button, Callout, Card, Checkbox, EmptyState, Field, Input, Loading, Money, PageHeader, Segmented, Select, Tabs, useToast } from '../components/ui';
 import { api, qs, useApi, useApiMutation } from '../lib/api';
 import { useAppData } from '../lib/data';
-import { cn, money, plural } from '../lib/format';
+import { cn, matchWords, money, plural } from '../lib/format';
 
 type Tab = 'people' | 'rules' | 'payees' | 'guesses';
 type Period = '12m' | 'all';
@@ -388,19 +388,12 @@ function SavedPeople({ people }: { people: Person[] }) {
 
 // ─── Rules ───────────────────────────────────────────────────────────────────────────────────────
 
-function matchWords(m: Rule['match']): string {
-  const what = m.field === 'payee' ? `the payee is “${m.value}”` : `the description holds “${m.value}”`;
-  const dir = m.direction === 'in' ? ', money in' : m.direction === 'out' ? ', money out' : '';
-  const size = m.amountMin !== undefined && m.amountMax !== undefined ? `, ${money(m.amountMin, { decimals: 0 })} to ${money(m.amountMax, { decimals: 0 })}` : '';
-  return `${what}${dir}${size}`;
-}
-
 function RulesTab({ rules }: { rules: RuleSuggestion[] }) {
   if (!rules.length)
     return (
       <Card>
         <EmptyState icon={<Wand2 className="size-6" />} title="No rules to suggest">
-          A rule is suggested when you put a payee in one category twice or more (or the reader did three times) and it would categorise payments now.
+          A rule is suggested when you put a payee in one category twice or more (or the reader did three times): for the payments it would categorise now, or, when you decided them all, for the next ones.
         </EmptyState>
       </Card>
     );
@@ -433,13 +426,21 @@ function RuleCard({ rule }: { rule: RuleSuggestion }) {
             {rule.payee} → {cats.path(rule.category)}
           </div>
           <div className="tabular text-[13px] text-ink-2">
-            {plural(rule.fills.count, 'payment')} · <Money value={rule.fills.amount} />
+            {rule.next ? (
+              'For the next ones'
+            ) : (
+              <>
+                {plural(rule.fills.count, 'payment')} · <Money value={rule.fills.amount} />
+              </>
+            )}
           </div>
         </div>
         <p className="mt-1 text-[12.5px] text-ink-3">
-          {rule.from.by === 'user' ? `You put ${rule.from.count} of these in ${cats.name(rule.category)}` : `The reader put ${rule.from.count} of these in ${cats.name(rule.category)}, and you never put one elsewhere`}. The rule: {matchWords(rule.match)}. It categorises these now, and the next ones as they come.
+          {rule.from.by === 'user' ? `You put ${rule.from.count} of these in ${cats.name(rule.category)}` : `The reader put ${rule.from.count} of these in ${cats.name(rule.category)}, and you never put one elsewhere`}. The rule: {matchWords(rule.match)}.{' '}
+          {rule.next ? 'You decided every one so far; without a rule, the next ones come in uncategorised.' : 'It categorises these now, and the next ones as they come.'}
         </p>
-        <Examples items={rule.examples} more={rule.fills.count - rule.examples.length} />
+        {rule.next && <div className="mt-2 text-[12px] text-ink-3">Yours so far:</div>}
+        <Examples items={rule.examples} more={rule.next ? rule.from.count - rule.examples.length : rule.fills.count - rule.examples.length} />
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <CategorySelect value={category} onChange={setCategory} allowEmpty={false} className="w-full sm:w-64" />
           <Button variant="primary" size="sm" disabled={!category} loading={make.isPending} onClick={() => make.mutate(undefined)}>
