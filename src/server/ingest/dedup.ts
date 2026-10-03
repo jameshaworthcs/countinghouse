@@ -80,6 +80,8 @@ export interface DedupResult {
   reason?: string;
   /** Matched to several recorded rows adding up to it (step 5): `duplicateOf` is only the first. */
   sum?: true;
+  /** A possible duplicate on the same amount whose descriptions are alike (or one names no one): close to certain. */
+  similar?: true;
 }
 
 /** A time a row can be placed by: to the minute, and not a midnight an export puts on every row. */
@@ -194,7 +196,7 @@ export function classifyDuplicates(incoming: DedupCandidate[], existing: Transac
         : best.similar
           ? 'Same amount, similar description, within a few days'
           : `Same amount ${best.days === 0 ? 'on the same day' : 'within a few days'}, described differently`;
-      results[i] = { status: 'possible_duplicate', duplicateOf: best.t.id, reason };
+      results[i] = { status: 'possible_duplicate', duplicateOf: best.t.id, reason, ...(best.similar ? { similar: true as const } : {}) };
     }
   });
 

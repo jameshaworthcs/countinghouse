@@ -134,9 +134,10 @@ describe('an import that knows more about recorded payments', () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  it('offers what each row adds: by itself when the match is certain, for you to tick when it is possible', () => {
+  it('offers what each row adds: ticked by itself when the match is certain, or close with nothing in conflict', () => {
     const [cashRow, cardRow] = draftOf().sections[0]!.transactions;
-    expect(cashRow).toMatchObject({ status: 'possible_duplicate', duplicateOf: cash.id, include: false, adds: { include: false, fields: { transactionDate: '2026-09-14', transactionTime: '21:15' }, differs: [] } });
+    // A possible duplicate on like words, adding only when the cash was taken out: ticked.
+    expect(cashRow).toMatchObject({ status: 'possible_duplicate', duplicateOf: cash.id, include: false, adds: { include: true, fields: { transactionDate: '2026-09-14', transactionTime: '21:15' }, differs: [] } });
     // The same minute on the same day: certain.
     expect(cardRow).toMatchObject({ status: 'duplicate', duplicateOf: card.id, include: false, adds: { include: true, fields: { counterpartyName: 'Credit card' } } });
     expect(cardRow!.adds!.differs).toEqual([{ field: 'description', recorded: 'To Revolving Line Account', here: "Sam's Account to Credit card" }]);

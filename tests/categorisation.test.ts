@@ -133,6 +133,10 @@ describe('money that is neither spending nor income', () => {
     expect(payeeRuleMatch('Tfl Travel', [fare], 'out')).toMatchObject({ field: 'description', op: 'contains', value: 'Tfl Travel' });
   });
 
+  it('a car park is parking, and keeps its own name', () => {
+    expect(c.categorise({ accountId: 'card', description: 'Exampleton Car Park', amount: -2.4 })).toMatchObject({ category: 'parking', payee: 'Exampleton Car Park' });
+  });
+
   it('a "BP" ending an HSBC row is its bill-payment code, not the fuel brand', () => {
     expect(c.categorise({ accountId: 'current', description: 'EXAMPLE LETTINGS 12 FLAT BP', amount: -900 }).category).not.toBe('fuel');
     expect(c.categorise({ accountId: 'current', description: 'EXAMPLE BNK VSA123456 123456******1234 BP', amount: -150 }).category).not.toBe('fuel');

@@ -34,6 +34,7 @@ import { hmrcId, payslipId } from '../ids';
 import { earnedReplaced, inferPayroll } from '../analytics/earned';
 import type { Store } from '../store';
 import { classifyDuplicates, saysNothing, storedTwice } from './dedup';
+import { isCancelled } from '../../shared/review';
 import { dateFromFileName } from './images';
 import { fitsAccount, identifies, matchAccount, onlyKind, proposeAccount, sameHolding } from './match';
 import { asAgreement, draftAgreements, isStudentFinance, paymentLabel, STUDENT_FINANCE, studentLoanAccount } from './schedules';
@@ -100,13 +101,6 @@ const DATE_SOURCE_WORDS: Record<DateSource, string> = {
   upload: 'the upload day',
   manual: 'as you set it',
 };
-
-/**
- * A row the document shows as cancelled or declined (struck through, "Cancelled"): money that never
- * moved. The reader says so in `uncertain`; it is shown, not recorded, like a pending row.
- */
-const CANCELLED = /\b(cancell?ed|declined)\b/i;
-const cancelled = (t: { uncertain?: string | null | undefined }) => Boolean(t.uncertain && CANCELLED.test(t.uncertain));
 
 const TRANSFER_CATEGORIES = new Set(['transfer', 'credit-card-payment', 'savings-transfer', 'investment-transfer', 'contribution', 'withdrawal']);
 
@@ -371,7 +365,7 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
         // Pending rows are shown but not recorded: the settled row arrives with the next statement.
         // Nor a cancelled one, which never moved money. A move to or from one of the account's
         // Spaces is not money in or out.
-        include: dup.status === 'new' && !t.pending && !space && !cancelled(t),
+        include: dup.status === 'new' && !t.pending && !space && !isCancelled(t),
         status: dup.status,
         date: t.date,
         amount: t.amount,
@@ -403,10 +397,14 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
           const named = found.differs.some((d) => d.field === 'description');
           const seenIn = named ? [...(recorded.seenIn ?? []), seenInEntry({}, Object.keys(found.fields) as DetailField[], found.differs, '')] : recorded.seenIn;
           const change = rederive(categoriser, { ...recorded, ...fillIn(recorded, found.fields).patch, ...(seenIn ? { seenIn } : {}) }, [...Object.keys(found.fields), ...(named ? ['seenIn'] : [])]);
+          // Ticked by itself when the match is certain; when the record names no one ("Outgoing
+          // transaction"), as this document's name for it is all gain; and when the match is on
+          // like words and nothing it says conflicts (only the posting day or the wording differ).
+          // Only what the record lacks is filled in, and a row you record as a payment of its own
+          // adds nothing to the other.
+          const conflicts = found.differs.some((x) => x.field !== 'date' && x.field !== 'description');
           row.adds = {
-            // Ticked by itself when the match is certain, or when the record names no one ("Outgoing
-            // transaction"): this document's name for it is all gain.
-            include: dup.status === 'duplicate' || saysNothing(recorded.description),
+            include: dup.status === 'duplicate' || saysNothing(recorded.description) || (dup.similar === true && !conflicts),
             fields: found.fields,
             differs: found.differs,
             ...('category' in change ? { category: { ...(recorded.category ? { from: recorded.category } : {}), ...(change.category ? { to: change.category } : {}) } } : {}),

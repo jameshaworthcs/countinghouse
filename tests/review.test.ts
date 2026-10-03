@@ -66,10 +66,13 @@ describe('review checks', () => {
     const b = row('2026-09-05', -3.2, 'Costa ');
     const unsure = row('2026-09-06', -45, 'SHELL', { uncertain: 'amount partly hidden' });
     const pending = row('2026-09-07', -9.99, 'NETFLIX', { pending: true, include: false });
-    const checks = sectionChecks(section([a, b, unsure, pending]), ctx);
+    // Struck through on the screen: left out, and nothing to be unsure of.
+    const cancelled = row('2026-09-08', -0.1, 'EXAMPLE BUSES', { uncertain: 'Marked Cancelled with the amount struck through', include: false });
+    const checks = sectionChecks(section([a, b, unsure, pending, cancelled]), ctx);
     expect(byId(checks, 'repeated')).toMatchObject({ status: 'info', rows: [a.key, b.key] });
     expect(byId(checks, 'uncertain')).toMatchObject({ status: 'warn', rows: [unsure.key] });
     expect(byId(checks, 'pending')).toMatchObject({ status: 'info', rows: [pending.key] });
+    expect(byId(checks, 'cancelled')).toMatchObject({ status: 'info', rows: [cancelled.key] });
   });
 
   it('has nothing to say about a clean export with no balances', () => {

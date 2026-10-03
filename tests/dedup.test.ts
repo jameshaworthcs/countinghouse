@@ -69,6 +69,7 @@ describe('the same payment from another source', () => {
       ['possible_duplicate', 'tx_unnamed2'],
     ]);
     expect(res[0]!.reason).toMatch(/names no one/);
+    expect(res.every((r) => r.similar)).toBe(true);
     // Named both sides, small and unlike: still two payments.
     expect(classifyDuplicates([{ date: '2026-07-28', amount: -4.08, description: 'GREENGROCER' }], [tx('tx_cafe2', '2026-07-29', -4.08, 'CORNER CAFE')])[0]!.status).toBe('new');
   });
@@ -163,6 +164,33 @@ describe('an import that corrects the record', () => {
     await store.updateTransactions([{ id: CSV, patch: { notes: 'the card payment' } }], 'test: a note');
     await commitDraft(store, { record: { ...record, id: 'imp_20260930_073000_0b03' }, draft, workFile });
     expect(store.transaction(CSV)).toBeDefined();
+  });
+
+  it('a close match fills in what the record lacks by itself; one described differently waits for you', async () => {
+    await store.addTransactions(
+      [
+        tx('tx_00000000000000a4', '2026-07-06', -9.5, 'EXAMPLE SPORT PURCHASE', { source: { importId: 'imp_20260829_100000_0a01' } }),
+        tx('tx_00000000000000a5', '2026-07-27', 653.27, 'From A N Other Repayment', { source: { importId: 'imp_20260829_100000_0a01' } }),
+      ],
+      'test: two payments a statement recorded',
+    );
+    const app = ExtractionSchema.parse({
+      documentType: 'transactions_screenshot',
+      accounts: [
+        {
+          accountName: 'Current',
+          transactions: [
+            { date: '2026-07-03', description: 'EXAMPLE SPORT', amount: -9.5, time: '19:37', type: 'Purchase' },
+            { date: '2026-07-27', description: "A N Other's Account to Credit card", amount: 653.27, time: '12:23' },
+          ],
+        },
+      ],
+    });
+    const [sport, repay] = buildDraft(app, { store, document: record.document, hintAccountId: 'current', uploadedOn: '2026-09-30' }).sections[0]!.transactions;
+    // Made on the 3rd, posted on the 6th: when it was made, ticked to fill in.
+    expect(sport).toMatchObject({ status: 'possible_duplicate', duplicateOf: 'tx_00000000000000a4', include: false, adds: { include: true, fields: { transactionDate: '2026-07-03', transactionTime: '19:37' } } });
+    // The same money, worded differently: yours to look at.
+    expect(repay).toMatchObject({ status: 'possible_duplicate', duplicateOf: 'tx_00000000000000a5', adds: { include: false } });
   });
 
   it('a cancelled row is shown, not recorded; a row that names no one takes the app’s name, and its category', async () => {

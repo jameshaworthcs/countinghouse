@@ -549,9 +549,13 @@ read again.
     counts in working out its payee and category, on the review page and on commit: a statement's
     "Outgoing transaction" that an app calls "ALDI" is groceries. The description it was recorded
     by stays.
-  - **Ticked by itself** when the match is certain, or when the record names no one (its
-    description says nothing but "Outgoing transaction"): what the document adds is all gain. A
-    possible duplicate is still yours to confirm.
+  - **Ticked by itself** when the match is certain; when the record names no one (its
+    description says nothing but "Outgoing transaction"), as what the document adds is all gain;
+    and when the match is on like words ("Example Sport" and "Example Sport Purchase") and nothing it
+    says conflicts (only the day it posted, or the wording, differs). Only what the record lacks is
+    filled in, and a row you tick in as a payment of its own adds nothing to the other. Left
+    unticked: a match on the same money described differently, or one whose details disagree with
+    the record's. A possible duplicate is still yours to confirm.
   - **What it says differently** (its own words for the payment, another time) is shown, and kept
     with what it filled in; the record keeps its own. A shorter wording within the record's
     ("Cash withdrawal" in "Cash withdrawal | EUR 40.00 | …") is not a difference.
@@ -652,7 +656,8 @@ read again.
   next statement. Include one only if you know it will never appear settled.
 - **Cancelled rows** (struck through, "Cancelled", "Declined"; the reader says so in `uncertain`)
   are shown but not included: no money moved. An app lists a card check or a cancelled fare that
-  way.
+  way. The review notes them ("cancelled: left out"); they don't count as rows the reader was
+  unsure of, so they don't hold an import back from "Commit all ready".
 - **Figures** are matched to an account by last 4 digits only when exactly one account has them.
   Several documents can state one job's figure for a year; all are kept and exactly one counts
   ([FORMULAS.md §11](FORMULAS.md), "One source per employer and year").

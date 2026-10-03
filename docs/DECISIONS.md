@@ -1876,3 +1876,23 @@ Later the same day, after the owner's first runs (`label-imports-2`):
   - What a matched document calls the payment counts in working out its payee and category, on the
     review page and on commit. Its details are ticked by itself when the record names no one.
   - A row the reader says was cancelled or declined is drafted left out, like a pending one.
+
+## 2026-10-03: Committing an import keeps everything a matched row adds
+
+- **Owner:** must anything be done on the review page, beyond committing, to get the most from an
+  upload?
+- **Found:** yes. A possible duplicate's details (when a card was used, its time, a foreign amount)
+  were added only when ticked, and only a certain match ticked them. On one Chase statement,
+  payments recorded from the app's screens would have lost their foreign amounts, and on other
+  screens, when each payment was made. The two cancelled card checks still counted as
+  rows the reader was unsure of, holding the screens back from "Commit all ready" though they were
+  left out.
+- **Done** (INGESTION.md, "Adding detail to a recorded payment", "Cancelled rows"):
+  - A match on like words whose details don't conflict ticks them by itself. A match on the same
+    money described differently, or with details that disagree, still waits.
+  - Cancelled rows are a note ("cancelled: left out"), not a warning.
+  - "Car park" is parking.
+- **Not done:** possible duplicates still hold an import back from "Commit all ready". A statement
+  dates a payment when it posts and the app when it was made, so the same payment is a few days
+  apart; two payments of the same amount at the same place a few days apart look the same (two Example
+  Sport bookings in a week). Only the owner can tell them apart.

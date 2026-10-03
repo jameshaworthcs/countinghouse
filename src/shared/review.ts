@@ -57,6 +57,12 @@ export function cardSigns<T extends { amount: number; description: string }>(set
 
 const rowsWord = (n: number) => (n === 1 ? '1 row' : `${n} rows`);
 
+/**
+ * A row the document shows as cancelled or declined (struck through, "Cancelled"): money that never
+ * moved. The reader says so in `uncertain`; drafting leaves it out, like a pending row.
+ */
+export const isCancelled = (t: { uncertain?: string | null | undefined }) => Boolean(t.uncertain && /\b(cancell?ed|declined)\b/i.test(t.uncertain));
+
 export function sectionChecks(section: DraftSection, ctx: CheckContext): ReviewCheck[] {
   const out: ReviewCheck[] = [];
   const rows = section.transactions;
@@ -195,9 +201,13 @@ export function sectionChecks(section: DraftSection, ctx: CheckContext): ReviewC
     out.push({ id: 'repeated', status: 'info', title: `${rowsWord(repeated.length)} appear more than once`, detail: 'They may be genuine, or one row read twice where the parts of a long screenshot overlap. Check each against the original.', rows: repeated });
   }
 
-  const unsure = rows.filter((t) => t.uncertain);
+  const unsure = rows.filter((t) => t.uncertain && !isCancelled(t));
   if (unsure.length) {
     out.push({ id: 'uncertain', status: 'warn', title: `${rowsWord(unsure.length)} the reader was unsure of`, detail: unsure.map((t) => `${formatDate(t.date)} ${t.description}: ${t.uncertain}`).join('; '), rows: unsure.map((t) => t.key) });
+  }
+  const cancelled = rows.filter((t) => isCancelled(t));
+  if (cancelled.length) {
+    out.push({ id: 'cancelled', status: 'info', title: `${rowsWord(cancelled.length)} cancelled: left out`, detail: `${cancelled.map((t) => `${formatDate(t.date)} ${t.description}`).join('; ')}. Shown as cancelled, so no money moved; tick one only if it was charged after all.`, rows: cancelled.map((t) => t.key) });
   }
 
   const pending = rows.filter((t) => t.pending);
