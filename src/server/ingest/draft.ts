@@ -33,7 +33,8 @@ import { jobOfFigure, jobOfHmrc, matchEmployment, newEmploymentId, type JobIdent
 import { hmrcId, payslipId } from '../ids';
 import { earnedReplaced, inferPayroll } from '../analytics/earned';
 import type { Store } from '../store';
-import { classifyDuplicates, saysNothing, storedTwice } from './dedup';
+import { classifyDuplicates, storedTwice } from './dedup';
+import { saysNothing } from '../../shared/merchants';
 import { isCancelled } from '../../shared/review';
 import { dateFromFileName } from './images';
 import { fitsAccount, identifies, matchAccount, onlyKind, proposeAccount, sameHolding } from './match';

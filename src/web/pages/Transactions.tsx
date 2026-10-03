@@ -198,7 +198,15 @@ export default function Transactions() {
                     onMouseDown={(e) => e.shiftKey && e.preventDefault()}
                   >
                     <Checkbox checked={checked} onChange={(_, mods) => click(t.id, mods)} ariaLabel={`Select ${t.payee ?? t.description}`} />
-                    <span className="text-[12.5px] text-ink-3 tabular">{formatDate(t.date)}</span>
+                    <div className="text-[12.5px] leading-tight text-ink-3 tabular">
+                      {formatDate(t.date)}
+                      {/* When the card was used, where it posted later: a statement dates it on posting, an app on the day. */}
+                      {t.transactionDate && t.transactionDate !== t.date && (
+                        <div className="text-[11px]" title={`Made on ${formatDate(t.transactionDate)}${t.transactionTime ? ` at ${t.transactionTime.slice(0, 5)}` : ''}; it posted on ${formatDate(t.date)}`}>
+                          made {formatDate(t.transactionDate, { year: false })}
+                        </div>
+                      )}
+                    </div>
                     <div className="min-w-0">
                       <div className="flex min-w-0 items-center gap-1">
                         <button

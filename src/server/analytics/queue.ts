@@ -16,7 +16,7 @@
 import { balanceModeOf } from '../../shared/accounts';
 import type { CategoriseQueue, GuessGroup, PayeeGroup, PersonGroup, PersonRow, QueueExample, RuleSuggestion } from '../../shared/api';
 import { CategoryIndex } from '../../shared/categories';
-import { CASH_PAID_IN, Categoriser, CHEQUE_PAID_IN, holdsPaidIn, isCashWithdrawal, isWrapperAccount, paidInKind, type CategoriseInput, type PaidIn } from '../../shared/categorise';
+import { CASH_PAID_IN, Categoriser, CHEQUE_PAID_IN, fallbackPayeeOf, holdsPaidIn, isCashWithdrawal, isWrapperAccount, paidInKind, type CategoriseInput, type PaidIn } from '../../shared/categorise';
 import { addDays, today } from '../../shared/dates';
 import { cleanPayee } from '../../shared/merchants';
 import { fromMinor, toMinor } from '../../shared/money';
@@ -92,7 +92,7 @@ export function payeeRuleMatch(payee: string, rows: readonly Transaction[], dire
   const way = direction ? { direction } : {};
   const candidates: Rule['match'][] = [
     ...(payee.replace(/[^A-Za-z]/g, '').length >= 4 ? [{ field: 'description' as const, op: 'contains' as const, value: payee, caseSensitive: false, ...way }] : []),
-    { field: 'payee', op: 'equals', value: input.payee ?? cleanPayee(input.description), caseSensitive: false, ...way },
+    { field: 'payee', op: 'equals', value: fallbackPayeeOf(input), caseSensitive: false, ...way },
   ];
   for (const match of candidates) {
     const rule: Rule = { id: 'rule_check', enabled: true, priority: 100, match, set: {}, createdAt: '', updatedAt: '' };
@@ -235,7 +235,7 @@ export function categoriseQueue(store: Store, opts: { from?: string | undefined 
     let e = inputs.get(t.id);
     if (!e) {
       const input = categoriseInputOf(t);
-      e = { input, texts: [input.description, ...(input.alsoSaid ?? [])], payee: input.payee ?? cleanPayee(input.description) };
+      e = { input, texts: [input.description, ...(input.alsoSaid ?? [])], payee: fallbackPayeeOf(input) };
       inputs.set(t.id, e);
     }
     return e;

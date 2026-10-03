@@ -5,9 +5,8 @@
 // salary, and what each card paid whom, so money back from the same payee is that purchase's refund.
 
 import { CategoryIndex } from '../shared/categories';
-import { CARD_REFUND_DAYS, Categoriser, purchaseKey, type CardPurchases, type CategoriseInput } from '../shared/categorise';
+import { CARD_REFUND_DAYS, Categoriser, fallbackPayeeOf, purchaseKey, type CardPurchases, type CategoriseInput } from '../shared/categorise';
 import { diffDays } from '../shared/dates';
-import { cleanPayee } from '../shared/merchants';
 import type { Agreement, Category, Rule, Transaction } from '../shared/schema';
 import { paidAs } from './analytics/pay';
 import type { Store } from './store';
@@ -68,6 +67,6 @@ export function categoriseInputOf(t: Transaction): CategoriseInput {
  */
 export function ruleCatches(rule: Rule, t: Transaction, categoriser: Categoriser = new Categoriser([rule], new CategoryIndex([]), [], [])): boolean {
   const input = categoriseInputOf(t);
-  const payee = input.payee ?? cleanPayee(input.description);
+  const payee = fallbackPayeeOf(input);
   return [input.description, ...(input.alsoSaid ?? [])].some((description) => categoriser.matchRule(rule, { ...input, description }, payee));
 }

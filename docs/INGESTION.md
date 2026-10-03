@@ -548,7 +548,13 @@ read again.
   - **What it is called there** is kept with the payment (`seenIn`, what that document said) and
     counts in working out its payee and category, on the review page and on commit: a statement's
     "Outgoing transaction" that an app calls "ALDI" is groceries. The description it was recorded
-    by stays.
+    by stays. When that description names no one, the other document's name is the payee
+    (`fallbackPayeeOf`): the name the lists show and group by ("Example Cafe B", its card reader's
+    " - Zettle / Paypal POS" taken off), with the recorded description beneath it. Searching
+    transactions finds a payment by any name a document gave it.
+  - **The day it was made** shows under the date in the transaction lists when it differs from the
+    day it posted ("made 17 Jul" under 18 Jul). The posting day stays the payment's date, as its
+    statement and balances have it.
   - **Ticked by itself** when the match is certain; when the record names no one (its
     description says nothing but "Outgoing transaction"), as what the document adds is all gain;
     and when the match is on like words ("Example Sport" and "Example Sport Purchase") and nothing it

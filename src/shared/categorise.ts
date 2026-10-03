@@ -23,7 +23,7 @@ import { agreementPattern, isScheduledPayment, scheduleFit } from './agreements'
 import { CategoryIndex, mapBankCategory } from './categories';
 import { addDays } from './dates';
 import { INSTITUTION_CATALOG, TRANSFER_WORDS } from './institutions';
-import { cleanPayee, GENERIC_PAYEES, matchMerchant, normaliseDescription } from './merchants';
+import { cleanPayee, GENERIC_PAYEES, matchMerchant, normaliseDescription, saysNothing } from './merchants';
 import type { Account, AccountType, Agreement, CategorisedBy, Institution, Rule } from './schema';
 
 export interface CategoriseInput {
@@ -203,6 +203,18 @@ function compileRule(rule: Rule): CompiledRule {
   return { rule, test };
 }
 
+/**
+ * Who a payment is with when nothing better names them: the source's payee, the reader's, else the
+ * description's words. A description that names no one ("Outgoing transaction") takes the words
+ * another document gave the same payment ("Example Cafe B - Zettle / Paypal POS").
+ */
+export function fallbackPayeeOf(input: Pick<CategoriseInput, 'payee' | 'aiPayee' | 'description' | 'alsoSaid'>): string {
+  const given = input.payee ?? input.aiPayee;
+  if (given !== undefined) return given;
+  const named = saysNothing(input.description) ? input.alsoSaid?.find((s) => s.trim() && !saysNothing(s)) : undefined;
+  return cleanPayee(named ?? input.description);
+}
+
 export function ruleMatches(rule: Rule, input: CategoriseInput, payee?: string): boolean {
   return new Categoriser([rule], new CategoryIndex([]), [], []).matchRule(rule, input, payee);
 }
@@ -339,7 +351,7 @@ export class Categoriser {
 
   categorise(input: CategoriseInput): CategoriseResult {
     const account = this.accountsById.get(input.accountId);
-    const fallbackPayee = input.payee ?? input.aiPayee ?? cleanPayee(input.description);
+    const fallbackPayee = fallbackPayeeOf(input);
     // The description, then what other documents said of the same payment.
     const texts = [input.description, ...(input.alsoSaid ?? []).filter((s) => s.trim() && s !== input.description)];
 

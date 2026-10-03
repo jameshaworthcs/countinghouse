@@ -188,7 +188,14 @@ export function TransactionList({ items, compact = false, showAccount = true }: 
         {items.map((t) => (
           <li key={t.id}>
             <button type="button" onClick={() => setOpen(t)} className={cn('flex w-full items-center gap-3 px-5 text-left hover:bg-panel-2', compact ? 'py-2' : 'py-2.5')}>
-              <div className="w-14 shrink-0 text-[12px] text-ink-3 tabular">{formatDate(t.date, { year: false })}</div>
+              <div className="w-14 shrink-0 text-[12px] leading-tight text-ink-3 tabular">
+                {formatDate(t.date, { year: false })}
+                {t.transactionDate && t.transactionDate !== t.date && (
+                  <div className="text-[10.5px]" title={`Made on ${formatDate(t.transactionDate)}; it posted on ${formatDate(t.date)}`}>
+                    made {formatDate(t.transactionDate, { year: false })}
+                  </div>
+                )}
+              </div>
               <div className="min-w-0 flex-1">
                 <div className="truncate text-[13.5px] font-medium text-ink">{t.payee ?? t.description}</div>
                 <div className="truncate text-[12px] text-ink-3">

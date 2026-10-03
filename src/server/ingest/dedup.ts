@@ -20,7 +20,7 @@
 //      duplicate: a deposit made in two payments, confirmed by letter as one.
 
 import { diffDays } from '../../shared/dates';
-import { descriptionKey } from '../../shared/merchants';
+import { descriptionKey, saysNothing } from '../../shared/merchants';
 import { formatMoney, toMinor } from '../../shared/money';
 import type { Draft, DraftTransaction, ExtraCopy, Transaction } from '../../shared/schema';
 
@@ -50,13 +50,8 @@ export const DIFFERENT_WORDS_FROM = 20;
 /** Below this, a row that stored rows add up to is taken as its own payment (small sums coincide). */
 export const SUM_FROM = 100;
 
-/**
- * A description that says no more than that money went or came: Chase's statement prints some card
- * payments as "Outgoing transaction", with no merchant, where its app names them. It can be any
- * payment of the same amount, so it matches whatever another document calls it.
- */
-const SAYS_NOTHING = /^\s*(outgoing|incoming) (transaction|payment)s?\s*$/i;
-export const saysNothing = (description: string) => SAYS_NOTHING.test(description);
+// A row that names no one (`saysNothing`: Chase's "Outgoing transaction") can be any payment of the
+// same amount, so it matches whatever another document calls it (step 4).
 
 /** Two or three of `rows` whose amounts add up to `minor` exactly, if any do. */
 function rowsAddingUpTo<T extends { amount: number }>(rows: T[], minor: number): T[] | undefined {

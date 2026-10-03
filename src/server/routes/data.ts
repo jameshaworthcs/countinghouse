@@ -277,7 +277,9 @@ export function filterTransactions(ctx: AppContext, q: Record<string, string | u
     if (tag && !t.tags?.some((x) => x.toLowerCase() === tag)) return false;
     if (q.source && t.source.importId !== q.source) return false;
     if (text) {
-      const hay = `${t.description} ${t.payee ?? ''} ${t.notes ?? ''} ${t.reference ?? ''} ${t.counterpartyName ?? ''} ${(t.tags ?? []).join(' ')} ${t.amount.toFixed(2)}`.toLowerCase();
+      // What other documents called it too: a statement's "Outgoing transaction" is found as "Example Cafe".
+      const said = (t.seenIn ?? []).map((x) => x.said?.description ?? '').join(' ');
+      const hay = `${t.description} ${t.payee ?? ''} ${t.merchant?.name ?? ''} ${said} ${t.notes ?? ''} ${t.reference ?? ''} ${t.counterpartyName ?? ''} ${(t.tags ?? []).join(' ')} ${t.amount.toFixed(2)}`.toLowerCase();
       if (!text.split(/\s+/).every((w) => hay.includes(w))) return false;
     }
     return true;

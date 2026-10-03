@@ -282,6 +282,17 @@ describe('API without login configured', () => {
     expect(await order('nonsense')).toEqual([cherry, banana, apple]);
     expect(await order('description_asc')).toEqual([cherry, banana, apple]);
   });
+
+  it('finds a payment by what another document called it', async () => {
+    const json = { ...CSRF, 'content-type': 'application/json' };
+    expect((await req('/api/accounts', { method: 'POST', headers: json, body: JSON.stringify({ id: 'card', name: 'Card', type: 'credit_card' }) })).status).toBe(201);
+    await ctx.app.ctx.store.addTransactions(
+      [{ id: 'tx_00000000000000f1', accountId: 'card', date: '2026-07-18', amount: -1.8, currency: 'GBP', description: 'Outgoing transaction', source: {}, seenIn: [{ at: '2026-10-03T15:45:04+01:00', added: ['transactionDate'], said: { description: 'Example Beach Cafe - Zettle' } }] }],
+      'test: a payment a statement names no one for',
+    );
+    const found = (await (await req('/api/transactions?q=beach%20cafe')).json()) as { items: { id: string }[] };
+    expect(found.items.map((t) => t.id)).toEqual(['tx_00000000000000f1']);
+  });
 });
 
 describe('API with login configured', () => {

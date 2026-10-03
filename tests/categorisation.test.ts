@@ -133,6 +133,17 @@ describe('money that is neither spending nor income', () => {
     expect(payeeRuleMatch('Tfl Travel', [fare], 'out')).toMatchObject({ field: 'description', op: 'contains', value: 'Tfl Travel' });
   });
 
+  it('a payment its own document names no one for takes the name another document gave it', () => {
+    // A statement's "Outgoing transaction"; the app called it after the café, through its card reader.
+    expect(c.categorise({ accountId: 'card', description: 'Outgoing transaction', alsoSaid: ['Example Beach Cafe - Zettle / Paypal POS'], amount: -1.8 }).payee).toBe('Example Beach Cafe');
+    // A brand the merchant list knows names it, and categorises it.
+    expect(c.categorise({ accountId: 'card', description: 'Outgoing transaction', alsoSaid: ['ALDI'], amount: -4.08 })).toMatchObject({ payee: 'Aldi', category: 'groceries' });
+    // A description that names someone keeps its own words.
+    expect(c.categorise({ accountId: 'card', description: 'EXAMPLE DELI', alsoSaid: ['Example Deli Ltd'], amount: -4 }).payee).toBe('Example Deli');
+    expect(cleanPayee('Example Ices - Zettle')).toBe('Example Ices');
+    expect(cleanPayee('Example Pancakes V. - CCV Payments')).toBe('Example Pancakes V.');
+  });
+
   it('a car park is parking, and keeps its own name', () => {
     expect(c.categorise({ accountId: 'card', description: 'Exampleton Car Park', amount: -2.4 })).toMatchObject({ category: 'parking', payee: 'Exampleton Car Park' });
   });

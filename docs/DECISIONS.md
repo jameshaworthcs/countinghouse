@@ -1896,3 +1896,20 @@ Later the same day, after the owner's first runs (`label-imports-2`):
   dates a payment when it posts and the app when it was made, so the same payment is a few days
   apart; two payments of the same amount at the same place a few days apart look the same (two Example
   Sport bookings in a week). Only the owner can tell them apart.
+
+## 2026-10-03: A payment its statement names no one for is shown, and found, by the app's name
+
+- **Owner:** the £2.40 of 3 May was hard to find: its title was still "Outgoing transaction", on
+  4 May, with the café's name only in its details.
+- **Found:** committing the screens gave the payments the app's names only where the merchant list
+  knows the brand (Aldi, eBay, TfL). The other six kept "Outgoing transaction" as their payee, even
+  with a category from the name (a pharmacy, a pub, a car park). Search looked at the description
+  and payee, not at what other documents called a payment. Lists showed only the day it posted.
+- **Done** (INGESTION.md, "Adding detail to a recorded payment"):
+  - When a payment's own description names no one, its payee is the name another document gave it,
+    with a card reader's tag (" - Zettle / Paypal POS", "- CCV Payments") taken off. Re-applying
+    categorisation brings this to the payments already recorded (they show as payees tidied).
+  - Searching transactions matches the names other documents gave a payment, and the merchant's.
+  - The transaction lists show the day a payment was made under its date when it differs.
+- **Not done:** a payment still counts in the month it posted (a fare paid on a month's last day is in
+  the next), as its statement and balance have it.

@@ -443,6 +443,15 @@ const NUMBERED_BRANDS = /^(TRADING ?212|FOREVER ?21)\b/i;
  * "CARD PAYMENT TO SQ *THE COFFEE ROOM ON 12/09 LONDON GB" -> "The Coffee Room". A payment worded
  * with the other party inside other words (`paymentParts`) gives that party.
  */
+/**
+ * A description that says no more than that money went or came: Chase's statement prints some card
+ * payments as "Outgoing transaction", where its app names them. It names no one.
+ */
+export const saysNothing = (description: string) => /^\s*(outgoing|incoming) (transaction|payment)s?\s*$/i.test(description);
+
+/** A card reader's name after the merchant's ("Example Cafe - Zettle / Paypal POS"): who took the card, not who was paid. */
+const PROCESSOR_SUFFIX = /\s+-\s+(?:i?Zettle|SumUp|Square|Mollie|CCV Payments)(?:\s*\/\s*Paypal POS)?\s*$|\s+-\s+Paypal POS\s*$/i;
+
 export function cleanPayee(description: string): string {
   let s = decodeEntities(description).replace(/[\u00a0\s]+/g, ' ').trim();
   const parts = paymentParts(s);
@@ -451,7 +460,7 @@ export function cleanPayee(description: string): string {
   if (brand) return brand[1]!.replace(/([A-Za-z])(\d)/, '$1 $2').replace(/^[A-Za-z]+/, (w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
   for (let i = 0; i < 3; i++) {
     const before = s;
-    s = s.replace(PAYEE_PREFIXES, '').replace(PAYMENT_PROCESSORS, '');
+    s = s.replace(PAYEE_PREFIXES, '').replace(PAYMENT_PROCESSORS, '').replace(PROCESSOR_SUFFIX, '');
     if (s === before) break;
   }
   s = s
