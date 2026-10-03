@@ -543,6 +543,83 @@ when the purchase had none.
 - a general word in the merchant list ("COUNCIL", "TICKET") never overrules the category Claude
   gave a row; a brand it knows does.
 
+**A rule you make** (`applyRule` in `enrich.ts`) applies at once to the rows it matches, and, when you
+change one, to the rows it categorised before; each takes what the categoriser now says of it. Nothing
+else changes: re-applying everything is its own step, with its preview.
+
+**People** (`shared/people.ts`; the To categorise page, `analytics/queue.ts`). A payment is with a
+person when:
+
+- the bank words it as a payment between two people's accounts (a Faster Payment to or from a name,
+  Chase's "From *name* - *ref*", or the other party a source gives on a transfer), in its description
+  or another document's; not a card payment, a giro credit or a direct debit;
+- and the name is shaped like a person's: a title, initials ("H J REED", "REED AJ", "REED R&C"), or
+  one of about 500 common first names on either side ("WHITLOCK HANNAH"), with no word a business uses
+  (Ltd, Pay, Cash, Card, Estates…). A whole name a brand also goes by ("Capital One") is the brand;
+  an initial makes it someone ("J Morrison");
+- and it is not you (your profile's surname and first initial, or a joint name you are in), nor the
+  name or an alias of one of your accounts or banks, nor a transfer linked between your accounts.
+  Someone you saved (`people.json`) is a person whatever their name looks like.
+
+One person's names share a **key**, their surname and first initial: "Hannah Reed", "H REED" and "REED
+HANNAH" are one. A joint name keys on the surname and every first initial ("REED R&C" is "R & C REED").
+Two first names could be either way round ("TAYLOR SAM"); someone you saved is found either way.
+
+What each payment was is **yours to decide**: payments with people stay as they are until you
+confirm each one, and those not decided by you, a rule of yours or an agreement are listed. A
+suggestion, with its reason, only fills in the choice (`suggestFor`). For money in:
+
+1. a loan ("loan", "lend", "borrow"): no suggestion;
+2. words that square something up ("half", "share", "owe", "paying back", "expenses", "refund"):
+   paid back, in the category of what was shared when the words say (a share of a present goes in
+   gifts);
+3. an occasion, pocket money, love or kisses ("xmas", "birthday", "congrats", "xx"; the occasion is
+   the reason given): a gift. Who it is from ("FROM NAN") is not: most money from family is a gift,
+   not all of it;
+4. half, a third, a quarter or all of a payment you made in the 90 days before (`SHARE_DAYS`), to
+   the penny (within a penny a part for a split that doesn't divide evenly): paid back, in that
+   payment's category, else in what the reference says was shared. Not cash, transfers or other
+   people's payments; not under £5; "all" needs £20 or more, not in round pounds. A share in round
+   pounds counts only when the reference doesn't say what was shared ("Train home" for £40 is a
+   train, not half of an £80 shop);
+5. words for your own money ("top up", "savings"): yours moving;
+6. what you said the person usually is;
+7. what you chose for 3 or more of their earlier payments the same way, if 70% or more were one
+   category;
+8. what was shared, from the reference's words alone (trains, a holiday, the phone) or a brand in it;
+9. the category the reader, the bank or the built-in list gave it;
+10. your surname: a gift, marked "check".
+
+Money out goes the same way, a gift or your share of something, without 4 and 10. Only 2–4 come from
+the payment itself, and of 4 only a share not in round pounds: those are ticked for you to confirm.
+Where each choice goes:
+
+| | Money in | Money out |
+|---|---|---|
+| A gift | Gifts received | Gifts |
+| Paid back / your share | what was shared, else Paid back to you | what was shared, else Other spending |
+| Your own money | Between my accounts | Between my accounts |
+
+Money paid back in a spending category counts against spending in it, and Paid back to you
+counts against spending as refunds do (§14).
+
+**Rules from your decisions** (`analytics/queue.ts`):
+
+- **When:** a payee you put in one category at least twice one way (`RULE_FROM_DECISIONS`), all in
+  that category; or, when you put none of them anywhere, one the reader put in one category three
+  times or more (`RULE_FROM_READER`). Only spending and income categories; never a person's payments;
+  only when the rule would categorise a payment now.
+- **The rule:** money that way whose description holds the payee (one of 4 letters or more); else
+  whose payee, as the categoriser sees it, is the payee. A rule that would catch a payment you put
+  in another category is too wide and isn't offered. When some payments it would catch are under a
+  quarter of the smallest you decided or over four times the largest, it keeps to half the
+  smallest to twice the largest.
+- Two payees that are one (a statement's wording and an app's) offer the rule that fills more,
+  once.
+
+**What's left** is the uncategorised payments in the period, not a person's and not one a suggested
+rule would fill, grouped by payee and direction, the largest total first.
+
 ## 11. Allowances (`analytics/allowances.ts`)
 
 **ISA:**
@@ -761,8 +838,12 @@ A transaction counts as follows (`classifyFlow`):
   - it is on a market account;
   - or it is linked as a transfer;
   - or its category is a transfer or investment kind.
-- **Income:** an income category (refunds excepted).
-- **Spending:** an expense category, or refunds, which count as negative spending.
+- **Income:** an income category, except one that offsets spending.
+- **Spending:**
+  - an expense category: money in under one (your share of something paid back, a card's refund in
+    the purchase's category) counts as negative spending in it;
+  - or an income category that offsets spending (`offsetsSpending`: Refunds, and Paid back to you),
+    which counts as negative spending.
 - **Uncategorised:** by sign.
 - **A split payment** counts as its lines, each in its own category and with its own amount
   (`categoryLines`). What the lines do not add up to stays in the transaction's own category. A

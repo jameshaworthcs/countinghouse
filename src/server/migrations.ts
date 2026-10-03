@@ -525,6 +525,27 @@ export const MIGRATIONS: Migration[] = [
       ctx.log(`[migrate] ${taught.size} job${taught.size === 1 ? '' : 's'} learnt what ${taught.size === 1 ? 'its' : 'their'} payslips print${taught.size ? `: ${[...taught].join(', ')}` : ''}`);
     },
   },
+  {
+    from: 8,
+    description: 'Money paid back to you counts against spending, as refunds do: refunds marks it, and "Paid back to you" joins the income categories; people.json, for the people you send money to or get money from',
+    async run(ctx) {
+      if (!(await ctx.exists('people.json'))) await ctx.writeJson('people.json', { $schema: '../schemas/people.schema.json', people: [] });
+      const file = (await ctx.readJson('categories.json')) as { categories?: Record<string, unknown>[] } | undefined;
+      const list = file?.categories;
+      if (!list) return;
+      for (const c of list) if (c.id === 'refunds' && c.offsetsSpending === undefined) c.offsetsSpending = true;
+      if (!list.some((c) => c.id === 'repaid')) {
+        // Beside refunds, under the income group when there is one.
+        const parent = list.find((c) => c.id === 'income' && !c.parent) ? 'income' : undefined;
+        const at = list.findIndex((c) => c.id === 'refunds');
+        const repaid = { id: 'repaid', name: 'Paid back to you', ...(parent ? { parent } : {}), kind: 'income', system: true, offsetsSpending: true };
+        if (at >= 0) list.splice(at + 1, 0, repaid);
+        else list.push(repaid);
+      }
+      await ctx.writeJson('categories.json', { ...file, categories: list });
+      ctx.log('[migrate] refunds and "Paid back to you" count against spending');
+    },
+  },
 ];
 
 export interface MigrationResult {

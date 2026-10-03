@@ -46,6 +46,7 @@ data/
   companies.json       { companies: [...] }      companies you hold shares in: the holding and its valuations
   agreements.json      { agreements: [...] }     agreements: an offer's, contract's or award's schedule of payments, and what its document says
   coverage.json        { confirmations: [...] }  stretches you confirmed nothing is missing from, which count as covered
+  people.json          { people: [...] }         people you send money to or get money from: the names their payments carry, and how money with them usually goes
   transactions/<account-id>/<yyyy>.jsonl    one transaction per line, by posting date
   balances/<account-id>.jsonl               balance / valuation snapshots
   holdings/<account-id>.jsonl               holdings snapshots
@@ -359,6 +360,24 @@ You confirm or withdraw one in Settings → Data health (`POST /api/coverage/con
 `DELETE /api/coverage/confirmations/:id`). No agent token can. Withdrawing takes the record out of
 the file, and git keeps the history. The file is optional: data from before it has none.
 
+## people.json
+
+People you send money to or get money from ([FORMULAS.md §10](FORMULAS.md), "People"). Each is
+`{id, name, names, relation?, usually, createdAt, updatedAt}`:
+
+- `id`: a slug of the name.
+- `names`: every other name their payments carry ("A REED", "REED ALEX"), as printed. A name is
+  one person's: saving it under someone takes it from anyone else.
+- `relation`: `family`, `partner`, `friend` or `other`.
+- `usually`: `{in?, out?}`, how money with them usually goes. In: `gift`, `repaid` (paying you
+  back) or `own` (your own money). Out: `gift`, `shared` (your share of something) or `own`. It only
+  fills in the choice for their next payments: each is still yours to confirm.
+
+You save someone when you confirm their payments on the To categorise page
+(`POST /api/categorise/decisions` with `person`), and forget them there
+(`DELETE /api/people/:id`); their payments keep the categories you gave them. No agent token can.
+The migration to format 9 writes an empty one.
+
 ## payslips.jsonl
 
 Payslips in full, one per line: everything a payslip prints except your name and National Insurance
@@ -522,10 +541,11 @@ A monthly spending budget, yours to set (Spending → Budgets). How it is measur
 
 ## categories.json, rules.json, csv-profiles.json
 
-- **Category**: `{ id, name, parent?, kind: expense|income|transfer|investment, system?, hidden? }`.
+- **Category**: `{ id, name, parent?, kind: expense|income|transfer|investment, system?, hidden?, offsetsSpending? }`.
   - Two levels: a group, then categories.
   - `transfer` and `investment` kinds are excluded from spending.
-  - `refunds` reduces spending.
+  - `offsetsSpending`: money in under it reduces spending rather than counting as income. It is set
+    on `refunds` and `repaid` ("Paid back to you": someone's share of something you paid for).
   - `interest` feeds the savings allowance.
   - `contribution` / `employer-contribution` / `tax-relief` / `government-bonus` feed the ISA and
     pension allowances.
@@ -694,6 +714,7 @@ An ask without a check is ticked by you (`doneAt`). Agents cannot set `doneAt` o
 | 6 | Payslips in full. Added `payslips.jsonl`, the readings' and drafts' `payslips`, `result.payslipsAdded`, and the `payslip` engine. Payslips already imported, in a layout read on this machine, are read again from their stored PDFs: each is kept in full under its job, its pay figure gets the tax code it prints, and, when every line on it adds up to the totals it prints, a figure its first reading got wrong is put right (its note keeps the old amount) and one it left out is added. Several figures of one kind are left as they are | `from: 5` in `src/server/migrations.ts` |
 | 7 | Terms. Added `terms.jsonl`, the readings' and drafts' `terms`, `result.termsAdded`, the `set_terms` proposal and `before.terms`. The credit limit and rate each balance kept move into the account's terms for that day and document (the same terms from two balances of one day kept once); balances no longer have `creditLimit` or `interestRate`. One that cannot be made a terms record stays on its balance, and the migration says which | `from: 6` in `src/server/migrations.ts` |
 | 8 | Jobs learn what their payslips print. Each job takes from the payslips stored under it the payroll number and every name they print (a group's as an alias), which payslips filed by format 6 never taught it. No file changes shape | `from: 7` in `src/server/migrations.ts` |
+| 9 | Money paid back to you counts against spending, as refunds do. Categories gain `offsetsSpending`, set on `refunds`; a system category "Paid back to you" (`repaid`, income, `offsetsSpending`) is added beside it. Added `people.json` (empty until you save someone) | `from: 8` in `src/server/migrations.ts` |
 
 Data written by a newer version of the app than the one running is read-only until the app is
 updated.

@@ -101,6 +101,7 @@ const INCOME: Def[] = [
     ['interest', 'Savings interest'],
     ['dividends', 'Dividends'],
     ['refunds', 'Refunds'],
+    ['repaid', 'Paid back to you'],
     ['cashback', 'Cashback & rewards'],
     ['gifts-received', 'Gifts received'],
     ['benefits', 'Benefits'],
@@ -153,8 +154,12 @@ export const SYSTEM_CATEGORY_IDS = new Set([
   'interest',
   'dividends',
   'refunds',
+  'repaid',
   'cash-withdrawal',
 ]);
+
+/** Money in under these counts against spending: money back for something spent. */
+export const OFFSETS_SPENDING_IDS = new Set(['refunds', 'repaid']);
 
 /**
  * Categories that represent money genuinely entering or leaving an investment/pension account from
@@ -181,7 +186,7 @@ function expand(defs: Def[], kind: Category['kind']): Category[] {
   for (const [id, name, children] of defs) {
     out.push({ id, name, kind, ...(SYSTEM_CATEGORY_IDS.has(id) ? { system: true } : {}) });
     for (const [cid, cname] of children ?? []) {
-      out.push({ id: cid, name: cname, parent: id, kind, ...(SYSTEM_CATEGORY_IDS.has(cid) ? { system: true } : {}) });
+      out.push({ id: cid, name: cname, parent: id, kind, ...(SYSTEM_CATEGORY_IDS.has(cid) ? { system: true } : {}), ...(OFFSETS_SPENDING_IDS.has(cid) ? { offsetsSpending: true } : {}) });
     }
   }
   return out;
@@ -219,6 +224,10 @@ export class CategoryIndex {
   }
   kindOf(id: string | undefined): Category['kind'] | undefined {
     return this.get(id)?.kind;
+  }
+  /** Money in under it counts against spending (a refund, money paid back to you). */
+  offsetsSpending(id: string | undefined): boolean {
+    return Boolean(this.get(id)?.offsetsSpending) || id === 'refunds';
   }
   name(id: string | undefined): string {
     if (!id) return 'Uncategorised';

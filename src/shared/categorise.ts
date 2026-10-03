@@ -187,9 +187,9 @@ export function longNumbers(description: string): string[] {
 }
 
 /**
- * Money to or from you by name ("TO SAM TAYLOR", "FROM S R TAYLOR", "FROM TAYLOR S"): from the
- * name in your profile. Only after "to" or "from", so a payer naming you as the payee ("BANK GIRO
- * CREDIT REF ACME, S TAYLOR") is not taken for your own money.
+ * Money to or from you by name ("TO SAM TAYLOR", "FROM S R TAYLOR", "FROM TAYLOR S", "FROM TAYLOR
+ * SR"): from the name in your profile. Only after "to" or "from", so a payer naming you as the payee
+ * ("BANK GIRO CREDIT REF ACME, S TAYLOR") is not taken for your own money.
  */
 export function ownNamePattern(name: string | undefined): RegExp | null {
   const parts = (name ?? '').trim().split(/\s+/).filter((p) => /^[A-Za-z][A-Za-z'-]+$/.test(p));
@@ -201,7 +201,7 @@ export function ownNamePattern(name: string | undefined): RegExp | null {
   const variants = [
     `${first}\\s+${middles.map((m) => `(?:${m}\\s+)?`).join('')}${last}`,
     `${initials[0]}\\.?\\s*${initials.slice(1).map((i) => `(?:${i}\\.?\\s*)?`).join('')}${last}`,
-    `${last},?\\s+(?:${first}|${initials[0]}\\b)`,
+    `${last},?\\s+(?:${first}|${initials.join('')}\\b|${initials[0]}\\b)`,
   ];
   return new RegExp(`\\b(?:to|from)\\s+(?:(?:mr|mrs|ms|miss|mx|dr)\\.?\\s+)?(?:${variants.join('|')})\\b`, 'i');
 }

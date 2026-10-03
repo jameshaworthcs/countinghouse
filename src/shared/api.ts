@@ -1,6 +1,7 @@
 // Response shapes of the HTTP API, shared by the server and the web app.
 
 import type { AccessGroup, WrapperGroup } from './accounts';
+import type { PersonSuggestion } from './people';
 import type {
   Account,
   Agreement,
@@ -22,6 +23,7 @@ import type {
   SetBy,
   Institution,
   Profile,
+  Person,
   Proposal,
   ProposedChange,
   Rule,
@@ -1265,4 +1267,82 @@ export interface EnrichPreview {
   /** Rows whose payee alone would be tidied. */
   payeesTidied: number;
   groups: EnrichGroup[];
+}
+
+/** A payment to show on the To categorise page. */
+export interface QueueExample {
+  id: string;
+  accountId: string;
+  date: string;
+  amount: number;
+  description: string;
+}
+
+/** A payment with a person for you to decide (GET /categorise/queue). */
+export interface PersonRow extends QueueExample {
+  /** The payment's reference ("xmas", "Train"), when the bank gives one. */
+  reference?: string;
+  /** The category it has now and what gave it: never yours, which are decided. */
+  category?: string;
+  categorisedBy?: Transaction['categorisedBy'];
+  suggestion?: PersonSuggestion;
+}
+
+/** One person, however their payments write the name (docs/FORMULAS.md §10, "People"). */
+export interface PersonGroup {
+  /** The person you saved, else the key their names share ("whitlock|h"). */
+  key: string;
+  person?: Person;
+  /** A name to show: the saved one, or the fullest the payments carry. */
+  name: string;
+  /** Every name their payments carry, the most used first. */
+  names: string[];
+  /** Their surname is yours: family, most likely. */
+  sharesYourSurname: boolean;
+  /** Their payments waiting for you, newest first. */
+  rows: PersonRow[];
+  /** Their payments you decided already. */
+  decided: number;
+  /** Money from them and to them, over the payments listed and decided. */
+  in: number;
+  out: number;
+}
+
+/** A rule your decisions point to: you categorised a payee the same way again and again. */
+export interface RuleSuggestion {
+  payee: string;
+  category: string;
+  direction?: 'in' | 'out';
+  match: Rule['match'];
+  /** The decisions it comes from: yours, or the reader's when you made none. */
+  from: { by: 'user' | 'ai'; count: number };
+  /** The rows it would categorise now: not yours, and not in that category already. */
+  fills: { count: number; amount: number; ids: string[] };
+  examples: QueueExample[];
+}
+
+/** Uncategorised payments to or from one payee, one way. */
+export interface PayeeGroup {
+  payee: string;
+  direction: 'in' | 'out';
+  count: number;
+  /** The amounts added up, with their sign. */
+  amount: number;
+  first: string;
+  last: string;
+  accountIds: string[];
+  ids: string[];
+  examples: QueueExample[];
+  /** The rule "always" would make: the description holds the payee. */
+  match: Rule['match'];
+}
+
+/** The To categorise page (GET /categorise/queue): people's payments, rules to make, and what's left by payee. */
+export interface CategoriseQueue {
+  /** Only payments from this day on are listed (rules look at all of history). */
+  from?: string;
+  people: PersonGroup[];
+  rules: RuleSuggestion[];
+  payees: PayeeGroup[];
+  counts: { people: number; rules: number; payees: number };
 }

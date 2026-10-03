@@ -394,39 +394,41 @@ const PAYEE_PREFIXES =
   /^(CARD PAYMENT TO|CARD PAYMENT|PAYMENT TO|DIRECT DEBIT PAYMENT TO|DIRECT DEBIT TO|DIRECT DEBIT|STANDING ORDER TO|STANDING ORDER|FASTER PAYMENTS? (RECEIVED )?(FROM|TO)?|BILL PAYMENT (TO|FROM)?|TRANSFER (TO|FROM)|CONTACTLESS|VIS|POS|DEB|DD|SO|FPI|FPO|BGC|BP|TFR|CHQ|ATM|CPT)\s+/i;
 const PAYMENT_PROCESSORS = /^(SQ|SUMUP|SUMUP \*|ZETTLE_?|IZ|CRV|PAYPAL|PP|STRIPE|SP|TST|DNH|WWW|GOOGLE|APPLE PAY|CURVE|LSP|SMP|YOYO)\s*\*\s*/i;
 
+/** How a payment was made: between two people's accounts, by giro credit, by direct debit, or by card. */
+export type PaymentVia = 'transfer' | 'giro' | 'direct-debit' | 'card';
 /** The ways banks word a payment that put the other party's name inside other words (`paymentParts`). */
-const PAYMENT_SHAPES: { re: RegExp; name: number; reference?: number }[] = [
+const PAYMENT_SHAPES: { re: RegExp; name: number; reference?: number; via: PaymentVia }[] = [
   // Santander: "BILL PAYMENT VIA FASTER PAYMENT TO SAM TAYLOR REFERENCE Dinner , MANDATE NO 12", and
   // the same after "STANDING ORDER" or "THIRD PARTY PAYMENT MADE"; cut short, the reference is lost.
-  { re: /^(?:STANDING ORDER|BILL PAYMENT|THIRD PARTY PAYMENT MADE) VIA FASTER PAYMENT TO (.+?) REFERENCE\b ?(.*?) ?(?:, ?MANDATE\b.*)?$/i, name: 1, reference: 2 },
-  { re: /^(?:STANDING ORDER|BILL PAYMENT|THIRD PARTY PAYMENT MADE) VIA FASTER PAYMENT TO (.+?)(?: ?, ?MANDATE\b.*)?$/i, name: 1 },
+  { re: /^(?:STANDING ORDER|BILL PAYMENT|THIRD PARTY PAYMENT MADE) VIA FASTER PAYMENT TO (.+?) REFERENCE\b ?(.*?) ?(?:, ?MANDATE\b.*)?$/i, name: 1, reference: 2, via: 'transfer' },
+  { re: /^(?:STANDING ORDER|BILL PAYMENT|THIRD PARTY PAYMENT MADE) VIA FASTER PAYMENT TO (.+?)(?: ?, ?MANDATE\b.*)?$/i, name: 1, via: 'transfer' },
   // "FASTER PAYMENTS RECEIPT REF.Holiday FROM S TAYLOR": the last FROM, as a reference can hold one.
-  { re: /^FASTER PAYMENTS? RECEIPT REF\.? ?(.*) FROM (.+)$/i, name: 2, reference: 1 },
+  { re: /^FASTER PAYMENTS? RECEIPT REF\.? ?(.*) FROM (.+)$/i, name: 2, reference: 1, via: 'transfer' },
   // "BANK GIRO CREDIT REF ACME WIDGETS, 0420 1234 K": the payer, then its reference.
-  { re: /^BANK GIRO CREDIT REF (.+?) ?(?:, ?(.*))?$/i, name: 1, reference: 2 },
+  { re: /^BANK GIRO CREDIT REF (.+?) ?(?:, ?(.*))?$/i, name: 1, reference: 2, via: 'giro' },
   // "DIRECT DEBIT PAYMENT TO EXAMPLE GYM REF GYM123, MANDATE NO 0004".
-  { re: /^DIRECT DEBIT PAYMENT TO (.+?) REF\b ?([^,]*?) ?(?:, ?MANDATE\b.*)?$/i, name: 1, reference: 2 },
+  { re: /^DIRECT DEBIT PAYMENT TO (.+?) REF\b ?([^,]*?) ?(?:, ?MANDATE\b.*)?$/i, name: 1, reference: 2, via: 'direct-debit' },
   // "EXAMPLE CAFE (VIA APPLE PAY), ON 08-01-2024".
-  { re: /^(.+?) ?\(VIA (?:APPLE|GOOGLE) PAY\),?(?: ON \d.*)?$/i, name: 1 },
-  // Chase: "Example Hosting Purchase | EUR 24.50 | FX rate \u00a31 = EUR 1.1440", "Example Cafe Purchase".
-  { re: /^(.+?) (?:Purchase|Refund)(?: ?\|.*)?$/i, name: 1 },
-  { re: /^(.+?) ?\| ?[A-Z]{3} [\d.,]+ ?\| ?FX rate\b.*$/i, name: 1 },
+  { re: /^(.+?) ?\(VIA (?:APPLE|GOOGLE) PAY\),?(?: ON \d.*)?$/i, name: 1, via: 'card' },
+  // Chase: "Example Hosting Purchase | EUR 24.50 | FX rate £1 = EUR 1.1440", "Example Cafe Purchase".
+  { re: /^(.+?) (?:Purchase|Refund)(?: ?\|.*)?$/i, name: 1, via: 'card' },
+  { re: /^(.+?) ?\| ?[A-Z]{3} [\d.,]+ ?\| ?FX rate\b.*$/i, name: 1, via: 'card' },
   // Chase: "From Sam's Account - RENT-APRIL", "To Sam Taylor - Savings".
-  { re: /^(?:From|To) ([A-Za-z][^|]*?)(?: - (.+))?$/, name: 1, reference: 2 },
+  { re: /^(?:From|To) ([A-Za-z][^|]*?)(?: - (.+))?$/, name: 1, reference: 2, via: 'transfer' },
 ];
 
 /**
  * The other party and the reference in a payment worded as one of `PAYMENT_SHAPES` (docs/FORMULAS.md
- * \u00a710, "Payees"), or undefined for any other wording. The name is as printed, before tidying.
+ * §10, "Payees"), or undefined for any other wording. The name is as printed, before tidying.
  */
-export function paymentParts(description: string): { name: string; reference?: string } | undefined {
+export function paymentParts(description: string): { name: string; reference?: string; via: PaymentVia } | undefined {
   const text = decodeEntities(description).replace(/[\u00a0\s]+/g, ' ').trim();
   for (const shape of PAYMENT_SHAPES) {
     const m = shape.re.exec(text);
     const name = m?.[shape.name]?.replace(/[\s,.;:-]+$/, '').trim();
     if (!m || !name) continue;
     const reference = shape.reference !== undefined ? m[shape.reference]?.replace(/[\s,.;:]+$/, '').trim() : undefined;
-    return { name, ...(reference ? { reference } : {}) };
+    return { name, ...(reference ? { reference } : {}), via: shape.via };
   }
   return undefined;
 }

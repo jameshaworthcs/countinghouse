@@ -1,5 +1,6 @@
 // Income and spending. Transfers between your own accounts and investment flows are excluded; a
-// refund reduces spending rather than counting as income.
+// refund, or money paid back to you for your share of something, reduces spending rather than
+// counting as income.
 
 import { balanceModeOf } from '../../shared/accounts';
 import type { CashflowMonth, CashflowResponse, CategoryAmount } from '../../shared/api';
@@ -17,7 +18,7 @@ export function classifyFlow(t: Transaction, cats: CategoryIndex, account: Accou
   if (t.transferGroup) return 'excluded';
   const kind = cats.kindOf(t.category);
   if (kind === 'transfer' || kind === 'investment') return 'excluded';
-  if (kind === 'income') return t.category === 'refunds' ? 'spending' : 'income';
+  if (kind === 'income') return cats.offsetsSpending(t.category) ? 'spending' : 'income';
   if (kind === 'expense') return 'spending';
   return t.amount > 0 ? 'income' : 'spending';
 }

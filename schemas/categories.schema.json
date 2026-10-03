@@ -42,6 +42,9 @@
           },
           "hidden": {
             "type": "boolean"
+          },
+          "offsetsSpending": {
+            "type": "boolean"
           }
         },
         "required": [

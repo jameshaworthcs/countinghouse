@@ -1,7 +1,7 @@
 import { ArrowDownRight, ArrowUpRight, Calculator, Repeat } from 'lucide-react';
 import { useState } from 'react';
-import { useNavigate } from 'react-router';
-import type { CashflowResponse, SpendingResponse } from '../../shared/api';
+import { Link, useNavigate } from 'react-router';
+import type { CashflowResponse, CategoriseQueue, SpendingResponse } from '../../shared/api';
 import { addMonths, endOfMonth, formatMonth, startOfMonth, today } from '../../shared/dates';
 import { taxYearOf } from '../../shared/uk';
 import { BarList, ColumnChart, Heatmap } from '../components/charts/bars';
@@ -47,6 +47,19 @@ function ChangeNote({ change }: { change: number | null | undefined }) {
   );
 }
 
+/** Spending → To categorise, with how many payments wait there from the last 12 months. */
+function ToCategoriseLink() {
+  const from = addMonths(startOfMonth(today()), -12);
+  const q = useApi<CategoriseQueue>(['categorise', 'queue', from], `/categorise/queue${qs({ from })}`);
+  const waiting = q.data ? q.data.counts.people + q.data.counts.payees : undefined;
+  return (
+    <Link to="/spending/categorise" className="inline-flex h-9 items-center gap-2 rounded-lg border border-line bg-panel px-3 text-[13px] font-medium text-ink hover:bg-panel-2">
+      To categorise
+      {waiting !== undefined && waiting > 0 && <span className="rounded bg-warn-soft px-1.5 text-[11.5px] leading-5 text-warn-ink">{waiting}</span>}
+    </Link>
+  );
+}
+
 export default function Spending() {
   const [period, setPeriod] = useState<Period>('3m');
   const [from, to] = periodRange(period);
@@ -71,6 +84,8 @@ export default function Spending() {
         title="Spending"
         subtitle={`${formatDate(from)} – ${formatDate(to)}`}
         actions={
+          <>
+          <ToCategoriseLink />
           <Select value={period} onChange={(e) => setPeriod(e.target.value as Period)} className="w-44" aria-label="Period">
             <option value="month">This month</option>
             <option value="last-month">Last month</option>
@@ -78,6 +93,7 @@ export default function Spending() {
             <option value="12m">Last 12 months</option>
             <option value="tax-year">This tax year</option>
           </Select>
+          </>
         }
       />
       {!s ? (

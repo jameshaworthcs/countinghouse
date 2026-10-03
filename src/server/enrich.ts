@@ -176,6 +176,45 @@ export async function enrich(store: Store, opts: { accountIds?: string[]; dryRun
 }
 
 /**
+ * A rule you just made or changed, applied to the rows it matches and to the rows it categorised
+ * before, and to nothing else: each takes what the categoriser now says of it (rules come first).
+ * Rows you categorised, and transfers linked between your accounts, stay as they are. Re-applying
+ * everything is Settings → Categorisation, with its preview, so a rule never brings in other changes
+ * unseen. Returns how many rows changed category.
+ */
+export async function applyRule(store: Store, ruleId: string): Promise<{ recategorised: number }> {
+  const rule = store.rules.find((r) => r.id === ruleId);
+  const categoriser = categoriserFor(store);
+  const updates: { id: string; patch: Partial<Transaction> }[] = [];
+  let recategorised = 0;
+  for (const t of store.transactions()) {
+    if (t.categorisedBy === 'user' || (t.transferGroup && t.categorisedBy === 'transfer')) continue;
+    const input = categoriseInputOf(t);
+    const payee = input.payee ?? input.aiPayee ?? cleanPayee(input.description);
+    const texts = [input.description, ...(input.alsoSaid ?? [])];
+    const matches = rule?.enabled === true && texts.some((description) => categoriser.matchRule(rule, { ...input, description }, payee));
+    if (!matches && t.ruleId !== ruleId) continue;
+    const res = categoriser.categorise(input);
+    const patch: Partial<Transaction> = {};
+    const next = nextPayee(t, input, res);
+    if (next !== t.payee) patch.payee = next;
+    if (res.category !== t.category) patch.category = res.category;
+    if (res.categorisedBy !== t.categorisedBy) patch.categorisedBy = res.categorisedBy;
+    if (res.ruleId !== t.ruleId) patch.ruleId = res.ruleId;
+    if (res.counterpartyAccountId && res.counterpartyAccountId !== t.counterpartyAccountId) patch.counterpartyAccountId = res.counterpartyAccountId;
+    if (res.tags?.length) {
+      const tags = [...new Set([...(t.tags ?? []), ...res.tags])];
+      if (tags.length !== (t.tags?.length ?? 0)) patch.tags = tags;
+    }
+    if (!Object.keys(patch).length) continue;
+    updates.push({ id: t.id, patch });
+    if ('category' in patch) recategorised++;
+  }
+  if (updates.length) await store.updateTransactions(updates, `rule: apply ${rule?.name ?? rule?.match.value ?? ruleId} (${recategorised} recategorised)`);
+  return { recategorised };
+}
+
+/**
  * Pay recorded before its job had your payroll number: money in with no category that carries one of
  * `numbers` is salary, as the categoriser now says of it (shared/categorise.ts, step 4c). Only gaps
  * are filled: a category you, a rule or a reader gave stays. Returns how many.

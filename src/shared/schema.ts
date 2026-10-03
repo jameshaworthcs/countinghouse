@@ -724,6 +724,27 @@ export const BalanceEvidenceSchema = z.object({
 });
 export type BalanceEvidence = z.infer<typeof BalanceEvidenceSchema>;
 
+/** How money with a person usually goes, to pre-fill a suggestion: never applied without you. */
+export const PERSON_IN = ['gift', 'repaid', 'own'] as const;
+export const PERSON_OUT = ['gift', 'shared', 'own'] as const;
+
+/**
+ * Someone you send money to or get money from (people.json, docs/DATA_FORMAT.md): the names their
+ * payments carry, who they are to you, and how money with them usually goes. Each of their payments
+ * is still yours to decide (the To categorise page).
+ */
+export const PersonSchema = z.object({
+  id: SlugSchema,
+  name: z.string().min(1).max(120),
+  /** Every name their payments carry ("H WHITLOCK", "Hannah Whitlock"), as they appear. */
+  names: z.array(z.string().min(1).max(120)).max(30).default([]),
+  relation: z.enum(['family', 'partner', 'friend', 'other']).optional(),
+  usually: z.object({ in: z.enum(PERSON_IN).optional(), out: z.enum(PERSON_OUT).optional() }).default({}),
+  createdAt: TimestampSchema,
+  updatedAt: TimestampSchema,
+});
+export type Person = z.infer<typeof PersonSchema>;
+
 /**
  * You confirmed that nothing is missing from an account over a stretch of days no document covers:
  * it counts as covered, like a statement's period (docs/FORMULAS.md §3).
@@ -934,6 +955,11 @@ export const CategorySchema = z.object({
   /** System categories carry meaning in calculations (transfers, pension relief, …). */
   system: z.boolean().optional(),
   hidden: z.boolean().optional(),
+  /**
+   * Money in under it counts against spending, not as income: money back for something spent (a
+   * refund, or what someone paid you back for their share).
+   */
+  offsetsSpending: z.boolean().optional(),
 });
 export type Category = z.infer<typeof CategorySchema>;
 
@@ -2431,6 +2457,8 @@ export const EmploymentsFileSchema = z.object({ employments: z.array(EmploymentS
 export const CompaniesFileSchema = z.object({ companies: z.array(CompanySchema) });
 export const AgreementsFileSchema = z.object({ agreements: z.array(AgreementSchema) });
 export const CoverageFileSchema = z.object({ confirmations: z.array(CoverageConfirmationSchema) });
+/** people.json: the people you send money to or get money from. */
+export const PeopleFileSchema = z.object({ people: z.array(PersonSchema) });
 export const InstitutionsFileSchema = z.object({ institutions: z.array(InstitutionSchema) });
 export const CategoriesFileSchema = z.object({ categories: z.array(CategorySchema) });
 export const RulesFileSchema = z.object({ rules: z.array(RuleSchema) });

@@ -27,15 +27,16 @@ const tx = (accountId: string, date: string, amount: number, description: string
 
 describe('payees from the ways banks word a payment', () => {
   it('takes the other party out of the words around it, and keeps the reference', () => {
-    expect(paymentParts('BILL PAYMENT VIA FASTER PAYMENT TO SAM TAYLOR REFERENCE Dinner , MANDATE NO 12')).toEqual({ name: 'SAM TAYLOR', reference: 'Dinner' });
-    expect(paymentParts('STANDING ORDER VIA FASTER PAYMENT TO Alex Reed REFERENCE Rent-May')).toEqual({ name: 'Alex Reed', reference: 'Rent-May' });
-    expect(paymentParts('Third party payment made via Faster Payment to EXAMPLE BANK Reference 4000123')).toEqual({ name: 'EXAMPLE BANK', reference: '4000123' });
+    expect(paymentParts('BILL PAYMENT VIA FASTER PAYMENT TO SAM TAYLOR REFERENCE Dinner , MANDATE NO 12')).toEqual({ name: 'SAM TAYLOR', reference: 'Dinner', via: 'transfer' });
+    expect(paymentParts('STANDING ORDER VIA FASTER PAYMENT TO Alex Reed REFERENCE Rent-May')).toEqual({ name: 'Alex Reed', reference: 'Rent-May', via: 'transfer' });
+    expect(paymentParts('Third party payment made via Faster Payment to EXAMPLE BANK Reference 4000123')).toEqual({ name: 'EXAMPLE BANK', reference: '4000123', via: 'transfer' });
     // The last FROM: a reference can hold one of its own.
-    expect(paymentParts('FASTER PAYMENTS RECEIPT REF.FROM NAN FROM TAYLOR M')).toEqual({ name: 'TAYLOR M', reference: 'FROM NAN' });
-    expect(paymentParts('FASTER PAYMENTS RECEIPT REF.Train&amp;Tickets FROM A REED')).toEqual({ name: 'A REED', reference: 'Train&Tickets' });
-    expect(paymentParts('BANK GIRO CREDIT REF ACME WIDGETS, 0420 1234 K')).toEqual({ name: 'ACME WIDGETS', reference: '0420 1234 K' });
-    expect(paymentParts('DIRECT DEBIT PAYMENT TO EXAMPLE GYM REF GYM123, MANDATE NO 0004')).toEqual({ name: 'EXAMPLE GYM', reference: 'GYM123' });
-    expect(paymentParts('From Sam Taylor - SAVINGS')).toEqual({ name: 'Sam Taylor', reference: 'SAVINGS' });
+    expect(paymentParts('FASTER PAYMENTS RECEIPT REF.FROM NAN FROM TAYLOR M')).toEqual({ name: 'TAYLOR M', reference: 'FROM NAN', via: 'transfer' });
+    expect(paymentParts('FASTER PAYMENTS RECEIPT REF.Train&amp;Tickets FROM A REED')).toEqual({ name: 'A REED', reference: 'Train&Tickets', via: 'transfer' });
+    expect(paymentParts('BANK GIRO CREDIT REF ACME WIDGETS, 0420 1234 K')).toEqual({ name: 'ACME WIDGETS', reference: '0420 1234 K', via: 'giro' });
+    expect(paymentParts('DIRECT DEBIT PAYMENT TO EXAMPLE GYM REF GYM123, MANDATE NO 0004')).toEqual({ name: 'EXAMPLE GYM', reference: 'GYM123', via: 'direct-debit' });
+    expect(paymentParts('From Sam Taylor - SAVINGS')).toEqual({ name: 'Sam Taylor', reference: 'SAVINGS', via: 'transfer' });
+    expect(paymentParts('Example Kitchen Purchase')).toEqual({ name: 'Example Kitchen', via: 'card' });
     // A bank credit that names nobody stays as it is.
     expect(paymentParts('BANK GIRO CREDIT')).toBeUndefined();
   });

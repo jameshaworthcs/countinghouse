@@ -277,6 +277,37 @@ async function main() {
     }
     if (chance(0.15)) tx('rewards-card', addDays(m, 20), between(15, 80), 'AMAZON.CO.UK REFUND');
   }
+  // Money with people, as a bank's export gives a payment between two people's accounts (the To
+  // categorise page): family on occasions and for the train home, a friend paying back half of each
+  // holiday's hotel, and payments to friends, one with a reference that says nothing. Fixed amounts,
+  // so the random draws above are unchanged.
+  const person = (date: string, amount: number, name: string, reference: string) => {
+    if (date >= START && date <= END) tx('current-account', date, amount, name, { type: 'Faster payment', counterpartyName: name, reference });
+  };
+  for (let m = START; m <= END; m = addMonths(m, 1)) {
+    const ym = m.slice(0, 7);
+    const month = ym.slice(5);
+    if (month === '05') person(`${ym}-14`, 100, 'BLOGGS R&J', 'Happy birthday xx');
+    if (month === '12') person(`${ym}-20`, 150, 'BLOGGS R&J', 'Xmas');
+    if (['03', '08', '10'].includes(month)) person(`${ym}-09`, 40, 'BLOGGS R&J', 'Train home');
+    if (['01', '04', '07', '09'].includes(month)) person(`${ym}-16`, 25, 'R BLOGGS', 'For you');
+    if (['02', '06', '09'].includes(month)) person(`${ym}-22`, -24, 'Sam Sample', 'Tickets');
+    if (['04', '10'].includes(month)) person(`${ym}-25`, -18.5, 'SAM SAMPLE', 'pizza');
+    if (month === '08') person(`${ym}-03`, -50, 'A N OTHER', 'ta');
+  }
+  for (const hotel of txs.filter((t) => /BOOKING\.COM HOTEL|AIRBNB/.test(t.description))) person(addDays(hotel.date, 9), roundMoney(-hotel.amount / 2), 'PAT PLACEHOLDER', 'Paris');
+  // A payee the app doesn't know, which you put in Hobbies twice, with the next one waiting (a rule
+  // to make), and a shop nobody has categorised.
+  const unknown = (date: string, amount: number, description: string, extra: Partial<Transaction> = {}) => {
+    if (date >= START && date <= END) tx('rewards-card', date, amount, description, extra);
+  };
+  for (let m = START; m <= END; m = addMonths(m, 1)) {
+    const ym = m.slice(0, 7);
+    const month = ym.slice(5);
+    if (['02', '05'].includes(month)) unknown(`${ym}-17`, -32.5, 'GREENLEAF POTTERY STUDIO', { category: 'hobbies', categorisedBy: 'user' });
+    if (month === '08') unknown(`${ym}-17`, -32.5, 'GREENLEAF POTTERY STUDIO');
+    if (month === '07') unknown(`${ym}-23`, -64.2, 'MERIDIAN FRAMING');
+  }
   // The card: the monthly direct debit arrives on it.
   for (const t of txs.filter((x) => x.accountId === 'current-account' && x.description === 'EXAMPLE CARDS DD')) tx('rewards-card', t.date, -t.amount, 'PAYMENT RECEIVED - THANK YOU');
 

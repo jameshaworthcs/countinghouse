@@ -1684,3 +1684,29 @@ Later the same day, after the owner's first runs (`label-imports-2`):
     fall in the months the schedules give;
   - the Aldermore statement splits on the day the fixed rate ended, adding only the fixed account's
     interest and the easy-access account's own rows.
+
+## 2026-10-03: Money with people, decided by you; rules from your decisions
+
+- **Found:** money with people was most of what stayed uncategorised. Uncategorised money in counts
+  as income, so family gifts, friends paying back their share of a trip, and your own money passing
+  through someone else's account all looked like income. Payees you had categorised the same way
+  several times had no rule, so each new payment came in uncategorised again.
+- **Owner's decision:** most money from family is a gift, but not all of it. Nothing may file it as
+  one wholesale: each payment is decided, past and future.
+- **Done** (FORMULAS.md §10 "People", "Rules from your decisions", §14; DATA_FORMAT.md
+  `people.json`, format 9):
+  - Payments with people are found by the shape of the payment and the name, never you or your
+    accounts. One person's variants are grouped by surname and first initial.
+  - Each gets a suggestion with its reason, from the payment's own words, a share of a payment you
+    made, what you said they usually are, or what you chose before. Only a payment's own words or a
+    share not in round pounds tick it for you; nothing is categorised until you confirm it. Who it is
+    from ("FROM NAN") is not taken for a gift.
+  - Money paid back counts against spending: in what was shared, or in "Paid back to you", which
+    offsets spending as refunds do (`offsetsSpending`, format 9).
+  - Rules from your decisions are offered with what they would fill, kept to sizes like yours and
+    never wider than your decisions; a rule you make applies only to what it matches. This changes
+    what "apply" did for rules made elsewhere: it no longer re-applies everything unseen.
+  - Your surname followed by your initials ("FROM TAYLOR SR") is you.
+- **Rehearsed** on a copy of the owner's data, after re-applying: payments with several people
+  wait to be decided (some ticked by their own words or amount), a few rules are offered, and the
+  other uncategorised payments are left by payee.

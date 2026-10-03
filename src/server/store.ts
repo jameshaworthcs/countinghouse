@@ -24,6 +24,7 @@ import {
   CompanySchema,
   AgreementSchema,
   CoverageConfirmationSchema,
+  PersonSchema,
   HmrcRecordSchema,
   PayslipRecordSchema,
   TermsSchema,
@@ -55,6 +56,7 @@ import {
   type Company,
   type Agreement,
   type CoverageConfirmation,
+  type Person,
   type HmrcRecord,
   type PayslipRecord,
   type Terms,
@@ -82,7 +84,7 @@ import { diffById, DiffCollector, diffFields, listed } from './auditdiff';
 import { atomicWrite, Mutex, nowISO, readTextIfExists, sha256 } from './fsutil';
 
 /** Bump when the on-disk format changes, and add a migration in migrations.ts. */
-export const FORMAT_VERSION = 8;
+export const FORMAT_VERSION = 9;
 
 export interface DataIssue {
   file: string;
@@ -156,6 +158,7 @@ const ARRAY_FILES = {
   companies: { file: 'companies.json', key: 'companies', schema: CompanySchema },
   agreements: { file: 'agreements.json', key: 'agreements', schema: AgreementSchema },
   coverage: { file: 'coverage.json', key: 'confirmations', schema: CoverageConfirmationSchema },
+  people: { file: 'people.json', key: 'people', schema: PersonSchema },
 } as const;
 
 /** Single-file JSONL collections: one record per line. */
@@ -189,6 +192,8 @@ interface State {
   agreements: Agreement[];
   /** Stretches you confirmed nothing is missing from (coverage.json). */
   coverage: CoverageConfirmation[];
+  /** People you send money to or get money from (people.json). */
+  people: Person[];
   /** Append-only: every version of every assumption, in file order. */
   assumptions: Assumption[];
   /** Append-only: every research record, in file order. */
@@ -226,6 +231,7 @@ function emptyState(): State {
     companies: [],
     agreements: [],
     coverage: [],
+    people: [],
     assumptions: [],
     research: [],
     insights: [],
@@ -319,6 +325,7 @@ export class Store extends EventEmitter {
       ['companies.json', { $schema: '../schemas/companies.schema.json', companies: [] }],
       ['agreements.json', { $schema: '../schemas/agreements.schema.json', agreements: [] }],
       ['coverage.json', { $schema: '../schemas/coverage.schema.json', confirmations: [] }],
+      ['people.json', { $schema: '../schemas/people.schema.json', people: [] }],
     ];
     for (const [rel, value] of writes) await this.writeJson(rel, value);
     for (const def of Object.values(JSONL_FILES)) await atomicWrite(this.abs(def.file), '');
@@ -634,6 +641,10 @@ export class Store extends EventEmitter {
   agreement(id: string | undefined): Agreement | undefined {
     return id ? this.state.agreements.find((a) => a.id === id) : undefined;
   }
+  get people(): Person[] {
+    return this.state.people;
+  }
+
   get coverageConfirmations(): CoverageConfirmation[] {
     return this.state.coverage;
   }
@@ -833,6 +844,10 @@ export class Store extends EventEmitter {
   setAgreements(list: Agreement[], message = 'agreements: update'): Promise<void> {
     return this.setArray('agreements', list, message);
   }
+  setPeople(list: Person[], message = 'people: update'): Promise<void> {
+    return this.setArray('people', list, message);
+  }
+
   setCoverageConfirmations(list: CoverageConfirmation[], message = 'coverage: update'): Promise<void> {
     return this.setArray('coverage', list, message);
   }

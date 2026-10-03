@@ -12,6 +12,7 @@ const Accounts = lazy(() => import('./pages/Accounts'));
 const AccountDetail = lazy(() => import('./pages/AccountDetail'));
 const Transactions = lazy(() => import('./pages/Transactions'));
 const Spending = lazy(() => import('./pages/Spending'));
+const Categorise = lazy(() => import('./pages/Categorise'));
 const Projections = lazy(() => import('./pages/Projections'));
 const Investments = lazy(() => import('./pages/Investments'));
 const TaxYear = lazy(() => import('./pages/TaxYear'));
@@ -77,6 +78,7 @@ const router = createBrowserRouter([
           { path: 'accounts/:id', element: page(<AccountDetail />) },
           { path: 'transactions', element: page(<Transactions />) },
           { path: 'spending', element: page(<Spending />) },
+          { path: 'spending/categorise', element: page(<Categorise />) },
           { path: 'projections', element: page(<Projections />) },
           { path: 'investments', element: page(<Investments />) },
           { path: 'tax', element: page(<TaxYear />) },

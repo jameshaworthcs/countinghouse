@@ -33,10 +33,14 @@ import {
   SettingsSchema,
   SlugSchema,
   WorkDetailSchema,
+  PersonSchema,
+  PERSON_IN,
+  PERSON_OUT,
   type Account,
   type BalanceSnapshot,
   type CoverageConfirmation,
   type Figure,
+  type Person,
   type Rule,
   type Transaction,
   type SplitLine,
@@ -44,7 +48,7 @@ import {
 import { SYSTEM_CATEGORY_IDS } from '../../shared/categories';
 import { csvCell, queryDate, readJson, type AppContext } from '../context';
 import { categoriserFor } from '../categoriser';
-import { enrich, salaryByPayroll } from '../enrich';
+import { applyRule, enrich, salaryByPayroll } from '../enrich';
 import { nowISO, randomHex } from '../fsutil';
 import { balanceId, figureId, ruleId, transactionId } from '../ids';
 import { payerKey } from '../analytics/pay';
@@ -57,6 +61,7 @@ import { taxDocuments } from '../analytics/taxdocuments';
 import { matchEmployment } from '../employments';
 import { StoreError } from '../store';
 import { accountSummary } from '../analytics/estate';
+import { categoriseQueue } from '../analytics/queue';
 
 const NewAccountBody = z.object({
   name: z.string().min(1).max(120),
@@ -130,6 +135,29 @@ const TxPatch = z.object({
   correctionNote: z.string().max(500).optional(),
   /** Split across categories (null removes the split). */
   splits: z.array(SplitLineSchema).min(2).max(30).optional().nullable(),
+});
+
+const PersonBody = z.object({
+  id: SlugSchema.optional(),
+  name: z.string().trim().min(1).max(120),
+  /** The names their payments carry: added to the ones they have. */
+  names: z.array(z.string().trim().min(1).max(120)).max(30).default([]),
+  /** null forgets it. */
+  relation: z.enum(['family', 'partner', 'friend', 'other']).optional().nullable(),
+  usually: z.object({ in: z.enum(PERSON_IN).optional(), out: z.enum(PERSON_OUT).optional() }).optional(),
+});
+
+const DecisionsBody = z.object({
+  decisions: z.array(z.object({ id: z.string(), category: z.string().min(1).max(64) })).max(5000),
+  person: PersonBody.optional(),
+  /** "Always": a rule for the payee, applied to the rows it matches. */
+  rule: z
+    .object({
+      name: z.string().max(200).optional(),
+      match: RuleSchema.shape.match,
+      category: z.string().min(1).max(64),
+    })
+    .optional(),
 });
 
 const NewTx = z.object({
@@ -613,7 +641,7 @@ export function dataRoutes(ctx: AppContext): Hono {
     const stamp = nowISO();
     const rule: Rule = { ...rest, id: ruleId(), createdAt: stamp, updatedAt: stamp };
     await store.setRules([...store.rules, rule], `rule: add ${rule.name ?? rule.match.value}`);
-    const result = apply ? await enrich(store) : null;
+    const result = apply ? await applyRule(store, rule.id) : null;
     return c.json({ rule, result }, 201);
   });
 
@@ -627,7 +655,7 @@ export function dataRoutes(ctx: AppContext): Hono {
       store.rules.map((r) => (r.id === next.id ? next : r)),
       `rule: edit ${next.name ?? next.match.value}`,
     );
-    const result = apply ? await enrich(store) : null;
+    const result = apply ? await applyRule(store, next.id) : null;
     return c.json({ rule: next, result });
   });
 
@@ -678,6 +706,89 @@ export function dataRoutes(ctx: AppContext): Hono {
       groups: [...groups.values()].map((g) => ({ ...g, payees: g.payees.sort((a, b) => b.amount - a.amount).slice(0, 8) })).sort((a, b) => b.amount - a.amount),
     };
     return c.json(body);
+  });
+
+  // ─── To categorise: people, rules from your decisions, what's left (docs/FORMULAS.md §10) ─────
+
+  app.get('/categorise/queue', (c) => {
+    const from = queryDate(c.req.query('from'));
+    return c.json(categoriseQueue(store, { from }));
+  });
+
+  /**
+   * Your decisions from the To categorise page, in one go: each payment's category (yours from now
+   * on), the person they're with when you saved one, and a rule when you asked for one ("always"),
+   * applied to the rows it matches.
+   */
+  app.post('/categorise/decisions', async (c) => {
+    const body = await readJson(c, DecisionsBody);
+    const cats = new CategoryIndex(store.categories);
+    for (const d of body.decisions) {
+      if (!cats.get(d.category)) throw new StoreError(`Unknown category "${d.category}".`);
+      if (!store.transaction(d.id)) throw new StoreError(`Unknown transaction ${d.id}`, 404);
+    }
+    if (body.rule && !cats.get(body.rule.category)) throw new StoreError(`Unknown category "${body.rule.category}".`);
+    const person = body.person ? await savePerson(body.person) : undefined;
+    const updated = body.decisions.length
+      ? await store.updateTransactions(
+          body.decisions.map((d) => ({ id: d.id, patch: { category: d.category, categorisedBy: 'user' as const, ruleId: undefined } })),
+          `categorise: ${body.decisions.length} decided${person ? ` (${person.name})` : ''}`,
+        )
+      : [];
+    let rule: Rule | undefined;
+    let ruleApplied: { recategorised: number } | undefined;
+    if (body.rule) {
+      const stamp = nowISO();
+      rule = { id: ruleId(), name: body.rule.name ?? `${body.rule.match.value} → ${cats.name(body.rule.category)}`, enabled: true, priority: 100, match: body.rule.match, set: { category: body.rule.category }, createdAt: stamp, updatedAt: stamp };
+      await store.setRules([...store.rules, rule], `rule: add ${rule.name}`);
+      ruleApplied = await applyRule(store, rule.id);
+    }
+    return c.json({ updated: updated.length, ...(person ? { person } : {}), ...(rule ? { rule, ruleApplied } : {}) });
+  });
+
+  /** Add someone, or change them: the names their payments carry are added to theirs. */
+  async function savePerson(input: z.infer<typeof PersonBody>): Promise<Person> {
+    const stamp = nowISO();
+    const existing = input.id ? store.people.find((p) => p.id === input.id) : undefined;
+    if (input.id && !existing) throw new StoreError(`Unknown person ${input.id}`, 404);
+    const names = [...new Set([...(existing?.names ?? []), ...input.names].map((n) => n.trim()).filter((n) => n && n !== input.name))].slice(0, 30);
+    const usually = input.usually ?? existing?.usually ?? {};
+    const relation = input.relation === null ? undefined : (input.relation ?? existing?.relation);
+    const person: Person = PersonSchema.parse({
+      id: existing?.id ?? slugify(input.name, store.people.map((p) => p.id)),
+      name: input.name,
+      names,
+      ...(relation ? { relation } : {}),
+      usually,
+      createdAt: existing?.createdAt ?? stamp,
+      updatedAt: stamp,
+    });
+    // A name is one person's: saving it here takes it from anyone else who had it.
+    const taken = new Set([person.name, ...person.names].map((n) => n.toLowerCase()));
+    const others = store.people
+      .filter((p) => p.id !== person.id)
+      .map((p) => ({ ...p, names: p.names.filter((n) => !taken.has(n.toLowerCase())) }));
+    await store.setPeople([...others, person].sort((a, b) => a.name.localeCompare(b.name)), `people: ${existing ? 'edit' : 'add'} ${person.name}`);
+    return person;
+  }
+
+  app.get('/people', (c) => c.json(store.people));
+
+  app.put('/people/:id', async (c) => {
+    const body = await readJson(c, PersonBody.omit({ id: true }));
+    if (!store.people.some((p) => p.id === c.req.param('id'))) throw new StoreError('Unknown person', 404);
+    return c.json(await savePerson({ ...body, id: c.req.param('id') }));
+  });
+
+  /** Forget someone: their payments keep the categories you gave them. */
+  app.delete('/people/:id', async (c) => {
+    const person = store.people.find((p) => p.id === c.req.param('id'));
+    if (!person) throw new StoreError('Unknown person', 404);
+    await store.setPeople(
+      store.people.filter((p) => p.id !== person.id),
+      `people: remove ${person.name}`,
+    );
+    return c.json({ ok: true });
   });
 
   app.post('/categorise/preview', async (c) => {

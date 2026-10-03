@@ -45,7 +45,7 @@ describe('reading a description for your own accounts', () => {
   });
 
   it('by your name after “to” or “from”: your money moving, not spending or income', () => {
-    for (const d of ['BILL PAYMENT VIA FASTER PAYMENT TO SAM TAYLOR REFERENCE SAVING , MANDATE NO 7', 'FASTER PAYMENTS RECEIPT REF.TOPUP FROM S Taylor', 'STANDING ORDER TO SAM ROBIN TAYLOR REFERENCE POT', 'TRANSFER FROM SR TAYLOR', 'Payment from TAYLOR S', 'From MR S. TAYLOR - SAVING']) {
+    for (const d of ['BILL PAYMENT VIA FASTER PAYMENT TO SAM TAYLOR REFERENCE SAVING , MANDATE NO 7', 'FASTER PAYMENTS RECEIPT REF.TOPUP FROM S Taylor', 'STANDING ORDER TO SAM ROBIN TAYLOR REFERENCE POT', 'TRANSFER FROM SR TAYLOR', 'Payment from TAYLOR S', 'From MR S. TAYLOR - SAVING', 'FASTER PAYMENTS RECEIPT REF.E FROM TAYLOR SR']) {
       expect(cat('bank', d, -100), d).toMatchObject({ category: 'transfer', categorisedBy: 'transfer' });
     }
     // Paying the card from yourself is a card payment.
@@ -53,6 +53,8 @@ describe('reading a description for your own accounts', () => {
     // A payer naming you as the payee is not your own money.
     expect(cat('bank', 'BANK GIRO CREDIT REF ACME LTD 4242, SAM TAYLOR', 75).category).not.toBe('transfer');
     expect(cat('bank', 'TO SAMUEL TAYLORSON', -5).category).not.toBe('transfer');
+    // Someone else's initials after your surname: family, not you.
+    expect(cat('bank', 'FASTER PAYMENTS RECEIPT REF.xmas FROM TAYLOR MJ', 25).category).not.toBe('transfer');
     expect(ownNamePattern('Cher')).toBeNull();
     expect(new Categoriser([], new CategoryIndex(defaultCategories()), accounts, []).categorise({ accountId: 'bank', description: 'TO SAM TAYLOR', amount: -1 }).category).not.toBe('transfer');
   });
