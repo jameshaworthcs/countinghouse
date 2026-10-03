@@ -505,7 +505,7 @@ function changesNothing(store: Store, o: Outcome): boolean {
   }
   for (const [id, a] of o.accounts) {
     const was = store.account(id);
-    if (!was || was.openedOn !== a.openedOn || was.closedOn !== a.closedOn || was.status !== a.status) return false;
+    if (!was || was.openedOn !== a.openedOn || was.closedOn !== a.closedOn || was.status !== a.status || JSON.stringify(was.continues ?? null) !== JSON.stringify(a.continues ?? null)) return false;
   }
   return true;
 }

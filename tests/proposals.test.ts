@@ -379,6 +379,16 @@ describe('a proposal must fit the data', () => {
     expect(await problem({ kind: 'set_account_dates', account: 'fixed', closedOn: '2026-02-03' })).toMatch(/already says this/);
   });
 
+  it('links an account to the one it carries on from', async () => {
+    const link = { title: 'Easy access carries on from the fixed rate', summary: 'A test.', changes: [{ kind: 'link_accounts', account: 'easy', continues: 'fixed', from: '2026-02-04', why: 'The same number; the fixed rate matured into it.' }] };
+    const dry = await propose({ ...link, dryRun: true });
+    expect(dry.status).toBe(200);
+    expect(((await dry.json()) as ProposalView).ready).toBe(1);
+    const made = (await (await propose(link)).json()) as ProposalView;
+    expect((await owner(`/api/proposals/${made.proposal.id}/apply`)).status).toBe(200);
+    expect(app.ctx.store.account('easy')?.continues).toEqual({ accountId: 'fixed', from: '2026-02-04' });
+  });
+
   it('checks without keeping it on a dry run, and only a token proposes', async () => {
     const res = await propose({ ...relink, dryRun: true });
     expect(res.status).toBe(200);
