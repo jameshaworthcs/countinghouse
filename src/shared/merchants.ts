@@ -36,7 +36,8 @@ export const MERCHANTS: MerchantDef[] = [
   ['ROBINHOOD', 'Robinhood', 'investment-transfer', 'out'],
   ['MOONPAY', 'MoonPay', 'investment-transfer', 'out'],
   ['COINBASE', 'Coinbase', 'investment-transfer', 'out'],
-  ['\\bKRAKEN\\b', 'Kraken', 'investment-transfer', 'out'],
+  // Kraken's company is Payward ("PAYWARD SERVICES LTD").
+  ['\\bKRAKEN\\b|\\bPAYWARD\\b', 'Kraken', 'investment-transfer', 'out'],
   ['BINANCE', 'Binance', 'investment-transfer', 'out'],
   ['CRYPTO\\.COM', 'Crypto.com', 'investment-transfer', 'out'],
   ['\\bBITPANDA\\b|\\bBITSTAMP\\b|\\bUPHOLD\\b', 'Crypto exchange', 'investment-transfer', 'out'],
@@ -159,7 +160,7 @@ export const MERCHANTS: MerchantDef[] = [
   ['FRANKIE ?& ?BENNY', "Frankie & Benny's", 'eating-out'],
   ['GOURMET BURGER|\\bGBK\\b', 'GBK', 'eating-out'],
   ['\\bCOTE\\b|CÔTE', 'Côte', 'eating-out'],
-  ['LAS IGUANAS', 'Las Iguanas', 'eating-out'],
+  ['LAS ?IGUANAS', 'Las Iguanas', 'eating-out'],
   ['MILLER ?& ?CARTER', 'Miller & Carter', 'eating-out'],
   ['\\bPOPEYES\\b', 'Popeyes', 'eating-out'],
   ['\\bTACO BELL\\b', 'Taco Bell', 'eating-out'],
@@ -274,7 +275,7 @@ export const MERCHANTS: MerchantDef[] = [
   ['B ?& ?Q\\b|\\bB AND Q\\b', 'B&Q', 'home-garden'],
   ['WICKES|HOMEBASE|SCREWFIX|TOOLSTATION|DUNELM|THE RANGE|WAYFAIR|HABITAT|ROBERT DYAS|LAKELAND|DOBBIES|WYEVALE|GARDEN CENTRE|HOBBYCRAFT', 'Home & garden', 'home-garden'],
   ['\\bB ?& ?M\\b|HOME BARGAINS|POUNDLAND|THE WORKS|\\bWILKO\\b|TK ?MAXX|\\bHOMESENSE\\b', 'Discount store', 'general-shopping'],
-  ['PRIMARK|\\bNEXT\\b(?! ?DAY)|NEXT RETAIL|H ?& ?M\\b|HENNES|\\bZARA\\b|UNIQLO|\\bASOS\\b|BOOHOO|JD SPORTS|SPORTS DIRECT|RIVER ISLAND|NEW LOOK|SUPERDRY|\\bSCHUH\\b|CLARKS|\\bOFFICE\\b.*SHOES|MATALAN|\\bMANGO\\b|\\bCOS\\b|ARKET|SELFRIDGES|HARRODS|LIBERTY|FAT FACE|WHITE STUFF|SEASALT|JOULES|MONSOON|ACCESSORIZE|\\bGAP\\b|\\bMUJI\\b|NIKE|ADIDAS|DECATHLON|GO OUTDOORS|MOUNTAIN WAREHOUSE|BLACKS|CRAGHOPPERS|GYMSHARK|END\\. ?CLOTHING|MR ?PORTER|NET-A-PORTER|ALLSAINTS|TED BAKER|REISS|HOBBS|WHISTLES|JIGSAW|BODEN|TOPSHOP|PRETTYLITTLETHING|MISSGUIDED', 'Clothing', 'clothing'],
+  ['PRIMARK|\\bNEXT\\b(?! ?DAY)|NEXT RETAIL|H ?& ?M\\b|HENNES|\\bZARA\\b|UNIQLO|\\bASOS\\b|BOOHOO|JD SPORTS|SPORTS ?DIRECT|RIVER ISLAND|NEW LOOK|SUPERDRY|\\bSCHUH\\b|CLARKS|\\bOFFICE\\b.*SHOES|MATALAN|\\bMANGO\\b|\\bCOS\\b|ARKET|SELFRIDGES|HARRODS|LIBERTY|FAT FACE|WHITE STUFF|SEASALT|JOULES|MONSOON|ACCESSORIZE|\\bGAP\\b|\\bMUJI\\b|NIKE|ADIDAS|DECATHLON|GO OUTDOORS|MOUNTAIN WAREHOUSE|BLACKS|CRAGHOPPERS|GYMSHARK|END\\. ?CLOTHING|MR ?PORTER|NET-A-PORTER|ALLSAINTS|TED BAKER|REISS|HOBBS|WHISTLES|JIGSAW|BODEN|TOPSHOP|PRETTYLITTLETHING|MISSGUIDED', 'Clothing', 'clothing'],
   ['MARKS ?(&|AND) ?SPENCER|\\bM ?& ?S\\b', 'M&S', 'general-shopping'],
   ['WATERSTONES|FOYLES|BLACKWELL|WH ?SMITH|\\bBOOKS?\\b(?!ING)', 'Books', 'books'],
   ['SMYTHS|THE ENTERTAINER|MOTHERCARE|JOJO MAMAN|HAMLEYS|LEGO', 'Kids', 'kids'],
@@ -464,7 +465,9 @@ export function cleanPayee(description: string): string {
     if (s === before) break;
   }
   s = s
+    .replace(/\s*\([^()]*\bRate:[^()]*\)\s*$/i, '') // Starling's "($3.75, Rate: 1.2810)"
     .replace(/\bON \d{1,2}[/.-]\d{1,2}([/.-]\d{2,4})?\b.*$/i, '') // "ON 12/09 …"
+    .replace(/\s+ON \d{1,2} (JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\b.*$/i, '') // Capital One's "on 01 Sep"
     .replace(/\b\d{1,2}[A-Z]{3}\d{2,4}\b.*$/i, '') // "12SEP26 …"
     .replace(/\s+(GB|GBR|UK|IE|IRL|US|USA|FR|DE|NL|ES|IT|LU)$/i, '') // trailing country
     .replace(/\s+(LONDON|MANCHESTER|BIRMINGHAM|LEEDS|GLASGOW|EDINBURGH|BRISTOL|LIVERPOOL|CARDIFF|BELFAST|INTERNET|WWW\.[A-Z.]+)$/i, '')

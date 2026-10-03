@@ -259,6 +259,8 @@ export class PeopleIndex {
   private readonly ownNames: Set<string>;
   private readonly byName = new Map<string, Person>();
   private readonly byKey = new Map<string, Person[]>();
+  /** Each saved person's key: their first name that reads as a person's. */
+  private readonly savedKey = new Map<string, string>();
 
   /**
    * `ownerName`: the name in your profile. `ownNames`: your accounts' names and aliases, and their
@@ -271,6 +273,7 @@ export class PeopleIndex {
       for (const n of [p.name, ...p.names]) {
         this.byName.set(letters(n), p);
         const parsed = parsePersonName(n, true);
+        if (parsed && !this.savedKey.has(p.id)) this.savedKey.set(p.id, parsed.key);
         for (const k of parsed ? [parsed.key, parsed.altKey] : []) {
           if (!k) continue;
           const list = this.byKey.get(k) ?? [];
@@ -297,7 +300,9 @@ export class PeopleIndex {
     if (this.ownNames.has(letters(name))) return undefined;
     const saved = this.byName.get(letters(name));
     const parsed = parsePersonName(name, Boolean(saved));
-    if (!parsed || isOwnerName(parsed, this.owner)) return undefined;
+    // Someone you saved is a person however a payment writes them ("Vance Mi&T" for "VANCE MI&T").
+    if (!parsed) return saved ? (this.savedKey.get(saved.id) ?? `saved|${saved.id}`) : undefined;
+    if (isOwnerName(parsed, this.owner)) return undefined;
     if (!saved && !parsed.joint && !/^[A-Za-z]\.?\s/.test(name) && !/\s[A-Za-z]{1,3}$/.test(name.trim())) {
       // A whole name a brand also goes by ("Capital One") is the brand; an initial says it's someone ("J Morrison").
       const brand = matchMerchant(name, -1) ?? matchMerchant(name, 1);
@@ -333,7 +338,11 @@ export class PeopleIndex {
         break;
       }
     }
-    if (!candidate && t.counterpartyName && TRANSFER_TYPES.test((t.type ?? '').trim())) candidate = { name: t.counterpartyName };
+    // The other party a source names, on a transfer; or on a row that says no more than who it was
+    // with (an app's list, "Alex Reed"), or names someone you saved, with no type to say otherwise.
+    const type = (t.type ?? '').trim();
+    const named = t.counterpartyName;
+    if (!candidate && named && (TRANSFER_TYPES.test(type) || (!type && (letters(t.description) === letters(named) || this.personFor(named))))) candidate = { name: named };
     if (!candidate) return undefined;
     const key = this.keyOf(candidate.name);
     if (!key) return undefined;

@@ -322,7 +322,7 @@ const AMEX_CATEGORY_MAP: Record<string, { group: string; sub: Record<string, str
       'bars & cafes': 'eating-out',
       clubs: 'pubs-bars',
       associations: 'memberships',
-      'general attractions': 'hobbies',
+      'general attractions': 'events',
       'theatrical events': 'events',
       'music & video': 'hobbies',
       sports: 'hobbies',

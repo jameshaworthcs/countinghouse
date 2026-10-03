@@ -526,6 +526,8 @@ party inside other words gives that party, and its reference is kept apart:
   the rate), "From *name* - *ref*".
 - HTML entities an export leaves in ("&amp;") are read as their characters, and a brand whose name
   ends in a number keeps it ("Trading 212").
+- What a card adds about the money is left out: Starling's rate for a payment in another currency
+  ("($3.75, Rate: 1.2810)") and Capital One's day it was made ("on 01 Sep").
 
 **Pay by name** (`analytics/pay.ts`, `paidAs`; the categoriser's step 4d). The payments paired with a
 job's payslips (§17) teach the name the bank gives its pay. Money in under that name is salary when
@@ -564,7 +566,9 @@ person when:
 
 - the bank words it as a payment between two people's accounts (a Faster Payment to or from a name,
   Chase's "From *name* - *ref*", or the other party a source gives on a transfer), in its description
-  or another document's; not a card payment, a giro credit or a direct debit;
+  or another document's; not a card payment, a giro credit or a direct debit. A row with no type that
+  says no more than the other party's name (a banking app's list: "Alex Reed"), or names someone you
+  saved, counts as such a payment;
 - and the name is shaped like a person's: a title, initials ("H J REED", "REED AJ", "REED R&C"), or
   one of about 500 common first names on either side ("WHITLOCK HANNAH"), with no word a business uses
   (Ltd, Pay, Cash, Card, Estates…). A whole name a brand also goes by ("Capital One") is the brand;

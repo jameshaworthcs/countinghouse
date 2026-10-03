@@ -57,6 +57,14 @@ describe('payees from the ways banks word a payment', () => {
     expect(cleanPayee('TRADING 212 UK LIM 12345678 CR')).toBe('Trading 212');
     expect(cleanPayee('BANK GIRO CREDIT')).toBe('Bank Giro Credit');
   });
+
+  it('leaves out what a card added about the money: a rate paid abroad, the day it was made', () => {
+    // Starling, paying in another currency.
+    expect(cleanPayee('EXAMPLE TRANSIT PAYGO ($3.75, Rate: 1.2810)')).toBe('Example Transit Paygo');
+    expect(cleanPayee('Sam Taylor (Trip) (€11.64, Rate: 1.1695, Fee: £0.04)')).toBe('Sam Taylor (Trip)');
+    // Capital One's day the payment was made.
+    expect(cleanPayee('Www.examplevans.com London LND on 01 Sep')).toBe('Www.examplevans.com London LND');
+  });
 });
 
 describe('American Express’s own categories', () => {
@@ -67,6 +75,8 @@ describe('American Express’s own categories', () => {
     expect(mapBankCategory('Travel-Airline')).toBe('flights');
     expect(mapBankCategory('Travel-Space Flights')).toBe('travel');
     expect(mapBankCategory('Fees & Adjustments-Fees & Adjustments')).toBe('bank-fees');
+    // An attraction's ticket (a cathedral, a museum) is an outing, not a hobby.
+    expect(mapBankCategory('Entertainment-General Attractions')).toBe('events');
     // Other banks' words are read as before.
     expect(mapBankCategory('Transfers')).toBe('transfer');
     expect(mapBankCategory('eating_out')).toBe('eating-out');

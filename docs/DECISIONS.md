@@ -1913,3 +1913,27 @@ Later the same day, after the owner's first runs (`label-imports-2`):
   - The transaction lists show the day a payment was made under its date when it differs.
 - **Not done:** a payment still counts in the month it posted (a fare paid on a month's last day is in
   the next), as its statement and balance have it.
+
+## 2026-10-03: Guesses to check, and why they were guesses
+
+- **Owner:** look into "Guesses to check" and propose what it needs.
+- **Found:** payments categorised from a guess (the reader's or the bank's), most of them right.
+  - Some were guesses only because a pattern missed how a card spaces a brand ("SPORTSDIRECT",
+    "Lasiguanas") or names Kraken by its company (Payward).
+  - Some payees were split by what a card adds: Starling's rate abroad made three payees of one metro
+    abroad, and Capital One's "on 01 Sep" stayed in a payee.
+  - Amex's "General Attractions" (a cathedral's entry) went to Hobbies.
+  - Rows from a banking app's list name only the other party, with no type. So £15 from a
+    relative was not seen as money from people: it sat in the guesses as a move between accounts,
+    not on the People tab.
+- **Done:**
+  - Proposals for all the guesses: going out; shopping, services and money; trips (one abroad, and
+    the euros taken on another).
+  - The patterns match "SPORTS ?DIRECT", "LAS ?IGUANAS" and "PAYWARD".
+  - Payees leave out Starling's rate and Capital One's day (FORMULAS.md, "Payees").
+  - Amex's "General Attractions" is Events & tickets.
+  - Such a row with no type is a payment with a person when it says no more than their name, or
+    names someone saved (FORMULAS.md, "People"). Someone saved is found however a payment writes
+    them: an app's "Reed Al&S" for the bank's "REED AL&S", which did not read as a name.
+- **Not done:** the merchant list still reads only descriptions, not the merchant name a bank gives
+  apart (Monzo's "Payward Services Ltd." beside a reference). A rule on the payee covers Kraken.

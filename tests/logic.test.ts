@@ -55,6 +55,12 @@ describe('merchants and categorisation', () => {
     expect(matchMerchant('LEON SMITH', -10)?.category).toBe('eating-out'); // known limitation: first names collide
   });
 
+  it('knows a brand however a card spaces it, and Kraken by its company', () => {
+    expect(matchMerchant('SPORTSDIRECT 164 01234567890', -48.99)).toMatchObject({ category: 'clothing' });
+    expect(matchMerchant('Lasiguanas York', -30.74)).toMatchObject({ category: 'eating-out' });
+    expect(matchMerchant('FASTER PAYMENT TO PAYWARD SERVICES LTD', -100)).toMatchObject({ payee: 'Kraken', category: 'investment-transfer' });
+  });
+
   it('cleans payees', () => {
     expect(cleanPayee('CARD PAYMENT TO SQ *THE COFFEE ROOM ON 12/09 LONDON GB')).toBe('The Coffee Room');
     expect(cleanPayee('DIRECT DEBIT PAYMENT TO BRITISH GAS REF 1234567')).toBe('British Gas');

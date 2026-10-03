@@ -86,7 +86,11 @@ describe('a person’s name', () => {
 });
 
 describe('who a payment is with', () => {
-  const index = new PeopleIndex({ ownerName: 'Jordan W Blake', ownNames: ['Robin Wood', 'Example Bank'], people: [person('zorvan', 'Zorvan Quill'), person('sam', 'Sam Taylor', { names: ['S TAYLOR'] })] });
+  const index = new PeopleIndex({
+    ownerName: 'Jordan W Blake',
+    ownNames: ['Robin Wood', 'Example Bank'],
+    people: [person('zorvan', 'Zorvan Quill'), person('sam', 'Sam Taylor', { names: ['S TAYLOR'] }), person('vances', 'Mira and Tom Vance', { names: ['VANCE MI&T'] })],
+  });
   const party = (description: string, extra: Partial<Transaction> = {}) => index.party(tx('bank', '2026-05-01', 20, description, extra));
 
   it('is the other person of a payment between two people’s accounts, with its reference', () => {
@@ -116,6 +120,18 @@ describe('who a payment is with', () => {
   it('reads the other party a source names on a transfer, not on a card payment', () => {
     expect(party('Alex Reed', { counterpartyName: 'Alex Reed', type: 'FASTER PAYMENT', reference: 'pizza' })).toMatchObject({ key: 'reed|a', reference: 'pizza' });
     expect(party('Alex Reed', { counterpartyName: 'Alex Reed', type: 'Card payment' })).toBeUndefined();
+  });
+
+  it('reads it on a row that says no more than who, as an app’s list does, or names someone you saved', () => {
+    expect(party('Alex Reed', { counterpartyName: 'Alex Reed' })).toMatchObject({ key: 'reed|a' });
+    expect(party('Quill Z', { counterpartyName: 'Quill Z' })).toMatchObject({ personId: 'zorvan' });
+    expect(party('Payment received', { counterpartyName: 'S TAYLOR' })).toMatchObject({ personId: 'sam' });
+    // Written as the app writes it, not as the bank's capitals that were saved.
+    expect(party('Vance Mi&T', { counterpartyName: 'Vance Mi&T' })).toMatchObject({ personId: 'vances', key: index.keyOf('VANCE MI&T') });
+    // Not a business, nor a name the description doesn't stop at, nor you.
+    expect(party('Northwind Trading Ltd', { counterpartyName: 'Northwind Trading Ltd' })).toBeUndefined();
+    expect(party('Corner Cafe York', { counterpartyName: 'Alex Reed' })).toBeUndefined();
+    expect(party('J Blake', { counterpartyName: 'J Blake' })).toBeUndefined();
   });
 
   it('is found in what another document said of the payment', () => {
