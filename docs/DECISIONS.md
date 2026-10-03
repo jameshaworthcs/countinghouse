@@ -1765,6 +1765,10 @@ Later the same day, after the owner's first runs (`label-imports-2`):
     5% of spending is guessed.
   - Version 5 of the month in review checks a guessed category against the payment's description
     before resting a finding on it, and says when much of the month rests on guesses.
+  - The owner had not seen Gifts received, and put gifts to them in Gifts, which is spending. For
+    money in, the category picker now lists the income categories first. The transaction editor
+    says that money in under a spending category lowers that spending and isn't income, and
+    points a gift to Gifts received. A rule can now be made for money in only, or money out only.
 - **Rehearsed** on a copy of the owner's data, after re-applying:
   - cash and cheque payments in to decide, a few of them recent;
   - payee groups of guesses, the largest a rent payment the reader categorised;

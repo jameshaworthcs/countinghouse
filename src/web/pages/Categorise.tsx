@@ -273,7 +273,7 @@ function PersonCard({ group, saved }: { group: PersonGroup; saved: Person[] }) {
                 </div>
                 <Money value={r.amount} className={cn('tabular pt-0.5 text-[13px] font-medium', r.amount > 0 ? 'text-good-ink' : 'text-ink')} />
                 <div className="col-span-3 sm:col-span-1">
-                  <CategorySelect value={chosen(r)} onChange={(v) => setChoice((c) => ({ ...c, [r.id]: v }))} placeholder="Choose…" className="w-full" />
+                  <CategorySelect value={chosen(r)} onChange={(v) => setChoice((c) => ({ ...c, [r.id]: v }))} placeholder="Choose…" className="w-full" direction={r.amount >= 0 ? 'in' : 'out'} />
                 </div>
               </li>
             ))}
@@ -534,7 +534,7 @@ function PayeeRow({ group }: { group: PayeeGroup }) {
       </div>
       {open && <Examples items={group.examples} more={group.count - group.examples.length} />}
       <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 pl-[1.375rem]">
-        <CategorySelect value={category} onChange={setCategory} placeholder="Choose a category…" className="w-full sm:w-64" />
+        <CategorySelect value={category} onChange={setCategory} placeholder="Choose a category…" className="w-full sm:w-64" direction={group.direction} />
         <Checkbox checked={always} onChange={setAlways} label={`Always (a rule: ${matchWords(group.match)})`} />
         <Button variant="primary" size="sm" disabled={!category} loading={save.isPending} onClick={() => save.mutate(undefined)}>
           Categorise {group.count}
@@ -622,7 +622,7 @@ function GuessRow({ group }: { group: GuessGroup }) {
       <div className="pl-[1.375rem] text-[12px] text-ink-3">{guessWords(group)}</div>
       {open && <Examples items={group.examples} more={group.count - group.examples.length} />}
       <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 pl-[1.375rem]">
-        <CategorySelect value={category} onChange={setCategory} allowEmpty={false} className="w-full sm:w-64" />
+        <CategorySelect value={category} onChange={setCategory} allowEmpty={false} className="w-full sm:w-64" direction={group.direction} />
         <Checkbox checked={always} onChange={setAlways} label={`Always (a rule: ${matchWords(group.match)})`} />
         <Button variant="primary" size="sm" disabled={!category} loading={save.isPending} onClick={() => save.mutate(undefined)}>
           {same ? `Right: confirm ${group.count}` : `Categorise ${group.count}`}

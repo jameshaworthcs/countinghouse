@@ -321,7 +321,7 @@ function TxRow({ t, currency, flags, onChange, onTick, linking }: { t: DraftTran
           ))}
         </td>
         <td className={cn(tableClasses.td, 'w-52')}>
-          <CategorySelect value={t.category} onChange={(v) => onChange({ category: v, categorisedBy: 'user' })} className="h-8 text-[12.5px]" />
+          <CategorySelect value={t.category} onChange={(v) => onChange({ category: v, categorisedBy: 'user' })} className="h-8 text-[12.5px]" direction={t.amount > 0 ? 'in' : 'out'} />
         </td>
         <td className={cn(tableClasses.td, tableClasses.num)}>
           {editing ? (

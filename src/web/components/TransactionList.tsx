@@ -10,9 +10,15 @@ import { cn, formatDate, money } from '../lib/format';
 import { Badge, Button, Callout, Dialog, Drawer, Field, Input, KeyValue, Money, Select, Textarea, useToast } from './ui';
 import { ReceiptsSection, SplitSection, type SplitLineDraft } from './SplitReceipts';
 
-export function CategorySelect({ value, onChange, allowEmpty = true, className, placeholder = 'Uncategorised', id }: { value: string | undefined; onChange: (v: string | undefined) => void; allowEmpty?: boolean; className?: string; placeholder?: string; id?: string }) {
+/**
+ * A category to choose. For money in (`direction: "in"`) the income categories come first: a gift to
+ * you is Gifts received, and Gifts, further down, is spending.
+ */
+export function CategorySelect({ value, onChange, allowEmpty = true, className, placeholder = 'Uncategorised', id, direction }: { value: string | undefined; onChange: (v: string | undefined) => void; allowEmpty?: boolean; className?: string; placeholder?: string; id?: string; direction?: 'in' | 'out' | undefined }) {
   const { cats } = useAppData();
-  const groups = cats.groups().filter((g) => !g.hidden);
+  const shown = cats.groups().filter((g) => !g.hidden);
+  const income = (id: string) => cats.kindOf(id) === 'income';
+  const groups = direction === 'in' ? [...shown.filter((g) => income(g.id)), ...shown.filter((g) => !income(g.id))] : shown;
   return (
     <Select id={id} value={value ?? ''} onChange={(e) => onChange(e.target.value || undefined)} className={className}>
       {allowEmpty && <option value="">{placeholder}</option>}
@@ -31,6 +37,13 @@ export function CategorySelect({ value, onChange, allowEmpty = true, className, 
       })}
     </Select>
   );
+}
+
+/** What a spending category means for money in: money back, lowering that spending, not income. */
+export function moneyBackHint(cats: ReturnType<typeof useAppData>['cats'], amount: number, category: string | undefined): string | undefined {
+  if (amount <= 0 || !category || cats.kindOf(category) !== 'expense') return undefined;
+  const gift = category === 'gifts' && cats.get('gifts-received') ? ` A gift to you goes in ${cats.name('gifts-received')}.` : '';
+  return `Money in here counts as money back: it lowers your ${cats.name(category)} spending, and isn’t income.${gift}`;
 }
 
 export function categoryBadge(t: Transaction, name: string): ReactNode {
@@ -281,8 +294,8 @@ export function TransactionDrawer({ tx, onClose }: { tx: Transaction; onClose: (
           <Field label="Payee" hint={tx.payeeSetBy === 'user' ? 'Set by you: rules and re-running enrichment leave it alone.' : undefined}>
             <Input value={payee} onChange={(e) => setPayee(e.target.value)} />
           </Field>
-          <Field label="Category">
-            <CategorySelect value={category} onChange={setCategory} />
+          <Field label="Category" hint={moneyBackHint(cats, tx.amount, category)}>
+            <CategorySelect value={category} onChange={setCategory} direction={tx.amount > 0 ? 'in' : 'out'} />
           </Field>
           <Field label="Notes" hint={NOTES_HINT}>
             <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} placeholder="e.g. Dinner with Sam; they paid me back half" />

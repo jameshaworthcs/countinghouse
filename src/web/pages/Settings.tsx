@@ -336,25 +336,29 @@ function RulesEditor() {
   const toast = useToast();
   const [value, setValue] = useState('');
   const [op, setOp] = useState<Rule['match']['op']>('contains');
+  // Money in only, money out only, or either way.
+  const [direction, setDirection] = useState<'in' | 'out' | ''>('');
   const [category, setCategory] = useState<string | undefined>();
   const [payee, setPayee] = useState('');
   const [previewCount, setPreviewCount] = useState<number | null>(null);
+  const match = { field: 'description' as const, op, value, caseSensitive: false, ...(direction ? { direction } : {}) };
   useEffect(() => {
     if (!value.trim()) return setPreviewCount(null);
     const t = setTimeout(() => {
-      void api<{ count: number }>('/rules/preview', { body: { enabled: true, priority: 100, match: { field: 'description', op, value, caseSensitive: false }, set: {} } })
+      void api<{ count: number }>('/rules/preview', { body: { enabled: true, priority: 100, match: { field: 'description', op, value, caseSensitive: false, ...(direction ? { direction } : {}) }, set: {} } })
         .then((r) => setPreviewCount(r.count))
         .catch(() => setPreviewCount(null));
     }, 300);
     return () => clearTimeout(t);
-  }, [value, op]);
+  }, [value, op, direction]);
   const add = useApiMutation(
-    () => api<{ result: { recategorised: number } | null }>('/rules', { body: { name: `${value} → ${cats.name(category)}`, enabled: true, priority: 100, match: { field: 'description', op, value, caseSensitive: false }, set: { ...(category ? { category } : {}), ...(payee ? { payee } : {}) }, apply: true } }),
+    () => api<{ result: { recategorised: number } | null }>('/rules', { body: { name: `${value} → ${cats.name(category)}`, enabled: true, priority: 100, match, set: { ...(category ? { category } : {}), ...(payee ? { payee } : {}) }, apply: true } }),
     {
       onSuccess: (r) => {
         toast({ tone: 'good', text: `Rule added; ${r.result?.recategorised ?? 0} transactions updated` });
         setValue('');
         setPayee('');
+        setDirection('');
       },
     },
   );
@@ -371,7 +375,7 @@ function RulesEditor() {
   return (
     <div className="flex flex-col gap-5">
       <Card title="Add a rule" description="Rules run before the built-in UK merchant list. Your manual edits are never overwritten.">
-        <div className="grid gap-3 sm:grid-cols-[140px_1fr_1fr_1fr_auto] sm:items-end">
+        <div className="grid gap-3 sm:grid-cols-[140px_1fr_130px_1fr_1fr_auto] sm:items-end">
           <Field label="When description">
             <Select value={op} onChange={(e) => setOp(e.target.value as Rule['match']['op'])}>
               <option value="contains">contains</option>
@@ -383,8 +387,15 @@ function RulesEditor() {
           <Field label="Text" hint={previewCount !== null ? `${previewCount} existing transactions match` : ' '}>
             <Input value={value} onChange={(e) => setValue(e.target.value)} placeholder="e.g. PAYPAL *STEAM" />
           </Field>
+          <Field label="For">
+            <Select value={direction} onChange={(e) => setDirection(e.target.value as 'in' | 'out' | '')}>
+              <option value="">In or out</option>
+              <option value="in">Money in</option>
+              <option value="out">Money out</option>
+            </Select>
+          </Field>
           <Field label="Set category">
-            <CategorySelect value={category} onChange={setCategory} placeholder="(leave)" />
+            <CategorySelect value={category} onChange={setCategory} placeholder="(leave)" direction={direction || undefined} />
           </Field>
           <Field label="Set payee">
             <Input value={payee} onChange={(e) => setPayee(e.target.value)} placeholder="(leave)" />
@@ -423,6 +434,8 @@ function RulesEditor() {
                     <tr key={r.id} className={r.enabled ? '' : 'opacity-50'}>
                       <td className={tableClasses.td}>
                         {r.match.field} {r.match.op} <code className="rounded bg-panel-2 px-1">{r.match.value}</code>
+                        {r.match.direction && <span className="text-ink-3">, money {r.match.direction}</span>}
+                        {r.match.amountMin !== undefined && r.match.amountMax !== undefined && <span className="text-ink-3">, {money(r.match.amountMin, { decimals: 0 })} to {money(r.match.amountMax, { decimals: 0 })}</span>}
                         {r.match.accountIds?.length ? <div className="text-[12px] text-ink-3">only {r.match.accountIds.map(accountName).join(', ')}</div> : null}
                       </td>
                       <td className={tableClasses.td}>{[r.set.category ? cats.path(r.set.category) : null, r.set.payee ? `payee “${r.set.payee}”` : null, r.set.tags?.length ? `tags ${r.set.tags.join(', ')}` : null].filter(Boolean).join(' · ')}</td>
