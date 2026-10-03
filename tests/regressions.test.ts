@@ -79,7 +79,7 @@ describe('estate value classification', () => {
     await store.addBalances([bal('late', '2025-06-01', 50_000), bal('opened', '2025-06-01', 50_000), bal('empty', '2025-06-01', 50_000), bal('empty', '2024-09-30', 0)], 'test');
     const engine = new BalanceEngine(store);
     // The valuation less what arrived since, as if nothing grew.
-    expect(engine.balanceOn('late', '2024-10-10')).toEqual({ value: 48_000, gbp: 48_000, estimated: true });
+    expect(engine.balanceOn('late', '2024-10-10')).toEqual({ value: 48_000, gbp: 48_000, estimated: true, basis: { date: '2025-06-01', kind: 'screenshot', after: true } });
     expect(engine.balanceOn('late', '2025-01-31')!.value).toBe(50_000);
     expect(engine.balanceOn('late', '2024-10-09')).toBeNull();
     // The data goes back to the start, by the opening date or a nil valuation: it grew from what went in.

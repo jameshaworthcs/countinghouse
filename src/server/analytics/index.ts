@@ -22,6 +22,7 @@ import { investments } from './investments';
 import { captureList } from './capture';
 import { termsAlerts } from './terms';
 import { monthlyChecklist } from './monthly';
+import { MonthContext } from './month';
 import { projections, type ProjectionOptions } from './projections';
 import { detectRecurring } from './recurring';
 import { selfAssessment } from './selfassessment';
@@ -67,6 +68,16 @@ export class Analytics {
 
   cashflow(from: string, to: string) {
     return this.cached(`cashflow:${from}:${to}`, () => cashflow(this.store, from, to, this.coverageIndex));
+  }
+
+  /** What working out a month needs (docs/FORMULAS.md §18), built once per version of the data. */
+  get monthContext(): MonthContext {
+    return this.cached('month-context', () => new MonthContext(this.store, this.engine, this.coverageIndex));
+  }
+
+  /** A month's figures (docs/FORMULAS.md §18). */
+  month(month: string) {
+    return this.cached(`month:${month}`, () => this.monthContext.summary(month));
   }
 
   spending(from: string, to: string) {

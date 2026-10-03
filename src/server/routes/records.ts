@@ -142,10 +142,12 @@ export function recordRoutes(ctx: AppContext): Hono {
   app.get('/insights', (c) => {
     const page = c.req.query('page');
     const accountId = c.req.query('accountId');
+    const kind = c.req.query('kind');
     const all = c.req.query('all') === '1';
     const now = today();
     const list = store.insights
       .filter((i) => (all ? true : i.status === 'active' && (!i.expiresOn || i.expiresOn >= now)))
+      .filter((i) => !kind || i.kind === kind)
       .filter((i) => !page || i.pages.includes(page as (typeof INSIGHT_PAGES)[number]))
       .filter((i) => !accountId || i.subject.accountId === accountId)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));

@@ -13,15 +13,15 @@ import { z } from 'zod';
 import { ACCOUNT_TYPE_META } from '../../shared/accounts';
 import { LABEL_BATCH } from '../../shared/api';
 import { ASSUMPTION_DEFS, AssumptionSet, formatAssumptionValue } from '../../shared/assumptions';
-import { addDays, today } from '../../shared/dates';
-import { ACCOUNT_TYPES, ASSET_CLASSES, CONTEXT_KINDS, INSIGHT_KINDS, INSIGHT_PAGES, INSTRUMENT_TYPES, type ImportRecord, type Insight, type Note, type Provenance, type Research } from '../../shared/schema';
+import { addDays, endOfMonth, today } from '../../shared/dates';
+import { ACCOUNT_TYPES, ASSET_CLASSES, CONTEXT_KINDS, INSIGHT_FOLLOW_UP, INSIGHT_KINDS, INSIGHT_PAGES, INSTRUMENT_TYPES, type ImportRecord, type Insight, type Note, type Provenance, type Research } from '../../shared/schema';
 import type { Analytics } from '../analytics';
 import { nowISO } from '../fsutil';
 import type { ProposalService } from '../proposals';
 import { applyRecords, researchIdOf, type ApplyResult, type RecordBatch, type RecordInput } from '../records';
 import type { Store } from '../store';
 import type { AgentTool } from './claude';
-import { buildDigest } from './digest';
+import { buildDigest, buildMonthDigest } from './digest';
 
 export const JOB_KINDS = ['research-instrument', 'research-provider', 'refresh-assumptions', 'insights-after-import', 'monthly-review', 'interpret-note', 'label-imports'] as const;
 export type JobKind = (typeof JOB_KINDS)[number];
@@ -570,7 +570,7 @@ const refreshAssumptions: JobKindDef = {
 
 const insightsAfterImport: JobKindDef = {
   kind: 'insights-after-import',
-  promptVersion: 'insights-after-import-4',
+  promptVersion: 'insights-after-import-5',
   privacy: 'personal',
   tools: ['Read'],
   label: ({ params }) => `Insights from ${(params.importIds as string[] | undefined)?.length ?? 0} new import(s)`,
@@ -583,6 +583,7 @@ const insightsAfterImport: JobKindDef = {
       'Imports were just committed (digest.focus.imports). Write up to 4 insights about what they show that you (the owner) would want to know now:',
       'unusual or new spending, a regular payment that changed or stopped, income that looks late or different, a large one-off, allowance progress, or anything that looks like a data problem.',
       'For a payslip or an HMRC page, digest.pay and digest.hmrc show what it says, checked against your bank and HMRC; for a statement, digest.terms has the account\'s rates and limit as its documents give them.',
+      'A schedule of payments (student finance, a tenancy, a council tax bill) is in digest.agreements: money in that one pays you (direction "in") is borrowing or that agreement\'s payment, not income, and a payment a loan makes for you is on the loan.',
       'Each import lists what it added (transactions, balances, holdings, figures). A screenshot of a value or holdings, a payslip or a voucher adds no transactions and is not empty; an import that added nothing at all was kept as a record of a document another import covers, not a failure.',
       'Pick the pages each belongs on (overview, spending, accounts, transactions, tax, investments, projections). Set expiresInDays to how long it stays useful. Return an empty list if nothing is notable.',
     ].join('\n');
@@ -596,46 +597,86 @@ const insightsAfterImport: JobKindDef = {
   },
 };
 
+/** A month in review: its insights, what to watch next month, and how the last review's lines turned out. */
+const MonthReviewOut = z.object({
+  insights: z.array(InsightOut).max(6),
+  watch: z.array(z.string()).max(3),
+  followUp: z.array(z.object({ watch: z.string(), outcome: z.enum(INSIGHT_FOLLOW_UP), note: z.string().nullable() })).max(6),
+});
+
+/** The parts of a month in review's body, in order (docs/AGENTS.md, "monthly-review"). */
+const MONTH_REVIEW_SHAPE = [
+  '   - The month: money in (pay, other income, gifts received) and spending. Name scheduled payments (rent instalments, tuition: focus.spending.scheduled) and one-offs (focus.spending.oneOffs) as such, and say where the net went (focus.moved).',
+  '     Borrowing (focus.borrowed, focus.moneyIn.borrowed) is borrowing, never income. A Student Finance maintenance instalment is a loan for its whole term (about four months): say so, rather than reading one month’s instalment as that month’s money.',
+  '   - Against typical: each line against the median and range of the complete months before it (its `compared`: median, low, high, months), never against a single month or an average. Say how many months that is when they are few; a month with none to compare has no typical yet.',
+  '   - People: gifts received against money paid back (the spending line "money-back"), and payments with people still to confirm (focus.quality.peopleToConfirm). They are unconfirmed: one among them is not yet a gift or a repayment.',
+  '   - Worth: the change from focus.worth.start to focus.worth.end, and what it rests on. An account marked oldValuation rests on a valuation long before the month ended (its basis), so its change is not the month’s: never call it flat or say it grew. A value marked estimated is rough.',
+  '   - Data: when focus.complete is false, uncategorised shares are high, or people money is unconfirmed, say what that limits.',
+].join('\n');
+
 const monthlyReview: JobKindDef = {
   kind: 'monthly-review',
-  promptVersion: 'monthly-review-3',
+  promptVersion: 'monthly-review-4',
   privacy: 'personal',
   tools: ['Read'],
-  label: ({ params }) => `Month in review: ${String(params.month)}`,
+  label: ({ params }) => `Month in review: ${String(params.month)}${params.catchUp === true ? ' (written later)' : ''}`,
   systemPrompt: ANALYSIS_SYSTEM,
-  output: InsightsOut,
+  output: MonthReviewOut,
   async prepare(ctx) {
     const month = String(ctx.params.month);
-    await writeDigest(ctx, buildDigest(ctx.store, ctx.analytics, { month }));
+    const catchUp = ctx.params.catchUp === true;
+    await writeDigest(ctx, buildMonthDigest(ctx.store, ctx.analytics, { month, catchUp }));
     return [
       'Read ./digest.json with the Read tool.',
-      `Review ${month} (digest.focus). Write:`,
-      `1. Exactly one insight of kind "month-review" for the overview page, with subject.month "${month}": a short paragraph on the month — income, spending against recent months, saving, notable changes, and the estate value — citing computed figures.`,
-      '2. Up to 5 more, only where the data supports them:',
-      '   - habit changes, for spending;',
-      '   - allowance opportunities, for tax (ISA, LISA or pension headroom and days left, Personal Savings Allowance headroom);',
-      '   - notes on investments (charges, make-up, drift from what the owner said they want);',
-      '   - how the month bears on the owner’s plans (digest.ownerContext), for projections;',
-      '   - pay (digest.pay, digest.owedPay), for tax: each pay period is checked against your bank (paidIn, status) and against what HMRC says the employer reported (hmrcReported); taxCodeCheck says when the tax taken is not what HMRC’s code would take. Note pay that differs, is late or owed, a tax code that changed, or a job that started or ended;',
-      '   - what HMRC says (digest.hmrc), for tax: tax owed or repaid (settlements), National Insurance years that are not full and when they can be paid by, the State Pension forecast;',
-      '   - your accounts’ terms (digest.terms), for accounts: a promotional rate ending (until, endingSoon), a card’s limit or minimum payment, a rate that changed;',
-      '   - agreements to pay and pension arrangements (digest.agreements, digest.pensionArrangements): a scheduled payment due, missed or paid differently; contributions an employer said it would pay that have not arrived (missingMonths);',
-      '   - companies you hold shares in (digest.companies): dividends and the latest valuation; budgets and goals when there are any (digest.budgets, digest.goals).',
-      'Weigh these against each other and pick what matters most this month; skip a section with nothing new.',
-      'Set subject.month to the month for every insight about it.',
+      `Review ${month}. digest.focus is the month as the app works it out by fixed rules, the figures the owner sees on the Overview; digest.history is the 12 months up to it; digest.previousReview is the review of the month before, with what it said to watch and what the owner made of it.`,
+      ...(catchUp
+        ? [`This review is written later, as of the end of ${month}: the digest holds nothing after it. Write as at the end of ${month}: nothing of what came after, and no advice about today.`]
+        : ['digest.asOfToday holds today’s figures, apart from the month’s: use them only for what the month means now, and say they are today’s.']),
+      'Write:',
+      `1. Exactly one insight of kind "month-review" for the overview page, with subject.month "${month}". Its body is a few short paragraphs, in this order:`,
+      MONTH_REVIEW_SHAPE,
+      '2. watch: up to 3 short lines for next month’s review to check, each specific and measurable from the app’s figures ("Whether eating out stays near its £180 median").',
+      '3. followUp: for each line in digest.previousReview.watch, whether this month’s figures show it done, still open or unclear, with a short note citing them. None when there is no previous review.',
+      ...(catchUp
+        ? ['No other insights: this is a record of the month.']
+        : [
+            '4. Up to 5 more insights, only where the data supports them:',
+            '   - habit changes, for spending;',
+            '   - allowance opportunities, for tax (digest.asOfToday.taxYear: ISA, LISA or pension headroom and days left, Personal Savings Allowance headroom);',
+            '   - notes on investments (charges, make-up, drift from what the owner said they want);',
+            '   - how the month bears on the owner’s plans (digest.ownerContext), for projections;',
+            '   - pay (digest.pay, digest.asOfToday.owedPay), for tax: each pay period is checked against your bank (paidIn, status) and against what HMRC says the employer reported (hmrcReported); taxCodeCheck says when the tax taken is not what HMRC’s code would take. Note pay that differs, is late or owed, a tax code that changed, or a job that started or ended;',
+            '   - what HMRC says (digest.hmrc), for tax: tax owed or repaid (settlements), National Insurance years that are not full and when they can be paid by, the State Pension forecast;',
+            '   - your accounts’ terms (digest.terms), for accounts: a promotional rate ending (until, endingSoon), a card’s limit or minimum payment, a rate that changed;',
+            '   - agreements and pension arrangements (digest.agreements, digest.pensionArrangements, focus.coming): a scheduled payment due, missed or paid differently; contributions an employer said it would pay that have not arrived (missingMonths);',
+            '   - companies you hold shares in (digest.companies); budgets and goals when there are any (digest.budgets, digest.asOfToday.goals).',
+            '   Weigh these against each other and pick what matters most; skip a section with nothing new. Set subject.month to the month for every insight about it.',
+          ]),
     ].join('\n');
   },
   async apply({ store, params }, raw, provenance) {
-    const out = InsightsOut.parse(raw);
+    const out = MonthReviewOut.parse(raw);
     const month = String(params.month);
+    const catchUp = params.catchUp === true;
     const { records, dropped } = toInsightRecords(
       store,
-      out.insights.map((i) => ({ ...i, subject: { ...i.subject, month } })),
-      { period: { from: `${month}-01`, to: `${month}-${String(new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0)).getUTCDate()).padStart(2, '0')}` } },
+      out.insights.filter((i) => !catchUp || i.kind === 'month-review').map((i) => ({ ...i, subject: { ...i.subject, month } })),
+      { period: { from: `${month}-01`, to: endOfMonth(`${month}-01`) } },
     );
+    // The month's review carries what to watch next, and how the last review's lines turned out.
+    const review = records.find((r): r is Extract<RecordInput, { type: 'insight' }> => r.type === 'insight' && r.record.kind === 'month-review');
+    if (review) {
+      const watch = out.watch.map((w) => w.trim().slice(0, 300)).filter(Boolean).slice(0, 3);
+      const followUp = out.followUp
+        .filter((f) => f.watch.trim())
+        .slice(0, 6)
+        .map((f) => ({ watch: f.watch.trim().slice(0, 300), outcome: f.outcome, ...(f.note?.trim() ? { note: f.note.trim().slice(0, 500) } : {}) }));
+      review.record = { ...review.record, ...(watch.length ? { watch } : {}), ...(followUp.length ? { followUp } : {}) };
+    }
     if (!records.length) return { summary: dropped ? `No insights kept (${dropped} cited nothing that exists)` : 'Nothing to say' };
-    const result = await applyRecords(store, { provenance, supersede: true, records });
-    return { summary: `${records.length} insight(s) for ${month}${dropped ? `; ${dropped} dropped for missing evidence` : ''}`, result };
+    // A review of a month replaces every note an earlier review of the same month wrote.
+    const result = await applyRecords(store, { provenance, supersede: true, records }, { replaces: (old) => old.subject.month === month && (old.provenance.promptVersion ?? '').startsWith('monthly-review') });
+    return { summary: `${records.length} insight(s) for ${month}${catchUp ? ', written later' : ''}${dropped ? `; ${dropped} dropped for missing evidence` : ''}`, result };
   },
 };
 

@@ -6,7 +6,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { buildDigest } from '../src/server/agents/digest';
+import { buildDigest, buildMonthDigest } from '../src/server/agents/digest';
 import { JOB_DEFS, type JobContext } from '../src/server/agents/kinds';
 import { Analytics } from '../src/server/analytics';
 import { transactionId } from '../src/server/ids';
@@ -96,6 +96,28 @@ describe('the digest', () => {
     expect(d.goals).toBeNull();
   });
 
+  it('a month looked back on knows only what its documents said by its end', async () => {
+    await store.upsertRecords('hmrc', [{ id: 'hmrc_00000000000000c3', type: 'tax-code', employer: 'ACME WIDGETS LTD', payeReference: PAYE, date: '2026-09-15', code: 'K100', cumulative: true, taxYear: '2026/27', employmentId: 'acme', source: {}, createdAt: stamp }], 'h');
+    const a = new Analytics(store);
+    const july = buildMonthDigest(store, a, { month: '2026-07', catchUp: true });
+    // August's payslip, the code issued in August, the NI record seen in September and the card's
+    // August terms came after July.
+    const job = july.pay.employers.find((e) => e.employmentId === 'acme')!;
+    expect(job).toMatchObject({ months: [], taxCodesIssued: [], yearToDate: { gross: null, paidIn: 0 }, yearDocument: null });
+    expect(july.hmrc.taxCodes).toEqual([]);
+    expect(july.hmrc.niYears.notFull).toEqual([]);
+    expect(july.terms).toEqual([]);
+    // The lease's August rent was due within 60 days: known, not yet due.
+    expect(july.agreements).toEqual([expect.objectContaining({ id: 'flat-lease', payments: [expect.objectContaining({ due: '2026-08-01', status: 'upcoming', paid: null })] })]);
+    // August's review knows its own month's documents, and, apart, the code issued since.
+    const august = buildMonthDigest(store, a, { month: '2026-08' });
+    expect(august.hmrc.taxCodes.map((c) => c.code)).toEqual(['BR']);
+    expect(august.asOfToday?.taxCodesSince.map((c) => c.code)).toEqual(['K100']);
+    const paid = august.pay.employers.find((e) => e.employmentId === 'acme')!.months[0]!;
+    expect(paid.payDate).toBe('2026-08-28');
+    expect(paid.status).not.toBe('not paid by then');
+  });
+
   it('leaves out identifiers the analysis does not need', () => {
     const text = JSON.stringify(buildDigest(store, new Analytics(store), { month: '2026-08' }));
     expect(text).not.toContain(PAYROLL);
@@ -120,6 +142,8 @@ describe('what an insight may cite', () => {
           expiresInDays: 30,
         },
       ],
+      watch: [],
+      followUp: [],
     };
     await JOB_DEFS['monthly-review'].apply(ctx, out, { setBy: 'agent', model: 'claude-test', promptVersion: 'test', jobId: 'job_test' });
     expect(store.insights[0]!.evidence).toEqual([

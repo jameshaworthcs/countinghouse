@@ -333,6 +333,10 @@ years), both paths grow at the median:
   - with an anchor on or before D, balance(D) = anchor + Σ tx in (anchor, D];
   - otherwise, rolled back from the next anchor;
   - with no anchors, Σ tx ≤ D, flagged estimated.
+- **What it rests on** (`basis`, for ledger and market accounts alike): the anchor it is worked out
+  from, its day and kind (a statement's or your own balance or valuation, a running balance, a
+  screenshot's, or a rough one you gave), marked `after` when worked back from a later one. A
+  running sum of rows with no anchor, or a closed account's £0, rests on none.
 - An account whose interest its documents do not list as movements (a student loan,
   `interestUnrecorded`) has every balance but a statement's own day flagged estimated: worked out
   from its movements (instalments lent and fees paid), it leaves the interest out.
@@ -1091,4 +1095,61 @@ pay day is *D*.
   month's pay as a payment of its own on *D*. NI adds what the extra threshold would have spared;
   a month-1 code taxes each alone; a cumulative code's tax is the same either way. The difference
   is shown: the NI part is never refunded, the tax part is settled after the tax year.
+
+## 18. The month in review (`analytics/month.ts`)
+
+A month's figures, by fixed rules (`MONTH_RULES`), for the Overview's month card
+(`GET /api/month/:month`) and the month in review's digest alike. A month is **complete** when every
+account has data for at least 90% of its days (§3); a month's comparisons use complete months only.
+
+**Money in** is the month's income (§14) in four lines, with borrowing apart:
+
+- **Pay:** salary and bonus. **Gifts received.** **Other income:** every other income category.
+  **Uncategorised money in.**
+- **Borrowed:** what a loan (any liability but a card) lent you or paid for you, each payment once:
+  - a row on a loan that took its balance further into debt, not its interest or fees (a Tuition
+    Fee Loan's payment to the university, a maintenance instalment's row);
+  - money into another account from a loan whose own row isn't recorded yet (a credit linked to
+    the loan as its other side, with no transfer link to a row of the loan's).
+  Borrowing is never income; total money in = income + borrowed.
+
+**Spending** (§14), in lines that add up to it to the penny, each payment in one:
+
+- **Money back:** spending lines below zero (refunds, money paid back to you, a refund in its
+  purchase's category).
+- **Scheduled:** a payment one of your agreements schedules (paired with one of its payments, or
+  filed by it).
+- **Regular:** a payment in a regular-payment group (§10) as the groups stood at the month's end.
+- **One-offs:** a payment of £250 or more (`oneOffMinimum`) to a payee you paid fewer than 3 times
+  (`oneOffPriorPayments`) in the 365 days before it. Cash from a machine is nobody's.
+- **Everyday:** the rest.
+
+Each line is broken down by category group.
+
+**Left over** = income − spending.
+
+**Moved:** money between your current accounts and your others, by where it went (savings, ISAs, the
+Lifetime ISA, pensions, investments, credit cards, loans, or an account the app doesn't know): a
+transfer's amount on the current account, by the other side's type. A loan's money in is borrowing,
+not moved; current account to current account is neither.
+
+**Worth:** the estate (§9) on the day before the month and on its last day, by group, and each
+account's value at both ends with what the end value rests on (§9, `basis`). A value at market
+resting on a valuation more than 31 days before the month's end (`valuationDays`), or worked back
+from a later one, is marked `oldValuation`: its change is not the month's.
+
+**Quality:** uncategorised spending and money in, with their shares; payments with people (§10) in
+the month not decided by you, a rule or an agreement (count, in and out).
+
+**Compared:** each line, spending and left over against the complete months among the 12 before
+(`historyMonths`): their median (the mean of the middle two for an even count), lowest and highest,
+and how many there were; and the same month a year before, when complete. None when no month before
+is complete.
+
+**Payees:** those paid this month and not in the 365 days before (people's payments apart), the
+largest first; regular payments that started this month (their first payment), stopped (not active
+at the month's end, the next one due in it) or changed price in it.
+
+**Coming:** your agreements' payments due in the 60 days after the month (`comingDays`), in and out,
+not cancelled.
 

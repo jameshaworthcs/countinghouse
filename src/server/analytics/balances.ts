@@ -17,6 +17,7 @@ import { ACCOUNT_TYPE_META, balanceModeOf } from '../../shared/accounts';
 import { EXTERNAL_FLOW_CATEGORIES } from '../../shared/categories';
 import { addDays, diffDays, today, type ISODate } from '../../shared/dates';
 import { fromMinor, toMinor } from '../../shared/money';
+import type { BalanceBasis } from '../../shared/api';
 import type { Account, BalanceEvidence, Settings } from '../../shared/schema';
 import type { Store } from '../store';
 
@@ -93,7 +94,12 @@ export interface BalancePoint {
   /** Converted to GBP (null when no FX rate is configured). */
   gbp: number | null;
   estimated: boolean;
+  /** The balance or valuation it is worked out from; none for a running sum of rows alone, or a closed account. */
+  basis?: BalanceBasis;
 }
+
+const BASIS_KIND: Record<Anchor['source'], BalanceBasis['kind']> = { snapshot: 'balance', running: 'running', screenshot: 'screenshot', approximate: 'approximate' };
+const basisOf = (a: Anchor, after = false): BalanceBasis => ({ date: a.date, kind: BASIS_KIND[a.source], ...(after ? { after: true as const } : {}) });
 
 /** Transactions by day, in date order. */
 function daysOf<T extends { date: ISODate }>(txs: T[]): Map<ISODate, T[]> {
@@ -313,6 +319,7 @@ export class BalanceEngine {
     if (account.closedOn && date > account.closedOn) return { value: 0, gbp: 0, estimated: false };
     let minor: number;
     let estimated = false;
+    let basis: BalanceBasis | undefined;
     if (d.mode === 'ledger') {
       // Interest its documents do not list (a student loan's) makes any day but a statement's own an estimate.
       const unrecorded = Boolean(ACCOUNT_TYPE_META[account.type].interestUnrecorded);
@@ -320,11 +327,13 @@ export class BalanceEngine {
       if (a1) {
         minor = a1.minor + (sumTo(d.tx, date) - sumTo(d.tx, a1.date));
         estimated = a1.source === 'approximate' || (unrecorded && a1.date !== date);
+        basis = basisOf(a1);
       } else {
         const a2 = firstAnchorAfter(d.anchors, date);
         if (a2) {
           minor = a2.minor - (sumTo(d.tx, a2.date) - sumTo(d.tx, date));
           estimated = a2.source === 'approximate' || unrecorded;
+          basis = basisOf(a2, true);
         } else {
           minor = sumTo(d.tx, date);
           estimated = true;
@@ -335,10 +344,12 @@ export class BalanceEngine {
       if (a1) {
         minor = a1.minor + (sumTo(d.flows, date) - sumTo(d.flows, a1.date));
         estimated = a1.source === 'approximate';
+        basis = basisOf(a1);
       } else {
         const contributed = sumTo(d.flows, date);
         const a2 = firstAnchorAfter(d.anchors, date);
         estimated = true;
+        if (a2) basis = basisOf(a2, true);
         if (a2 && (diffDays(date, a2.date) <= 45 || !d.fromStart)) {
           // Close to the first valuation, or data that starts part-way through the account's life
           // (it was not empty when the first flow arrived): roll back by the money that arrived
@@ -358,7 +369,7 @@ export class BalanceEngine {
       }
     }
     const value = fromMinor(minor);
-    return { value, gbp: d.fx === null ? null : fromMinor(Math.round(minor * d.fx)), estimated };
+    return { value, gbp: d.fx === null ? null : fromMinor(Math.round(minor * d.fx)), estimated, ...(basis ? { basis } : {}) };
   }
 
   latest(accountId: string, on: ISODate = today()): (BalancePoint & { asOf: ISODate | null }) | null {

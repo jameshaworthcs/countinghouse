@@ -474,6 +474,45 @@
     "supersedes": {
       "type": "string"
     },
+    "watch": {
+      "maxItems": 3,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 300
+      }
+    },
+    "followUp": {
+      "maxItems": 6,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "watch": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "done",
+              "open",
+              "unclear"
+            ]
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "watch",
+          "outcome"
+        ]
+      }
+    },
     "feedback": {
       "type": "object",
       "properties": {

@@ -89,7 +89,7 @@ const TYPICAL_COST_USD: Record<string, number> = {
   'research-instrument': 1.6,
   'research-provider': 0.7,
   'insights-after-import': 0.3,
-  'monthly-review': 0.25,
+  'monthly-review': 0.5,
   'interpret-note': 0.1,
   'label-imports': 0.1,
 };
@@ -286,15 +286,26 @@ export class JobRunner extends EventEmitter implements JobQueue {
     };
   }
 
-  private pump(): void {
-    if (this.current || this.opts.paused) return;
-    // Jobs you started go first and are never held back; the app's own wait for the budget.
+  /**
+   * The queued job to run next: yours first and never held back, then the app's own within the
+   * budget, oldest first. Months in review go oldest month first, however they were queued: each
+   * reads the review before it.
+   */
+  nextJob(): JobRecord | undefined {
     const queued = this.list()
       .filter((j) => j.status === 'queued')
       .sort((a, b) => Number(b.trigger === 'owner') - Number(a.trigger === 'owner') || a.createdAt.localeCompare(b.createdAt));
     const open = this.budget().open;
     const autoResearch = this.store.settings.agents.autoResearch;
-    const next = queued.find((j) => j.trigger === 'owner' || (open && (autoResearch || !RESEARCH_KINDS.has(j.kind))));
+    const runnable = queued.filter((j) => j.trigger === 'owner' || (open && (autoResearch || !RESEARCH_KINDS.has(j.kind))));
+    const next = runnable[0];
+    if (next?.kind !== 'monthly-review') return next;
+    return runnable.filter((j) => j.kind === 'monthly-review').sort((a, b) => String(a.params.month).localeCompare(String(b.params.month)) || a.createdAt.localeCompare(b.createdAt))[0];
+  }
+
+  private pump(): void {
+    if (this.current || this.opts.paused) return;
+    const next = this.nextJob();
     if (!next) return;
     const abort = new AbortController();
     this.current = { id: next.id, abort };
@@ -371,6 +382,19 @@ export class JobRunner extends EventEmitter implements JobQueue {
       await rm(scratch, { recursive: true, force: true });
     }
     await this.save(job);
+  }
+
+  /**
+   * The complete months before the latest with no standing review by this prompt version or a later
+   * one: what "Write reviews for earlier months" queues, oldest first, each written as of its end.
+   */
+  catchUpMonths(on: string = today()): string[] {
+    const complete = this.analytics.coverageIndex.summary(13, on).completeMonths;
+    const latest = complete[complete.length - 1];
+    const version = (v: string | undefined) => Number(/-(\d+)$/.exec(v ?? '')?.[1] ?? 0);
+    const current = version(JOB_DEFS['monthly-review'].promptVersion);
+    const reviewed = new Set(this.store.insights.filter((i) => i.kind === 'month-review' && i.status === 'active' && i.subject.month && version(i.provenance.promptVersion) >= current).map((i) => i.subject.month!));
+    return complete.filter((m) => m !== latest && !reviewed.has(m));
   }
 
   // ─── What is stale, and what runs by itself ──────────────────────────────────────────────────

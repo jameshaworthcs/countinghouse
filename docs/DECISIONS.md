@@ -1710,3 +1710,30 @@ Later the same day, after the owner's first runs (`label-imports-2`):
 - **Rehearsed** on a copy of the owner's data, after re-applying: payments with several people
   wait to be decided (some ticked by their own words or amount), a few rules are offered, and the
   other uncategorised payments are left by payee.
+
+## 2026-10-03: The month in review, worked out first and read in sequence
+
+- **Found:** the month in review's digest gave today's estate for a month long past (well above
+  what it was at August's end, with the ISAs on a valuation from the year before). It
+  compared each category with a 3-month mean that one rent payment could swing, could not see
+  borrowing, saving or one-offs, and did not know how well the month was categorised. Each review
+  started from nothing: none read the one before.
+- **Owner's decisions:** the earlier months back to the start of the data get reviews too, written
+  before August's, as a chain; extra cost for better analysis is fine.
+- **Done** (FORMULAS.md §18, §9; AGENTS.md "The month in review"):
+  - A month's figures are worked out by fixed rules, once, for the Overview's new month card and
+    for the digest alike: money in with borrowing apart, spending as scheduled, regular, one-offs,
+    everyday and money back, where the net went, the estate at both ends with what each value rests
+    on, how well the month is categorised, and each line against the median and range of the
+    complete months before.
+  - The balance engine says what each value rests on, so a value on an old valuation is never read
+    as the month's change.
+  - Version 4 of the review reads the month's figures, its 12 months, and the review before with
+    its lines to watch, and writes lines for the next one. A review written later for an earlier
+    month knows nothing after the month's end; only the latest month's review sees today's figures,
+    labelled as such. A rerun replaces every note the month's earlier review wrote.
+  - Earlier months are reviewed oldest first, on your click, never by a token.
+- **Rehearsed** on a copy of the owner's data, with no Claude: August's figures add up to the cash
+  flow to the penny, its worth at both ends is shown with the ISA marked as resting on an older
+  valuation, and a review of the first month written later
+  holds nothing dated after that month but values worked back from later valuations, marked as such.

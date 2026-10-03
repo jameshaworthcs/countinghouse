@@ -35,7 +35,8 @@ const standing = (t: Terms, applies: TermsRateApplies) => {
 };
 
 export function termsView(store: Store, accountId: string, now: ISODate = today()): TermsResponse {
-  const all = store.terms(accountId);
+  // What documents of `now` or before give: a month looked back on knows nothing of later ones.
+  const all = store.terms(accountId).filter((t) => t.asOf <= now);
   // Each part from the latest document that gives it: a screenshot showing only the limit does not
   // hide the rates the statement before it gave.
   const fileNames = new Map(store.imports.map((i) => [i.id, i.fileName]));

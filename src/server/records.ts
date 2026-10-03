@@ -206,7 +206,12 @@ function stamp(p: Provenance): Provenance {
  * Validate and write a batch. Nothing is written unless every record passes. Research records are
  * content-addressed, so writing the same findings twice is a no-op.
  */
-export async function applyRecords(store: Store, input: unknown): Promise<ApplyResult> {
+/**
+ * `replaces`: the earlier insights this batch takes the place of, besides those `supersede` matches
+ * (a month in review rerun replaces every note an earlier review of that month wrote). Yours are
+ * never replaced.
+ */
+export async function applyRecords(store: Store, input: unknown, opts: { replaces?: (old: Insight) => boolean } = {}): Promise<ApplyResult> {
   const parsed = RecordBatchSchema.safeParse(input);
   if (!parsed.success) throw new RecordsError(parsed.error.issues.map((i) => `${i.path.join('.') || 'batch'}: ${i.message}`));
   const batch = parsed.data;
@@ -299,12 +304,12 @@ export async function applyRecords(store: Store, input: unknown): Promise<ApplyR
   }
   if (insights.length) {
     const superseded: Insight[] = [];
-    if (batch.supersede) {
+    if (batch.supersede || opts.replaces) {
       const keyOf = (x: Pick<Insight, 'kind' | 'subject'>) => `${x.kind}|${JSON.stringify(x.subject)}`;
       const fresh = new Map(insights.map((x) => [keyOf(x), x.id]));
       for (const old of store.insights) {
-        const replacement = fresh.get(keyOf(old));
-        if (old.status === 'active' && old.provenance.setBy !== 'owner' && replacement) superseded.push({ ...old, status: 'superseded' });
+        const replacement = batch.supersede && fresh.get(keyOf(old));
+        if (old.status === 'active' && old.provenance.setBy !== 'owner' && (replacement || opts.replaces?.(old))) superseded.push({ ...old, status: 'superseded' });
       }
       for (const n of insights) {
         const prev = superseded.find((o) => keyOf(o) === keyOf(n));

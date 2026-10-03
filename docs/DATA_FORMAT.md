@@ -631,7 +631,8 @@ One record per line, **append-only**, content-addressed (the same findings get t
 | `confidence` | |
 | `period`, `expiresOn` | optional |
 | `provenance` | model, prompt version, job |
-| `status` | `active`, `dismissed` (by you) or `superseded` (by a newer run of the same job) |
+| `status` | `active`, `dismissed` (by you) or `superseded` (by a newer run of the same job, or a newer review of the same month) |
+| `watch`, `followUp` | a month in review's: up to 3 lines for the next month's review to check, and how the review before's lines turned out (`{watch, outcome: done\|open\|unclear, note?}`); optional |
 | `supersedes`, `feedback`, `createdAt` | `feedback` is `{useful, note?, at}` |
 
 ### context.jsonl and notes.jsonl

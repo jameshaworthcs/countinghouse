@@ -1337,6 +1337,123 @@ export interface PayeeGroup {
   match: Rule['match'];
 }
 
+// ─── The month in review (GET /month/:month, docs/FORMULAS.md §18) ─────────────────────────────
+
+/** A month's figure against the complete months before it. */
+export interface MonthCompared {
+  /** The median, lowest and highest of the complete months among the 12 before, and how many there were. */
+  median: number;
+  low: number;
+  high: number;
+  months: number;
+  /** The same month a year before, when its data is complete. */
+  lastYear?: number;
+}
+
+/** One line of a month: what it adds up to, by category group, against the months before. */
+export interface MonthLine {
+  id: string;
+  label: string;
+  amount: number;
+  count: number;
+  /** By category group, the largest first. */
+  groups: { id: string; name: string; amount: number }[];
+  compared?: MonthCompared;
+}
+
+export interface MonthPayment {
+  id: string;
+  date: string;
+  accountId: string;
+  payee: string;
+  amount: number;
+  category?: string;
+}
+
+/**
+ * What a balance on a day is worked out from (docs/FORMULAS.md §9): the balance or valuation on its
+ * day (a statement's or your own, a running balance printed beside a row, a screenshot's, or a rough
+ * one you gave) and the rows since; `after` when worked back from a later one.
+ */
+export interface BalanceBasis {
+  date: string;
+  kind: 'balance' | 'running' | 'screenshot' | 'approximate';
+  after?: true;
+}
+
+/** An account's value at the start and end of a month, and what the end value rests on. */
+export interface MonthAccountValue {
+  accountId: string;
+  name: string;
+  group: WrapperGroup;
+  /** On the day before the month, and on its last day; null where nothing is known yet. */
+  start: number | null;
+  end: number | null;
+  /**
+   * The balance or valuation the end value is worked out from: its day, and what it was (a statement's
+   * or your own balance or valuation, a running balance, a screenshot's, or a rough one you gave),
+   * after the day when worked back from a later one.
+   */
+  basis?: BalanceBasis;
+  estimated: boolean;
+  /** Valued at market on a valuation more than 31 days before the month's end: its change is not the month's. */
+  oldValuation?: boolean;
+}
+
+export interface MonthRegularChange {
+  payee: string;
+  cadence: RecurringItem['cadence'];
+  amount: number;
+  date: string;
+  from?: number;
+}
+
+/** A month's figures, worked out by fixed rules (docs/FORMULAS.md §18). */
+export interface MonthSummary {
+  month: string;
+  from: string;
+  to: string;
+  /** Every account has data for at least 90% of the month's days (§3). */
+  complete: boolean;
+  /** The accounts that leave days of the month without data. */
+  limitedBy: { accountId: string; name: string; missingDays: number }[];
+  /** Pay, other income, gifts received and uncategorised money in add up to `income` (§14); borrowing is apart. */
+  moneyIn: { income: number; borrowed: number; total: number; lines: MonthLine[] };
+  /** What a loan lent you or paid for you this month (cards excepted), each payment once. */
+  borrowed: MonthPayment[];
+  /** Scheduled, regular, one-offs, everyday and money back add up to `total` (§14). */
+  spending: { total: number; lines: MonthLine[]; scheduled: MonthPayment[]; oneOffs: MonthPayment[]; compared?: MonthCompared };
+  /** Income less spending. */
+  net: { amount: number; compared?: MonthCompared };
+  /** Money moved between your current accounts and your others, by where it went: positive is moved there. */
+  moved: { id: string; label: string; amount: number }[];
+  worth: {
+    start: number;
+    end: number;
+    change: number;
+    estimated: boolean;
+    groups: { id: WrapperGroup; label: string; start: number; end: number }[];
+    accounts: MonthAccountValue[];
+  };
+  quality: {
+    uncategorisedSpending: number;
+    uncategorisedSpendingShare: number | null;
+    uncategorisedIn: number;
+    uncategorisedInShare: number | null;
+    /** Payments with people not decided by you (the To categorise page). */
+    peopleToConfirm: { count: number; in: number; out: number };
+  };
+  payees: {
+    /** Paid this month, and not in the 12 months before. */
+    new: { payee: string; amount: number; count: number }[];
+    started: MonthRegularChange[];
+    stopped: MonthRegularChange[];
+    priceChanged: MonthRegularChange[];
+  };
+  /** What your agreements have due in the 60 days after the month, in and out. */
+  coming: { date: string; amount: number; direction: 'in' | 'out'; agreementId: string; name: string; label?: string }[];
+}
+
 /** The To categorise page (GET /categorise/queue): people's payments, rules to make, and what's left by payee. */
 export interface CategoriseQueue {
   /** Only payments from this day on are listed (rules look at all of history). */

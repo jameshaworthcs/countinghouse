@@ -2260,6 +2260,9 @@ export const InsightEvidenceSchema = z.discriminatedUnion('type', [
 ]);
 export type InsightEvidence = z.infer<typeof InsightEvidenceSchema>;
 
+/** What became of a line a month in review said to watch. */
+export const INSIGHT_FOLLOW_UP = ['done', 'open', 'unclear'] as const;
+
 export const InsightSchema = z.object({
   id: z.string().regex(/^inf_[0-9a-f]{16}$/),
   kind: z.enum(INSIGHT_KINDS),
@@ -2292,6 +2295,10 @@ export const InsightSchema = z.object({
   status: z.enum(['active', 'dismissed', 'superseded']).default('active'),
   /** The insight this one replaces (same job kind and subject, newer run). */
   supersedes: z.string().optional(),
+  /** A month in review's lines to check the month after (docs/AGENTS.md, "monthly-review"). */
+  watch: z.array(z.string().min(1).max(300)).max(3).optional(),
+  /** How the review before's lines to watch turned out, by this month's figures. */
+  followUp: z.array(z.object({ watch: z.string().min(1).max(300), outcome: z.enum(INSIGHT_FOLLOW_UP), note: z.string().max(500).optional() })).max(6).optional(),
   /** Your reaction: kept with the insight so later jobs learn from it. */
   feedback: z.object({ useful: z.boolean(), note: z.string().max(500).optional(), at: TimestampSchema }).optional(),
   createdAt: TimestampSchema,

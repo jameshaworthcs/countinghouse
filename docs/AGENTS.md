@@ -325,7 +325,7 @@ extraction:
 | `research-provider` | a provider's name and the kinds of account held there | WebSearch, WebFetch | `provider.rates`, `provider.fees` | only when you ask (or with "Research by itself" on: when a provider is new or stale) |
 | `refresh-assumptions` | the asset classes held (no amounts) | WebSearch, WebFetch | `economy.indicator`, `market.outlook`, assumptions with `basedOn` | only when you ask (or with "Research by itself" on: when assumptions are on fallbacks or past review, at most weekly) |
 | `insights-after-import` | the digest, focused on the new imports | Read (the digest only) | insights | 2 minutes after imports stop arriving |
-| `monthly-review` | the digest, focused on the last complete month | Read (the digest only) | a month in review, plus page insights (superseding the last run's) | once a month's data is complete for every account |
+| `monthly-review` | the month digest (version 4): the month's figures, the 12 months to it, the review before, documents as of the month's end, and, for the latest month only, today's figures | Read (the digest only) | a month in review with lines to watch and how the last ones turned out; for the latest month, up to 5 page insights; replacing every note an earlier review of the month wrote | once a month's data is complete for every account; earlier months only when you ask |
 | `interpret-note` | the owner's note, account and instrument names | none | proposals on the note | when a note is added |
 | `label-imports` | each committed import's file name, kind, provider, accounts (name, type, period) and dates, a payslip's employer, the tax figures' kinds and years; never amounts, account numbers, references or rows | none | a name on each import (`label`) that has none | only with "Name imports with the agent" on (off by default): a minute after imports stop being committed or filed; History offers the ones from before |
 | receipt reading (not a job) | one receipt file, the payment's amount, date and payee, the category names | Read (the receipt only) | a reading on the receipt: proposed split lines | when a receipt is attached, only with "Read receipts with the agent" on (off by default) |
@@ -334,6 +334,9 @@ Other behaviour:
 
 - **Settings → Agents** turns off automatic starts, insights after imports and the monthly review,
   and picks the model and effort.
+- **Insights after imports** (`insights-after-import-5`) are told where schedules of payments are
+  (`digest.agreements`, with each one's direction): money in that one pays you is borrowing or that
+  agreement's payment, not income.
 - **Holdings create instruments.** Funds listed on statements become instrument records
   (`setBy: system`, identifiers exactly as printed), so research can follow. They are recorded at
   each commit that records holdings and when the app starts, whether or not agents are on: a fact
@@ -388,6 +391,19 @@ Other behaviour:
   | `monthly-review` | 61 s | $0.24 |
   | `interpret-note` | 15 s | $0.07 |
   | `label-imports` | 2 s (one import) to 16 s (twelve) | $0.007 to $0.08 |
+- **The month in review** (`monthly-review-4`; FORMULAS.md §18; the Overview's month card):
+  - **Its digest** (`buildMonthDigest`):
+    - `focus` is the month's figures exactly as the Overview's month card shows them (`GET /api/month/:month`), with the month's payments to cite.
+    - `history` is the 12 months up to and including it, each as its lines; the complete ones are what "typical" means.
+    - `previousReview` is the latest review of an earlier month (never one replaced), with its watch lines, follow-ups, status, your feedback and the titles of that run's other notes.
+    - The documents (pay, HMRC's records, terms, agreements, pension arrangements, companies) stand as at the month's end: records dated later are left out, a job that started later is not there, and pay or an agreement payment that arrived later was "not paid by then".
+  - **Two modes:**
+    - **Latest** (the last complete month, "Write this month's review"): the digest adds `asOfToday` (the estate, accounts, allowances, investments, projection, pay owed, goals and tax codes since the month, labelled as today's), your context and earlier notes. Claude writes the review and up to 5 page insights.
+    - **Written later** (`params.catchUp`, "Write reviews for earlier months"): none of today. Claude writes the review alone, as at the month's end, with no advice about now.
+  - **Its output:** besides the insights, `watch` (up to 3 lines for the next review to check) and `followUp` (each of the last review's lines: done, still open or unclear, with a note). Both are kept on the month's review insight.
+  - **A rerun replaces its month:** every active note an earlier `monthly-review` run wrote for that month is superseded (yours never are), not only one of the same kind and subject.
+  - **Earlier months, oldest first.** `POST /api/jobs/month-reviews` (yours alone: no token may) queues a review, written later, for each complete month before the latest with no standing review by this prompt version, among the last 13. The runner runs month reviews oldest month first however they were queued, so each reads the one before; one that fails does not stop the rest, and the next reads the latest review there is.
+  - **Shown by month.** The Overview's month card shows the review of the month you pick, beside its figures, whether or not it has expired; expiry only takes a note out of "What to look at".
 - **The output's records** carry the job's id, model and prompt version.
 - **A job can propose fixes** through `ctx.proposals` (§5), under the job's provenance. None does
   yet: a job that checks the owner's data for fixes reads the owner's data, so it gets no web tools,

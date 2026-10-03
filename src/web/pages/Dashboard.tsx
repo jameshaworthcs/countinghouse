@@ -11,6 +11,7 @@ import { TransactionList } from '../components/TransactionList';
 import { Badge, Button, Card, Callout, Delta, EmptyState, ErrorNote, Loading, Money, PageHeader, Segmented, Stat } from '../components/ui';
 import { GoalsPanel } from '../components/Goals';
 import { InsightsPanel } from '../components/Intel';
+import { MonthReviewCard } from '../components/MonthReview';
 import { DropZone } from '../components/Upload';
 import { qs, useApi } from '../lib/api';
 import { useAppData } from '../lib/data';
@@ -364,7 +365,8 @@ export default function Dashboard() {
 
           <Kpis summary={s} />
           <CoverageNote summary={s} />
-          <InsightsPanel page="overview" title="Month in review and what to look at" />
+          <MonthReviewCard />
+          <InsightsPanel page="overview" title="What to look at" excludeKinds={['month-review']} />
 
           <section className="grid gap-5 lg:grid-cols-[1.35fr_1fr]">
             <AccountsPanel accounts={s.accounts} />

@@ -53,7 +53,7 @@ export function SignalList({ signals, empty }: { signals: Signal[]; empty?: Reac
   );
 }
 
-function EvidenceLinks({ insight }: { insight: Insight }) {
+export function EvidenceLinks({ insight }: { insight: Insight }) {
   const chips: ReactNode[] = [];
   insight.evidence.forEach((e, i) => {
     const key = `${e.type}-${i}`;
@@ -70,11 +70,11 @@ function EvidenceLinks({ insight }: { insight: Insight }) {
 }
 
 /** Claude's inferences for a page, labelled as such. Renders nothing when there are none and no `empty`. */
-export function InsightsPanel({ page, accountId, title = 'Agent notes', empty, className, limit = 6 }: { page: InsightPage; accountId?: string; title?: ReactNode; empty?: ReactNode; className?: string; limit?: number }) {
+export function InsightsPanel({ page, accountId, title = 'Agent notes', empty, className, limit = 6, excludeKinds }: { page: InsightPage; accountId?: string; title?: ReactNode; empty?: ReactNode; className?: string; limit?: number; excludeKinds?: Insight['kind'][] }) {
   const q = useApi<Insight[]>(['insights', page, accountId ?? ''], `/insights?page=${page}${accountId ? `&accountId=${accountId}` : ''}`);
   const dismiss = useApiMutation((id: string) => api(`/insights/${id}/dismiss`, { method: 'POST' }));
   const feedback = useApiMutation((v: { id: string; useful: boolean }) => api(`/insights/${v.id}/feedback`, { method: 'POST', body: { useful: v.useful } }));
-  const items = (q.data ?? []).slice(0, limit);
+  const items = (q.data ?? []).filter((i) => !excludeKinds?.includes(i.kind)).slice(0, limit);
   if (!items.length && !empty) return null;
   return (
     <Card

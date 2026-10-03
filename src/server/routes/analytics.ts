@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { addDays, addMonths, startOfMonth, today } from '../../shared/dates';
 import { csvCell, queryDate, type AppContext } from '../context';
+import { StoreError } from '../store';
 
 export function analyticsRoutes(ctx: AppContext): Hono {
   const app = new Hono();
@@ -64,6 +65,12 @@ export function analyticsRoutes(ctx: AppContext): Hono {
 
   app.get('/investments', (c) => c.json(a.investments()));
   app.get('/monthly', (c) => c.json(a.monthly()));
+  /** A month's figures (docs/FORMULAS.md §18): YYYY-MM, not after this month. */
+  app.get('/month/:month', (c) => {
+    const month = c.req.param('month');
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || month > today().slice(0, 7)) throw new StoreError('A month is YYYY-MM, and not after this one.', 400);
+    return c.json(a.month(month));
+  });
   app.get('/capture', (c) => c.json(a.capture()));
   app.get('/data-health', (c) => c.json(a.health()));
 

@@ -75,7 +75,8 @@ describe('privacy boundary', () => {
     const prompt = await JOB_DEFS['monthly-review'].prepare(ctx({ month: '2026-08' }));
     expect(prompt).toMatch(/digest\.json/);
     const digest = JSON.parse(await readFile(path.join(dir, 'digest.json'), 'utf8')) as Record<string, unknown>;
-    expect(digest).toHaveProperty('accounts');
+    expect(digest).toHaveProperty('focus.worth.accounts');
+    expect(digest).toHaveProperty('asOfToday.accounts');
     expect(JSON.stringify(digest)).not.toMatch(/"name":"[^"]*Taylor/);
   });
 

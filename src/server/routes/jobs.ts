@@ -19,6 +19,8 @@ export function jobRoutes(ctx: AppContext): Hono {
       enabled: ctx.store.settings.agents.enabled,
       jobs: r.list().slice(0, 100),
       suggestions: r.suggestions(),
+      /** The earlier months "Write reviews for earlier months" would review. */
+      catchUpMonths: r.catchUpMonths(),
       budget: r.budget(),
       autoResearch: ctx.store.settings.agents.autoResearch,
       kinds: JOB_KINDS.map((k) => ({ kind: k, privacy: JOB_DEFS[k].privacy, tools: JOB_DEFS[k].tools, promptVersion: JOB_DEFS[k].promptVersion })),
@@ -38,6 +40,18 @@ export function jobRoutes(ctx: AppContext): Hono {
     // The same job was queued or running already: that one is the answer, and nothing new starts.
     if (job.id === before?.id) return c.json({ ...job, existing: true }, 200);
     return c.json(job, 201);
+  });
+
+  /**
+   * Reviews of the complete months before the latest that have none, queued oldest first, each
+   * written as of its month's end (docs/AGENTS.md, "monthly-review"). Yours alone: no token may.
+   */
+  app.post('/month-reviews', (c) => {
+    if (agentTokenOf(c)) throw new StoreError('Only you can start reviews of earlier months.', 403);
+    const r = runner();
+    const months = r.catchUpMonths();
+    const jobs = months.map((month) => r.enqueue({ kind: 'monthly-review', params: { month, catchUp: true }, trigger: 'owner' })).filter((j) => j !== undefined);
+    return c.json({ months, jobs }, jobs.length ? 201 : 200);
   });
 
   app.post('/tick', async (c) => {
