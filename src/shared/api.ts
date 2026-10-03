@@ -1286,6 +1286,8 @@ export interface PersonRow extends QueueExample {
   category?: string;
   categorisedBy?: Transaction['categorisedBy'];
   suggestion?: PersonSuggestion;
+  /** In the cash group, a cheque rather than cash. */
+  cheque?: boolean;
 }
 
 /** One person, however their payments write the name (docs/FORMULAS.md §10, "People"). */
@@ -1299,6 +1301,8 @@ export interface PersonGroup {
   names: string[];
   /** Their surname is yours: family, most likely. */
   sharesYourSurname: boolean;
+  /** Not a person: cash and cheques paid in, whose money nothing on them says (docs/FORMULAS.md §10, "Cash and cheques paid in"). */
+  cash?: boolean;
   /** Their payments waiting for you, newest first. */
   rows: PersonRow[];
   /** Their payments you decided already. */
@@ -1335,6 +1339,19 @@ export interface PayeeGroup {
   examples: QueueExample[];
   /** The rule "always" would make: the description holds the payee. */
   match: Rule['match'];
+}
+
+/**
+ * Payments to or from one payee, one way, that the app put in one category from a guess: the bank's
+ * own category, or the reader's suggestion when it read the document (docs/FORMULAS.md §10, "Guesses
+ * to check"). They count as categorised until you change them.
+ */
+export interface GuessGroup extends PayeeGroup {
+  category: string;
+  /** How many each guess gave. */
+  by: { bank: number; ai: number };
+  /** The bank's own words for the category it gave ("Business Services-Conferences & Training"). */
+  bankSays: string[];
 }
 
 // ─── The month in review (GET /month/:month, docs/FORMULAS.md §18) ─────────────────────────────
@@ -1442,6 +1459,16 @@ export interface MonthSummary {
     uncategorisedInShare: number | null;
     /** Payments with people not decided by you (the To categorise page). */
     peopleToConfirm: { count: number; in: number; out: number };
+    /** Cash and cheques paid in not decided by you: a gift, your own cash back or something else. */
+    cashToConfirm: { count: number; amount: number };
+    /**
+     * Spending and money in the app categorised from a guess, the bank's category or the reader's,
+     * that you haven't checked (not people's, cash or cheques, counted above), and their shares.
+     */
+    guessedSpending: number;
+    guessedSpendingShare: number | null;
+    guessedIn: number;
+    guessedInShare: number | null;
   };
   payees: {
     /** Paid this month, and not in the 12 months before. */
@@ -1458,8 +1485,10 @@ export interface MonthSummary {
 export interface CategoriseQueue {
   /** Only payments from this day on are listed (rules look at all of history). */
   from?: string;
+  /** People, and cash and cheques paid in first when there are any to decide. */
   people: PersonGroup[];
   rules: RuleSuggestion[];
   payees: PayeeGroup[];
-  counts: { people: number; rules: number; payees: number };
+  guesses: GuessGroup[];
+  counts: { people: number; rules: number; payees: number; guesses: number };
 }

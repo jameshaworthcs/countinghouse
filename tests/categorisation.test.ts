@@ -1,8 +1,9 @@
 // Categorisation that gets more right by itself (docs/FORMULAS.md §10, "Payees" and "Pay by name";
 // docs/DECISIONS.md 2026-10-03): payees from the ways banks word a payment, American Express's own
-// categories, platform withdrawals, disputed charges, card repayments and refunds, pay under the
-// name the bank gives a job, what other documents said of a payment, and a preview of re-applying
-// it all that matches what applying does. Every name and amount is invented.
+// categories, platform withdrawals, disputed charges, card repayments and refunds, cash paid in left
+// for the owner to say, pay under the name the bank gives a job, what other documents said of a
+// payment, and a preview of re-applying it all that matches what applying does. Every name and
+// amount is invented.
 
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
@@ -101,8 +102,27 @@ describe('money that is neither spending nor income', () => {
     expect(c.categorise({ accountId: 'current', description: 'PAYMENT', amount: 25 }).category).not.toBe('credit-card-payment');
   });
 
-  it('cash paid in, conversion fees, the Underground and a platform’s fee', () => {
-    expect(c.categorise({ accountId: 'current', description: 'POST OFFICE CASH DEPOSIT', amount: 80 }).category).toBe('transfer');
+  it('cash and cheques paid in are yours to say: nothing on the list, from the bank or from the reader gives them a category', () => {
+    const cases: [string, string | undefined][] = [
+      ['POST OFFICE CASH DEPOSIT', undefined],
+      ['CASH PAID IN AT ATM EXAMPLETOWN', undefined],
+      ['COUNTER CREDIT 0412', undefined],
+      ['EXAMPLE BANK', 'ATM'],
+    ];
+    for (const [description, type] of cases) expect(c.categorise({ accountId: 'current', description, amount: 80, ...(type ? { type } : {}) })).toEqual({ payee: 'Cash paid in' });
+    expect(c.categorise({ accountId: 'current', description: 'POST OFFICE CASH DEPOSIT', amount: 80, bankCategory: 'Transfers', aiCategory: 'transfer' })).toEqual({ payee: 'Cash paid in' });
+    // A cheque paid in is a cheque, wherever it was paid in.
+    expect(c.categorise({ accountId: 'current', description: 'CHEQUE PAID IN AT EXAMPLETOWN', amount: 30 })).toEqual({ payee: 'Cheque paid in' });
+    expect(c.categorise({ accountId: 'current', description: 'EXAMPLE BANK', amount: 30, type: 'CHQ' })).toEqual({ payee: 'Cheque paid in' });
+    // A rule of yours still comes first.
+    const rule = { id: 'rule_cash', enabled: true, priority: 100, match: { field: 'description' as const, op: 'contains' as const, value: 'CASH DEPOSIT', caseSensitive: false }, set: { category: 'gifts-received' }, createdAt: stamp, updatedAt: stamp };
+    expect(new Categoriser([rule], cats, [acct('current', 'current')], []).categorise({ accountId: 'current', description: 'POST OFFICE CASH DEPOSIT', amount: 80 }).category).toBe('gifts-received');
+    // Cash taken out is still a withdrawal, and cash paid onto a card is not cash paid in.
+    expect(c.categorise({ accountId: 'current', description: 'CASH WITHDRAWAL LINK ATM', amount: -50 }).category).toBe('cash-withdrawal');
+    expect(c.categorise({ accountId: 'card', description: 'POST OFFICE CASH DEPOSIT', amount: 80 }).payee).not.toBe('Cash paid in');
+  });
+
+  it('conversion fees, the Underground and a platform’s fee', () => {
     expect(c.categorise({ accountId: 'current', description: 'FOREIGN CURRENCY CONVERSION FEE', amount: -0.5 }).category).toBe('bank-fees');
     expect(c.categorise({ accountId: 'card', description: 'LUL TICKET MACHINE EXAMPLE', amount: -10 }).category).toBe('public-transport');
     expect(c.categorise({ accountId: 'current', description: 'DIRECT DEBIT PAYMENT TO INTERACTIVE INVEST REF A1234TDFEEO, MANDATE NO', amount: -14.99 }).category).toBe('investment-fee');

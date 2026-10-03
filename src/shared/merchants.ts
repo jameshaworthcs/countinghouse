@@ -51,8 +51,8 @@ export const MERCHANTS: MerchantDef[] = [
   ['PREMIUM BOND PRIZE|NS&I.*PRIZE|NSANDI.*PRIZE|AUTO PRIZE REINVEST', 'NS&I Premium Bonds prize', 'other-income', 'in'],
   ['SAVINGS POT|TRANSFER (TO|FROM) POT|\\bPOT TRANSFER|FROM SAVINGS POT|ROUND ?UP|SAVING SPACE|SPACE TRANSFER|\\bTO SAVINGS\\b|\\bFROM SAVINGS\\b', 'Savings', 'savings-transfer'],
   ['CASH WITHDRAWAL|\\bATM\\b|CASH MACHINE|CASHPOINT|\\bLINK\\b.*CASH|^CASH\\b|CASH CD\\b|CSH WDL', 'Cash withdrawal', 'cash-withdrawal', 'out'],
-  // Cash paid in over a counter is your own money moving, as a withdrawal is.
-  ['POST OFFICE CASH DEPOSIT|\\bCASH DEPOSIT\\b|CASH PAID IN|COUNTER CREDIT', 'Cash paid in', 'transfer', 'in'],
+  // Cash paid in is not here: a gift, your own cash back or something sold, it is yours to say
+  // (categorise.ts, step 1b).
 
   // ── Income ──
   // "WAGES" also inside a payroll reference ("WWAGES012345/01"); "PAYE" at a word's end is an
@@ -371,7 +371,7 @@ export const GENERIC_PAYEES = new Set([
   'Professional fees', 'Credit card', 'Marketplace', 'Rapid grocery', 'Veg box', 'Meal kit',
   'EV charging', 'Car maintenance', 'Breakdown cover', 'Road charge', 'Bike & scooter hire',
   'Interest charged', 'Foreign transaction fee', 'App subscription', 'Creator membership',
-  'Second-hand fashion', 'Games', 'Opticians', 'Disputed charge', 'Cash paid in', 'Crypto exchange',
+  'Second-hand fashion', 'Games', 'Opticians', 'Disputed charge', 'Crypto exchange',
 ]);
 
 /** Aggressively simplified description for fuzzy duplicate detection. */

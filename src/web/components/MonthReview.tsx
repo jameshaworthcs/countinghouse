@@ -147,9 +147,18 @@ function Figures({ s }: { s: MonthSummary }) {
         {s.moved.length > 0 && <li>Moved: {s.moved.map((m) => `${m.amount >= 0 ? 'to' : 'from'} ${m.label} ${money(Math.abs(m.amount), { decimals: 0 })}`).join(', ')}.</li>}
         {old.length > 0 && <li className="text-warn-ink">Valued long before the month ended, so their change isn’t the month’s: {old.map((a) => `${a.name}${a.basis ? ` (${formatDate(a.basis.date)})` : ''}`).join(', ')}.</li>}
         {(s.quality.uncategorisedSpendingShare ?? 0) > 0.05 && <li>Uncategorised: {pct(s.quality.uncategorisedSpendingShare ?? 0, 0)} of spending.</li>}
-        {s.quality.peopleToConfirm.count > 0 && (
+        {(s.quality.guessedSpendingShare ?? 0) > 0.05 && (
           <li>
-            {plural(s.quality.peopleToConfirm.count, 'payment')} with people to confirm (
+            Guessed from the bank’s category or the reader, not checked: {pct(s.quality.guessedSpendingShare ?? 0, 0)} of spending (
+            <Link to="/spending/categorise#guesses" className="text-accent hover:underline">
+              Guesses to check
+            </Link>
+            ).
+          </li>
+        )}
+        {(s.quality.peopleToConfirm.count > 0 || s.quality.cashToConfirm.count > 0) && (
+          <li>
+            {[s.quality.peopleToConfirm.count > 0 && `${plural(s.quality.peopleToConfirm.count, 'payment')} with people`, s.quality.cashToConfirm.count > 0 && `${money(s.quality.cashToConfirm.amount, { decimals: 0 })} of cash paid in`].filter(Boolean).join(' and ')} to confirm (
             <Link to="/spending/categorise" className="text-accent hover:underline">
               To categorise
             </Link>

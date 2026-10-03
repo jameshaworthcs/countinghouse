@@ -425,7 +425,9 @@ read again.
   - A local model could tidy harder cases, but it would be a new engine under the privacy rules.
     It is not built.
 - **Categorisation** follows `src/shared/categorise.ts`:
-  1. your rules;
+  1. your rules; then cash and cheques paid in to a current or savings account, which nothing else
+     categorises, as nothing on them says whose money it was: that is yours to say
+     ([FORMULAS.md §10](FORMULAS.md), "Cash and cheques paid in");
   2. transfers to your own accounts (by alias, or by provider name outside investment accounts),
      and money to or from you by name after "to" or "from" (your profile's name, or your surname
      and initials, "FROM TAYLOR SR"). Never cash from a machine: "Cash withdrawal, Santander, Faro" names the bank that runs the
@@ -481,13 +483,18 @@ read again.
   - **A rule you make** applies at once to the payments it matches, and nothing else (`applyRule`):
     whatever else re-applying would change waits for its preview.
   - **To categorise** (Spending → To categorise, `GET /api/categorise/queue`) lists what's left
-    for you ([FORMULAS.md §10](FORMULAS.md), "People", "Rules from your decisions"):
+    for you ([FORMULAS.md §10](FORMULAS.md), "People", "Cash and cheques paid in", "Rules from your
+    decisions", "Guesses to check"):
     - payments with people, by person however their payments write the name, each with what it
       looks like and why. Each is yours to confirm: a gift, your share of something paid back, your
       own money, or any category. Confirming saves the person (`people.json`) with every name their
       payments carry and, if you say, how money with them usually goes;
+    - cash and cheques paid in, first among them, each yours to confirm the same way (no one is
+      saved);
     - rules your decisions point to, each with the payments it would categorise;
-    - the uncategorised rest by payee, with "always" making a rule for the payee.
+    - the uncategorised rest by payee, with "always" making a rule for the payee;
+    - the categories the app guessed, from the bank's category or the reader's suggestion, by payee
+      and category, to confirm or change, with "always" making a rule.
     Your choices go in one write (`POST /api/categorise/decisions`): the categories as yours, the
     person, and the rule, applied to what it matches.
 - **Duplicates** (`dedup.ts`) are checked in this order:

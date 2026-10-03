@@ -25,6 +25,8 @@ const stamp = '2026-01-01T00:00:00+00:00';
 const acct = (id: string, type: Account['type'], extra: Partial<Account> = {}): Account => ({ id, name: id, type, currency: 'GBP', status: 'open', aliases: [], includeInNetWorth: true, createdAt: stamp, updatedAt: stamp, ...extra });
 let seq = 0;
 const tx = (accountId: string, date: string, amount: number, description: string, extra: Partial<Transaction> = {}): Transaction => ({ id: transactionId(accountId, date, amount, description, seq++), accountId, date, amount, currency: 'GBP', description, source: {}, ...extra });
+/** The month in review's prompt version now: a review by it stands. */
+const REVIEW_VERSION = JOB_DEFS['monthly-review'].promptVersion;
 const MONTHS = ['2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07', '2026-08'];
 const lastDay = (m: string) => `${m}-${m === '2026-02' ? '28' : ['2026-04', '2026-06'].includes(m) ? '30' : '31'}`;
 let n = 0;
@@ -37,7 +39,7 @@ const insight = (extra: Partial<Insight>): Insight => ({
   body: 'What happened.',
   evidence: [{ type: 'computed', metric: 'spending' }],
   confidence: 'medium',
-  provenance: { setBy: 'agent', promptVersion: 'monthly-review-4', jobId: 'job_a' },
+  provenance: { setBy: 'agent', promptVersion: REVIEW_VERSION, jobId: 'job_a' },
   status: 'active',
   createdAt: '2026-09-01T00:00:00+00:00',
   ...extra,
@@ -152,6 +154,29 @@ describe('a month’s figures', () => {
     expect(m.payees.new.map((p) => p.payee)).toContain('Example Sofa Co');
   });
 
+  it('counts cash paid in still to confirm, and what rests on a category the bank or the reader guessed', async () => {
+    await months();
+    await store.addTransactions(
+      [
+        tx('bank', '2026-08-23', 60, 'CASH PAID IN AT ATM EXAMPLETOWN'),
+        tx('bank', '2026-08-24', -40, 'EXAMPLE STUDIO', { category: 'courses', categorisedBy: 'bank' }),
+        tx('bank', '2026-08-25', 25, 'EXAMPLE PRIZE DRAW', { category: 'other-income', categorisedBy: 'ai' }),
+      ],
+      't',
+    );
+    const m = new Analytics(store).month('2026-08');
+    // The reader's gift from someone is theirs to confirm, not a guess; the cash is uncategorised money in until you say.
+    expect(m.quality).toMatchObject({
+      peopleToConfirm: { count: 1, in: 50, out: 0 },
+      cashToConfirm: { count: 1, amount: 60 },
+      uncategorisedIn: 72.34,
+      guessedSpending: 40,
+      guessedSpendingShare: 0.01,
+      guessedIn: 25,
+      guessedInShare: 0.012,
+    });
+  });
+
   it('compares with fewer than 12 months, and with none', async () => {
     await months();
     const a = new Analytics(store);
@@ -231,7 +256,7 @@ describe('a month in review’s output', () => {
     followUp: [{ watch: 'Whether groceries stay near £200', outcome: 'done', note: 'They were £155.50.' }],
     ...extra,
   });
-  const provenance = { setBy: 'agent' as const, model: 'test', promptVersion: 'monthly-review-4', jobId: 'job_new' };
+  const provenance = { setBy: 'agent' as const, model: 'test', promptVersion: REVIEW_VERSION, jobId: 'job_new' };
   const ctx = (params: Record<string, unknown>) => ({ store, analytics: new Analytics(store), params, scratch: dir });
 
   it('carries what to watch and how the last lines turned out; written later, it is the month’s review alone', async () => {
@@ -247,7 +272,7 @@ describe('a month in review’s output', () => {
     const old = [
       insight({ subject: { month: '2026-08' }, provenance: { setBy: 'agent', promptVersion: 'monthly-review-3', jobId: 'job_old' } }),
       insight({ kind: 'habit', subject: { month: '2026-08', category: 'groceries' }, provenance: { setBy: 'agent', promptVersion: 'monthly-review-3', jobId: 'job_old' } }),
-      insight({ subject: { month: '2026-07' }, provenance: { setBy: 'agent', promptVersion: 'monthly-review-4', jobId: 'job_july' } }),
+      insight({ subject: { month: '2026-07' }, provenance: { setBy: 'agent', promptVersion: REVIEW_VERSION, jobId: 'job_july' } }),
       insight({ kind: 'note', subject: { month: '2026-08' }, provenance: { setBy: 'owner' } }),
       insight({ kind: 'anomaly', subject: { month: '2026-08' }, provenance: { setBy: 'agent', promptVersion: 'insights-after-import-5', jobId: 'job_import' } }),
     ];

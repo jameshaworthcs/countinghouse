@@ -301,12 +301,24 @@ async function main() {
   const unknown = (date: string, amount: number, description: string, extra: Partial<Transaction> = {}) => {
     if (date >= START && date <= END) tx('rewards-card', date, amount, description, extra);
   };
+  // Cash paid in, yours to say what it was: after Christmas, and cash taken out and paid back in.
+  const cashIn = (date: string, amount: number) => {
+    if (date >= START && date <= END) tx('current-account', date, amount, 'POST OFFICE CASH DEPOSIT');
+  };
   for (let m = START; m <= END; m = addMonths(m, 1)) {
     const ym = m.slice(0, 7);
     const month = ym.slice(5);
     if (['02', '05'].includes(month)) unknown(`${ym}-17`, -32.5, 'GREENLEAF POTTERY STUDIO', { category: 'hobbies', categorisedBy: 'user' });
     if (month === '08') unknown(`${ym}-17`, -32.5, 'GREENLEAF POTTERY STUDIO');
     if (month === '07') unknown(`${ym}-23`, -64.2, 'MERIDIAN FRAMING');
+    // Guesses to check: a café the reader categorised, and a studio the card's own category calls training.
+    if (['03', '06', '09'].includes(month)) unknown(`${ym}-11`, -6.8, 'THE COPPER KETTLE', { category: 'eating-out', categorisedBy: 'ai' });
+    if (month === '04') unknown(`${ym}-08`, -150, 'EXAMPLE STUDIOS LONDON', { bankCategory: 'Business Services-Conferences & Training' });
+    if (month === '01') cashIn(`${ym}-06`, 120);
+    if (month === '09' && `${ym}-19` <= END) {
+      tx('current-account', `${ym}-05`, -60, 'CASH WITHDRAWAL LINK ATM');
+      cashIn(`${ym}-19`, 60);
+    }
   }
   // The card: the monthly direct debit arrives on it.
   for (const t of txs.filter((x) => x.accountId === 'current-account' && x.description === 'EXAMPLE CARDS DD')) tx('rewards-card', t.date, -t.amount, 'PAYMENT RECEIVED - THANK YOU');

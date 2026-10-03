@@ -21,7 +21,7 @@ import type { BalanceEngine } from './balances';
 import { flows, type FlowTx } from './cashflow';
 import type { Coverage } from './coverage';
 import { estateOn } from './estate';
-import { personParties } from './queue';
+import { DECIDED, GUESSED, paidInto, personParties } from './queue';
 import { detectRecurring } from './recurring';
 
 /** The month's rules, named (docs/FORMULAS.md §18). */
@@ -94,6 +94,8 @@ export class MonthContext {
   private readonly scheduled = new Set<string>();
   private readonly payeeDates = new Map<string, ISODate[]>();
   private readonly parties: ReturnType<typeof personParties>;
+  /** Cash and cheques paid in, by transaction id. */
+  private readonly cash: ReturnType<typeof paidInto>;
   private readonly linesCache = new Map<string, MonthLines>();
 
   constructor(
@@ -115,6 +117,7 @@ export class MonthContext {
     }
     for (const list of this.payeeDates.values()) list.sort();
     this.parties = personParties(store);
+    this.cash = paidInto(store);
   }
 
   /** Every account has data for the month (≥ 90% of its days, §3). */
@@ -298,14 +301,25 @@ export class MonthContext {
     const inFlows = monthFlows.filter((f) => f.cls === 'income');
     const uncatSpend = sumMinor(spendFlows.filter((f) => !f.t.category));
     const uncatIn = sumMinor(inFlows.filter((f) => !f.t.category));
+    // Guessed: categorised from the bank's category or the reader's suggestion, and not a person's
+    // or cash or a cheque paid in, which are counted as still to confirm.
+    const guessed = (f: FlowTx) => Boolean(f.t.category) && GUESSED.has(f.t.categorisedBy) && !this.parties.has(f.t.id) && !this.cash.has(f.t.id);
+    const guessedSpend = sumMinor(spendFlows.filter(guessed));
+    const guessedIn = sumMinor(inFlows.filter(guessed));
     const people = { count: 0, in: 0, out: 0 };
+    const cash = { count: 0, minor: 0 };
     for (const t of store.transactions()) {
-      if (t.date < from || t.date > to || !this.parties.has(t.id)) continue;
-      if (t.categorisedBy === 'user' || t.categorisedBy === 'rule' || t.categorisedBy === 'agreement') continue;
-      people.count++;
-      if (t.amount > 0) people.in += toMinor(t.amount);
-      else people.out -= toMinor(t.amount);
+      if (t.date < from || t.date > to || DECIDED.has(t.categorisedBy)) continue;
+      if (this.cash.has(t.id)) {
+        cash.count++;
+        cash.minor += toMinor(t.amount);
+      } else if (this.parties.has(t.id)) {
+        people.count++;
+        if (t.amount > 0) people.in += toMinor(t.amount);
+        else people.out -= toMinor(t.amount);
+      }
     }
+    const share = (part: number, whole: number) => (whole > 0 ? Math.round((part / whole) * 1000) / 1000 : null);
 
     // Payees new this month, and regular payments that started, stopped or changed price.
     const newPayees = new Map<string, { payee: string; minor: number; count: number }>();
@@ -356,10 +370,15 @@ export class MonthContext {
       worth: { start: start.total, end: end.total, change: fromMinor(toMinor(end.total) - toMinor(start.total)), estimated: start.estimated || end.estimated, groups, accounts },
       quality: {
         uncategorisedSpending: fromMinor(uncatSpend),
-        uncategorisedSpendingShare: lines.spendingTotal > 0 ? Math.round((uncatSpend / lines.spendingTotal) * 1000) / 1000 : null,
+        uncategorisedSpendingShare: share(uncatSpend, lines.spendingTotal),
         uncategorisedIn: fromMinor(uncatIn),
-        uncategorisedInShare: lines.income > 0 ? Math.round((uncatIn / lines.income) * 1000) / 1000 : null,
+        uncategorisedInShare: share(uncatIn, lines.income),
         peopleToConfirm: { count: people.count, in: fromMinor(people.in), out: fromMinor(people.out) },
+        cashToConfirm: { count: cash.count, amount: fromMinor(cash.minor) },
+        guessedSpending: fromMinor(guessedSpend),
+        guessedSpendingShare: share(guessedSpend, lines.spendingTotal),
+        guessedIn: fromMinor(guessedIn),
+        guessedInShare: share(guessedIn, lines.income),
       },
       payees: {
         new: [...newPayees.values()].sort((a, b) => b.minor - a.minor).slice(0, MONTH_RULES.listed).map((e) => ({ payee: e.payee, amount: fromMinor(e.minor), count: e.count })),

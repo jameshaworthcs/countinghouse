@@ -1,6 +1,7 @@
-// Money with people (docs/FORMULAS.md §10, "People"): who a payment is with, the names one person's
-// payments carry, what each payment looks like it was and why, the To categorise page's queue, and
-// the decisions you make there. Nothing is categorised from a suggestion without you. Every name and
+// Money with people (docs/FORMULAS.md §10, "People", "Cash paid in" and "Guesses to check"): who a
+// payment is with, the names one person's payments carry, what each payment, and each cash payment
+// in, looks like it was and why, the To categorise page's queue with the app's guesses, and the
+// decisions you make there. Nothing is categorised from a suggestion without you. Every name and
 // amount is invented.
 
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -15,7 +16,8 @@ import { transactionId } from '../src/server/ids';
 import { runMigrations } from '../src/server/migrations';
 import { Store } from '../src/server/store';
 import { CategoryIndex, defaultCategories } from '../src/shared/categories';
-import { itemCategory, parsePersonName, PeopleIndex, referenceWords, shareOf, suggestFor, tidyName, type PaidOut, type PersonParty } from '../src/shared/people';
+import { cleanPayee } from '../src/shared/merchants';
+import { giftOccasion, itemCategory, parsePersonName, PeopleIndex, referenceWords, shareOf, suggestFor, suggestForCash, tidyName, type PaidOut, type PersonParty } from '../src/shared/people';
 import type { Account, Person, Transaction } from '../src/shared/schema';
 
 const stamp = '2026-01-01T00:00:00+00:00';
@@ -218,6 +220,49 @@ describe('what a payment with a person looks like it was', () => {
   });
 });
 
+describe('what cash or a cheque paid in looks like it was', () => {
+  const withdrawals = [
+    { date: '2026-03-02', amount: -80 },
+    { date: '2026-03-10', amount: -20 },
+  ];
+  const ctx = { known, kindOf, withdrawals };
+
+  it('your own cash back when you took out exactly as much in the 30 days before, or as much in all', () => {
+    expect(suggestForCash({ amount: 80, date: '2026-03-20' }, ctx)).toEqual({ treatment: 'own', category: 'cash-withdrawal', reason: 'you took out exactly £80.00 in cash on 2 Mar 2026', strong: false });
+    expect(suggestForCash({ amount: 100, date: '2026-03-20' }, ctx)).toMatchObject({ treatment: 'own', reason: 'you took out £100.00 in cash in the 30 days before' });
+    // Too long after, or more than you took out: often a gift, to check.
+    expect(suggestForCash({ amount: 80, date: '2026-04-15' }, ctx)).toEqual({ treatment: 'gift', category: 'gifts-received', reason: 'cash paid in is often a gift, but check', strong: false });
+    expect(suggestForCash({ amount: 150, date: '2026-03-20' }, ctx)?.treatment).toBe('gift');
+    // A cheque is never cash you took out.
+    expect(suggestForCash({ amount: 80, date: '2026-03-20', cheque: true }, ctx)).toEqual({ treatment: 'gift', category: 'gifts-received', reason: 'a cheque paid in is often a gift, but check', strong: false });
+  });
+
+  it('a gift from a week before Christmas Day or your birthday to a month after', () => {
+    expect(giftOccasion('2026-01-08')).toBe('14 days after Christmas Day');
+    expect(giftOccasion('2025-12-20')).toBe('5 days before Christmas Day');
+    expect(giftOccasion('2026-12-25')).toBe('on Christmas Day');
+    expect(giftOccasion('2026-02-10')).toBeUndefined();
+    expect(giftOccasion('2026-05-15', '05-14')).toBe('1 day after your birthday');
+    expect(giftOccasion('2026-05-15')).toBeUndefined();
+    // Born on 29 February: the 28th in other years.
+    expect(giftOccasion('2027-03-02', '02-29')).toBe('2 days after your birthday');
+    expect(suggestForCash({ amount: 317, date: '2026-01-08' }, { known, kindOf, withdrawals: [] })).toEqual({ treatment: 'gift', category: 'gifts-received', reason: 'paid in 14 days after Christmas Day, when cash is often a gift', strong: false });
+    // Cash you took out to the penny says more than the time of year.
+    expect(suggestForCash({ amount: 80, date: '2025-12-30' }, { known, kindOf, withdrawals: [{ date: '2025-12-24', amount: -80 }] })?.treatment).toBe('own');
+  });
+
+  it('what you chose before for cash paid in, when most of it was one thing', () => {
+    const history = new Map([
+      ['cash-withdrawal', 3],
+      ['gifts-received', 1],
+    ]);
+    expect(suggestForCash({ amount: 40, date: '2026-06-10' }, { known, kindOf, withdrawals: [], history })).toEqual({ treatment: 'own', category: 'cash-withdrawal', reason: 'you chose this for 3 of 4 earlier cash payments in', strong: false });
+    // Not when it was mixed.
+    history.set('gifts-received', 3);
+    expect(suggestForCash({ amount: 40, date: '2026-06-10' }, { known, kindOf, withdrawals: [], history })?.reason).toBe('cash paid in is often a gift, but check');
+  });
+});
+
 describe('the To categorise queue', () => {
   let dir: string;
   let store: Store;
@@ -316,6 +361,50 @@ describe('the To categorise queue', () => {
     // The person's third payment is theirs to decide, with what you chose before.
     expect(q.people[0]!.rows[0]!.suggestion).toMatchObject({ category: 'gifts-received', strong: false });
   });
+
+  it('lists cash and cheques paid in first, each to decide, and what the app guessed by payee and category', async () => {
+    await store.setProfile({ ...store.profile, dateOfBirth: '1990-05-14' });
+    const guess = { bankCategory: 'Business Services-Conferences & Training', category: 'courses', categorisedBy: 'bank' as const, payee: 'Example Platform' };
+    await store.addTransactions(
+      [
+        tx('bank', '2026-03-02', -80, 'CASH WITHDRAWAL LINK ATM'),
+        tx('bank', '2026-03-20', 80, 'POST OFFICE CASH DEPOSIT', { payee: 'Cash paid in' }),
+        tx('bank', '2026-01-08', 317, 'CASH PAID IN AT ATM EXAMPLETOWN'),
+        tx('bank', '2026-01-02', 30, 'CHEQUE PAID IN AT EXAMPLETOWN'),
+        tx('bank', '2025-06-01', 50, 'CASH PAID IN AT ATM EXAMPLETOWN', { category: 'gifts-received', categorisedBy: 'user' }),
+        // Cash paid onto a card is not cash paid in.
+        tx('card', '2026-04-01', 60, 'POST OFFICE CASH DEPOSIT'),
+        tx('card', '2026-02-14', -459.99, 'EXAMPLE PLATFORM LIMITED*J LONDON', guess),
+        tx('card', '2026-02-14', -459.99, 'EXAMPLE PLATFORM LIMITED*J LONDON', guess),
+        tx('bank', '2026-03-05', -3.2, 'THE COPPER KETTLE', { payee: 'The Copper Kettle', category: 'eating-out', categorisedBy: 'ai' }),
+        // Not guesses: a name the app knows, and a person's payment (theirs to decide).
+        tx('bank', '2026-03-06', -12, 'THE COPPER KETTLE', { payee: 'The Copper Kettle', category: 'eating-out', categorisedBy: 'builtin' }),
+        tx('bank', '2026-03-07', 25, 'FASTER PAYMENTS RECEIPT REF.xmas FROM A REED', { category: 'gifts-received', categorisedBy: 'ai' }),
+      ],
+      't',
+    );
+    const q = categoriseQueue(store);
+    const [cash, ...people] = q.people;
+    expect(cash).toMatchObject({ key: 'cash', cash: true, name: 'Cash and cheques paid in', decided: 1, in: 477, out: 0 });
+    expect(cash!.rows.map((r) => [r.date, r.cheque ?? false, r.suggestion?.treatment, r.suggestion?.reason])).toEqual([
+      ['2026-03-20', false, 'own', 'you took out exactly £80.00 in cash on 2 Mar 2026'],
+      ['2026-01-08', false, 'gift', 'paid in 14 days after Christmas Day, when cash is often a gift'],
+      ['2026-01-02', true, 'gift', 'paid in 8 days after Christmas Day, when a cheque is often a gift'],
+    ]);
+    expect(people.map((g) => g.name)).toEqual(['A Reed']);
+    expect(q.counts.people).toBe(4);
+    const cashIds = new Set(cash!.rows.map((r) => r.id));
+    expect(q.payees.flatMap((g) => g.ids).filter((id) => cashIds.has(id))).toEqual([]);
+    expect(q.payees.map((g) => g.payee)).toContain(cleanPayee('POST OFFICE CASH DEPOSIT'));
+    expect(q.guesses.map((g) => [g.payee, g.category, g.count, g.amount, g.by, g.bankSays])).toEqual([
+      ['Example Platform', 'courses', 2, -919.98, { bank: 2, ai: 0 }, ['Business Services-Conferences & Training']],
+      ['The Copper Kettle', 'eating-out', 1, -3.2, { bank: 0, ai: 1 }, []],
+    ]);
+    expect(q.guesses[0]!.match).toMatchObject({ field: 'description', op: 'contains', value: 'Example Platform', direction: 'out' });
+    expect(q.counts.guesses).toBe(3);
+    // Only payments from a day on, when asked.
+    expect(categoriseQueue(store, { from: '2026-03-01' }).people[0]!.rows.map((r) => r.date)).toEqual(['2026-03-20']);
+  });
 });
 
 const CSRF = { 'x-finance-csrf': '1', 'content-type': 'application/json' };
@@ -363,6 +452,25 @@ describe('deciding on the To categorise page', () => {
     expect((await req('/api/people/alex-reed', { method: 'DELETE', headers: CSRF })).status).toBe(200);
     expect(store.people).toEqual([]);
     expect(store.transaction(a.id)).toMatchObject({ category: 'gifts-received', categorisedBy: 'user' });
+  });
+
+  it('cash paid in is decided as yours with no one to save, and a guess confirmed is yours too', async () => {
+    const { store } = app.ctx;
+    const cash = tx('bank', '2026-01-08', 317, 'CASH PAID IN AT ATM EXAMPLETOWN');
+    const guess = tx('bank', '2026-03-05', -3.2, 'THE COPPER KETTLE', { payee: 'The Copper Kettle', category: 'eating-out', categorisedBy: 'ai' });
+    await store.addTransactions([cash, guess], 't');
+    const res = await post('/api/categorise/decisions', {
+      decisions: [
+        { id: cash.id, category: 'gifts-received' },
+        { id: guess.id, category: 'eating-out' },
+      ],
+    });
+    expect(res.status).toBe(200);
+    expect(store.transaction(cash.id)).toMatchObject({ category: 'gifts-received', categorisedBy: 'user' });
+    expect(store.transaction(guess.id)).toMatchObject({ category: 'eating-out', categorisedBy: 'user' });
+    expect(store.people).toEqual([]);
+    const queue = (await (await req('/api/categorise/queue')).json()) as { people: unknown[]; guesses: unknown[] };
+    expect(queue).toMatchObject({ people: [], guesses: [] });
   });
 
   it('refuses a category that doesn’t exist, before changing anything', async () => {

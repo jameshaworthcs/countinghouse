@@ -102,6 +102,35 @@ export function isCashWithdrawal(description: string, type?: string): boolean {
   return CASH_WITHDRAWAL.test(description) || (type !== undefined && CASH_WITHDRAWAL.test(type));
 }
 
+/**
+ * Cash or a cheque paid in, by the description or the bank's type for the row. Nothing on either
+ * says whose money it was (a gift, your own cash back, something sold), so that is yours to say
+ * (docs/FORMULAS.md §10, "Cash and cheques paid in"). The caller checks it is money in.
+ */
+const CASH_DEPOSIT = /\bCASH (?:DEPOSIT|PAID IN|CREDIT)\b|\bPAID IN AT\b|\bCOUNTER CREDIT\b|\bATM DEPOSIT\b|\bDEPOSIT AT (?:ATM|POST OFFICE|BRANCH)\b/i;
+/** The bank's type for a row of cash paid in, when that is all it says: "ATM", "Cash", "Cash deposit". */
+const CASH_DEPOSIT_TYPE = /^\s*(?:ATM|CASH|CASH DEPOSIT|CASH IN|COUNTER CREDIT)\s*$/i;
+/** A cheque, in the description or as the bank's type: "CHEQUE PAID IN AT …", "CHQ DEPOSIT", "Cheque". */
+const CHEQUE = /\b(?:CHEQUE|CHQ)S?\b/i;
+
+/** The payees of cash and cheques paid in: no one is named. */
+export const CASH_PAID_IN = 'Cash paid in';
+export const CHEQUE_PAID_IN = 'Cheque paid in';
+
+export type PaidIn = 'cash' | 'cheque';
+
+/** Cash or a cheque paid in, or neither: a cheque "paid in at" a branch is a cheque. */
+export function paidInKind(description: string, type?: string): PaidIn | undefined {
+  if (CHEQUE.test(description) || (type !== undefined && CHEQUE.test(type))) return 'cheque';
+  if (CASH_DEPOSIT.test(description) || (type !== undefined && (CASH_DEPOSIT.test(type) || CASH_DEPOSIT_TYPE.test(type)))) return 'cash';
+  return undefined;
+}
+
+/** Accounts whose cash and cheques paid in are yours to say what they were: current and savings accounts, not a card, a loan or an investment. */
+export function holdsPaidIn(type: AccountType | undefined): boolean {
+  return !type || ACCOUNT_TYPE_META[type].group === 'cash';
+}
+
 /** Category for money moving between two of your own accounts, from the other account's type. */
 export function transferCategoryFor(otherType: AccountType, thisType?: AccountType): string {
   const other = ACCOUNT_TYPE_META[otherType];
@@ -331,6 +360,12 @@ export class Categoriser {
     }
 
     const isWrapper = account ? isWrapperAccount(account.type) : false;
+
+    // 1b. Cash or a cheque paid in to a current or savings account: what it was is yours to say on
+    // the To categorise page. Nothing here can know, so nothing gives it a category: not the
+    // merchant list, the bank's category or the reader's suggestion.
+    const paidIn = input.amount > 0 && holdsPaidIn(account?.type) ? texts.map((d) => paidInKind(d, input.type)).find(Boolean) : undefined;
+    if (paidIn) return { payee: paidIn === 'cheque' ? CHEQUE_PAID_IN : CASH_PAID_IN };
 
     // 2. Transfers to your own accounts.
     const mentioned = texts.map((d) => this.ownAccountsMentioned(input.accountId, d, !isWrapper || account?.type === 'cash_isa', input.type)).find((m) => m.length > 0) ?? [];

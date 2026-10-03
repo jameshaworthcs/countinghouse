@@ -1,18 +1,22 @@
-// The To categorise page (docs/FORMULAS.md §10, "People" and "Rules from your decisions"):
-// - payments with people, each yours to decide, with what it looks like and why;
+// The To categorise page (docs/FORMULAS.md §10, "People", "Cash and cheques paid in", "Rules from your
+// decisions" and "Guesses to check"):
+// - payments with people, and cash and cheques paid in, each yours to decide, with what it looks like
+//   and why;
 // - rules your decisions point to: a payee you put in one category at least twice one way (or the
 //   reader did, three times, when you never did), that would categorise rows now;
-// - what's left uncategorised, by payee and direction.
+// - what's left uncategorised, by payee and direction;
+// - what the app categorised from a guess (the bank's category, the reader's suggestion), for you to
+//   confirm or change.
 // Accounts valued at market (investments, pensions) are left out: their rows are not spending or
 // income (§14).
 
 import { balanceModeOf } from '../../shared/accounts';
-import type { CategoriseQueue, PayeeGroup, PersonGroup, PersonRow, QueueExample, RuleSuggestion } from '../../shared/api';
+import type { CategoriseQueue, GuessGroup, PayeeGroup, PersonGroup, PersonRow, QueueExample, RuleSuggestion } from '../../shared/api';
 import { CategoryIndex } from '../../shared/categories';
-import { Categoriser, isCashWithdrawal, isWrapperAccount, type CategoriseInput } from '../../shared/categorise';
+import { CASH_PAID_IN, Categoriser, CHEQUE_PAID_IN, holdsPaidIn, isCashWithdrawal, isWrapperAccount, paidInKind, type CategoriseInput, type PaidIn } from '../../shared/categorise';
 import { cleanPayee } from '../../shared/merchants';
 import { fromMinor, toMinor } from '../../shared/money';
-import { PeopleIndex, suggestFor, tidyName, type PaidOut, type PersonHistory, type PersonParty } from '../../shared/people';
+import { PeopleIndex, suggestFor, suggestForCash, tidyName, type CashOut, type PaidOut, type PersonHistory, type PersonParty } from '../../shared/people';
 import type { Person, Rule, Transaction } from '../../shared/schema';
 import { categoriseInputOf } from '../categoriser';
 import type { Store } from '../store';
@@ -22,8 +26,11 @@ export const RULE_FROM_DECISIONS = 2;
 /** Or the reader's, when you made none for that payee that way. */
 export const RULE_FROM_READER = 3;
 
-/** How a payment with a person got its category, when that settles it: yours, your rule's, or an agreement's. */
-const DECIDED = new Set<Transaction['categorisedBy']>(['user', 'rule', 'agreement']);
+/** How a payment with a person, or cash or a cheque paid in, got its category, when that settles it: yours, your rule's, or an agreement's. */
+export const DECIDED = new Set<Transaction['categorisedBy']>(['user', 'rule', 'agreement']);
+
+/** Categories the app guessed: the bank's own, or the reader's suggestion. */
+export const GUESSED = new Set<Transaction['categorisedBy']>(['bank', 'ai']);
 
 /** Who your payments are with, when a person: from your name, your accounts and banks, and the people you saved. */
 export function peopleIndexFor(store: Store): PeopleIndex {
@@ -39,6 +46,21 @@ export function personParties(store: Store, index: PeopleIndex = peopleIndexFor(
     if (skip.has(t.accountId)) continue;
     const party = index.party(t);
     if (party) out.set(t.id, party);
+  }
+  return out;
+}
+
+/**
+ * Cash and cheques paid in to your current and savings accounts, by transaction id: by their words or
+ * the bank's type, or the payee the categoriser gave them from another document's words.
+ */
+export function paidInto(store: Store): Map<string, PaidIn> {
+  const holds = new Map(store.accounts.map((a) => [a.id, holdsPaidIn(a.type)]));
+  const out = new Map<string, PaidIn>();
+  for (const t of store.transactions()) {
+    if (t.amount <= 0 || t.transferGroup || !(holds.get(t.accountId) ?? true)) continue;
+    const kind = t.payee === CHEQUE_PAID_IN ? 'cheque' : t.payee === CASH_PAID_IN ? 'cash' : paidInKind(t.description, t.type);
+    if (kind) out.set(t.id, kind);
   }
   return out;
 }
@@ -60,6 +82,7 @@ export function categoriseQueue(store: Store, opts: { from?: string | undefined 
   const kindOf = (id: string) => cats.kindOf(id);
   const index = peopleIndexFor(store);
   const parties = personParties(store, index);
+  const cash = paidInto(store);
   const market = new Set(store.accounts.filter((a) => balanceModeOf(a) === 'market').map((a) => a.id));
   const all = store.transactions().filter((t) => !market.has(t.accountId));
   const listed = (t: Transaction) => !opts.from || t.date >= opts.from;
@@ -82,7 +105,7 @@ export function categoriseQueue(store: Store, opts: { from?: string | undefined 
   const groups = new Map<string, Acc>();
   for (const t of all) {
     const party = parties.get(t.id);
-    if (!party) continue;
+    if (!party || cash.has(t.id)) continue;
     const key = party.personId ?? party.key;
     const person = party.personId ? peopleById.get(party.personId) : undefined;
     const g = groups.get(key) ?? groups.set(key, { ...(person ? { person } : {}), names: new Map(), open: [], decided: 0, history: { in: new Map(), out: new Map() }, shown: [] }).get(key)!;
@@ -125,6 +148,50 @@ export function categoriseQueue(store: Store, opts: { from?: string | undefined 
   }
   people.sort((a, b) => b.rows.length - a.rows.length || b.in - b.out - (a.in - a.out) || a.name.localeCompare(b.name));
 
+  // ── Cash and cheques paid in ──
+  const withdrawals: CashOut[] = all
+    .filter((t) => t.amount < 0 && !t.transferGroup && (t.category === 'cash-withdrawal' || isCashWithdrawal(t.description, t.type)))
+    .map((t) => ({ date: t.date, amount: t.amount }));
+  const cashHistory: Record<PaidIn, PersonHistory> = { cash: new Map(), cheque: new Map() };
+  const cashOpen: Transaction[] = [];
+  const cashShown: Transaction[] = [];
+  let cashDecided = 0;
+  for (const t of all) {
+    const kind = cash.get(t.id);
+    if (!kind) continue;
+    const h = cashHistory[kind];
+    if (t.categorisedBy === 'user' && t.category && !t.splits) h.set(t.category, (h.get(t.category) ?? 0) + 1);
+    if (!listed(t)) continue;
+    cashShown.push(t);
+    if (DECIDED.has(t.categorisedBy)) cashDecided++;
+    else cashOpen.push(t);
+  }
+  if (cashOpen.length) {
+    const birthday = store.profile.dateOfBirth?.slice(5);
+    const kinds = new Set(cashOpen.map((t) => cash.get(t.id)!));
+    people.unshift({
+      key: 'cash',
+      cash: true,
+      name: kinds.size > 1 ? 'Cash and cheques paid in' : kinds.has('cheque') ? 'Cheques paid in' : CASH_PAID_IN,
+      names: [],
+      sharesYourSurname: false,
+      rows: cashOpen.sort(newestFirst).map((t) => {
+        const cheque = cash.get(t.id) === 'cheque';
+        const suggestion = suggestForCash({ amount: t.amount, date: t.date, cheque }, { known, kindOf, withdrawals, birthday, history: cashHistory[cheque ? 'cheque' : 'cash'] });
+        return {
+          ...example(t),
+          ...(cheque ? { cheque } : {}),
+          ...(t.category ? { category: t.category } : {}),
+          ...(t.categorisedBy ? { categorisedBy: t.categorisedBy } : {}),
+          ...(suggestion ? { suggestion } : {}),
+        };
+      }),
+      decided: cashDecided,
+      in: sumOf(cashShown),
+      out: 0,
+    });
+  }
+
   // ── Rules from your decisions ──
   const inputs = new Map<string, { input: CategoriseInput; texts: string[]; payee: string }>();
   const inputOf = (t: Transaction) => {
@@ -138,7 +205,7 @@ export function categoriseQueue(store: Store, opts: { from?: string | undefined 
   };
   const byPayee = new Map<string, { payee: string; direction: 'in' | 'out'; rows: Transaction[] }>();
   for (const t of all) {
-    if (parties.has(t.id) || t.transferGroup) continue;
+    if (parties.has(t.id) || cash.has(t.id) || t.transferGroup) continue;
     const payee = (t.payee ?? cleanPayee(t.description)).trim();
     if (!payee) continue;
     const direction = directionOf(t);
@@ -183,7 +250,7 @@ export function categoriseQueue(store: Store, opts: { from?: string | undefined 
       let match = candidate;
       let hits = test(match);
       if (!basis.every(hits)) continue;
-      const fillsOf = () => all.filter((t) => t.categorisedBy !== 'user' && !t.transferGroup && !parties.has(t.id) && t.category !== category && hits(t)).sort(newestFirst);
+      const fillsOf = () => all.filter((t) => t.categorisedBy !== 'user' && !t.transferGroup && !parties.has(t.id) && !cash.has(t.id) && t.category !== category && hits(t)).sort(newestFirst);
       let fills = fillsOf();
       // Payments far from the sizes you decided (£1 of printing beside £2,000 of rent) are something
       // else: the rule keeps to sizes like yours.
@@ -217,39 +284,55 @@ export function categoriseQueue(store: Store, opts: { from?: string | undefined 
     else for (const id of ids) claimed.add(id);
   }
 
-  // ── What's left, by payee ──
+  // ── What's left, by payee; and the app's guesses, by payee and category ──
   const inRules = new Set(rules.flatMap((r) => r.fills.ids));
   const left = new Map<string, { payee: string; direction: 'in' | 'out'; rows: Transaction[] }>();
+  const guessed = new Map<string, { payee: string; direction: 'in' | 'out'; category: string; rows: Transaction[] }>();
   for (const t of all) {
-    if (!listed(t) || t.category || t.transferGroup || parties.has(t.id) || inRules.has(t.id)) continue;
+    // A payment a suggested rule would fill waits there: your decisions say what it is.
+    if (!listed(t) || t.transferGroup || parties.has(t.id) || cash.has(t.id) || inRules.has(t.id)) continue;
     const payee = (t.payee ?? cleanPayee(t.description)).trim() || t.description;
     const direction = directionOf(t);
-    const k = `${payee.toLowerCase()}|${direction}`;
-    (left.get(k) ?? left.set(k, { payee, direction, rows: [] }).get(k)!).rows.push(t);
+    if (!t.category) {
+      const k = `${payee.toLowerCase()}|${direction}`;
+      (left.get(k) ?? left.set(k, { payee, direction, rows: [] }).get(k)!).rows.push(t);
+    } else if (GUESSED.has(t.categorisedBy) && !t.splits) {
+      const k = `${payee.toLowerCase()}|${direction}|${t.category}`;
+      (guessed.get(k) ?? guessed.set(k, { payee, direction, category: t.category, rows: [] }).get(k)!).rows.push(t);
+    }
   }
-  const payees: PayeeGroup[] = [...left.values()]
-    .map(({ payee, direction, rows }) => {
-      rows.sort(newestFirst);
-      return {
-        payee,
-        direction,
-        count: rows.length,
-        amount: sumOf(rows),
-        first: rows[rows.length - 1]!.date,
-        last: rows[0]!.date,
-        accountIds: [...new Set(rows.map((t) => t.accountId))],
-        ids: rows.map((t) => t.id),
-        examples: rows.slice(0, 5).map(example),
-        match: payee.replace(/[^A-Za-z]/g, '').length >= 4 ? { field: 'description' as const, op: 'contains' as const, value: payee, caseSensitive: false, direction } : { field: 'payee' as const, op: 'equals' as const, value: inputOf(rows[0]!).payee, caseSensitive: false, direction },
-      };
-    })
-    .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount) || a.payee.localeCompare(b.payee));
+  const groupOf = (payee: string, direction: 'in' | 'out', rows: Transaction[]): PayeeGroup => {
+    rows.sort(newestFirst);
+    return {
+      payee,
+      direction,
+      count: rows.length,
+      amount: sumOf(rows),
+      first: rows[rows.length - 1]!.date,
+      last: rows[0]!.date,
+      accountIds: [...new Set(rows.map((t) => t.accountId))],
+      ids: rows.map((t) => t.id),
+      examples: rows.slice(0, 5).map(example),
+      match: payee.replace(/[^A-Za-z]/g, '').length >= 4 ? { field: 'description' as const, op: 'contains' as const, value: payee, caseSensitive: false, direction } : { field: 'payee' as const, op: 'equals' as const, value: inputOf(rows[0]!).payee, caseSensitive: false, direction },
+    };
+  };
+  const largest = (a: PayeeGroup, b: PayeeGroup) => Math.abs(b.amount) - Math.abs(a.amount) || a.payee.localeCompare(b.payee);
+  const payees: PayeeGroup[] = [...left.values()].map(({ payee, direction, rows }) => groupOf(payee, direction, rows)).sort(largest);
+  const guesses: GuessGroup[] = [...guessed.values()]
+    .map(({ payee, direction, category, rows }) => ({
+      ...groupOf(payee, direction, rows),
+      category,
+      by: { bank: rows.filter((t) => t.categorisedBy === 'bank').length, ai: rows.filter((t) => t.categorisedBy === 'ai').length },
+      bankSays: [...new Set(rows.filter((t) => t.categorisedBy === 'bank' && t.bankCategory).map((t) => t.bankCategory!))].slice(0, 3),
+    }))
+    .sort(largest);
 
   return {
     ...(opts.from ? { from: opts.from } : {}),
     people,
     rules,
     payees,
-    counts: { people: people.reduce((s, g) => s + g.rows.length, 0), rules: rules.length, payees: payees.reduce((s, g) => s + g.count, 0) },
+    guesses,
+    counts: { people: people.reduce((s, g) => s + g.rows.length, 0), rules: rules.length, payees: payees.reduce((s, g) => s + g.count, 0), guesses: guesses.reduce((s, g) => s + g.count, 0) },
   };
 }

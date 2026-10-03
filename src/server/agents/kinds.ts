@@ -609,14 +609,14 @@ const MONTH_REVIEW_SHAPE = [
   '   - The month: money in (pay, other income, gifts received) and spending. Name scheduled payments (rent instalments, tuition: focus.spending.scheduled) and one-offs (focus.spending.oneOffs) as such, and say where the net went (focus.moved).',
   '     Borrowing (focus.borrowed, focus.moneyIn.borrowed) is borrowing, never income. A Student Finance maintenance instalment is a loan for its whole term (about four months): say so, rather than reading one month’s instalment as that month’s money.',
   '   - Against typical: each line against the median and range of the complete months before it (its `compared`: median, low, high, months), never against a single month or an average. Say how many months that is when they are few; a month with none to compare has no typical yet.',
-  '   - People: gifts received against money paid back (the spending line "money-back"), and payments with people still to confirm (focus.quality.peopleToConfirm). They are unconfirmed: one among them is not yet a gift or a repayment.',
+  '   - People, cash and cheques: gifts received against money paid back (the spending line "money-back"), and payments with people, or cash and cheques paid in, still to confirm (focus.quality.peopleToConfirm, focus.quality.cashToConfirm). They are unconfirmed: one among them is not yet a gift, a repayment or the owner’s own money.',
   '   - Worth: the change from focus.worth.start to focus.worth.end, and what it rests on. An account marked oldValuation rests on a valuation long before the month ended (its basis), so its change is not the month’s: never call it flat or say it grew. A value marked estimated is rough.',
-  '   - Data: when focus.complete is false, uncategorised shares are high, or people money is unconfirmed, say what that limits.',
+  '   - Data: when focus.complete is false, uncategorised shares are high, or money with people, cash or cheques is unconfirmed, say what that limits. A category the bank or the reader guessed (a payment’s categorisedBy "bank" or "ai"; focus.quality.guessedSpendingShare, guessedInShare) can be wrong: check one against the payment’s description before resting a finding on it, and say when much of the month rests on guesses.',
 ].join('\n');
 
 const monthlyReview: JobKindDef = {
   kind: 'monthly-review',
-  promptVersion: 'monthly-review-4',
+  promptVersion: 'monthly-review-5',
   privacy: 'personal',
   tools: ['Read'],
   label: ({ params }) => `Month in review: ${String(params.month)}${params.catchUp === true ? ' (written later)' : ''}`,

@@ -100,6 +100,7 @@ async function main() {
     ['spending-categorise', '/spending/categorise'],
     ['spending-categorise-rules', '/spending/categorise#rules'],
     ['spending-categorise-payees', '/spending/categorise#payees'],
+    ['spending-categorise-guesses', '/spending/categorise#guesses'],
     ['projections', '/projections'],
     ['investments', '/investments'],
     ['tax', '/tax'],

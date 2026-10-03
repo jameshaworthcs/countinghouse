@@ -1737,3 +1737,35 @@ Later the same day, after the owner's first runs (`label-imports-2`):
   flow to the penny, its worth at both ends is shown with the ISA marked as resting on an older
   valuation, and a review of the first month written later
   holds nothing dated after that month but values worked back from later valuations, marked as such.
+
+## 2026-10-03: Cash and cheques paid in are yours to decide; the app's guesses are listed to check
+
+- **Found:**
+  - Categorisation filed cash paid in as money moving between your accounts. The owner says it is
+    not always theirs: often it is a gift. Cheques paid in waited uncategorised, a payee to put in
+    one category for all.
+  - A card top-up to a business account took the card's own category, "Business
+    Services-Conferences & Training", and became tuition.
+  - Hundreds of payments took their category from a guess, the bank's
+    category or the reader's suggestion. Nothing showed them for checking, and the month in review
+    could not tell them from settled ones.
+- **Owner's concern:** most re-categorisations are right, but future ones will sometimes be wrong.
+- **Done** (FORMULAS.md §10, "Cash and cheques paid in" and "Guesses to check"; §18, "Quality"):
+  - Cash and cheques paid in to current and savings accounts get no category but from a rule of
+    yours. Each is listed first on the To categorise page's People tab, with a suggestion and its
+    reason; none is ticked:
+    - your own cash back, when you took out as much in the 30 days before;
+    - a gift, from a week before Christmas Day or your birthday to a month after;
+    - otherwise a gift, marked "check".
+  - **Guesses to check** lists the payments the bank's category or the reader's suggestion
+    categorised, by payee and category, the largest first, each to confirm or change. "Always"
+    makes a rule, so the next ones from that payee are categorised by it, not guessed.
+  - A month's figures count cash and cheques still to confirm beside people's payments, and the
+    share of spending and money in resting on guesses. The Overview's month card says so when over
+    5% of spending is guessed.
+  - Version 5 of the month in review checks a guessed category against the payment's description
+    before resting a finding on it, and says when much of the month rests on guesses.
+- **Rehearsed** on a copy of the owner's data, after re-applying:
+  - cash and cheque payments in to decide, a few of them recent;
+  - payee groups of guesses, the largest a rent payment the reader categorised;
+  - guessed spending varies widely from month to month, most of it a few large payments.

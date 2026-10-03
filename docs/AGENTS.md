@@ -391,9 +391,10 @@ Other behaviour:
   | `monthly-review` | 61 s | $0.24 |
   | `interpret-note` | 15 s | $0.07 |
   | `label-imports` | 2 s (one import) to 16 s (twelve) | $0.007 to $0.08 |
-- **The month in review** (`monthly-review-4`; FORMULAS.md §18; the Overview's month card):
+- **The month in review** (`monthly-review-5`; FORMULAS.md §18; the Overview's month card):
   - **Its digest** (`buildMonthDigest`):
     - `focus` is the month's figures exactly as the Overview's month card shows them (`GET /api/month/:month`), with the month's payments to cite.
+    - `focus.quality` says what is still yours to confirm (payments with people, cash and cheques paid in) and how much rests on a category the bank or the reader guessed (each payment's `categorisedBy` says which). The review says what that limits, and checks a guessed category against the payment's description before resting a finding on it (since `monthly-review-5`).
     - `history` is the 12 months up to and including it, each as its lines; the complete ones are what "typical" means.
     - `previousReview` is the latest review of an earlier month (never one replaced), with its watch lines, follow-ups, status, your feedback and the titles of that run's other notes.
     - The documents (pay, HMRC's records, terms, agreements, pension arrangements, companies) stand as at the month's end: records dated later are left out, a job that started later is not there, and pay or an agreement payment that arrived later was "not paid by then".

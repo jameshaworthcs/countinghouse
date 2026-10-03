@@ -9,11 +9,12 @@
 // What each payment was is yours to decide on the To categorise page: a gift, your share paid back,
 // your own money, or anything else. `suggestFor` says what a payment's own words or amount point to,
 // and why; nothing is categorised from it without you, and a person's usual treatment only fills in
-// the choice (docs/DECISIONS.md, 2026-10-03).
+// the choice (docs/DECISIONS.md, 2026-10-03). Cash and cheques paid in are decided the same way
+// (`suggestForCash`): nothing on them says whose money it was.
 
-import { addDays, formatDate } from './dates';
+import { addDays, diffDays, formatDate, makeDate } from './dates';
 import { decodeEntities, matchMerchant, paymentParts } from './merchants';
-import { formatMoney, toMinor } from './money';
+import { formatMoney, fromMinor, toMinor } from './money';
 import type { Person, PERSON_IN, PERSON_OUT, Transaction } from './schema';
 
 /** Words a business's name carries and a person's doesn't. */
@@ -561,4 +562,80 @@ function usualWords(treatment: PersonTreatment, dir: 'in' | 'out'): string {
   if (treatment === 'gift') return 'a gift';
   if (treatment === 'own') return 'your own money';
   return dir === 'in' ? 'paying you back' : 'your share of something';
+}
+
+// ─── Cash and cheques paid in ────────────────────────────────────────────────────────────────────
+
+/** Your cash withdrawals this many days before cash paid in are what it may be your own cash back from. */
+export const CASH_BACK_DAYS = 30;
+/** Cash or a cheque paid in from a week before Christmas or your birthday to a month after looks like a gift. */
+export const CASH_GIFT_WINDOW = { before: 7, after: 31 } as const;
+
+/** Cash you took out: a withdrawal's date and amount (below zero). */
+export interface CashOut {
+  date: string;
+  amount: number;
+}
+
+/** "9 days after Christmas", "on your birthday": a date from a week before either to a month after, else nothing. */
+export function giftOccasion(date: string, birthday?: string): string | undefined {
+  const near = (month: number, day: number, name: string) => {
+    const year = Number(date.slice(0, 4));
+    for (const y of [year - 1, year, year + 1]) {
+      // A birthday on 29 February falls on the 28th in other years.
+      const on = makeDate(y, month, day) ?? makeDate(y, month, day - 1);
+      if (!on) continue;
+      const d = diffDays(on, date);
+      if (d < -CASH_GIFT_WINDOW.before || d > CASH_GIFT_WINDOW.after) continue;
+      const days = (n: number) => `${n} day${n === 1 ? '' : 's'}`;
+      return d === 0 ? `on ${name}` : d > 0 ? `${days(d)} after ${name}` : `${days(-d)} before ${name}`;
+    }
+    return undefined;
+  };
+  const [month, day] = (birthday ?? '').split('-').map(Number);
+  return near(12, 25, 'Christmas Day') ?? (month && day ? near(month, day, 'your birthday') : undefined);
+}
+
+/**
+ * What cash or a cheque paid in looks like it was (docs/FORMULAS.md §10, "Cash and cheques paid in").
+ * Nothing on the payment says, so none is ticked for you:
+ * 1. cash: a withdrawal of exactly this much in the 30 days before (`CASH_BACK_DAYS`), your own cash
+ *    back;
+ * 2. what you chose for 3 or more of the same (cash, or cheques) paid in before, if 70% or more were
+ *    one category;
+ * 3. paid in from a week before Christmas Day or your birthday to a month after: a gift;
+ * 4. cash: withdrawals in the 30 days before adding up to as much, your own cash back;
+ * 5. else a gift, marked "check": cash or a cheque paid in is often a gift, not always.
+ * Your own cash back goes in Cash withdrawal, so it nets off the withdrawal it came from (§14).
+ */
+export function suggestForCash(
+  t: Pick<Transaction, 'amount' | 'date'> & { cheque?: boolean | undefined },
+  ctx: {
+    known: (id: string) => boolean;
+    kindOf: (id: string) => string | undefined;
+    withdrawals: readonly CashOut[];
+    /** Your birthday, "MM-DD", from your profile. */
+    birthday?: string | undefined;
+    history?: PersonHistory | undefined;
+  },
+): PersonSuggestion | undefined {
+  const minor = toMinor(t.amount);
+  const back = ctx.known('cash-withdrawal') ? 'cash-withdrawal' : 'transfer';
+  const own = (reason: string): PersonSuggestion => ({ treatment: 'own', category: back, reason, strong: false });
+  const gift = (reason: string): PersonSuggestion | undefined => (ctx.known('gifts-received') ? { treatment: 'gift', category: 'gifts-received', reason, strong: false } : undefined);
+  const before = ctx.withdrawals.filter((w) => w.date <= t.date && diffDays(w.date, t.date) <= CASH_BACK_DAYS);
+  const exact = before.filter((w) => -toMinor(w.amount) === minor).sort((a, b) => b.date.localeCompare(a.date))[0];
+  if (exact && !t.cheque) return own(`you took out exactly ${formatMoney(t.amount)} in cash on ${formatDate(exact.date)}`);
+  if (ctx.history?.size) {
+    const total = [...ctx.history.values()].reduce((s, n) => s + n, 0);
+    const [top, n] = [...ctx.history.entries()].sort((a, b) => b[1] - a[1])[0]!;
+    const treatment = top === back ? 'own' : treatmentOf(top, 'in', ctx.kindOf);
+    if (total >= 3 && n / total >= 0.7 && treatment && ctx.known(top)) return { treatment, category: top, reason: `you chose this for ${n} of ${total} earlier ${t.cheque ? 'cheques' : 'cash payments'} in`, strong: false };
+  }
+  const what = t.cheque ? 'a cheque' : 'cash';
+  const occasion = giftOccasion(t.date, ctx.birthday);
+  if (occasion) return gift(`paid in ${occasion}, when ${what} is often a gift`);
+  const took = before.reduce((s, w) => s - toMinor(w.amount), 0);
+  if (took >= minor && !t.cheque) return own(`you took out ${formatMoney(fromMinor(took))} in cash in the ${CASH_BACK_DAYS} days before`);
+  return gift(`${what} paid in is often a gift, but check`);
 }

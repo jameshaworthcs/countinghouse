@@ -607,12 +607,33 @@ Where each choice goes:
 Money paid back in a spending category counts against spending in it, and Paid back to you
 counts against spending as refunds do (§14).
 
+**Cash and cheques paid in** (the categoriser's step 1b; `suggestForCash` in `shared/people.ts`) to a
+current or savings account are yours to decide like a payment with a person: nothing on them says
+whose money it was. Cash is known by its words ("CASH PAID IN AT", "POST OFFICE CASH DEPOSIT",
+"COUNTER CREDIT") or the bank's type for it ("ATM", "Cash"); a cheque by "CHEQUE" or "CHQ" in either.
+No category is given them but by a rule of yours: not the merchant list, the bank's category or the
+reader's. They are listed first among people on the To categorise page, uncategorised money in until
+you decide. A suggestion only fills in the choice, and none is ticked:
+
+1. cash: a cash withdrawal of exactly the amount in the 30 days before (`CASH_BACK_DAYS`), your own
+   cash back;
+2. what you chose for 3 or more of the same (cash, or cheques) paid in before, if 70% or more were
+   one category;
+3. paid in from a week before Christmas Day or your birthday (your profile) to a month after
+   (`CASH_GIFT_WINDOW`): a gift;
+4. cash: withdrawals in the 30 days before adding up to the amount or more, your own cash back;
+5. else a gift, marked "check": cash or a cheque paid in is often a gift, not always.
+
+Your own cash back goes in Cash withdrawal, so it nets off the withdrawal it came from (§14), and a
+cheque of your own money is a transfer; a gift goes in Gifts received, and paid back in Paid back to
+you.
+
 **Rules from your decisions** (`analytics/queue.ts`):
 
 - **When:** a payee you put in one category at least twice one way (`RULE_FROM_DECISIONS`), all in
   that category; or, when you put none of them anywhere, one the reader put in one category three
-  times or more (`RULE_FROM_READER`). Only spending and income categories; never a person's payments;
-  only when the rule would categorise a payment now.
+  times or more (`RULE_FROM_READER`). Only spending and income categories; never a person's payments
+  or cash and cheques paid in; only when the rule would categorise a payment now.
 - **The rule:** money that way whose description holds the payee (one of 4 letters or more); else
   whose payee, as the categoriser sees it, is the payee. A rule that would catch a payment you put
   in another category is too wide and isn't offered. When some payments it would catch are under a
@@ -621,8 +642,16 @@ counts against spending as refunds do (§14).
 - Two payees that are one (a statement's wording and an app's) offer the rule that fills more,
   once.
 
-**What's left** is the uncategorised payments in the period, not a person's and not one a suggested
-rule would fill, grouped by payee and direction, the largest total first.
+**What's left** is the uncategorised payments in the period, not a person's, not cash or a cheque paid
+in and not one a suggested rule would fill, grouped by payee and direction, the largest total first.
+
+**Guesses to check** are the payments in the period the app categorised from a guess: the bank's own
+category (`categorisedBy: "bank"`) or the reader's suggestion (`"ai"`). They are grouped by payee,
+direction and category, the largest total first, with the bank's own words for its category. Not
+listed: a person's payments and cash and cheques paid in (decided above), transfers linked between your accounts,
+split payments, and payments a suggested rule would fill. They count as categorised until you act;
+confirming or changing one makes it yours, and "always" makes a rule for its payee. Your rules,
+schedules and the names the merchant list knows are not guesses.
 
 ## 11. Allowances (`analytics/allowances.ts`)
 
@@ -1138,8 +1167,14 @@ account's value at both ends with what the end value rests on (§9, `basis`). A 
 resting on a valuation more than 31 days before the month's end (`valuationDays`), or worked back
 from a later one, is marked `oldValuation`: its change is not the month's.
 
-**Quality:** uncategorised spending and money in, with their shares; payments with people (§10) in
-the month not decided by you, a rule or an agreement (count, in and out).
+**Quality:**
+
+- uncategorised spending and money in, with their shares;
+- payments with people (§10) in the month not decided by you, a rule or an agreement (count, in and
+  out), and cash and cheques paid in likewise (count and amount);
+- spending and money in categorised from a guess, the bank's category or the reader's suggestion,
+  that you haven't confirmed (§10, "Guesses to check"), with their shares. People's payments and cash
+  and cheques paid in are counted above instead.
 
 **Compared:** each line, spending and left over against the complete months among the 12 before
 (`historyMonths`): their median (the mean of the middle two for an even count), lowest and highest,
