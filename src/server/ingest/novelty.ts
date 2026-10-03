@@ -3,9 +3,10 @@
 // same balance on two tabs of one app). Such an import is "nothing new": said plainly on the review
 // page, and dismissed in one action (docs/INGESTION.md, "Nothing new").
 
-import { formatDate } from '../../shared/dates';
-import { formatMoney } from '../../shared/money';
-import type { DraftFigure, DraftSection, Holding, ImportRecord } from '../../shared/schema';
+import { AGREEMENT_RECEIPT_DAYS } from '../../shared/agreements';
+import { diffDays, formatDate, parseFlexibleDate } from '../../shared/dates';
+import { formatMoney, parseAmount, toMinor } from '../../shared/money';
+import type { Agreement, DraftFigure, DraftSection, Holding, ImportRecord } from '../../shared/schema';
 import type { Store } from '../store';
 import { addsAnything, detailToAdd, stillAdds, type DetailFields } from '../../shared/detail';
 import { candidateOf, classifyDuplicates, type DedupResult } from './dedup';
@@ -36,7 +37,9 @@ type Fact =
   // An HMRC record is known by what it says (ids.ts, `hmrcId`).
   | { kind: 'hmrc'; id: string; what: string }
   // A payslip in full is known by what identifies it (ids.ts, `payslipId`).
-  | { kind: 'payslip'; id: string };
+  | { kind: 'payslip'; id: string }
+  // A schedule, as the agreement it records: known by who, what and its payments.
+  | { kind: 'agreement'; key: string; name: string };
 
 /** A fact and where it already is: the stored data, or another import. */
 interface Placed {
@@ -97,6 +100,48 @@ function factsOf(record: ImportRecord, store: Store): Placed[] {
   for (const f of draft.figures) if (f.include || f.duplicateOf) out.push({ fact: { kind: 'figure', figure: f }, stored: Boolean(f.duplicateOf) });
   for (const h of draft.hmrc ?? []) if (h.include || h.duplicateOf) out.push({ fact: { kind: 'hmrc', id: hmrcId(h.record), what: h.record.type }, stored: Boolean(h.duplicateOf) });
   for (const p of draft.payslips ?? []) if (p.include || p.duplicateOf) out.push({ fact: { kind: 'payslip', id: payslipId(p.record) }, stored: Boolean(p.duplicateOf) });
+  // A schedule that adds nothing to the agreement recorded already (it is not ticked) is stored.
+  for (const a of draft.agreements ?? []) out.push({ fact: { kind: 'agreement', key: agreementKey(a.record), name: a.record.name }, stored: !a.include });
+  return out;
+}
+
+/** What makes two schedules one: the way round, the counterparty, and the payments with their statuses. */
+function agreementKey(a: Pick<Agreement, 'direction' | 'counterparty' | 'payments'>): string {
+  const payments = a.payments.map((p) => `${p.due}:${toMinor(p.amount)}:${p.status ?? ''}`).sort();
+  return `${a.direction ?? 'out'}|${a.counterparty.toLowerCase()}|${payments.join(',')}`;
+}
+
+/** "14 September 2026", "14 Sep 2026", "14/09/2026" in a piece of text. */
+const DAY_IN_TEXT = /\b(\d{1,2}(?:st|nd|rd|th)?\s+[A-Za-z]{3,9}\s+\d{4}|\d{1,2}\/\d{1,2}\/\d{4}|\d{4}-\d{2}-\d{2})\b/;
+/** "£1,236.70" in a piece of text. */
+const MONEY_IN_TEXT = /£\s?(\d{1,3}(?:,\d{3})*(?:\.\d{2})|\d+\.\d{2})/;
+
+/**
+ * Payments a reading mentions that are recorded already, by exact amount within 7 days, though it
+ * gave them no place (an older reader had none for a schedule): from its printed values (a date in
+ * the label or value, an amount in the value) and its remarks ("14 Sep 2026 £1,236.70 Paid").
+ */
+export function mentionedPayments(r: ImportRecord, store: Store): { date: string; amount: number; transactionId: string; accountId: string }[] {
+  const raw = r.extraction.raw;
+  if (!raw) return [];
+  const pairs: { date: string; amount: number }[] = [];
+  const add = (dateText: string | undefined, moneyText: string | undefined) => {
+    const date = dateText ? parseFlexibleDate(dateText) : undefined;
+    const amount = moneyText ? parseAmount(moneyText) : null;
+    if (date && amount !== null && amount !== 0) pairs.push({ date, amount: Math.abs(amount) });
+  };
+  for (const p of raw.printed) add(DAY_IN_TEXT.exec(`${p.label} ${p.value}`)?.[1], MONEY_IN_TEXT.exec(p.value)?.[0]);
+  for (const note of raw.notes) {
+    for (const m of note.matchAll(new RegExp(`${DAY_IN_TEXT.source}[^£;]{0,12}${MONEY_IN_TEXT.source}`, 'g'))) add(m[1], `£${m[2]}`);
+  }
+  const out: { date: string; amount: number; transactionId: string; accountId: string }[] = [];
+  const seen = new Set<string>();
+  for (const p of pairs) {
+    const t = store.transactions().find((x) => !seen.has(x.id) && toMinor(Math.abs(x.amount)) === toMinor(p.amount) && Math.abs(diffDays(x.date, p.date)) <= AGREEMENT_RECEIPT_DAYS);
+    if (!t) continue;
+    seen.add(t.id);
+    out.push({ date: t.date, amount: t.amount, transactionId: t.id, accountId: t.accountId });
+  }
   return out;
 }
 
@@ -125,6 +170,7 @@ function covers(k: Fact, f: Fact): boolean {
   if (k.kind === 'terms' && f.kind === 'terms') return k.account === f.account && k.date === f.date && sameTerms(k.terms, f.terms);
   if (k.kind === 'hmrc' && f.kind === 'hmrc') return k.id === f.id;
   if (k.kind === 'payslip' && f.kind === 'payslip') return k.id === f.id;
+  if (k.kind === 'agreement' && f.kind === 'agreement') return k.key === f.key;
   if (k.kind === 'figure' && f.kind === 'figure') {
     const [a, b] = [k.figure, f.figure];
     return a.kind === b.kind && sameMoney(a.amount, b.amount) && (a.taxYear ?? '') === (b.taxYear ?? '') && (a.periodEnd ?? '') === (b.periodEnd ?? '') && (a.payer ?? '').toLowerCase() === (b.payer ?? '').toLowerCase();
@@ -163,6 +209,7 @@ function describe(facts: { fact: Fact; where: string }[]): string {
     if (kind === 'terms') return `${list.length === 1 ? 'its terms (rates and limit) are' : `its terms for ${plural(list.length, 'account')} are`} ${place}`;
     if (kind === 'hmrc') return `${list.length === 1 ? 'its HMRC record is' : `its ${plural(list.length, 'HMRC record')} are`} ${place}`;
     if (kind === 'payslip') return `${list.length === 1 ? 'the payslip is' : `its ${plural(list.length, 'payslip')} are`} ${place}`;
+    if (kind === 'agreement') return `${list.length === 1 ? `its schedule (${(list[0] as Extract<Fact, { kind: 'agreement' }>).name}) is` : `its ${plural(list.length, 'schedule')} are`} ${place}`;
     return `${list.length === 1 ? 'its tax figure is' : `its ${plural(list.length, 'tax figure')} are`} ${place}`;
   });
   const text = parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}` : (parts[0] ?? '');
@@ -197,10 +244,11 @@ export function assessNovelty(pending: ImportRecord[], store: Store): Map<string
       kept.push(...fresh.map((f) => ({ fact: f.fact, from: r })));
       continue;
     }
-    if (!draft.sections.length && !draft.figures.length && !draft.hmrc?.length && !draft.payslips?.length) {
+    if (!draft.sections.length && !draft.figures.length && !draft.hmrc?.length && !draft.payslips?.length && !draft.agreements?.length) {
       // Understood, and nothing to record: the reader says what it is. With no such words, it was
-      // not understood, and stays a document to look at.
-      if (draft.nothingToRecord) out.set(r.id, { reason: draft.nothingToRecord, coveredBy: [] });
+      // not understood, and stays a document to look at; so does one that mentions payments already
+      // recorded, which its reading had no place for (read it again).
+      if (draft.nothingToRecord && !mentionedPayments(r, store).length) out.set(r.id, { reason: draft.nothingToRecord, coveredBy: [] });
       continue;
     }
     const used = new Set<number>();

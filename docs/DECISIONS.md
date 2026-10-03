@@ -1650,3 +1650,37 @@ Later the same day, after the owner's first runs (`label-imports-2`):
   Uncategorised spending falls by about two fifths, and money in by over two thirds. Most of what
   is left is money with people and the Student Finance credit, which later work handles.
 - **Business costs** paid personally stay in personal spending (owner, 2026-10-03).
+
+## 2026-10-03: Imports where every document finds a home
+
+- **Found:**
+  - Several Student Finance PDFs were read as "nothing new": the reader had no place for a schedule of
+    payments, though the 2026/27 page shows the £1,236.70 maintenance instalment that was the one
+    unexplained credit of September. Its instalments survived only in prose remarks.
+  - A filed "nothing new" document could never be read again.
+  - A full-history savings statement spanning a fixed rate and the easy-access account it became,
+    under one number, was marked ready although it would re-add the fixed account's deposits.
+- **Owner's decisions:**
+  - Maintenance instalments are borrowing: a transfer from the student loan, not income.
+  - Tuition paid straight to the university counts as education spending, when Student Finance
+    pays it.
+- **Done** (INGESTION.md, "Schedules", "Linked accounts", "Nothing new"; FORMULAS.md §3, §9, §10):
+  - Reader rule 24 (`extract-15`): schedules of payments as structured records, never transactions
+    and never "nothing to record".
+  - A schedule is drafted as an agreement, new or filling in the one recorded. Agreements now carry
+    money paid to you (`direction: "in"`) and payments a loan makes for you (`accountId`,
+    `paidBy`), known by exact amount within 7 days.
+  - Student finance's paid instalments become the student loan's rows: maintenance linked to its
+    bank credit as a transfer, fees as education spending. The loan's derived balances are
+    estimates, since its interest is on no such document.
+  - Projections leave out spending a student loan pays for you, which stops with the course.
+  - A reading that mentions recorded payments it had no place for is not "nothing new": read it
+    again. A filed document can be opened again, drafted as the app drafts now.
+  - Linked accounts (`Account.continues`, the `link_accounts` proposal): a statement across the day
+    is split, with the balance carried over. Same-number duplicates and rows outside an account's
+    open dates hold an import back. A section moved to another account is checked again.
+- **Rehearsed** on a copy of the owner's data, with no Claude:
+  - the two years' schedules pair every maintenance instalment with its bank credit, and the fees
+    fall in the months the schedules give;
+  - the Aldermore statement splits on the day the fixed rate ended, adding only the fixed account's
+    interest and the easy-access account's own rows.

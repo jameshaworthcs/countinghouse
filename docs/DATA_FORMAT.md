@@ -44,7 +44,7 @@ data/
   payslips.jsonl       payslips in full: every line, the totals, the codes and the year to date
   terms.jsonl          each account's terms as each document gives them: its rates, its limit and a card's minimum payment
   companies.json       { companies: [...] }      companies you hold shares in: the holding and its valuations
-  agreements.json      { agreements: [...] }     agreements to pay: an offer's or contract's schedule, and what its document says
+  agreements.json      { agreements: [...] }     agreements: an offer's, contract's or award's schedule of payments, and what its document says
   coverage.json        { confirmations: [...] }  stretches you confirmed nothing is missing from, which count as covered
   transactions/<account-id>/<yyyy>.jsonl    one transaction per line, by posting date
   balances/<account-id>.jsonl               balance / valuation snapshots
@@ -70,6 +70,7 @@ data/
 | `balanceMode` | `ledger` \| `market`? | overrides the type default (see ARCHITECTURE.md) |
 | `includeInNetWorth` | boolean | the estate value includes it |
 | `flexibleIsa`, `interestRate`, `maturesOn`, `pension{employer,method}`, `notes`, `attributes` | optional | |
+| `continues` | `{accountId, from}`? | the account this one carries on from, from that day: a product change under one account number (a fixed rate maturing into easy access). A statement that runs across the day is split between the two ([INGESTION.md](INGESTION.md), "Linked accounts") |
 
 ## transactions/&lt;account&gt;/&lt;yyyy&gt;.jsonl
 
@@ -304,17 +305,28 @@ An agent proposes a company from its documents (`add_company`); you change one w
 
 ## agreements.json
 
-Agreements that set out payments you make: an accommodation offer or tenancy, a contract, a payment
-plan. Each is `{id, name, counterparty, names, category, from, until?, total?, payments, details,
-agreedOn?, reference?, notes?, source, createdBy, createdAt, updatedAt}`:
+Agreements that set out payments between you and someone: an accommodation offer or tenancy, a
+contract, a payment plan, a student finance award. Each is `{id, name, counterparty, names,
+category, direction?, accountId?, paidBy?, from, until?, total?, payments, details, agreedOn?,
+reference?, statusAsOf?, notes?, source, createdBy, createdAt, updatedAt}`:
 
-- `counterparty`: who you pay. `names`: other names its payments carry in your accounts ("UNI OF
-  EXAMPLETON"); with the counterparty's own, how its payments are recognised, as whole words.
-- `category`: the spending category its payments take.
+- `counterparty`: who you pay, or who pays you. `names`: other names its payments carry in your
+  accounts ("UNI OF EXAMPLETON"); with the counterparty's own, how its payments are recognised, as whole
+  words.
+- `category`: the category its payments take: a spending category for money you pay; for money paid
+  to you, a transfer (a loan lending it) or an income category.
+- `direction` (optional): `in` for money paid to you (a student finance award's maintenance); absent
+  for money you pay.
+- `accountId` (optional): the account its payments move through when not your everyday ones: a
+  loan that lends you the payments in, or pays the payments out for you. Such payments are known by
+  their exact amount within 7 days of their dates.
+- `paidBy` (optional): who pays it for you, when you do not ("Student Finance England" paying your
+  university). With no `accountId`, none of your payments is one of its.
 - `from`, `until`: the period it covers (a let's first and last days). `total`: its total cost, as
   its document gives it.
-- `payments`: its schedule, `[{due, amount, label?}]`, each amount what is due (positive: money you
-  pay).
+- `payments`: its schedule, `[{due, amount, label?, status?}]`, each amount what is due (always
+  positive). `status` is what its document said: `paid`, `due`, `scheduled`, `awaiting` or
+  `cancelled`, as on `statusAsOf`.
 - `details`: everything else its document says, as `[{label, value}]` in its own words ("Bedroom
   type": "Standard ensuite"). `agreedOn`: the day it was offered or signed; `reference`: a booking,
   contract or account number.
@@ -323,9 +335,10 @@ agreedOn?, reference?, notes?, source, createdBy, createdAt, updatedAt}`:
 
 A payment it schedules takes its category as it comes, ahead of the merchant list
 (`categorisedBy: "agreement"`), and its card on the Spending page checks each scheduled payment
-against what you paid ([FORMULAS.md §10](FORMULAS.md), "Agreements"). An agent proposes one from
-its document (`add_agreement`); you change its name, names, category, end or notes with
-`PUT /api/agreements/:id`.
+against what was paid ([FORMULAS.md §10](FORMULAS.md), "Agreements"). An import records one from a
+schedule its document gives (`draft.agreements`, below), or fills in one recorded already; an agent
+proposes one from its document (`add_agreement`); you change its name, names, category, end or
+notes with `PUT /api/agreements/:id`.
 
 ## coverage.json
 
@@ -382,7 +395,10 @@ number. Its pay, tax, NI, pension and student loan for the period are also tax f
   verification?, alternative?}`.
   - `raw` is the engine's complete output, kept for audit and re-derivation. A reading that read
     everything (`extract-14`) also has `payslips`, `hmrc`, each account's `terms` and `printed`:
-    every other labelled value the document prints, `{section?, label, value}` as printed.
+    every other labelled value the document prints, `{section?, label, value}` as printed. Since
+    `extract-15` it also has `schedules`: each schedule of payments the document gives, `{provider,
+    name, direction (to-you, from-you, to-other), paidTo?, from?, until?, reference?, total?,
+    payments [{date, amount, label?, status?}], details}`.
   - `verification` records how the reading was checked (docs/INGESTION.md, "Checking every
     figure"): `{method: checks|second-reading, firstModel, secondModel?, reasons, disagreements,
     kept: first|second, error?}`.
@@ -404,6 +420,13 @@ number. Its pay, tax, NI, pension and student loan for the period are also tax f
   waiting for review (or of another account in this one). `transferMatchBy: "user"` says you chose
   its `transferMatch`, or that it has none ([INGESTION.md](INGESTION.md), "Linking transfers before
   commit"). Both are optional.
+  A draft's `agreements` (optional) are the schedules its document gives, each `{key, include,
+  target (new, or existing with its agreementId), record, adds?, explains}`: the agreement as the
+  document gives it (laid over the one recorded already), what it adds to that one (`{payments,
+  statuses}`), and the recorded payments its payments are (`{index, transactionId, accountId, date,
+  amount}`) ([INGESTION.md](INGESTION.md), "Schedules").
+- `reopens` (optional): the import that filed this document as adding nothing new, which this one
+  opens again.
 - `draftEditedAt`: when you last saved changes to a pending draft; such a draft is never redrafted
   by itself.
 - `label` (optional, committed imports): the name History shows and searches in place of the file
@@ -415,6 +438,7 @@ number. Its pay, tax, NI, pension and student loan for the period are also tax f
   statement periods it gives each account's **coverage** (the days it has data for).
   `nothingNew` (optional) is set when the import was dismissed as adding nothing new: why, in words.
   Only the document and this record were written; the counts are all zero.
+  `agreementsAdded` (optional): the agreements it recorded or filled in from its schedules.
   `transactionsRemoved` (optional): copies of payments recorded twice that the import took away
   (`{id, date, amount, description, importId}`, the import that had recorded the copy). A draft
   section offers them as `extraCopies` (`{transactionId, keepId, date, amount, description,
@@ -448,6 +472,9 @@ lives in the work area (`<work>/proposals/`), never here.
   - `remove_internal_move {transaction}`: a move between an account's main balance and one of its
     Spaces, which the balances either side of it add up only without.
   - `set_account_dates {account, openedOn?, closedOn?}` (`null` clears one).
+  - `link_accounts {account, continues, from}`: an account carries on from another from a day (a
+    product change under one account number), set as its `continues`. The other must have closed
+    before that day.
   - `move_balance {balance, to}`: a balance a document was read into the wrong account, moved to
     the account it is of. It keeps its id and everything else, and the terms its reading gave that
     day (`terms.jsonl`) go with it.
@@ -456,9 +483,9 @@ lives in the work area (`<work>/proposals/`), never here.
   - `add_company {company, valuation, account}`: shares you hold in a company, from its documents:
     the company (`companies.json`), a new "other asset" account `{id, name}`, and its valuation
     recorded as that account's balance.
-  - `add_agreement {agreement}`: an agreement to pay, from its document (`agreements.json`). The
-    payments already recorded that it schedules take its category, except one you, a rule of yours
-    or a transfer link categorised.
+  - `add_agreement {agreement}`: an agreement, from its document (`agreements.json`). The payments
+    already recorded that it schedules take its category, except one you, a rule of yours or a
+    transfer link categorised.
   - `set_terms {account, asOf, importId, terms}`: an account's terms as one of its documents gives
     them on its date (`{rates, limit?, minimumPayment?, paymentDue?}`), in place of what its reading
     kept for that account and day.

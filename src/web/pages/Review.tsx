@@ -365,6 +365,16 @@ function SectionEditor({ section, index, total, latest, periodFromRows, onChange
   const [showDupes, setShowDupes] = useState(false);
   const set = (patch: Partial<DraftSection>) => onChange({ ...section, ...patch });
   const setTx = (key: string, patch: Partial<DraftTransaction>) => set({ transactions: section.transactions.map((t) => (t.key === key ? { ...t, ...patch } : t)) });
+  // Another account chosen: its rows are checked again against that account, as which are recorded
+  // there already decides which are ticked. Shown at once, then replaced by the server's check.
+  const retarget = (next: DraftSection['target']) => {
+    const moved = { ...section, target: next };
+    onChange(moved);
+    if (next.mode === 'skip' || !linking.editable) return;
+    void api<DraftSection>(`/imports/${linking.importId}/sections/redraft`, { body: { section: moved } as unknown as Record<string, unknown> })
+      .then(onChange)
+      .catch(() => undefined);
+  };
   // Ticking rows in and out with Shift and Ctrl/⌘, as in the transactions list (lib/selection.ts).
   const holdOf = useShiftHold();
   const anchor = useRef<Anchor | undefined>(undefined);
@@ -396,9 +406,10 @@ function SectionEditor({ section, index, total, latest, periodFromRows, onChange
   // span; the range you chose can widen it (docs/FORMULAS.md §3).
   const rowDates = section.transactions.map((t) => t.date).sort();
   const [rowsFrom, rowsTo] = [rowDates[0] ?? '', rowDates.at(-1) ?? ''];
-  const coverable = !market && rowDates.length > 0 && (periodFromRows || !section.periodStart);
+  const coverable = !market && !section.fromSchedule && rowDates.length > 0 && (periodFromRows || !section.periodStart);
   const suggested = section.suggestedAccountId ? data.accounts.find((a) => a.id === section.suggestedAccountId) : undefined;
-  const checks = target.mode === 'skip' ? [] : sectionChecks(section, { accountType: type, latest, periodFromRows });
+  const into = target.mode === 'existing' ? data.accounts.find((a) => a.id === target.accountId) : target.mode === 'new' ? target.account : undefined;
+  const checks = target.mode === 'skip' ? [] : sectionChecks(section, { accountType: type, latest, periodFromRows, openedOn: into?.openedOn, closedOn: into?.closedOn });
   // Rows a check is about carry its title, so the problem is visible where it is.
   const flags = new Map<string, string[]>();
   for (const c of checks) if (c.status === 'warn') for (const k of c.rows ?? []) flags.set(k, [...(flags.get(k) ?? []), c.title]);
@@ -421,13 +432,11 @@ function SectionEditor({ section, index, total, latest, periodFromRows, onChange
                 const v = e.target.value;
                 if (v === '__skip') set({ target: { mode: 'skip' } });
                 else if (v === '__new')
-                  set({
-                    target: {
-                      mode: 'new',
-                      account: target.mode === 'new' ? target.account : { id: slugify(`${d.institutionName ?? ''} ${d.accountName ?? 'account'}`, data.accounts.map((a) => a.id)), name: d.accountName ?? 'New account', type: d.accountType ?? 'current', currency: section.currency, ...(d.last4 ? { last4: d.last4 } : {}), ...(d.institutionName ? { institutionName: d.institutionName } : {}) },
-                    },
+                  retarget({
+                    mode: 'new',
+                    account: target.mode === 'new' ? target.account : { id: slugify(`${d.institutionName ?? ''} ${d.accountName ?? 'account'}`, data.accounts.map((a) => a.id)), name: d.accountName ?? 'New account', type: d.accountType ?? 'current', currency: section.currency, ...(d.last4 ? { last4: d.last4 } : {}), ...(d.institutionName ? { institutionName: d.institutionName } : {}) },
                   });
-                else set({ target: { mode: 'existing', accountId: v } });
+                else retarget({ mode: 'existing', accountId: v });
               }}
             >
               <optgroup label="Your accounts">
@@ -456,7 +465,7 @@ function SectionEditor({ section, index, total, latest, periodFromRows, onChange
             </Select>
           </Field>
           {target.mode === 'skip' && suggested && (
-            <Button size="sm" variant="primary" onClick={() => set({ target: { mode: 'existing', accountId: suggested.id } })}>
+            <Button size="sm" variant="primary" onClick={() => retarget({ mode: 'existing', accountId: suggested.id })}>
               Import into {suggested.name}
             </Button>
           )}
@@ -483,9 +492,12 @@ function SectionEditor({ section, index, total, latest, periodFromRows, onChange
             </Field>
           </div>
         )}
+        {section.fromSchedule && target.mode !== 'skip' && (
+          <Callout tone="neutral">These rows are the payments its schedule says were made, not a statement of the account: they add to what you owe, and cover none of its days. Its balance comes from its own statements.</Callout>
+        )}
         {target.mode !== 'skip' && (
           <>
-            <div className="rounded-lg border border-line p-3">
+            <div className={cn('rounded-lg border border-line p-3', section.fromSchedule && 'hidden')}>
               <Checkbox checked={section.recordBalance} onChange={(v) => set({ recordBalance: v })} label={<span className="font-medium text-ink">Record the {market ? 'value' : 'balance'}</span>} />
               <div className="mt-3 grid gap-3 sm:grid-cols-2">
                 <Field label={market ? 'Value' : 'Balance'} hint={type && ACCOUNT_TYPE_META[type].liability ? 'Money owed is negative' : undefined}>
@@ -966,6 +978,115 @@ function JobsEditor({ draft, onChange }: { draft: Draft; onChange: (d: Draft) =>
   );
 }
 
+const PAYMENT_STATUS_WORDS: Record<string, string> = { paid: 'Paid', due: 'Due', scheduled: 'Expected', awaiting: 'Awaiting confirmation', cancelled: 'Cancelled' };
+
+/**
+ * The schedules on this document (docs/INGESTION.md, "Schedules"): each the agreement it records, new
+ * or filling in one recorded already, with its payments as the document gives them and the recorded
+ * payments they are. Its category is what its payments take: change it here before committing.
+ */
+function AgreementsEditor({ draft, onChange }: { draft: Draft; onChange: (d: Draft) => void }) {
+  const { accountName } = useAppData();
+  if (!draft.agreements?.length) return null;
+  const set = (key: string, patch: Partial<NonNullable<Draft['agreements']>[number]>) => onChange({ ...draft, agreements: draft.agreements!.map((a) => (a.key === key ? { ...a, ...patch } : a)) });
+  return (
+    <Card title="Schedules" description="Payments this document says are due, made or expected, kept as an agreement: its payments take its category as they come, and each is checked against what was paid." padded={false}>
+      <div className="divide-y divide-line border-t border-line">
+        {draft.agreements.map((d) => {
+          const a = d.record;
+          const toYou = a.direction === 'in';
+          const who = toYou ? `${a.counterparty} pays you${a.accountId ? `, lent through ${accountName(a.accountId)}` : ''}` : a.paidBy ? `${a.paidBy} pays ${a.counterparty} for you${a.accountId ? `, from ${accountName(a.accountId)}` : ''}` : `You pay ${a.counterparty}`;
+          const explained = new Map(d.explains.map((e) => [e.index, e]));
+          return (
+            <div key={d.key} className={cn('px-5 py-4', d.include ? '' : 'opacity-60')}>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <label className="flex min-w-0 items-start gap-2.5">
+                  <Checkbox checked={d.include} onChange={(v) => set(d.key, { include: v })} />
+                  <span className="min-w-0">
+                    <span className="block font-medium text-ink">{a.name}</span>
+                    <span className="block text-[12.5px] text-ink-3">
+                      {who}
+                      {a.total !== undefined && (
+                        <>
+                          {' '}
+                          · <Money value={a.total} /> in all
+                        </>
+                      )}
+                    </span>
+                    <span className="mt-0.5 block text-[12.5px] text-ink-3">
+                      {d.target.mode === 'new' ? (
+                        <Badge tone="accent">New agreement</Badge>
+                      ) : d.adds && d.adds.payments + d.adds.statuses > 0 ? (
+                        <Badge tone="neutral">
+                          Fills in the one recorded: {[d.adds.payments ? plural(d.adds.payments, 'new payment') : '', d.adds.statuses ? plural(d.adds.statuses, 'newer status', 'newer statuses') : ''].filter(Boolean).join(', ')}
+                        </Badge>
+                      ) : (
+                        <Badge tone="muted">Recorded already, as it is here</Badge>
+                      )}
+                    </span>
+                  </span>
+                </label>
+                <div className="w-56 max-w-full">
+                  <CategorySelect value={a.category} onChange={(v) => v && set(d.key, { record: { ...a, category: v } })} className="h-8 text-[12.5px]" />
+                </div>
+              </div>
+              <div className="mt-2 overflow-x-auto">
+                <table className={tableClasses.table}>
+                  <thead>
+                    <tr>
+                      <th className={tableClasses.th}>Date</th>
+                      <th className={tableClasses.th}>Payment</th>
+                      <th className={cn(tableClasses.th, 'hidden sm:table-cell')}>Its document says</th>
+                      <th className={cn(tableClasses.th, 'text-right')}>Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {a.payments.map((p, i) => {
+                      const e = explained.get(i);
+                      return (
+                        <tr key={i}>
+                          <td className={cn(tableClasses.td, 'whitespace-nowrap')}>{formatDate(p.due)}</td>
+                          <td className={cn(tableClasses.td, 'text-[12.5px]')}>
+                            {p.label ?? `Payment ${i + 1}`}
+                            {/* On a phone what its document says goes under the payment, so the amount fits. */}
+                            {p.status && <div className="text-[12px] text-ink-3 sm:hidden">{PAYMENT_STATUS_WORDS[p.status]}</div>}
+                            {e && (
+                              <div className="text-[12px] text-good-ink">
+                                {toYou ? 'Received' : 'Paid'} {formatDate(e.date)} · {accountName(e.accountId)}
+                              </div>
+                            )}
+                          </td>
+                          <td className={cn(tableClasses.td, 'hidden text-[12.5px] text-ink-2 sm:table-cell')}>{p.status ? PAYMENT_STATUS_WORDS[p.status] : ''}</td>
+                          <td className={cn(tableClasses.td, tableClasses.num)}>
+                            <Money value={p.amount} />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              {a.details.length > 0 && (
+                <details className="mt-2 text-[12.5px]">
+                  <summary className="cursor-pointer text-ink-3 hover:text-ink-2">What else it says</summary>
+                  <dl className="mt-1.5 grid gap-x-3 gap-y-0.5 sm:grid-cols-[auto_minmax(0,1fr)]">
+                    {a.details.map((x, i) => (
+                      <Fragment key={i}>
+                        <dt className="text-ink-3">{x.label}</dt>
+                        <dd className="text-ink-2">{x.value}</dd>
+                      </Fragment>
+                    ))}
+                  </dl>
+                </details>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </Card>
+  );
+}
+
 /** HMRC's records on this document: payments, codes, job details, events, settlements, NI years, forecasts. */
 function HmrcEditor({ draft, onChange }: { draft: Draft; onChange: (d: Draft) => void }) {
   if (!draft.hmrc?.length) return null;
@@ -1368,6 +1489,10 @@ export default function Review() {
       void navigate('/import');
     },
   });
+  // A filed document, back in review as an import of its own.
+  const reopen = useApiMutation(() => api<ImportRecord>(`/imports/${id}/reopen`, { method: 'POST' }), {
+    onSuccess: (r) => void navigate(`/import/${r.id}`),
+  });
   const summary = useMemo(() => {
     if (!draft) return '';
     const n = draft.sections.filter((s) => s.target.mode !== 'skip').reduce((s, sec) => s + sec.transactions.filter((t) => t.include).length, 0);
@@ -1380,9 +1505,10 @@ export default function Review() {
     const p = draft.sections.filter((s) => s.target.mode !== 'skip' && s.annualIncome !== undefined && s.balanceDate && !(s.recordBalance && s.balance !== undefined)).length;
     const r = (draft.hmrc ?? []).filter((x) => x.include).length;
     const ps = (draft.payslips ?? []).filter((x) => x.include).length;
+    const ag = (draft.agreements ?? []).filter((x) => x.include).length;
     const used = new Set([...draft.figures, ...(draft.hmrc ?? []), ...(draft.payslips ?? [])].flatMap((x) => (x.include && x.jobKey ? [x.jobKey] : [])));
     const j = (draft.jobs ?? []).filter((x) => x.target.mode === 'new' && used.has(x.key)).length;
-    return [n ? plural(n, 'transaction') : '', d ? `details on ${plural(d, 'recorded payment')}` : '', b ? plural(b, 'balance') : '', h ? 'holdings' : '', f ? plural(f, 'tax figure') : '', w ? `earned pay for ${plural(w, 'month')}` : '', p ? plural(p, 'pension forecast') : '', r ? plural(r, 'HMRC record') : '', ps ? `${plural(ps, 'payslip')} in full` : '', j ? plural(j, 'new job') : ''].filter(Boolean).join(', ') || 'nothing';
+    return [n ? plural(n, 'transaction') : '', d ? `details on ${plural(d, 'recorded payment')}` : '', b ? plural(b, 'balance') : '', h ? 'holdings' : '', f ? plural(f, 'tax figure') : '', w ? `earned pay for ${plural(w, 'month')}` : '', p ? plural(p, 'pension forecast') : '', r ? plural(r, 'HMRC record') : '', ps ? `${plural(ps, 'payslip')} in full` : '', ag ? plural(ag, 'schedule') : '', j ? plural(j, 'new job') : ''].filter(Boolean).join(', ') || 'nothing';
   }, [draft]);
 
   if (q.error) return <ErrorNote error={q.error} />;
@@ -1446,6 +1572,13 @@ export default function Review() {
       {filed && (
         <Callout tone="neutral" title={`Filed ${rec.committedAt ? formatDate(rec.committedAt.slice(0, 10)) : ''}: nothing new`}>
           {filed} The document is kept with your other documents; nothing was recorded from it.
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <Button size="sm" loading={reopen.isPending} onClick={() => reopen.mutate(undefined)}>
+              Open it again
+            </Button>
+            <span className="text-[12.5px] text-ink-3">Drafted again from its reading as the app would draft it now, to find what it had no place for before. Nothing is read with Claude unless you ask.</span>
+          </div>
+          {reopen.error && <div className="mt-1 text-[12.5px] text-bad-ink">{reopen.error.message}</div>}
         </Callout>
       )}
       {committed && rec.result && !filed && (
@@ -1520,7 +1653,7 @@ export default function Review() {
                     </ul>
                   </Callout>
                 )}
-                {draft.sections.length === 0 && !draft.figures.length && !draft.hmrc?.length && !nothingNew && !filed && (
+                {draft.sections.length === 0 && !draft.figures.length && !draft.hmrc?.length && !draft.agreements?.length && !nothingNew && !filed && (
                   <Callout tone="warn" title="Nothing was found to record">
                     {draft.nothingToRecord ? `${draft.nothingToRecord} ` : ''}Check the document: if it does hold figures, read it again with another model; if not, discard it.
                   </Callout>
@@ -1569,6 +1702,13 @@ export default function Review() {
                   }}
                 />
                 <HmrcEditor
+                  draft={draft}
+                  onChange={(d) => {
+                    setDirty(true);
+                    setDraft(d);
+                  }}
+                />
+                <AgreementsEditor
                   draft={draft}
                   onChange={(d) => {
                     setDirty(true);

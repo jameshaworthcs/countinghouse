@@ -85,7 +85,10 @@ export function computeBaseline(store: Store, coverage: Coverage, from: ISODate,
   }
 
   const inCovered = (d: ISODate) => covers(covered, d);
-  const list = flows(store, from, to).filter((f) => inCovered(f.t.date));
+  // Spending a student loan pays for you (tuition fees paid to your university) is not your own
+  // money, and stops when the course does: it is left out of what continues (FORMULAS.md §3).
+  const lent = new Set(store.accounts.filter((a) => a.type === 'student_loan').map((a) => a.id));
+  const list = flows(store, from, to).filter((f) => inCovered(f.t.date) && !lent.has(f.t.accountId));
   const income = list.filter((f) => f.cls === 'income').reduce((s, f) => s + f.minor, 0);
   const spending = list.filter((f) => f.cls === 'spending').reduce((s, f) => s + f.minor, 0);
   const perMonth = (minor: number) => fromMinor(Math.round(minor / periodMonths));

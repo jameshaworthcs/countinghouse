@@ -26,6 +26,7 @@ export const CHANGE_LABELS: Record<ProposedChangeKind, { title: string; count: (
   remove_internal_move: { title: 'Remove a move inside the account', count: (n) => `${plural(n, 'move')} inside an account removed`, icon: <PiggyBank className="size-4" aria-hidden /> },
   remove_wrong_sign: { title: 'Remove a row read with the wrong sign', count: (n) => `${plural(n, 'row')} with the wrong sign removed`, icon: <ArrowUpDown className="size-4" aria-hidden /> },
   set_account_dates: { title: 'Change an account’s dates', count: (n) => (n === 1 ? 'an account’s dates' : `${n} accounts’ dates`), icon: <CalendarDays className="size-4" aria-hidden /> },
+  link_accounts: { title: 'Link an account to the one it carries on from', count: (n) => plural(n, 'account link'), icon: <Link2 className="size-4" aria-hidden /> },
   move_balance: { title: 'Move a balance to its account', count: (n) => `${plural(n, 'balance')} moved`, icon: <ArrowRightLeft className="size-4" aria-hidden /> },
   add_company: { title: 'Add shares you hold in a company', count: (n) => plural(n, 'company', 'companies'), icon: <Building2 className="size-4" aria-hidden /> },
   add_pension_arrangement: { title: 'Add what an employer pays into your pension', count: (n) => plural(n, 'pension arrangement'), icon: <PiggyBank className="size-4" aria-hidden /> },
@@ -365,6 +366,25 @@ export function ChangeBody({ change, view }: { change: ProposedChange; view: Pro
           {line('Opened', acc?.openedOn, change.openedOn)}
           {line('Closed', acc?.closedOn, change.closedOn)}
           {change.closedOn !== undefined && (acc?.status === 'closed') !== (change.closedOn !== null) && <div className="text-[12.5px] text-ink-3">{change.closedOn ? 'It will show as closed, and stop counting after that day.' : 'It will show as open again.'}</div>}
+        </div>
+      );
+    }
+    case 'link_accounts': {
+      const acc = view.accounts[change.account];
+      const older = view.accounts[change.continues];
+      return (
+        <div className="grid gap-1 rounded-lg border border-line bg-panel px-3 py-2 text-[13px] text-ink-2">
+          <div>
+            <Link to={`/accounts/${change.account}`} className="font-medium text-ink hover:underline">
+              {acc?.name ?? accountName(change.account)}
+            </Link>{' '}
+            carries on from{' '}
+            <Link to={`/accounts/${change.continues}`} className="font-medium text-ink hover:underline">
+              {older?.name ?? accountName(change.continues)}
+            </Link>{' '}
+            from {formatDate(change.from)}.
+          </div>
+          <div className="text-[12.5px] text-ink-3">A statement that runs across that day is split between the two: the rows before it go to the first, the rest to the second.</div>
         </div>
       );
     }

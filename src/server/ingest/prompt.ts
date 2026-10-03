@@ -2,15 +2,15 @@
 // JSON schema. Bump PROMPT_VERSION whenever either changes; it is recorded on every import so old
 // extractions can be told apart (and re-run) later.
 //
-// Reading everything (Settings → Import & extraction, `readEverything`) adds rules 20 to 23 and their
+// Reading everything (Settings → Import & extraction, `readEverything`) adds rules 20 to 24 and their
 // part of the schema: a payslip in full, HMRC's pages as records, an account's terms (its rates,
-// limit and minimum payment) and every other labelled value the document prints. It is
-// PROMPT_VERSION_EVERYTHING, and stays off until its evaluation has passed.
+// limit and minimum payment), every other labelled value the document prints, and schedules of
+// payments (a student finance award, an offer's instalments). It is PROMPT_VERSION_EVERYTHING.
 
-import { ACCOUNT_TYPES, ASSET_CLASSES, EXTRACTION_DOC_TYPES, FIGURE_KINDS, TERMS_RATE_APPLIES } from '../../shared/schema';
+import { ACCOUNT_TYPES, AGREEMENT_PAYMENT_STATUSES, ASSET_CLASSES, EXTRACTION_DOC_TYPES, FIGURE_KINDS, SCHEDULE_DIRECTIONS, TERMS_RATE_APPLIES } from '../../shared/schema';
 
 export const PROMPT_VERSION = 'extract-11';
-export const PROMPT_VERSION_EVERYTHING = 'extract-14';
+export const PROMPT_VERSION_EVERYTHING = 'extract-15';
 
 /** The prompt version a reading is made with. */
 export const promptVersion = (everything: boolean) => (everything ? PROMPT_VERSION_EVERYTHING : PROMPT_VERSION);
@@ -76,7 +76,7 @@ Accuracy matters more than completeness:
     - Holiday balances (accrued, taken, carried over, left) are not figures.
     For every figure that is not earned_pay, work is null.`;
 
-/** Rules 20 to 23: everything else the document prints (extract-14). */
+/** Rules 20 to 24: everything else the document prints (extract-15). */
 const EVERYTHING_RULES = `
 20. payslips: each payslip on the document in full, as well as its figures for the period under rule 13: gross_pay, tax_deducted, national_insurance, pension_contribution_employee (the pension deducted from your pay) and student_loan_deducted, each when printed. The employer's NI and pension are never figures: they go in employerCosts.
     - employer as the payslip names it; otherNames for any other company it prints (a group company); payeReference ("123/AB45678") and payrollNumber (your payroll or works number) when printed.
@@ -93,12 +93,19 @@ const EVERYTHING_RULES = `
     - settlement: a tax year worked out: taxYear, asOf, outcome (underpaid, overpaid or settled), amount, calculatedOn, outstanding (to pay positive, to be repaid negative), payments made.
     - ni-year: a year of the National Insurance record: asOf, taxYear, status (full, not-full, not-available, other), contributions by kind, voluntaryCost and payBy to fill it, text.
     - state-pension-forecast: asOf, weekly, monthly, annual, payableFrom, recordTo, qualifyingYears, yearsNeeded, assumesYears, maximum.
-22. printed: every other labelled value the document prints that nothing above holds, so nothing on it is lost: plan and policy details, charges, transfer and projected values, estimated interest, a P60's National Insurance table and statutory payments, a P45's details, and the like. One entry each: section (the heading it is under, or null), label and value exactly as printed. Leave out transaction rows, holdings and anything already given under figures, payslips, hmrc or an account's terms. Never include a name, address, date of birth, National Insurance number, full account or card number, sort code, or a reference that identifies the account holder.
+22. printed: every other labelled value the document prints that nothing above holds, so nothing on it is lost: plan and policy details, charges, transfer and projected values, estimated interest, a P60's National Insurance table and statutory payments, a P45's details, and the like. One entry each: section (the heading it is under, or null), label and value exactly as printed. Leave out transaction rows, holdings and anything already given under figures, payslips, hmrc, schedules or an account's terms. Never include a name, address, date of birth, National Insurance number, full account or card number, sort code, or a reference that identifies the account holder.
 23. terms, on each account: its terms as the document gives them; null when it gives none. The credit limit or arranged overdraft stays in creditLimit, and the AER in interestRate as well.
     - rates: every rate it prints, one each: applies (interest when paid to you on what the account holds; purchases, cash or balance-transfers on a card; overdraft; loan when charged on a loan or mortgage; other), rate as the percentage printed (34.94 for 34.940%), per month when the document gives it for a month ("2.104% monthly interest rate") and null for a year, basis as printed (AER, APR, EAR, simple for a card's annual simple rate, gross), variable true or false when it says, until the last day it applies when it ends (a promotional rate "until 31 Mar 2027", a boosted rate, a fixed rate's end), balance the amount at that rate when printed (a promotional balance), and label as printed ("Standard purchases", "Boosted rate").
-    - minimumPayment and paymentDue: a card's minimum payment and the date it is due.`;
+    - minimumPayment and paymentDue: a card's minimum payment and the date it is due.
+24. schedules: a schedule of payments between you and an organisation, or made for you, that is not an account's own movements (rule 5): a student finance award, payments page ("View your payments") or entitlement letter; an accommodation offer or tenancy's instalments; a council tax bill; a loan, payment plan or contract's payment dates. One entry per schedule, and each part its own: a Maintenance Loan and a Tuition Fee Loan are two.
+    - provider: who pays or is paid, as printed ("Student Finance England"); name: what it is, with its period ("Maintenance Loan 2026/27", "Room 4 rent 2026/27").
+    - direction: to-you when the provider pays you; from-you when you pay it; to-other when it pays someone else for you (a Tuition Fee Loan paid to your university or college), with paidTo naming who it pays.
+    - from and until: the period it covers, when printed; reference as printed, never a customer, account or student support number that identifies you; total as printed.
+    - payments: every payment it lists, in printed order: date, amount (positive, whichever way it goes), label as printed ("Instalment 1"), and status: paid ("Paid", "We've paid you"), due ("Due", "Ready to be paid"), scheduled ("Expected", "Planned", a timetable's dates), awaiting ("Awaiting confirmation") or cancelled; null when it shows none.
+    - details: other labelled facts about it as printed (course, course year, university or college, room, let period), never a name, address, date of birth or a number that identifies you.
+    A schedule's payments are never transactions, and a document that gives a schedule is never nothingToRecord. Every payment it lists goes in payments, never only in notes or printed.`;
 
-/** The system prompt: rules 1 to 19, and 20 to 23 when reading everything. */
+/** The system prompt: rules 1 to 19, and 20 to 24 when reading everything. */
 export const systemPrompt = (everything: boolean) => (everything ? `${SYSTEM_PROMPT}${EVERYTHING_RULES}` : SYSTEM_PROMPT);
 
 const nullable = (schema: Record<string, unknown>) => ({ anyOf: [schema, { type: 'null' }] });
@@ -277,13 +284,25 @@ export function extractionJsonSchema(everything = false): Record<string, unknown
     maximum: nullable(bool()),
   });
   const printed = object({ section: nullable(str('The heading it is under')), label: str('As printed'), value: str('As printed') });
+  const schedule = object({
+    provider: str('Who pays or is paid, as printed'),
+    name: str('What it is, with its period'),
+    direction: { type: 'string', enum: [...SCHEDULE_DIRECTIONS] },
+    paidTo: nullable(str('Who it pays for you, for to-other')),
+    from: nullable(date()),
+    until: nullable(date()),
+    reference: nullable(str()),
+    total: nullable(num()),
+    payments: { type: 'array', items: object({ date: date(), amount: num('Positive'), label: nullable(str('As printed')), status: nullable({ type: 'string', enum: [...AGREEMENT_PAYMENT_STATUSES] }) }) },
+    details: { type: 'array', items: object({ label: str('As printed'), value: str('As printed') }) },
+  });
   return object({
     documentType: { type: 'string', enum: [...EXTRACTION_DOC_TYPES] },
     institutionName: nullable(str()),
     documentDate: nullable(date()),
     accounts: { type: 'array', items: account },
     figures: { type: 'array', items: figure },
-    ...(everything ? { payslips: { type: 'array', items: payslip }, hmrc: { type: 'array', items: hmrc }, printed: { type: 'array', items: printed } } : {}),
+    ...(everything ? { payslips: { type: 'array', items: payslip }, hmrc: { type: 'array', items: hmrc }, printed: { type: 'array', items: printed }, schedules: { type: 'array', items: schedule } } : {}),
     notes: { type: 'array', items: str() },
     nothingToRecord: nullable(str('What the document shows, when it has nothing to record')),
     confidence: { type: 'string', enum: ['high', 'medium', 'low'] },

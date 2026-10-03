@@ -10,9 +10,10 @@ import { formatMoney, fromMinor, toMinor } from '../../shared/money';
 import { taxYearOf } from '../../shared/uk';
 import { detailToAdd, fillIn, seenInEntry, stillAdds } from '../../shared/detail';
 import { sameTerms, termsOfReading } from '../../shared/terms';
-import type { Account, BalanceSnapshot, DetailField, Draft, DraftSection, Employment, Extraction, Figure, HmrcRecord, Holding, HoldingsSnapshot, ImportRecord, PayslipRecord, Terms, Transaction } from '../../shared/schema';
-import { AccountSchema, BalanceSnapshotSchema, DraftSchema, EmploymentSchema, FigureSchema, HmrcRecordSchema, HoldingsSnapshotSchema, PayslipRecordSchema, TermsSchema, TransactionSchema } from '../../shared/schema';
+import type { Account, Agreement, BalanceSnapshot, DetailField, Draft, DraftSection, Employment, Extraction, Figure, HmrcRecord, Holding, HoldingsSnapshot, ImportRecord, PayslipRecord, Terms, Transaction } from '../../shared/schema';
+import { AccountSchema, AgreementSchema, BalanceSnapshotSchema, DraftSchema, EmploymentSchema, FigureSchema, HmrcRecordSchema, HoldingsSnapshotSchema, PayslipRecordSchema, TermsSchema, TransactionSchema } from '../../shared/schema';
 import { learn, learnFromPayslip, matchEmployment } from '../employments';
+import { scheduledPatches } from '../analytics/agreements';
 import { payeReference } from '../analytics/sources';
 import { nowISO, safeFileName } from '../fsutil';
 import { balanceId, figureId, hmrcId, holdingsId, payslipId, termsId, transactionId, transferGroupId } from '../ids';
@@ -21,6 +22,7 @@ import { linkTransfers, rederive, salaryByPayroll } from '../enrich';
 import { StoreError, type Store } from '../store';
 import { hasYourChanges } from './dedup';
 import { sameHolding } from './match';
+import { mergeSchedule } from './schedules';
 
 export interface CommitInput {
   record: ImportRecord;
@@ -513,6 +515,36 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
   const hmrcAdded = hmrcFresh.length;
   if (payslipsFresh.length) await store.upsertRecords('payslips', payslipsFresh, `import: ${label} payslips`);
   const payslipsAdded = payslipsFresh.length;
+  // The schedules it gives, as agreements: new ones, or what they add to one recorded already (laid
+  // over it again now, as it may have changed since the draft). An account a schedule pays through
+  // that this import creates takes its final id. Then the payments already recorded that each one
+  // schedules take its category, as the categoriser will file those to come.
+  let agreementsAdded = 0;
+  if (!nothingNew) {
+    const finalId = (id: string | undefined) => {
+      const section = id ? draft.sections.find((x) => x.target.mode === 'new' && x.target.account.id === id) : undefined;
+      return (section ? resolved.get(section.key)?.id : undefined) ?? id;
+    };
+    for (const d of draft.agreements ?? []) {
+      if (!d.include) continue;
+      const base = d.target.mode === 'existing' ? store.agreement(d.target.agreementId) : undefined;
+      const accountId = finalId(d.record.accountId);
+      const record = { ...d.record, ...(accountId ? { accountId } : {}) };
+      let agreement: Agreement;
+      if (base) {
+        const { merged } = mergeSchedule(base, record);
+        agreement = AgreementSchema.parse({ ...merged, createdBy: base.createdBy, createdAt: base.createdAt, updatedAt: stamp });
+      } else {
+        const taken = store.agreements.map((a) => a.id);
+        const id = taken.includes(record.id) ? slugify(record.id, taken) : record.id;
+        agreement = AgreementSchema.parse({ ...record, id, source, createdBy: 'owner', createdAt: stamp, updatedAt: stamp });
+      }
+      await store.upsertAgreement(agreement, `import: ${label} agreement ${agreement.name}`);
+      agreementsAdded++;
+      const files = scheduledPatches(store, agreement, categoriserFor(store));
+      if (files.length) await store.updateTransactions(files.map(({ t, patch }) => ({ id: t.id, patch })), `import: ${label} (${files.length} payment${files.length === 1 ? '' : 's'} ${agreement.name} schedules filed)`);
+    }
+  }
 
   const sha = record.document.sha256;
   const docPath = await store.storeDocument(input.workFile, sha, safeFileName(record.document.fileName));
@@ -534,6 +566,7 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
       ...(hmrcAdded ? { hmrcAdded } : {}),
       ...(payslipsAdded ? { payslipsAdded } : {}),
       ...(termsAdded ? { termsAdded } : {}),
+      ...(agreementsAdded ? { agreementsAdded } : {}),
       ...(employmentsCreated.length ? { employmentsCreated } : {}),
       ...(jobIds.size ? { jobs: [...jobIds].map(([key, employmentId]) => ({ key, employmentId })) } : {}),
       ...(nothingNew ? { nothingNew: nothingNew.slice(0, 500) } : {}),
@@ -556,6 +589,7 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
     hmrcAdded ? `${hmrcAdded} HMRC record${hmrcAdded === 1 ? '' : 's'}` : '',
     payslipsAdded ? `${payslipsAdded} payslip${payslipsAdded === 1 ? '' : 's'} in full` : '',
     termsAdded ? 'terms' : '',
+    agreementsAdded ? `${agreementsAdded} agreement${agreementsAdded === 1 ? '' : 's'}` : '',
     employmentsCreated.length ? `${employmentsCreated.length} new job${employmentsCreated.length === 1 ? '' : 's'}` : '',
     salaried ? `${salaried} payment${salaried === 1 ? '' : 's'} with its payroll number now salary` : '',
   ].filter(Boolean);

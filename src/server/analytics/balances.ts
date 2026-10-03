@@ -314,15 +314,17 @@ export class BalanceEngine {
     let minor: number;
     let estimated = false;
     if (d.mode === 'ledger') {
+      // Interest its documents do not list (a student loan's) makes any day but a statement's own an estimate.
+      const unrecorded = Boolean(ACCOUNT_TYPE_META[account.type].interestUnrecorded);
       const a1 = lastAnchorOnOrBefore(d.anchors, date);
       if (a1) {
         minor = a1.minor + (sumTo(d.tx, date) - sumTo(d.tx, a1.date));
-        estimated = a1.source === 'approximate';
+        estimated = a1.source === 'approximate' || (unrecorded && a1.date !== date);
       } else {
         const a2 = firstAnchorAfter(d.anchors, date);
         if (a2) {
           minor = a2.minor - (sumTo(d.tx, a2.date) - sumTo(d.tx, date));
-          estimated = a2.source === 'approximate';
+          estimated = a2.source === 'approximate' || unrecorded;
         } else {
           minor = sumTo(d.tx, date);
           estimated = true;

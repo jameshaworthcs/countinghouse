@@ -19,7 +19,7 @@
 // (`alsoSaid`): a terse app screenshot is categorised by the statement that showed it in full.
 
 import { ACCOUNT_TYPE_META } from './accounts';
-import { agreementPattern, isScheduledPayment } from './agreements';
+import { agreementPattern, isScheduledPayment, scheduleFit } from './agreements';
 import { CategoryIndex, mapBankCategory } from './categories';
 import { addDays } from './dates';
 import { INSTITUTION_CATALOG, TRANSFER_WORDS } from './institutions';
@@ -369,10 +369,17 @@ export class Categoriser {
     // what was due. It takes the agreement's category, whatever the merchant list says of the name
     // (a university is paid rent as well as fees). Its payee is worked out as any other's, so it
     // groups with the payments to the same payee before and after the agreement.
-    if (!isWrapper && input.date && input.amount < 0) {
+    // Money paid to you on an agreement's dates (a student finance instalment) is known by its exact
+    // amount, as the bank seldom names the sender: it takes the agreement's counterparty as its payee,
+    // and the account that lends it as the other side.
+    if (!isWrapper && input.date) {
       const text = `${input.payee ?? ''} ${texts.join(' ')}`;
-      const hit = this.agreements.find(({ agreement, pattern }) => this.known(agreement.category) && isScheduledPayment(agreement, pattern, { date: input.date!, amount: input.amount, text }));
+      const hit = this.agreements.find(({ agreement, pattern }) => this.known(agreement.category) && isScheduledPayment(agreement, pattern, { date: input.date!, amount: input.amount, text, accountId: input.accountId }));
+      if (hit?.agreement.direction === 'in') return { payee: hit.agreement.counterparty, category: hit.agreement.category, categorisedBy: 'agreement', ...(hit.agreement.accountId ? { counterpartyAccountId: hit.agreement.accountId } : {}) };
       if (hit) return { payee: fallbackPayee, category: hit.agreement.category, categorisedBy: 'agreement' };
+      // The loan's own row for money it lent you on an agreement's dates: the lending, not spending.
+      const lent = input.amount < 0 ? this.agreements.find(({ agreement }) => agreement.direction === 'in' && agreement.accountId === input.accountId && this.known(agreement.category) && agreement.payments.some((p) => scheduleFit(agreement, p, input.date!, -input.amount) !== null)) : undefined;
+      if (lent) return { payee: lent.agreement.counterparty, category: lent.agreement.category, categorisedBy: 'agreement' };
     }
 
     // 3c. Money into a credit card that its statement calls a payment: paying the card off.

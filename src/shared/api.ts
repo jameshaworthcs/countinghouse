@@ -1120,9 +1120,11 @@ export interface AgreementView {
     label?: string;
     /**
      * `paid`: a payment of it was found; `upcoming`: not due yet; `due`: due, and it may still come
-     * (up to 45 days after); `unseen`: no payment of it was found in your accounts.
+     * (up to 45 days after, or 7 for one paid to the penny); `unseen`: no payment of it was found in
+     * your accounts; `documented`: none was found, but its document says it was paid (before your
+     * data begins, say); `cancelled`: its document says it was cancelled.
      */
-    status: 'paid' | 'upcoming' | 'due' | 'unseen';
+    status: 'paid' | 'upcoming' | 'due' | 'unseen' | 'documented' | 'cancelled';
     /** The payment found, as a positive amount, and by how much it is more (or, below 0, less) than what was due: up to a tenth. */
     paid?: { transactionId: string; accountId: string; date: string; amount: number; difference?: number };
   }[];

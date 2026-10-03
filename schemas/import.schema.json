@@ -55,6 +55,10 @@
       "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
       "description": "Stable, human-readable identifier (lowercase-hyphenated)"
     },
+    "reopens": {
+      "type": "string",
+      "pattern": "^imp_\\d{8}_\\d{6}_[0-9a-f]{4}$"
+    },
     "document": {
       "type": "object",
       "properties": {
@@ -2127,6 +2131,122 @@
                 ]
               }
             },
+            "schedules": {
+              "default": [],
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                  },
+                  "direction": {
+                    "type": "string",
+                    "enum": [
+                      "to-you",
+                      "from-you",
+                      "to-other"
+                    ]
+                  },
+                  "paidTo": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "from": {
+                    "type": "string",
+                    "description": "Calendar date, YYYY-MM-DD"
+                  },
+                  "until": {
+                    "type": "string",
+                    "description": "Calendar date, YYYY-MM-DD"
+                  },
+                  "reference": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80
+                  },
+                  "total": {
+                    "type": "number",
+                    "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                  },
+                  "payments": {
+                    "minItems": 1,
+                    "maxItems": 120,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "date": {
+                          "type": "string",
+                          "description": "Calendar date, YYYY-MM-DD"
+                        },
+                        "amount": {
+                          "type": "number",
+                          "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                        },
+                        "label": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 120
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "paid",
+                            "due",
+                            "scheduled",
+                            "awaiting",
+                            "cancelled"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "date",
+                        "amount"
+                      ]
+                    }
+                  },
+                  "details": {
+                    "default": [],
+                    "maxItems": 40,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "label": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 80
+                        },
+                        "value": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 400
+                        }
+                      },
+                      "required": [
+                        "label",
+                        "value"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "provider",
+                  "name",
+                  "direction",
+                  "payments"
+                ]
+              }
+            },
             "notes": {
               "default": [],
               "type": "array",
@@ -3797,6 +3917,122 @@
                 ]
               }
             },
+            "schedules": {
+              "default": [],
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                  },
+                  "direction": {
+                    "type": "string",
+                    "enum": [
+                      "to-you",
+                      "from-you",
+                      "to-other"
+                    ]
+                  },
+                  "paidTo": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "from": {
+                    "type": "string",
+                    "description": "Calendar date, YYYY-MM-DD"
+                  },
+                  "until": {
+                    "type": "string",
+                    "description": "Calendar date, YYYY-MM-DD"
+                  },
+                  "reference": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80
+                  },
+                  "total": {
+                    "type": "number",
+                    "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                  },
+                  "payments": {
+                    "minItems": 1,
+                    "maxItems": 120,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "date": {
+                          "type": "string",
+                          "description": "Calendar date, YYYY-MM-DD"
+                        },
+                        "amount": {
+                          "type": "number",
+                          "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                        },
+                        "label": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 120
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "paid",
+                            "due",
+                            "scheduled",
+                            "awaiting",
+                            "cancelled"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "date",
+                        "amount"
+                      ]
+                    }
+                  },
+                  "details": {
+                    "default": [],
+                    "maxItems": 40,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "label": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 80
+                        },
+                        "value": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 400
+                        }
+                      },
+                      "required": [
+                        "label",
+                        "value"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "provider",
+                  "name",
+                  "direction",
+                  "payments"
+                ]
+              }
+            },
             "notes": {
               "default": [],
               "type": "array",
@@ -4036,6 +4272,9 @@
               },
               "matchReason": {
                 "type": "string"
+              },
+              "fromSchedule": {
+                "type": "boolean"
               },
               "suggestedAccountId": {
                 "type": "string",
@@ -5656,6 +5895,292 @@
             ]
           }
         },
+        "agreements": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string"
+              },
+              "include": {
+                "type": "boolean"
+              },
+              "target": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "mode": {
+                        "type": "string",
+                        "const": "new"
+                      }
+                    },
+                    "required": [
+                      "mode"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "mode": {
+                        "type": "string",
+                        "const": "existing"
+                      },
+                      "agreementId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64,
+                        "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                        "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+                      }
+                    },
+                    "required": [
+                      "mode",
+                      "agreementId"
+                    ]
+                  }
+                ]
+              },
+              "record": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                    "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                  },
+                  "counterparty": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "names": {
+                    "default": [],
+                    "maxItems": 10,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 100
+                    }
+                  },
+                  "category": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  },
+                  "direction": {
+                    "type": "string",
+                    "enum": [
+                      "out",
+                      "in"
+                    ]
+                  },
+                  "accountId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                    "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+                  },
+                  "paidBy": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "statusAsOf": {
+                    "type": "string",
+                    "description": "Calendar date, YYYY-MM-DD"
+                  },
+                  "from": {
+                    "type": "string",
+                    "description": "Calendar date, YYYY-MM-DD"
+                  },
+                  "until": {
+                    "type": "string",
+                    "description": "Calendar date, YYYY-MM-DD"
+                  },
+                  "total": {
+                    "type": "number",
+                    "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                  },
+                  "payments": {
+                    "minItems": 1,
+                    "maxItems": 120,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "due": {
+                          "type": "string",
+                          "description": "Calendar date, YYYY-MM-DD"
+                        },
+                        "amount": {
+                          "type": "number",
+                          "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                        },
+                        "label": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 120
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "paid",
+                            "due",
+                            "scheduled",
+                            "awaiting",
+                            "cancelled"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "due",
+                        "amount"
+                      ]
+                    }
+                  },
+                  "details": {
+                    "default": [],
+                    "maxItems": 40,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "label": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 80
+                        },
+                        "value": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 400
+                        }
+                      },
+                      "required": [
+                        "label",
+                        "value"
+                      ]
+                    }
+                  },
+                  "agreedOn": {
+                    "type": "string",
+                    "description": "Calendar date, YYYY-MM-DD"
+                  },
+                  "reference": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80
+                  },
+                  "notes": {
+                    "type": "string",
+                    "maxLength": 2000
+                  },
+                  "source": {
+                    "default": {},
+                    "type": "object",
+                    "properties": {
+                      "importId": {
+                        "type": "string"
+                      },
+                      "documentId": {
+                        "type": "string"
+                      },
+                      "row": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      }
+                    }
+                  }
+                },
+                "required": [
+                  "id",
+                  "name",
+                  "counterparty",
+                  "category",
+                  "from",
+                  "payments"
+                ]
+              },
+              "adds": {
+                "type": "object",
+                "properties": {
+                  "payments": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "statuses": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "payments",
+                  "statuses"
+                ]
+              },
+              "explains": {
+                "default": [],
+                "maxItems": 120,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "index": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "transactionId": {
+                      "type": "string"
+                    },
+                    "accountId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                      "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+                    },
+                    "date": {
+                      "type": "string",
+                      "description": "Calendar date, YYYY-MM-DD"
+                    },
+                    "amount": {
+                      "type": "number",
+                      "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                    }
+                  },
+                  "required": [
+                    "index",
+                    "transactionId",
+                    "accountId",
+                    "date",
+                    "amount"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "key",
+              "include",
+              "target",
+              "record"
+            ]
+          }
+        },
         "notes": {
           "default": [],
           "type": "array",
@@ -5785,6 +6310,11 @@
           "maximum": 9007199254740991
         },
         "termsAdded": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "agreementsAdded": {
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991

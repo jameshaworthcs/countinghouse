@@ -210,6 +210,7 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
       { "kind": "remove_wrong_sign", "transaction": "tx_…", "recordedAs": ["tx_…"], "why": "…" },
       { "kind": "remove_internal_move", "transaction": "tx_…", "why": "…" },
       { "kind": "set_account_dates", "account": "example-fixed", "closedOn": "2026-02-01", "why": "…" },
+      { "kind": "link_accounts", "account": "example-easy-access", "continues": "example-fixed", "from": "2026-02-02", "why": "…" },
       { "kind": "move_balance", "balance": "bal_…", "to": "example-easy-access", "why": "…" },
       { "kind": "add_pension_arrangement", "employmentId": "example-job", "arrangement": { "accountId": "example-sipp", "kind": "monthly", "amount": 250, "from": "2024-11-14" }, "why": "…" },
       { "kind": "add_company", "company": { "id": "example-ltd", "name": "Example Ltd", "number": "01234567", "holdings": [{ "shareClass": "A ordinary", "shares": 4, "totalShares": 120, "certificate": "12" }] }, "valuation": { "asOf": "2025-12-31", "method": "net-assets", "netAssets": 100000, "value": 3333.33, "note": "…" }, "account": { "id": "example-ltd-shares", "name": "Example Ltd shares" }, "why": "…" },
@@ -249,8 +250,12 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
     the id its account would take. Its valuation is not in the future. A book value's `why` names
     the documents its figures come from (the share certificate, the accounts, the confirmation
     statement that gives the shares in issue).
+  - An account linked (`link_accounts`) carries on from another of the owner's accounts that closed
+    before the day given, and opened (if its opening is known) no later than that day. Its `why`
+    names what shows the product change: the same account number, the day the older one matured.
   - An agreement added (`add_agreement`) is new (none with its id, unless it has the same schedule:
-    then it is there already), takes a spending category, and does not end before it starts. Its
+    then it is there already), takes a spending category (money paid to the owner, `direction:
+    "in"`: a transfer or income category), and does not end before it starts. Its
     schedule, total and `details` are its document's own words and figures; its `names` are only
     the names its payments carry in the owner's accounts. The proposal shows the payments already
     recorded that it would file under its category: not one the owner, a rule of theirs or a

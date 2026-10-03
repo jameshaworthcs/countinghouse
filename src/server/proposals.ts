@@ -301,6 +301,20 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
         out.accounts.set(acc.id, AccountSchema.parse(next));
         return {};
       }
+      case 'link_accounts': {
+        const acc = account(c.account);
+        const older = account(c.continues);
+        if (!acc) return { problem: `Account ${c.account} is no longer in your data.` };
+        if (!older) return { problem: `Account ${c.continues} is no longer in your data.` };
+        if (acc.id === older.id) return { problem: 'An account cannot carry on from itself.' };
+        if (older.continues?.accountId === acc.id) return { problem: `${older.name} already carries on from ${acc.name}.` };
+        if (acc.openedOn && c.from < acc.openedOn) return { problem: `${acc.name} opened on ${formatDate(acc.openedOn)}, after ${formatDate(c.from)}.` };
+        if (older.closedOn && older.closedOn >= c.from) return { problem: `${older.name} was still open on ${formatDate(c.from)} (it closed on ${formatDate(older.closedOn)}).` };
+        if (acc.continues?.accountId === older.id && acc.continues.from === c.from) return { alreadySo: true };
+        if (!out.touchedAccounts.has(acc.id)) out.touchedAccounts.set(acc.id, store.account(acc.id)!);
+        out.accounts.set(acc.id, AccountSchema.parse({ ...acc, continues: { accountId: older.id, from: c.from } }));
+        return {};
+      }
       case 'move_balance': {
         const b = balanceById.get(c.balance);
         if (!b) return { problem: `Balance ${c.balance} is no longer in your data.` };
@@ -347,7 +361,10 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
         if (there) return there.counterparty === a.counterparty && schedule(there) === schedule(a) ? { alreadySo: true } : { problem: `There is an agreement ${a.id} already: ${there.name}.` };
         const cat = cats.get(a.category);
         if (!cat) return { problem: `There is no category "${a.category}".` };
-        if (cat.kind !== 'expense') return { problem: `${cat.name} is not a spending category: an agreement's payments are money you pay.` };
+        if (a.direction === 'in' ? cat.kind !== 'transfer' && cat.kind !== 'income' : cat.kind !== 'expense') {
+          return { problem: a.direction === 'in' ? `${cat.name} is neither a transfer nor an income category: money paid to you is one or the other.` : `${cat.name} is not a spending category: an agreement's payments are money you pay.` };
+        }
+        if (a.accountId && !account(a.accountId)) return { problem: `Account ${a.accountId} is not in your data.` };
         if (a.until && a.until < a.from) return { problem: 'It would end before it starts.' };
         const stamp = nowISO();
         const agreement = AgreementSchema.parse({ ...a, createdBy: 'agent', createdAt: stamp, updatedAt: stamp });
@@ -361,7 +378,7 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
           const t = row(stored.id);
           if (!t || t.transferGroup || t.categorisedBy === 'user' || t.categorisedBy === 'rule' || t.categorisedBy === 'transfer') continue;
           const acc = account(t.accountId);
-          if (!acc || isWrapperAccount(acc.type) || !isScheduledPayment(agreement, pattern, { date: t.date, amount: t.amount, text: paidToText(t) })) continue;
+          if (!acc || isWrapperAccount(acc.type) || !isScheduledPayment(agreement, pattern, { date: t.date, amount: t.amount, text: paidToText(t), accountId: t.accountId })) continue;
           const res = withIt.categorise(categoriseInputOf(t));
           if (res.categorisedBy !== 'agreement' || res.category !== a.category) continue;
           if (t.category === a.category && t.categorisedBy === 'agreement') continue;
@@ -519,6 +536,7 @@ function namedRows(c: ProposedChange): string[] {
     case 'remove_internal_move':
       return [c.transaction];
     case 'set_account_dates':
+    case 'link_accounts':
     case 'move_balance':
     case 'add_company':
     case 'add_pension_arrangement':
@@ -787,7 +805,10 @@ export class ProposalService extends EventEmitter {
         ...(t.source?.importId ? { source: { importId: t.source.importId, ...(importName.has(t.source.importId) ? { fileName: importName.get(t.source.importId)! } : {}) } } : {}),
       };
     }
-    for (const c of p.changes) if (c.kind === 'set_account_dates' || c.kind === 'set_terms') accountIds.add(c.account);
+    for (const c of p.changes) {
+      if (c.kind === 'set_account_dates' || c.kind === 'set_terms') accountIds.add(c.account);
+      if (c.kind === 'link_accounts') accountIds.add(c.account).add(c.continues);
+    }
     // A balance a change moves, as it is now (a decided proposal: as it was before it).
     const wasBalance = new Map((before?.balances ?? []).map((b) => [b.id, b]));
     const balances: Record<string, ProposalBalance> = {};

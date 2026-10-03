@@ -14,6 +14,18 @@ export interface ExpectedTx {
   original?: { amount: number; currency: string };
   /** Already in the store from an earlier document in the group. */
   duplicate?: boolean;
+  /** For a row the app words itself (a student loan's instalment): its description as a pattern. */
+  descriptionPattern?: RegExp;
+}
+
+/** A schedule of payments the document gives (scored when reading everything, from the draft's agreements). */
+export interface ExpectedSchedule {
+  direction: 'to-you' | 'from-you' | 'to-other';
+  /** Who pays or is paid, or who pays for you. */
+  provider: RegExp;
+  /** Who it pays for you (to-other). */
+  paidTo?: RegExp;
+  payments: { date: string; amount: number; status?: 'paid' | 'due' | 'scheduled' | 'awaiting' | 'cancelled' }[];
 }
 
 export interface ExpectedSection {
@@ -58,6 +70,8 @@ export interface Expected {
   /** Payslips in full, and other values it prints as label and value (scored when reading everything). */
   payslips?: ExpectedPayslip[];
   printed?: { label: RegExp; value: RegExp }[];
+  /** Schedules of payments (scored when reading everything). */
+  schedules?: ExpectedSchedule[];
   /** Understood, but adds nothing another import or the stored data does not already have. */
   nothingNew?: boolean;
   /** Claims the document does not make (where money went, say): a note stating one loses a point. */
@@ -97,6 +111,7 @@ export const EVAL_ACCOUNTS: { id: string; name: string; type: AccountType; insti
   { id: 'nest-pension', name: 'Nest', type: 'workplace_pension', institutionId: 'nest' },
   { id: 'ajbell-sipp', name: 'AJ Bell SIPP', type: 'sipp', institutionId: 'aj-bell', last4: '8830' },
   { id: 'premium-bonds', name: 'Premium Bonds', type: 'premium_bonds', institutionId: 'ns-and-i' },
+  { id: 'student-loan', name: 'Student loan', type: 'student_loan', institutionId: 'slc' },
 ];
 
 // ─── Data helpers ────────────────────────────────────────────────────────────────────────────────
@@ -1030,6 +1045,72 @@ export function buildCases(): EvalCase[] {
         ]),
       },
       expected: { sections: [], nothingNew: true, unsupported: unsupportedOrReinvested },
+    });
+  }
+  // ── Schedules of payments (extract-15, rule 24): kept as agreements, never as transactions ──
+  {
+    const sf = brand('Student Finance-style Service', '#0b0c0c', 'Student finance account');
+    cases.push({
+      id: 'pdf-student-finance-payments',
+      title: 'Student finance payments page: two loans, paid and still to come, as schedules and the loan’s paid instalment',
+      tags: ['pdf', 'schedules', 'everything'],
+      file: {
+        name: 'View Your Payments - Student Finance Account.pdf',
+        kind: 'pdf',
+        html: simpleDocHtml(sf, 'View your payments', [
+          { rows: [['Academic year', '2026/27']] },
+          { heading: 'Maintenance Loan', table: { head: ['Expected payment date', 'Amount', 'Status'], rows: [['21 September 2026', '£1,234.56', "Paid - We've paid you"], ['04 January 2027', '£1,234.56', 'Ready to be paid'], ['05 April 2027', '£1,271.10', 'Ready to be paid']], numeric: [1] } },
+          { rows: [['Total', '£3,740.22']] },
+          { heading: 'Tuition Fee Loan', text: 'We pay your Tuition Fee Loan to your university or college: University of Exampleton.' },
+          { table: { head: ['Expected payment date', 'Amount', 'Status'], rows: [['21 October 2026', '£1,733.75', 'Awaiting confirmation'], ['03 February 2027', '£1,733.75', 'Awaiting confirmation'], ['05 May 2027', '£3,467.50', 'Awaiting confirmation']], numeric: [1] } },
+          { rows: [['Total', '£6,935.00']] },
+        ]),
+      },
+      expected: {
+        sections: [{ account: 'student-loan', transactions: [{ date: '2026-09-21', amount: -1234.56, description: 'Maintenance Loan paid to you', descriptionPattern: /maintenance loan.*paid to you/i }] }],
+        schedules: [
+          { direction: 'to-you', provider: /student finance/i, payments: [{ date: '2026-09-21', amount: 1234.56, status: 'paid' }, { date: '2027-01-04', amount: 1234.56, status: 'due' }, { date: '2027-04-05', amount: 1271.1, status: 'due' }] },
+          { direction: 'to-other', provider: /student finance/i, paidTo: /exampleton/i, payments: [{ date: '2026-10-21', amount: 1733.75, status: 'awaiting' }, { date: '2027-02-03', amount: 1733.75, status: 'awaiting' }, { date: '2027-05-05', amount: 3467.5, status: 'awaiting' }] },
+        ],
+      },
+    });
+    cases.push({
+      id: 'pdf-student-finance-entitlement',
+      title: 'Student finance entitlement letter: the tuition fee timetable as a schedule, nothing as transactions',
+      tags: ['pdf', 'schedules', 'everything'],
+      file: {
+        name: 'Letter of entitlement.pdf',
+        kind: 'pdf',
+        html: simpleDocHtml(sf, 'Your 2026/27 student finance application has been approved', [
+          { rows: [['Total student finance we will pay to your university or college', '£6,935.00'], ['Total student finance we will pay to you', '£3,740.22']] },
+          { heading: 'Your current course details', rows: [['University or college', 'UNIVERSITY OF EXAMPLETON'], ['Course', 'Example Studies'], ['Course year', '3']] },
+          { heading: 'Payment timetable for Tuition Fee Loan', table: { head: ['Date', 'Amount'], rows: [['21 October 2026', '£1,733.75'], ['03 February 2027', '£1,733.75'], ['05 May 2027', '£3,467.50'], ['Total', '£6,935.00']], numeric: [1] } },
+        ]),
+      },
+      expected: {
+        sections: [],
+        schedules: [{ direction: 'to-other', provider: /student finance/i, paidTo: /exampleton/i, payments: [{ date: '2026-10-21', amount: 1733.75 }, { date: '2027-02-03', amount: 1733.75 }, { date: '2027-05-05', amount: 3467.5 }] }],
+      },
+    });
+    const council = brand('Exampleshire District Council', '#00594f', 'Council Tax, PO Box 99, Exampleton EX1 1AA');
+    const months = ['01 May 2026', '01 June 2026', '01 July 2026', '01 August 2026', '01 September 2026', '01 October 2026', '01 November 2026', '01 December 2026', '01 January 2027', '01 February 2027'];
+    const iso = ['2026-05-01', '2026-06-01', '2026-07-01', '2026-08-01', '2026-09-01', '2026-10-01', '2026-11-01', '2026-12-01', '2027-01-01', '2027-02-01'];
+    cases.push({
+      id: 'pdf-council-tax-bill',
+      title: 'Council tax bill: ten instalments as a schedule you pay',
+      tags: ['pdf', 'schedules', 'everything'],
+      file: {
+        name: 'Council Tax Bill 2026-27.pdf',
+        kind: 'pdf',
+        html: simpleDocHtml(council, 'Council Tax bill 2026/27', [
+          { rows: [['Band', 'C'], ['Annual charge', '£1,502.00'], ['Payment method', 'Direct Debit']] },
+          { heading: 'Your instalments', table: { head: ['Date due', 'Amount'], rows: months.map((m) => [m, '£150.20']), numeric: [1] } },
+        ]),
+      },
+      expected: {
+        sections: [],
+        schedules: [{ direction: 'from-you', provider: /exampleshire|council/i, payments: iso.map((date) => ({ date, amount: 150.2 })) }],
+      },
     });
   }
   return cases;

@@ -4,7 +4,7 @@
 import { isISODate, parseFlexibleDate } from '../../shared/dates';
 import { parseAmount, roundMoney, toMinor } from '../../shared/money';
 import { isNiNumber, withoutNiNumbers } from '../../shared/privacy';
-import { ExtractedHmrcSchema, ExtractedPayslipSchema, ExtractionSchema, TermsRateSchema, type ExtractedPayslip, type Extraction } from '../../shared/schema';
+import { AGREEMENT_PAYMENT_STATUSES, ExtractedHmrcSchema, ExtractedPayslipSchema, ExtractedScheduleSchema, ExtractionSchema, TermsRateSchema, type ExtractedPayslip, type Extraction } from '../../shared/schema';
 import { payeReference } from '../analytics/sources';
 import { formatZodError } from '../store';
 
@@ -74,7 +74,7 @@ const HMRC_FIELDS: Record<string, string[]> = {
 };
 
 /**
- * A payslip in full, HMRC's records, an account's terms and the other values printed (extract-14),
+ * A payslip in full, HMRC's records, an account's terms, the other values printed and schedules (extract-15),
  * as the reader gives them, made into what an extraction keeps. One that cannot be made valid is left out, with a
  * warning; a National Insurance number in any of them is taken out.
  */
@@ -164,6 +164,43 @@ function readEverything(fixed: Record<string, unknown>, original: Record<string,
     const paymentDue = day(t.paymentDue);
     if (rates.length || minimumPayment !== undefined) acc.terms = { rates, ...(minimumPayment !== undefined ? { minimumPayment } : {}), ...(paymentDue ? { paymentDue } : {}) };
   });
+  // Schedules (extract-15): taken from the reading as it was, as their details' values are text
+  // (a value is not an amount), with each payment's date and amount repaired. Amounts are kept
+  // positive, whichever way the money goes; a status not in the list is not kept.
+  delete fixed.schedules;
+  if (Array.isArray(original.schedules)) {
+    const text = (v: unknown, max: number) => (typeof v === 'string' && v.trim() ? withoutNiNumbers(v.trim()).slice(0, max) : undefined);
+    const money = (v: unknown) => {
+      const x = fixValue('amount', v);
+      return typeof x === 'number' ? Math.abs(x) : undefined;
+    };
+    const day = (v: unknown) => {
+      const x = fixValue('date', v);
+      return typeof x === 'string' ? x : undefined;
+    };
+    fixed.schedules = (original.schedules as Record<string, unknown>[]).flatMap((raw, i) => {
+      if (!raw || typeof raw !== 'object') return [];
+      const payments = (Array.isArray(raw.payments) ? (raw.payments as Record<string, unknown>[]) : []).flatMap((p) => {
+        const date = day(p?.date);
+        const amount = money(p?.amount);
+        const status = typeof p?.status === 'string' && (AGREEMENT_PAYMENT_STATUSES as readonly string[]).includes(p.status) ? p.status : undefined;
+        const label = text(p?.label, 120);
+        return date && amount ? [{ date, amount, ...(label ? { label } : {}), ...(status ? { status } : {}) }] : [];
+      });
+      const details = (Array.isArray(raw.details) ? (raw.details as Record<string, unknown>[]) : []).flatMap((d) => {
+        const label = text(d?.label, 80);
+        const value = typeof d?.value === 'number' ? String(d.value) : text(d?.value, 400);
+        return label && value ? [{ label, value }] : [];
+      });
+      const total = money(raw.total);
+      const schedule = ExtractedScheduleSchema.safeParse(
+        present({ provider: text(raw.provider, 200), name: text(raw.name, 160), direction: raw.direction, paidTo: text(raw.paidTo, 200), from: day(raw.from), until: day(raw.until), reference: text(raw.reference, 80), total, payments, details }),
+      );
+      if (schedule.success) return [schedule.data];
+      warnings.push(`Schedule ${i + 1} could not be kept: ${formatZodError(schedule.error)}`);
+      return [];
+    });
+  }
   // Printed values are text as printed: taken from the reading before amounts and dates were
   // repaired (a value is not an amount).
   if (Array.isArray(original.printed)) {

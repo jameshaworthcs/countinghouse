@@ -38,14 +38,14 @@ import { PAYSLIP_ENGINE_VERSION, readPayslipPage } from './payslips';
 import { commitDraft } from './commit';
 import { linkTransfers } from '../enrich';
 import { BUILTIN_CSV_PROFILES } from './csv-profiles';
-import { recheckDraft } from './dedup';
+import { candidateOf, classifyDuplicates, recheckDraft } from './dedup';
 import { compareReading } from './reread';
 import { CSV_ENGINE_VERSION, findProfile, parseWithProfile, readCsvRows, suggestMapping, withCardSigns } from './csv';
 import { HOLDINGS_CSV_VERSION, parseHoldingsCsv } from './holdings-csv';
 import { decodeText, detectKind, MAX_UPLOAD_BYTES, mediaTypeFor } from './detect';
 import { buildDraft, draftIsClean, type BatchEvidence } from './draft';
 import { asTransferLeg, findRow, keepLinks, keepYourLinks, linkCandidates, linkViews, replaceRow, sameAccount, sectionAccount, withoutLink, type FoundRow, type RowRef, type SectionAccount } from './links';
-import { assessNovelty, type NothingNew } from './novelty';
+import { assessNovelty, mentionedPayments, type NothingNew } from './novelty';
 import { assessReading, chooseReading, compareReadings, shortModel } from './verify';
 import { detectEngines, pickEngine, type EngineResult } from './engines';
 import { captureDate, imageInfo, prepareImage } from './images';
@@ -1109,8 +1109,9 @@ export class ImportService extends EventEmitter {
       // Nothing is created either: a section that would have made a new account is left out.
       sections: record.draft.sections.map((s) => ({ ...s, ...(s.target.mode === 'new' ? { target: { mode: 'skip' as const } } : {}), recordBalance: false, recordHoldings: false, transactions: s.transactions.map((t) => ({ ...t, include: false })) })),
       figures: record.draft.figures.map((f) => ({ ...f, include: false })),
-      // Nor any HMRC record, so no job is set up for one either.
+      // Nor any HMRC record, so no job is set up for one either, nor an agreement.
       ...(record.draft.hmrc ? { hmrc: record.draft.hmrc.map((h) => ({ ...h, include: false })) } : {}),
+      ...(record.draft.agreements ? { agreements: record.draft.agreements.map((a) => ({ ...a, include: false })) } : {}),
     };
     const filed = await commitDraft(this.store, { record, draft, workFile: this.work.filePath(record.document), nothingNew: nothing.reason });
     this.pending.delete(id);
@@ -1118,6 +1119,40 @@ export class ImportService extends EventEmitter {
     await this.settleLinks(id, record.document.fileName, 'dismissed');
     this.emit('update', filed);
     return filed;
+  }
+
+  /**
+   * A document filed as adding nothing new, back in review as an import of its own (docs/INGESTION.md,
+   * "Nothing new"): its stored reading drafted again as it would be drafted now, with no Claude, so a
+   * newer app finds what an older one had no place for. The filing stays in History as it was. When
+   * the stored reading is not enough (an older reader put a schedule only in its remarks), "Read it
+   * again" on the review page reads the document afresh.
+   */
+  async reopen(filedId: string): Promise<ImportRecord> {
+    const filed = await this.store.readImport(filedId);
+    if (!filed || filed.status !== 'committed' || !filed.result?.nothingNew || !filed.document.path) throw new StoreError('Only a document filed as adding nothing new can be opened again.', 409);
+    const waiting = [...this.pending.values()].find((r) => r.document.sha256 === filed.document.sha256 && r.status !== 'discarded');
+    if (waiting) return waiting;
+    const bytes = await readFile(this.store.documentAbsPath(filed.document.path));
+    const stamp = nowISO();
+    const { path: _stored, ...document } = filed.document;
+    const record: ImportRecord = {
+      id: importId(),
+      status: filed.extraction.raw ? 'review' : 'queued',
+      createdAt: stamp,
+      updatedAt: stamp,
+      origin: filed.origin,
+      document,
+      extraction: filed.extraction,
+      reopens: filed.id,
+      ...(filed.hintAccountId ? { hintAccountId: filed.hintAccountId } : {}),
+      ...(filed.label ? { label: filed.label } : {}),
+    };
+    await this.work.saveFile(record.document, bytes);
+    if (filed.extraction.raw) record.draft = this.rebuild(record, await this.batchEvidence(record));
+    await this.save(record);
+    if (!filed.extraction.raw) this.schedule(record.id, { startedBy: { actor: currentActor(), reason: `Opened again: ${record.document.fileName}` } });
+    return record;
   }
 
   /** Dismiss every import that adds nothing new. The ones that cover them stay. */
@@ -1132,6 +1167,27 @@ export class ImportService extends EventEmitter {
     return done;
   }
 
+  /**
+   * A section's rows checked again against the account you chose for it (docs/INGESTION.md,
+   * "Review"): which are recorded there already and which are new, each ticked accordingly. What a
+   * row would fill in on a payment it matched elsewhere is dropped, as that payment is another
+   * account's. Nothing else about the section changes.
+   */
+  redraftSection(section: DraftSection): DraftSection {
+    const target = section.target;
+    const recorded = target.mode === 'existing' ? this.store.transactions(target.accountId) : [];
+    const dups = target.mode === 'existing' ? classifyDuplicates(section.transactions.map(candidateOf), recorded, 3) : section.transactions.map(() => ({ status: 'new' as const, duplicateOf: undefined }));
+    return {
+      ...section,
+      transactions: section.transactions.map((t, i) => {
+        const d = dups[i]!;
+        const { duplicateOf: _was, adds: _adds, ...rest } = t;
+        return { ...rest, status: d.status, include: d.status === 'new' && !t.pending && !t.insideAccount, ...(d.duplicateOf ? { duplicateOf: d.duplicateOf } : {}) };
+      }),
+      ...(section.extraCopies ? { extraCopies: target.mode === 'existing' ? section.extraCopies.filter((c) => !c.accountId || c.accountId === target.accountId) : [] } : {}),
+    };
+  }
+
   /** Why an import is (not) safe to commit without review. */
   readiness(record: ImportRecord, nothingNew?: NothingNew): { ready: boolean; reasons: string[] } {
     if (record.status !== 'review' || !record.draft) return { ready: false, reasons: [record.status] };
@@ -1141,10 +1197,18 @@ export class ImportService extends EventEmitter {
     // Every check that asks for a look (the review page shows the same ones) holds the import back.
     for (const s of record.draft.sections) {
       if (s.target.mode === 'skip') continue;
-      const accountType = s.target.mode === 'existing' ? this.store.account(s.target.accountId)?.type : s.target.account.type;
-      for (const c of sectionChecks(s, { accountType, latest: record.createdAt.slice(0, 10), periodFromRows: record.draft.documentType === 'csv_export' })) if (c.status === 'warn') reasons.push(c.title.toLowerCase());
+      const account = s.target.mode === 'existing' ? this.store.account(s.target.accountId) : s.target.account;
+      for (const c of sectionChecks(s, { accountType: account?.type, latest: record.createdAt.slice(0, 10), periodFromRows: record.draft.documentType === 'csv_export', openedOn: account?.openedOn, closedOn: account?.closedOn })) if (c.status === 'warn') reasons.push(c.title.toLowerCase());
     }
     if (record.extraction.warnings.length) reasons.push('warnings from reading the document');
+    // A schedule recorded for the first time files your payments under it: look at it once.
+    if (record.draft.agreements?.some((a) => a.include && a.target.mode === 'new')) reasons.push('a new schedule to check');
+    // Payments it mentions, recorded already, that its reading had no place for: read it again.
+    const d = record.draft;
+    if (!d.sections.length && !d.figures.length && !d.hmrc?.length && !d.payslips?.length && !d.agreements?.length) {
+      const mentioned = mentionedPayments(record, this.store);
+      if (mentioned.length) reasons.push(`it mentions ${mentioned.length === 1 ? 'a payment' : `${mentioned.length} payments`} already recorded that its reading had no place for: read it again`);
+    }
     if (record.extraction.verification?.disagreements.length) reasons.push('the two readings disagreed');
     if (record.extraction.verification?.error) reasons.push('the figures could not be checked');
     if (record.extraction.engine === 'ocr') reasons.push('read with offline OCR');

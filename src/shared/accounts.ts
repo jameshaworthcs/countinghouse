@@ -57,6 +57,11 @@ export interface AccountTypeMeta {
   onePerPerson?: boolean;
   /** The only provider of this kind of account (institution catalog id). */
   issuer?: string;
+  /**
+   * Interest is added to it that its documents do not list as movements (a student loan's): a
+   * balance worked out from its movements away from a statement leaves that out, so it is estimated.
+   */
+  interestUnrecorded?: boolean;
   description: string;
 }
 
@@ -316,6 +321,7 @@ export const ACCOUNT_TYPE_META: Record<AccountType, AccountTypeMeta> = {
     taxFreeInterest: false,
     defaultInNetWorth: false,
     expectsTransactions: false,
+    interestUnrecorded: true,
     description: 'Plan 1/2/4/5 or postgraduate. Excluded from net worth by default because repayments work like a graduate tax and the balance may be written off.',
   },
   other_liability: {

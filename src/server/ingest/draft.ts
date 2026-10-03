@@ -3,9 +3,10 @@
 
 import { ACCOUNT_TYPE_META, balanceModeOf } from '../../shared/accounts';
 import { findInstitution } from '../../shared/institutions';
-import { isWrapperAccount, transferLegCategory } from '../../shared/categorise';
-import { dateOf, diffDays, today } from '../../shared/dates';
-import { toMinor } from '../../shared/money';
+import { isWrapperAccount, transferLegCategory, type Categoriser } from '../../shared/categorise';
+import { AGREEMENT_RECEIPT_DAYS } from '../../shared/agreements';
+import { addDays, dateOf, diffDays, formatDate, today } from '../../shared/dates';
+import { formatMoney, toMinor } from '../../shared/money';
 import { spaceMove } from '../../shared/spaces';
 import { categoriserFor } from '../categoriser';
 import { addsAnything, detailToAdd, fillIn } from '../../shared/detail';
@@ -19,6 +20,8 @@ import type {
   DraftFigure,
   DraftSection,
   DraftTransaction,
+  ExtractedAccount,
+  ExtractedSchedule,
   Extraction,
   Holding,
   Transaction,
@@ -33,6 +36,7 @@ import type { Store } from '../store';
 import { classifyDuplicates, storedTwice } from './dedup';
 import { dateFromFileName } from './images';
 import { fitsAccount, identifies, matchAccount, onlyKind, proposeAccount, sameHolding } from './match';
+import { asAgreement, draftAgreements, isStudentFinance, STUDENT_FINANCE, studentLoanAccount } from './schedules';
 
 export { fitsAccount } from './match';
 
@@ -125,7 +129,16 @@ function findTransferMatch(row: TransferSide & { date: string; amount: number },
 
 export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
   const { store } = ctx;
-  const categoriser = categoriserFor(store);
+  // Schedules (extract-15): the agreements they are, which the categoriser reads beside yours. Student
+  // finance's lend and pay through your student loan, or one proposed for it.
+  const statusAsOf = extraction.documentDate ?? ctx.document.capturedOn ?? ctx.uploadedOn;
+  const studentFinance = extraction.schedules.filter(isStudentFinance);
+  const loan = studentFinance.length ? studentLoanAccount(store) : undefined;
+  const newLoan = studentFinance.length && !loan ? proposeAccount({ institutionName: 'Student Loans Company', accountType: 'student_loan', accountName: 'Student loan' }, store.accounts, 'student_loan') : undefined;
+  const loanAccountId = loan?.id ?? newLoan?.id;
+  const agreements = draftAgreements(store, extraction.schedules, { loanAccountId, statusAsOf });
+  const replaced = new Set(agreements.flatMap((d) => (d.target.mode === 'existing' ? [d.target.agreementId] : [])));
+  const categoriser = categoriserFor(store, { agreements: [...store.agreements.filter((a) => !replaced.has(a.id)), ...agreements.map((d) => asAgreement(d.record))] });
   const reader = transferReader(store, categoriser);
   const allTx = store.transactions();
   const txByAmount = new Map<number, Transaction[]>();
@@ -141,7 +154,12 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
   // Each account's latest holdings: a fund's own page names no account, but the account holding it.
   const held = new Map(store.accounts.map((a) => [a.id, store.holdings(a.id).at(-1)?.holdings ?? []]));
 
-  const sections: DraftSection[] = extraction.accounts.map((acc, si) => {
+  // A statement that runs across the day one of your accounts carries on from another is two: the
+  // rows before for the older account, the rest for the newer (docs/INGESTION.md, "Linked accounts").
+  const entries = splitAtLinks(store, extraction.accounts, (acc) => matchAccount({ institutionName: acc.institutionName ?? extraction.institutionName ?? undefined, accountName: acc.accountName ?? undefined, accountType: acc.accountType ?? undefined, last4: acc.last4 ?? undefined, currency: acc.currency ?? undefined }, store.accounts, store.institutions, extraction.accounts.length === 1 ? ctx.hintAccountId : undefined, held));
+  for (const e of entries) if (e.note) notes.push(e.note);
+
+  const sections: DraftSection[] = entries.map(({ acc, force }, si) => {
     // A screen about one holding: its value, gain and amount invested are the holding's, not the
     // account's, and the name at the top is the fund's (or the app's nickname for it).
     const holdingDetail =
@@ -159,7 +177,7 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
     };
     if (typeFromRows) notes.push('The screen does not name the account, but its Lifetime ISA bonus rows say it is a Lifetime ISA.');
     const hint = extraction.accounts.length === 1 ? ctx.hintAccountId : undefined;
-    const match = matchAccount({ ...detected, holdings: acc.holdings.map((h) => h.name) }, store.accounts, store.institutions, hint, held);
+    const match = force ? { accountId: force, score: 100, reason: 'Its part of a statement that runs across the day one account carries on from the other' } : matchAccount({ ...detected, holdings: acc.holdings.map((h) => h.name) }, store.accounts, store.institutions, hint, held);
     let existing: Account | undefined = match.accountId && match.score >= 50 ? store.account(match.accountId) : undefined;
     // A scrolled screen seldom names its account; one taken beside it on the same phone and uploaded
     // with it usually does. Only when this screen has no confident match of its own, shows one
@@ -272,13 +290,24 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
     // Transactions.
     const existingForAccount = existing ? store.transactions(existing.id) : [];
     const recordedById = new Map(existingForAccount.map((t) => [t.id, t]));
-    const dups = classifyDuplicates(
-      acc.transactions.map((t) => ({ date: t.date, amount: t.amount, description: t.description, sourceId: t.sourceId ?? undefined, balanceAfter: t.balanceAfter ?? undefined, time: t.time && /^\d{2}:\d{2}(:\d{2})?$/.test(t.time) ? t.time : undefined })),
+    const candidates = acc.transactions.map((t) => ({ date: t.date, amount: t.amount, description: t.description, sourceId: t.sourceId ?? undefined, balanceAfter: t.balanceAfter ?? undefined, time: t.time && /^\d{2}:\d{2}(:\d{2})?$/.test(t.time) ? t.time : undefined }));
+    const ownDups = classifyDuplicates(
+      candidates,
       existingForAccount,
       3,
       // A letter or confirmation may restate payments recorded one by one (dedup.ts, step 5).
       { sums: !TRANSACTION_LISTS.has(extraction.documentType) },
     );
+    // Rows another of your accounts under the same number and provider has recorded already (the
+    // older or newer product, when the two are not linked): left out, to check.
+    const twins = existing?.last4 ? store.accounts.filter((a) => a.id !== existing.id && a.last4 === existing.last4 && a.institutionId === existing.institutionId) : [];
+    const twinDups = twins.length ? classifyDuplicates(candidates, twins.flatMap((a) => store.transactions(a.id)), 3) : [];
+    const dups = ownDups.map((d, i) => {
+      const twin = d.status === 'new' ? twinDups[i] : undefined;
+      return twin && twin.status !== 'new' && twin.duplicateOf ? { status: 'possible_duplicate' as const, duplicateOf: twin.duplicateOf } : d;
+    });
+    const onTwin = dups.filter((d, i) => d !== ownDups[i]).length;
+    if (onTwin) notes.push(`${onTwin === 1 ? 'A row is' : `${onTwin} rows are`} recorded already on ${twins.map((a) => a.name).join(' or ')}, under the same account number: left out, to check. If one account carries on from the other, link them on its account page, and the statement is split between them.`);
     // The account's Spaces, and those this document's own rows show by type: a row cut off above
     // its type still names the Space.
     const shownSpaces = existing ? acc.transactions.flatMap((t) => (t.type ? (spaceMove({ ...existing, spaces: [] }, t) ?? []) : [])) : [];
@@ -530,6 +559,29 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
     };
   });
 
+  // Student finance's paid instalments, as its student loan's own movements: on the loan's section
+  // when the document gives one, else on a section of their own.
+  const loanRows = studentLoanRows(store, studentFinance, { categoriser, loanAccountId, taken: takenTransfers, keyPrefix: `s${sections.length}` });
+  if (loanRows.length && loanAccountId) {
+    const own = sections.find((x) => (x.target.mode === 'existing' && x.target.accountId === loanAccountId) || (x.target.mode === 'new' && x.target.account.id === loanAccountId));
+    if (own) own.transactions.push(...loanRows.map((r, i) => ({ ...r, key: `${own.key}-l${i}` })));
+    else
+      sections.push({
+        key: `s${sections.length}`,
+        detected: { institutionName: studentFinance[0]!.provider, accountType: 'student_loan', accountName: 'Student loan' },
+        target: loan ? { mode: 'existing', accountId: loan.id } : { mode: 'new', account: newLoan! },
+        matchReason: 'Student finance pays out of your student loan: each instalment it paid is money the loan lent you, or paid for you',
+        fromSchedule: true,
+        currency: 'GBP',
+        recordBalance: false,
+        balanceDate: statusAsOf,
+        recordHoldings: false,
+        transactions: loanRows,
+        holdings: [],
+        readBalance: null,
+      });
+  }
+
   // An account the document only mentions (the account on an interest certificate, say) has
   // nothing to import: leave it out rather than offer to create it.
   const importable = sections.filter((s) => s.transactions.length || s.holdings.length || s.balance !== undefined || [s.contributions, s.bonusToDate, s.taxYearContributions, s.cash, s.annualIncome].some((v) => v !== undefined));
@@ -551,12 +603,112 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
     ...(jobs.length ? { jobs } : {}),
     ...(hmrc.length ? { hmrc } : {}),
     ...(payslips.length ? { payslips } : {}),
+    ...(agreements.length ? { agreements } : {}),
     notes,
     ...(extraction.nothingToRecord?.trim() ? { nothingToRecord: extraction.nothingToRecord.trim().slice(0, 300) } : {}),
     ...(batchMatch && importable.some((s) => s.target.mode === 'existing' && s.target.accountId === batchMatch!.accountId) ? { batchMatch } : {}),
     confidence: extraction.confidence,
     ...(extraction.institutionName ? { institutionName: extraction.institutionName } : {}),
     ...(extraction.documentDate ? { documentDate: extraction.documentDate } : {}),
+  });
+}
+
+/**
+ * Extracted accounts as entries to draft: one that runs across the day one of your accounts carries
+ * on from another (`Account.continues`: a product change under one account number) is split there,
+ * the rows before for the older account and the rest for the newer, each with the balance it
+ * starts or ends with as its running balances give them; one wholly on one side goes to that side's
+ * account. `matchOf` is how the account would be matched without the link.
+ */
+export function splitAtLinks(store: Store, accounts: readonly ExtractedAccount[], matchOf: (acc: ExtractedAccount) => { accountId?: string | undefined; score: number }): { acc: ExtractedAccount; force?: string; note?: string }[] {
+  const links = store.accounts.flatMap((n) => {
+    const older = n.continues ? store.account(n.continues.accountId) : undefined;
+    return older && n.continues ? [{ newer: n, older, from: n.continues.from }] : [];
+  });
+  if (!links.length) return accounts.map((acc) => ({ acc }));
+  return accounts.flatMap((acc) => {
+    const m = matchOf(acc);
+    const link = links.find((l) => (acc.last4 && (l.newer.last4 === acc.last4 || l.older.last4 === acc.last4) && (!acc.institutionName || findInstitution(acc.institutionName)?.id === (l.newer.institutionId ?? l.older.institutionId))) || (m.score >= 50 && (m.accountId === l.newer.id || m.accountId === l.older.id)));
+    if (!link) return [{ acc }];
+    const before = acc.transactions.filter((t) => t.date < link.from);
+    const after = acc.transactions.filter((t) => t.date >= link.from);
+    const runsAcross = before.length > 0 && (after.length > 0 || Boolean(acc.periodEnd && acc.periodEnd >= link.from));
+    if (!runsAcross) return [{ acc, force: before.length || (acc.periodEnd && acc.periodEnd < link.from) ? link.older.id : link.newer.id }];
+    const carried = before.at(-1)?.balanceAfter ?? null;
+    const dayBefore = addDays(link.from, -1);
+    const older: ExtractedAccount = { ...acc, transactions: before, holdings: [], ...(acc.periodEnd && acc.periodEnd >= link.from ? { periodEnd: dayBefore } : {}), closingBalance: carried, balanceDate: carried !== null ? (before.at(-1)?.date ?? dayBefore) : null, statedMoneyIn: null, statedMoneyOut: null, cashBalance: null };
+    const newer: ExtractedAccount = { ...acc, transactions: after, ...(acc.periodStart && acc.periodStart < link.from ? { periodStart: link.from } : {}), openingBalance: carried, statedMoneyIn: null, statedMoneyOut: null };
+    const note = `Split at ${formatDate(link.from)}, where ${link.newer.name} carries on from ${link.older.name}: ${before.length === 1 ? 'the row' : `the ${before.length} rows`} before ${before.length === 1 ? 'goes' : 'go'} to ${link.older.name}, ${after.length === 1 ? 'the row' : `the ${after.length} rows`} from it to ${link.newer.name}.${carried !== null ? ` The balance carried over: ${formatMoney(carried)}.` : ''}`;
+    return [
+      { acc: older, force: link.older.id, note },
+      { acc: newer, force: link.newer.id },
+    ];
+  });
+}
+
+/** A student loan's row for a student finance payment: what it was, and who it was paid to. */
+export function loanRowDescription(s: Pick<ExtractedSchedule, 'name' | 'direction' | 'paidTo'>, p: Pick<ExtractedSchedule['payments'][number], 'label'>): string {
+  const what = `${s.name}${p.label ? ` (${p.label})` : ''}`;
+  return `${what}: paid to ${s.direction === 'to-you' ? 'you' : (s.paidTo ?? 'your university or college')}`;
+}
+
+/**
+ * Student finance's paid instalments as rows on its student loan (docs/INGESTION.md, "Schedules").
+ * Each is money the loan lent you or paid for you, so it adds to what you owe. One paid to you is the
+ * other leg of the money that reached your bank: the credit of exactly that amount within 7 days,
+ * which commit links as a transfer. One paid for you takes the agreement's category (its fees).
+ */
+function studentLoanRows(store: Store, schedules: readonly ExtractedSchedule[], opts: { categoriser: Categoriser; loanAccountId: string | undefined; taken: Set<string>; keyPrefix: string }): DraftTransaction[] {
+  const loanId = opts.loanAccountId;
+  if (!loanId || !schedules.length) return [];
+  const wrapper = new Set(store.accounts.filter((a) => isWrapperAccount(a.type)).map((a) => a.id));
+  const loanType: AccountType = store.account(loanId)?.type ?? 'student_loan';
+  const items = schedules.flatMap((s) => s.payments.filter((p) => p.status === 'paid').map((p) => ({ s, p, description: loanRowDescription(s, p) })));
+  const dups = classifyDuplicates(
+    items.map(({ p, description }) => ({ date: p.date, amount: -p.amount, description })),
+    store.transactions(loanId),
+    3,
+  );
+  const credits = store.transactions().filter((t) => t.amount > 0 && t.accountId !== loanId && !wrapper.has(t.accountId) && !t.transferGroup && (t.categorisedBy !== 'user' || TRANSFER_CATEGORIES.has(t.category ?? '')));
+  return items.map(({ s, p, description }, i) => {
+    const toYou = s.direction === 'to-you';
+    const payee = toYou ? s.provider : (s.paidTo ?? s.provider);
+    const cat = opts.categoriser.categorise({ accountId: loanId, description, amount: -p.amount, date: p.date, payee });
+    const dup = dups[i]!;
+    let category = cat.category;
+    let categorisedBy = cat.categorisedBy;
+    let counterpartyAccountId: string | undefined;
+    let transferMatch: string | undefined;
+    if (toYou && dup.status === 'new') {
+      // The credit of exactly that amount within 7 days: one naming student finance first, then the nearest.
+      const names = (t: Transaction) => Number(STUDENT_FINANCE.test(`${t.payee ?? ''} ${t.counterpartyName ?? ''} ${t.description}`));
+      const credit = credits
+        .filter((t) => !opts.taken.has(t.id) && toMinor(t.amount) === toMinor(p.amount) && Math.abs(diffDays(t.date, p.date)) <= AGREEMENT_RECEIPT_DAYS)
+        .sort((a, b) => names(b) - names(a) || Math.abs(diffDays(a.date, p.date)) - Math.abs(diffDays(b.date, p.date)))[0];
+      const other = credit ? store.account(credit.accountId) : undefined;
+      if (credit && other) {
+        opts.taken.add(credit.id);
+        transferMatch = credit.id;
+        counterpartyAccountId = credit.accountId;
+        category = transferLegCategory(loanType, other.type, -p.amount);
+        categorisedBy = 'transfer';
+      }
+    }
+    return {
+      key: `${opts.keyPrefix}-t${i}`,
+      include: dup.status === 'new',
+      status: dup.status,
+      date: p.date,
+      amount: -p.amount,
+      description,
+      payee,
+      ...(dup.duplicateOf ? { duplicateOf: dup.duplicateOf } : {}),
+      ...(category ? { category } : {}),
+      ...(categorisedBy ? { categorisedBy } : {}),
+      ...(counterpartyAccountId ? { counterpartyAccountId } : {}),
+      ...(transferMatch ? { transferMatch } : {}),
+      row: i,
+    };
   });
 }
 

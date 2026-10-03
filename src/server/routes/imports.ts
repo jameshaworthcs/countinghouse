@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import type { ImportHistoryResponse, ImportListResponse, ImportView } from '../../shared/api';
-import { CsvProfileSchema, DraftSchema, EXTRACTION_ENGINES, SlugSchema } from '../../shared/schema';
+import { CsvProfileSchema, DraftSchema, DraftSectionSchema, EXTRACTION_ENGINES, SlugSchema } from '../../shared/schema';
 import { readJson, type AppContext } from '../context';
 import { detectKind } from '../ingest/detect';
 import { nowISO } from '../fsutil';
@@ -185,6 +185,13 @@ export function importRoutes(ctx: AppContext): Hono {
   });
 
   app.post('/:id/dismiss', async (c) => c.json(await svc.dismiss(c.req.param('id'))));
+  /** A section's rows checked again against the account chosen for it on the review page. */
+  app.post('/:id/sections/redraft', async (c) => {
+    const body = await readJson(c, z.object({ section: DraftSectionSchema }));
+    return c.json(svc.redraftSection(body.section));
+  });
+  /** A document filed as adding nothing new, back in review as an import of its own. */
+  app.post('/:id/reopen', async (c) => c.json(await svc.reopen(c.req.param('id')), 201));
 
   // ─── Reading a stored document again (docs/INGESTION.md): yours only, and off unless turned on ──
 

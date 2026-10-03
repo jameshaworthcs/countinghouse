@@ -1,5 +1,6 @@
-// Agreements to pay on the Spending page: what an accommodation offer, a contract or a payment plan
-// says is due and when, each payment checked against what you paid (docs/FORMULAS.md §10, "Agreements").
+// Agreements on the Spending page: what an accommodation offer, a contract, a payment plan or a student
+// finance award says is due and when, each payment checked against what was paid, by you, to you, or by
+// a loan for you (docs/FORMULAS.md §10, "Agreements").
 
 import { Handshake } from 'lucide-react';
 import { Fragment } from 'react';
@@ -13,7 +14,7 @@ import { Badge, Card, Money, StatusBadge } from './ui';
 
 const paidLink = (p: { accountId: string; date: string }) => `/transactions?accounts=${p.accountId}&period=custom&from=${p.date}&to=${p.date}`;
 
-function Payment({ p, i }: { p: AgreementView['payments'][number]; i: number }) {
+function Payment({ p, i, toYou }: { p: AgreementView['payments'][number]; i: number; toYou: boolean }) {
   const { accountName } = useAppData();
   const off = p.paid?.difference;
   return (
@@ -27,7 +28,7 @@ function Payment({ p, i }: { p: AgreementView['payments'][number]; i: number }) 
         {p.paid ? (
           <>
             <Link to={paidLink(p.paid)} className="hover:underline">
-              <StatusBadge status="good">Paid {formatDate(p.paid.date)}</StatusBadge>
+              <StatusBadge status="good">{toYou ? 'Received' : 'Paid'} {formatDate(p.paid.date)}</StatusBadge>
             </Link>
             <span className="text-[12px] text-ink-3">
               {off ? (
@@ -42,6 +43,12 @@ function Payment({ p, i }: { p: AgreementView['payments'][number]; i: number }) 
           <Badge tone="muted">Not due yet</Badge>
         ) : p.status === 'due' ? (
           <StatusBadge status="info">Due</StatusBadge>
+        ) : p.status === 'documented' ? (
+          <span title="Its document says it was paid; no payment matching it is in your accounts (from before your data begins, say)">
+            <Badge tone="muted">Paid, says its document</Badge>
+          </span>
+        ) : p.status === 'cancelled' ? (
+          <Badge tone="muted">Cancelled</Badge>
         ) : (
           <StatusBadge status="warn">No payment seen</StatusBadge>
         )}
@@ -53,13 +60,16 @@ function Payment({ p, i }: { p: AgreementView['payments'][number]; i: number }) 
 function AgreementBlock({ v }: { v: AgreementView }) {
   const { cats, accountName } = useAppData();
   const a = v.agreement;
+  const toYou = a.direction === 'in';
+  // Who pays whom: you pay it; it pays you (lent through an account of yours); someone pays it for you.
+  const who = toYou ? `${a.counterparty} pays you${a.accountId ? `, lent through ${accountName(a.accountId)}` : ''}` : a.paidBy ? `${a.paidBy} pays ${a.counterparty} for you` : a.counterparty;
   return (
     <div className="px-5 py-4">
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
         <div className="min-w-0">
           <div className="font-medium text-ink">{a.name}</div>
           <div className="text-[12.5px] text-ink-3">
-            {a.counterparty} · {formatDate(a.from)}
+            {who} · {formatDate(a.from)}
             {a.until ? ` to ${formatDate(a.until)}` : ''}
             {a.total !== undefined && (
               <>
@@ -73,7 +83,7 @@ function AgreementBlock({ v }: { v: AgreementView }) {
       </div>
       <ul className="mt-1 divide-y divide-line text-[13px]">
         {v.payments.map((p, i) => (
-          <Payment key={i} p={p} i={i} />
+          <Payment key={i} p={p} i={i} toYou={toYou} />
         ))}
       </ul>
       {v.others.length > 0 && (
@@ -92,7 +102,16 @@ function AgreementBlock({ v }: { v: AgreementView }) {
         </div>
       )}
       <div className="mt-1.5 text-[12.5px] text-ink-3">
-        <Money value={v.paid} className="font-medium text-ink-2" /> paid to it in your accounts{a.total !== undefined ? <> of the <Money value={a.total} /> it comes to</> : ''}.
+        <Money value={v.paid} className="font-medium text-ink-2" /> {toYou ? 'received in your accounts' : a.accountId ? `paid from ${accountName(a.accountId)}` : 'paid to it in your accounts'}
+        {a.total !== undefined ? (
+          <>
+            {' '}
+            of the <Money value={a.total} /> it comes to
+          </>
+        ) : (
+          ''
+        )}
+        .{a.statusAsOf && v.payments.some((p) => p.status === 'documented') ? ` Its document gave the payments as they were on ${formatDate(a.statusAsOf)}.` : ''}
       </div>
       {(a.details.length > 0 || a.reference || a.agreedOn || a.notes) && (
         <details className="mt-2 text-[12.5px]">
@@ -134,10 +153,10 @@ export function AgreementsCard() {
   const q = useApi<AgreementView[]>(['agreements'], '/agreements');
   if (!q.data?.length) return null;
   const now = today();
-  const running = (v: AgreementView) => v.payments.some((p) => p.status !== 'paid' && p.status !== 'unseen') || (v.agreement.until ?? v.agreement.from) >= now;
+  const running = (v: AgreementView) => v.payments.some((p) => p.status === 'upcoming' || p.status === 'due') || (v.agreement.until ?? v.agreement.from) >= now;
   const list = [...q.data].sort((x, y) => Number(running(y)) - Number(running(x)) || y.agreement.from.localeCompare(x.agreement.from));
   return (
-    <Card title={<span className="inline-flex items-center gap-2"><Handshake className="size-4 text-ink-3" /> Agreements to pay</span>} description="What an offer, contract or payment plan says is due and when, checked against your payments. Its payments take its category as they come." padded={false}>
+    <Card title={<span className="inline-flex items-center gap-2"><Handshake className="size-4 text-ink-3" /> Agreements</span>} description="What an offer, contract, payment plan or student finance award says is due and when, checked against what was paid. Its payments take its category as they come." padded={false}>
       <div className="divide-y divide-line border-t border-line">
         {list.map((v) => (
           <AgreementBlock key={v.agreement.id} v={v} />

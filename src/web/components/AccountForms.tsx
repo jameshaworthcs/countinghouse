@@ -35,6 +35,8 @@ export function AccountDialog({ open, onOpenChange, account }: { open: boolean; 
   const [notes, setNotes] = useState(account?.notes ?? '');
   const [openedOn, setOpenedOn] = useState(account?.openedOn ?? '');
   const [closedOn, setClosedOn] = useState(account?.closedOn ?? '');
+  const [continuesFrom, setContinuesFrom] = useState(account?.continues?.accountId ?? '');
+  const [continuesOn, setContinuesOn] = useState(account?.continues?.from ?? '');
   const [balance, setBalance] = useState('');
   const [balanceDate, setBalanceDate] = useState(today());
   const meta = ACCOUNT_TYPE_META[type];
@@ -58,6 +60,8 @@ export function AccountDialog({ open, onOpenChange, account }: { open: boolean; 
         ...(notes.trim() ? { notes: notes.trim() } : {}),
         // Dates you clear are cleared; a closing date closes the account, and clearing it reopens it.
         ...(account ? { openedOn: openedOn || null, closedOn: closedOn || null } : openedOn ? { openedOn } : {}),
+        // The account it carries on from (a product change under one number), or none.
+        ...(account ? { continues: continuesFrom && continuesOn ? { accountId: continuesFrom, from: continuesOn } : null } : {}),
       };
       if (!account && balance.trim()) {
         body.balance = Number(balance);
@@ -123,6 +127,28 @@ export function AccountDialog({ open, onOpenChange, account }: { open: boolean; 
           <Field label="Closed on" hint={closedOn ? 'The last day it counts in your estate value' : 'Empty while it is open'}>
             <Input type="date" value={closedOn} min={openedOn || undefined} max={today()} onChange={(e) => setClosedOn(e.target.value)} />
           </Field>
+        )}
+        {account && (
+          <>
+            <Field label="Carries on from" hint="Another account it continues under the same number, as a fixed rate that matures into easy access: a statement that runs across the day is split between them">
+              <Select value={continuesFrom} onChange={(e) => setContinuesFrom(e.target.value)}>
+                <option value="">None</option>
+                {data.accounts
+                  .filter((a) => a.id !== account.id)
+                  .map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name}
+                      {a.status === 'closed' ? ' (closed)' : ''}
+                    </option>
+                  ))}
+              </Select>
+            </Field>
+            {continuesFrom && (
+              <Field label="From" hint="The first day this account holds the money">
+                <Input type="date" value={continuesOn} max={today()} onChange={(e) => setContinuesOn(e.target.value)} />
+              </Field>
+            )}
+          </>
         )}
         {meta.pension && type !== 'state_pension' && type !== 'db_pension' && (
           <Field label="How tax relief is given" className="sm:col-span-2">

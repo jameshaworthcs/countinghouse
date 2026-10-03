@@ -24,6 +24,9 @@ export interface CheckContext {
   latest: string;
   /** An export's period is its first and last rows, so checking rows against it proves nothing. */
   periodFromRows?: boolean;
+  /** When the account the rows go into opened and closed, when known: rows outside them are not its. */
+  openedOn?: string | undefined;
+  closedOn?: string | undefined;
 }
 
 /**
@@ -57,6 +60,20 @@ const rowsWord = (n: number) => (n === 1 ? '1 row' : `${n} rows`);
 export function sectionChecks(section: DraftSection, ctx: CheckContext): ReviewCheck[] {
   const out: ReviewCheck[] = [];
   const rows = section.transactions;
+  // Rows from before the account opened or after it closed: another account's (one it carries on
+  // from, under the same number), or a misread date.
+  const early = rows.filter((t) => t.include && ctx.openedOn !== undefined && t.date < ctx.openedOn);
+  const late = rows.filter((t) => t.include && ctx.closedOn !== undefined && t.date > ctx.closedOn);
+  if (early.length || late.length) {
+    const n = early.length + late.length;
+    out.push({
+      id: 'open-dates',
+      status: 'warn',
+      title: 'Rows outside the account’s open dates',
+      detail: `${n === 1 ? 'A row is' : `${n} rows are`} dated ${[early.length ? `before it opened (${formatDate(ctx.openedOn!)})` : '', late.length ? `after it closed (${formatDate(ctx.closedOn!)})` : ''].filter(Boolean).join(' or ')}: another account’s rows, such as one it carries on from under the same number, or a misread date. Choose the right account, or link the two on the account’s page so the statement is split between them.`,
+      rows: [...early, ...late].map((t) => t.key),
+    });
+  }
   // Statements and exports total their settled rows; pending ones are shown separately.
   const settled = rows.filter((t) => !t.pending);
 

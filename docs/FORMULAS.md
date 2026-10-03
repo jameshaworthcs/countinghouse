@@ -114,6 +114,9 @@ A month is **complete** when it lies inside the period and ≥ 90% of its days a
   - Fewer days can miss a payday altogether: 20 days of June before the salary on the 25th
     read as a monthly loss.
 - **Else:** unavailable, with the limiting accounts named.
+- **Spending a student loan pays for you** (tuition fees paid to your university, rows on a
+  student loan account) is left out: it is not your own money, and it stops when the course does.
+  The month's figures (§14) still count it, as you chose.
 
 **Standard periods** (`standardPeriods`): the last 3 and the last 12 full months. When the last 3
 full months have neither a complete month nor 28 covered days (after a first import), the recent
@@ -330,6 +333,9 @@ years), both paths grow at the median:
   - with an anchor on or before D, balance(D) = anchor + Σ tx in (anchor, D];
   - otherwise, rolled back from the next anchor;
   - with no anchors, Σ tx ≤ D, flagged estimated.
+- An account whose interest its documents do not list as movements (a student loan,
+  `interestUnrecorded`) has every balance but a statement's own day flagged estimated: worked out
+  from its movements (instalments lent and fees paid), it leaves the interest out.
 - Prefix sums and binary search make each lookup O(log n).
 
 **Market accounts:**
@@ -463,12 +469,22 @@ Deterministic rules with named thresholds (`SIGNAL_RULES` in `analytics/spending
 - **Top category:** > 25% of spending.
 
 **Agreements** (`agreements.json`; `shared/agreements.ts`, `analytics/agreements.ts`). An agreement
-is what an offer, contract or payment plan says you will pay: a schedule of payments due, each a
-date and an amount.
+is what an offer, contract, payment plan or student finance award says will be paid: a schedule of
+payments due, each a date and an amount, paid by you, to you (`direction: "in"`), or by a loan for
+you (`accountId`, `paidBy`).
 
 - **Its payments:** money out of an everyday account (not an investment or pension) whose
   description, or the merchant or payer its source gives, names its counterparty or one of its
   other names, as whole words.
+  - **Paid to you:** money in to an everyday account other than the one that lends it, for exactly
+    a payment's amount within 7 days of its date (`AGREEMENT_RECEIPT_DAYS`): the bank seldom names
+    who sent it. Filed under its category (borrowing: a transfer from the loan, which is named as
+    the other side) with its counterparty as the payee. The loan's own row for the same instalment
+    takes the category too.
+  - **Paid by a loan for you:** money out of that loan's account, the same way (a Tuition Fee
+    Loan's fees on the student loan).
+  - **Paid for you outside your accounts** (`paidBy` with no `accountId`): none of your payments is
+    one of its.
 - **A scheduled payment** is one of those within 45 days either side of a due date
   (`AGREEMENT_PAYMENT_DAYS`), for that payment's amount or within a tenth of it
   (`AGREEMENT_PAYMENT_TOLERANCE`): an advance taken off an instalment, or a small charge added to
@@ -483,11 +499,14 @@ date and an amount.
 - **The check** pairs payments due with payments, across all your agreements at once, so two never
   share one (a tenancy and its renewal): pairs of exactly the amount due first, then the fewest
   days apart, then the nearest amount; each payment pairs once. A payment due with none is *not due
-  yet* before its date, *due* for 45 days after it, then *no payment seen*. A paired payment that
-  differs from what was due shows the difference.
+  yet* before its date, *due* for 45 days after it (7 for one paid to the penny), then *no payment
+  seen*. With none found, what its document says comes first: *paid, says its document* (before your
+  data begins, say) or *cancelled*. A paired payment that differs from what was due shows the
+  difference.
 - **Other payments:** those to its counterparty in its category that no agreement's payment due
   pairs with, from when it was agreed (its start, if that is not known; its first due date, if
   earlier) to 45 days after its end (or its last due date, if later), as a charge after a let comes.
+  None for one known only by its exact amounts.
 - **Paid** is the paired payments and the other payments added up. Its total is the document's,
   shown beside it; nothing is worked out from the two.
 

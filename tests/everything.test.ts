@@ -11,15 +11,18 @@ import type { Draft } from '../src/shared/schema';
 const NI = /[A-Z]{2} ?\d{2} ?\d{2} ?\d{2} ?[A-D]/;
 
 describe('the reader, reading everything', () => {
-  it('is a prompt version of its own, with four more rules and their part of the schema', () => {
-    expect([promptVersion(false), promptVersion(true)]).toEqual(['extract-11', 'extract-14']);
+  it('is a prompt version of its own, with five more rules and their part of the schema', () => {
+    expect([promptVersion(false), promptVersion(true)]).toEqual(['extract-11', 'extract-15']);
     expect(systemPrompt(false)).not.toMatch(/^20\. payslips/m);
+    expect(systemPrompt(false)).not.toMatch(/^24\. schedules/m);
     expect(systemPrompt(true)).toMatch(/^20\. payslips:/m);
     expect(systemPrompt(true)).toMatch(/^22\. printed:/m);
     expect(systemPrompt(true)).toMatch(/^23\. terms, on each account:/m);
+    expect(systemPrompt(true)).toMatch(/^24\. schedules:/m);
     const keys = (s: Record<string, unknown>) => Object.keys(s.properties as Record<string, unknown>);
     expect(keys(extractionJsonSchema(false))).not.toContain('payslips');
-    expect(keys(extractionJsonSchema(true))).toEqual(expect.arrayContaining(['payslips', 'hmrc', 'printed']));
+    expect(keys(extractionJsonSchema(false))).not.toContain('schedules');
+    expect(keys(extractionJsonSchema(true))).toEqual(expect.arrayContaining(['payslips', 'hmrc', 'printed', 'schedules']));
     // An account's terms: only when reading everything.
     const account = (s: Record<string, unknown>) => ((s.properties as Record<string, { items: Record<string, unknown> }>).accounts!.items);
     expect(keys(account(extractionJsonSchema(false)))).not.toContain('terms');

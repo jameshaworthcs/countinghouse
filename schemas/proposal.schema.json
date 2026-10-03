@@ -329,6 +329,50 @@
               },
               "kind": {
                 "type": "string",
+                "const": "link_accounts"
+              },
+              "why": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000
+              },
+              "account": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+              },
+              "continues": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+              },
+              "from": {
+                "type": "string",
+                "description": "Calendar date, YYYY-MM-DD"
+              }
+            },
+            "required": [
+              "key",
+              "kind",
+              "why",
+              "account",
+              "continues",
+              "from"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]{0,39}$"
+              },
+              "kind": {
+                "type": "string",
                 "const": "move_balance"
               },
               "why": {
@@ -497,6 +541,29 @@
                     "minLength": 1,
                     "maxLength": 64
                   },
+                  "direction": {
+                    "type": "string",
+                    "enum": [
+                      "out",
+                      "in"
+                    ]
+                  },
+                  "accountId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                    "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+                  },
+                  "paidBy": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "statusAsOf": {
+                    "type": "string",
+                    "description": "Calendar date, YYYY-MM-DD"
+                  },
                   "from": {
                     "type": "string",
                     "description": "Calendar date, YYYY-MM-DD"
@@ -528,6 +595,16 @@
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 120
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "paid",
+                            "due",
+                            "scheduled",
+                            "awaiting",
+                            "cancelled"
+                          ]
                         }
                       },
                       "required": [
@@ -1481,6 +1558,26 @@
                     ]
                   }
                 }
+              },
+              "continues": {
+                "type": "object",
+                "properties": {
+                  "accountId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                    "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+                  },
+                  "from": {
+                    "type": "string",
+                    "description": "Calendar date, YYYY-MM-DD"
+                  }
+                },
+                "required": [
+                  "accountId",
+                  "from"
+                ]
               },
               "notes": {
                 "type": "string"

@@ -143,6 +143,12 @@ export const AccountSchema = z.object({
   interestRate: z.number().min(-100).max(100).optional(),
   maturesOn: ISODateSchema.optional(),
   pension: PensionDetailsSchema.optional(),
+  /**
+   * The account this one carries on from, and from which day: a product change under the same
+   * account number (a fixed rate maturing into easy access). A statement that runs across the day is
+   * split between the two (docs/INGESTION.md, "Linked accounts").
+   */
+  continues: z.object({ accountId: SlugSchema, from: ISODateSchema }).optional(),
   notes: z.string().optional(),
   attributes: AttributesSchema.optional(),
   createdAt: TimestampSchema,
@@ -634,29 +640,50 @@ export const CompanySchema = z.object({
 });
 export type Company = z.infer<typeof CompanySchema>;
 
+/** A payment's state as its document gives it: paid, due (or ready to be paid), expected, awaiting confirmation, or cancelled. */
+export const AGREEMENT_PAYMENT_STATUSES = ['paid', 'due', 'scheduled', 'awaiting', 'cancelled'] as const;
+export type AgreementPaymentStatus = (typeof AGREEMENT_PAYMENT_STATUSES)[number];
+
 /**
- * An agreement that sets out payments you make to someone (agreements.json, docs/DATA_FORMAT.md): an
- * accommodation offer or tenancy, a contract, a payment plan. Its schedule is kept as its document
- * gives it, with everything else the document says; its payments are filed under its category as
- * they come, and checked against the schedule (FORMULAS.md §10, "Agreements").
+ * An agreement that sets out payments between you and someone (agreements.json, docs/DATA_FORMAT.md):
+ * an accommodation offer or tenancy, a contract, a payment plan, a student finance award. Its
+ * schedule is kept as its document gives it, with everything else the document says; its payments
+ * are filed under its category as they come, and checked against the schedule (FORMULAS.md §10,
+ * "Agreements").
  */
 const AgreementPaymentSchema = z.object({
   due: ISODateSchema,
-  /** What is due, as the document gives it: money you pay, so a positive amount. */
+  /** What is due, as the document gives it: always a positive amount, whichever way it goes. */
   amount: MoneySchema.refine((n) => n > 0, { message: 'A payment due is a positive amount' }),
   /** As the document names it ("Instalment 1"). */
   label: z.string().min(1).max(120).optional(),
+  /** What its document said of it (`statusAsOf`): the check pairs it with your payments whatever this says. */
+  status: z.enum(AGREEMENT_PAYMENT_STATUSES).optional(),
 });
 export const AgreementSchema = z.object({
   id: SlugSchema,
   /** What it is, in a few words ("Example College room, 2023/24"). */
   name: z.string().min(1).max(160),
-  /** Who you pay. */
+  /** Who you pay, or who pays you. */
   counterparty: z.string().min(1).max(200),
   /** Other names its payments carry in your accounts ("UNI OF EXAMPLETON"): with the counterparty's, how they are recognised. */
   names: z.array(z.string().min(3).max(100)).max(10).default([]),
-  /** The category its payments take: a spending category. */
+  /**
+   * The category its payments take: a spending category for money you pay; for money paid to you,
+   * a transfer (a loan lending it) or an income category.
+   */
   category: z.string().min(1).max(64),
+  /** Money you pay (out, when absent) or money paid to you (in: a student finance award's maintenance). */
+  direction: z.enum(['out', 'in']).optional(),
+  /**
+   * The account its payments move through when not your everyday ones: a loan that lends you the
+   * payments in, or pays the payments out for you (a Tuition Fee Loan paid to your university).
+   */
+  accountId: SlugSchema.optional(),
+  /** Who pays it for you, when you do not ("Student Finance England" paying your university). */
+  paidBy: z.string().min(1).max(200).optional(),
+  /** The day its document gave the payments' statuses. */
+  statusAsOf: ISODateSchema.optional(),
   /** The period it covers (a let's first and last days). */
   from: ISODateSchema,
   until: ISODateSchema.optional(),
@@ -1328,6 +1355,41 @@ export const ExtractedFigureSchema = z.object({
 });
 export type ExtractedFigure = z.infer<typeof ExtractedFigureSchema>;
 
+export const SCHEDULE_DIRECTIONS = ['to-you', 'from-you', 'to-other'] as const;
+
+/**
+ * A schedule of payments between you and an organisation, or made for you, that is not an account's
+ * own movements (extract-15, rule 24): a student finance award or payments page, an accommodation
+ * offer's instalments, a council tax bill, a loan's payment dates. Recorded as an agreement.
+ */
+export const ExtractedScheduleSchema = z.object({
+  /** Who pays or is paid, as printed ("Student Finance England"). */
+  provider: z.string().min(1).max(200),
+  /** What it is, with its period ("Maintenance Loan 2026/27"). */
+  name: z.string().min(1).max(160),
+  /** The provider pays you, you pay it, or it pays someone else for you (`paidTo`). */
+  direction: z.enum(SCHEDULE_DIRECTIONS),
+  paidTo: z.string().min(1).max(200).optional(),
+  from: ISODateSchema.optional(),
+  until: ISODateSchema.optional(),
+  reference: z.string().min(1).max(80).optional(),
+  total: MoneySchema.optional(),
+  payments: z
+    .array(
+      z.object({
+        date: ISODateSchema,
+        amount: MoneySchema.refine((n) => n > 0, { message: 'A scheduled payment is a positive amount' }),
+        label: z.string().min(1).max(120).optional(),
+        status: z.enum(AGREEMENT_PAYMENT_STATUSES).optional(),
+      }),
+    )
+    .min(1)
+    .max(120),
+  /** Other facts it prints about itself (course, course year, room), as printed. */
+  details: z.array(z.object({ label: z.string().min(1).max(80), value: z.string().min(1).max(400) })).max(40).default([]),
+});
+export type ExtractedSchedule = z.infer<typeof ExtractedScheduleSchema>;
+
 export const ExtractionSchema = z.object({
   documentType: z.enum(EXTRACTION_DOC_TYPES).default('other'),
   institutionName: z.string().nullable().default(null),
@@ -1344,6 +1406,8 @@ export const ExtractionSchema = z.object({
    * kept with the import so nothing on a document is lost, though nothing reads it yet.
    */
   printed: z.array(z.object({ section: z.string().max(120).optional(), label: z.string().min(1).max(200), value: z.string().min(1).max(500) })).max(400).default([]),
+  /** Schedules of payments it gives (extract-15): recorded as agreements. */
+  schedules: z.array(ExtractedScheduleSchema).default([]),
   notes: z.array(z.string()).default([]),
   /** Understood, but nothing to record: what the document shows, in a sentence (extract-9). */
   nothingToRecord: z.string().nullable().default(null),
@@ -1479,6 +1543,11 @@ export const DraftSectionSchema = z.object({
   }),
   target: DraftTargetSchema,
   matchReason: z.string().optional(),
+  /**
+   * Rows a document's schedules give, not a statement of the account: student finance's paid
+   * instalments as its loan's movements. They cover no days of it, and have no balance to give.
+   */
+  fromSchedule: z.boolean().optional(),
   /** The screen says only what kind of account it is, and you have one of that kind: offered in one click. */
   suggestedAccountId: SlugSchema.optional(),
   currency: CurrencySchema.default('GBP'),
@@ -1577,6 +1646,23 @@ export const DraftHmrcSchema = z.object({
 });
 export type DraftHmrc = z.infer<typeof DraftHmrcSchema>;
 
+/**
+ * A schedule a document gives, as the agreement it records (docs/INGESTION.md, "Schedules"): a new
+ * one, or one recorded already that it fills in (new payments, their latest statuses).
+ */
+export const DraftAgreementSchema = z.object({
+  key: z.string(),
+  include: z.boolean(),
+  target: z.discriminatedUnion('mode', [z.object({ mode: z.literal('new') }), z.object({ mode: z.literal('existing'), agreementId: SlugSchema })]),
+  /** The agreement as this document gives it. */
+  record: AgreementSchema.omit({ createdBy: true, createdAt: true, updatedAt: true }),
+  /** For one recorded already: how many of its payments this adds, and how many statuses it updates. */
+  adds: z.object({ payments: z.number().int().nonnegative(), statuses: z.number().int().nonnegative() }).optional(),
+  /** Recorded payments its payments are, by their place in its schedule. */
+  explains: z.array(z.object({ index: z.number().int().nonnegative(), transactionId: z.string(), accountId: SlugSchema, date: ISODateSchema, amount: MoneySchema })).max(120).default([]),
+});
+export type DraftAgreement = z.infer<typeof DraftAgreementSchema>;
+
 export const DraftPayslipSchema = z.object({
   key: z.string(),
   include: z.boolean(),
@@ -1623,6 +1709,8 @@ export const DraftSchema = z.object({
   jobs: z.array(DraftJobSchema).optional(),
   hmrc: z.array(DraftHmrcSchema).optional(),
   payslips: z.array(DraftPayslipSchema).optional(),
+  /** Schedules it gives, as agreements to record. */
+  agreements: z.array(DraftAgreementSchema).optional(),
   notes: z.array(z.string()).default([]),
   /** The reader understood the document but found nothing to record: what it shows, in its words. */
   nothingToRecord: z.string().max(300).optional(),
@@ -1650,6 +1738,8 @@ export const ImportRecordSchema = z.object({
   origin: z.enum(['upload', 'inbox', 'cli']).default('upload'),
   /** The account the user said this document belongs to (e.g. dropped onto that account). */
   hintAccountId: SlugSchema.optional(),
+  /** The import that filed this document as adding nothing new, which this one opens again. */
+  reopens: z.string().regex(/^imp_\d{8}_\d{6}_[0-9a-f]{4}$/).optional(),
   document: DocumentRefSchema,
   /** When you last saved changes to the draft: it is never drafted again by itself after that. */
   draftEditedAt: TimestampSchema.optional(),
@@ -1726,6 +1816,8 @@ export const ImportRecordSchema = z.object({
       payslipsAdded: z.number().int().nonnegative().optional(),
       /** Accounts whose terms (rates, limit, minimum payment) it recorded. */
       termsAdded: z.number().int().nonnegative().optional(),
+      /** Agreements it recorded or filled in, from the schedules it gives. */
+      agreementsAdded: z.number().int().nonnegative().optional(),
       employmentsCreated: z.array(SlugSchema).optional(),
       /** The job each draft job was committed to (new jobs get their final id). */
       jobs: z.array(z.object({ key: z.string(), employmentId: SlugSchema })).optional(),
@@ -1792,6 +1884,8 @@ const changeUnion = <K extends z.ZodType<string | undefined>>(key: K) =>
     z.object({ key, kind: z.literal('remove_internal_move'), why: ChangeWhySchema, transaction: TransactionIdSchema }),
     /** Set when an account opened or closed (null clears it; a closing date closes the account). */
     z.object({ key, kind: z.literal('set_account_dates'), why: ChangeWhySchema, account: SlugSchema, openedOn: ISODateSchema.nullable().optional(), closedOn: ISODateSchema.nullable().optional() }),
+    /** Link an account to the one it carries on from, from a day: a product change under one account number. */
+    z.object({ key, kind: z.literal('link_accounts'), why: ChangeWhySchema, account: SlugSchema, continues: SlugSchema, from: ISODateSchema }),
     /**
      * Move a balance a document was read into the wrong account to the account it is of: where it
      * is, that account was not open that day or its balances do not add up with it; where it goes,

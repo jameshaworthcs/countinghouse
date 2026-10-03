@@ -142,8 +142,12 @@ describe('Claude sessions in the app', () => {
     expect(s.promptVersion).toMatch(/^extract-/);
     expect(list.retention).toMatchObject({ days: 90 });
 
-    // The transcript is in the work area beside the import, never in the data.
-    const d = await get<SessionDetail>(`/api/sessions/${s.id}`);
+    // The transcript is in the work area beside the import, never in the data. The import shows its
+    // new state before its audit row is written (on the save's update event), so wait for that row.
+    const d = await until(
+      () => get<SessionDetail>(`/api/sessions/${s.id}`),
+      (x) => x.audit.some((e) => e.action === 'import.review'),
+    );
     expect(d.record!.transcript.path).toBe(path.join('imports', rec.id, `${s.id}.jsonl`));
     const file = path.join(work, d.record!.transcript.path);
     expect(existsSync(file)).toBe(true);

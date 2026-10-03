@@ -74,7 +74,7 @@ function scoreSection(sc: Scorer, e: ExpectedSection, s: DraftSection | undefine
       sc.check('date', a.date === t.date, `${where}: dated ${a.date}`);
       sc.check('sign', Math.sign(a.amount) === Math.sign(t.amount), `${where}: sign wrong (${a.amount})`);
       sc.check('amount', sameMoney(a.amount, t.amount), `${where}: amount ${a.amount}`);
-      sc.check('description', sameText(t.description, a.description), `${where}: description "${a.description}"`);
+      sc.check('description', t.descriptionPattern ? t.descriptionPattern.test(a.description) : sameText(t.description, a.description), `${where}: description "${a.description}"`);
       sc.check('pending', Boolean(a.pending) === Boolean(t.pending), `${where}: pending ${Boolean(a.pending)}`);
       if (t.balanceAfter !== undefined) sc.check('balanceAfter', sameMoney(a.balanceAfter, t.balanceAfter), `${where}: balance after ${a.balanceAfter ?? 'none'}`);
       if (t.original) sc.check('original', sameMoney(a.original?.amount, t.original.amount) && a.original?.currency === t.original.currency, `${where}: original ${a.original ? `${a.original.amount} ${a.original.currency}` : 'none'}`);
@@ -182,6 +182,26 @@ export function scoreCase(expected: Expected, draft: Draft | undefined, outcome:
       if (e.terms.minimumPayment !== undefined) sc.check('termsMinimum', sameMoney(s?.terms?.minimumPayment, e.terms.minimumPayment) && (e.terms.paymentDue === undefined || s?.terms?.paymentDue === e.terms.paymentDue), `terms: minimum payment ${s?.terms?.minimumPayment ?? 'none'} due ${s?.terms?.paymentDue ?? 'none'}`);
     });
     for (const e of expected.printed ?? []) sc.check('printed', (opts.printed ?? []).some((p) => e.label.test(p.label) && e.value.test(p.value)), `printed: ${e.label.source} missing`);
+    // Schedules, as the agreements they draft: the way round, who, and every payment with its status.
+    const records = (draft?.agreements ?? []).map((a) => a.record);
+    const usedSchedules = new Set<number>();
+    for (const e of expected.schedules ?? []) {
+      const way = (r: (typeof records)[number]) => (e.direction === 'to-you' ? r.direction === 'in' : e.direction === 'to-other' ? Boolean(r.paidBy) : r.direction !== 'in' && !r.paidBy);
+      const i = records.findIndex((r, n) => !usedSchedules.has(n) && way(r) && (e.provider.test(r.counterparty) || e.provider.test(r.paidBy ?? '')) && (!e.paidTo || e.paidTo.test(r.counterparty)));
+      const r = i >= 0 ? records[i] : undefined;
+      if (i >= 0) usedSchedules.add(i);
+      sc.check('schedule', Boolean(r), `schedule ${e.direction} ${e.provider.source}: missing`);
+      if (!r) continue;
+      for (const p of e.payments) {
+        const got = r.payments.find((x) => x.due === p.date && sameMoney(x.amount, p.amount));
+        sc.check('schedulePayment', Boolean(got), `schedule ${r.name}: ${p.date} ${p.amount} missing`);
+        if (got && p.status) sc.check('scheduleStatus', got.status === p.status, `schedule ${r.name}: ${p.date} status ${got.status ?? 'none'}`);
+      }
+      sc.check('scheduleNoExtra', r.payments.length === e.payments.length, `schedule ${r.name}: ${r.payments.length} payments, ${e.payments.length} printed`);
+    }
+    records.forEach((r, n) => {
+      if (!usedSchedules.has(n)) sc.check('noExtraSchedule', false, `extra schedule: ${r.name}`);
+    });
     // Never a name or a National Insurance number among the values kept.
     for (const p of opts.printed ?? []) if (/Alex Taylor|[A-Z]{2} ?\d{2} ?\d{2} ?\d{2} ?[A-D]\b/.test(`${p.label} ${p.value}`)) sc.check('printedPrivate', false, `printed a personal identifier: ${p.label}`);
   }

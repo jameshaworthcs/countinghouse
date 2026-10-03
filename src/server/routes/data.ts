@@ -96,6 +96,8 @@ const AccountPatch = NewAccountBody.omit({ id: true, balance: true, balanceDate:
       .regex(/^\d{2,6}$/)
       .optional()
       .nullable(),
+    /** The account it carries on from, and from which day (a product change under one number); null unlinks it. */
+    continues: z.object({ accountId: SlugSchema, from: ISODateSchema }).optional().nullable(),
   });
 
 const ManualBalance = z.object({
@@ -359,6 +361,12 @@ export function dataRoutes(ctx: AppContext): Hono {
     const closed = merged.closedOn as string | undefined;
     if (opened && closed && closed < opened) throw new StoreError('It cannot close before it opened.', 400);
     if (closed && closed > today()) throw new StoreError('The closing date is in the future.', 400);
+    if (body.continues) {
+      const older = store.account(body.continues.accountId);
+      if (!older || older.id === account.id) throw new StoreError('It can only carry on from another of your accounts.', 400);
+      if (older.continues?.accountId === account.id) throw new StoreError(`${older.name} carries on from this account already.`, 400);
+      if (older.closedOn && older.closedOn >= body.continues.from) throw new StoreError(`${older.name} was still open on that day.`, 400);
+    }
     if (institutionName && !body.institutionId) {
       const cat = findInstitution(institutionName);
       const instId = cat?.id ?? slugify(institutionName, store.institutions.map((i) => i.id));

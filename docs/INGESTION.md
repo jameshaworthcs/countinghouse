@@ -162,14 +162,12 @@ is paid ([FORMULAS.md §17](FORMULAS.md), "Earned pay").
   stays in `figures.jsonl` and no longer counts. The draft says what it replaces, and is held back
   from "Commit all ready".
 
-### Reading everything (`extract-14`)
+### Reading everything (`extract-15`)
 
 The reader keeps every value a document prints when **Read everything a document prints** is on
-(Settings → Import & extraction; `settings.extraction.readEverything`). It is off until its
-evaluation run has passed (`npm run eval -- --everything`, which spends the Claude plan), so until
-then readings are `extract-11`. The gov.uk pages and payslip layouts read on this machine (above)
-are read in full either way. Four rules are added to the prompt (`prompt.ts`), each with its part
-of the schema:
+(Settings → Import & extraction; `settings.extraction.readEverything`). With it off, readings are
+`extract-11`. The gov.uk pages and payslip layouts read on this machine (above) are read in full
+either way. Five rules are added to the prompt (`prompt.ts`), each with its part of the schema:
 
 - **20. Payslips in full**, as the local readers keep them (`payslips.jsonl`): every payment and
   deduction line, signed as printed; the totals and net pay; employer costs; the tax code and its
@@ -191,6 +189,19 @@ of the schema:
   limit and the AER stay in `creditLimit` and `interestRate`, which every reading gives. A rate is
   taken as the reader gives it, not as an amount (34.940% is not £34.94), and a monthly rate stays
   a month's (`per: "month"`); one that cannot be kept is left out with a warning.
+- **24. Schedules** (`extract-15`; `extraction.raw.schedules`): each schedule of payments between
+  you and an organisation, or made for you, that is not an account's own movements. These are
+  student finance payments pages and entitlement letters, accommodation offers, council tax bills,
+  and loans' or plans' payment dates. Each part is its own schedule (a Maintenance Loan and a Tuition
+  Fee Loan are two). A schedule records:
+  - who pays whom (to you, from you, or to someone else for you);
+  - every payment with its date, amount and status as printed (paid, due, expected, awaiting
+    confirmation, cancelled);
+  - what else it says about itself (course, room).
+
+  Its payments are never transactions (rule 5 stays), a document that gives one is never "nothing to
+  record", and a payment is never left only in the remarks or `printed`. A schedule is recorded as an
+  agreement ("Schedules", below).
 - **Never a personal identifier.** The prompt says to leave out names, addresses, dates of birth,
   NI numbers and full account numbers. The normaliser also takes any NI number out of all three,
   drops a payroll number that is one, and keeps only the NI letter.
@@ -675,6 +686,59 @@ in or out that the statements on either side never saw, and a gap between them
 - A bank whose pots are outside the account's balance (Monzo's pots, say) is not one of these:
   money into a pot does leave the balance its statements show.
 
+## Schedules
+
+A schedule a document gives (rule 24) is drafted as the agreement it is (`src/server/ingest/schedules.ts`;
+`draft.agreements`; [FORMULAS.md §10](FORMULAS.md), "Agreements"):
+
+- **New, or filling in one recorded already.** One recorded already is the same way round, with
+  the same counterparty, and the same name or a payment in common. The schedule is laid over it:
+  payments it lacks are added, and a payment's status is the one the latest document gives. It is
+  ticked only when it adds a payment or a newer status; with nothing to add it is "already here".
+- **Its category** comes from what it is, and can be changed on the review page:
+  - student finance paid to you is borrowing, a transfer from the student loan;
+  - other money paid to you is other income;
+  - a payment made for you to a university or college is its fees;
+  - rent, council tax, insurance and loans by their words.
+- **The payments it explains**: the recorded payments that are its paid ones, shown beside them
+  ("Received 14 Sep 2026 · Current account"). Money paid to you is known by its exact amount
+  within 7 days of its date, as the bank seldom names who sent it.
+- **Student finance** (Student Finance England, Wales, Northern Ireland, SAAS, the Student Loans
+  Company) lends and pays through your student loan. Each paid instalment is also a row on the
+  student loan (on a new student loan account when you have none), as money it lent you or paid for
+  you:
+  - one paid to you is the other leg of the bank credit of exactly that amount within 7 days, and
+    commit links the two as a transfer, so the instalment is borrowing, not income;
+  - one paid to your university is its fees (education spending), on the loan account;
+  - a later instalment the bank shows before a newer page does is still filed as borrowing, by the
+    agreement.
+
+  The loan's interest is on no such document, so its balance away from a statement is an estimate
+  ([FORMULAS.md §9](FORMULAS.md)).
+- **Held back once.** An import with a new schedule is not ready to commit by itself ("a new
+  schedule to check"): recording it files payments already recorded under it.
+
+## Linked accounts
+
+A product change under one account number (a fixed rate that matures into easy access) is two
+accounts, the newer carrying on from the older (`Account.continues {accountId, from}`). You set
+it on the newer account's page ("Carries on from"), or apply an agent's `link_accounts`
+proposal.
+
+- **A statement that runs across the day** is split there (`splitAtLinks` in `draft.ts`):
+  - the rows before go to the older account, ending with the balance its running balances reach;
+  - the rest go to the newer, starting from that balance (the review says so);
+  - each part is checked for duplicates against its own account.
+
+  A statement wholly on one side goes to that side's account.
+- **Unlinked**, a row another of your accounts under the same number and provider has recorded is
+  left out as a possible duplicate, and the review page says to link the two.
+- **Rows outside the account's open dates** (before it opened, after it closed) are a check that
+  holds the import back: another account's rows, or a misread date.
+- **Changing a section's account** on the review page checks its rows again against the account
+  chosen (`POST /api/imports/:id/sections/redraft`): which are recorded there already decides which
+  are ticked.
+
 ## Nothing new
 
 A document the reader understood can add nothing: a prize history that repeats the account's
@@ -683,8 +747,13 @@ page and the review page say so plainly ("Nothing new", with the reason), and it
 click, not left looking failed or stuck (`src/server/ingest/novelty.ts`).
 
 - **Nothing to record.** The reader understood it and says what it shows (`nothingToRecord`, in
-  its words), with no balance, rows, holdings or figures. A reading that found nothing and could not
+  its words), with no balance, rows, holdings, figures or schedules. A reading that found nothing and could not
   say what the document is stays a document to look at ("Nothing was found to record").
+- **Not when it mentions recorded payments.** A reading with nothing to record whose printed values
+  or remarks give a date and an amount that a recorded payment is (exact amount, within 7 days)
+  had no place for something real: an older reader kept a schedule only in its remarks. It is not
+  "nothing new", and is held back with "it mentions … already recorded … read it again"
+  (`mentionedPayments`).
 - **Already here.** Everything it would record is already stored (rows already imported, the same
   balance and figures on the same day for that account, the same terms that day, the same
   holdings, the same tax figures, the same HMRC records),
@@ -709,6 +778,12 @@ account's last digits. The account it was about lists the document; the same fil
 recognised; and a later, better reader can go back to it. *Discard* still deletes a file instead.
 It must still add nothing when you click: otherwise it is refused and the page says to review it.
 No analyst job follows a dismissal.
+
+**Opening it again** (the filed import's page, "Open it again"; `POST /api/imports/:id/reopen`)
+puts the document back in review as an import of its own (`reopens`: the filed one), drafted from
+its stored reading as the app drafts now, with no Claude, so a newer app finds what an older one had
+no place for. The filing stays in History as it was. When the stored reading is not enough, "Read
+it again" on the review page reads the document afresh.
 
 ## Reading a stored document again
 

@@ -1328,7 +1328,8 @@ function sectionsOf(r: ImportRecord): ImportSummary['sections'] {
   if (r.status !== 'committed' || !r.draft) return [];
   const out: ImportSummary['sections'] = [];
   for (const s of r.draft.sections) {
-    if (s.target.mode === 'skip') continue;
+    // A schedule's rows (a loan's instalments) are not a statement: they cover none of its days.
+    if (s.target.mode === 'skip' || s.fromSchedule) continue;
     const accountId = r.result?.sections?.find((x) => x.key === s.key)?.accountId ?? (s.target.mode === 'existing' ? s.target.accountId : s.target.account.id);
     const dates = s.transactions.map((t) => t.date).sort();
     // A statement with an opening balance and no rows still covers the day it closed; coverage

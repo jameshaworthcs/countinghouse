@@ -365,6 +365,10 @@ describe('a proposal must fit the data', () => {
     expect(await problem({ kind: 'remove_duplicate', transaction: letter.id, sameAs: [part1.id] })).toMatch(/add up to £400.00, not £10,500.50/);
     expect(await problem({ kind: 'remove_duplicate', transaction: letter.id, sameAs: [toSaver.id] })).toMatch(/another account/);
     expect(await problem({ kind: 'set_account_dates', account: 'fixed', closedOn: '2020-01-01' })).toMatch(/close .* before it opened/);
+    // An account carries on from another only after that one closed, and never from itself.
+    expect(await problem({ kind: 'link_accounts', account: 'easy', continues: 'easy', from: '2026-02-04' })).toMatch(/cannot carry on from itself/);
+    expect(await problem({ kind: 'link_accounts', account: 'easy', continues: 'fixed', from: '2026-02-01' })).toMatch(/was still open on/);
+    expect(await problem({ kind: 'link_accounts', account: 'easy', continues: 'gone', from: '2026-02-04' })).toMatch(/no longer in your data/);
     expect(await problem({ kind: 'set_category', transaction: toSaver.id, category: 'no-such-category' })).toMatch(/no category/);
     expect(await problem({ kind: 'set_category', transaction: saverIn.id, category: 'groceries' })).toMatch(/transfer category, not/);
     // Yours wins: a category you set, or a copy with your note on it.
