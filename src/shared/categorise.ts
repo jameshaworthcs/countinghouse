@@ -7,13 +7,21 @@
 //      from a machine, whichever bank runs it)
 //   3. wrapper-account flows (contributions, tax relief, LISA bonus, fees) on ISA/pension accounts
 //   3b. a payment one of your agreements schedules (agreements.json)
+//   3c. a payment to a credit card, as the card words it ("Payment", "Direct debit")
+//   4a. money in from an investment platform: a withdrawal
 //   4. built-in UK merchant list
+//   4c/4d. pay: your payroll number, or the name the bank gives a job's pay (not your own company's)
 //   5. the bank's own category (Monzo/Starling/Revolut/Amex exports)
 //   6. Claude's suggestion (from screenshot/PDF extraction)
+//   7. money in on a card from a payee it paid in the 120 days before: a refund, in that purchase's category
+//
+// Each step reads the row's description first, then what other documents said of the same payment
+// (`alsoSaid`): a terse app screenshot is categorised by the statement that showed it in full.
 
 import { ACCOUNT_TYPE_META } from './accounts';
 import { agreementPattern, isScheduledPayment } from './agreements';
 import { CategoryIndex, mapBankCategory } from './categories';
+import { addDays } from './dates';
 import { INSTITUTION_CATALOG, TRANSFER_WORDS } from './institutions';
 import { cleanPayee, GENERIC_PAYEES, matchMerchant, normaliseDescription } from './merchants';
 import type { Account, AccountType, Agreement, CategorisedBy, Institution, Rule } from './schema';
@@ -30,7 +38,50 @@ export interface CategoriseInput {
   type?: string | undefined;
   /** The day it was paid: an agreement's payments are recognised by when they were due. */
   date?: string | undefined;
+  /**
+   * What other documents that showed this payment said of it, in their own words (a statement's
+   * fuller description, a reference, the other party's name): tried after the description.
+   */
+  alsoSaid?: readonly string[] | undefined;
 }
+
+/**
+ * A job's pay as the bank names it (server/analytics/pay.ts, `paidAs`): money in under one of these
+ * payees, between half the least and twice the most it has paid, from a year before its first such
+ * payment to three months after its last, is salary.
+ */
+export interface EmployerPay {
+  payees: readonly string[];
+  least: number;
+  most: number;
+  first: string;
+  last: string;
+}
+
+/**
+ * The category of the latest purchase on a card from a payee (by `purchaseKey`) in the 120 days up to
+ * a date, or "refunds" when that purchase has none of its own; undefined when the card paid it nothing.
+ */
+export type CardPurchases = (accountId: string, key: string, date: string) => string | undefined;
+
+/** How long after a purchase on a card money back from the same payee is taken for its refund. */
+export const CARD_REFUND_DAYS = 120;
+
+/** A name reduced for comparing: "Example Widgets Ltd" and "EXAMPLEWIDGETS" are one. */
+export const nameKey = (name: string | undefined) =>
+  (name ?? '')
+    .toLowerCase()
+    .replace(/\b(ltd|limited|plc|llp|uk)\b/g, '')
+    .replace(/[^a-z0-9]/g, '');
+
+/** Who a card payment or refund is with, reduced for comparing: the brand when the merchant list knows it, else the cleaned payee. */
+export function purchaseKey(description: string): string {
+  const m = matchMerchant(description, -1);
+  return nameKey(m && !GENERIC_PAYEES.has(m.payee) ? m.payee : cleanPayee(description));
+}
+
+/** A payment to a credit card, as the card's own statement words it. */
+const CARD_REPAYMENT = /^(?:PAYMENT|PAYMENT RECEIVED|PAYMENT - THANK YOU|PAYMENT THANK YOU|DIRECT DEBIT(?: PAYMENT)?|DD PAYMENT|FASTER PAYMENTS?(?: RECEIVED)?|BANK (?:TRANSFER|PAYMENT)|BACS(?: PAYMENT)?|ONLINE PAYMENT|MOBILE PAYMENT)\b/;
 
 export interface CategoriseResult {
   payee: string;
@@ -163,13 +214,23 @@ export class Categoriser {
   private readonly ownName: RegExp | null;
   private readonly payroll: RegExp | null;
   private readonly agreements: { agreement: Agreement; pattern: RegExp }[];
+  private readonly employers: { keys: Set<string>; least: number; most: number; from: string; until: string }[];
+  private readonly cardPurchases: CardPurchases | undefined;
 
   /**
    * `ownerName`: the name in your profile, so money to or from you by name is seen as a transfer.
    * `payrollNumbers`: your payroll numbers at your jobs, so pay that carries one is seen as salary.
    * `agreements`: what you agreed to pay and when, so a payment one schedules takes its category.
+   * `employers`: the names the bank gives your jobs' pay, so pay before your payslips is salary.
+   * `cardPurchases`: what each card paid whom, so money back from the same payee is its refund.
    */
-  constructor(rules: Rule[], categories: CategoryIndex, accounts: Account[], institutions: Institution[], opts: { ownerName?: string | undefined; payrollNumbers?: readonly string[]; agreements?: readonly Agreement[] } = {}) {
+  constructor(
+    rules: Rule[],
+    categories: CategoryIndex,
+    accounts: Account[],
+    institutions: Institution[],
+    opts: { ownerName?: string | undefined; payrollNumbers?: readonly string[]; agreements?: readonly Agreement[]; employers?: readonly EmployerPay[]; cardPurchases?: CardPurchases } = {},
+  ) {
     this.rules = rules
       .filter((r) => r.enabled)
       .sort((a, b) => a.priority - b.priority || a.createdAt.localeCompare(b.createdAt))
@@ -178,6 +239,8 @@ export class Categoriser {
     this.ownName = ownNamePattern(opts.ownerName);
     this.payroll = payrollPattern(opts.payrollNumbers);
     this.agreements = (opts.agreements ?? []).map((agreement) => ({ agreement, pattern: agreementPattern(agreement) }));
+    this.employers = (opts.employers ?? []).map((e) => ({ keys: new Set(e.payees.map(nameKey).filter((k) => k.length >= 4)), least: e.least / 2, most: e.most * 2, from: addDays(e.first, -366), until: addDays(e.last, 92) }));
+    this.cardPurchases = opts.cardPurchases;
     this.accountsById = new Map(accounts.map((a) => [a.id, a]));
     const instById = new Map(institutions.map((i) => [i.id, i]));
     this.ownMatchers = accounts
@@ -246,10 +309,12 @@ export class Categoriser {
   categorise(input: CategoriseInput): CategoriseResult {
     const account = this.accountsById.get(input.accountId);
     const fallbackPayee = input.payee ?? input.aiPayee ?? cleanPayee(input.description);
+    // The description, then what other documents said of the same payment.
+    const texts = [input.description, ...(input.alsoSaid ?? []).filter((s) => s.trim() && s !== input.description)];
 
     // 1. User rules.
     for (const { rule } of this.rules) {
-      if (!this.matchRule(rule, input, fallbackPayee)) continue;
+      if (!texts.some((description) => this.matchRule(rule, { ...input, description }, fallbackPayee))) continue;
       const res: CategoriseResult = {
         payee: rule.set.payee ?? fallbackPayee,
         categorisedBy: 'rule',
@@ -268,7 +333,7 @@ export class Categoriser {
     const isWrapper = account ? isWrapperAccount(account.type) : false;
 
     // 2. Transfers to your own accounts.
-    const mentioned = this.ownAccountsMentioned(input.accountId, input.description, !isWrapper || account?.type === 'cash_isa', input.type);
+    const mentioned = texts.map((d) => this.ownAccountsMentioned(input.accountId, d, !isWrapper || account?.type === 'cash_isa', input.type)).find((m) => m.length > 0) ?? [];
     if (mentioned.length > 0) {
       const types = new Set(mentioned.map((a) => (account ? transferLegCategory(account.type, a.type, input.amount) : transferCategoryFor(a.type))));
       const [only] = mentioned;
@@ -284,7 +349,7 @@ export class Categoriser {
     // 2b. Money to or from you by name, not saying which account: your money moving between your
     // own accounts, not spending or income. Linking it to the other side says which.
     const cash = input.amount < 0 && isCashWithdrawal(input.description, input.type);
-    if (!isWrapper && !cash && this.namesOwner(input.description)) {
+    if (!isWrapper && !cash && texts.some((d) => this.namesOwner(d))) {
       return { payee: fallbackPayee, category: account?.type === 'credit_card' ? 'credit-card-payment' : 'transfer', categorisedBy: 'transfer' };
     }
 
@@ -305,23 +370,50 @@ export class Categoriser {
     // (a university is paid rent as well as fees). Its payee is worked out as any other's, so it
     // groups with the payments to the same payee before and after the agreement.
     if (!isWrapper && input.date && input.amount < 0) {
-      const text = `${input.payee ?? ''} ${input.description}`;
+      const text = `${input.payee ?? ''} ${texts.join(' ')}`;
       const hit = this.agreements.find(({ agreement, pattern }) => this.known(agreement.category) && isScheduledPayment(agreement, pattern, { date: input.date!, amount: input.amount, text }));
       if (hit) return { payee: fallbackPayee, category: hit.agreement.category, categorisedBy: 'agreement' };
     }
 
-    // 4. Built-in merchants.
-    const merchant = matchMerchant(input.description, input.amount);
-    if (merchant && (!isWrapper || this.categories.kindOf(merchant.category) !== 'expense')) {
-      const sourcePayee = input.payee ?? input.aiPayee;
-      const payee = GENERIC_PAYEES.has(merchant.payee) ? (sourcePayee ?? cleanPayee(input.description)) : merchant.payee;
-      return { payee, category: merchant.category, categorisedBy: 'builtin' };
+    // 3c. Money into a credit card that its statement calls a payment: paying the card off.
+    if (account?.type === 'credit_card' && input.amount > 0 && this.known('credit-card-payment') && texts.some((d) => CARD_REPAYMENT.test(normaliseDescription(d)))) {
+      return { payee: fallbackPayee, category: 'credit-card-payment', categorisedBy: 'builtin' };
+    }
+
+    // 4a. Money in from an investment platform (as the list knows it for money paid to one): taken out of your investments.
+    if (!isWrapper && input.amount > 0 && this.known('investment-transfer')) {
+      for (const d of texts) {
+        const platform = matchMerchant(d, -1);
+        if (platform?.category === 'investment-transfer') return { payee: platform.payee, category: 'investment-transfer', categorisedBy: 'builtin' };
+      }
+    }
+
+    // 4. Built-in merchants. A brand the list knows wins; a general word it matches ("COUNCIL",
+    // "TICKET") does not overrule the category Claude gave the row reading the whole document.
+    for (const d of texts) {
+      const merchant = matchMerchant(d, input.amount);
+      if (merchant && (!isWrapper || this.categories.kindOf(merchant.category) !== 'expense')) {
+        const sourcePayee = input.payee ?? input.aiPayee;
+        const generic = GENERIC_PAYEES.has(merchant.payee);
+        const payee = generic ? (sourcePayee ?? cleanPayee(input.description)) : merchant.payee;
+        if (generic && input.aiCategory && input.aiCategory !== merchant.category && this.known(input.aiCategory)) return { payee, category: input.aiCategory, categorisedBy: 'ai' };
+        return { payee, category: merchant.category, categorisedBy: 'builtin' };
+      }
     }
     // 4b. Cash that only the bank's type calls cash (an app lists it under the machine's bank).
     if (cash && !isWrapper && this.known('cash-withdrawal')) return { payee: fallbackPayee, category: 'cash-withdrawal', categorisedBy: 'builtin' };
     // 4c. Money in that carries one of your payroll numbers: pay. An employer's name alone is not
     // enough, since a company you own also pays you dividends and transfers under its name.
-    if (input.amount > 0 && !isWrapper && this.payroll?.test(input.description) && this.known('salary')) return { payee: fallbackPayee, category: 'salary', categorisedBy: 'builtin' };
+    if (input.amount > 0 && !isWrapper && this.payroll && texts.some((d) => this.payroll!.test(d)) && this.known('salary')) return { payee: fallbackPayee, category: 'salary', categorisedBy: 'builtin' };
+    // 4d. Money in under the name the bank gives a job's pay, of about that pay, while the job
+    // lasted: pay (not a job at a company you hold shares in: the caller leaves those out).
+    if (input.amount > 0 && !isWrapper && this.employers.length && this.known('salary')) {
+      const keys = new Set([fallbackPayee, ...texts.map((d) => cleanPayee(d))].map(nameKey));
+      const date = input.date;
+      if (this.employers.some((e) => [...keys].some((k) => e.keys.has(k)) && input.amount >= e.least && input.amount <= e.most && (!date || (date >= e.from && date <= e.until)))) {
+        return { payee: fallbackPayee, category: 'salary', categorisedBy: 'builtin' };
+      }
+    }
 
     // 5. Bank-provided category.
     const bank = mapBankCategory(input.bankCategory);
@@ -330,6 +422,17 @@ export class Categoriser {
     // 6. Claude's suggestion.
     if (input.aiCategory && this.known(input.aiCategory)) {
       return { payee: fallbackPayee, category: input.aiCategory, categorisedBy: 'ai' };
+    }
+
+    // 7. Money back onto a card from a payee the card paid in the 120 days before: that purchase's
+    // refund, in its category, so the two net off.
+    if (account?.type === 'credit_card' && input.amount > 0 && input.date && this.cardPurchases) {
+      for (const d of texts) {
+        const category = this.cardPurchases(input.accountId, purchaseKey(d), input.date);
+        const kind = this.categories.kindOf(category);
+        if (category && this.known(category) && (kind === 'expense' || category === 'refunds')) return { payee: fallbackPayee, category, categorisedBy: 'builtin' };
+        if (category && this.known('refunds')) return { payee: fallbackPayee, category: 'refunds', categorisedBy: 'builtin' };
+      }
     }
 
     return { payee: fallbackPayee };

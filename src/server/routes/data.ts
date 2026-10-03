@@ -4,7 +4,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { ACCOUNT_TYPE_META, slugify } from '../../shared/accounts';
-import type { AccountDetailResponse, BootstrapResponse, TransactionsResponse } from '../../shared/api';
+import type { AccountDetailResponse, BootstrapResponse, EnrichGroup, EnrichPreview, TransactionsResponse } from '../../shared/api';
 import { addTags, appendNote, removeTags } from '../../shared/annotations';
 import { CategoryIndex } from '../../shared/categories';
 import { ruleMatches } from '../../shared/categorise';
@@ -642,6 +642,35 @@ export function dataRoutes(ctx: AppContext): Hono {
   });
 
   app.post('/enrich', async (c) => c.json(await enrich(store)));
+
+  /** What re-applying categorisation would change, grouped: nothing is written (`enrich`, dry run). */
+  app.post('/enrich/preview', async (c) => {
+    const result = await enrich(store, { dryRun: true, detail: true });
+    const groups = new Map<string, EnrichGroup>();
+    let payeesTidied = 0;
+    for (const ch of result.changes ?? []) {
+      if (!ch.category) {
+        if (ch.payee) payeesTidied++;
+        continue;
+      }
+      const key = `${ch.category.from ?? ''}|${ch.category.to ?? ''}|${ch.category.by ?? ''}`;
+      const g = groups.get(key) ?? groups.set(key, { from: ch.category.from, to: ch.category.to, by: ch.category.by, count: 0, amount: 0, payees: [], examples: [] }).get(key)!;
+      g.count++;
+      g.amount = fromMinor(toMinor(g.amount) + Math.abs(toMinor(ch.amount)));
+      const payee = ch.payee?.to ?? store.transaction(ch.id)?.payee ?? ch.description;
+      const p = g.payees.find((x) => x.payee === payee) ?? (g.payees.push({ payee, count: 0, amount: 0 }), g.payees.at(-1)!);
+      p.count++;
+      p.amount = fromMinor(toMinor(p.amount) + Math.abs(toMinor(ch.amount)));
+      if (g.examples.length < 5) g.examples.push({ id: ch.id, accountId: ch.accountId, date: ch.date, amount: ch.amount, description: ch.description });
+    }
+    const body: EnrichPreview = {
+      recategorised: result.recategorised,
+      transfersLinked: result.transfersLinked,
+      payeesTidied,
+      groups: [...groups.values()].map((g) => ({ ...g, payees: g.payees.sort((a, b) => b.amount - a.amount).slice(0, 8) })).sort((a, b) => b.amount - a.amount),
+    };
+    return c.json(body);
+  });
 
   app.post('/categorise/preview', async (c) => {
     const body = await readJson(c, z.object({ accountId: SlugSchema, description: z.string(), amount: MoneySchema, date: ISODateSchema.optional() }));

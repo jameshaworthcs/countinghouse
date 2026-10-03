@@ -491,6 +491,39 @@ date and an amount.
 - **Paid** is the paired payments and the other payments added up. Its total is the document's,
   shown beside it; nothing is worked out from the two.
 
+**Payees** (`shared/merchants.ts`, `paymentParts` and `cleanPayee`). A payment worded with the other
+party inside other words gives that party, and its reference is kept apart:
+
+- Santander: "BILL PAYMENT | STANDING ORDER | THIRD PARTY PAYMENT MADE VIA FASTER PAYMENT TO *name*
+  REFERENCE *ref*", "FASTER PAYMENTS RECEIPT REF.*ref* FROM *name*" (the last FROM, as a reference
+  can hold one), "BANK GIRO CREDIT REF *payer*, *ref*" and "DIRECT DEBIT PAYMENT TO *payee* REF *ref*,
+  MANDATE NO …".
+- Apple Pay and Google Pay: "*merchant* (VIA APPLE PAY), ON *date*".
+- Chase: "*merchant* Purchase", "*merchant* Purchase | EUR 24.50 | FX rate …" (one payee whatever
+  the rate), "From *name* - *ref*".
+- HTML entities an export leaves in ("&amp;") are read as their characters, and a brand whose name
+  ends in a number keeps it ("Trading 212").
+
+**Pay by name** (`analytics/pay.ts`, `paidAs`; the categoriser's step 4d). The payments paired with a
+job's payslips (§17) teach the name the bank gives its pay. Money in under that name is salary when
+it is between half the least and twice the most of those payments, and dated from a year before
+the first to three months after the last. A job at a company you hold shares in is left out, as its
+dividends and transfers come under the same name.
+
+**Refunds onto a card** (the categoriser's step 7, `CARD_REFUND_DAYS`). Money in on a credit card from
+a payee the card paid in the 120 days before, that nothing else categorised, is that purchase's
+refund. It takes the purchase's category, so the two net off in that category (§14), or "Refunds"
+when the purchase had none.
+
+**Re-applying categorisation** (`enrich.ts`). Every row you did not categorise is worked out again:
+
+- a payee from elsewhere (the reader's) is kept when all it would get is a name cut from the
+  description;
+- one cut by an earlier version of the tidying, or left in the bank's words, is replaced
+  (`nextPayee`);
+- a general word in the merchant list ("COUNCIL", "TICKET") never overrules the category Claude
+  gave a row; a brand it knows does.
+
 ## 11. Allowances (`analytics/allowances.ts`)
 
 **ISA:**

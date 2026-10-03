@@ -28,7 +28,7 @@ import { AccountSchema, AgreementSchema, BalanceSnapshotSchema, CompanySchema, E
 import { paidToText } from './analytics/agreements';
 import { BalanceEngine, type BalanceSource } from './analytics/balances';
 import { runAs } from './audit';
-import { categoriserFor } from './categoriser';
+import { categoriseInputOf, categoriserFor } from './categoriser';
 import { atomicWrite, Mutex, nowISO } from './fsutil';
 import { balanceId, proposalId, termsId, transferGroupId } from './ids';
 import { StoreError, type DecidedProposalSummary, type Store } from './store';
@@ -208,7 +208,7 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
         // a payee that was one of your accounts' names is worked out again from its words.
         const untransferred = cat.kind !== 'transfer' && !t.transferGroup;
         const namedYours = untransferred && t.payeeSetBy !== 'user' && store.accounts.some((a) => a.id !== t.accountId && a.name === t.payee);
-        const payee = namedYours ? categoriser().categorise({ accountId: t.accountId, description: t.description, amount: t.amount, date: t.date, type: t.type, bankCategory: t.bankCategory, payee: t.merchant?.name ?? t.counterpartyName }).payee : undefined;
+        const payee = namedYours ? categoriser().categorise({ ...categoriseInputOf(t), aiCategory: undefined }).payee : undefined;
         patch(t, { category: c.category, categorisedBy: 'user', ...(untransferred && t.counterpartyAccountId ? { counterpartyAccountId: undefined } : {}), ...(payee && payee !== t.payee ? { payee } : {}) });
         return {};
       }
@@ -362,7 +362,7 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
           if (!t || t.transferGroup || t.categorisedBy === 'user' || t.categorisedBy === 'rule' || t.categorisedBy === 'transfer') continue;
           const acc = account(t.accountId);
           if (!acc || isWrapperAccount(acc.type) || !isScheduledPayment(agreement, pattern, { date: t.date, amount: t.amount, text: paidToText(t) })) continue;
-          const res = withIt.categorise({ accountId: t.accountId, description: t.description, amount: t.amount, date: t.date, type: t.type, bankCategory: t.bankCategory, aiCategory: t.categorisedBy === 'ai' ? t.category : undefined, payee: t.merchant?.name ?? t.counterpartyName });
+          const res = withIt.categorise(categoriseInputOf(t));
           if (res.categorisedBy !== 'agreement' || res.category !== a.category) continue;
           if (t.category === a.category && t.categorisedBy === 'agreement') continue;
           files.push({ transactionId: t.id, accountId: t.accountId, date: t.date, amount: t.amount, ...(t.category ? { category: t.category } : {}) });

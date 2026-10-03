@@ -1,7 +1,7 @@
 import { CircleAlert, CircleCheck, Copy, GitCommitHorizontal, KeyRound, Plus, RefreshCw, Trash2, Wand2 } from 'lucide-react';
 import { Fragment, useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
-import type { AllowancesResponse, DataHealthResponse, SystemResponse, TaxDocSource, TaxDocumentsResponse, TokensResponse } from '../../shared/api';
+import type { AllowancesResponse, DataHealthResponse, EnrichGroup, EnrichPreview, SystemResponse, TaxDocSource, TaxDocumentsResponse, TokensResponse } from '../../shared/api';
 import { formatDate, today } from '../../shared/dates';
 import { FIGURE_KINDS, type Category, type Figure, type Profile, type Rule, type Settings as SettingsT } from '../../shared/schema';
 import { taxYearOf } from '../../shared/uk';
@@ -360,8 +360,13 @@ function RulesEditor() {
   );
   const toggle = useApiMutation((r: Rule) => api(`/rules/${r.id}`, { method: 'PATCH', body: { enabled: !r.enabled } }));
   const del = useApiMutation((id: string) => api(`/rules/${id}`, { method: 'DELETE' }));
+  const [preview, setPreview] = useState<EnrichPreview | null>(null);
+  const check = useApiMutation(() => api<EnrichPreview>('/enrich/preview', { method: 'POST' }), { onSuccess: setPreview });
   const rerun = useApiMutation(() => api<{ recategorised: number; transfersLinked: number }>('/enrich', { method: 'POST' }), {
-    onSuccess: (r) => toast({ tone: 'good', text: `${r.recategorised} recategorised, ${r.transfersLinked} transfers linked` }),
+    onSuccess: (r) => {
+      toast({ tone: 'good', text: `${r.recategorised} recategorised, ${r.transfersLinked} transfers linked` });
+      setPreview(null);
+    },
   });
   return (
     <div className="flex flex-col gap-5">
@@ -394,11 +399,13 @@ function RulesEditor() {
         title={`Your rules (${data.rules.length})`}
         padded={false}
         actions={
-          <Button size="sm" icon={<Wand2 className="size-3.5" />} loading={rerun.isPending} onClick={() => rerun.mutate(undefined)}>
-            Re-run on all history
+          <Button size="sm" icon={<Wand2 className="size-3.5" />} loading={check.isPending} onClick={() => check.mutate(undefined)}>
+            Re-apply to history…
           </Button>
         }
       >
+        {check.error && <Callout tone="bad" className="mx-5 my-3">{check.error.message}</Callout>}
+        {preview && <ReapplyPreview preview={preview} applying={rerun.isPending} error={rerun.error?.message} onApply={() => rerun.mutate(undefined)} onCancel={() => setPreview(null)} />}
         {data.rules.length ? (
           <Sorted rows={[...data.rules].sort((a, b) => a.priority - b.priority)} columns={{ when: { value: (r) => r.match.value }, then: { value: (r) => (r.set.category ? cats.path(r.set.category) : r.set.payee) }, on: { value: (r) => (r.enabled ? 0 : 1), first: 'asc' } }}>
             {({ rows, sortProps }) => (
@@ -438,6 +445,63 @@ function RulesEditor() {
         )}
       </Card>
       <CsvProfilesCard />
+    </div>
+  );
+}
+
+/** How a category came to be, in words, for the preview of re-applying categorisation. */
+const BY_WORDS: Record<string, string> = {
+  builtin: 'the app’s own list',
+  bank: 'the bank’s category',
+  rule: 'your rule',
+  transfer: 'a transfer between your accounts',
+  agreement: 'an agreement’s schedule',
+  ai: 'the reader’s suggestion',
+};
+
+/** What re-applying categorisation would change, before anything is written. Your own categories are never in it. */
+function ReapplyPreview({ preview, applying, error, onApply, onCancel }: { preview: EnrichPreview; applying: boolean; error: string | undefined; onApply: () => void; onCancel: () => void }) {
+  const { cats } = useAppData();
+  const nothing = !preview.groups.length && !preview.transfersLinked && !preview.payeesTidied;
+  const label = (g: EnrichGroup) => `${g.from ? cats.path(g.from) : 'Uncategorised'} → ${g.to ? cats.path(g.to) : 'Uncategorised'}`;
+  return (
+    <div className="border-t border-line bg-panel-2 px-5 py-4">
+      <div className="mb-1 text-[13.5px] font-medium text-ink">{nothing ? 'Nothing would change' : 'Re-applying would change'}</div>
+      {!nothing && (
+        <p className="mb-3 text-[12.5px] text-ink-3">
+          {preview.recategorised} row{preview.recategorised === 1 ? '' : 's'} recategorised
+          {preview.transfersLinked ? `, ${preview.transfersLinked} transfer${preview.transfersLinked === 1 ? '' : 's'} linked` : ''}
+          {preview.payeesTidied ? `, ${preview.payeesTidied} payee${preview.payeesTidied === 1 ? '' : 's'} tidied` : ''}. Categories you set yourself are never changed.
+        </p>
+      )}
+      {preview.groups.length > 0 && (
+        <ul className="mb-3 flex flex-col gap-2">
+          {preview.groups.map((g) => (
+            <li key={`${g.from}|${g.to}|${g.by}`} className="rounded-lg border border-line bg-panel px-3 py-2 text-[13px]">
+              <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+                <span className="font-medium text-ink">{label(g)}</span>
+                <span className="tabular text-ink-2">
+                  {g.count} row{g.count === 1 ? '' : 's'} · <Money value={g.amount} />
+                </span>
+              </div>
+              <div className="text-[12px] text-ink-3">
+                {g.to ? `by ${BY_WORDS[g.by ?? ''] ?? 'the app'}` : 'nothing gives it one now'}: {g.payees.map((p) => `${p.payee} (${p.count})`).join(', ')}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+      {error && <Callout tone="bad" className="mb-3">{error}</Callout>}
+      <div className="flex gap-2">
+        {!nothing && (
+          <Button variant="primary" size="sm" loading={applying} onClick={onApply}>
+            Apply these changes
+          </Button>
+        )}
+        <Button size="sm" onClick={onCancel}>
+          {nothing ? 'Close' : 'Cancel'}
+        </Button>
+      </div>
     </div>
   );
 }

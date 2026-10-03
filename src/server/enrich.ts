@@ -2,20 +2,62 @@
 // fields. Your manual edits (categorisedBy = "user") are never touched. This is what lets new rules,
 // better merchant lists or new categories apply to history without re-importing anything.
 
-import { isWrapperAccount, payrollPattern, transferLegCategory, type Categoriser } from '../shared/categorise';
+import { isWrapperAccount, payrollPattern, transferLegCategory, type Categoriser, type CategoriseInput, type CategoriseResult } from '../shared/categorise';
 import { diffDays } from '../shared/dates';
+import { cleanPayee } from '../shared/merchants';
 import { toMinor } from '../shared/money';
 import { tidyPlace } from '../shared/places';
 import type { Account, Transaction } from '../shared/schema';
-import { categoriserFor } from './categoriser';
+import { categoriseInputOf, categoriserFor } from './categoriser';
 import { transferGroupId } from './ids';
 import type { Store } from './store';
 
 const TRANSFERISH = new Set(['transfer', 'credit-card-payment', 'savings-transfer', 'investment-transfer', 'contribution', 'withdrawal']);
 
+/**
+ * A payee that is the bank's wording rather than a name: the description itself, or one that keeps
+ * its words for how the money moved ("…VIA FASTER PAYMENT TO…", "… Purchase | EUR 24.50 | FX rate").
+ */
+export function payeeLooksRaw(payee: string, description: string): boolean {
+  if (payee.trim().toLowerCase() === description.trim().toLowerCase()) return true;
+  return /\b(?:VIA FASTER PAYMENT|FASTER PAYMENTS? RECEIPT|REFERENCE|MANDATE|BANK GIRO CREDIT|DIRECT DEBIT|BILL PAYMENT|THIRD PARTY PAYMENT|CARD PAYMENT|REF)\b|\(VIA (?:APPLE|GOOGLE) PAY\)|\|\s*[A-Z]{3}\s+[\d.,]|FX RATE|&AMP;|\s(?:PURCHASE|REFUND)$|^(?:FROM|TO)\s|\d{5,}/i.test(payee);
+}
+
+/** Letters and digits only, lower case: for asking whether one text holds another. */
+const letters = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+/**
+ * The payee enrichment gives a row: the categoriser's, unless that is only a name cut from the
+ * description and the row has a clean one from elsewhere already, as the reader gave it. A payee
+ * cut from the description by an earlier version of the tidying is not from
+ * elsewhere: its words are the description's. A payee you set is never changed.
+ */
+export function nextPayee(t: Transaction, input: CategoriseInput, res: CategoriseResult): string | undefined {
+  if (t.payeeSetBy === 'user') return t.payee;
+  const cut = cleanPayee(t.description);
+  const weak = res.payee === (input.payee ?? input.aiPayee ?? cut) || res.payee === cut;
+  const fromElsewhere = t.payee !== undefined && !letters(t.description).includes(letters(t.payee));
+  if (weak && t.payee && fromElsewhere && !payeeLooksRaw(t.payee, t.description)) return t.payee;
+  return res.payee;
+}
+
 export interface EnrichResult {
   recategorised: number;
   transfersLinked: number;
+  /** With `detail`: each row it would change, and how. */
+  changes?: EnrichChange[];
+}
+
+/** A row enrichment changes: its payee, its category and what gave it, or a transfer link. */
+export interface EnrichChange {
+  id: string;
+  accountId: string;
+  date: string;
+  amount: number;
+  description: string;
+  payee?: { from: string | null; to: string | null };
+  category?: { from: string | null; to: string | null; by: Transaction['categorisedBy'] | null };
+  linked?: boolean;
 }
 
 /**
@@ -48,7 +90,7 @@ export async function categoriseInvestmentRows(store: Store): Promise<number> {
   for (const a of wrappers) {
     for (const t of store.transactions(a.id)) {
       if (t.category || t.categorisedBy || t.transferGroup) continue;
-      const res = categoriser.categorise({ accountId: t.accountId, description: t.description, amount: t.amount, date: t.date, type: t.type, bankCategory: t.bankCategory, payee: t.merchant?.name ?? t.counterpartyName });
+      const res = categoriser.categorise({ ...categoriseInputOf(t), aiCategory: undefined });
       if (!res.category || res.categorisedBy !== 'builtin') continue;
       const patch: Partial<Transaction> = { category: res.category, categorisedBy: 'builtin' };
       if (t.payeeSetBy !== 'user' && res.payee && res.payee !== t.payee) patch.payee = res.payee;
@@ -59,7 +101,7 @@ export async function categoriseInvestmentRows(store: Store): Promise<number> {
   return updates.length;
 }
 
-export async function enrich(store: Store, opts: { accountIds?: string[]; dryRun?: boolean } = {}): Promise<EnrichResult> {
+export async function enrich(store: Store, opts: { accountIds?: string[]; dryRun?: boolean; detail?: boolean } = {}): Promise<EnrichResult> {
   const categoriser = categoriserFor(store);
   const scope = opts.accountIds ? new Set(opts.accountIds) : null;
   const patches = new Map<string, Partial<Transaction>>();
@@ -68,20 +110,13 @@ export async function enrich(store: Store, opts: { accountIds?: string[]; dryRun
   for (const t of store.transactions()) {
     if (scope && !scope.has(t.accountId)) continue;
     if (t.categorisedBy === 'user' || (t.transferGroup && t.categorisedBy === 'transfer')) continue;
-    const res = categoriser.categorise({
-      accountId: t.accountId,
-      description: t.description,
-      amount: t.amount,
-      date: t.date,
-      type: t.type,
-      bankCategory: t.bankCategory,
-      aiCategory: t.categorisedBy === 'ai' ? t.category : undefined,
-      payee: t.merchant?.name ?? t.counterpartyName,
-    });
+    const input = categoriseInputOf(t);
+    const res = categoriser.categorise(input);
     const patch: Partial<Transaction> = {};
     const place = tidyPlace(t.merchant);
     if (place !== t.place) patch.place = place;
-    if (res.payee !== t.payee && t.payeeSetBy !== 'user') patch.payee = res.payee;
+    const payee = nextPayee(t, input, res);
+    if (payee !== t.payee) patch.payee = payee;
     if (res.category !== t.category) patch.category = res.category;
     if (res.categorisedBy !== t.categorisedBy) patch.categorisedBy = res.categorisedBy;
     if (res.ruleId !== t.ruleId) patch.ruleId = res.ruleId;
@@ -126,7 +161,18 @@ export async function enrich(store: Store, opts: { accountIds?: string[]; dryRun
       `enrich: ${recategorised} recategorised, ${transfersLinked} transfers linked`,
     );
   }
-  return { recategorised, transfersLinked };
+  if (!opts.detail) return { recategorised, transfersLinked };
+  const changes: EnrichChange[] = [];
+  for (const [id, patch] of patches) {
+    const t = store.transaction(id);
+    if (!t) continue;
+    const change: EnrichChange = { id, accountId: t.accountId, date: t.date, amount: t.amount, description: t.description };
+    if ('payee' in patch && patch.payee !== t.payee) change.payee = { from: t.payee ?? null, to: patch.payee ?? null };
+    if ('category' in patch && patch.category !== t.category) change.category = { from: t.category ?? null, to: patch.category ?? null, by: ('categorisedBy' in patch ? patch.categorisedBy : t.categorisedBy) ?? null };
+    if (patch.transferGroup) change.linked = true;
+    if (change.payee || change.category || change.linked) changes.push(change);
+  }
+  return { recategorised, transfersLinked, changes };
 }
 
 /**
@@ -158,18 +204,11 @@ const CATEGORISER_READS = ['type', 'counterpartyName', 'merchant', 'bankCategory
 export function rederive(categoriser: Categoriser, t: Transaction, filled: readonly string[]): Partial<Transaction> {
   if (!filled.some((f) => (CATEGORISER_READS as readonly string[]).includes(f))) return {};
   if (t.categorisedBy === 'user' || t.transferGroup) return {};
-  const res = categoriser.categorise({
-    accountId: t.accountId,
-    description: t.description,
-    amount: t.amount,
-    date: t.date,
-    type: t.type,
-    bankCategory: t.bankCategory,
-    aiCategory: t.categorisedBy === 'ai' ? t.category : undefined,
-    payee: t.merchant?.name ?? t.counterpartyName,
-  });
+  const input = categoriseInputOf(t);
+  const res = categoriser.categorise(input);
   const patch: Partial<Transaction> = {};
-  if (t.payeeSetBy !== 'user' && res.payee && res.payee !== t.payee) patch.payee = res.payee;
+  const payee = nextPayee(t, input, res);
+  if (payee && payee !== t.payee) patch.payee = payee;
   if (res.category !== t.category) patch.category = res.category;
   if (res.categorisedBy !== t.categorisedBy) patch.categorisedBy = res.categorisedBy;
   if (res.ruleId !== t.ruleId) patch.ruleId = res.ruleId;

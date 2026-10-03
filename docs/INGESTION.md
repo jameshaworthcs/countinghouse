@@ -428,12 +428,30 @@ read again.
   4. a payment one of your agreements schedules (`agreements.json`: to its counterparty, near a
      due date, for about what was due) takes the agreement's category ([FORMULAS.md §10](FORMULAS.md),
      "Agreements"). A university is paid rent as well as fees, so its name alone says nothing;
-  5. the built-in UK merchant list (`src/shared/merchants.ts`, about 200 patterns);
-  6. money in that carries one of your payroll numbers at your jobs (`employments.json`; 5
-     characters or more, not inside a longer number) is salary. An employer's name alone is not
-     enough: a company you own pays you dividends and transfers under its name too;
-  7. the bank's own category;
-  8. Claude's suggestion.
+  5. money into a credit card that the card's statement calls a payment ("Payment", "Direct
+     debit") is paying it off;
+  6. money in from an investment platform the list knows (Trading 212, eToro, MoonPay…) is taken
+     out of your investments, outside the platform's own accounts;
+  7. the built-in UK merchant list (`src/shared/merchants.ts`, about 220 patterns). A brand it knows
+     wins; a general word it matches ("COUNCIL", "TICKET") does not overrule Claude's category for
+     the row;
+  8. money in that carries one of your payroll numbers at your jobs (`employments.json`; 5
+     characters or more, not inside a longer number) is salary. So is money in under the name the
+     bank gives a job's pay, learnt from payments paired with its payslips, when it is about that
+     pay (half the least to twice the most) and from a year before the first such payment to three
+     months after the last ([FORMULAS.md §10](FORMULAS.md), "Pay by name"). A job at a company you
+     hold shares in is left out: it pays you dividends and transfers under its name too;
+  9. the bank's own category, including American Express's "Group-Subgroup" categories;
+  10. Claude's suggestion;
+  11. money back onto a card from a payee it paid in the 120 days before is that purchase's refund,
+      in its category.
+  - Each step reads the row's description, then what other documents that showed the same payment
+    said of it (`seenIn`) and its reference: an app screenshot's "Bank Giro Credit" is categorised
+    by the statement that printed "BANK GIRO CREDIT REF SLC DISBURSEMENTS".
+  - **Payees** come from the ways banks word a payment ([FORMULAS.md §10](FORMULAS.md), "Payees"):
+    Santander's "…VIA FASTER PAYMENT TO *name* REFERENCE…", "FASTER PAYMENTS RECEIPT REF.… FROM
+    *name*", "BANK GIRO CREDIT REF *payer*, …" and "DIRECT DEBIT PAYMENT TO *payee* REF…", Apple
+    Pay's "(VIA APPLE PAY)", and Chase's "*merchant* Purchase | EUR 24.50 | FX rate …".
   - When an agreement is added, the payments already recorded that it schedules take its category,
     except one you, a rule of yours or a transfer link categorised.
   - When a job learns a payroll number (a document gave it, or you added it), money in already
@@ -442,8 +460,12 @@ read again.
   - When the app starts, rows in investment and pension accounts that nothing categorised get the
     category the built-in wording now gives them, and its payee unless you set one
     (`categoriseInvestmentRows`). Nothing else changes: a category set by anyone stays, and so does
-    a row you left uncategorised. **Re-run on all history** (Settings → Rules) works everything
-    out again instead; it currently loses Claude's payees and some of its categories.
+    a row you left uncategorised.
+  - **Re-apply to history** (Settings → Rules) works everything out again for rows you did not
+    categorise. It shows first what would change, grouped by from and to category and what gives
+    it (`POST /enrich/preview`), and changes nothing until you apply it. A payee from elsewhere (the
+    reader's) is kept when all it would get instead is a name cut from the description; one cut by
+    an earlier version of the tidying, or left in the bank's words, is replaced (`nextPayee`).
 - **Duplicates** (`dedup.ts`) are checked in this order:
   1. same bank id;
   2. same date + amount + simplified description, matched as a multiset (two identical coffees

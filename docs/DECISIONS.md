@@ -1618,3 +1618,35 @@ Later the same day, after the owner's first runs (`label-imports-2`):
     `monthly-review-3`, and the post-import prompt `insights-after-import-4`.
   - No job was run on the owner's data to test this: the tests build the digest and apply a job's
     output without Claude.
+
+## 2026-10-03: Categorisation that gets more right by itself
+
+- **Found** (Oct 2025 to Sep 2026, on a copy of the owner's data):
+  - 19% of spending and 46% of money in were uncategorised, and uncategorised money
+    in counts as income.
+  - American Express's own category was on almost all of its rows, but its "Group-Subgroup" form was
+    never read.
+  - Santander's and Chase's wordings left payees as whole descriptions, so one payee was many and
+    regular payments were missed.
+  - Money in from Trading 212, card repayments ("Payment") and card refunds counted as income.
+  - Pay from a job before its payslips began was not salary, since its name alone was not enough.
+  - Re-running categorisation on all history was unsafe: it lost the payees Claude had read.
+- **Done** (FORMULAS.md §10; INGESTION.md, "Categorisation"):
+  - payees from the banks' wordings, with the reference kept apart;
+  - Amex's categories;
+  - money in from investment platforms is a withdrawal;
+  - a card's own repayments, and refunds onto a card in the purchase's category;
+  - disputed charges and their reversals;
+  - cash paid in;
+  - conversion fees and the Underground;
+  - pay under the name the bank gives a job's pay, learnt from payments paired with its payslips,
+    never for a company recorded as a shareholding;
+  - each step also reads what other documents said of the same payment.
+- **Fixed:** a payee from elsewhere is kept unless it is the bank's wording or was cut from the
+  description, and a general word in the merchant list no longer overrules Claude's category.
+- **Re-apply to history** now shows what it would change, grouped, before anything is written (owner
+  reviews before data changes).
+- **Rehearsed** on a copy of the owner's data: hundreds of rows recategorised and payees tidied.
+  Uncategorised spending falls by about two fifths, and money in by over two thirds. Most of what
+  is left is money with people and the Student Finance credit, which later work handles.
+- **Business costs** paid personally stay in personal spending (owner, 2026-10-03).

@@ -1233,3 +1233,34 @@ export interface Reread {
   notes: string[];
   error?: string;
 }
+
+/** A row in a preview of re-applying categorisation. */
+export interface EnrichExample {
+  id: string;
+  accountId: string;
+  date: string;
+  amount: number;
+  description: string;
+}
+
+/** Rows whose category would change the same way: from one category to another, by the same means. */
+export interface EnrichGroup {
+  from: string | null;
+  to: string | null;
+  by: Transaction['categorisedBy'] | null;
+  count: number;
+  /** The amounts added up, ignoring sign. */
+  amount: number;
+  /** Who they are with, the most first. */
+  payees: { payee: string; count: number; amount: number }[];
+  examples: EnrichExample[];
+}
+
+/** What re-applying categorisation to all history would change (POST /enrich/preview); nothing is written. */
+export interface EnrichPreview {
+  recategorised: number;
+  transfersLinked: number;
+  /** Rows whose payee alone would be tidied. */
+  payeesTidied: number;
+  groups: EnrichGroup[];
+}

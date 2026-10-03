@@ -175,6 +175,15 @@ async function main() {
     await shoot('settings-audit-entry', '/settings#audit', { ...(mobile ? { width: 390, height: 1400, mobile: true } : { width: 1440, height: 1400 }), theme: dark ? 'dark' : 'light', act: openEntry });
     console.log('✓ settings-audit-entry');
   }
+  // What re-applying categorisation would change, before anything is written.
+  const openReapply = async (page: Page) => {
+    await page.click('main button::-p-text(Re-apply to history)');
+    await page.waitForSelector('main ::-p-text(would change)', { timeout: 15_000 });
+  };
+  if (!only || 'settings-rules-reapply'.includes(only)) {
+    await shoot('settings-rules-reapply', '/settings#rules', { ...(mobile ? { width: 390, height: 1600, mobile: true } : { width: 1440, height: 1400 }), theme: dark ? 'dark' : 'light', act: openReapply });
+    console.log('✓ settings-rules-reapply');
+  }
   if (!only) {
     if (txs.total > 0) await shoot('transaction-drawer', '/transactions', { width: 390, height: 844, theme: 'dark', mobile: true, act: openDrawer });
     for (const [name, route] of [['overview', '/'], ['spending', '/spending'], ['projections', '/projections'], ['assumptions', '/assumptions'], ['review', pendingId ? `/import/${pendingId}` : '/import'], ...(nothingId ? [['review-nothing-to-record', `/import/${nothingId}`]] : []), ...(proposalId ? [['proposal', `/proposals/${proposalId}`]] : [])] as [string, string][]) {

@@ -14,6 +14,7 @@ import { employerYears, isPayslipFigure, jobEndedOn, payerKey, type PayKind, typ
 import { parseTaxCode, payeTax, taxMonth } from '../../shared/paye';
 import { matchEmployment, namesOf } from '../employments';
 import { payrollPattern } from '../../shared/categorise';
+import { cleanPayee } from '../../shared/merchants';
 
 export { isPayslipFigure, payerKey };
 
@@ -324,6 +325,36 @@ export function jobStartedOn(store: Store, employmentId: string): string | undef
     .flatMap((r) => (r.employmentId !== employmentId ? [] : r.type === 'employment' && r.startedOn ? [r.startedOn] : r.type === 'event' && r.event === 'started' ? [r.date] : []))
     .sort()
     .at(-1);
+}
+
+/**
+ * What the bank calls each job's pay, from the payments paired with its payslips (FORMULAS §10, "Pay
+ * by name"): the payee those payments read as, the least and most of them, and the first and last
+ * day one came. A job at a company you hold shares in is left out: it pays you dividends and moves
+ * money under the same name. Read by the categoriser, so pay before your payslips start is salary.
+ */
+export function paidAs(store: Store): { employmentId: string; payees: string[]; least: number; most: number; first: ISODate; last: ISODate }[] {
+  const owned = new Set(store.companies.flatMap((c) => [c.employmentId ? `job:${c.employmentId}` : '', `name:${payerKey(c.name)}`]));
+  const years = [...new Set(store.figures.filter((f) => f.kind !== 'earned_pay' && isPayslipFigure(store, f)).map((f) => f.taxYear ?? taxYearOf(f.periodEnd ?? f.date ?? today()).label))].sort();
+  const byJob = new Map<string, { payees: Set<string>; amounts: number[]; dates: ISODate[] }>();
+  for (const label of years) {
+    if (!/^\d{4}\/\d{2}$/.test(label)) continue;
+    for (const p of pairPay(store, taxYearOf(`${label.slice(0, 4)}-06-01`)).periods) {
+      const job = store.employment(p.employmentId);
+      if (!p.credit || !job || owned.has(`job:${job.id}`) || namesOf(job).some((n) => owned.has(`name:${payerKey(n)}`))) continue;
+      const e = byJob.get(job.id) ?? byJob.set(job.id, { payees: new Set(), amounts: [], dates: [] }).get(job.id)!;
+      const payee = cleanPayee(p.credit.description);
+      if (payerKey(payee).length >= 4) e.payees.add(payee);
+      e.amounts.push(p.credit.amount);
+      e.dates.push(p.credit.date);
+    }
+  }
+  return [...byJob.entries()]
+    .filter(([, e]) => e.payees.size > 0)
+    .map(([employmentId, e]) => {
+      const dates = [...e.dates].sort();
+      return { employmentId, payees: [...e.payees], least: Math.min(...e.amounts), most: Math.max(...e.amounts), first: dates[0]!, last: dates.at(-1)! };
+    });
 }
 
 export function pay(store: Store, coverage: Coverage, taxYear?: string, now: ISODate = today(), earned: EarnedPayroll[] = earnedPay(store, now)): PayResponse {

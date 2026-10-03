@@ -280,8 +280,10 @@ and an address of its own, and links back to each.
      (an account you dropped the file onto wins). A scrolled screen that names no account takes
      the one a screenshot taken and uploaded with it shows, when nothing on it disagrees.
    - Each row is categorised: your rules, then own-account transfers, then wrapper flows, then a
-     payment one of your agreements schedules, then the UK merchant list, then pay carrying one of
-     your payroll numbers, then the bank's category, then Claude's suggestion.
+     payment one of your agreements schedules, then a card's own repayments and money from an
+     investment platform, then the UK merchant list, then pay (your payroll number, or the name
+     the bank gives a job's pay), then the bank's category, then Claude's suggestion, then a
+     card's refunds (INGESTION.md, "Categorisation").
    - Duplicates are found by bank id, then exact multiset match, then fuzzy match.
    - Opposite-amount rows in your other accounts are proposed as the other leg of a transfer.
    - Investment app screens are read as the part of the account they show: an activity list's
