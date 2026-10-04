@@ -92,8 +92,9 @@ function modelSettings(opts: RunOptions): Settings['models'] {
   const engineOf = (m: string): TaskEngine => (isInferenceAlias(m) ? 'inference' : 'claude-cli');
   const engine = (opts.engine ?? (opts.model ? engineOf(opts.model) : undefined)) as TaskEngine | undefined;
   const read = { ...(engine ? { engine } : {}), ...(opts.model ? { model: opts.model } : {}), ...(opts.effort ? { effort: opts.effort as 'high' } : {}), ...(opts.thinking ? { thinking: true } : {}) };
-  // Claude reads: Claude checks too, unless --verify-model says otherwise (as before format v10).
-  const check = opts.verifyModel === 'off' ? { engine: 'off' as const } : opts.verifyModel ? { engine: engineOf(opts.verifyModel), model: opts.verifyModel } : engine && engine !== 'inference' && engine !== 'ocr' ? { engine } : {};
+  // The reading's engine checks too (the local model checks a local reading; never Claude unless
+  // asked: a local run must not spend the Claude plan), unless --verify-model says otherwise.
+  const check = opts.verifyModel === 'off' ? { engine: 'off' as const } : opts.verifyModel ? { engine: engineOf(opts.verifyModel), model: opts.verifyModel } : engine && engine !== 'ocr' ? { engine } : {};
   return { tasks: { 'read-document': read, 'check-reading': check } };
 }
 
