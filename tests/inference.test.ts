@@ -15,6 +15,7 @@ import { createApp, type App } from '../src/server/app';
 import { loadConfig } from '../src/server/config';
 import { chat, InferenceFailed, InferenceUnavailable, postLong, provenanceOf } from '../src/server/inference';
 import { normaliseExtraction } from '../src/server/ingest/normalise';
+import { providerOf } from '../src/server/ingest/draft';
 import { migrateModelSettings } from '../src/server/migrations';
 import { readReceipt } from '../src/server/receipts';
 import { runModel } from '../src/server/agents/run-model';
@@ -112,6 +113,16 @@ describe('readings', () => {
     // Put right, so not a problem that calls for a second reading.
     expect(warnings).toEqual([]);
     expect(notices).toEqual(['Account 1: 2 balance lines were read as rows and left out (a balance brought or carried forward is not a payment).']);
+  });
+
+  it('do not take a fund’s manager for the provider of the account holding it', () => {
+    const holding = (name: string) => ({ name, value: 5204.77 }) as never;
+    const page = { institutionName: 'Fidelity', holdings: [holding('Fidelity Index World Fund P Acc')], transactions: [] };
+    expect(providerOf(page, { institutionName: null })).toBeUndefined();
+    // Named by something other than its funds, or with payments, the provider stands.
+    expect(providerOf({ ...page, holdings: [holding('Fidelity Index World Fund P Acc'), holding('Vanguard LifeStrategy 80%')] }, { institutionName: null })).toBe('Fidelity');
+    expect(providerOf({ ...page, institutionName: 'Moneybox' }, { institutionName: null })).toBe('Moneybox');
+    expect(providerOf({ ...page, transactions: [{ date: '2026-09-01', description: 'Fidelity fee', amount: -1 }] as never }, { institutionName: null })).toBe('Fidelity');
   });
 
   it('keep no image in a transcript', () => {
@@ -361,6 +372,8 @@ describe('through the app', () => {
     expect(rec.status).toBe('review');
     expect(rec.extraction).toMatchObject({ engine: 'inference', model: 'qwen3.6-35b-a3b-q4_k_m', inference: { alias: 'vision-extract', modelSha256: 'ab'.repeat(32), systemFingerprint: 'inf-0123456789abcdef', seed: 42, thinking: false, schemaValid: true } });
     expect(rec.extraction.costUsd).toBeUndefined();
+    // The local model's own rules are part of its reader's version.
+    expect(rec.extraction.engineVersion).toMatch(/^extract-\d+\+local-1$/);
     expect(rec.extraction.waiting).toBeUndefined();
     expect(rec.extraction.verification).toMatchObject({ method: 'checks', firstModel: 'vision-extract', firstInference: { alias: 'vision-extract' } });
     expect(svc.seen).toEqual([{ alias: 'vision-extract', priority: 'batch', thinking: false, images: 1, schema: 'extraction' }]);

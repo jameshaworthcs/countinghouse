@@ -54,7 +54,7 @@ import { claudeChoice, choiceName, isInferenceAlias, resolveTask, TASKS, type Ta
 import { captureDate, imageInfo, prepareImage } from './images';
 import { extractWithOcr, OCR_ENGINE_VERSION } from './ocr';
 import { OFX_ENGINE_VERSION, parseOfx } from './ofx';
-import { extractionJsonSchema, promptVersion, systemPrompt, userPrompt } from './prompt';
+import { extractionJsonSchema, readerVersion, systemPrompt, userPrompt } from './prompt';
 import { parseQif, QIF_ENGINE_VERSION } from './qif';
 import { parseSantanderTxt, SANTANDER_ENGINE_VERSION } from './santander';
 import { WorkArea } from './workarea';
@@ -528,7 +528,7 @@ export class ImportService extends EventEmitter {
     const timeoutMs = settings.timeoutSeconds * 1000;
     // Everything the document prints, when that is turned on (prompt.ts, extract-14).
     const everything = settings.readEverything;
-    const engineVersionOf = () => (kind === 'sheet' ? `${XLSX_ENGINE_VERSION}+${promptVersion(everything)}` : promptVersion(everything));
+    const engineVersionOf = (local = false) => (kind === 'sheet' ? `${XLSX_ENGINE_VERSION}+${readerVersion(everything, local)}` : readerVersion(everything, local));
     // While the local model cannot take the reading, the import says so (an upload only).
     const onWait =
       sessionKind === 'reading'
@@ -546,7 +546,7 @@ export class ImportService extends EventEmitter {
           files,
           scratch,
           userPrompt: userPrompt(promptCtx),
-          systemPrompt: systemPrompt(everything),
+          systemPrompt: systemPrompt(everything, true),
           schema: extractionJsonSchema(everything),
           alias: c.model,
           thinking: c.thinking,
@@ -599,7 +599,7 @@ export class ImportService extends EventEmitter {
         engine: engine as SessionEngine,
         model: c.model,
         ...(engine === 'inference' ? { thinking: c.thinking } : { effort: c.effort }),
-        promptVersion: engineVersionOf(),
+        promptVersion: engineVersionOf(engine === 'inference'),
         tools: engine === 'claude-cli' ? ['Read'] : [],
         privacy: 'personal',
         ...(opts.startedBy ? { startedBy: opts.startedBy } : {}),
@@ -630,7 +630,7 @@ export class ImportService extends EventEmitter {
       engineVersion = OCR_ENGINE_VERSION;
     } else {
       result = await readWith(readChoice, 'first');
-      engineVersion = engineVersionOf();
+      engineVersion = engineVersionOf(result.engine === 'inference');
       const same = checkChoice.engine === readChoice.engine && checkChoice.model === readChoice.model && checkChoice.thinking === readChoice.thinking;
       if (checkChoice.engine !== 'off' && !same) {
         const checked = await this.verifyReading(record, result, { read: readChoice, check: checkChoice, readWith, batch: await this.batchEvidence(record), sheets, claudeAvailable: claudeEngine(engines) });
@@ -647,6 +647,8 @@ export class ImportService extends EventEmitter {
     await this.work.clearScratch(scratchId);
     // What was put right or done another way goes with the warnings, once the checks are done.
     if (result.notices?.length) result = { ...result, warnings: [...result.notices, ...result.warnings] };
+    // The reading kept may be the check's, on another engine: its version is the one recorded.
+    if (readChoice.engine !== 'ocr') engineVersion = engineVersionOf(result.engine === 'inference');
     return { result, engine: result.engine ?? (readChoice.engine as EngineId), engineVersion, verified };
   }
 

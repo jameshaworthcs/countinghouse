@@ -35,7 +35,9 @@ export function ReadAgainCard({ rec, currentVersion }: { rec: ImportRecord; curr
   const parsed = rec.extraction.engine === 'csv';
   const enabled = parsed || data.settings.extraction.rereadDocuments;
   const r = q.data;
-  const older = currentVersion && rec.extraction.engineVersion && rec.extraction.engineVersion !== currentVersion;
+  // The prompt's number decides (a local reading adds "+local-N"; a spreadsheet's starts "xlsx-N+").
+  const number = (v: string | undefined | null) => Number(/extract-(\d+)/.exec(v ?? '')?.[1] ?? 0);
+  const older = currentVersion && rec.extraction.engineVersion && number(rec.extraction.engineVersion) < number(currentVersion);
   const differences = r?.sections.flatMap((s) => s.rows.filter((x) => x.kind !== 'same')) ?? [];
   return (
     <Card

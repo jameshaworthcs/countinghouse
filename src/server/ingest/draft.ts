@@ -129,6 +129,22 @@ function findTransferMatch(row: TransferSide & { date: string; amount: number },
   return best?.t;
 }
 
+/**
+ * The provider a reading names for an account, unless all it names is a fund's manager: a fund's own
+ * page in an app ("Fidelity Index World Fund P Acc" in a Moneybox LISA) names the fund, not where the
+ * account is held, and a reader can take the fund's first word for the provider. When the provider's
+ * name only begins a holding's name, and the account shows no payments, the screen says nothing of
+ * its provider: the screenshots taken with it, or the funds each account holds, decide.
+ */
+export function providerOf(acc: Pick<ExtractedAccount, 'institutionName' | 'holdings' | 'transactions'>, extraction: Pick<Extraction, 'institutionName'>): string | undefined {
+  const named = acc.institutionName ?? extraction.institutionName ?? undefined;
+  if (!named || acc.transactions.length || !acc.holdings.length) return named;
+  const words = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter(Boolean);
+  const name = words(named);
+  const fundsByIt = acc.holdings.filter((h) => words(h.name).slice(0, name.length).join(' ') === name.join(' '));
+  return fundsByIt.length === acc.holdings.length ? undefined : named;
+}
+
 export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
   const { store } = ctx;
   // Schedules (extract-15): the agreements they are, which the categoriser reads beside yours. Student
@@ -158,7 +174,7 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
 
   // A statement that runs across the day one of your accounts carries on from another is two: the
   // rows before for the older account, the rest for the newer (docs/INGESTION.md, "Linked accounts").
-  const entries = splitAtLinks(store, extraction.accounts, (acc) => matchAccount({ institutionName: acc.institutionName ?? extraction.institutionName ?? undefined, accountName: acc.accountName ?? undefined, accountType: acc.accountType ?? undefined, last4: acc.last4 ?? undefined, currency: acc.currency ?? undefined }, store.accounts, store.institutions, extraction.accounts.length === 1 ? ctx.hintAccountId : undefined, held));
+  const entries = splitAtLinks(store, extraction.accounts, (acc) => matchAccount({ institutionName: providerOf(acc, extraction), accountName: acc.accountName ?? undefined, accountType: acc.accountType ?? undefined, last4: acc.last4 ?? undefined, currency: acc.currency ?? undefined }, store.accounts, store.institutions, extraction.accounts.length === 1 ? ctx.hintAccountId : undefined, held));
   for (const e of entries) if (e.note) notes.push(e.note);
 
   const sections: DraftSection[] = entries.map(({ acc, force, reason }, si) => {
@@ -170,8 +186,11 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
       (extraction.documentType === 'holding_detail_screenshot' || (acc.accountName !== null && sameHolding({ name: acc.accountName }, { name: acc.holdings[0]!.name })));
     // Scrolled app screens hide the account's name; a row only one kind of account has still says it.
     const typeFromRows: AccountType | undefined = !acc.accountType && acc.transactions.some((t) => LISA_ROW.test(t.description)) ? 'lisa' : undefined;
+    const named = acc.institutionName ?? extraction.institutionName ?? undefined;
+    const provider0 = providerOf(acc, extraction);
+    if (named && !provider0) notes.push(`The only provider it names, ${named}, is the manager of a fund it shows, which does not say where the account is held.`);
     const detected = {
-      institutionName: acc.institutionName ?? extraction.institutionName ?? undefined,
+      institutionName: provider0,
       accountName: holdingDetail ? undefined : (acc.accountName ?? undefined),
       accountType: acc.accountType ?? typeFromRows,
       last4: acc.last4 ?? undefined,

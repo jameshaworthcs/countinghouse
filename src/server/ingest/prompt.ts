@@ -106,7 +106,26 @@ const EVERYTHING_RULES = `
     A schedule's payments are never transactions, and a document that gives a schedule is never nothingToRecord. Every payment it lists goes in payments, never only in notes or printed.`;
 
 /** The system prompt: rules 1 to 19, and 20 to 24 when reading everything. */
-export const systemPrompt = (everything: boolean) => (everything ? `${SYSTEM_PROMPT}${EVERYTHING_RULES}` : SYSTEM_PROMPT);
+/**
+ * Rules added for the local model service only (`vision-extract`; DECISIONS 2026-10-04). Its
+ * evaluation found readings that passed every check yet left out what Claude reads unprompted: a
+ * statement's period, the foreign amount under a payment abroad (kept by the first reading, lost by
+ * the second), and a fund manager taken for the provider. Claude's prompt is unchanged. Bump
+ * LOCAL_PROMPT_VERSION when these change; a local reading's version is `extract-NN+local-N`.
+ */
+export const LOCAL_PROMPT_VERSION = 'local-1';
+export const LOCAL_RULES = `
+
+Rules that are easy to miss:
+L1. Each account's periodStart and periodEnd are the period the statement covers, as printed ("Statement period 15 August 2026 to 14 September 2026", "01/09/2026 - 30/09/2026", "From … to …"). A statement that prints a period always has both, also when balanceDate is its last day. A screenshot that prints no period has null.
+L2. A payment made in another currency shows that amount beside or under it ("€12.50", "USD 14.00"): originalAmount is that number (12.5) and originalCurrency its ISO code (EUR); amount stays the amount in the account's currency. Give them on every such row, in every reading.
+L3. institutionName is the bank, app or platform that holds the account. A fund's name ("Fidelity Index World Fund P Acc") names the fund's manager, not the provider: when nothing else on the document names a provider, institutionName is null.
+L4. documentDate is a date printed on the document. Never use the upload date for it.`;
+
+export const systemPrompt = (everything: boolean, local = false) => `${everything ? `${SYSTEM_PROMPT}${EVERYTHING_RULES}` : SYSTEM_PROMPT}${local ? LOCAL_RULES : ''}`;
+
+/** The version a reading by this engine is made with: the prompt's, and the local rules' when local. */
+export const readerVersion = (everything: boolean, local: boolean) => `${promptVersion(everything)}${local ? `+${LOCAL_PROMPT_VERSION}` : ''}`;
 
 const nullable = (schema: Record<string, unknown>) => ({ anyOf: [schema, { type: 'null' }] });
 const str = (description?: string) => ({ type: 'string', ...(description ? { description } : {}) });
