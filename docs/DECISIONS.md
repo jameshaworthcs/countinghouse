@@ -2059,6 +2059,12 @@ Later the same day, after the owner's first runs (`label-imports-2`):
   - Claude and AWS keep one payee name however the card prints them; a payment id before a name
     and Santander's fee wording on a foreign payment leave payees. Duplicates rule 2b: the same
     amount and description with the same printed date, up to 10 days apart.
+- **A holdings page's total** (owner: "I shouldn't have to untick values"): ii's holdings PDF and
+  a SIPP statement gave the funds' total, with no cash, and it was recorded as the
+  account's value (short by the cash each held). Such a value is now recognised (its import's
+  holdings add up to it and neither shows cash) and stands for itself plus the cash the account
+  held that day (FORMULAS.md §9, "Investments alone"); the review page says so. No reading change
+  or migration: the figure is kept as read.
 - **Not done:** the workplace pension and company shares have no holdings or prices, so
   they stay at their last valuation. Prices are not refreshed by a job; captures are meant to make
   that unneeded.

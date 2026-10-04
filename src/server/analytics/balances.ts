@@ -22,7 +22,7 @@ import { EXTERNAL_FLOW_CATEGORIES } from '../../shared/categories';
 import { addDays, diffDays, today, type ISODate } from '../../shared/dates';
 import { fromMinor, toMinor } from '../../shared/money';
 import type { BalanceBasis } from '../../shared/api';
-import type { Account, BalanceEvidence, Settings, Transaction } from '../../shared/schema';
+import type { Account, BalanceEvidence, BalanceSnapshot, HoldingsSnapshot, Settings, Transaction } from '../../shared/schema';
 import type { Store } from '../store';
 import { covers, holdingsPath, indexNear, PriceBook, type HoldingsPath, type PriceIndex } from './prices';
 
@@ -110,6 +110,29 @@ export interface BalancePoint {
 const BASIS_KIND: Record<Anchor['source'], BalanceBasis['kind']> = { snapshot: 'balance', running: 'running', screenshot: 'screenshot', approximate: 'approximate' };
 const basisOf = (a: Anchor, after = false): BalanceBasis => ({ date: a.date, kind: BASIS_KIND[a.source], ...(after ? { after: true as const } : {}) });
 
+/** How far from a day a cash figure may be to give an investments-alone value its cash. */
+const CASH_REFERENCE_DAYS = 31;
+
+/**
+ * For each valuation of a valued account that is its investments alone, the cash to add, in pence
+ * (§9, "Investments alone"). One is: no cash on it, and its own import recorded a holdings
+ * snapshot that day, with no cash either, whose holdings add up to it (within £1): a holdings page
+ * whose total is the funds alone. Its cash is the nearest cash figure within 31 days (a balance's
+ * `cash`, or a snapshot's), carried to that day by the account's rows between; with none, nothing.
+ */
+function investmentsOnlyCash(snaps: readonly BalanceSnapshot[], holdings: readonly HoldingsSnapshot[], txs: readonly Transaction[]): (s: BalanceSnapshot) => number {
+  const refs = [...snaps.filter((b) => b.cash !== undefined).map((b) => ({ date: b.date, cash: b.cash! })), ...holdings.filter((h) => h.cash !== undefined).map((h) => ({ date: h.date, cash: h.cash! }))];
+  const rows = buildSeries(txs);
+  return (s) => {
+    if (s.cash !== undefined || !s.source.importId) return 0;
+    const own = holdings.find((h) => h.source.importId === s.source.importId && h.date === s.date && h.cash === undefined && h.holdings.length);
+    if (!own || Math.abs(toMinor(own.holdings.reduce((sum, h) => sum + h.value, 0)) - toMinor(s.balance)) > 100) return 0;
+    const ref = refs.filter((r) => Math.abs(diffDays(r.date, s.date)) <= CASH_REFERENCE_DAYS).sort((a, b) => Math.abs(diffDays(a.date, s.date)) - Math.abs(diffDays(b.date, s.date)) || a.date.localeCompare(b.date))[0];
+    if (!ref) return 0;
+    return toMinor(ref.cash) + sumTo(rows, s.date) - sumTo(rows, ref.date);
+  };
+}
+
 /** Prices may end this many days before the valuation an estimate is worked towards. */
 const PRICES_END_SLACK_DAYS = 7;
 
@@ -152,7 +175,7 @@ export function dayClose(day: { amount: number; balanceAfter?: number | undefine
   return ends.length === 1 ? ends[0] : toMinor(printed[printed.length - 1]!.balanceAfter);
 }
 
-function buildSeries(items: { date: ISODate; amount: number }[]): Series {
+function buildSeries(items: readonly { date: ISODate; amount: number }[]): Series {
   const dates: ISODate[] = [];
   const prefix: number[] = [];
   let acc = 0;
@@ -283,13 +306,16 @@ export class BalanceEngine {
       const real = snaps.filter((s) => !s.approximate);
       const lastReal = [txs[txs.length - 1]?.date, real[real.length - 1]?.date].filter(Boolean).sort().reverse()[0];
       const placeholders = snaps.filter((s) => s.approximate && (!lastReal || s.date > lastReal));
+      // A valued account's figure that is its investments alone (its document showed no cash) is
+      // worth that plus the cash it held that day (docs/FORMULAS.md §9, "Investments alone").
+      const plusCash = mode === 'market' ? investmentsOnlyCash(snaps, store.holdings?.(account.id) ?? [], txs) : () => 0;
       // One anchor a day: the later one, else the stronger (`outranks`). A screenshot may be taken
       // mid-day, and would hide what a statement's or your own balance says from the gap check; one
       // you typed yourself weighs as your own.
       for (const s of real) {
         const source = s.kind === 'screenshot' && s.enteredBy !== 'user' ? 'screenshot' : 'snapshot';
         const at = timeOnDay(s);
-        const next: Anchor = { date: s.date, minor: toMinor(s.balance), source, ...(at ? { at } : {}) };
+        const next: Anchor = { date: s.date, minor: toMinor(s.balance) + plusCash(s), source, ...(at ? { at } : {}) };
         const current = anchors.get(s.date);
         if (!current || outranks(next, current)) anchors.set(s.date, next);
       }

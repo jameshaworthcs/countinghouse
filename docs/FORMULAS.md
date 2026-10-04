@@ -383,6 +383,12 @@ years), both paths grow at the median:
 
 - Anchors are valuations. External flows move the value (contributions, employer, relief, bonus,
   withdrawals, transfers).
+- **Investments alone.** A valuation with no cash on it whose own import recorded a holdings
+  snapshot that day, with no cash either, whose holdings add up to it within £1, is the funds
+  alone: a holdings page whose total leaves the cash out. It stands for the value plus the cash the
+  account held that day: the nearest cash figure within 31 days (a balance's `cash` or a
+  snapshot's), carried to the day by the account's rows between; with none, nothing. The figure
+  is kept as the document gave it.
 - After the last valuation: the valuation + the flows since. Nothing grows, and nothing is flagged.
 - **Between valuations** (a day after one valuation V₁ on d₁ and before the next V₂ on d₂, not a
   rough figure you gave): flagged estimated, and meeting both valuations exactly. The first of

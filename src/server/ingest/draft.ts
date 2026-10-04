@@ -434,6 +434,11 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
     const heldMinor = holdings.reduce((sum, h) => sum + toMinor(h.value), 0) + toMinor(cash ?? 0);
     const holdingsPartial = holdings.length > 0 && (holdingDetail || balance === undefined || heldMinor < toMinor(balance) - Math.max(100, Math.round(Math.abs(toMinor(balance)) * 0.001)));
 
+    // A value that is its holdings alone, with no cash shown: the app adds the cash it knows that day
+    // (docs/FORMULAS.md §9, "Investments alone"), so it is recorded as read.
+    if (market && balance !== undefined && cash === undefined && holdings.length && !holdingDetail && Math.abs(holdings.reduce((sum, h) => sum + toMinor(h.value), 0) - toMinor(balance)) <= 100)
+      notes.push('The value shown is the holdings alone, with no cash. It is recorded as shown; the account’s value that day adds the cash the app knows from its other documents.');
+
     // Payments recorded twice that this document shows once: offered to be taken away on commit.
     const extraCopies = existing
       ? storedTwice(transactions, existingForAccount, {

@@ -34,7 +34,7 @@ const holdings = (accountId: string, date: string, list: { name: string; value: 
   accountId,
   date,
   holdings: list.map((h) => ({ ...h, currency: 'GBP' })),
-  cash,
+  ...(cash ? { cash } : {}),
   totalValue: list.reduce((s, h) => s + h.value, cash),
   source: {},
   createdAt: stamp,
@@ -124,5 +124,19 @@ describe('between two valuations', () => {
     expect(path.at('2025-01-05') / 100).toBeCloseTo(0);
     // A trade at a price no holding had is not one of these holdings: no path.
     expect(holdingsPath(snap, 0, [...rows, { date: '2025-04-01', amount: -100, description: 'Purchase 1 Something Else', category: 'trade' }], instruments, book)).toBeUndefined();
+  });
+
+  it('a value that is its holdings alone, with no cash, adds the cash it held that day', async () => {
+    const page = (date: string, balance: number, importId: string, cash?: number): BalanceSnapshot => ({ ...bal('isa', date, balance), source: { importId }, ...(cash !== undefined ? { cash } : {}) });
+    await store.addTransactions([tx('isa', '2025-03-03', 55.14, { description: 'DIVIDEND', category: 'investment-income' })], 'test');
+    // A screenshot the day before with its cash; then a holdings page whose total is its funds alone.
+    await store.addBalances([page('2025-03-02', 10_007.83, 'imp_20250302_000000_aaaa', 7.83), page('2025-03-04', 10_100, 'imp_20250304_000000_bbbb')], 'test');
+    await store.addHoldings([{ ...holdings('isa', '2025-03-04', [{ name: 'Example World Index Fund', value: 6_000 }, { name: 'Example Bond Fund', value: 4_100 }]), source: { importId: 'imp_20250304_000000_bbbb' } }], 'test');
+    const engine = new BalanceEngine(store);
+    expect(engine.balanceOn('isa', '2025-03-04')!.value).toBeCloseTo(10_100 + 7.83 + 55.14, 2);
+    // A value that is not its holdings' total (a page showing the account's value) stays as it is.
+    await store.addBalances([page('2025-03-10', 10_500, 'imp_20250310_000000_cccc')], 'test');
+    await store.addHoldings([{ ...holdings('isa', '2025-03-10', [{ name: 'Example World Index Fund', value: 6_100 }]), source: { importId: 'imp_20250310_000000_cccc' } }], 'test');
+    expect(new BalanceEngine(store).balanceOn('isa', '2025-03-10')!.value).toBe(10_500);
   });
 });
