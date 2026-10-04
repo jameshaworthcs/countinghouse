@@ -168,6 +168,21 @@ describe('linking transfers', () => {
     expect(partner(out2!)?.id).toBe(moved);
   });
 
+  it('never links money the app knows as someone else’s: a prize is not the money you moved', async () => {
+    // £100 out of the bank to your own name, and a £100 Premium Bonds prize reinvested the next day.
+    await store.setAccounts([...accounts, acct('bonds', 'premium_bonds', { institutionId: 'ns-and-i' })]);
+    const [out] = await commit([['bank', '2026-04-01', -100, 'Third party payment made via Faster Payment to Sam Taylor']]);
+    expect(store.transaction(out!)!.category).toBe('transfer');
+    const [prize] = await commit([['bonds', '2026-04-02', 100, 'Auto prize reinvestment']]);
+    expect(store.transaction(prize!)).toMatchObject({ category: 'other-income', categorisedBy: 'builtin' });
+    expect(partner(prize!)).toBeUndefined();
+    // Nor does a re-run link them; a deposit, which names no one either, still pairs with it.
+    await enrich(store);
+    expect(partner(prize!)).toBeUndefined();
+    const [deposit] = await commit([['bonds', '2026-04-03', 100, 'Faster Payment deposit']]);
+    expect(partner(deposit!)?.id).toBe(out);
+  });
+
   it('never links a row that names another of your accounts', async () => {
     // A direct debit to the Tesco Bank card, and a £5 refund on the Amex card two days before.
     const [refund] = await commit([['amex', '2026-02-08', 7.5, 'DELIVEROO']]);

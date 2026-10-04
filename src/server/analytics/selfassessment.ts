@@ -147,6 +147,10 @@ export function selfAssessment(store: Store, label?: string, engine?: BalanceEng
     const settle = list.some((m) => m.evidence === 'adds-up') ? ' Where its balances add up, confirm those days in Settings → Data health.' : '';
     interestItemNotes.push(`${store.account(accountId)?.name ?? first.name}: ${days}, so interest may be missing. The bank's annual interest statement is the reliable figure.${settle}`);
   }
+  // Days you confirmed with no balances to show it count as nil: say so, with your reason.
+  for (const c of allow.savings.confirmedNil) {
+    interestItemNotes.push(`${c.name}: ${formatSpan(c.from, c.to)} counted as no interest on your confirmation alone${c.note ? ` (“${c.note}”)` : ''}. Any interest it paid then is not in this figure.`);
+  }
   if (allow.savings.interest > 0) {
     interestItemNotes.unshift(
       allow.savings.interest > allow.savings.allowance

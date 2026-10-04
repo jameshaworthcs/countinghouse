@@ -354,7 +354,8 @@ covered, like a statement's period ([FORMULAS.md §3](FORMULAS.md)). Each is
   are the balances either side, and `through` is the last day they speak for. `difference` is what
   the rows between leave unexplained. `fromOpening` says the first is the £0 the account opened
   with.
-- `note`: optional, your words.
+- `note`: optional, your words: why nothing is missing. Kept trimmed; the Tax year page and Self
+  Assessment show it beside days that no balances show are complete.
 
 You confirm or withdraw one in Settings → Data health (`POST /api/coverage/confirmations`,
 `DELETE /api/coverage/confirmations/:id`). No agent token can. Withdrawing takes the record out of

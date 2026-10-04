@@ -354,6 +354,20 @@ export interface MissingDaysView {
   evidence: BalanceEvidence['status'];
 }
 
+/**
+ * Days of a tax year you confirmed nothing is missing from with no balances to show it (an account
+ * with no data, no balance after the days, or a valued account): the figure counts them as nil on
+ * your word, so the tax pages list them, with the note you gave (docs/FORMULAS.md §3, "Missing days").
+ */
+export interface ConfirmedNilView {
+  accountId: string;
+  name: string;
+  from: string;
+  to: string;
+  days: number;
+  note?: string;
+}
+
 export interface AllowancesResponse {
   taxYear: { label: string; start: string; end: string; daysLeft: number | null; current: boolean };
   /**
@@ -361,8 +375,8 @@ export interface AllowancesResponse {
    * used is a minimum and what is left a maximum, in a sentence; null when the year is covered.
    * `missing`: the same days, account by account.
    */
-  isa: { allowance: number; used: number; remaining: number; cashLimit: number; cashUsed: number; lines: AllowanceLine[]; notes: string[]; incomplete: string | null; missing: MissingDaysView[] };
-  lisa: { allowance: number; contributed: number; remaining: number; bonusReceived: number; bonusExpected: number; lines: AllowanceLine[]; notes: string[]; incomplete: string | null; missing: MissingDaysView[] } | null;
+  isa: { allowance: number; used: number; remaining: number; cashLimit: number; cashUsed: number; lines: AllowanceLine[]; notes: string[]; incomplete: string | null; missing: MissingDaysView[]; confirmedNil: ConfirmedNilView[] };
+  lisa: { allowance: number; contributed: number; remaining: number; bonusReceived: number; bonusExpected: number; lines: AllowanceLine[]; notes: string[]; incomplete: string | null; missing: MissingDaysView[]; confirmedNil: ConfirmedNilView[] } | null;
   pension: {
     annualAllowance: number;
     personal: number;
@@ -377,9 +391,10 @@ export interface AllowancesResponse {
     notes: string[];
     incomplete: string | null;
     missing: MissingDaysView[];
+    confirmedNil: ConfirmedNilView[];
   };
   /** The allowance follows the tax band worked out from the year's income (`taxBand`). */
-  savings: { interest: number; allowance: number; band: TaxBand; bandBasis: TaxBandEstimate['basis']; remaining: number; lines: AllowanceLine[]; notes: string[]; incomplete: string | null; missing: MissingDaysView[] };
+  savings: { interest: number; allowance: number; band: TaxBand; bandBasis: TaxBandEstimate['basis']; remaining: number; lines: AllowanceLine[]; notes: string[]; incomplete: string | null; missing: MissingDaysView[]; confirmedNil: ConfirmedNilView[] };
   dividends: { amount: number; allowance: number; remaining: number; lines: AllowanceLine[] };
   taxBand: TaxBandEstimate;
   ruleNotes: string[];

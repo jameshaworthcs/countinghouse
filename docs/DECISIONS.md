@@ -1987,3 +1987,29 @@ Later the same day, after the owner's first runs (`label-imports-2`):
   each tax year lists the accounts still missing days, with how many, and the latest is complete.
 - **Not done:** an account's id cannot be renamed (`new-account-1`); the categoriser does not yet
   read an account's own name as an alias ("From Chase Saver").
+
+## 2026-10-04: A confirmation can say why; a prize is never the other side of a transfer
+
+- **Owner:** two small accounts will get no statements (there was next to no
+  interest); confirm their days with a note, so the tax pages say what the figure rests on. Fix the
+  Premium Bonds prize linked as a transfer, in the data and in the code.
+- **Found:**
+  - A stretch confirmed with no balances to show it (an account with no data, a valued one) counted
+    as covered with nothing on the tax pages saying so: the interest figure would have looked
+    complete. The API took a note, but the page never asked for one.
+  - The £25 prize reinvested on 2 May 2025 was linked to a £25 payment "to James Ashby" the
+    day before: one row naming the owner and its transfer category were evidence enough, though
+    the app knew the other row as a Premium Bonds prize.
+- **Done** (FORMULAS.md §3 "Missing days"; DATA_FORMAT.md `coverage.json`; INGESTION.md
+  "Transfers"):
+  - Confirming one stretch in Data health asks why (optional), and the confirmation keeps the
+    note. The Tax year page lists, under each figure, the days counted as nil on a confirmation
+    whose balances do not show it, with the note; Self Assessment says the same beside the
+    interest. Confirmations whose balances add up are not listed.
+  - `transferEvidence` rules out a row the app knows by its own wording as someone else's money (a
+    built-in category that is not a transfer) when it says nothing of the owner's accounts or the
+    owner. Cash withdrawals are left out of that, as cash can go into a cash account.
+- **Rehearsed** on a copy of the owner's data: of all the links, the new rule would have refused
+  only the prize. The prize and the PayPal direct debits filed as subscriptions (each paid PayPal
+  Credit for a charge already counted there) are fixed by proposals the owner
+  reviews.

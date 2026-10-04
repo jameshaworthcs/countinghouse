@@ -1,11 +1,12 @@
+import { useState } from 'react';
 import { Link } from 'react-router';
 import type { CoverageGapView, CoverageResponse, DataHealthResponse } from '../../shared/api';
 import { confirmableTo, settledStretches, settledThrough } from '../../shared/coverage';
-import { formatDate, formatSpan, today } from '../../shared/dates';
+import { diffDays, formatDate, formatSpan, today } from '../../shared/dates';
 import type { BalanceEvidence } from '../../shared/schema';
 import { api, useApiMutation } from '../lib/api';
 import { cn, formatMonth, money, plural } from '../lib/format';
-import { Button, Card, StatusBadge, useToast } from './ui';
+import { Button, Card, Dialog, Field, Input, StatusBadge, useToast } from './ui';
 
 /** Sequential shade for the share of a month's days that have data. */
 const shade = (f: number) => (f <= 0 ? 'var(--panel-2)' : f < 0.5 ? 'var(--seq-2)' : f < 0.9 ? 'var(--seq-4)' : 'var(--seq-6)');
@@ -150,10 +151,21 @@ export function CoverageGaps({
 }) {
   const now = today();
   const toast = useToast();
-  const confirm = useApiMutation((stretches: { accountId: string; from: string; to: string }[]) => api<{ added: unknown[] }>('/coverage/confirmations', { method: 'POST', body: { stretches } }), {
-    onSuccess: (r) => toast({ tone: 'good', text: r.added.length === 1 ? 'Confirmed: it counts as covered' : `Confirmed ${r.added.length} stretches: they count as covered` }),
+  // The stretch being confirmed on its own, with the note you give for it.
+  const [asking, setAsking] = useState<{ g: CoverageGapView; to: string } | null>(null);
+  const [note, setNote] = useState('');
+  const confirm = useApiMutation((stretches: { accountId: string; from: string; to: string; note?: string }[]) => api<{ added: unknown[] }>('/coverage/confirmations', { method: 'POST', body: { stretches } }), {
+    onSuccess: (r) => {
+      toast({ tone: 'good', text: r.added.length === 1 ? 'Confirmed: it counts as covered' : `Confirmed ${r.added.length} stretches: they count as covered` });
+      setAsking(null);
+    },
     onError: (e) => toast({ tone: 'bad', text: e.message }),
   });
+  const confirmAsked = () => {
+    if (!asking) return;
+    const why = note.trim();
+    confirm.mutate([{ accountId: asking.g.accountId, from: asking.g.from, to: asking.to, ...(why ? { note: why } : {}) }]);
+  };
   const withdraw = useApiMutation((id: string) => api(`/coverage/confirmations/${id}`, { method: 'DELETE' }), { onSuccess: () => toast({ tone: 'good', text: 'Withdrawn' }) });
   // Days up to today with nothing after the last balance yet: newer documents will cover them.
   const waiting = gaps.filter((g) => g.to >= now && g.evidence.status === 'no-balance' && !g.noData && !g.openingUnknown);
@@ -194,8 +206,14 @@ export function CoverageGaps({
           )}
         </div>
         {to && (
-          <Button size="sm" loading={confirm.isPending} onClick={() => confirm.mutate([{ accountId: g.accountId, from: g.from, to }])}>
-            Confirm nothing missing
+          <Button
+            size="sm"
+            onClick={() => {
+              setNote('');
+              setAsking({ g, to });
+            }}
+          >
+            Confirm nothing missing…
           </Button>
         )}
       </li>
@@ -206,7 +224,7 @@ export function CoverageGaps({
       {gaps.length > 0 && (
         <Card
           title="Days no document covers"
-          description={`Days an account was open that no statement, export or screenshot covers. Where the balances either side add up with the rows recorded, nothing is missing on balance: confirm it, and those days count as covered. Balances show only the net, so a payment and its refund inside would cancel out. Confirming all takes days up to ${formatDate(settled)}, the end of the month before last; later days are recent, and their statements are still due through the monthly update.`}
+          description={`Days an account was open that no statement, export or screenshot covers. Where the balances either side add up with the rows recorded, nothing is missing on balance: confirm it, and those days count as covered. Balances show only the net, so a payment and its refund inside would cancel out. Where no balances show it, say why as you confirm: the tax pages list those days with your reason. Confirming all takes days up to ${formatDate(settled)}, the end of the month before last; later days are recent, and their statements are still due through the monthly update.`}
           actions={
             addingUp.length > 0 && (
               <Button size="sm" variant="primary" loading={confirm.isPending} onClick={() => confirm.mutate(addingUp)}>
@@ -264,6 +282,7 @@ export function CoverageGaps({
                       <EvidenceText e={c.now} to={c.to} />
                     )}
                   </div>
+                  {c.note && <div className="text-ink-2">“{c.note}”</div>}
                 </div>
                 <Button size="sm" variant="ghost" loading={withdraw.isPending} onClick={() => withdraw.mutate(c.id)}>
                   Withdraw
@@ -272,6 +291,47 @@ export function CoverageGaps({
             ))}
           </ul>
         </Card>
+      )}
+      {asking && (
+        <Dialog
+          open
+          onOpenChange={(o) => !o && setAsking(null)}
+          title="Confirm nothing is missing"
+          description={`${asking.g.name}, ${formatSpan(asking.g.from, asking.to)} (${plural(diffDays(asking.g.from, asking.to) + 1, 'day')})`}
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => setAsking(null)}>
+                Cancel
+              </Button>
+              <Button variant="primary" loading={confirm.isPending} onClick={confirmAsked}>
+                Confirm
+              </Button>
+            </>
+          }
+        >
+          <div className="flex flex-col gap-3 text-[13px]">
+            <p className="text-ink-2">
+              <StretchText g={asking.g} />
+            </p>
+            <p className="text-ink-3">
+              {asking.g.evidence.status === 'adds-up'
+                ? 'Its balances show nothing is missing: these days then count as covered, like a statement’s period.'
+                : 'No balances show it, so it rests on your word: these days then count as covered, and where a tax figure rests on them, the Tax year and Self Assessment pages list them as counted as nil, with your reason.'}
+            </p>
+            <Field label="Why nothing is missing" hint="Optional. Shown with the confirmation, and on the tax pages beside the days it settles.">
+              <Input
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') confirmAsked();
+                }}
+                maxLength={500}
+                placeholder={asking.g.noData ? 'e.g. No statements: it paid next to no interest' : 'e.g. Not used in those weeks'}
+                autoFocus
+              />
+            </Field>
+          </div>
+        </Dialog>
       )}
     </>
   );

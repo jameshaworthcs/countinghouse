@@ -347,6 +347,9 @@ export function rederive(categoriser: Categoriser, t: Transaction, filled: reado
  *   counterparty), rules the pair out: "AJ BELL" is not a payment to the Chase saver.
  * - So does a row you put in a category that isn't a transfer: you said where the money went (a
  *   gift you sent is not money moving between your accounts).
+ * - So does a row the app knows by its own wording as someone else's money (a built-in category
+ *   that isn't a transfer: a Premium Bonds prize, pay, a refund, a shop) when it says nothing of your
+ *   accounts or you: the other row naming you cannot make a prize the money you moved.
  * With nothing for it, the pair is not linked.
  */
 export type TransferSide = Pick<Transaction, 'id' | 'accountId' | 'date' | 'description' | 'type' | 'category' | 'categorisedBy' | 'counterpartyAccountId'>;
@@ -355,6 +358,9 @@ export function transferEvidence(a: TransferSide, b: TransferSide, named: (t: Tr
   if ([a, b].some((t) => t.categorisedBy === 'user' && t.category && !TRANSFERISH.has(t.category))) return null;
   const namesA = named(a);
   const namesB = named(b);
+  // Cash taken out may go into a cash account of yours, so a withdrawal is not ruled out here.
+  const someoneElse = (t: TransferSide, names: string[]) => t.categorisedBy === 'builtin' && !!t.category && !TRANSFERISH.has(t.category) && t.category !== 'cash-withdrawal' && !names.length && !t.counterpartyAccountId && !ownName(t);
+  if (someoneElse(a, namesA) || someoneElse(b, namesB)) return null;
   if ((namesA.length && !namesA.includes(b.accountId)) || (namesB.length && !namesB.includes(a.accountId))) return null;
   if ((a.counterpartyAccountId && a.counterpartyAccountId !== b.accountId) || (b.counterpartyAccountId && b.counterpartyAccountId !== a.accountId)) return null;
   let score = 0;

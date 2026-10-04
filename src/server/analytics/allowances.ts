@@ -3,9 +3,9 @@
 
 import { ACCOUNT_TYPE_META, balanceModeOf } from '../../shared/accounts';
 import { DIVIDEND_WORDING } from '../../shared/categorise';
-import type { AllowanceLine, AllowancesResponse, MissingDaysView, TaxBandEstimate } from '../../shared/api';
+import type { AllowanceLine, AllowancesResponse, ConfirmedNilView, MissingDaysView, TaxBandEstimate } from '../../shared/api';
 import { settledThrough } from '../../shared/coverage';
-import { addDays, diffDays, formatDate, formatSpan, minDate, today, type ISODate } from '../../shared/dates';
+import { addDays, diffDays, formatDate, formatSpan, maxDate, minDate, today, type ISODate } from '../../shared/dates';
 import { fromMinor, toMinor } from '../../shared/money';
 import type { Account, Figure, Transaction } from '../../shared/schema';
 import {
@@ -85,6 +85,28 @@ export function yearMissing(store: Store, accounts: readonly Account[], ty: TaxY
     }
   }
   return out;
+}
+
+/**
+ * The days of the tax year you confirmed nothing is missing from with no balances to show it (an
+ * account with no data, no balance after the days, or a valued account): covered, so the figure
+ * counts them as nil, on your word alone. The tax pages list them with your note
+ * (docs/FORMULAS.md §3, "Missing days"). A confirmation whose balances add up is not listed.
+ */
+export function yearConfirmedNil(store: Store, accounts: readonly Account[], ty: TaxYear, engine: () => BalanceEngine = () => new BalanceEngine(store)): ConfirmedNilView[] {
+  const ids = new Set(accounts.map((a) => a.id));
+  const out: ConfirmedNilView[] = [];
+  let balances: BalanceEngine | undefined;
+  for (const c of store.coverageConfirmations) {
+    if (!ids.has(c.accountId)) continue;
+    const from = maxDate(c.from, ty.start)!;
+    const to = minDate(c.to, ty.end)!;
+    if (from > to) continue;
+    balances ??= engine();
+    if (balances.evidence(c.accountId, c.from, c.to).status === 'adds-up') continue;
+    out.push({ accountId: c.accountId, name: store.account(c.accountId)?.name ?? c.accountId, from, to, days: diffDays(from, to) + 1, ...(c.note ? { note: c.note } : {}) });
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name) || a.from.localeCompare(b.from));
 }
 
 /** Stretches named for one account in a sentence; the rest are counted. */
@@ -497,6 +519,7 @@ export function allowances(store: Store, label?: string, now: ISODate = today(),
   // Built only when some day is missing, to say what the balances show about it.
   let balances = engine;
   const missingIn = (accounts: readonly Account[]) => yearMissing(store, accounts, ty, now, () => (balances ??= new BalanceEngine(store)));
+  const confirmedIn = (accounts: readonly Account[]) => yearConfirmedNil(store, accounts, ty, () => (balances ??= new BalanceEngine(store)));
 
   // ISA.
   const isaAccounts = isaAccountsOf(store);
@@ -526,8 +549,11 @@ export function allowances(store: Store, label?: string, now: ISODate = today(),
   if (isaAccounts.length && !isaLines.length) isaNotes.push('No ISA subscriptions found for this tax year. Import ISA statements or the transfers from your current account.');
   // A provider's "paid in this tax year" figure is complete; otherwise the account's data must cover
   // the year (docs/FORMULAS.md §3, "Missing days").
-  const isaMissing = missingIn(isaAccounts.filter((a) => providerFigure(store, a.id, ty) === null));
+  const isaNeedDays = isaAccounts.filter((a) => providerFigure(store, a.id, ty) === null);
+  const isaMissing = missingIn(isaNeedDays);
   const lisaMissing = isaMissing.filter((m) => store.account(m.accountId)?.type === 'lisa');
+  const isaConfirmed = confirmedIn(isaNeedDays);
+  const lisaConfirmed = isaConfirmed.filter((c) => store.account(c.accountId)?.type === 'lisa');
   isaNotes.push('Transfers between ISAs do not use allowance; they are excluded when recorded as transfers.');
 
   const cashLimit = cashIsaLimit(ty, dob);
@@ -561,6 +587,7 @@ export function allowances(store: Store, label?: string, now: ISODate = today(),
       notes,
       incomplete: missingNote('contributions', lisaMissing),
       missing: lisaMissing,
+      confirmedNil: lisaConfirmed,
     };
   }
 
@@ -590,6 +617,7 @@ export function allowances(store: Store, label?: string, now: ISODate = today(),
   }
   const pensionFigures = store.figures.some((f) => f.taxYear === ty.label && (f.kind === 'pension_contribution_employee' || f.kind === 'pension_contribution_employer'));
   const pensionMissing = pensionFigures ? [] : missingIn(pensionAccounts);
+  const pensionConfirmed = pensionFigures ? [] : confirmedIn(pensionAccounts);
   const pensionNotes = [...pen.notes];
   if ((store.profile.grossSalary ?? 0) > params.pensionTaperThresholdIncome) {
     pensionNotes.push(`Your salary is above £${params.pensionTaperThresholdIncome.toLocaleString('en-GB')}, so the tapered annual allowance may apply (down to £${params.pensionTaperMinimum.toLocaleString('en-GB')}).`);
@@ -613,7 +641,9 @@ export function allowances(store: Store, label?: string, now: ISODate = today(),
     }
   }
   // Interest statements for the year are complete; otherwise the accounts' data must cover it.
-  const interestMissing = missingIn(interestAccounts(store).filter((a) => !interestFigures.some((f) => f.accountId === a.id)));
+  const interestNeedDays = interestAccounts(store).filter((a) => !interestFigures.some((f) => f.accountId === a.id));
+  const interestMissing = missingIn(interestNeedDays);
+  const interestConfirmed = confirmedIn(interestNeedDays);
   // Dividends outside ISAs and pensions, each counted once: a voucher and the credit that paid it are one.
   const dividends = dividendsOf(store, ty);
   const dividendsMinor = dividends.minor;
@@ -646,6 +676,7 @@ export function allowances(store: Store, label?: string, now: ISODate = today(),
       notes: isaNotes,
       incomplete: missingNote('subscriptions', isaMissing),
       missing: isaMissing,
+      confirmedNil: isaConfirmed,
     },
     lisa,
     pension: {
@@ -661,8 +692,9 @@ export function allowances(store: Store, label?: string, now: ISODate = today(),
       notes: pensionNotes,
       incomplete: missingNote('contributions', pensionMissing),
       missing: pensionMissing,
+      confirmedNil: pensionConfirmed,
     },
-    savings: { interest: fromMinor(interestMinor), allowance: psa, band, bandBasis: taxBand.basis, remaining: fromMinor(Math.max(0, toMinor(psa) - interestMinor)), lines: interestLines, notes: savingsNotes, incomplete: missingNote('interest', interestMissing), missing: interestMissing },
+    savings: { interest: fromMinor(interestMinor), allowance: psa, band, bandBasis: taxBand.basis, remaining: fromMinor(Math.max(0, toMinor(psa) - interestMinor)), lines: interestLines, notes: savingsNotes, incomplete: missingNote('interest', interestMissing), missing: interestMissing, confirmedNil: interestConfirmed },
     dividends: {
       amount: fromMinor(dividendsMinor),
       allowance: params.dividendAllowance,

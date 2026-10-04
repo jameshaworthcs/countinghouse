@@ -237,4 +237,17 @@ describe('confirming coverage through the API', () => {
     expect(requiredScope('POST', '/api/coverage/confirmations')).toBeNull();
     expect(requiredScope('DELETE', `/api/coverage/confirmations/${added[0]!.id}`)).toBeNull();
   });
+
+  it('keeps the reason you give, trimmed, and none for a blank one', async () => {
+    expect((await req('/api/accounts', { method: 'POST', headers: CSRF, body: JSON.stringify({ name: 'Old bank', type: 'current' }) })).status).toBe(201);
+    const post = (stretches: unknown) => req('/api/coverage/confirmations', { method: 'POST', headers: CSRF, body: JSON.stringify({ stretches }) });
+    const res = await post([
+      { accountId: 'old-bank', from: '2025-04-06', to: '2025-07-31', note: '  No statements: next to no interest  ' },
+      { accountId: 'old-bank', from: '2025-08-01', to: '2025-08-31', note: '   ' },
+    ]);
+    const { added } = (await res.json()) as { added: { note?: string }[] };
+    expect(added.map((c) => c.note)).toEqual(['No statements: next to no interest', undefined]);
+    const health = (await (await req('/api/data-health')).json()) as { confirmations: { from: string; note?: string }[] };
+    expect(health.confirmations.find((c) => c.from === '2025-04-06')?.note).toBe('No statements: next to no interest');
+  });
 });

@@ -615,6 +615,10 @@ read again.
     Chase saver, and "TESCO BANK" is not an Amex refund.
   - So does a row you put in a category that isn't a transfer: you said where the money went (a
     gift you sent is not money moving between your accounts).
+  - So does a row the app knows by its own wording as someone else's money, when it says nothing
+    of your accounts or you: a built-in category that isn't a transfer (a Premium Bonds prize, pay,
+    a refund, a shop). "TO SAM TAYLOR" the day before does not make a reinvested prize the money
+    you moved. Cash withdrawals are the exception: cash can go into a cash account of yours.
   - Among the rest, the best evidence wins, then the closest date. The busiest day links the same
     whichever statement arrives first.
   - On commit both legs get a `transferGroup`, and money arriving in an ISA or pension becomes a

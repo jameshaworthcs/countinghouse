@@ -114,13 +114,21 @@ evidence never covers days by itself. You confirm a stretch, and only then does 
 (`shared/coverage.ts`):
 
 - **One at a time:** any stretch except one that leaves something unexplained. It is confirmed to
-  the day its balances reach when they add up, else to its end, and never today.
+  the day its balances reach when they add up, else to its end, and never today. You can say why
+  nothing is missing (`note`), and the confirmation keeps it.
 - **All that add up, at once:** only settled days, up to the end of the month before last
   (`settledThrough`: 31 Aug on any day of October). By then every monthly statement that includes
   those days has been issued. A stretch is capped there, and one that starts later is left out.
   Later days are recent: their statements are still due, and the monthly update asks for them.
 - A confirmed stretch whose balances later stop adding up is marked, and stays until you withdraw
   it.
+- **Counted as nil on your word** (`yearConfirmedNil`): a confirmed stretch whose balances do not
+  add up to show it (an account with no data, no balance after the days, or a valued account) still
+  counts as covered, so a tax figure that rests on its account counts those days as nil. The Tax
+  year page lists each such stretch in the year under the figure (interest, ISA subscriptions, LISA
+  or pension contributions), with your note, and Self Assessment says it beside the interest: any
+  interest those days paid is not in the figure. A confirmation whose balances add up is not
+  listed: they show it.
 
 **Joint coverage over [from, to]** is the set of days *d* on which every transaction account in the
 estate that is open on *d* covers *d*. An account counts from `openedOn`, or its first covered day,

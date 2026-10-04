@@ -1115,7 +1115,9 @@ export function dataRoutes(ctx: AppContext): Hono {
       if (s.to > now) throw new StoreError(`${account.name}: ${s.to} is in the future`, 400);
       const same = (x: { accountId: string; from: string; to: string }) => x.accountId === s.accountId && x.from === s.from && x.to === s.to;
       if (store.coverageConfirmations.some(same) || added.some(same)) continue;
-      added.push(CoverageConfirmationSchema.parse({ id: `cov_${randomHex(6)}`, ...s, evidence: engine.evidence(s.accountId, s.from, s.to), confirmedAt: nowISO() }));
+      // Why nothing is missing, in your words: the tax pages show it beside days no balances show.
+      const note = s.note?.trim();
+      added.push(CoverageConfirmationSchema.parse({ id: `cov_${randomHex(6)}`, accountId: s.accountId, from: s.from, to: s.to, ...(note ? { note } : {}), evidence: engine.evidence(s.accountId, s.from, s.to), confirmedAt: nowISO() }));
     }
     if (added.length) {
       const one = added.length === 1 ? `${store.account(added[0]!.accountId)!.name}, ${added[0]!.from} to ${added[0]!.to}` : `${added.length} stretches`;

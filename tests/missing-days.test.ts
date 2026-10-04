@@ -130,6 +130,23 @@ describe('tax figures', () => {
     expect(allowances(store, '2025/26', '2026-10-03').savings.missing.map((m) => m.accountId)).toEqual(['nodata']);
   });
 
+  it('lists the days counted as nil on your confirmation alone, with your note, and not those whose balances add up', async () => {
+    await store.setAccounts([acct('current', 'current', { openedOn: '2020-01-01' }), acct('nodata', 'current', { openedOn: '2024-01-01', status: 'closed', closedOn: '2025-07-31' })]);
+    await statement('current', '2025-04-01', '2025-09-28', [tx('current', '2025-06-01', 0.4, 'INTEREST', { category: 'interest' })], 100);
+    await statement('current', '2025-10-01', '2026-04-30', [], 100);
+    await confirm('current', '2025-09-29', '2025-09-30');
+    const note = 'No statements: next to no interest';
+    await store.setCoverageConfirmations([...store.coverageConfirmations, { id: 'cov_00000000abcd', accountId: 'nodata', from: '2024-04-06', to: '2025-07-31', note, confirmedAt: stamp }], 'confirm');
+    const a = allowances(store, '2025/26', '2026-10-03');
+    expect(a.savings).toMatchObject({ incomplete: null, missing: [] });
+    expect(a.savings.confirmedNil).toEqual([{ accountId: 'nodata', name: 'nodata', from: '2025-04-06', to: '2025-07-31', days: 117, note }]);
+    // Each tax year lists its own part of the confirmation.
+    expect(allowances(store, '2024/25', '2026-10-03').savings.confirmedNil.map((c) => [c.accountId, c.from, c.to, c.days])).toEqual([['nodata', '2024-04-06', '2025-04-05', 365]]);
+    const item = selfAssessment(store, '2025/26').sections.find((s) => s.id === 'savings')!.items.find((i) => i.id === 'interest')!;
+    expect(item.notes).toContain(`nodata: ${formatSpan('2025-04-06', '2025-07-31')} counted as no interest on your confirmation alone (“${note}”). Any interest it paid then is not in this figure.`);
+    expect(item.status).not.toBe('check');
+  });
+
   it('a year still settling needs its days only to the end of the month before last', async () => {
     await store.setAccounts([acct('current', 'current', { openedOn: '2020-01-01' })]);
     await statement('current', '2026-04-01', '2026-08-31');

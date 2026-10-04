@@ -1,7 +1,7 @@
 import { ChevronRight, CircleCheck, CircleDashed, Download, FileWarning, Printer, TriangleAlert } from 'lucide-react';
 import { Fragment, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
-import type { AllowanceLine, AllowancesResponse, MissingDaysView, PayResponse, SaItem, SelfAssessmentResponse, TaxBandEstimate } from '../../shared/api';
+import type { AllowanceLine, AllowancesResponse, ConfirmedNilView, MissingDaysView, PayResponse, SaItem, SelfAssessmentResponse, TaxBandEstimate } from '../../shared/api';
 import { formatDate, formatSpan } from '../../shared/dates';
 import { Meter } from '../components/charts/bars';
 import { InsightsPanel } from '../components/Intel';
@@ -101,6 +101,41 @@ function Incomplete({ what, note, missing }: { what: string; note: string | null
   );
 }
 
+/**
+ * Days counted as nil on your confirmation alone: you confirmed nothing is missing, and no balances
+ * show it (an account with no data, or a valued one). Listed with your note, so the figure above
+ * says what it rests on (docs/FORMULAS.md §3, "Missing days").
+ */
+function ConfirmedNil({ what, list }: { what: string; list: ConfirmedNilView[] }) {
+  if (!list.length) return null;
+  return (
+    <div className="mt-2 flex items-start gap-1.5 rounded-lg bg-panel-2 px-2.5 py-2 text-[12px] text-ink-2">
+      <CircleCheck className="mt-0.5 size-3.5 shrink-0 text-ink-3" aria-hidden />
+      <div className="min-w-0">
+        <div>Counted as no {what} on your confirmation alone: no document or balance shows these days.</div>
+        <ul className="mt-1 flex flex-col gap-0.5">
+          {list.map((c) => (
+            <li key={`${c.accountId}-${c.from}`}>
+              <Link to={`/accounts/${c.accountId}`} className="font-medium text-ink hover:underline">
+                {c.name}
+              </Link>
+              : {formatSpan(c.from, c.to)}
+              {c.note && <span className="text-ink-3"> · “{c.note}”</span>}
+            </li>
+          ))}
+        </ul>
+        <div className="mt-1 text-ink-3">
+          If a document for those days turns up, withdraw the confirmation in{' '}
+          <Link to="/settings#health" className="text-accent hover:underline">
+            Data health
+          </Link>{' '}
+          and import it.
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** How the tax band was worked out: the year's income, the allowance and where the bands start. */
 function TaxBandBreakdown({ t }: { t: TaxBandEstimate }) {
   return (
@@ -154,6 +189,7 @@ function Allowances({ a }: { a: AllowancesResponse }) {
       <Card title="ISA allowance" description="All ISAs together, including the LISA">
         <Meter label="Subscriptions" used={a.isa.used} limit={a.isa.allowance} atLeast={a.isa.incomplete !== null} />
         <Incomplete what="subscriptions" note={a.isa.incomplete} missing={a.isa.missing} />
+        <ConfirmedNil what="subscriptions" list={a.isa.confirmedNil} />
         {a.isa.cashLimit < a.isa.allowance && (
           <div className="mt-4">
             <Meter label="Of which cash ISAs" used={a.isa.cashUsed} limit={a.isa.cashLimit} />
@@ -166,6 +202,7 @@ function Allowances({ a }: { a: AllowancesResponse }) {
         <Card title="Lifetime ISA" description="Counts within the £20,000 ISA allowance">
           <Meter label="Contributions" used={a.lisa.contributed} limit={a.lisa.allowance} atLeast={a.lisa.incomplete !== null} />
           <Incomplete what="contributions" note={a.lisa.incomplete} missing={a.lisa.missing} />
+          <ConfirmedNil what="contributions" list={a.lisa.confirmedNil} />
           <KeyValue
             className="mt-3"
             items={[
@@ -184,6 +221,7 @@ function Allowances({ a }: { a: AllowancesResponse }) {
       <Card title="Pension annual allowance" description="Your contributions (grossed up for tax relief) plus employer contributions">
         <Meter label="Contributions" used={a.pension.total} limit={a.pension.annualAllowance} atLeast={a.pension.incomplete !== null} />
         <Incomplete what="contributions" note={a.pension.incomplete} missing={a.pension.missing} />
+        <ConfirmedNil what="contributions" list={a.pension.confirmedNil} />
         <KeyValue
           className="mt-3"
           items={[
@@ -216,6 +254,7 @@ function Allowances({ a }: { a: AllowancesResponse }) {
       <Card title="Savings interest" description={`Interest outside ISAs vs your Personal Savings Allowance (${bandLabel(a.taxBand)})`}>
         <Meter label="Interest earned" used={a.savings.interest} limit={a.savings.allowance} atLeast={a.savings.incomplete !== null} overLabel="Taxable" />
         <Incomplete what="interest" note={a.savings.incomplete} missing={a.savings.missing} />
+        <ConfirmedNil what="interest" list={a.savings.confirmedNil} />
         <Lines lines={a.savings.lines} />
         <Notes notes={a.savings.notes} />
         <div className="mt-4 border-t border-line pt-4">
