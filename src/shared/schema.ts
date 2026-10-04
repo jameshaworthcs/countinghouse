@@ -2155,6 +2155,17 @@ export const ResearchDataSchemas = {
     volatility: z.object({ y3: z.number().min(0).max(5).optional(), y5: z.number().min(0).max(5).optional() }).default({}),
     maxDrawdown: z.number().min(-1).max(0).optional(),
   }),
+  /**
+   * Published prices of a fund, ETF or share on past days (closing prices, or a fund's daily price),
+   * in its currency's main unit (pounds, not pence): what values a holding between its valuations
+   * (docs/FORMULAS.md §9, "Between valuations").
+   */
+  'instrument.prices': z.object({
+    currency: CurrencySchema.default('GBP'),
+    /** Where the prices are quoted ("LSE: SWDA"), and the share class when another class of the same fund stands in for it. */
+    listing: z.string().max(200).optional(),
+    points: z.array(z.object({ date: ISODateSchema, price: z.number().positive() })).min(1).max(1500),
+  }),
   /** Interest rates of a provider's savings products. */
   'provider.rates': z.object({
     products: z
@@ -2237,6 +2248,7 @@ const D = ResearchDataSchemas;
 export const ResearchInputSchema = z.discriminatedUnion('kind', [
   z.object({ ...researchInputBase, kind: z.literal('instrument.facts'), data: D['instrument.facts'] }),
   z.object({ ...researchInputBase, kind: z.literal('instrument.performance'), data: D['instrument.performance'] }),
+  z.object({ ...researchInputBase, kind: z.literal('instrument.prices'), data: D['instrument.prices'] }),
   z.object({ ...researchInputBase, kind: z.literal('provider.rates'), data: D['provider.rates'] }),
   z.object({ ...researchInputBase, kind: z.literal('provider.fees'), data: D['provider.fees'] }),
   z.object({ ...researchInputBase, kind: z.literal('market.outlook'), data: D['market.outlook'] }),
@@ -2246,6 +2258,7 @@ export const ResearchInputSchema = z.discriminatedUnion('kind', [
 export const ResearchSchema = z.discriminatedUnion('kind', [
   z.object({ ...researchBase, kind: z.literal('instrument.facts'), data: D['instrument.facts'] }),
   z.object({ ...researchBase, kind: z.literal('instrument.performance'), data: D['instrument.performance'] }),
+  z.object({ ...researchBase, kind: z.literal('instrument.prices'), data: D['instrument.prices'] }),
   z.object({ ...researchBase, kind: z.literal('provider.rates'), data: D['provider.rates'] }),
   z.object({ ...researchBase, kind: z.literal('provider.fees'), data: D['provider.fees'] }),
   z.object({ ...researchBase, kind: z.literal('market.outlook'), data: D['market.outlook'] }),
@@ -2280,8 +2293,14 @@ export const InsightEvidenceSchema = z.discriminatedUnion('type', [
 ]);
 export type InsightEvidence = z.infer<typeof InsightEvidenceSchema>;
 
-/** What became of a line a month in review said to watch. */
-export const INSIGHT_FOLLOW_UP = ['done', 'open', 'unclear'] as const;
+/**
+ * What became of a line a month in review said to watch: it happened, it did not, or the figures
+ * cannot tell. "done" and "open" are older reviews' words for the first two.
+ */
+export const INSIGHT_FOLLOW_UP = ['happened', 'not-happened', 'unclear', 'done', 'open'] as const;
+
+/** The parts of a month in review, in order (docs/AGENTS.md, "monthly-review"). */
+export const REVIEW_SECTIONS = ['month', 'typical', 'people', 'worth', 'coming', 'now'] as const;
 
 export const InsightSchema = z.object({
   id: z.string().regex(/^inf_[0-9a-f]{16}$/),
@@ -2319,6 +2338,16 @@ export const InsightSchema = z.object({
   watch: z.array(z.string().min(1).max(300)).max(3).optional(),
   /** How the review before's lines to watch turned out, by this month's figures. */
   followUp: z.array(z.object({ watch: z.string().min(1).max(300), outcome: z.enum(INSIGHT_FOLLOW_UP), note: z.string().max(500).optional() })).max(6).optional(),
+  /** A month in review's few points that mattered most, each with what shows it. */
+  keyPoints: z.array(z.object({ text: z.string().min(1).max(400), evidence: z.array(InsightEvidenceSchema).max(6).optional() })).max(5).optional(),
+  /** A month in review's parts, in order; `body` holds them as text too. */
+  sections: z.array(z.object({ id: z.enum(REVIEW_SECTIONS), heading: z.string().min(1).max(80), body: z.string().min(1).max(2500) })).max(REVIEW_SECTIONS.length).optional(),
+  /** What the data does not let it say, said once: new limits only, not those an earlier review raised. */
+  caveats: z.array(z.string().min(1).max(300)).max(4).optional(),
+  /** Figures it quotes that the app could not find in the month's data (docs/AGENTS.md, "Checking a review"). */
+  unchecked: z.array(z.string().max(40)).max(20).optional(),
+  /** Proposals it made to fix the data, for you to apply or dismiss. */
+  proposals: z.array(z.string().regex(/^prop_\d{8}_\d{6}_[0-9a-f]{4}$/)).max(5).optional(),
   /** Your reaction: kept with the insight so later jobs learn from it. */
   feedback: z.object({ useful: z.boolean(), note: z.string().max(500).optional(), at: TimestampSchema }).optional(),
   createdAt: TimestampSchema,

@@ -57,6 +57,10 @@ describe('merchants and categorisation', () => {
 
   it('knows a brand however a card spaces it, and Kraken by its company', () => {
     expect(matchMerchant('SPORTSDIRECT 164 01234567890', -48.99)).toMatchObject({ category: 'clothing' });
+    // One name for a service however its card line reads.
+    expect(matchMerchant('ANTHROPIC* CLAUDE SUB   SAN FRANCISCO', -18)).toMatchObject({ payee: 'Claude', category: 'software' });
+    expect(matchMerchant('CLAUDE.AI SUBSCRIPTION  SAN FRANCISCO', -18)).toMatchObject({ payee: 'Claude' });
+    expect(matchMerchant('AWS EMEA                AWS.AMAZON.CO', -3)).toMatchObject({ payee: 'AWS', category: 'software' });
     expect(matchMerchant('Lasiguanas York', -30.74)).toMatchObject({ category: 'eating-out' });
     expect(matchMerchant('FASTER PAYMENT TO PAYWARD SERVICES LTD', -100)).toMatchObject({ payee: 'Kraken', category: 'investment-transfer' });
   });
@@ -332,10 +336,13 @@ describe('store, balances and analytics', () => {
     engine = new BalanceEngine(store);
     expect(engine.balanceOn('isa', '2026-05-01')).toMatchObject({ value: 104_200, estimated: false });
     expect(engine.balanceOn('isa', '2026-09-29')).toMatchObject({ value: 110_000, estimated: true });
-    // A real valuation newer than it replaces it.
+    // A real valuation newer than it replaces it: the day is an estimate between the two real ones.
     await store.addBalances([snap('bal_00000000000000f3', 'isa', '2026-10-05', 111_050.4, { kind: 'screenshot' })], 'test');
     engine = new BalanceEngine(store);
-    expect(engine.balanceOn('isa', '2026-09-29')).toMatchObject({ value: 104_200, estimated: false });
+    const between = engine.balanceOn('isa', '2026-09-29')!;
+    expect(between).toMatchObject({ estimated: true, basis: { date: '2026-04-22', to: '2026-10-05' } });
+    expect(between.value).toBeGreaterThan(110_000);
+    expect(between.value).toBeLessThan(111_050.4);
     // On a ledger account it never shows as an unexplained gap.
     await store.addTransactions([tx('current', '2026-09-10', -40, 'SHOP')], 'test');
     await store.addBalances([snap('bal_00000000000000f4', 'current', '2026-09-01', 1000, { kind: 'statement' }), snap('bal_00000000000000f5', 'current', '2026-09-29', 1500, { approximate: true })], 'test');

@@ -257,6 +257,27 @@ export function Sparkline({ values, width = 96, height = 28, color = 'var(--deem
   );
 }
 
+// ─── Mini bars ───────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A row's months as small columns, the last in the accent and months that do not count for typical
+ * lighter. Decoration beside figures a table already gives; nothing below nothing is drawn.
+ */
+export function MiniBars({ values, width = 84, height = 22, color = 'var(--deemph)', accent = 'var(--s1)' }: { values: { value: number; faint?: boolean }[]; width?: number; height?: number; color?: string; accent?: string }) {
+  const max = Math.max(0, ...values.map((v) => v.value));
+  if (!values.length || max <= 0) return <svg width={width} height={height} aria-hidden />;
+  const step = width / values.length;
+  const bar = Math.max(2, step - 2);
+  return (
+    <svg width={width} height={height} aria-hidden>
+      {values.map((v, i) => {
+        const h = v.value > 0 ? Math.max(1.5, (v.value / max) * (height - 2)) : 0;
+        return <rect key={i} x={i * step + (step - bar) / 2} y={height - h} width={bar} height={h} rx={1} fill={i === values.length - 1 ? accent : color} opacity={v.faint && i !== values.length - 1 ? 0.45 : 1} />;
+      })}
+    </svg>
+  );
+}
+
 // ─── Meter ───────────────────────────────────────────────────────────────────────────────────────
 
 /** A single ratio against a limit. The track is a lighter step of the same ramp. */

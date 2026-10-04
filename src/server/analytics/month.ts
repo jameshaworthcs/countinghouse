@@ -8,7 +8,7 @@
 // payments due in the 60 days after it, which their documents gave.
 
 import { ACCOUNT_TYPE_META, balanceModeOf, WRAPPER_GROUP_LABELS, WRAPPER_GROUPS, type WrapperGroup } from '../../shared/accounts';
-import type { MonthAccountValue, MonthCompared, MonthLine, MonthPayment, MonthRegularChange, MonthSummary } from '../../shared/api';
+import type { MonthAccountValue, MonthCategory, MonthCompared, MonthLine, MonthPayment, MonthRegularChange, MonthSummary, MonthWhereItem, MonthWhereItWent } from '../../shared/api';
 import { CategoryIndex } from '../../shared/categories';
 import { isCashWithdrawal, nameKey } from '../../shared/categorise';
 import { addDays, addMonths, diffDays, endOfMonth, eachMonth, type ISODate } from '../../shared/dates';
@@ -18,7 +18,7 @@ import type { Account, Transaction } from '../../shared/schema';
 import type { Store } from '../store';
 import { agreementsView } from './agreements';
 import type { BalanceEngine } from './balances';
-import { flows, type FlowTx } from './cashflow';
+import { categoryLines, classifyFlow, flows, type FlowTx } from './cashflow';
 import type { Coverage } from './coverage';
 import { estateOn } from './estate';
 import { DECIDED, GUESSED, paidInto, personParties } from './queue';
@@ -38,6 +38,8 @@ export const MONTH_RULES = {
   comingDays: 60,
   /** New payees and regular changes listed, the largest first. */
   listed: 10,
+  /** Categories listed on their own, the largest first. */
+  topCategories: 12,
 } as const;
 
 const MONEY_IN_LINES = [
@@ -84,7 +86,31 @@ interface MonthLines {
   spending: Record<SpendingLine, number>;
   spendingTotal: number;
   net: number;
+  /** Spending by category, and by category group, refunds into a category netted off; offsets (money back) apart. */
+  byCategory: Map<string, { minor: number; count: number }>;
+  byGroup: Map<string, { minor: number; count: number }>;
 }
+
+/** Where money moved to another account lands, for "where it went" (§18). */
+type Place = 'cash' | 'cards' | 'invested' | 'loans' | 'other';
+function placeOf(a: Account | undefined): Place | undefined {
+  if (!a) return undefined;
+  if (a.type === 'credit_card') return 'cards';
+  const meta = ACCOUNT_TYPE_META[a.type];
+  if (meta.liability) return 'loans';
+  if (meta.group === 'cash') return 'cash';
+  if (meta.group === 'isa' || meta.group === 'lisa' || meta.group === 'pensions' || meta.group === 'investments') return 'invested';
+  return 'other';
+}
+
+const WHERE_LABELS: Record<MonthWhereItem['id'], string> = {
+  cash: 'Kept in current accounts and savings',
+  cards: 'Paid off credit cards',
+  invested: 'Put into ISAs, pensions and investments',
+  loans: 'Paid off loans',
+  unknown: 'Sent to accounts the app doesn’t know',
+  unexplained: 'Not placed (moving between accounts at the month’s end, or rows the app can’t place)',
+};
 
 /** What working out any month needs, built once. */
 export class MonthContext {
@@ -178,15 +204,28 @@ export class MonthContext {
     const regular = new Set(detectRecurring(this.store, to).flatMap((r) => r.transactionIds));
     const moneyIn = Object.fromEntries(MONEY_IN_LINES.map(([id]) => [id, 0])) as Record<MoneyInLine, number>;
     const spending = Object.fromEntries(SPENDING_LINES.map(([id]) => [id, 0])) as Record<SpendingLine, number>;
+    const byCategory = new Map<string, { minor: number; count: number }>();
+    const byGroup = new Map<string, { minor: number; count: number }>();
+    const bump = (m: Map<string, { minor: number; count: number }>, k: string, minor: number) => {
+      const e = m.get(k) ?? m.set(k, { minor: 0, count: 0 }).get(k)!;
+      e.minor += minor;
+      e.count++;
+    };
     for (const f of flows(this.store, from, to)) {
       if (f.cls === 'income') moneyIn[this.moneyInLine(f)] += f.minor;
       else if (f.minor < 0) spending['money-back'] += f.minor;
       else spending[this.spendingLine(f.t, regular)] += f.minor;
+      // By category: what was spent in each, its refunds netted off; money paid back stays apart.
+      if (f.cls === 'spending' && this.cats.kindOf(f.t.category) !== 'income') {
+        const cat = f.t.category ?? 'uncategorised';
+        bump(byCategory, cat, f.minor);
+        bump(byGroup, f.t.category ? (this.cats.groupOf(f.t.category)?.id ?? f.t.category) : 'uncategorised', f.minor);
+      }
     }
     moneyIn.borrowed = this.borrowedIn(from, to).reduce((s, t) => s + Math.abs(toMinor(t.amount)), 0);
     const income = moneyIn.pay + moneyIn['other-income'] + moneyIn.gifts + moneyIn['uncategorised-in'];
     const spendingTotal = Object.values(spending).reduce((s, v) => s + v, 0);
-    const out: MonthLines = { month, complete: this.isComplete(month), moneyIn, income, spending, spendingTotal, net: income - spendingTotal };
+    const out: MonthLines = { month, complete: this.isComplete(month), moneyIn, income, spending, spendingTotal, net: income - spendingTotal, byCategory, byGroup };
     this.linesCache.set(month, out);
     return out;
   }
@@ -281,7 +320,9 @@ export class MonthContext {
         const e = this.engine.balanceOn(a.id, to);
         const meta = ACCOUNT_TYPE_META[a.type];
         const market = balanceModeOf(a) === 'market';
-        const old = market && e?.basis && (e.basis.after || diffDays(e.basis.date, to) > MONTH_RULES.valuationDays);
+        // Not the month's: resting on a valuation after it or long before it, or shared out between two
+        // by days. A value worked out from the holdings' prices on the day is the month's, estimated.
+        const old = market && e?.basis && !e.basis.prices && (e.basis.after || e.basis.to !== undefined || diffDays(e.basis.date, to) > MONTH_RULES.valuationDays);
         return {
           accountId: a.id,
           name: a.name,
@@ -387,7 +428,126 @@ export class MonthContext {
         priceChanged: priceChanged.slice(0, MONTH_RULES.listed),
       },
       coming,
+      whereItWent: this.whereItWent(month),
+      categories: this.categories(month),
     };
+  }
+
+  /** Who a payment with a person is with, when it is one. */
+  personOf(txId: string): string | undefined {
+    return this.parties.get(txId)?.name;
+  }
+
+  /**
+   * Where the month's money went (§18, "Where it went"): left over plus borrowed comes to the change
+   * in your current accounts, savings and cards, plus what moved into investments, onto loans and to
+   * accounts the app doesn't know. Worked out from the rows on your cash accounts and cards: each
+   * part of one that is not income or spending moved money somewhere. What no row places is shown,
+   * so the items always add up.
+   */
+  whereItWent(month: string): MonthWhereItWent {
+    const { store, cats } = this;
+    const from = `${month}-01`;
+    const to = endOfMonth(from);
+    const lines = this.lines(month);
+    const byAccount = { cash: new Map<string, number>(), cards: new Map<string, number>(), invested: new Map<string, number>() };
+    const unknown = new Map<string, { name: string; minor: number; count: number }>();
+    let toLoans = 0;
+    const pairs = new Map<string, Transaction[]>();
+    for (const t of store.transactions()) if (t.transferGroup && t.date >= addDays(from, -10) && t.date <= addDays(to, 10)) (pairs.get(t.transferGroup) ?? pairs.set(t.transferGroup, []).get(t.transferGroup)!).push(t);
+    const add = (m: Map<string, number>, k: string, minor: number) => m.set(k, (m.get(k) ?? 0) + minor);
+    for (const t of store.transactions()) {
+      if (t.date < from || t.date > to) continue;
+      const account = this.accounts.get(t.accountId);
+      const place = placeOf(account);
+      if (place !== 'cash' && place !== 'cards') continue;
+      add(byAccount[place], t.accountId, toMinor(t.amount));
+      for (const line of categoryLines(t)) {
+        if (classifyFlow(line, cats, account) !== 'excluded') continue;
+        const otherId = t.counterpartyAccountId ?? pairs.get(t.transferGroup ?? '')?.find((x) => x.id !== t.id)?.accountId;
+        const other = otherId ? placeOf(this.accounts.get(otherId)) : undefined;
+        const minor = toMinor(line.amount);
+        if (other === 'cash' || other === 'cards') continue;
+        if (other === 'invested') add(byAccount.invested, otherId!, -minor);
+        else if (other === 'loans') toLoans += minor;
+        else {
+          const name = cleanPayee(t.payee ?? t.description);
+          const key = nameKey(name) || name;
+          const e = unknown.get(key) ?? unknown.set(key, { name, minor: 0, count: 0 }).get(key)!;
+          e.minor -= minor;
+          e.count++;
+        }
+      }
+    }
+    // Income and spending on your other accounts: interest kept in a cash ISA, tuition a loan paid.
+    let loanFlows = 0;
+    for (const f of flows(store, from, to)) {
+      const place = placeOf(this.accounts.get(f.t.accountId));
+      const net = f.cls === 'income' ? f.minor : -f.minor;
+      if (place === 'loans') loanFlows += net;
+      else if (place === 'invested' || place === 'other') add(byAccount.invested, f.t.accountId, net);
+    }
+    const borrowed = lines.moneyIn.borrowed;
+    const total = lines.net + borrowed;
+    const name = (id: string) => this.accounts.get(id)?.name ?? id;
+    const parts = (m: Map<string, number>) =>
+      [...m.entries()]
+        .filter(([, v]) => v !== 0)
+        .map(([id, v]) => ({ id, name: name(id), amount: fromMinor(v) }))
+        .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
+    const sum = (m: Map<string, number>) => [...m.values()].reduce((s, v) => s + v, 0);
+    const items: MonthWhereItem[] = [
+      { id: 'cash', label: WHERE_LABELS.cash, amount: fromMinor(sum(byAccount.cash)), parts: parts(byAccount.cash) },
+      { id: 'cards', label: WHERE_LABELS.cards, amount: fromMinor(sum(byAccount.cards)), parts: parts(byAccount.cards) },
+      { id: 'invested', label: WHERE_LABELS.invested, amount: fromMinor(sum(byAccount.invested)), parts: parts(byAccount.invested) },
+      { id: 'loans', label: WHERE_LABELS.loans, amount: fromMinor(borrowed - toLoans + loanFlows), parts: [] },
+      {
+        id: 'unknown',
+        label: WHERE_LABELS.unknown,
+        amount: fromMinor([...unknown.values()].reduce((s, e) => s + e.minor, 0)),
+        parts: [...unknown.entries()].filter(([, e]) => e.minor !== 0).map(([id, e]) => ({ id, name: e.name, amount: fromMinor(e.minor), count: e.count })).sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount)),
+      },
+    ];
+    const placed = items.reduce((s, i) => s + toMinor(i.amount), 0);
+    items.push({ id: 'unexplained', label: WHERE_LABELS.unexplained, amount: fromMinor(total - placed), parts: [] });
+    return { total: fromMinor(total), items: items.filter((i) => i.amount !== 0 || i.id === 'cash') };
+  }
+
+  /** Spending by category group, and the largest categories, against the months before (§18, "By category"). */
+  categories(month: string): { groups: MonthCategory[]; top: MonthCategory[] } {
+    const { cats } = this;
+    const lines = this.lines(month);
+    const months = eachMonth(addMonths(`${month}-01`, -(MONTH_RULES.historyMonths - 1)), `${month}-01`).slice(-MONTH_RULES.historyMonths);
+    const nameOf = (id: string) => (id === 'uncategorised' ? 'Uncategorised' : cats.name(id));
+    const view = (id: string, of: (l: MonthLines) => Map<string, { minor: number; count: number }>, group?: { id: string; name: string }): MonthCategory => {
+      const compared = this.compared(month, (l) => of(l).get(id)?.minor ?? 0);
+      return {
+        id,
+        name: nameOf(id),
+        ...(group ? { group } : {}),
+        amount: fromMinor(of(lines).get(id)?.minor ?? 0),
+        count: of(lines).get(id)?.count ?? 0,
+        ...(compared ? { compared } : {}),
+        history: months.map((m) => {
+          const l = this.lines(m);
+          return { month: m, amount: fromMinor(of(l).get(id)?.minor ?? 0), complete: l.complete };
+        }),
+      };
+    };
+    // Every group spent in this month or in a typical month before it.
+    const groupIds = new Set<string>([...lines.byGroup.keys()]);
+    for (const m of months.slice(0, -1)) for (const [id, e] of this.lines(m).byGroup) if (e.minor > 0) groupIds.add(id);
+    const groups = [...groupIds].map((id) => view(id, (l) => l.byGroup)).filter((g) => g.amount !== 0 || (g.compared?.median ?? 0) !== 0);
+    groups.sort((a, b) => b.amount - a.amount || (b.compared?.median ?? 0) - (a.compared?.median ?? 0));
+    const top = [...lines.byCategory.entries()]
+      .filter(([, e]) => e.minor > 0)
+      .sort((a, b) => b[1].minor - a[1].minor)
+      .slice(0, MONTH_RULES.topCategories)
+      .map(([id]) => {
+        const g = id === 'uncategorised' ? undefined : cats.groupOf(id);
+        return view(id, (l) => l.byCategory, g && g.id !== id ? { id: g.id, name: g.name } : undefined);
+      });
+    return { groups, top };
   }
 }
 

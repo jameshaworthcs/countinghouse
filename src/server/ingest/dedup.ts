@@ -3,6 +3,9 @@
 //   1. Same bank transaction id (sourceId) → duplicate.
 //   2. Same date, amount and simplified description → duplicate, as a multiset: two identical £3
 //      coffees on one day stay two transactions if the new file also has two.
+//   2b. Same amount and simplified description, with the same date printed in both ("S Date
+//      16/06/26"), up to 10 days apart → duplicate, as a multiset: one source posts a trade on the
+//      day it was made, another on the day it settled.
 //   3. Same date, amount and balance after it (both known) → duplicate, as a multiset. The running
 //      balance places a row in the account's history, whatever each source calls it: Chase's
 //      statement says "To Credit Card" where its export says "To Revolving Line Account".
@@ -46,6 +49,10 @@ export const candidateOf = (t: Pick<DraftTransaction, 'date' | 'amount' | 'descr
 
 /** Below this, the same amount described differently is taken as another payment (everyday prices repeat). */
 export const DIFFERENT_WORDS_FROM = 20;
+
+/** A date printed in a description ("S Date 16/06/26"), and how far apart two sources may post it. */
+const PRINTED_DATE = /\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/;
+const PRINTED_DATE_DAYS = 10;
 
 /** Below this, a row that stored rows add up to is taken as its own payment (small sums coincide). */
 export const SUM_FROM = 100;
@@ -134,6 +141,19 @@ export function classifyDuplicates(incoming: DedupCandidate[], existing: Transac
       const t = bucket.splice(idx, 1)[0]!;
       used.add(t.id);
       results[i] = { status: 'duplicate', duplicateOf: t.id, reason: 'Same date, amount and description' };
+    }
+  });
+
+  // 2b. The same amount and description with the same date printed in it, as a multiset: one source
+  // posts a trade on the day it was made and another on the day it settled ("S Date 16/06/26").
+  const printed = (desc: string) => PRINTED_DATE.exec(desc)?.[0];
+  incoming.forEach((c, i) => {
+    const on = printed(c.description);
+    if (results[i]!.status !== 'new' || !on) return;
+    const t = existing.find((x) => !used.has(x.id) && !conflictingIds(c, x) && toMinor(x.amount) === toMinor(c.amount) && printed(x.description) === on && descriptionKey(x.description) === descriptionKey(c.description) && Math.abs(diffDays(x.date, c.date)) <= PRINTED_DATE_DAYS);
+    if (t) {
+      used.add(t.id);
+      results[i] = { status: 'duplicate', duplicateOf: t.id, reason: `Same amount and description, with the same date printed in it (${on})` };
     }
   });
 

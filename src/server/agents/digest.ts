@@ -4,6 +4,9 @@
 
 import { ACCOUNT_TYPE_META } from '../../shared/accounts';
 import { CategoryIndex } from '../../shared/categories';
+import { nameKey } from '../../shared/categorise';
+import { cleanPayee } from '../../shared/merchants';
+import { toMinor, fromMinor } from '../../shared/money';
 import { addDays, addMonths, eachMonth, endOfMonth, startOfMonth, today, type ISODate } from '../../shared/dates';
 import { ageOn, taxYearOf } from '../../shared/uk';
 import type { Analytics } from '../analytics';
@@ -155,12 +158,13 @@ export interface MonthDigestOptions {
 }
 
 /**
- * The month in review's digest (version 4, docs/AGENTS.md): the month's figures as the app works them
- * out (`focus`, the same as the Overview's month card), the 12 months up to it (`history`), the review
- * of the month before with its lines to watch (`previousReview`), and what the documents say as of
- * the month's end. Only a review of the latest month also gets today's figures (`asOfToday`, labelled
- * as such), the owner's context and the earlier notes; a review written later for an earlier month
- * knows nothing after it.
+ * The month in review's digest (version 5, docs/AGENTS.md): the month's figures as the app works them
+ * out (`focus`, the same as the Overview's month card: where the money went, spending by category
+ * against typical), the 12 months up to it (`history`), the year's payees (`payeesYear`) and trips
+ * (`trips`), the review of the month before in full (`previousReview`) and every earlier one in short
+ * (`earlierReviews`), and what the documents say as of the month's end. Only a review of the latest
+ * month also gets today's figures (`asOfToday`, labelled as such), the owner's context and the earlier
+ * notes; a review written later for an earlier month knows nothing after it.
  */
 export function buildMonthDigest(store: Store, analytics: Analytics, opts: MonthDigestOptions) {
   const { month } = opts;
@@ -173,7 +177,7 @@ export function buildMonthDigest(store: Store, analytics: Analytics, opts: Month
 
   // The month's payments to cite: every payment in, the largest out, and those with people to confirm.
   const monthFlows = flows(store, from, to);
-  const txView = (t: (typeof monthFlows)[number]['t']) => ({ id: t.id, date: t.date, account: t.accountId, payee: t.payee ?? null, description: t.description, amount: t.amount, category: t.category ?? null, categorisedBy: t.categorisedBy ?? null });
+  const txView = (t: (typeof monthFlows)[number]['t']) => ({ id: t.id, date: t.date, account: t.accountId, payee: t.payee ?? null, person: context.personOf(t.id) ?? null, description: t.description, amount: t.amount, category: t.category ?? null, categorisedBy: t.categorisedBy ?? null });
   const seen = new Set<string>();
   const once = <T extends { t: { id: string } }>(list: T[]) => list.filter((f) => !seen.has(f.t.id) && seen.add(f.t.id));
   const moneyIn = once(monthFlows.filter((f) => f.cls === 'income')).map((f) => txView(f.t));
@@ -229,6 +233,21 @@ export function buildMonthDigest(store: Store, analytics: Analytics, opts: Month
       }
     : null;
 
+  // Every earlier review in short, oldest first: what each said mattered, what it raised as limits,
+  // its lines to watch and how they turned out, and what you made of it.
+  const earlierReviews = store.insights
+    .filter((i) => i.kind === 'month-review' && i.subject.month && i.subject.month < month && i.status !== 'superseded')
+    .sort((a, b) => a.subject.month!.localeCompare(b.subject.month!) || a.createdAt.localeCompare(b.createdAt))
+    .map((i) => ({
+      month: i.subject.month,
+      title: i.title,
+      keyPoints: (i.keyPoints ?? []).map((k) => k.text),
+      caveats: i.caveats ?? [],
+      watch: i.watch ?? [],
+      followUp: (i.followUp ?? []).map((f) => ({ watch: f.watch, outcome: f.outcome })),
+      feedback: i.feedback ? { useful: i.feedback.useful, note: i.feedback.note ?? null } : null,
+    }));
+
   const baseFrom = startOfMonth(addMonths(from, -3));
   const asOfToday = opts.catchUp ? null : todayDigest(store, analytics, now, to);
   return {
@@ -242,6 +261,12 @@ export function buildMonthDigest(store: Store, analytics: Analytics, opts: Month
     focus: { ...focus, transactions: { moneyIn, largestSpending, moneyBack } },
     history,
     previousReview,
+    earlierReviews,
+    payeesYear: payeesYear(store, cats, context, addMonths(from, -11), to, from),
+    trips: trips(store, addMonths(from, -12), to),
+    files: {
+      'transactions.jsonl': `Every payment on every account in the 24 months to ${to}, one JSON object a line: search it with Grep (a payee, a person, a category, an amount) to check or follow up a finding.`,
+    },
     categories: [...new Set(monthFlows.map((f) => f.t.category).filter((c): c is string => Boolean(c)))].map((id) => ({ id, name: cats.path(id) })),
     ...documentsDigest(store, analytics, { from, to, baseFrom, asOf: to }),
     ...(asOfToday
@@ -472,4 +497,102 @@ function documentsDigest(store: Store, analytics: Analytics, p: { from: ISODate;
     companies,
     budgets: budgetView ? { month: budgetView.month, complete: budgetView.complete, lines: budgetView.lines.map((l) => ({ name: l.name, scope: l.scope, monthly: l.monthly, spent: l.spent, left: l.left, status: l.status })) } : null,
   };
+}
+
+/** A year's payees, the most spent first: who the money went to, how often and in how many months (digest v5). */
+function payeesYear(store: Store, cats: CategoryIndex, context: Analytics['monthContext'], from: ISODate, to: ISODate, focusFrom: ISODate) {
+  const by = new Map<string, { payee: string; person: boolean; minor: number; count: number; months: Set<string>; focus: number; categories: Map<string, number>; last: string }>();
+  for (const f of flows(store, from, to)) {
+    if (f.cls !== 'spending' || cats.kindOf(f.t.category) === 'income') continue;
+    const person = context.personOf(f.t.id);
+    const name = person ?? f.t.payee ?? cleanPayee(f.t.description);
+    const key = nameKey(name);
+    if (!key) continue;
+    const e = by.get(key) ?? by.set(key, { payee: name, person: Boolean(person), minor: 0, count: 0, months: new Set(), focus: 0, categories: new Map(), last: '' }).get(key)!;
+    e.minor += f.minor;
+    e.count++;
+    e.months.add(f.t.date.slice(0, 7));
+    if (f.t.date >= focusFrom) e.focus += f.minor;
+    if (f.t.category) e.categories.set(f.t.category, (e.categories.get(f.t.category) ?? 0) + 1);
+    if (f.t.date > e.last) e.last = f.t.date;
+  }
+  return [...by.values()]
+    .filter((e) => e.minor > 0)
+    .sort((a, b) => b.minor - a.minor)
+    .slice(0, 40)
+    .map((e) => ({
+      payee: e.payee,
+      ...(e.person ? { person: true } : {}),
+      category: [...e.categories.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null,
+      total: fromMinor(e.minor),
+      count: e.count,
+      months: e.months.size,
+      thisMonth: fromMinor(e.focus),
+      lastPaid: e.last,
+    }));
+}
+
+/** Days a trip's holiday spending may pause and still be one trip. */
+const TRIP_GAP_DAYS = 6;
+
+/** Trips: spending filed as holidays, in runs with no gap longer than a few days, with where it went (digest v5). */
+function trips(store: Store, from: ISODate, to: ISODate) {
+  const rows = flows(store, from, to)
+    .filter((f) => f.cls === 'spending' && f.t.category === 'holidays')
+    .sort((a, b) => a.t.date.localeCompare(b.t.date));
+  const out: { from: string; to: string; spent: number; payments: number; months: string[]; payees: string[] }[] = [];
+  let run: typeof rows = [];
+  const close = () => {
+    if (!run.length) return;
+    const by = new Map<string, number>();
+    for (const f of run) {
+      const p = f.t.payee ?? cleanPayee(f.t.description);
+      by.set(p, (by.get(p) ?? 0) + f.minor);
+    }
+    out.push({
+      from: run[0]!.t.date,
+      to: run[run.length - 1]!.t.date,
+      spent: fromMinor(run.reduce((s, f) => s + f.minor, 0)),
+      payments: run.length,
+      months: [...new Set(run.map((f) => f.t.date.slice(0, 7)))],
+      payees: [...by.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([p]) => p),
+    });
+    run = [];
+  };
+  for (const f of rows) {
+    if (run.length && addDays(run[run.length - 1]!.t.date, TRIP_GAP_DAYS) < f.t.date) close();
+    run.push(f);
+  }
+  close();
+  return out.filter((t) => t.payments >= 2 || toMinor(t.spent) >= 10_000);
+}
+
+/**
+ * The month in review's file of payments (transactions.jsonl): every row on every account in the 24
+ * months to the month's end, one JSON object a line, for the review to search (docs/AGENTS.md).
+ */
+export function monthTransactionsFile(store: Store, analytics: Analytics, month: string): string {
+  const to = endOfMonth(`${month}-01`);
+  const from = startOfMonth(addMonths(`${month}-01`, -23));
+  const context = analytics.monthContext;
+  const lines: string[] = [];
+  for (const t of store.transactions()) {
+    if (t.date < from || t.date > to) continue;
+    lines.push(
+      JSON.stringify({
+        id: t.id,
+        date: t.date,
+        account: t.accountId,
+        payee: t.payee ?? null,
+        person: context.personOf(t.id) ?? null,
+        description: t.description,
+        amount: t.amount,
+        category: t.category ?? null,
+        categorisedBy: t.categorisedBy ?? null,
+        ...(t.counterpartyAccountId ? { otherAccount: t.counterpartyAccountId } : {}),
+        ...(t.notes ? { note: t.notes } : {}),
+      }),
+    );
+  }
+  return lines.sort().join('\n') + '\n';
 }

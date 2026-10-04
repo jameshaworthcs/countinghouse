@@ -14,14 +14,14 @@ import { ACCOUNT_TYPE_META } from '../../shared/accounts';
 import { LABEL_BATCH } from '../../shared/api';
 import { ASSUMPTION_DEFS, AssumptionSet, formatAssumptionValue } from '../../shared/assumptions';
 import { addDays, endOfMonth, today } from '../../shared/dates';
-import { ACCOUNT_TYPES, ASSET_CLASSES, CONTEXT_KINDS, INSIGHT_FOLLOW_UP, INSIGHT_KINDS, INSIGHT_PAGES, INSTRUMENT_TYPES, type ImportRecord, type Insight, type Note, type Provenance, type Research } from '../../shared/schema';
+import { ACCOUNT_TYPES, ASSET_CLASSES, CONTEXT_KINDS, INSIGHT_KINDS, INSIGHT_PAGES, INSTRUMENT_TYPES, REVIEW_SECTIONS, type ImportRecord, type Insight, type Note, type ProposalInput, type Provenance, type Research } from '../../shared/schema';
 import type { Analytics } from '../analytics';
 import { nowISO } from '../fsutil';
-import type { ProposalService } from '../proposals';
+import { ProposalProblems, type ProposalService } from '../proposals';
 import { applyRecords, researchIdOf, type ApplyResult, type RecordBatch, type RecordInput } from '../records';
 import type { Store } from '../store';
 import type { AgentTool } from './claude';
-import { buildDigest, buildMonthDigest } from './digest';
+import { buildDigest, buildMonthDigest, monthTransactionsFile } from './digest';
 
 export const JOB_KINDS = ['research-instrument', 'research-provider', 'refresh-assumptions', 'insights-after-import', 'monthly-review', 'interpret-note', 'label-imports'] as const;
 export type JobKind = (typeof JOB_KINDS)[number];
@@ -62,7 +62,14 @@ export interface JobKindDef {
   output: z.ZodType;
   /** What Claude is given. Throws `NothingToDo` when nothing is left for it to do. */
   prepare(ctx: JobContext): Promise<string> | string;
-  apply(ctx: JobContext, output: unknown, provenance: Provenance): Promise<JobOutcome>;
+  /**
+   * What is wrong with an answer that the app can check (figures it cannot find): asked once more
+   * with them, and what is still wrong goes to `apply` (docs/AGENTS.md, "Checking a review").
+   */
+  check?(ctx: JobContext, output: unknown): Promise<string[]> | string[];
+  /** The request for that second answer. */
+  recheck?(problems: string[], previous: unknown): string;
+  apply(ctx: JobContext, output: unknown, provenance: Provenance, unresolved?: string[]): Promise<JobOutcome>;
 }
 
 // ─── Shared output pieces ────────────────────────────────────────────────────────────────────────
@@ -95,6 +102,16 @@ const ANALYSIS_SYSTEM = `You are the analyst of a private UK personal-finance ap
 - Do not repeat earlier insights (in the digest) unless something changed; weigh the owner's feedback on them.
 - Confidence "high" only when the data clearly shows it. Return fewer insights, or none, rather than weak ones.`;
 
+/** What a finding rests on, as Claude gives it: ids from the digest, or a computed figure by its digest path. */
+const EvidenceOut = z.object({
+  type: z.enum(['transactions', 'account', 'context', 'research', 'assumption', 'payslip', 'hmrc', 'agreement', 'company', 'employment', 'computed']),
+  ids: z.array(z.string()).nullable(),
+  id: z.string().nullable(),
+  metric: z.string().nullable(),
+  value: z.number().nullable(),
+  label: z.string().nullable(),
+});
+
 const InsightOut = z.object({
   kind: z.enum(INSIGHT_KINDS),
   pages: z.array(z.enum(INSIGHT_PAGES)).min(1),
@@ -102,27 +119,17 @@ const InsightOut = z.object({
   title: z.string(),
   body: z.string(),
   confidence: Conf,
-  evidence: z.array(
-    z.object({
-      type: z.enum(['transactions', 'account', 'context', 'research', 'assumption', 'payslip', 'hmrc', 'agreement', 'company', 'employment', 'computed']),
-      ids: z.array(z.string()).nullable(),
-      id: z.string().nullable(),
-      metric: z.string().nullable(),
-      value: z.number().nullable(),
-      label: z.string().nullable(),
-    }),
-  ),
+  evidence: z.array(EvidenceOut),
   expiresInDays: z.number().int().nullable(),
 });
 const InsightsOut = z.object({ insights: z.array(InsightOut).max(8) });
 
-/** Keep only evidence that resolves; drop insights left with none. */
-function toInsightRecords(store: Store, list: z.infer<typeof InsightOut>[], defaults: { period?: { from: string; to: string } }): { records: RecordInput[]; dropped: number } {
+/** Keep only evidence that resolves to records that exist. */
+function evidenceResolver(store: Store): (list: z.infer<typeof EvidenceOut>[]) => Insight['evidence'] {
   const accounts = new Set(store.accounts.map((a) => a.id));
   const context = new Set(store.context.map((c) => c.id));
   const research = new Set(store.research.map((r) => r.id));
   const assumptions = new Set(store.assumptions.map((a) => a.id));
-  const instruments = new Set(store.instruments.map((i) => i.id));
   // Records an insight may cite by id, each checked to exist.
   const cited = {
     payslip: new Set(store.payslips.map((x) => x.id)),
@@ -131,11 +138,9 @@ function toInsightRecords(store: Store, list: z.infer<typeof InsightOut>[], defa
     company: new Set(store.companies.map((x) => x.id)),
     employment: new Set(store.employments.map((x) => x.id)),
   };
-  const records: RecordInput[] = [];
-  let dropped = 0;
-  for (const i of list) {
+  return (list) => {
     const evidence: Insight['evidence'] = [];
-    for (const e of i.evidence) {
+    for (const e of list) {
       const label = e.label?.slice(0, 200) ?? undefined;
       if (e.type === 'transactions') {
         const ids = (e.ids ?? (e.id ? [e.id] : [])).filter((id) => store.transaction(id));
@@ -147,6 +152,19 @@ function toInsightRecords(store: Store, list: z.infer<typeof InsightOut>[], defa
       else if ((e.type === 'payslip' || e.type === 'hmrc' || e.type === 'agreement' || e.type === 'company' || e.type === 'employment') && e.id && cited[e.type].has(e.id)) evidence.push({ type: e.type, id: e.id, ...(label ? { label } : {}) });
       else if (e.type === 'computed' && e.metric) evidence.push({ type: 'computed', metric: e.metric.slice(0, 120), ...(e.value !== null ? { value: e.value } : {}), ...(label ? { label } : {}) });
     }
+    return evidence;
+  };
+}
+
+/** Keep only evidence that resolves; drop insights left with none. */
+function toInsightRecords(store: Store, list: z.infer<typeof InsightOut>[], defaults: { period?: { from: string; to: string } }): { records: RecordInput[]; dropped: number } {
+  const accounts = new Set(store.accounts.map((a) => a.id));
+  const instruments = new Set(store.instruments.map((i) => i.id));
+  const resolve = evidenceResolver(store);
+  const records: RecordInput[] = [];
+  let dropped = 0;
+  for (const i of list) {
+    const evidence = resolve(i.evidence);
     if (!evidence.length || !i.title.trim()) {
       dropped++;
       continue;
@@ -597,28 +615,98 @@ const insightsAfterImport: JobKindDef = {
   },
 };
 
-/** A month in review: its insights, what to watch next month, and how the last review's lines turned out. */
-const MonthReviewOut = z.object({
-  insights: z.array(InsightOut).max(6),
-  watch: z.array(z.string()).max(3),
-  followUp: z.array(z.object({ watch: z.string(), outcome: z.enum(INSIGHT_FOLLOW_UP), note: z.string().nullable() })).max(6),
+/** A change a month in review may propose to fix the data it read (docs/AGENTS.md, "Proposing fixes"). */
+const ReviewChangeOut = z.object({
+  kind: z.enum(['set_category', 'add_rule', 'set_note']),
+  /** What in the data shows it, in a sentence or two. */
+  why: z.string(),
+  transaction: z.string().nullable(),
+  category: z.string().nullable(),
+  note: z.string().nullable(),
+  rule: z.object({ name: z.string().nullable(), field: z.enum(['description', 'payee']), op: z.enum(['contains', 'equals', 'startsWith', 'regex']), value: z.string(), direction: z.enum(['in', 'out']).nullable() }).nullable(),
 });
 
-/** The parts of a month in review's body, in order (docs/AGENTS.md, "monthly-review"). */
+/** A month in review: the review itself, what to watch next, how the last review's lines turned out, fixes to propose, and (for the latest month) other notes. */
+const MonthReviewOut = z.object({
+  review: z.object({
+    title: z.string(),
+    keyPoints: z.array(z.object({ text: z.string(), evidence: z.array(EvidenceOut) })).max(5),
+    sections: z.array(z.object({ id: z.enum(REVIEW_SECTIONS), heading: z.string(), body: z.string() })).max(REVIEW_SECTIONS.length),
+    caveats: z.array(z.string()).max(4),
+    confidence: Conf,
+    evidence: z.array(EvidenceOut),
+  }),
+  watch: z.array(z.string()).max(3),
+  followUp: z.array(z.object({ watch: z.string(), outcome: z.enum(['happened', 'not-happened', 'unclear']), note: z.string().nullable() })).max(6),
+  proposals: z.array(z.object({ title: z.string(), summary: z.string(), changes: z.array(ReviewChangeOut).max(40) })).max(3),
+  insights: z.array(InsightOut).max(5),
+});
+
+/** The parts of a month in review, in order (docs/AGENTS.md, "monthly-review"). */
 const MONTH_REVIEW_SHAPE = [
-  '   - The month: money in (pay, other income, gifts received) and spending. Name scheduled payments (rent instalments, tuition: focus.spending.scheduled) and one-offs (focus.spending.oneOffs) as such, and say where the net went (focus.moved).',
-  '     Borrowing (focus.borrowed, focus.moneyIn.borrowed) is borrowing, never income. A Student Finance maintenance instalment is a loan for its whole term (about four months): say so, rather than reading one month’s instalment as that month’s money.',
-  '   - Against typical: each line against the median and range of the complete months before it (its `compared`: median, low, high, months), never against a single month or an average. Say how many months that is when they are few; a month with none to compare has no typical yet.',
-  '   - People, cash and cheques: gifts received against money paid back (the spending line "money-back"), and payments with people, or cash and cheques paid in, still to confirm (focus.quality.peopleToConfirm, focus.quality.cashToConfirm). They are unconfirmed: one among them is not yet a gift, a repayment or the owner’s own money.',
-  '   - Worth: the change from focus.worth.start to focus.worth.end, and what it rests on. An account marked oldValuation rests on a valuation long before the month ended (its basis), so its change is not the month’s: never call it flat or say it grew. A value marked estimated is rough.',
-  '   - Data: when focus.complete is false, uncategorised shares are high, or money with people, cash or cheques is unconfirmed, say what that limits. A category the bank or the reader guessed (a payment’s categorisedBy "bank" or "ai"; focus.quality.guessedSpendingShare, guessedInShare) can be wrong: check one against the payment’s description before resting a finding on it, and say when much of the month rests on guesses.',
+  '   - "month" (The month): the story of the month in a few sentences: money in (pay, other income, gifts), borrowing (never income: a Student Finance maintenance instalment is a loan for its whole term, about four months), spending by kind (scheduled payments and one-offs named), and where the money went (focus.whereItWent: every item adds up to left over plus borrowed; name what went to accounts the app does not know from its parts). A trip that spans months is one trip (digest.trips).',
+  '   - "typical" (Against typical): only what moved: the category groups and categories furthest from their median (focus.categories, each with compared: median, low, high, months) and lines outside their range. Never list every line; never compare with a single month or an average; say how many months typical rests on when they are few. Use digest.payeesYear for what a payee costs over the year when that is the point (subscriptions, a regular you could question).',
+  '   - "people" (People and money back): gifts received against money paid back to you (the spending line "money-back"), by person (each payment\'s person), and payments with people or cash paid in still to confirm (focus.quality). Skip it when there is nothing.',
+  '   - "worth" (Worth): the change from focus.worth.start to focus.worth.end, split into what you put in and what grew. A value whose basis has prices:true is worked out from its holdings at published prices on the day: it is the month\'s, estimated. One marked oldValuation rests on a valuation from another time, so its change is not the month\'s: never call it flat or say it grew. A value marked estimated is rough.',
+  '   - "coming" (Coming up): what is due in the weeks after (focus.coming, agreements, regular payments), and anything to prepare for.',
 ].join('\n');
+
+/** A pound figure as written in a review ("£1,234.56", "£1,234", "−£12.40"), and words that make one approximate. */
+const POUNDS = /(about|around|roughly|nearly|almost|over|under|more than|less than|some|~)?\s*[−-]?£\s?(\d{1,3}(?:,\d{3})*|\d+)(\.\d{1,2})?(?!\s?[km]\b|\d)/gi;
+
+/** Every amount the review may quote, in pence: the digest's figures, the payments' amounts, and sums and differences of the month's headline figures. */
+async function knownFigures(scratch: string): Promise<{ exact: Set<number>; pounds: Set<number> }> {
+  const exact = new Set<number>();
+  const digest = JSON.parse(await readFile(path.join(scratch, 'digest.json'), 'utf8')) as Record<string, unknown>;
+  const walk = (v: unknown) => {
+    if (typeof v === 'number') exact.add(Math.abs(Math.round(v * 100)));
+    else if (Array.isArray(v)) v.forEach(walk);
+    else if (v && typeof v === 'object') Object.values(v).forEach(walk);
+  };
+  walk(digest);
+  const rows = await readFile(path.join(scratch, 'transactions.jsonl'), 'utf8').catch(() => '');
+  for (const line of rows.split('\n')) {
+    const m = /"amount":(-?[\d.]+)/.exec(line);
+    if (m) exact.add(Math.abs(Math.round(Number(m[1]) * 100)));
+  }
+  // The month's headline figures, two at a time: "£850 of the £2,310 went to…" quotes a difference.
+  const headline: number[] = [];
+  const collect = (v: unknown) => {
+    if (typeof v === 'number') headline.push(Math.abs(Math.round(v * 100)));
+    else if (Array.isArray(v)) v.forEach(collect);
+    else if (v && typeof v === 'object') for (const [k, x] of Object.entries(v)) if (k !== 'history' && k !== 'transactions' && k !== 'parts') collect(x);
+  };
+  collect((digest as { focus?: unknown }).focus);
+  const list = [...new Set(headline)].slice(0, 600);
+  for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
+    exact.add(list[i]! + list[j]!);
+    exact.add(Math.abs(list[i]! - list[j]!));
+  }
+  const pounds = new Set([...exact].map((p) => Math.round(p / 100)));
+  return { exact, pounds };
+}
+
+/** The figures in a review's text the app cannot find: each as written. */
+export function uncheckedFigures(texts: string[], known: { exact: Set<number>; pounds: Set<number> }): string[] {
+  const out = new Set<string>();
+  for (const text of texts) {
+    for (const m of text.matchAll(POUNDS)) {
+      if (m[1]) continue;
+      const whole = Number(m[2]!.replace(/,/g, ''));
+      const ok = m[3] ? known.exact.has(Math.round((whole + Number(m[3])) * 100)) : known.pounds.has(whole) || known.exact.has(whole * 100);
+      if (!ok) out.add(m[0].trim().replace(/^[−-]/, ''));
+    }
+  }
+  return [...out].slice(0, 20);
+}
+
+const reviewTexts = (out: z.infer<typeof MonthReviewOut>) => [out.review.title, ...out.review.keyPoints.map((k) => k.text), ...out.review.sections.map((x) => x.body), ...out.review.caveats, ...out.watch, ...out.followUp.map((f) => f.note ?? '')];
 
 const monthlyReview: JobKindDef = {
   kind: 'monthly-review',
-  promptVersion: 'monthly-review-5',
+  promptVersion: 'monthly-review-6',
   privacy: 'personal',
-  tools: ['Read'],
+  tools: ['Read', 'Grep', 'Glob'],
   label: ({ params }) => `Month in review: ${String(params.month)}${params.catchUp === true ? ' (written later)' : ''}`,
   systemPrompt: ANALYSIS_SYSTEM,
   output: MonthReviewOut,
@@ -626,57 +714,132 @@ const monthlyReview: JobKindDef = {
     const month = String(ctx.params.month);
     const catchUp = ctx.params.catchUp === true;
     await writeDigest(ctx, buildMonthDigest(ctx.store, ctx.analytics, { month, catchUp }));
+    await writeFile(path.join(ctx.scratch, 'transactions.jsonl'), monthTransactionsFile(ctx.store, ctx.analytics, month));
     return [
-      'Read ./digest.json with the Read tool.',
-      `Review ${month}. digest.focus is the month as the app works it out by fixed rules, the figures the owner sees on the Overview; digest.history is the 12 months up to it; digest.previousReview is the review of the month before, with what it said to watch and what the owner made of it.`,
+      'Read ./digest.json with the Read tool. ./transactions.jsonl holds every payment of the 24 months to the month’s end, one a line: search it with Grep to check a finding or follow one up (what else went to a payee, a person, an amount) before you rest anything on it.',
+      `Review ${month}. digest.focus is the month as the app works it out by fixed rules, the figures the owner sees beside your review; digest.history is the 12 months up to it; digest.previousReview is the review of the month before, in full; digest.earlierReviews is every review before, in short, with the limits each raised and what the owner made of it.`,
       ...(catchUp
-        ? [`This review is written later, as of the end of ${month}: the digest holds nothing after it. Write as at the end of ${month}: nothing of what came after, and no advice about today.`]
+        ? [`This review is written later, as of the end of ${month}: the digest and the file hold nothing after it. Write as at the end of ${month}: nothing of what came after, and no advice about today.`]
         : ['digest.asOfToday holds today’s figures, apart from the month’s: use them only for what the month means now, and say they are today’s.']),
-      'Write:',
-      `1. Exactly one insight of kind "month-review" for the overview page, with subject.month "${month}". Its body is a few short paragraphs, in this order:`,
+      '',
+      'Write review:',
+      '- title: the month’s story in one line of up to 100 characters, its most important thing first ("June: £640 in gifts, first pay from the new job, and £850 a month of rent now regular").',
+      '- keyPoints: the 3 to 5 things that mattered most this month, most important first, one or two sentences each, each with its evidence. What is new or changed beats what is the same as usual. A point about the data itself only when it changes what the figures mean.',
+      '- sections, in this order, each a short paragraph or a few short bullet lines ("- "), never repeating a key point word for word:',
       MONTH_REVIEW_SHAPE,
-      '2. watch: up to 3 short lines for next month’s review to check, each specific and measurable from the app’s figures ("Whether eating out stays near its £180 median").',
-      '3. followUp: for each line in digest.previousReview.watch, whether this month’s figures show it done, still open or unclear, with a short note citing them. None when there is no previous review.',
+      ...(catchUp ? [] : ['   - "now" (What to do now): the few things worth doing now, from today’s figures: allowances with headroom and the days left (digest.asOfToday.taxYear: ISA, LISA, pension; dividends over their allowance mean a Self Assessment return), pay or tax that looks wrong, a deadline, a promotional rate ending. Practical, specific, never a product or provider.']),
+      '- caveats: only limits on what the data lets you say that no earlier review raised (digest.earlierReviews[].caveats, digest.previousReview). Do not repeat a standing one: a value resting on a valuation from another time is shown by the app already. None is fine.',
+      '- confidence, and evidence for the review as a whole.',
+      '',
+      'watch: up to 3 lines for next month’s review to check, each about your money or a decision of yours, specific and measurable from the app’s figures ("Whether eating out comes back under its £150 median", "Whether the first full pay from the new job is about £1,420"). Never about how the app files or counts something.',
+      'followUp: for each line in digest.previousReview.watch, "happened" if this month’s figures show it did, "not-happened" if they show it did not, "unclear" if they cannot tell, with a short note citing the figure.',
+      'proposals: when you find data that is wrong, propose the fix for the owner to apply or dismiss (up to 3 proposals, each one subject): set_category (transaction id and category id from digest.categories or one the month uses) when a payment is clearly filed wrong; add_rule (a payee or description match and a category) when a payee keeps coming and is filed the same way by hand; set_note to record what a payment was. Each change says why, from the data. Only what the data clearly shows; never a payment with a person (the owner decides those). None is fine.',
       ...(catchUp
-        ? ['No other insights: this is a record of the month.']
+        ? ['insights: none; this is a record of the month.']
         : [
-            '4. Up to 5 more insights, only where the data supports them:',
-            '   - habit changes, for spending;',
-            '   - allowance opportunities, for tax (digest.asOfToday.taxYear: ISA, LISA or pension headroom and days left, Personal Savings Allowance headroom);',
+            'insights: up to 5 more notes, only where the data supports them and the review does not say it already:',
+            '   - habit changes, for spending; a subscription or regular payment worth questioning (digest.payeesYear);',
+            '   - allowance opportunities, for tax (digest.asOfToday.taxYear);',
             '   - notes on investments (charges, make-up, drift from what the owner said they want);',
             '   - how the month bears on the owner’s plans (digest.ownerContext), for projections;',
-            '   - pay (digest.pay, digest.asOfToday.owedPay), for tax: each pay period is checked against your bank (paidIn, status) and against what HMRC says the employer reported (hmrcReported); taxCodeCheck says when the tax taken is not what HMRC’s code would take. Note pay that differs, is late or owed, a tax code that changed, or a job that started or ended;',
-            '   - what HMRC says (digest.hmrc), for tax: tax owed or repaid (settlements), National Insurance years that are not full and when they can be paid by, the State Pension forecast;',
-            '   - your accounts’ terms (digest.terms), for accounts: a promotional rate ending (until, endingSoon), a card’s limit or minimum payment, a rate that changed;',
-            '   - agreements and pension arrangements (digest.agreements, digest.pensionArrangements, focus.coming): a scheduled payment due, missed or paid differently; contributions an employer said it would pay that have not arrived (missingMonths);',
-            '   - companies you hold shares in (digest.companies); budgets and goals when there are any (digest.budgets, digest.asOfToday.goals).',
-            '   Weigh these against each other and pick what matters most; skip a section with nothing new. Set subject.month to the month for every insight about it.',
+            '   - pay (digest.pay, digest.asOfToday.owedPay), HMRC (digest.hmrc), account terms (digest.terms), agreements and pension arrangements, companies, budgets and goals.',
+            '   Set subject.month to the month for each.',
           ]),
+      '',
+      'Quote figures as the digest or the file gives them, to the penny, or say "about". Every £ figure you write is checked against them.',
     ].join('\n');
   },
-  async apply({ store, params }, raw, provenance) {
+  async check(ctx, raw) {
+    const out = MonthReviewOut.parse(raw);
+    return uncheckedFigures(reviewTexts(out), await knownFigures(ctx.scratch));
+  },
+  recheck(problems, previous) {
+    return [
+      `Your answer quoted figures that are not in digest.json or transactions.jsonl: ${problems.join(', ')}.`,
+      'Check each one there. Use the figure as given, a sum of payments you cite, or say "about". Then give the whole answer again, corrected. Your answer was:',
+      JSON.stringify(previous),
+    ].join('\n');
+  },
+  async apply({ store, params, proposals }, raw, provenance, unresolved = []) {
     const out = MonthReviewOut.parse(raw);
     const month = String(params.month);
     const catchUp = params.catchUp === true;
-    const { records, dropped } = toInsightRecords(
-      store,
-      out.insights.filter((i) => !catchUp || i.kind === 'month-review').map((i) => ({ ...i, subject: { ...i.subject, month } })),
-      { period: { from: `${month}-01`, to: endOfMonth(`${month}-01`) } },
-    );
-    // The month's review carries what to watch next, and how the last review's lines turned out.
-    const review = records.find((r): r is Extract<RecordInput, { type: 'insight' }> => r.type === 'insight' && r.record.kind === 'month-review');
-    if (review) {
-      const watch = out.watch.map((w) => w.trim().slice(0, 300)).filter(Boolean).slice(0, 3);
-      const followUp = out.followUp
-        .filter((f) => f.watch.trim())
-        .slice(0, 6)
-        .map((f) => ({ watch: f.watch.trim().slice(0, 300), outcome: f.outcome, ...(f.note?.trim() ? { note: f.note.trim().slice(0, 500) } : {}) }));
-      review.record = { ...review.record, ...(watch.length ? { watch } : {}), ...(followUp.length ? { followUp } : {}) };
+    const period = { from: `${month}-01`, to: endOfMonth(`${month}-01`) };
+    const resolve = evidenceResolver(store);
+
+    // Fixes it found, as proposals the owner applies or dismisses; a change that does not fit the data is left out.
+    const made: string[] = [];
+    if (proposals) {
+      for (const p of out.proposals) {
+        let changes = p.changes.flatMap((c, i): ProposalInput['changes'] => {
+          const why = c.why.trim().slice(0, 1000);
+          const key = `c${i + 1}`;
+          if (!why) return [];
+          if (c.kind === 'set_category' && c.transaction && c.category) return [{ key, kind: 'set_category', why, transaction: c.transaction, category: c.category }];
+          if (c.kind === 'set_note' && c.transaction && c.note) return [{ key, kind: 'set_note', why, transaction: c.transaction, note: c.note.slice(0, 500) }];
+          if (c.kind === 'add_rule' && c.rule && c.category) return [{ key, kind: 'add_rule', why, rule: { ...(c.rule.name ? { name: c.rule.name.slice(0, 120) } : {}), match: { field: c.rule.field, op: c.rule.op, value: c.rule.value, caseSensitive: false, ...(c.rule.direction ? { direction: c.rule.direction } : {}) }, category: c.category } }];
+          return [];
+        });
+        for (let attempt = 0; attempt < 2 && changes.length; attempt++) {
+          try {
+            const view = await proposals.create({ title: p.title.slice(0, 160), summary: p.summary.slice(0, 4000) || p.title, changes }, provenance);
+            made.push(view.proposal.id);
+            break;
+          } catch (err) {
+            const bad = new Set(err instanceof ProposalProblems ? err.problems.map((x) => x.key) : []);
+            if (!bad.size) break;
+            changes = changes.filter((c) => !bad.has(c.key!));
+          }
+        }
+      }
     }
-    if (!records.length) return { summary: dropped ? `No insights kept (${dropped} cited nothing that exists)` : 'Nothing to say' };
+
+    const r = out.review;
+    const keyPoints = r.keyPoints
+      .map((k) => ({ text: k.text.trim().slice(0, 400), evidence: resolve(k.evidence).slice(0, 6) }))
+      .filter((k) => k.text)
+      .map((k) => ({ text: k.text, ...(k.evidence.length ? { evidence: k.evidence } : {}) }));
+    const sections = r.sections.filter((x) => x.body.trim() && (!catchUp || x.id !== 'now')).map((x) => ({ id: x.id, heading: x.heading.trim().slice(0, 80) || x.id, body: x.body.trim().slice(0, 2500) }));
+    const evidence = [...resolve(r.evidence), ...keyPoints.flatMap((k) => k.evidence ?? [])].slice(0, 40);
+    const watch = out.watch.map((w) => w.trim().slice(0, 300)).filter(Boolean).slice(0, 3);
+    const followUp = out.followUp
+      .filter((f) => f.watch.trim())
+      .slice(0, 6)
+      .map((f) => ({ watch: f.watch.trim().slice(0, 300), outcome: f.outcome, ...(f.note?.trim() ? { note: f.note.trim().slice(0, 500) } : {}) }));
+    const caveats = r.caveats.map((c) => c.trim().slice(0, 300)).filter(Boolean).slice(0, 4);
+    const body = sections.map((x) => `${x.heading}\n${x.body}`).join('\n\n').slice(0, 4000);
+    const records: RecordInput[] = [];
+    if (evidence.length && r.title.trim() && body) {
+      records.push({
+        type: 'insight',
+        record: {
+          kind: 'month-review',
+          pages: ['overview'],
+          subject: { month },
+          title: r.title.trim().slice(0, 160),
+          body,
+          evidence,
+          confidence: r.confidence,
+          period,
+          expiresOn: addDays(today(), 45),
+          ...(keyPoints.length ? { keyPoints } : {}),
+          ...(sections.length ? { sections } : {}),
+          ...(caveats.length ? { caveats } : {}),
+          ...(watch.length ? { watch } : {}),
+          ...(followUp.length ? { followUp } : {}),
+          ...(unresolved.length ? { unchecked: unresolved.slice(0, 20).map((u) => u.slice(0, 40)) } : {}),
+          ...(made.length ? { proposals: made.slice(0, 5) } : {}),
+        },
+      });
+    }
+    const others = catchUp ? { records: [], dropped: 0 } : toInsightRecords(store, out.insights.filter((i) => i.kind !== 'month-review').map((i) => ({ ...i, subject: { ...i.subject, month } })), { period });
+    records.push(...others.records);
+    const dropped = others.dropped;
+    if (!records.length) return { summary: `Nothing kept${made.length ? `; ${made.length} proposal(s)` : ''}` };
     // A review of a month replaces every note an earlier review of the same month wrote.
     const result = await applyRecords(store, { provenance, supersede: true, records }, { replaces: (old) => old.subject.month === month && (old.provenance.promptVersion ?? '').startsWith('monthly-review') });
-    return { summary: `${records.length} insight(s) for ${month}${catchUp ? ', written later' : ''}${dropped ? `; ${dropped} dropped for missing evidence` : ''}`, result };
+    const parts = [`${records.length} insight(s) for ${month}${catchUp ? ', written later' : ''}`, made.length ? `${made.length} proposal(s)` : '', unresolved.length ? `${unresolved.length} figure(s) not found in the data` : '', dropped ? `${dropped} dropped for missing evidence` : ''].filter(Boolean);
+    return { summary: parts.join('; '), result };
   },
 };
 

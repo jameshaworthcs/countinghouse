@@ -497,9 +497,11 @@
           "outcome": {
             "type": "string",
             "enum": [
+              "happened",
+              "not-happened",
+              "unclear",
               "done",
-              "open",
-              "unclear"
+              "open"
             ]
           },
           "note": {
@@ -511,6 +513,406 @@
           "watch",
           "outcome"
         ]
+      }
+    },
+    "keyPoints": {
+      "maxItems": 5,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 400
+          },
+          "evidence": {
+            "maxItems": 6,
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "transactions"
+                    },
+                    "ids": {
+                      "minItems": 1,
+                      "maxItems": 200,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "pattern": "^tx_[0-9a-f]{16}$"
+                      }
+                    },
+                    "label": {
+                      "type": "string",
+                      "maxLength": 200
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "ids"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "balance"
+                    },
+                    "id": {
+                      "type": "string",
+                      "pattern": "^bal_[0-9a-f]{16}$"
+                    },
+                    "label": {
+                      "type": "string",
+                      "maxLength": 200
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "id"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "holdings"
+                    },
+                    "id": {
+                      "type": "string",
+                      "pattern": "^hld_[0-9a-f]{16}$"
+                    },
+                    "label": {
+                      "type": "string",
+                      "maxLength": 200
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "id"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "figure"
+                    },
+                    "id": {
+                      "type": "string",
+                      "pattern": "^fig_[0-9a-f]{16}$"
+                    },
+                    "label": {
+                      "type": "string",
+                      "maxLength": 200
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "id"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "research"
+                    },
+                    "id": {
+                      "type": "string",
+                      "pattern": "^res_[0-9a-f]{16}$"
+                    },
+                    "label": {
+                      "type": "string",
+                      "maxLength": 200
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "id"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "assumption"
+                    },
+                    "id": {
+                      "type": "string",
+                      "pattern": "^asm_[0-9a-f]{16}$"
+                    },
+                    "label": {
+                      "type": "string",
+                      "maxLength": 200
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "id"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "context"
+                    },
+                    "id": {
+                      "type": "string",
+                      "pattern": "^ctx_[0-9a-f]{16}$"
+                    },
+                    "label": {
+                      "type": "string",
+                      "maxLength": 200
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "id"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "account"
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                      "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+                    },
+                    "label": {
+                      "type": "string",
+                      "maxLength": 200
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "id"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "payslip"
+                    },
+                    "id": {
+                      "type": "string",
+                      "pattern": "^pay_[0-9a-f]{16}$"
+                    },
+                    "label": {
+                      "type": "string",
+                      "maxLength": 200
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "id"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "hmrc"
+                    },
+                    "id": {
+                      "type": "string",
+                      "pattern": "^hmrc_[0-9a-f]{16}$"
+                    },
+                    "label": {
+                      "type": "string",
+                      "maxLength": 200
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "id"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "agreement"
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                      "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+                    },
+                    "label": {
+                      "type": "string",
+                      "maxLength": 200
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "id"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "company"
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                      "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+                    },
+                    "label": {
+                      "type": "string",
+                      "maxLength": 200
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "id"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "employment"
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                      "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+                    },
+                    "label": {
+                      "type": "string",
+                      "maxLength": 200
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "id"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "computed"
+                    },
+                    "metric": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 120
+                    },
+                    "value": {
+                      "type": "number"
+                    },
+                    "label": {
+                      "type": "string",
+                      "maxLength": 200
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "metric"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        "required": [
+          "text"
+        ]
+      }
+    },
+    "sections": {
+      "maxItems": 6,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "enum": [
+              "month",
+              "typical",
+              "people",
+              "worth",
+              "coming",
+              "now"
+            ]
+          },
+          "heading": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "body": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2500
+          }
+        },
+        "required": [
+          "id",
+          "heading",
+          "body"
+        ]
+      }
+    },
+    "caveats": {
+      "maxItems": 4,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 300
+      }
+    },
+    "unchecked": {
+      "maxItems": 20,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 40
+      }
+    },
+    "proposals": {
+      "maxItems": 5,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^prop_\\d{8}_\\d{6}_[0-9a-f]{4}$"
       }
     },
     "feedback": {

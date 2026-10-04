@@ -346,11 +346,11 @@ export class JobRunner extends EventEmitter implements JobQueue {
         privacy: def.privacy,
         startedBy: { actor: job.requestedBy ?? currentActor(), reason: TRIGGER_WORDS[job.trigger] },
       });
-      const runOnce = (transcript: Parameters<typeof runAgent>[0]['transcript']) =>
+      const ask = (text: string, transcript: Parameters<typeof runAgent>[0]['transcript']) =>
         runAgent({
           bin: claudeBin,
           cwd: scratch,
-          prompt,
+          prompt: text,
           systemPrompt: def.systemPrompt,
           schema: outputJsonSchema(def),
           tools: def.tools,
@@ -360,9 +360,22 @@ export class JobRunner extends EventEmitter implements JobQueue {
           signal,
           transcript,
         });
-      const res = session ? await session.run(runOnce, signal) : await runOnce(undefined);
+      // An answer the app can check that is wrong is asked for once more, with what is wrong.
+      const runOnce = async (transcript: Parameters<typeof runAgent>[0]['transcript']) => {
+        const first = await ask(prompt, transcript);
+        if (!def.check || !def.recheck) return { res: first, unresolved: [] as string[] };
+        const problems = await def.check(ctx, def.output.parse(first.output));
+        if (!problems.length) return { res: first, unresolved: [] as string[] };
+        const second = await ask(`${prompt}\n\n${def.recheck(problems, first.output)}`, transcript);
+        const unresolved = await def.check(ctx, def.output.parse(second.output));
+        const add = (a?: number, b?: number) => (a === undefined && b === undefined ? undefined : (a ?? 0) + (b ?? 0));
+        const costUsd = add(first.costUsd, second.costUsd);
+        const turns = add(first.turns, second.turns);
+        return { res: { ...second, ...(costUsd !== undefined ? { costUsd } : {}), ...(turns !== undefined ? { turns } : {}), durationMs: first.durationMs + second.durationMs }, unresolved };
+      };
+      const { res, unresolved } = session ? await session.run(runOnce, signal) : await runOnce(undefined);
       const output = def.output.parse(res.output);
-      const outcome = await def.apply(ctx, output, { setBy: 'agent', model: res.model, promptVersion: def.promptVersion, jobId: job.id });
+      const outcome = await def.apply(ctx, output, { setBy: 'agent', model: res.model, promptVersion: def.promptVersion, jobId: job.id }, unresolved);
       job = {
         ...job,
         status: 'succeeded',

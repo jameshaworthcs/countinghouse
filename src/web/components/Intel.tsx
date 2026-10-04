@@ -54,8 +54,13 @@ export function SignalList({ signals, empty }: { signals: Signal[]; empty?: Reac
 }
 
 export function EvidenceLinks({ insight }: { insight: Insight }) {
+  return <EvidenceChips evidence={insight.evidence} />;
+}
+
+/** Links to what a finding rests on. */
+export function EvidenceChips({ evidence }: { evidence: Insight['evidence'] }) {
   const chips: ReactNode[] = [];
-  insight.evidence.forEach((e, i) => {
+  evidence.forEach((e, i) => {
     const key = `${e.type}-${i}`;
     if (e.type === 'transactions') chips.push(<Link key={key} to={`/transactions?ids=${e.ids.join(',')}`} className="text-accent hover:underline">{e.label ?? `${e.ids.length} transaction${e.ids.length > 1 ? 's' : ''}`}</Link>);
     else if (e.type === 'account') chips.push(<Link key={key} to={`/accounts/${e.id}`} className="text-accent hover:underline">{e.label ?? 'account'}</Link>);

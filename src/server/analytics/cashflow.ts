@@ -13,10 +13,16 @@ import { Coverage } from './coverage';
 
 export type FlowClass = 'income' | 'spending' | 'excluded';
 
+/** The category of investment platforms' and funds' fees. */
+const PLATFORM_FEE = 'investment-fee';
+
 export function classifyFlow(t: Transaction, cats: CategoryIndex, account: Account | undefined): FlowClass {
   if (!account || balanceModeOf(account) === 'market') return 'excluded';
   if (t.transferGroup) return 'excluded';
   const kind = cats.kindOf(t.category);
+  // A platform's fee paid from a bank account (ii's monthly membership by direct debit) is spent;
+  // inside the investment account it only lowers the value, so it is left out there (above).
+  if (kind === 'investment' && t.category === PLATFORM_FEE) return 'spending';
   if (kind === 'transfer' || kind === 'investment') return 'excluded';
   if (kind === 'income') return cats.offsetsSpending(t.category) ? 'spending' : 'income';
   if (kind === 'expense') return 'spending';

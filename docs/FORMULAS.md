@@ -371,7 +371,9 @@ years), both paths grow at the median:
 - **What it rests on** (`basis`, for ledger and market accounts alike): the anchor it is worked out
   from, its day and kind (a statement's or your own balance or valuation, a running balance, a
   screenshot's, or a rough one you gave), marked `after` when worked back from a later one. A
-  running sum of rows with no anchor, or a closed account's £0, rests on none.
+  value between two valuations of a market account also names the next one (`to`), and says when
+  published prices shaped it (`prices`). A running sum of rows with no anchor, or a closed
+  account's £0, rests on none.
 - An account whose interest its documents do not list as movements (a student loan,
   `interestUnrecorded`) has every balance but a statement's own day flagged estimated: worked out
   from its movements (instalments lent and fees paid), it leaves the interest out.
@@ -379,9 +381,42 @@ years), both paths grow at the median:
 
 **Market accounts:**
 
-- Anchors are valuations. Between them, only external flows move the value (contributions,
-  employer, relief, bonus, withdrawals, transfers).
+- Anchors are valuations. External flows move the value (contributions, employer, relief, bonus,
+  withdrawals, transfers).
+- After the last valuation: the valuation + the flows since. Nothing grows, and nothing is flagged.
+- **Between valuations** (a day after one valuation V₁ on d₁ and before the next V₂ on d₂, not a
+  rough figure you gave): flagged estimated, and meeting both valuations exactly. The first of
+  these that applies (`analytics/prices.ts`):
+  1. **Holdings path.** What its holdings were worth on the day at published prices:
+     H(t) = Σ units(t) × price(t) + cash(t), from a holdings snapshot (the one nearest d₂ that
+     works).
+     - Units: the snapshot's (or its value ÷ that day's price, when it gives values alone), less
+       the units each trade after t bought (plus those it sold), up to the snapshot; after it,
+       the trades between. A trade's units are the number it begins with ("Purchase 20 …",
+       "12 EXAMPLE ETF Del 25.10 …"). It is a trade of the holding whose name its words share most,
+       among those whose published price that day is within 15% of the trade's own (|amount| ÷
+       units); else none, and there is no path.
+     - Cash: the snapshot's, or a balance's of that day or the next, carried by every row on the
+       account (contributions, trades, fees, income).
+     - Prices: research of kind `instrument.prices` for each holding, the last on or before the
+       day. Holdings with no prices may be at most 5% of the value. Good from the latest first
+       price of its holdings and back until a holding would be walked below none (2% slack, for
+       units worked out from values), to the earliest last price.
+     - value(t) = H(t) + r₁ + (r₂ − r₁) × (t − d₁) ÷ (d₂ − d₁), where rᵢ = Vᵢ − H(dᵢ): what the
+       path is short of each valuation (charges, the provider's own prices), shared out by days.
+  2. **Price index.** With no path, when its holdings' prices cover the days: I(t) =
+     (cash + Σ value_h × price_h(t) ÷ price_h(S) + unpriced × that same move) ÷ total, weighted
+     by a snapshot S's values (at least half of them priced, cash counting as priced).
+  3. **Neither:** I(t) = 1.
+
+  With an index, value(t) = V₁ × G(t, d₁) + Σ flows f on (d₁, t] × G(t, d_f), where G(t, s) =
+  I(t) ÷ I(s) × e^{g (t − s)}, and g is the one steady daily rate (within ±2%) that makes it come
+  to V₂ on d₂ (bisection). With no such rate, what is left at d₂ is shared out by days. Money
+  grows only from the day it arrives: a contribution mid-way gets none of the growth before it.
 - Before the first valuation, flagged estimated:
+  - with a holdings path good back to the day: H(t) + (V₁ − H(d₁)), never below nothing;
+  - else with a price index covering the days: (V₁ − Σ flows f on (t, d₁] × I(d₁) ÷ I(d_f)) ×
+    I(t) ÷ I(d₁);
   - within 45 days, rolled back by the flows since;
   - further back, when the flows go back to the account's start (§12, **Paid in**):
     contributions + (growth at the first valuation) × elapsed fraction since the first flow;
@@ -965,7 +1000,9 @@ A transaction counts as follows (`classifyFlow`):
 - **Excluded:**
   - it is on a market account;
   - or it is linked as a transfer;
-  - or its category is a transfer or investment kind.
+  - or its category is a transfer or investment kind, except a platform's fee
+    (`investment-fee`) paid from a bank account: ii's monthly membership by direct debit is spent.
+    Inside the investment account a fee only lowers the value, so it is left out there.
 - **Income:** an income category, except one that offsets spending.
 - **Spending:**
   - an expense category: money in under one (your share of something paid back, a card's refund in
@@ -1255,12 +1292,36 @@ Each line is broken down by category group.
 **Moved:** money between your current accounts and your others, by where it went (savings, ISAs, the
 Lifetime ISA, pensions, investments, credit cards, loans, or an account the app doesn't know): a
 transfer's amount on the current account, by the other side's type. A loan's money in is borrowing,
-not moved; current account to current account is neither.
+not moved; current account to current account is neither. (Kept for older readers; the card and the
+review use "Where it went".)
+
+**Where it went** (`whereItWent`): left over + borrowed, item by item, adding up to it to the penny.
+From the rows in the month on your cash accounts (current, savings, Premium Bonds) and cards:
+
+- **Kept in current accounts and savings**: Σ rows on them, by account.
+- **Paid off credit cards**: Σ rows on them (repayments less what was spent on them), by card.
+- **Put into ISAs, pensions and investments**: each part of a row that is not income or spending
+  (§14) whose other side is such an account, by account; plus income and spending on those
+  accounts and any other that is neither cash, card nor loan (interest kept in a cash ISA).
+- **Paid off loans**: borrowed − the rows' parts whose other side is a loan + income less spending
+  on loans. A Tuition Fee Loan's payment to the university (borrowed and spent on the loan) and a
+  maintenance instalment (borrowed and moved from the loan) each come to nothing.
+- **Sent to accounts the app doesn't know**: each part of a row that is not income or spending and
+  has no other side among your accounts, by payee (your own Revolut, a transfer to yourself).
+- **Not placed**: what is left: a transfer between your accounts whose other side falls in the next
+  month, or a row the app cannot place. Shown so the items always add up.
+
+**By category** (`categories`): spending in each category, its refunds netted off (§14: an expense
+category's money in), money paid back apart (it is the money-back line); and the same by category
+group. Each group, and the 12 largest categories (`topCategories`), with its compared (below) and the
+12 months up to the month, each marked whether it counts for typical.
 
 **Worth:** the estate (§9) on the day before the month and on its last day, by group, and each
 account's value at both ends with what the end value rests on (§9, `basis`). A value at market
-resting on a valuation more than 31 days before the month's end (`valuationDays`), or worked back
-from a later one, is marked `oldValuation`: its change is not the month's.
+that published prices did not shape, resting on a valuation more than 31 days before the month's
+end (`valuationDays`), worked back from a later one, or shared out between two by days, is marked
+`oldValuation`: its change is not the month's. One shaped by prices (`basis.prices`) is the month's,
+estimated.
 
 **Quality:**
 

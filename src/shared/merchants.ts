@@ -235,6 +235,9 @@ export const MERCHANTS: MerchantDef[] = [
   ['GOOGLE (STORAGE|ONE|\\*GOOGLE ONE|PLAY|WORKSPACE|CLOUD)|GOOGLE \\*', 'Google', 'software'],
   ['MICROSOFT|MSFT|XBOX', 'Microsoft', 'software'],
   ['ADOBE', 'Adobe', 'software'],
+  // One name however the card prints them ("ANTHROPIC* CLAUDE SUB", "CLAUDE.AI SUBSCRIPTION"; "AWS EMEA").
+  ['\\bANTHROPIC\\b|CLAUDE\\.AI', 'Claude', 'software'],
+  ['\\bAWS\\b|AMAZON WEB SERVICES', 'AWS', 'software'],
   ['DROPBOX|1PASSWORD|LASTPASS|NORDVPN|EXPRESSVPN|PROTON|GITHUB|\\bNOTION\\b|CANVA|ZOOM\\.US|SLACK|FIGMA|JETBRAINS|OPENAI|CHATGPT|ANTHROPIC|CLAUDE\\.AI|MIDJOURNEY|CURSOR|VERCEL|DIGITALOCEAN|HETZNER|CLOUDFLARE|\\bAWS\\b|AMAZON WEB SERVICES|NAMECHEAP|GODADDY|SQUARESPACE|WIX\\.COM', 'Software', 'software'],
   ['DUOLINGO|HEADSPACE|CALM\\.COM|\\bCALM\\b', 'App subscription', 'software'],
   ['PLAYSTATION|\\bPSN\\b|SONY INTERACTIVE', 'PlayStation', 'games'],
@@ -465,7 +468,9 @@ export function cleanPayee(description: string): string {
     if (s === before) break;
   }
   s = s
+    .replace(/^[0-9a-f]{12,}\s+-\s+/i, '') // a payment id before the name ("0a1b2c3d4e5f6071 - GrabPay")
     .replace(/\s*\([^()]*\bRate:[^()]*\)\s*$/i, '') // Starling's "($3.75, Rate: 1.2810)"
+    .replace(/,\s*[\d.,]+ [A-Z]{3}, RATE [\d.]+\/GBP.*$/i, '') // Santander's fee on a foreign payment ("AWS EMEA,1.80 USD, RATE 0.77/GBP")
     .replace(/\bON \d{1,2}[/.-]\d{1,2}([/.-]\d{2,4})?\b.*$/i, '') // "ON 12/09 …"
     .replace(/\s+ON \d{1,2} (JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\b.*$/i, '') // Capital One's "on 01 Sep"
     .replace(/\b\d{1,2}[A-Z]{3}\d{2,4}\b.*$/i, '') // "12SEP26 …"

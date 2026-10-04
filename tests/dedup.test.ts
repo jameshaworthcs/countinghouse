@@ -24,6 +24,22 @@ describe('the same payment from another source', () => {
     tx('tx_cafe', '2026-09-10', -3.5, 'COSTA COFFEE'),
   ];
 
+  it('a trade posted on the day it was made and on the day it settled is one trade, by the date printed in it', () => {
+    const trades = [tx('tx_buy', '2026-06-12', -694.04, '27 EXAMPLE ETF  Del   25.69 S Date 16/06/26'), tx('tx_buy2', '2026-06-17', -694.04, '27 EXAMPLE ETF  Del   25.69 S Date 19/06/26')];
+    const [a, b] = classifyDuplicates(
+      [
+        { date: '2026-06-16', amount: -694.04, description: '27 EXAMPLE ETF Del 25.69 S Date 16/06/26' },
+        { date: '2026-06-19', amount: -694.04, description: '27 EXAMPLE ETF Del 25.69 S Date 19/06/26' },
+      ],
+      trades,
+    );
+    expect(a).toMatchObject({ status: 'duplicate', duplicateOf: 'tx_buy' });
+    expect(b).toMatchObject({ status: 'duplicate', duplicateOf: 'tx_buy2' });
+    // Another date printed: not that trade by this rule.
+    const [c] = classifyDuplicates([{ date: '2026-06-16', amount: -694.04, description: '27 EXAMPLE ETF Del 25.69 S Date 01/07/26' }], [trades[0]!]);
+    expect(c!.status).not.toBe('duplicate');
+  });
+
   it('the same balance after it makes it the same payment, however it is described', () => {
     const [r] = classifyDuplicates([{ date: '2026-08-12', amount: -45.67, description: 'To Revolving Line Account', balanceAfter: 954.33 }], stored);
     expect(r).toEqual({ status: 'duplicate', duplicateOf: 'tx_statement', reason: 'Same date, amount and balance after it' });

@@ -2013,3 +2013,52 @@ Later the same day, after the owner's first runs (`label-imports-2`):
   only the prize. The prize and the PayPal direct debits filed as subscriptions (each paid PayPal
   Credit for a charge already counted there) are fixed by proposals the owner
   reviews.
+
+## 2026-10-04: The month in review, rebuilt for the August run; investments valued between valuations
+
+- **Owner:** the catch-up reviews were checked. Improve the job and how its results show,
+  significantly, before the August run. Use the latest ii uploads and
+  public prices to fill the investment gaps; frequent captures will make that unneeded later.
+- **Found:**
+  - The reviews' sums were right, but they read as a check of the app. A third of each repeated
+    standing caveats or recited the figures table. A third of the watch lines tested how the app
+    filed something. "Done" and "still open" meant different things in different reviews.
+  - They could not see below line totals (no categories or payees over time), nor where the money
+    went in a way that adds up, nor who "accounts the app doesn't know" were. They found wrong data
+    but could not propose a fix.
+  - The ISA had no valuation for over a year. Its month ends were the older value plus
+    contributions, well below its value by the end. The SIPP was low too, and the LISA rolled back
+    with no growth.
+  - ii's monthly membership, by direct debit, was left out of spending as an in-account fee,
+    and showed every month as money sent to an unknown account.
+  - ii's statement posts a trade on its settlement date and its export on the trade date: the
+    same trade would have been added twice.
+- **Done:**
+  - **Between valuations** (FORMULAS.md §9): a market account's value between two valuations is
+    its holdings path when the trades and prices allow it. That is the units held each day, from a
+    holdings snapshot walked through every trade, at published prices, with its cash, adjusted to
+    meet both valuations. Failing that, a price index of its holdings. Failing that, one steady
+    rate on the money in it. Before the first valuation, the same, rolled back. Prices are research
+    of a new kind, `instrument.prices`: the funds and ETFs held, weekly and month-end closes over
+    the accounts' history, from public quote pages, by identifiers only. Rehearsed: the ISA's path,
+    walked back over a year from its latest holdings, lands within 0.2% of the earlier statement.
+  - **The month summary** (§18): "Where it went", item by item, adding up to left over plus
+    borrowed, with the unknown accounts named; spending by category group and the largest
+    categories against typical, with each of the 12 months. A platform fee paid from a bank
+    account is spending (§14).
+  - **monthly-review-6** (AGENTS.md): digest version 5 (the year's payees, trips, every earlier
+    review in short with the limits it raised), and a file of 24 months' payments it searches with
+    Grep and Glob, confined to its scratch directory. Its output is a headline, 3 to 5 key points
+    with evidence, parts in a fixed order, new limits only, watch lines about money and decisions,
+    and outcomes as happened / did not happen / cannot tell. It may propose up to 3 fixes
+    (`set_category`, `add_rule`, `set_note`). Every £ figure is checked against the data; it is
+    asked once more with any not found, and what is still not found shows beside the review.
+  - **The display:** the month card shows the headline, key points with evidence, parts that open
+    and close, "What this rests on", fixes proposed, figures not found, outcome chips, and a note
+    with the thumbs. A new Reviews page lists every month's review. The card takes `?month=`.
+  - Claude and AWS keep one payee name however the card prints them; a payment id before a name
+    and Santander's fee wording on a foreign payment leave payees. Duplicates rule 2b: the same
+    amount and description with the same printed date, up to 10 days apart.
+- **Not done:** the workplace pension and company shares have no holdings or prices, so
+  they stay at their last valuation. Prices are not refreshed by a job; captures are meant to make
+  that unneeded.

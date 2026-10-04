@@ -89,6 +89,7 @@ async function main() {
   };
   const pages: [string, string][] = [
     ['overview', '/'],
+    ['reviews', '/reviews'],
     ['accounts', '/accounts'],
     ...accountPage('account-current', 'current'),
     ...accountPage('account-savings', 'savings'),

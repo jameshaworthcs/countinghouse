@@ -43,10 +43,10 @@ afterEach(async () => {
 });
 
 describe('privacy boundary', () => {
-  it('research jobs get only web tools; jobs that read your data get none', () => {
+  it('research jobs get only web tools; jobs that read your data get no web tools, only file tools confined to their scratch directory', () => {
     for (const def of Object.values(JOB_DEFS)) {
       if (def.privacy === 'public') expect(def.tools).toEqual(['WebSearch', 'WebFetch']);
-      else expect(def.tools.every((t) => t === 'Read')).toBe(true);
+      else expect(def.tools.every((t) => t === 'Read' || t === 'Grep' || t === 'Glob')).toBe(true);
     }
     const args = agentArgs({ schema: {}, tools: [], model: 'opus', effort: 'high', systemPrompt: 's' });
     expect(args).toContain('--restricted');

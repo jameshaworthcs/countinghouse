@@ -107,6 +107,8 @@ there), an asset class, or an economic indicator.
   - `asOf` is the date the facts describe (the factsheet date), not the day you read it.
 - **Past and future stay apart.**
   - Historical performance is an `instrument.performance` research record.
+  - Past prices are an `instrument.prices` research record: public prices by a fund's or ETF's
+    identifiers only, never a balance or a number of units.
   - A forward-looking return is an assumption with `basedOn` pointing at the research
     (`market.outlook`, `economy.indicator`) it rests on, and a `rationale` explaining the link.
 
@@ -116,6 +118,7 @@ Research record kinds (`ResearchDataSchemas` in `src/shared/schema.ts`):
 |---|---|---|
 | `instrument.facts` | instrumentId | OCF, transaction costs, allocation by class, regions, benchmark, launch date, distribution, risk indicator, fund size |
 | `instrument.performance` | instrumentId | annualised returns (1, 3, 5, 10 years, since launch), benchmark returns, calendar years, volatility, maximum drawdown |
+| `instrument.prices` | instrumentId | published prices on past days (closing prices, or a fund's daily price) in pounds, with the listing they are quoted on and the share class when another stands in: what values a holding between its valuations (FORMULAS.md §9) |
 | `provider.rates` | institutionId | savings products: AER, variable, bonus and end date, conditions |
 | `provider.fees` | institutionId | platform fee tiers, cap, flat fee, which account types |
 | `market.outlook` | assetClass | a publisher's long-run expected return (nominal or real), range, volatility, horizon |
@@ -360,7 +363,7 @@ extraction:
 | `research-provider` | a provider's name and the kinds of account held there | WebSearch, WebFetch | `provider.rates`, `provider.fees` | only when you ask (or with "Research by itself" on: when a provider is new or stale) |
 | `refresh-assumptions` | the asset classes held (no amounts) | WebSearch, WebFetch | `economy.indicator`, `market.outlook`, assumptions with `basedOn` | only when you ask (or with "Research by itself" on: when assumptions are on fallbacks or past review, at most weekly) |
 | `insights-after-import` | the digest, focused on the new imports | Read (the digest only) | insights | 2 minutes after imports stop arriving |
-| `monthly-review` | the month digest (version 4): the month's figures, the 12 months to it, the review before, documents as of the month's end, and, for the latest month only, today's figures | Read (the digest only) | a month in review with lines to watch and how the last ones turned out; for the latest month, up to 5 page insights; replacing every note an earlier review of the month wrote | once a month's data is complete for every account; earlier months only when you ask |
+| `monthly-review` | the month digest (version 5): the month's figures, the 12 months to it, the year's payees and trips, every review before, documents as of the month's end, and, for the latest month only, today's figures; and a file of the 24 months' payments to the month's end | Read, Grep, Glob (its scratch directory only) | a month in review (headline, key points, parts, new limits) with lines to watch and how the last ones turned out; proposals to fix data it found wrong; for the latest month, up to 5 page insights; replacing every note an earlier review of the month wrote | once a month's data is complete for every account; earlier months only when you ask |
 | `interpret-note` | the owner's note, account and instrument names | none | proposals on the note | when a note is added |
 | `label-imports` | each committed import's file name, kind, provider, accounts (name, type, period) and dates, a payslip's employer, the tax figures' kinds and years; never amounts, account numbers, references or rows | none | a name on each import (`label`) that has none | only with "Name imports with the agent" on (off by default): a minute after imports stop being committed or filed; History offers the ones from before |
 | receipt reading (not a job) | one receipt file, the payment's amount, date and payee, the category names | Read (the receipt only) | a reading on the receipt: proposed split lines | when a receipt is attached, only with "Read receipts with the agent" on (off by default) |
@@ -423,27 +426,31 @@ Other behaviour:
   | `research-instrument` (one fund) | 4.6 min | $1.56 |
   | `research-provider` (one provider) | 47 s | $0.66 |
   | `insights-after-import` | 25 s | $0.17 |
-  | `monthly-review` | 61 s | $0.24 |
+  | `monthly-review` | 46–73 s (`monthly-review-5`) | $0.28–0.39 |
   | `interpret-note` | 15 s | $0.07 |
   | `label-imports` | 2 s (one import) to 16 s (twelve) | $0.007 to $0.08 |
-- **The month in review** (`monthly-review-5`; FORMULAS.md §18; the Overview's month card):
-  - **Its digest** (`buildMonthDigest`):
-    - `focus` is the month's figures exactly as the Overview's month card shows them (`GET /api/month/:month`), with the month's payments to cite.
-    - `focus.quality` says what is still yours to confirm (payments with people, cash and cheques paid in) and how much rests on a category the bank or the reader guessed (each payment's `categorisedBy` says which). The review says what that limits, and checks a guessed category against the payment's description before resting a finding on it (since `monthly-review-5`).
+- **The month in review** (`monthly-review-6`; FORMULAS.md §18; the Overview's month card and the Reviews page):
+  - **Its digest** (`buildMonthDigest`, version 5):
+    - `focus` is the month's figures exactly as the Overview's month card shows them (`GET /api/month/:month`): where the money went, adding up, and spending by category group and category against typical with each of the 12 months; with the month's payments to cite, each with the person it was with.
+    - `focus.quality` says what is still yours to confirm (payments with people, cash and cheques paid in) and how much rests on a category the bank or the reader guessed (each payment's `categorisedBy` says which).
     - `history` is the 12 months up to and including it, each as its lines; the complete ones are what "typical" means.
-    - `previousReview` is the latest review of an earlier month (never one replaced), with its watch lines, follow-ups, status, your feedback and the titles of that run's other notes.
+    - `payeesYear`: the 40 payees spent with most over the 12 months, with how often, in how many months and this month's part. `trips`: spending filed as holidays in runs with gaps of up to 6 days, across months.
+    - `previousReview` is the latest review of an earlier month in full (never one replaced), with its watch lines, follow-ups, status, your feedback and the titles of that run's other notes. `earlierReviews` is every one before, in short: title, key points, the limits it raised, its watch lines and outcomes, your feedback. A limit an earlier review raised is not raised again.
     - The documents (pay, HMRC's records, terms, agreements, pension arrangements, companies) stand as at the month's end: records dated later are left out, a job that started later is not there, and pay or an agreement payment that arrived later was "not paid by then".
+    - `transactions.jsonl` beside it: every row on every account in the 24 months to the month's end, one a line, for the review to search with Grep (what else went to a payee, a person, an amount) before it rests a finding on it.
   - **Two modes:**
-    - **Latest** (the last complete month, "Write this month's review"): the digest adds `asOfToday` (the estate, accounts, allowances, investments, projection, pay owed, goals and tax codes since the month, labelled as today's), your context and earlier notes. Claude writes the review and up to 5 page insights.
-    - **Written later** (`params.catchUp`, "Write reviews for earlier months"): none of today. Claude writes the review alone, as at the month's end, with no advice about now.
-  - **Its output:** besides the insights, `watch` (up to 3 lines for the next review to check) and `followUp` (each of the last review's lines: done, still open or unclear, with a note). Both are kept on the month's review insight.
+    - **Latest** (the last complete month, "Write this month's review"): the digest adds `asOfToday` (the estate, accounts, allowances, investments, projection, pay owed, goals and tax codes since the month, labelled as today's), your context and earlier notes. The review has a part about what to do now, and Claude writes up to 5 page insights.
+    - **Written later** (`params.catchUp`, "Write reviews for earlier months"): none of today. The review alone, as at the month's end, with no advice about now.
+  - **Its output:** the review (a headline; 3 to 5 key points, each with its evidence; parts in order: the month, against typical, people, worth, coming up, and for the latest month what to do now; new limits only; confidence), `watch` (up to 3 lines about your money or decisions for the next review to check, never about how the app files something), `followUp` (each of the last review's lines: happened, did not happen, or cannot tell, with a note; older reviews said done and still open) and up to 3 `proposals`. All are kept on the month's review insight; `body` holds the parts as text.
+  - **Proposing fixes.** A change the review proposes is one of `set_category`, `add_rule` or `set_note`, each with why. A proposal goes to Proposals through `ctx.proposals`, like any other (§5), less the changes that do not fit the data; never a payment with a person. The review lists the ones it made.
+  - **Checking a review.** Every £ figure in its text must be one the app has: a figure in the digest or a payment's amount (to the penny, or to the pound when written without pence), or the sum or difference of two of the month's headline figures. Figures written as "about …" are not checked. When some are not, it is asked once more with them and its first answer (a second run in the same session, its cost added); any still not found are kept on the review (`unchecked`) and shown beside it.
   - **A rerun replaces its month:** every active note an earlier `monthly-review` run wrote for that month is superseded (yours never are), not only one of the same kind and subject.
-  - **Earlier months, oldest first.** `POST /api/jobs/month-reviews` (yours alone: no token may) queues a review, written later, for each complete month before the latest with no standing review by this prompt version, among the last 13. The runner runs month reviews oldest month first however they were queued, so each reads the one before; one that fails does not stop the rest, and the next reads the latest review there is.
-  - **Shown by month.** The Overview's month card shows the review of the month you pick, beside its figures, whether or not it has expired; expiry only takes a note out of "What to look at".
+  - **Earlier months, oldest first.** `POST /api/jobs/month-reviews` (yours alone: no token may) queues a review, written later, for each complete month before the latest with no standing review by this prompt version, among the last 13. The runner runs month reviews oldest month first however they were queued, so each reads the ones before; one that fails does not stop the rest, and the next reads the latest review there is.
+  - **Shown by month.** The Overview's month card shows the review of the month you pick (`?month=`), beside its figures, whether or not it has expired; expiry only takes a note out of "What to look at". The Reviews page (`/reviews`) lists every month's review, newest first. Your thumbs and note on a review are read by the next ones.
 - **The output's records** carry the job's id, model and prompt version.
-- **A job can propose fixes** through `ctx.proposals` (§5), under the job's provenance. None does
-  yet: a job that checks the owner's data for fixes reads the owner's data, so it gets no web tools,
-  and like every job it waits for agents to be on.
+- **A job can propose fixes** through `ctx.proposals` (§5), under the job's provenance. The month
+  in review does (above). A job that checks the owner's data for fixes reads the owner's data, so it
+  gets no web tools, and like every job it waits for agents to be on or for your click.
 - **Only real data starts jobs by itself.** Jobs start on their own only when the data directory
   is tracked in git; the demo and throwaway copies never start them, though you can still start
   one by hand.

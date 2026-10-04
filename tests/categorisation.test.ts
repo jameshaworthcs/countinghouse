@@ -61,6 +61,9 @@ describe('payees from the ways banks word a payment', () => {
   it('leaves out what a card added about the money: a rate paid abroad, the day it was made', () => {
     // Starling, paying in another currency.
     expect(cleanPayee('EXAMPLE TRANSIT PAYGO ($3.75, Rate: 1.2810)')).toBe('Example Transit Paygo');
+    // A payment id before the name, and Santander's fee on a foreign payment.
+    expect(cleanPayee('0a1b2c3d4e5f6071 - ExamplePay')).toBe('ExamplePay');
+    expect(cleanPayee('CARD PAYMENT TO EXAMPLE CLOUD,1.80 USD, RATE 0.77/GBP ON 02-01-2024')).toBe('Example Cloud');
     expect(cleanPayee('Sam Taylor (Trip) (€11.64, Rate: 1.1695, Fee: £0.04)')).toBe('Sam Taylor (Trip)');
     // Capital One's day the payment was made.
     expect(cleanPayee('Www.examplevans.com London LND on 01 Sep')).toBe('Www.examplevans.com London LND');

@@ -6,13 +6,13 @@
 //
 // Tools are chosen per job and are the privacy boundary (docs/AGENTS.md):
 //   - research jobs get WebSearch and WebFetch, and a prompt built only from public identifiers;
-//   - jobs that read personal data get Read (of the digest in their scratch directory) or nothing,
-//     so what they see cannot leave except to Claude itself.
+//   - jobs that read personal data get Read, Grep and Glob (of the files in their scratch directory)
+//     or nothing, so what they see cannot leave except to Claude itself.
 
 import { lockedDownArgs, runClaudeCli } from '../ingest/claude-cli';
 import type { TranscriptSink } from '../sessions';
 
-export type AgentTool = 'Read' | 'WebSearch' | 'WebFetch';
+export type AgentTool = 'Read' | 'Grep' | 'Glob' | 'WebSearch' | 'WebFetch';
 
 export interface AgentRunOptions {
   bin: string;

@@ -8,21 +8,26 @@
 // Before the first anchor it is rolled back from the next one. With no anchors at all it is the
 // running sum of transactions, flagged as estimated.
 //
-// Market accounts (investments, pensions, property): valuations are anchors and only money moving
-// in or out from outside (contributions, withdrawals, bonus, relief) is added between them. Before
-// the first valuation, value is estimated: from contributions plus growth accrued linearly when the
-// data goes back to the account's start, else rolled back by the money that arrived since.
+// Market accounts (investments, pensions, property): valuations are anchors, and money moving in or
+// out from outside (contributions, withdrawals, bonus, relief) is added to them. Between two
+// valuations the growth between them is shared out: as the holdings' published prices moved, when
+// there are prices for enough of them (prices.ts), else evenly over the days; either way an
+// estimate that meets both valuations exactly. After the last valuation only money moving counts.
+// Before the first valuation, value is estimated: rolled back from it as the prices moved, or, with
+// no prices, from contributions plus growth accrued linearly when the data goes back to the
+// account's start, else rolled back by the money that arrived since.
 
 import { ACCOUNT_TYPE_META, balanceModeOf } from '../../shared/accounts';
 import { EXTERNAL_FLOW_CATEGORIES } from '../../shared/categories';
 import { addDays, diffDays, today, type ISODate } from '../../shared/dates';
 import { fromMinor, toMinor } from '../../shared/money';
 import type { BalanceBasis } from '../../shared/api';
-import type { Account, BalanceEvidence, Settings } from '../../shared/schema';
+import type { Account, BalanceEvidence, Settings, Transaction } from '../../shared/schema';
 import type { Store } from '../store';
+import { covers, holdingsPath, indexNear, PriceBook, type HoldingsPath, type PriceIndex } from './prices';
 
-/** What the engine reads: a store, or a store as a proposal would leave it. */
-export type BalanceSource = Pick<Store, 'accounts' | 'transactions' | 'balances' | 'settings'>;
+/** What the engine reads: a store, or a store as a proposal would leave it; holdings and prices when it has them. */
+export type BalanceSource = Pick<Store, 'accounts' | 'transactions' | 'balances' | 'settings'> & Partial<Pick<Store, 'holdings' | 'instruments' | 'research'>>;
 
 interface Anchor {
   date: ISODate;
@@ -66,6 +71,10 @@ interface AccountData {
   mode: 'ledger' | 'market';
   tx: Series;
   flows: Series;
+  /** The money moving in or out from outside, one by one (market accounts). */
+  flowList: { date: ISODate; minor: number }[];
+  /** Every row, for the holdings path (market accounts). */
+  rows: Transaction[];
   anchors: Anchor[];
   firstDate: ISODate | null;
   lastDate: ISODate | null;
@@ -100,6 +109,26 @@ export interface BalancePoint {
 
 const BASIS_KIND: Record<Anchor['source'], BalanceBasis['kind']> = { snapshot: 'balance', running: 'running', screenshot: 'screenshot', approximate: 'approximate' };
 const basisOf = (a: Anchor, after = false): BalanceBasis => ({ date: a.date, kind: BASIS_KIND[a.source], ...(after ? { after: true as const } : {}) });
+
+/** Prices may end this many days before the valuation an estimate is worked towards. */
+const PRICES_END_SLACK_DAYS = 7;
+
+/** The steady daily rate, within ±2% a day, at which `miss` is nothing, by bisection; none when no rate there is. */
+function solveRate(miss: (rate: number) => number): number | undefined {
+  let [lo, hi] = [-0.02, 0.02];
+  let [mLo, mHi] = [miss(lo), miss(hi)];
+  if (Math.abs(mLo) < 0.5) return lo;
+  if (Math.abs(mHi) < 0.5) return hi;
+  if (Math.sign(mLo) === Math.sign(mHi)) return undefined;
+  for (let i = 0; i < 80; i++) {
+    const mid = (lo + hi) / 2;
+    const m = miss(mid);
+    if (Math.abs(m) < 0.5) return mid;
+    if (Math.sign(m) === Math.sign(mLo)) [lo, mLo] = [mid, m];
+    else [hi, mHi] = [mid, m];
+  }
+  return (lo + hi) / 2;
+}
 
 /** Transactions by day, in date order. */
 function daysOf<T extends { date: ISODate }>(txs: T[]): Map<ISODate, T[]> {
@@ -231,8 +260,12 @@ export function lastUpdated(store: Pick<Store, 'hmrc'>, engine: BalanceEngine, a
 export class BalanceEngine {
   private readonly data = new Map<string, AccountData>();
   private readonly usable = new Map<string, Anchor[]>();
+  private readonly prices: PriceBook | undefined;
+  private readonly indexes = new Map<string, PriceIndex | null>();
+  private readonly paths = new Map<string, HoldingsPath | null>();
 
-  constructor(store: BalanceSource) {
+  constructor(private readonly store: BalanceSource) {
+    this.prices = store.research && store.instruments && store.holdings ? new PriceBook(store.research) : undefined;
     for (const account of store.accounts) {
       const mode = balanceModeOf(account);
       const txs = store.transactions(account.id);
@@ -282,6 +315,8 @@ export class BalanceEngine {
         mode,
         tx: buildSeries(mode === 'ledger' ? ledgerDates(txs, snaps).map((t) => ({ date: t.countsFrom, amount: t.amount })) : txs),
         flows: buildSeries(flows),
+        flowList: flows.map((t) => ({ date: t.date, minor: toMinor(t.amount) })),
+        rows: mode === 'market' ? txs : [],
         anchors: mode === 'market' ? sortedAnchors.filter((a) => a.source !== 'running') : sortedAnchors,
         firstDate,
         lastDate,
@@ -341,16 +376,41 @@ export class BalanceEngine {
       }
     } else {
       const a1 = lastAnchorOnOrBefore(d.anchors, date);
-      if (a1) {
+      const a2 = firstAnchorAfter(d.anchors, date);
+      if (a1 && a2 && a1.date !== date && a2.source !== 'approximate') {
+        // Between two valuations: as its holdings were worth at published prices, meeting both;
+        // else the growth between them shared out, as the prices moved or by days.
+        const path = this.pathFor(d, a1.date, a2.date);
+        const index = path ? undefined : this.indexFor(d, a1.date, a2.date);
+        if (path) {
+          const [r1, r2] = [a1.minor - path.at(a1.date), a2.minor - path.at(a2.date)];
+          minor = Math.round(path.at(date) + r1 + (r2 - r1) * (diffDays(a1.date, date) / Math.max(1, diffDays(a1.date, a2.date))));
+        } else minor = this.valueBetween(d, a1, a2, date, index);
+        estimated = true;
+        basis = { ...basisOf(a1), to: a2.date, ...(path || index ? { prices: true as const } : {}) };
+      } else if (a1) {
         minor = a1.minor + (sumTo(d.flows, date) - sumTo(d.flows, a1.date));
         estimated = a1.source === 'approximate';
         basis = basisOf(a1);
       } else {
         const contributed = sumTo(d.flows, date);
-        const a2 = firstAnchorAfter(d.anchors, date);
         estimated = true;
         if (a2) basis = basisOf(a2, true);
-        if (a2 && (diffDays(date, a2.date) <= 45 || !d.fromStart)) {
+        const path = a2 ? this.pathFor(d, date, a2.date) : undefined;
+        const index = a2 && !path ? this.indexFor(d, date, a2.date) : undefined;
+        if (a2 && path) {
+          // As its holdings were worth at published prices, less what they were short of the valuation.
+          const rolled = Math.round(path.at(date) + a2.minor - path.at(a2.date));
+          minor = ACCOUNT_TYPE_META[account.type].liability ? rolled : Math.max(0, rolled);
+          basis = { ...basis!, prices: true };
+        } else if (a2 && index) {
+          // Rolled back from the first valuation as the prices moved, with the money that arrived since.
+          const I = (t: ISODate) => index.at(t);
+          const since = d.flowList.filter((f) => f.date > date && f.date <= a2.date).reduce((s, f) => s + f.minor * (I(a2.date) / I(f.date)), 0);
+          const rolled = Math.round((a2.minor - since) * (I(date) / I(a2.date)));
+          minor = ACCOUNT_TYPE_META[account.type].liability ? rolled : Math.max(0, rolled);
+          basis = { ...basis!, prices: true };
+        } else if (a2 && (diffDays(date, a2.date) <= 45 || !d.fromStart)) {
           // Close to the first valuation, or data that starts part-way through the account's life
           // (it was not empty when the first flow arrived): roll back by the money that arrived
           // since, as if nothing grew. An asset is never worth less than nothing.
@@ -370,6 +430,60 @@ export class BalanceEngine {
     }
     const value = fromMinor(minor);
     return { value, gbp: d.fx === null ? null : fromMinor(Math.round(minor * d.fx)), estimated, ...(basis ? { basis } : {}) };
+  }
+
+  /**
+   * A market account's holdings path for valuing days from `from` to `to` (prices.ts): from its
+   * holdings snapshot nearest the later day that has one good for them all.
+   */
+  private pathFor(d: AccountData, from: ISODate, to: ISODate): HoldingsPath | undefined {
+    if (!this.prices || !this.store.holdings || !this.store.instruments) return undefined;
+    const snaps = [...this.store.holdings(d.account.id)].sort((a, b) => Math.abs(diffDays(a.date, to)) - Math.abs(diffDays(b.date, to)) || b.date.localeCompare(a.date));
+    for (const snap of snaps) {
+      let path = this.paths.get(snap.id);
+      if (path === undefined) {
+        // Its cash: as the snapshot gives it, else a balance of that day or the next.
+        const cash = snap.cash ?? this.store.balances(d.account.id).find((b) => b.cash !== undefined && (b.date === snap.date || b.date === addDays(snap.date, 1)))?.cash;
+        path = holdingsPath(snap, cash, d.rows, this.store.instruments, this.prices) ?? null;
+        this.paths.set(snap.id, path);
+      }
+      if (path && path.from <= from && diffDays(path.to, to) <= PRICES_END_SLACK_DAYS) return path;
+    }
+    return undefined;
+  }
+
+  /**
+   * A market account's price index for valuing days from `from` to `to`: weighted by its holdings
+   * nearest the later day, when its prices cover them all (docs/FORMULAS.md §9, "Between valuations").
+   */
+  private indexFor(d: AccountData, from: ISODate, to: ISODate): PriceIndex | undefined {
+    if (!this.prices || !this.store.holdings || !this.store.instruments) return undefined;
+    const key = `${d.account.id}|${to}`;
+    let index = this.indexes.get(key);
+    if (index === undefined) {
+      index = indexNear(this.store.holdings(d.account.id), to, this.store.instruments, this.prices) ?? null;
+      this.indexes.set(key, index);
+    }
+    return index && covers(index, from, addDays(to, -PRICES_END_SLACK_DAYS)) ? index : undefined;
+  }
+
+  /**
+   * A value between two valuations (§9, "Between valuations"): the first, and each sum moved in or
+   * out since, grown as the index moved (by nothing with no index) and at one steady rate on top,
+   * the rate that makes them come to the second valuation on its day. When no rate does (money taken
+   * out that the valuations cannot follow), what is left unexplained there is shared out by days.
+   */
+  private valueBetween(d: AccountData, a1: Anchor, a2: Anchor, date: ISODate, index: PriceIndex | undefined): number {
+    const I = (t: ISODate) => (index ? index.at(t) : 1);
+    const flows = d.flowList.filter((f) => f.date > a1.date && f.date <= a2.date);
+    const model = (t: ISODate, rate: number) => {
+      const grown = (from: ISODate) => (I(t) / I(from)) * Math.exp(rate * diffDays(from, t));
+      return a1.minor * grown(a1.date) + flows.filter((f) => f.date <= t).reduce((s, f) => s + f.minor * grown(f.date), 0);
+    };
+    const rate = solveRate((r) => model(a2.date, r) - a2.minor);
+    if (rate !== undefined) return Math.round(model(date, rate));
+    const rest = a2.minor - model(a2.date, 0);
+    return Math.round(model(date, 0) + rest * (diffDays(a1.date, date) / Math.max(1, diffDays(a1.date, a2.date))));
   }
 
   /**

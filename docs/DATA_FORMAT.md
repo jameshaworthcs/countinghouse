@@ -626,7 +626,7 @@ One record per line, **append-only**, content-addressed (the same findings get t
 | Field | Notes |
 |---|---|
 | `id` | `res_` + 16 hex |
-| `kind` | `instrument.facts` `instrument.performance` `provider.rates` `provider.fees` `market.outlook` `economy.indicator` |
+| `kind` | `instrument.facts` `instrument.performance` `instrument.prices` `provider.rates` `provider.fees` `market.outlook` `economy.indicator` |
 | `subject` | `{instrumentId?, institutionId?, assetClass?, topic?}` |
 | `data` | per kind: see `ResearchDataSchemas` in `src/shared/schema.ts` and [AGENTS.md §3](AGENTS.md) |
 | `asOf` | the date the facts describe |
@@ -648,7 +648,9 @@ One record per line, **append-only**, content-addressed (the same findings get t
 | `period`, `expiresOn` | optional |
 | `provenance` | model, prompt version, job |
 | `status` | `active`, `dismissed` (by you) or `superseded` (by a newer run of the same job, or a newer review of the same month) |
-| `watch`, `followUp` | a month in review's: up to 3 lines for the next month's review to check, and how the review before's lines turned out (`{watch, outcome: done\|open\|unclear, note?}`); optional |
+| `watch`, `followUp` | a month in review's: up to 3 lines for the next month's review to check, and how the review before's lines turned out (`{watch, outcome: happened\|not-happened\|unclear, note?}`; older reviews say `done` and `open`); optional |
+| `keyPoints`, `sections`, `caveats` | a month in review's (since `monthly-review-6`): up to 5 points that mattered (`{text, evidence?}`), its parts in order (`{id: month\|typical\|people\|worth\|coming\|now, heading, body}`, held as text in `body` too), and up to 4 limits no earlier review raised; optional |
+| `unchecked`, `proposals` | a month in review's: figures it quotes the app could not find in the month's data, and the ids of the proposals it made; optional |
 | `supersedes`, `feedback`, `createdAt` | `feedback` is `{useful, note?, at}` |
 
 ### context.jsonl and notes.jsonl

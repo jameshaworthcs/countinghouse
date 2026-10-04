@@ -130,20 +130,18 @@ describe('what an insight may cite', () => {
     const ctx: JobContext = { store, analytics: new Analytics(store), params: { month: '2026-08' }, scratch: dir };
     const cite = (type: string, id: string) => ({ type, ids: null, id, metric: null, value: null, label: null });
     const out = {
-      insights: [
-        {
-          kind: 'month-review',
-          pages: ['overview'],
-          subject: { accountId: null, instrumentId: null, category: null, taxYear: null, month: '2026-08' },
-          title: 'August',
-          body: 'b',
-          confidence: 'medium',
-          evidence: [cite('payslip', 'pay_00000000000000c1'), cite('hmrc', 'hmrc_00000000000000c1'), cite('agreement', 'flat-lease'), cite('employment', 'acme'), cite('payslip', 'pay_ffffffffffffffff'), cite('company', 'nowhere-ltd')],
-          expiresInDays: 30,
-        },
-      ],
+      review: {
+        title: 'August',
+        keyPoints: [],
+        sections: [{ id: 'month', heading: 'The month', body: 'b' }],
+        caveats: [],
+        confidence: 'medium',
+        evidence: [cite('payslip', 'pay_00000000000000c1'), cite('hmrc', 'hmrc_00000000000000c1'), cite('agreement', 'flat-lease'), cite('employment', 'acme'), cite('payslip', 'pay_ffffffffffffffff'), cite('company', 'nowhere-ltd')],
+      },
+      insights: [],
       watch: [],
       followUp: [],
+      proposals: [],
     };
     await JOB_DEFS['monthly-review'].apply(ctx, out, { setBy: 'agent', model: 'claude-test', promptVersion: 'test', jobId: 'job_test' });
     expect(store.insights[0]!.evidence).toEqual([

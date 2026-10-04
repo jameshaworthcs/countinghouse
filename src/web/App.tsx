@@ -22,6 +22,7 @@ const Proposal = lazy(() => import('./pages/Proposal'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Assumptions = lazy(() => import('./pages/Assumptions'));
 const Sessions = lazy(() => import('./pages/Sessions'));
+const Reviews = lazy(() => import('./pages/Reviews'));
 
 interface AuthStatus {
   configured: boolean;
@@ -87,6 +88,7 @@ const router = createBrowserRouter([
           { path: 'import', element: page(<Import />) },
           { path: 'import/:id', element: page(<Review />) },
           { path: 'proposals/:id', element: page(<Proposal />) },
+          { path: 'reviews', element: page(<Reviews />) },
           { path: 'settings', element: page(<Settings />) },
           { path: 'sessions', element: page(<Sessions />) },
           { path: 'sessions/:id', element: page(<Sessions />) },

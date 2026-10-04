@@ -513,6 +513,9 @@ read again.
   1. same bank id;
   2. same date + amount + simplified description, matched as a multiset (two identical coffees
      stay two);
+  2b. same amount + simplified description with the same date printed in both ("S Date
+     16/06/26"), up to 10 days apart, matched as a multiset: ii's export posts a trade on the day it
+     was made and its statement on the day it settled;
   3. same date + amount + balance after it (both known), matched as a multiset. The running
      balance places a row whatever each source calls it: Chase's statement says "To Credit Card"
      where its export says "To Revolving Line Account";

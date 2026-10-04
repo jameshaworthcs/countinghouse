@@ -662,6 +662,189 @@
         },
         "kind": {
           "type": "string",
+          "const": "instrument.prices"
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "currency": {
+              "default": "GBP",
+              "type": "string",
+              "pattern": "^[A-Z]{3}$",
+              "description": "ISO 4217 currency code"
+            },
+            "listing": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "points": {
+              "minItems": 1,
+              "maxItems": 1500,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "date": {
+                    "type": "string",
+                    "description": "Calendar date, YYYY-MM-DD"
+                  },
+                  "price": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  }
+                },
+                "required": [
+                  "date",
+                  "price"
+                ]
+              }
+            }
+          },
+          "required": [
+            "points"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "subject",
+        "asOf",
+        "sources",
+        "provenance",
+        "createdAt",
+        "kind",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^res_[0-9a-f]{16}$"
+        },
+        "subject": {
+          "type": "object",
+          "properties": {
+            "instrumentId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+              "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+            },
+            "institutionId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+              "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+            },
+            "assetClass": {
+              "type": "string",
+              "enum": [
+                "equity",
+                "bond",
+                "mixed",
+                "property",
+                "cash",
+                "commodity",
+                "crypto",
+                "other"
+              ]
+            },
+            "topic": {
+              "type": "string",
+              "maxLength": 80
+            }
+          }
+        },
+        "asOf": {
+          "type": "string",
+          "description": "Calendar date, YYYY-MM-DD"
+        },
+        "sources": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 300
+              },
+              "url": {
+                "type": "string",
+                "format": "uri"
+              },
+              "publisher": {
+                "type": "string",
+                "maxLength": 120
+              },
+              "retrievedOn": {
+                "type": "string",
+                "description": "Calendar date, YYYY-MM-DD"
+              },
+              "quote": {
+                "type": "string",
+                "maxLength": 600
+              }
+            },
+            "required": [
+              "title"
+            ]
+          }
+        },
+        "confidence": {
+          "default": "medium",
+          "type": "string",
+          "enum": [
+            "high",
+            "medium",
+            "low"
+          ]
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "provenance": {
+          "type": "object",
+          "properties": {
+            "setBy": {
+              "type": "string",
+              "enum": [
+                "owner",
+                "agent",
+                "system"
+              ]
+            },
+            "model": {
+              "type": "string"
+            },
+            "promptVersion": {
+              "type": "string"
+            },
+            "jobId": {
+              "type": "string"
+            },
+            "session": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "setBy"
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+          "description": "ISO 8601 timestamp"
+        },
+        "kind": {
+          "type": "string",
           "const": "provider.rates"
         },
         "data": {

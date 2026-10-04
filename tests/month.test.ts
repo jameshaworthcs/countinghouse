@@ -9,13 +9,14 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { buildMonthDigest } from '../src/server/agents/digest';
+import { buildMonthDigest, monthTransactionsFile } from '../src/server/agents/digest';
 import { JobRunner } from '../src/server/agents/jobs';
-import { JOB_DEFS } from '../src/server/agents/kinds';
+import { JOB_DEFS, uncheckedFigures } from '../src/server/agents/kinds';
 import { Analytics } from '../src/server/analytics';
 import { flows } from '../src/server/analytics/cashflow';
 import { loadConfig } from '../src/server/config';
 import { balanceId, hmrcId, transactionId } from '../src/server/ids';
+import { ProposalService } from '../src/server/proposals';
 import { Store } from '../src/server/store';
 import { defaultCategories } from '../src/shared/categories';
 import { toMinor } from '../src/shared/money';
@@ -152,6 +153,44 @@ describe('a month’s figures', () => {
     // What the agreement has due after the month.
     expect(m.coming).toEqual([{ date: '2026-10-15', amount: 1500, direction: 'in', agreementId: 'maintenance', name: 'Maintenance Loan 2026/27' }]);
     expect(m.payees.new.map((p) => p.payee)).toContain('Example Sofa Co');
+    // Where it went, adding up: kept in the bank and the saver; what the loan lent and paid comes to nothing.
+    expect(m.whereItWent.total).toBe(2156.99);
+    expect(m.whereItWent.items.map((i) => [i.id, i.amount])).toEqual([['cash', 2156.99]]);
+    expect(m.whereItWent.items[0]!.parts).toEqual([
+      { id: 'bank', name: 'bank', amount: 1956.94 },
+      { id: 'saver', name: 'saver', amount: 200.05 },
+    ]);
+    // By category: groceries against the months before, with each of the 12 months' amounts.
+    const groceries = m.categories.top.find((c) => c.id === 'groceries')!;
+    expect(groceries).toMatchObject({ amount: 155.5, count: 2, compared: { median: 155.5, months: 7 } });
+    expect(groceries.history).toHaveLength(12);
+    expect(groceries.history.at(-1)).toEqual({ month: '2026-08', amount: 155.5, complete: true });
+    expect(groceries.history[0]).toMatchObject({ month: '2025-09', amount: 0, complete: false });
+    // Its group nets off the £30 Alex paid back for dinner, filed under eating out.
+    expect(m.categories.groups.find((g) => g.id === groceries.group!.id)!.amount).toBe(125.5);
+  });
+
+  it('where it went names money sent to accounts the app doesn’t know, paid onto cards and into an ISA, and always adds up', async () => {
+    await months();
+    await store.setAccounts([...store.accounts, acct('card', 'credit_card')]);
+    await store.addTransactions(
+      [
+        tx('bank', '2026-08-27', -250, 'FASTER PAYMENT TO EXAMPLE BROKER', { category: 'investment-transfer', categorisedBy: 'user' }),
+        tx('bank', '2026-08-28', -300, 'TO ISA', { category: 'investment-transfer', categorisedBy: 'transfer', transferGroup: 'tg_isa', counterpartyAccountId: 'isa' }),
+        tx('isa', '2026-08-28', 300, 'SUBSCRIPTION', { category: 'contribution', categorisedBy: 'transfer', transferGroup: 'tg_isa', counterpartyAccountId: 'bank' }),
+        tx('card', '2026-08-05', -80, 'EXAMPLE CAFE', { category: 'eating-out', categorisedBy: 'user' }),
+        tx('bank', '2026-08-29', -100, 'CARD PAYMENT', { category: 'credit-card-payment', categorisedBy: 'transfer', transferGroup: 'tg_card', counterpartyAccountId: 'card' }),
+        tx('card', '2026-08-29', 100, 'PAYMENT RECEIVED', { category: 'credit-card-payment', categorisedBy: 'transfer', transferGroup: 'tg_card', counterpartyAccountId: 'bank' }),
+      ],
+      't',
+    );
+    const w = new Analytics(store).month('2026-08').whereItWent;
+    const item = (id: string) => w.items.find((i) => i.id === id);
+    expect(item('unknown')).toMatchObject({ amount: 250, parts: [{ name: 'Example Broker', amount: 250, count: 1 }] });
+    expect(item('invested')).toMatchObject({ amount: 300, parts: [{ id: 'isa', amount: 300 }] });
+    expect(item('cards')!.amount).toBe(20);
+    expect(item('unexplained')).toBeUndefined();
+    expect(w.items.reduce((s, i) => s + toMinor(i.amount), 0)).toBe(toMinor(w.total));
   });
 
   it('counts cash paid in still to confirm, and what rests on a category the bank or the reader guessed', async () => {
@@ -250,21 +289,77 @@ describe('the month in review’s digest', () => {
 });
 
 describe('a month in review’s output', () => {
+  const evidence = [{ type: 'computed', ids: null, id: null, metric: 'focus.spending.total', value: 1, label: null }];
   const out = (kinds: string[], extra: Record<string, unknown> = {}) => ({
-    insights: kinds.map((kind) => ({ kind, pages: ['overview'], subject: { accountId: null, instrumentId: null, category: null, taxYear: null, month: null }, title: `A ${kind}`, body: 'Said.', confidence: 'medium', evidence: [{ type: 'computed', ids: null, id: null, metric: 'spending', value: 1, label: null }], expiresInDays: 30 })),
+    review: {
+      title: 'July: the sofa, and groceries steady',
+      keyPoints: [
+        { text: 'A £400 sofa was the month’s one big payment.', evidence: [{ type: 'transactions', ids: ['tx_0000000000000000'], id: null, metric: null, value: null, label: 'not a real id' }, ...evidence] },
+        { text: '  ', evidence: [] },
+      ],
+      sections: [
+        { id: 'month', heading: 'The month', body: 'Pay of £2,000 came in.' },
+        { id: 'now', heading: 'What to do now', body: 'Use your ISA allowance.' },
+      ],
+      caveats: ['Typical rests on six months.'],
+      confidence: 'medium',
+      evidence,
+    },
+    insights: kinds.map((kind) => ({ kind, pages: ['overview'], subject: { accountId: null, instrumentId: null, category: null, taxYear: null, month: null }, title: `A ${kind}`, body: 'Said.', confidence: 'medium', evidence, expiresInDays: 30 })),
     watch: ['Whether the sofa was the last big payment', ''],
-    followUp: [{ watch: 'Whether groceries stay near £200', outcome: 'done', note: 'They were £155.50.' }],
+    followUp: [{ watch: 'Whether groceries stay near £200', outcome: 'not-happened', note: 'They were £155.50.' }],
+    proposals: [],
     ...extra,
   });
   const provenance = { setBy: 'agent' as const, model: 'test', promptVersion: REVIEW_VERSION, jobId: 'job_new' };
-  const ctx = (params: Record<string, unknown>) => ({ store, analytics: new Analytics(store), params, scratch: dir });
+  const ctx = (params: Record<string, unknown>, proposals?: ProposalService) => ({ store, analytics: new Analytics(store), params, scratch: dir, ...(proposals ? { proposals } : {}) });
 
-  it('carries what to watch and how the last lines turned out; written later, it is the month’s review alone', async () => {
+  it('keeps its title, key points, parts and new limits; written later, it is the month’s review alone, with nothing about now', async () => {
     await months();
-    await JOB_DEFS['monthly-review'].apply(ctx({ month: '2026-07', catchUp: true }), out(['month-review', 'habit']), provenance);
+    await JOB_DEFS['monthly-review'].apply(ctx({ month: '2026-07', catchUp: true }), out(['habit']), provenance, ['£999.99']);
     const written = store.insights.filter((i) => i.status === 'active');
     expect(written.map((i) => i.kind)).toEqual(['month-review']);
-    expect(written[0]).toMatchObject({ subject: { month: '2026-07' }, watch: ['Whether the sofa was the last big payment'], followUp: [{ watch: 'Whether groceries stay near £200', outcome: 'done', note: 'They were £155.50.' }], period: { from: '2026-07-01', to: '2026-07-31' } });
+    expect(written[0]).toMatchObject({
+      title: 'July: the sofa, and groceries steady',
+      subject: { month: '2026-07' },
+      keyPoints: [{ text: 'A £400 sofa was the month’s one big payment.', evidence: [{ type: 'computed', metric: 'focus.spending.total' }] }],
+      sections: [{ id: 'month', heading: 'The month', body: 'Pay of £2,000 came in.' }],
+      caveats: ['Typical rests on six months.'],
+      watch: ['Whether the sofa was the last big payment'],
+      followUp: [{ watch: 'Whether groceries stay near £200', outcome: 'not-happened', note: 'They were £155.50.' }],
+      unchecked: ['£999.99'],
+      period: { from: '2026-07-01', to: '2026-07-31' },
+    });
+    expect(written[0]!.body).toBe('The month\nPay of £2,000 came in.');
+  });
+
+  it('proposes the fixes it found, leaving out a change that does not fit the data', async () => {
+    await months();
+    const proposals = ProposalService.forWorkDir(store, path.join(dir, 'work'));
+    await proposals.init();
+    const rent = store.transactions('bank').find((t) => t.description === 'EXAMPLE LETTINGS RENT' && t.date === '2026-07-01')!;
+    await JOB_DEFS['monthly-review'].apply(
+      ctx({ month: '2026-07' }, proposals),
+      out([], {
+        proposals: [
+          {
+            title: 'Rent to Example Lettings',
+            summary: 'The same £900 goes to Example Lettings on the 1st of every month, uncategorised.',
+            changes: [
+              { kind: 'set_category', why: 'Rent, on the 1st as every month.', transaction: rent.id, category: 'rent', note: null, rule: null },
+              { kind: 'set_category', why: 'No such payment.', transaction: 'tx_ffffffffffffffff', category: 'rent', note: null, rule: null },
+              { kind: 'add_rule', why: 'Every month the same payee.', transaction: null, category: 'rent', note: null, rule: { name: 'Example Lettings', field: 'description', op: 'contains', value: 'EXAMPLE LETTINGS', direction: 'out' } },
+            ],
+          },
+        ],
+      }),
+      provenance,
+    );
+    const pending = proposals.list().pending;
+    expect(pending).toHaveLength(1);
+    expect(pending[0]!.proposal.changes.map((c) => c.kind)).toEqual(['set_category', 'add_rule']);
+    const review = store.insights.find((i) => i.kind === 'month-review' && i.status === 'active')!;
+    expect(review.proposals).toEqual([pending[0]!.proposal.id]);
   });
 
   it('a rerun replaces every note an earlier review of the month wrote, and nothing else', async () => {
@@ -280,8 +375,45 @@ describe('a month in review’s output', () => {
     await JOB_DEFS['monthly-review'].apply(ctx({ month: '2026-08' }), out(['month-review']), provenance);
     const status = (id: string) => store.insights.find((i) => i.id === id)!.status;
     expect(old.map((i) => status(i.id))).toEqual(['superseded', 'superseded', 'active', 'active', 'active']);
-    const fresh = store.insights.find((i) => i.provenance.jobId === 'job_new')!;
+    const fresh = store.insights.find((i) => i.provenance.jobId === 'job_new' && i.kind === 'month-review')!;
     expect(fresh.supersedes).toBe(old[0]!.id);
+    // The latest month keeps its part about now; a second month-review among the other notes is not kept.
+    expect(fresh.sections!.map((x) => x.id)).toEqual(['month', 'now']);
+    expect(store.insights.filter((i) => i.provenance.jobId === 'job_new')).toHaveLength(1);
+  });
+
+  it('finds the figures it quotes that are not in the data, to the penny, or to the pound when written so', () => {
+    const known = { exact: new Set([155_50, 2_000_00, 1_055_50]), pounds: new Set([156, 2000, 1056]) };
+    expect(uncheckedFigures(['Groceries were £155.50, pay £2,000 and spending £1,056.', 'About £3,000 went to savings.', '−£155.50 back'], known)).toEqual([]);
+    expect(uncheckedFigures(['Groceries were £155.51 and rent £900.', 'The ISA is worth £120k.'], known)).toEqual(['£155.51', '£900']);
+  });
+});
+
+describe('the month in review’s digest, version 5', () => {
+  it('has every earlier review in short, the year’s payees, trips, who each payment was with, and a file of payments to search up to the month’s end', async () => {
+    await months();
+    await store.addTransactions(
+      [
+        tx('bank', '2026-06-03', -120, 'EXAMPLE AIR', { category: 'holidays', categorisedBy: 'user' }),
+        tx('bank', '2026-06-06', -45, 'EXAMPLE TAVERNA', { category: 'holidays', categorisedBy: 'user' }),
+        tx('bank', '2026-07-20', -30, 'EXAMPLE MUSEUM', { category: 'holidays', categorisedBy: 'user' }),
+      ],
+      't',
+    );
+    await store.upsertRecords('insights', [insight({ subject: { month: '2026-05' }, title: 'May', caveats: ['Typical rests on four months.'], keyPoints: [{ text: 'Rent rose.' }] }), insight({ subject: { month: '2026-06' }, title: 'June' })], 'i');
+    const a = new Analytics(store);
+    const july = buildMonthDigest(store, a, { month: '2026-07', catchUp: true });
+    expect(july.earlierReviews.map((r) => [r.month, r.title, r.keyPoints, r.caveats])).toEqual([
+      ['2026-05', 'May', ['Rent rose.'], ['Typical rests on four months.']],
+      ['2026-06', 'June', [], []],
+    ]);
+    expect(july.payeesYear[0]).toMatchObject({ payee: 'Example Lettings Rent', total: 6300, count: 7, months: 7, thisMonth: 900 });
+    // The two June days are one trip; July's museum is another, small but on its own.
+    expect(july.trips.map((t) => [t.from, t.to, t.spent])).toEqual([['2026-06-03', '2026-06-06', 165]]);
+    expect(july.focus.transactions.moneyIn[0]).toHaveProperty('person');
+    const file = monthTransactionsFile(store, a, '2026-07');
+    expect(file).toContain('EXAMPLE MUSEUM');
+    expect(file).not.toContain('2026-08-');
   });
 });
 

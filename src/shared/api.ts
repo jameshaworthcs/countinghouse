@@ -1532,6 +1532,10 @@ export interface BalanceBasis {
   date: string;
   kind: 'balance' | 'running' | 'screenshot' | 'approximate';
   after?: true;
+  /** Estimated between this valuation and the next, on this day (docs/FORMULAS.md §9, "Between valuations"). */
+  to?: string;
+  /** Shaped by the holdings' published prices, not shared out evenly by days. */
+  prices?: true;
 }
 
 /** An account's value at the start and end of a month, and what the end value rests on. */
@@ -1615,6 +1619,39 @@ export interface MonthSummary {
   };
   /** What your agreements have due in the 60 days after the month, in and out. */
   coming: { date: string; amount: number; direction: 'in' | 'out'; agreementId: string; name: string; label?: string }[];
+  /** Where the money left over (and any borrowed) went, item by item: they add up to `total` exactly (§18, "Where it went"). */
+  whereItWent: MonthWhereItWent;
+  /** Spending by category group, and the largest categories, each against the months before (§18, "By category"). */
+  categories: { groups: MonthCategory[]; top: MonthCategory[] };
+}
+
+/** One item of where a month's money went. */
+export interface MonthWhereItem {
+  id: 'cash' | 'cards' | 'invested' | 'loans' | 'unknown' | 'unexplained';
+  label: string;
+  /** Positive: money that went there (kept in cash, paid off cards, invested, sent away). */
+  amount: number;
+  /** By account (cash, cards, invested), or by who it went to (unknown), the largest first. */
+  parts: { id: string; name: string; amount: number; count?: number }[];
+}
+
+export interface MonthWhereItWent {
+  /** Left over (income less spending) plus borrowed. */
+  total: number;
+  items: MonthWhereItem[];
+}
+
+/** A category group's or a category's spending in a month, against the months before. */
+export interface MonthCategory {
+  id: string;
+  name: string;
+  /** For a category, its group. */
+  group?: { id: string; name: string };
+  amount: number;
+  count: number;
+  compared?: MonthCompared;
+  /** The 12 months up to and including this one, oldest first; `complete` says whether each counts for typical. */
+  history: { month: string; amount: number; complete: boolean }[];
 }
 
 /** The To categorise page (GET /categorise/queue): people's payments, rules to make, and what's left by payee. */
