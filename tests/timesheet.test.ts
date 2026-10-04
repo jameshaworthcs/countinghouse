@@ -9,6 +9,7 @@ import path from 'node:path';
 import * as XLSX from 'xlsx';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createApp, type App } from '../src/server/app';
+import { CLAUDE_TASKS } from './claude-tasks';
 import { loadConfig } from '../src/server/config';
 import { suggestMapping } from '../src/server/ingest/csv';
 import { checkEarnedPay } from '../src/server/ingest/timesheet';
@@ -149,6 +150,7 @@ describe('importing a timesheet', () => {
     const config = loadConfig({ FINANCE_DATA_DIR: path.join(dir, 'data'), FINANCE_WORK_DIR: path.join(dir, 'work'), FINANCE_WATCH: '0' });
     config.webDist = path.join(dir, 'no-web');
     app = await createApp(config, { version: 'test', env: {}, inbox: false });
+    await app.ctx.store.setSettings({ ...app.ctx.store.settings, models: CLAUDE_TASKS });
   });
   afterEach(async () => {
     await app.close();
@@ -214,18 +216,18 @@ describe('importing a timesheet', () => {
     expect(rec.extraction.warnings).toEqual([]);
   });
 
-  it('can be mapped like a CSV instead, and is when Claude is not the reader', async () => {
+  it('can be mapped like a CSV instead, and is when no model is the reader', async () => {
     const rec = await upload();
     await req(`/api/imports/${rec.id}/reprocess`, json({ readAs: 'columns' }));
     const mapped = await waitFor(rec.id, ['needs_mapping', 'review', 'failed']);
     expect(mapped.status).toBe('needs_mapping');
     expect(mapped.extraction.engine).toBe('csv');
 
-    const settings = (await (await req('/api/settings')).json()) as Record<string, { engine: string }>;
-    await req('/api/settings', { method: 'PUT', headers: { ...CSRF, 'content-type': 'application/json' }, body: JSON.stringify({ ...settings, extraction: { ...settings.extraction, engine: 'ocr' } }) });
+    const settings = (await (await req('/api/settings')).json()) as Record<string, unknown>;
+    await req('/api/settings', { method: 'PUT', headers: { ...CSRF, 'content-type': 'application/json' }, body: JSON.stringify({ ...settings, models: { tasks: { 'read-document': { engine: 'ocr' } } } }) });
     await req(`/api/imports/${rec.id}/reprocess`, json({}));
     const fallback = await waitFor(rec.id, ['needs_mapping', 'review', 'failed']);
     expect(fallback.status).toBe('needs_mapping');
-    expect(fallback.extraction.warnings[0]).toMatch(/does not look like a list of payments, but Claude is not available/);
+    expect(fallback.extraction.warnings[0]).toMatch(/does not look like a list of payments, but no model is set up to read it/);
   });
 });

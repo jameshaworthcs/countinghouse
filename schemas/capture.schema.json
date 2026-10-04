@@ -208,6 +208,53 @@
               "model": {
                 "type": "string"
               },
+              "engine": {
+                "type": "string",
+                "enum": [
+                  "inference",
+                  "claude-cli",
+                  "claude-api"
+                ]
+              },
+              "inference": {
+                "type": "object",
+                "properties": {
+                  "requestId": {
+                    "type": "string"
+                  },
+                  "alias": {
+                    "type": "string"
+                  },
+                  "modelId": {
+                    "type": "string"
+                  },
+                  "modelSha256": {
+                    "type": "string"
+                  },
+                  "systemFingerprint": {
+                    "type": "string"
+                  },
+                  "seed": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "thinking": {
+                    "type": "boolean"
+                  },
+                  "schemaValid": {
+                    "type": "boolean"
+                  },
+                  "queueMs": {
+                    "type": "number",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "requestId",
+                  "alias"
+                ]
+              },
               "promptVersion": {
                 "type": "string"
               },

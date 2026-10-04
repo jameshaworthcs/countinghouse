@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, CircleAlert, CircleCheck, Copy, Eye, GitCommitHorizontal, KeyRound, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Copy, Eye, GitCommitHorizontal, KeyRound, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { Fragment, useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import type { AllowancesResponse, DataHealthResponse, EnrichGroup, EnrichPreview, Handover, SystemResponse, TaxDocSource, TaxDocumentsResponse, TokensResponse } from '../../shared/api';
@@ -15,6 +15,7 @@ import { useAppData } from '../lib/data';
 import { bandLabel, cn, money, timeAgo } from '../lib/format';
 import { Sorted } from '../lib/sort';
 import { SessionsLink } from '../components/SessionsLink';
+import { ModelsCard } from '../components/ModelsCard';
 
 type Section = 'profile' | 'extraction' | 'categories' | 'rules' | 'tax-documents' | 'data' | 'access' | 'audit' | 'health';
 
@@ -118,90 +119,31 @@ function ExtractionForm() {
   const setEx = (patch: Partial<SettingsT['extraction']>) => setS({ ...s, extraction: { ...ex, ...patch } });
   return (
     <div className="flex flex-col gap-5">
-      <Card title="Reading PDFs and screenshots" description="CSV, OFX, QIF and Santander TXT files, HMRC’s pages saved from gov.uk, and payslips in a layout known here (SAP paystubs, the classic UK payslip), are always read on this machine.">
-        <ul className="mb-4 flex flex-col gap-2">
-          {sys.data?.engines.map((e) => (
-            <li key={e.id} className="flex items-start gap-2 text-[13px]">
-              {e.available ? <CircleCheck className="mt-0.5 size-4 shrink-0 text-good-ink" /> : <CircleAlert className="mt-0.5 size-4 shrink-0 text-ink-3" />}
-              <div>
-                <span className="font-medium text-ink">{e.id === 'claude-cli' ? 'Claude via your Claude Code login' : e.id === 'claude-api' ? 'Claude API key' : 'Offline OCR'}</span>
-                {e.external && <Badge tone="neutral" className="ml-2">sends documents to Anthropic</Badge>}
-                <div className="text-ink-3">{e.detail}</div>
-              </div>
-            </li>
-          ))}
-        </ul>
+      <ModelsCard s={s} setS={setS} sys={sys.data} />
+      <Card title="Reading PDFs and screenshots" description="CSV, OFX, QIF and Santander TXT files, HMRC’s pages saved from gov.uk, and payslips in a layout known here (SAP paystubs, the classic UK payslip), are always read on this machine. The rest is read by the model Models gives reading documents, and checked by the one it gives checking.">
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Engine">
-            <Select value={ex.engine} onChange={(e) => setEx({ engine: e.target.value as SettingsT['extraction']['engine'] })}>
-              <option value="auto">Automatic (best available)</option>
-              <option value="claude-cli">Claude via CLI login</option>
-              <option value="claude-api">Claude API</option>
-              <option value="ocr">Offline OCR only</option>
-            </Select>
-          </Field>
-          <Field label="Reads every document" hint="Sonnet is quick and cheap; its reading is then checked">
-            <Select value={ex.model} onChange={(e) => setEx({ model: e.target.value })}>
-              <option value="sonnet">Sonnet</option>
-              <option value="opus">Opus</option>
-              <option value="fable">Fable</option>
-              <option value="haiku">Haiku</option>
-            </Select>
-          </Field>
-          <Field label="Checked by" hint="Reads a document again when the checks fail, or when nothing on it can confirm the figures">
-            <Select value={ex.verifyModel} onChange={(e) => setEx({ verifyModel: e.target.value })}>
-              <option value="opus">Opus</option>
-              <option value="fable">Fable</option>
-              <option value="sonnet">Sonnet</option>
-              <option value="">No second reading</option>
-            </Select>
-          </Field>
-          <Field label="Effort">
-            <Select value={ex.effort} onChange={(e) => setEx({ effort: e.target.value as SettingsT['extraction']['effort'] })}>
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-              <option value="xhigh">Extra high</option>
-              <option value="max">Max</option>
-            </Select>
-          </Field>
           <Field label="Files read at once">
             <Input type="number" min={1} max={4} value={ex.maxConcurrent} onChange={(e) => setEx({ maxConcurrent: Math.min(4, Math.max(1, Number(e.target.value) || 1)) })} />
           </Field>
         </div>
         <div className="mt-4">
-          <Switch checked={ex.readReceipts} onChange={(v) => setEx({ readReceipts: v })} label="Read receipts with the agent" description="When you attach a receipt to a transaction, the agent reads its lines (with the model above, about $0.05 each) and suggests how to split the payment. Nothing changes until you save the split. Off: receipts are only kept." />
-          <Switch checked={ex.rereadDocuments} onChange={(v) => setEx({ rereadDocuments: v })} label="Read stored documents again" description="On a committed import’s page, read its document again with the current reader and see what it finds different from what was recorded (a reading costs what an upload does). You apply each difference yourself." />
+          <Switch checked={ex.readReceipts} onChange={(v) => setEx({ readReceipts: v })} label="Read receipts" description="When you attach a receipt to a transaction, the model Models gives receipts reads its lines and suggests how to split the payment (the local model takes a minute or two; Claude costs about $0.05 each). Nothing changes until you save the split. Off: receipts are only kept." />
+          <Switch checked={ex.rereadDocuments} onChange={(v) => setEx({ rereadDocuments: v })} label="Read stored documents again" description="On a committed import’s page, read its document again with the current reader and see what it finds different from what was recorded (a reading takes what an upload does). You apply each difference yourself." />
           <Switch checked={ex.readEverything} onChange={(v) => setEx({ readEverything: v })} label="Read everything a document prints" description="The agent also keeps what has nowhere else to go: a scanned payslip in full, HMRC’s pages as their records, and every other labelled value (rates, limits, a P60’s NI table). A reading takes a little longer. Off until its evaluation run has passed; your gov.uk pages and known payslip layouts are read in full on this machine either way." />
         </div>
       </Card>
-      <Card title="Agents" description="Jobs that research what you hold, keep assumptions current and write insights, through the same Claude login. Research jobs send only public identifiers (fund names, ISINs, providers); jobs that read your data get no web access.">
+      <Card title="Agents" description="Jobs that research what you hold, keep assumptions current, write insights, name imports and understand your notes, each with the model Models gives it. Research jobs send only public identifiers (fund names, ISINs, providers); jobs that read your data get no web access.">
         <div className="flex flex-col gap-3">
           <Switch checked={s.agents.enabled} onChange={(v) => setS({ ...s, agents: { ...s.agents, enabled: v } })} label="Let agents start jobs by themselves" description="Insights after imports and the month in review, within the budget below. You can always start any job yourself." />
           <Switch checked={s.agents.autoResearch} onChange={(v) => setS({ ...s, agents: { ...s.agents, autoResearch: v } })} label="Research by itself too" description="Off: fund, provider and assumption research runs only when you press Run now on Assumptions & research → Agent jobs. On: new funds and providers, stale research (at most three a day) and assumptions on fallbacks (at most weekly) start within the budget." />
           <Switch checked={s.agents.insightsAfterImport} onChange={(v) => setS({ ...s, agents: { ...s.agents, insightsAfterImport: v } })} label="Insights after each import" />
           <Switch checked={s.agents.monthlyReview} onChange={(v) => setS({ ...s, agents: { ...s.agents, monthlyReview: v } })} label="A month in review once a month’s data is complete" />
-          <Switch checked={s.agents.labelImports} onChange={(v) => setS({ ...s, agents: { ...s.agents, labelImports: v } })} label="Name imports with the agent" description="A minute after you commit or file imports, the agent names each from what was read from it (“Monzo current account statement, Sep 2026”), so Import → History can be searched by what a document is. It sees the kind, provider, accounts and dates, never amounts or numbers, and gets no tools; a batch costs a few cents, within the budget below. Your own names are kept. On: History also offers to name the ones from before. This switch is enough on its own." />
+          <Switch checked={s.agents.labelImports} onChange={(v) => setS({ ...s, agents: { ...s.agents, labelImports: v } })} label="Name imports with the agent" description="A minute after you commit or file imports, the agent names each from what was read from it (“Monzo current account statement, Sep 2026”), so Import → History can be searched by what a document is. It sees the kind, provider, accounts and dates, never amounts or numbers, and gets no tools; on Claude a batch costs a few cents, within the budget below, and on the local model nothing. Your own names are kept. On: History also offers to name the ones from before. This switch is enough on its own." />
           <div className="grid gap-3 sm:grid-cols-3">
-            <Field label="Model">
-              <Select value={s.agents.model} onChange={(e) => setS({ ...s, agents: { ...s.agents, model: e.target.value } })}>
-                <option value="opus">Opus</option>
-                <option value="sonnet">Sonnet</option>
-                <option value="fable">Fable</option>
-              </Select>
-            </Field>
-            <Field label="Effort">
-              <Select value={s.agents.effort} onChange={(e) => setS({ ...s, agents: { ...s.agents, effort: e.target.value as SettingsT['agents']['effort'] } })}>
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-                <option value="xhigh">Extra high</option>
-              </Select>
-            </Field>
             <Field label="Refresh research after (days)">
               <Input type="number" min={7} max={730} value={s.agents.researchStaleAfterDays} onChange={(e) => setS({ ...s, agents: { ...s.agents, researchStaleAfterDays: Math.min(730, Math.max(7, Number(e.target.value) || 90)) } })} />
             </Field>
-            <Field label="Background budget per day ($)" hint="Claude usage at API prices">
+            <Field label="Background budget per day ($)" hint="Claude usage at API prices; the local model costs nothing">
               <Input type="number" min={0} max={100} step={1} value={s.agents.backgroundBudgetPerDayUsd} onChange={(e) => setS({ ...s, agents: { ...s.agents, backgroundBudgetPerDayUsd: Math.min(100, Math.max(0, Number(e.target.value) || 0)) } })} />
             </Field>
             <Field label="Background budget per month ($)">
@@ -1498,7 +1440,7 @@ export default function Settings() {
   const section = ((location.hash.slice(1) || 'profile') as Section) ?? 'profile';
   const tabs: { value: Section; label: string }[] = [
     { value: 'profile', label: 'Profile' },
-    { value: 'extraction', label: 'Import & extraction' },
+    { value: 'extraction', label: 'Models & import' },
     { value: 'categories', label: 'Categories' },
     { value: 'rules', label: 'Rules' },
     { value: 'tax-documents', label: 'Tax documents' },

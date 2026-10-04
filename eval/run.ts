@@ -6,11 +6,16 @@
 //   npm run eval -- --render              write the documents to eval/.out/docs and stop
 //   npm run eval -- --model sonnet --effort medium --concurrency 3 --label note
 //   npm run eval -- --everything --only png-payslip-scan,pdf-p60,pdf-barclaycard,pdf-marcus-savings   the reader that reads everything (extract-14)
-//   npm run eval -- --verify-model off    Sonnet's reading alone, without the second reading
+//   npm run eval -- --verify-model off    the first reading alone, without the second reading
+//   npm run eval -- --engine inference    read on the local model service (check with it too)
+//   npm run eval -- --engine inference --model chat-q8 --label q8   a bake-off alias (swaps the GPU)
+//   npm run eval -- --engine claude-cli --model sonnet --verify-model opus   Claude (the default)
 //
 // Each case (or group) gets a temporary store holding the accounts in cases.ts, so account
-// matching and duplicate detection are measured too. PDFs and screenshots go to Claude through
-// the logged-in CLI, exactly as uploads do; this spends the Claude plan. Results are written to
+// matching and duplicate detection are measured too. PDFs and screenshots go to the model Settings →
+// Models gives reading documents, exactly as uploads do (--engine and --model choose another): on
+// Claude that spends the Claude plan; on the local model service (INFERENCE_BASE_URL and
+// INFERENCE_API_KEY in .env) it takes minutes a document on the shared GPU. Results are written to
 // eval/results/ (small JSON, kept in git) with the prompt version, so runs can be compared.
 
 import { existsSync } from 'node:fs';
@@ -18,13 +23,14 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import puppeteer from 'puppeteer-core';
-import { loadConfig, PROJECT_ROOT } from '../src/server/config';
+import { loadConfig, loadDotEnv, PROJECT_ROOT } from '../src/server/config';
 import { ImportService } from '../src/server/ingest/service';
 import { promptVersion } from '../src/server/ingest/prompt';
 import { WorkArea } from '../src/server/ingest/workarea';
 import { Store } from '../src/server/store';
 import { defaultCategories } from '../src/shared/categories';
-import type { ImportRecord } from '../src/shared/schema';
+import type { ImportRecord, Settings } from '../src/shared/schema';
+import { isInferenceAlias, type TaskEngine } from '../src/shared/tasks';
 import { buildCases, EVAL_ACCOUNTS, type EvalCase } from './cases';
 import { renderPdf, renderPng } from './render';
 import { scoreCase, type CaseScore, type Tally } from './score';
@@ -72,7 +78,26 @@ interface CaseResult {
   score: CaseScore;
 }
 
-async function runGroup(cases: EvalCase[], files: Map<string, Buffer>, opts: { model?: string; effort?: string; verifyModel?: string; everything: boolean }): Promise<CaseResult[]> {
+interface RunOptions {
+  engine?: string | undefined;
+  model?: string | undefined;
+  effort?: string | undefined;
+  verifyModel?: string | undefined;
+  thinking: boolean;
+  everything: boolean;
+}
+
+/** The models Settings → Models would hold for this run: the app's defaults, with the flags over them. */
+function modelSettings(opts: RunOptions): Settings['models'] {
+  const engineOf = (m: string): TaskEngine => (isInferenceAlias(m) ? 'inference' : 'claude-cli');
+  const engine = (opts.engine ?? (opts.model ? engineOf(opts.model) : undefined)) as TaskEngine | undefined;
+  const read = { ...(engine ? { engine } : {}), ...(opts.model ? { model: opts.model } : {}), ...(opts.effort ? { effort: opts.effort as 'high' } : {}), ...(opts.thinking ? { thinking: true } : {}) };
+  // Claude reads: Claude checks too, unless --verify-model says otherwise (as before format v10).
+  const check = opts.verifyModel === 'off' ? { engine: 'off' as const } : opts.verifyModel ? { engine: engineOf(opts.verifyModel), model: opts.verifyModel } : engine && engine !== 'inference' && engine !== 'ocr' ? { engine } : {};
+  return { tasks: { 'read-document': read, 'check-reading': check } };
+}
+
+async function runGroup(cases: EvalCase[], files: Map<string, Buffer>, opts: RunOptions): Promise<CaseResult[]> {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'finance-eval-'));
   const store = await Store.open(path.join(dir, 'data'), { watch: false });
   const out: CaseResult[] = [];
@@ -85,15 +110,18 @@ async function runGroup(cases: EvalCase[], files: Map<string, Buffer>, opts: { m
     await store.setAccounts(EVAL_ACCOUNTS.map((a) => ({ id: a.id, name: a.name, type: a.type, institutionId: a.institutionId, currency: 'GBP', status: 'open', aliases: [], includeInNetWorth: true, createdAt: stamp, updatedAt: stamp, ...(a.last4 ? { last4: a.last4 } : {}) })));
     await store.setSettings({
       ...store.settings,
-      extraction: { ...store.settings.extraction, ...(opts.model ? { model: opts.model } : {}), ...(opts.effort ? { effort: opts.effort as 'high' } : {}), ...(opts.verifyModel !== undefined ? { verifyModel: opts.verifyModel === 'off' ? '' : opts.verifyModel } : {}), readEverything: opts.everything },
+      extraction: { ...store.settings.extraction, readEverything: opts.everything },
+      models: modelSettings(opts),
       agents: { ...store.settings.agents, enabled: false },
     });
-    const config = loadConfig({ FINANCE_DATA_DIR: path.join(dir, 'data'), FINANCE_WORK_DIR: path.join(dir, 'work'), FINANCE_WATCH: '0' });
+    const env = process.env;
+    const config = loadConfig({ FINANCE_DATA_DIR: path.join(dir, 'data'), FINANCE_WORK_DIR: path.join(dir, 'work'), FINANCE_WATCH: '0', ...(env.INFERENCE_BASE_URL && env.INFERENCE_API_KEY ? { INFERENCE_BASE_URL: env.INFERENCE_BASE_URL, INFERENCE_API_KEY: env.INFERENCE_API_KEY } : {}) });
     const svc = new ImportService(store, config, new WorkArea(path.join(dir, 'work')));
     await svc.init();
     const wait = async (id: string, started: number) => {
       let rec = svc.getPending(id);
-      while (rec && (rec.status === 'queued' || rec.status === 'processing') && Date.now() - started < 30 * 60_000) {
+      // The local model reads one document at a time, for minutes each: a group waits its turn.
+      while (rec && (rec.status === 'queued' || rec.status === 'processing') && Date.now() - started < 12 * 3600_000) {
         await new Promise((r) => setTimeout(r, 1000));
         rec = svc.getPending(id);
       }
@@ -147,6 +175,8 @@ async function runGroup(cases: EvalCase[], files: Map<string, Buffer>, opts: { m
 }
 
 async function main() {
+  // The local model service's address and key (INFERENCE_*), as the app reads them.
+  loadDotEnv();
   const only = arg('only')?.split(',');
   const tag = arg('tag');
   let cases = buildCases();
@@ -170,7 +200,7 @@ async function main() {
   }
   const concurrency = Number(arg('concurrency') ?? 3);
   // --everything: the reader that keeps everything a document prints (extract-14).
-  const opts = { model: arg('model'), effort: arg('effort'), verifyModel: arg('verify-model'), everything: argv.includes('--everything') };
+  const opts: RunOptions = { engine: arg('engine'), model: arg('model'), effort: arg('effort'), verifyModel: arg('verify-model'), thinking: argv.includes('--thinking'), everything: argv.includes('--everything') };
   const results: CaseResult[] = [];
   let next = 0;
   const started = Date.now();
@@ -211,6 +241,7 @@ async function main() {
     ranAt: new Date().toISOString(),
     promptVersion: promptVersion(opts.everything),
     label: arg('label') ?? null,
+    engine: opts.engine ?? 'app default',
     model: opts.model ?? 'app default',
     effort: opts.effort ?? 'app default',
     verifyModel: opts.verifyModel ?? 'app default',

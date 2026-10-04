@@ -349,8 +349,15 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
 
 ## 7. In-app jobs
 
-Jobs run through the logged-in `claude` CLI (`src/server/agents/claude.ts`), locked down like
-extraction:
+Each job runs on the engine Settings → Models gives its task (`src/shared/tasks.ts`; ARCHITECTURE.md,
+"Models per task"; `agents/run-model.ts`), with the same check-and-retry (`check`, `recheck`) on
+either engine. Naming imports and understanding notes run on the local model service by default: the prompt holds everything the job sees (they have no tools anyway), and
+nothing leaves the machine. Research needs the web and the month in review and insights read with
+tools, so they run on Claude. A job kind declares its privacy class as before; one that reads the
+owner's data may run locally, and one that needs the web only on Claude.
+
+On Claude, jobs run through the logged-in `claude` CLI (`src/server/agents/claude.ts`), locked down
+like extraction:
 
 - an empty scratch directory is the working directory;
 - `--restricted`: file tools are confined to it and code-running tools removed;
@@ -366,12 +373,17 @@ extraction:
 | `monthly-review` | the month digest (version 5): the month's figures, the 12 months to it, the year's payees and trips, every review before, documents as of the month's end, and, for the latest month only, today's figures; and a file of the 24 months' payments to the month's end | Read, Grep, Glob (its scratch directory only) | a month in review (headline, key points, parts, new limits) with lines to watch and how the last ones turned out; proposals to fix data it found wrong; for the latest month, up to 5 page insights; replacing every note an earlier review of the month wrote | once a month's data is complete for every account; earlier months only when you ask |
 | `interpret-note` | the owner's note, account and instrument names | none | proposals on the note | when a note is added |
 | `label-imports` | each committed import's file name, kind, provider, accounts (name, type, period) and dates, a payslip's employer, the tax figures' kinds and years; never amounts, account numbers, references or rows | none | a name on each import (`label`) that has none | only with "Name imports with the agent" on (off by default): a minute after imports stop being committed or filed; History offers the ones from before |
-| receipt reading (not a job) | one receipt file, the payment's amount, date and payee, the category names | Read (the receipt only) | a reading on the receipt: proposed split lines | when a receipt is attached, only with "Read receipts with the agent" on (off by default) |
+| receipt reading (not a job; `receipt-2`) | one receipt file, the payment's amount, date and payee, the category names | Read (the receipt only) on Claude; none locally (the receipt goes in as images) | a reading on the receipt: proposed split lines | when a receipt is attached, only with "Read receipts" on (off by default); on the local model (when chosen), it reads in the background |
+| category suggestions (not a job; `suggest-categories-1`, local model only) | one payment description at a time that nothing else placed: its words, direction, amount, date and account type, and the category names | none | one proposal of `set_category` changes, each with its reason | only when you press *Suggest categories* (To categorise) |
+| a question (not a job; `ask-1`) | your question and the digest of computed figures | none | an answer kept in memory, shown as an inference, never a record | when you ask (Ask) |
 
 Other behaviour:
 
-- **Settings → Agents** turns off automatic starts, insights after imports and the monthly review,
-  and picks the model and effort.
+- **Settings → Agents** turns off automatic starts, insights after imports and the monthly review;
+  **Settings → Models** picks each job's engine, model, and effort or thinking.
+- **The local model costs nothing:** a job it ran has no `costUsd` and does not count against the
+  background budget. Its records keep `provenance.engine: "inference"` and the service's own record
+  (`provenance.inference`).
 - **Insights after imports** (`insights-after-import-5`) are told where schedules of payments are
   (`digest.agreements`, with each one's direction): money in that one pays you is borrowing or that
   agreement's payment, not income.

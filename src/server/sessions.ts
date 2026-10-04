@@ -54,6 +54,8 @@ const SWEEP_EVERY_MS = 6 * 3600_000;
 /** A file's bytes left out of a transcript; long strings cut; identifiers masked. */
 export function sanitiseEvent(v: unknown, depth = 0): unknown {
   if (typeof v === 'string') {
+    // An image sent inline (the local model service takes them as data: URIs).
+    if (/^data:[a-z]+\/[a-z0-9.+-]+;base64,/i.test(v)) return `[not kept: the file's ${v.length} characters of base64]`;
     const s = maskIdentifiers(v);
     return s.length > MAX_STRING ? `${s.slice(0, MAX_STRING)}… [cut: ${s.length} characters]` : s;
   }
@@ -143,6 +145,7 @@ export class Session implements TranscriptSink {
     const models = e.modelUsage && typeof e.modelUsage === 'object' ? Object.keys(e.modelUsage) : [];
     if (models[0]) r.modelUsed = models[0];
     if (typeof e.model === 'string') r.modelUsed = e.model;
+    if (e.provenance && typeof e.provenance === 'object' && !Array.isArray(e.provenance)) r.inference = e.provenance as Record<string, unknown>;
     const u = e.usage as Record<string, unknown> | undefined;
     if (u && typeof u === 'object') {
       const n = (k: string) => (typeof u[k] === 'number' ? (u[k]) : undefined);

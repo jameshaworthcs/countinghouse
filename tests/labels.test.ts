@@ -10,6 +10,7 @@ import type { ImportHistoryResponse } from '../src/shared/api';
 import { JobRunner, type JobRecord } from '../src/server/agents/jobs';
 import { cleanLabel, importsToLabel, JOB_DEFS, NothingToDo, type JobContext } from '../src/server/agents/kinds';
 import { createApp, type App } from '../src/server/app';
+import { CLAUDE_TASKS } from './claude-tasks';
 import { loadConfig } from '../src/server/config';
 import { requiredScope } from '../src/server/tokens';
 
@@ -86,6 +87,7 @@ beforeEach(async () => {
   config.webDist = path.join(dir, 'no-web');
   // The app's own runner queues without running: the run end to end below has a runner of its own.
   app = await createApp(config, { version: 'test', env: {}, inbox: false, pauseJobs: true });
+  await app.ctx.store.setSettings({ ...app.ctx.store.settings, models: CLAUDE_TASKS });
 });
 afterEach(async () => {
   await app.close();

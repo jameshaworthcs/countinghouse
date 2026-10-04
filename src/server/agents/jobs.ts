@@ -27,7 +27,9 @@ import { recordInstrumentsFromHoldings } from '../instruments';
 import type { ProposalService } from '../proposals';
 import type { SessionLog } from '../sessions';
 import type { Store } from '../store';
-import { runAgent } from './claude';
+import { callModel, mayFallBack, sessionEngine } from './run-model';
+import { claudeChoice, resolveTask, taskOfJob, type TaskChoice } from '../../shared/tasks';
+import type { TranscriptSink } from '../sessions';
 import { JOB_DEFS, JOB_KINDS, NothingToDo, outputJsonSchema, REFRESHABLE_KEYS, type JobKind } from './kinds';
 
 export const JobRecordSchema = z.object({
@@ -45,6 +47,8 @@ export const JobRecordSchema = z.object({
   finishedAt: z.string().optional(),
   durationMs: z.number().optional(),
   model: z.string().optional(),
+  /** The engine that ran it: the local model service costs nothing and does not count against the budget. */
+  engine: z.enum(['inference', 'claude-cli']).optional(),
   costUsd: z.number().optional(),
   turns: z.number().optional(),
   summary: z.string().optional(),
@@ -268,7 +272,7 @@ export class JobRunner extends EventEmitter implements JobQueue {
     let day = 0;
     let month = 0;
     for (const j of this.list()) {
-      if (j.trigger === 'owner' || j.status === 'queued') continue;
+      if (j.trigger === 'owner' || j.status === 'queued' || j.engine === 'inference') continue;
       const when = (j.startedAt ?? j.createdAt).slice(0, 10);
       if (when.slice(0, 7) !== on.slice(0, 7)) continue;
       // A running job, or one that ended without a cost, counts at what its kind typically costs.
@@ -329,53 +333,57 @@ export class JobRunner extends EventEmitter implements JobQueue {
       const ctx = { store: this.store, analytics: this.analytics, params: job.params, scratch, ...(this.opts.proposals ? { proposals: this.opts.proposals } : {}) };
       // A job with nothing left to do ends here (NothingToDo), before Claude is looked for.
       const prompt = await Promise.resolve(def.prepare(ctx));
-      const { engines, claudeBin } = await detectEngines({ apiKey: this.config.anthropicApiKey });
-      if (!claudeBin || !engines.find((e) => e.id === 'claude-cli')?.available) throw new Error('The claude CLI is not available; agent jobs need it.');
-      const settings = this.store.settings.agents;
-      // The run is a Claude session, with its transcript (sessions.ts).
-      const session = await this.opts.sessions?.start({
-        kind: 'job',
-        title: job.label,
-        jobKind: job.kind,
-        jobId: job.id,
-        engine: 'claude-cli',
-        model: settings.model,
-        effort: settings.effort,
-        promptVersion: def.promptVersion,
-        tools: def.tools,
-        privacy: def.privacy,
-        startedBy: { actor: job.requestedBy ?? currentActor(), reason: TRIGGER_WORDS[job.trigger] },
-      });
-      const ask = (text: string, transcript: Parameters<typeof runAgent>[0]['transcript']) =>
-        runAgent({
-          bin: claudeBin,
-          cwd: scratch,
-          prompt: text,
-          systemPrompt: def.systemPrompt,
-          schema: outputJsonSchema(def),
-          tools: def.tools,
-          model: settings.model,
-          effort: settings.effort,
-          timeoutMs: settings.timeoutSeconds * 1000,
-          signal,
-          transcript,
+      const { engines, claudeBin } = await detectEngines({ apiKey: this.config.anthropicApiKey, inference: this.config.inference });
+      const claudeOk = Boolean(claudeBin) && (engines.find((e) => e.id === 'claude-cli')?.available ?? false);
+      // The job's model: Settings → Models for its task (src/shared/tasks.ts).
+      const task = taskOfJob(job.kind) ?? 'research';
+      const choice = resolveTask(task, this.store.settings.models.tasks);
+      if (choice.engine !== 'inference' && !claudeOk) throw new Error('The claude CLI is not available; this job needs it.');
+      job = { ...job, engine: choice.engine === 'inference' ? 'inference' : 'claude-cli' };
+      await this.save(job);
+      const call = { task, bin: claudeOk ? claudeBin : null, inference: this.config.inference, cwd: scratch, prompt, systemPrompt: def.systemPrompt, schema: outputJsonSchema(def), tools: def.tools, timeoutMs: this.store.settings.agents.timeoutSeconds * 1000, signal };
+      // One run on one engine is a session, with its transcript (sessions.ts).
+      const attempt = async (c: TaskChoice) => {
+        const ask = (text: string, transcript: TranscriptSink | undefined) => callModel(call, c, transcript, text);
+        // An answer the app can check that is wrong is asked for once more, with what is wrong.
+        const runOnce = async (transcript: TranscriptSink | undefined) => {
+          const first = await ask(prompt, transcript);
+          if (!def.check || !def.recheck) return { res: first, unresolved: [] as string[] };
+          const problems = await def.check(ctx, def.output.parse(first.output));
+          if (!problems.length) return { res: first, unresolved: [] as string[] };
+          const second = await ask(`${prompt}\n\n${def.recheck(problems, first.output)}`, transcript);
+          const unresolved = await def.check(ctx, def.output.parse(second.output));
+          const add = (a?: number, b?: number) => (a === undefined && b === undefined ? undefined : (a ?? 0) + (b ?? 0));
+          const costUsd = add(first.costUsd, second.costUsd);
+          const turns = add(first.turns, second.turns);
+          return { res: { ...second, ...(costUsd !== undefined ? { costUsd } : {}), ...(turns !== undefined ? { turns } : {}), durationMs: first.durationMs + second.durationMs }, unresolved };
+        };
+        const session = await this.opts.sessions?.start({
+          kind: 'job',
+          title: job.label,
+          jobKind: job.kind,
+          jobId: job.id,
+          ...sessionEngine(c, def.tools),
+          promptVersion: def.promptVersion,
+          privacy: def.privacy,
+          startedBy: { actor: job.requestedBy ?? currentActor(), reason: TRIGGER_WORDS[job.trigger] },
         });
-      // An answer the app can check that is wrong is asked for once more, with what is wrong.
-      const runOnce = async (transcript: Parameters<typeof runAgent>[0]['transcript']) => {
-        const first = await ask(prompt, transcript);
-        if (!def.check || !def.recheck) return { res: first, unresolved: [] as string[] };
-        const problems = await def.check(ctx, def.output.parse(first.output));
-        if (!problems.length) return { res: first, unresolved: [] as string[] };
-        const second = await ask(`${prompt}\n\n${def.recheck(problems, first.output)}`, transcript);
-        const unresolved = await def.check(ctx, def.output.parse(second.output));
-        const add = (a?: number, b?: number) => (a === undefined && b === undefined ? undefined : (a ?? 0) + (b ?? 0));
-        const costUsd = add(first.costUsd, second.costUsd);
-        const turns = add(first.turns, second.turns);
-        return { res: { ...second, ...(costUsd !== undefined ? { costUsd } : {}), ...(turns !== undefined ? { turns } : {}), durationMs: first.durationMs + second.durationMs }, unresolved };
+        return session ? session.run(runOnce, signal) : runOnce(undefined);
       };
-      const { res, unresolved } = session ? await session.run(runOnce, signal) : await runOnce(undefined);
+      let fellBack: string | undefined;
+      let ran: Awaited<ReturnType<typeof attempt>>;
+      try {
+        ran = await attempt(choice);
+      } catch (err) {
+        // The local model could not, and this task may fall back to Claude (Settings → Models).
+        if (!mayFallBack(choice, err, call.bin, signal)) throw err;
+        fellBack = (err as Error).message;
+        ran = await attempt(claudeChoice(task));
+      }
+      const { res, unresolved } = ran;
+      job = { ...job, engine: res.engine };
       const output = def.output.parse(res.output);
-      const outcome = await def.apply(ctx, output, { setBy: 'agent', model: res.model, promptVersion: def.promptVersion, jobId: job.id }, unresolved);
+      const outcome = await def.apply(ctx, output, { setBy: 'agent', model: res.model, promptVersion: def.promptVersion, jobId: job.id, ...(res.engine === 'inference' ? { engine: 'inference' as const, ...(res.inference ? { inference: res.inference } : {}) } : {}) }, unresolved);
       job = {
         ...job,
         status: 'succeeded',
@@ -384,7 +392,7 @@ export class JobRunner extends EventEmitter implements JobQueue {
         model: res.model,
         ...(res.costUsd !== undefined ? { costUsd: Math.round(res.costUsd * 10_000) / 10_000 } : {}),
         ...(res.turns !== undefined ? { turns: res.turns } : {}),
-        summary: outcome.summary,
+        summary: fellBack ? `${outcome.summary} (Claude did it: ${fellBack})` : outcome.summary,
         written: outcome.result?.written ?? [],
       };
     } catch (err) {

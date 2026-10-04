@@ -84,7 +84,7 @@ import { diffById, DiffCollector, diffFields, listed } from './auditdiff';
 import { atomicWrite, Mutex, nowISO, readTextIfExists, sha256 } from './fsutil';
 
 /** Bump when the on-disk format changes, and add a migration in migrations.ts. */
-export const FORMAT_VERSION = 9;
+export const FORMAT_VERSION = 10;
 
 export interface DataIssue {
   file: string;
@@ -1385,7 +1385,7 @@ function summarise(r: ImportRecord, rel: string): ImportSummary {
     documentType: r.draft?.documentType,
     label: r.label,
     result: r.result,
-    ...(r.extraction.engine === 'claude-cli' || r.extraction.engine === 'claude-api'
+    ...(r.extraction.engine === 'inference' || r.extraction.engine === 'claude-cli' || r.extraction.engine === 'claude-api'
       ? { reading: { model: r.extraction.model, costUsd: r.extraction.costUsd, startedAt: r.extraction.startedAt, finishedAt: r.extraction.finishedAt, durationMs: r.extraction.durationMs, verification: r.extraction.verification } }
       : {}),
     path: rel,

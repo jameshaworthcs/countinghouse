@@ -32,6 +32,7 @@ import { receiptRoutes } from './routes/receipts';
 import { sessionRoutes } from './routes/sessions';
 import { auditRoutes } from './routes/audit';
 import { systemRoutes } from './routes/system';
+import { modelRoutes } from './routes/models';
 import { tokenRoutes } from './routes/tokens';
 import { AgentTokens } from './tokens';
 import { authGate, csrfGuard, hostGuard, isPageRequest, securityHeaders } from './security';
@@ -198,6 +199,7 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
   app.route('/api', receiptRoutes(ctx));
   app.route('/api', analyticsRoutes(ctx));
   app.route('/api', systemRoutes(ctx));
+  app.route('/api', modelRoutes(ctx));
   app.all('/api/*', (c) => c.json({ error: 'Not found' }, 404));
 
   // The built web app (production). In development Vite serves it instead.

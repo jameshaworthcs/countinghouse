@@ -68,6 +68,11 @@ for the map and [docs/DATA_FORMAT.md](docs/DATA_FORMAT.md) before touching data 
   - Nothing may call third-party services except Claude, the engine the owner chose (CLI or API),
     for extraction and agent jobs, and jemedia-auth (`auth.jemedia.xyz`), the owner's own identity
     provider, for sign-in. Only the OIDC protocol goes there, never financial data.
+  - The local model service (`inference`, `INFERENCE_BASE_URL`, on P360 over the tailnet; its repo
+    is separate) is not a third party: personal data may go to it, and nothing sent to it
+    leaves the machine. It has no web access or tools. Its key (`INFERENCE_API_KEY`) is in `.env`
+    and is never logged. Which task runs where is `src/shared/tasks.ts` (Settings → Models); a
+    task falls back from it to Claude only where the owner turned that on.
   - Research sends only public, non-personal queries: fund names, ISINs, provider product pages.
     No balances, transactions or personal details ever go into one.
     - Research jobs get the web tools and are built only from public identifiers.

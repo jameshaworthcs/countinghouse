@@ -2068,3 +2068,89 @@ Later the same day, after the owner's first runs (`label-imports-2`):
 - **Not done:** the workplace pension and company shares have no holdings or prices, so
   they stay at their last valuation. Prices are not refreshed by a job; captures are meant to make
   that unneeded.
+
+## 2026-10-04: Model work moves to the local model service, task by task
+
+- **Owner:** a shared, OpenAI-compatible model service (`inference`, on P360, tailnet only) now
+  runs Qwen3.6-35B-A3B and smaller models. Decide with the owner which of finance's model work
+  moves to it; documents then never leave the machine.
+- **Measured by inference on finance's own samples** (its README §9 and BENCH "M2"): 99.4% / 99.3%
+  of fields right on synthetic / real documents with prompt extract-8, every wrong reading failing
+  reconciliation; a median 2.7 min per document, 28 min for a 7-page card statement; a second
+  reading with thinking on (16k budget) fixed 5 of the 10 imperfect ones in 4–34 min. Categorising
+  merchants 20/22, own-account transfers 9/18; Q&A over about 210 rows 5/6 with thinking on, about
+  5 min each.
+- **Found here:** nearly half of the documents Claude read had a second reading, mostly because nothing
+  on the document confirms its figures (tax figures, screenshots without totals), not because a
+  check failed. Claude reads in a median 12 s (Sonnet) plus 16 s (Opus); the local model takes
+  minutes.
+- **Decided (owner, 2026-10-04):**
+  - One task table (`src/shared/tasks.ts`) says, for each piece of model work, what it needs
+    (vision, web, reasoning), its privacy class, its default engine and model, its priority and
+    timeout. Settings → Models overrides it per task. It replaces `extraction.engine/model/
+    verifyModel/effort` and `agents.model/effort`; format v10 migrates them.
+  - **Local** (decided, gated on the evaluation below): reading documents (first and second
+    reading, reading again), receipts, naming imports and understanding notes. **Claude stays** for
+    the month in review, insights after imports and the three research jobs (they need web tools,
+    which the local model does not have).
+  - **Second readings stay local:** when the checks fail or nothing confirms the figures, the
+    document is read again by `vision-extract` with thinking on, compared and the better reading
+    kept, as before.
+  - **When the local model cannot** (down, its GPU lent out, or both readings fail): the work
+    waits and retries (up to 12 hours), and each import offers "Read with Claude". A per-task
+    switch, off by default, falls back to Claude by itself; it sends the document to Anthropic.
+  - **Priorities:** `batch` for everything that takes minutes, `normal` for a note, `interactive`
+    only for a question asked in the app.
+  - **Provenance:** each reading and record keeps the service's request id, alias, model sha256,
+    system fingerprint and seed beside `model`; sessions keep the whole provenance object.
+  - **Bake-off aliases** (`chat-q8`, `chat-9b`) can be chosen in Settings, marked as experiments
+    that swap the GPU, and in `npm run eval -- --engine inference --model …`.
+  - **New:** suggesting categories for the payments the rules leave (`fast-chat`, one row per
+    request, as proposals the owner reviews) and asking questions over computed tables (`fast-chat`
+    with thinking on).
+  - CLAUDE.md's privacy invariant names the service: personal data may go to it, and it gets no
+    web tools.
+- **Considered:** a fallback to Claude by default (rejected: it sends documents to Anthropic
+  without asking), no second reading for documents with nothing to check (rejected: half of all
+  documents would go unchecked), keeping the old settings beside an overlay (rejected: two places
+  would decide).
+- **Built** (ARCHITECTURE.md, "Models per task"; INGESTION.md, "The local model: waiting, Claude,
+  and balance lines"; AGENTS.md §7):
+  - `src/server/inference.ts` is the client: one batch or normal request of finance's at a time
+    (the service has one slot for them), retries after the service's `Retry-After` for up to
+    `INFERENCE_WAIT_MINUTES` (720; 10 for a question), and fails at once on any other refusal,
+    output cut off, or output outside the schema.
+  - What a reading put right or did another way (a balance line left out, Claude reading instead)
+    is a *notice*, shown with the warnings but not counted against the reading, so it calls for no
+    second reading. Only warnings are problems (verify.ts).
+  - "Read with Claude instead" stops a reading under way (`reprocess` with `interrupt`).
+  - Receipts read on the local model run in the background (`status: reading`); the prompt now
+    says how the receipt arrives (`receipt-2`).
+  - Suggestions leave out what To categorise → People and cash keeps for the owner (payments with
+    people, cash and cheques paid in) and valued accounts, ask once per description and direction,
+    and propose only medium or high confidence. They start only when the owner presses *Suggest
+    categories*.
+  - A question's answer is kept in memory only, labelled as an inference, and is given the
+    analysis digest (computed figures), never documents.
+  - Rehearsed: the v10 migration on a copy of the owner's data changes only `meta.json` and
+    `settings.json`.
+  - Found while evaluating: Node's `fetch` gives up on a response whose headers take more than 5
+    minutes (undici's `headersTimeout`), and the service answers a long reading only when it is
+    done, so every long reading was cut off and sent again. Requests now go through `node:http(s)`
+    (`postLong`), ended only by their own timeout, and a connection that drops twice mid-answer
+    fails instead of running again.
+- **The gate** (agreed before building: at least 98% of fields, and every wrong reading caught by
+  a check): `npm run eval -- --everything --engine inference` on 40 documents (`extract-15`,
+  eval/results/2026-10-04-16-46_extract-15_local-v10.json): **98.9% of fields**, 275 of 280 rows,
+  4.9 hours (Claude, Sonnet checked by Opus: 100% on 36 documents in about 4 minutes, $2.90).
+  Wrong figures (two pension contributions, an ISA's and a LISA's allowance read as tax, five
+  Premium Bonds prize rows missed, a long scroll's date) were each marked as a disagreement
+  between the two readings. **It failed the second bar:** a LISA fund page went to another
+  provider's existing account; four statements' periods were left blank (rows and balances right);
+  two screenshots lost their foreign amounts; two made a new account instead of matching (visible,
+  and held back from "Commit all ready"). None of these failed a check.
+- **Owner (2026-10-04), on that result:** ship the plumbing now, with documents, checking and
+  receipts on Claude (format v10 keeps the reading choices as they were) and import names and notes
+  on the local model; fix the silent misses on the finance side, run the local evaluation again,
+  and move documents only when it passes. Suggestions and questions, being new and started by the
+  owner, run locally.

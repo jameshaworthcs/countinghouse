@@ -79,7 +79,7 @@ function earlierReading(i: { id: string; fileName: string; createdAt: string; en
     kind: 'reading',
     title: `Read ${i.fileName}${checked}`,
     importId: i.id,
-    engine: i.engine === 'claude-api' ? 'claude-api' : 'claude-cli',
+    engine: i.engine === 'inference' ? 'inference' : i.engine === 'claude-api' ? 'claude-api' : 'claude-cli',
     startedBy: by,
     ...(v?.firstModel || r.model ? { model: v?.firstModel ?? r.model } : {}),
     ...(i.engineVersion ? { promptVersion: i.engineVersion } : {}),

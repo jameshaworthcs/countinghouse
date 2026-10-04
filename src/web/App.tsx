@@ -23,6 +23,7 @@ const Settings = lazy(() => import('./pages/Settings'));
 const Assumptions = lazy(() => import('./pages/Assumptions'));
 const Sessions = lazy(() => import('./pages/Sessions'));
 const Reviews = lazy(() => import('./pages/Reviews'));
+const Ask = lazy(() => import('./pages/Ask'));
 
 interface AuthStatus {
   configured: boolean;
@@ -92,6 +93,7 @@ const router = createBrowserRouter([
           { path: 'settings', element: page(<Settings />) },
           { path: 'sessions', element: page(<Sessions />) },
           { path: 'sessions/:id', element: page(<Sessions />) },
+          { path: 'ask', element: page(<Ask />) },
           { path: '*', element: <div className="py-20 text-center text-ink-3">Page not found.</div> },
         ],
       },

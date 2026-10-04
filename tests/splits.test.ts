@@ -8,6 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createApp, type App } from '../src/server/app';
+import { CLAUDE_TASKS } from './claude-tasks';
 import { categoryLines, flows } from '../src/server/analytics/cashflow';
 import { loadConfig } from '../src/server/config';
 import { transactionId } from '../src/server/ids';
@@ -27,6 +28,7 @@ beforeEach(async () => {
   const config = loadConfig({ FINANCE_DATA_DIR: path.join(dir, 'data'), FINANCE_WORK_DIR: path.join(dir, 'work'), FINANCE_WATCH: '0' });
   config.webDist = path.join(dir, 'no-web');
   app = await createApp(config, { version: 'test', env: {}, inbox: false });
+  await app.ctx.store.setSettings({ ...app.ctx.store.settings, models: CLAUDE_TASKS });
   const { store } = app.ctx;
   await store.setAccounts([{ id: 'current', name: 'Current', type: 'current', currency: 'GBP', status: 'open', aliases: [], includeInNetWorth: true, createdAt: stamp, updatedAt: stamp }]);
   const rows: Transaction[] = [
@@ -99,7 +101,7 @@ describe('receipts', () => {
     expect(app.ctx.store.receipts).toHaveLength(1);
     const readOff = await req(`/api/receipts/${r.id}/read`, { method: 'POST', headers: CSRF });
     expect(readOff.status).toBe(409);
-    expect(((await readOff.json()) as { error: string }).error).toBe('Reading receipts with the agent is off: turn it on in Settings → Import & extraction.');
+    expect(((await readOff.json()) as { error: string }).error).toBe('Reading receipts is off: turn it on in Settings → Models & import.');
   });
 
   it('only photos and PDFs', async () => {
@@ -137,7 +139,7 @@ describe('receipts', () => {
     expect(store.transaction(shopId)!.splits).toBeUndefined();
     // The reading is a Claude session, its transcript beside the receipt in the work area.
     const [session] = app.ctx.sessions.list();
-    expect(session).toMatchObject({ kind: 'receipt', receiptId: r.id, transactionId: shopId, status: 'succeeded', costUsd: 0.04, promptVersion: 'receipt-1' });
+    expect(session).toMatchObject({ kind: 'receipt', receiptId: r.id, transactionId: shopId, status: 'succeeded', costUsd: 0.04, promptVersion: 'receipt-2' });
     expect(session!.transcript.path).toBe(path.join('receipts', r.id, `${session!.id}.jsonl`));
   });
 

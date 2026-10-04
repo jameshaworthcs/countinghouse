@@ -2,7 +2,7 @@
 // JSON schema. Bump PROMPT_VERSION whenever either changes; it is recorded on every import so old
 // extractions can be told apart (and re-run) later.
 //
-// Reading everything (Settings → Import & extraction, `readEverything`) adds rules 20 to 24 and their
+// Reading everything (Settings → Models & import, `readEverything`) adds rules 20 to 24 and their
 // part of the schema: a payslip in full, HMRC's pages as records, an account's terms (its rates,
 // limit and minimum payment), every other labelled value the document prints, and schedules of
 // payments (a student finance award, an offer's instalments). It is PROMPT_VERSION_EVERYTHING.

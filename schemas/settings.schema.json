@@ -7,10 +7,6 @@
   "properties": {
     "extraction": {
       "default": {
-        "engine": "auto",
-        "model": "sonnet",
-        "verifyModel": "opus",
-        "effort": "high",
         "maxConcurrent": 2,
         "timeoutSeconds": 900,
         "readReceipts": false,
@@ -19,35 +15,6 @@
       },
       "type": "object",
       "properties": {
-        "engine": {
-          "default": "auto",
-          "type": "string",
-          "enum": [
-            "auto",
-            "claude-cli",
-            "claude-api",
-            "ocr"
-          ]
-        },
-        "model": {
-          "default": "sonnet",
-          "type": "string"
-        },
-        "verifyModel": {
-          "default": "opus",
-          "type": "string"
-        },
-        "effort": {
-          "default": "high",
-          "type": "string",
-          "enum": [
-            "low",
-            "medium",
-            "high",
-            "xhigh",
-            "max"
-          ]
-        },
         "maxConcurrent": {
           "default": 2,
           "type": "integer",
@@ -71,6 +38,69 @@
         "readEverything": {
           "default": false,
           "type": "boolean"
+        }
+      }
+    },
+    "models": {
+      "default": {
+        "tasks": {}
+      },
+      "type": "object",
+      "properties": {
+        "tasks": {
+          "default": {},
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "enum": [
+              "read-document",
+              "check-reading",
+              "read-receipt",
+              "label-imports",
+              "interpret-note",
+              "suggest-categories",
+              "ask",
+              "monthly-review",
+              "insights-after-import",
+              "research"
+            ]
+          },
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "engine": {
+                "type": "string",
+                "enum": [
+                  "inference",
+                  "claude-cli",
+                  "claude-api",
+                  "ocr",
+                  "off"
+                ]
+              },
+              "model": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              },
+              "thinking": {
+                "type": "boolean"
+              },
+              "effort": {
+                "type": "string",
+                "enum": [
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max"
+                ]
+              },
+              "fallback": {
+                "type": "boolean"
+              }
+            }
+          }
         }
       }
     },
@@ -113,8 +143,6 @@
     "agents": {
       "default": {
         "enabled": true,
-        "model": "opus",
-        "effort": "high",
         "researchStaleAfterDays": 90,
         "insightsAfterImport": true,
         "monthlyReview": true,
@@ -129,21 +157,6 @@
         "enabled": {
           "default": true,
           "type": "boolean"
-        },
-        "model": {
-          "default": "opus",
-          "type": "string"
-        },
-        "effort": {
-          "default": "high",
-          "type": "string",
-          "enum": [
-            "low",
-            "medium",
-            "high",
-            "xhigh",
-            "max"
-          ]
         },
         "researchStaleAfterDays": {
           "default": 90,

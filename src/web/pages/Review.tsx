@@ -7,7 +7,8 @@ import { formatDate, formatMonth } from '../../shared/dates';
 import { describeDetail, describeDifference, fieldsInWords } from '../../shared/detail';
 import { sectionChecks, type ReviewCheck } from '../../shared/review';
 import { headlineApplies, RATE_NAMES } from '../../shared/terms';
-import { FIGURE_KINDS, type CsvProfile, type Draft, type DraftJob, type DraftSection, type DraftTransaction, type Employment, type ExtractedHmrc, type Figure, type ImportRecord, type PayslipLine, type PayslipYtdKey } from '../../shared/schema';
+import { FIGURE_KINDS, type CsvProfile, type Draft, type DraftJob, type DraftSection, type DraftTransaction, type Employment, type ExtractedHmrc, type Figure, type ImportRecord, type PayslipLine, type PayslipYtdKey, type Settings as SettingsT } from '../../shared/schema';
+import { CLAUDE_MODELS, INFERENCE_ALIASES, isInferenceAlias, resolveTask } from '../../shared/tasks';
 import { AccountTypeSelect } from '../components/AccountForms';
 import { CategorySelect } from '../components/TransactionList';
 import { Badge, Button, Callout, Card, Checkbox, type ClickModifiers, ErrorNote, Field, IconButton, Input, KeyValue, Loading, Money, Select, StatusBadge, tableClasses, useToast } from '../components/ui';
@@ -110,6 +111,7 @@ function VerificationNote({ rec }: { rec: Rec }) {
   return (
     <Callout tone={v.disagreements.length ? 'warn' : 'good'} title={v.disagreements.length ? `Read twice: ${first} and ${second} disagreed on ${plural(v.disagreements.length, 'figure')}` : `Read twice: ${first} and ${second} agreed on every figure`}>
       <div className="text-ink-2">Why it was read twice: {v.reasons.slice(0, 3).join('; ')}{v.reasons.length > 3 ? '…' : ''}.</div>
+      {v.byClaude && <div className="mt-1 text-ink-2">Both readings by the local model failed a check, so Claude read it too (Settings → Models lets checking fall back to Claude); its reading is the second one here.</div>}
       {v.disagreements.length > 0 && (
         <>
           <div className="mt-1 text-ink-2">{v.kept === 'second' ? second : first}’s reading is shown; the rows they differed on are marked below.</div>
@@ -126,8 +128,14 @@ function VerificationNote({ rec }: { rec: Rec }) {
 
 const shortName = (model: string) => {
   const m = /(opus|sonnet|haiku|fable)/i.exec(model);
-  return m ? m[1]!.charAt(0).toUpperCase() + m[1]!.slice(1).toLowerCase() : model;
+  if (m) return m[1]!.charAt(0).toUpperCase() + m[1]!.slice(1).toLowerCase();
+  // The local model, by its alias: "vision-extract" or "vision-extract, thinking".
+  const [alias, thinking] = model.split(', ');
+  return isInferenceAlias(alias) ? `the local model${alias === 'vision-extract' ? '' : ` (${alias})`}${thinking ? ', thinking' : ''}` : model;
 };
+
+/** Read by a model (the local one or Claude), not parsed by a reader of this app. */
+const byModel = (engine: string | undefined) => engine === 'inference' || engine === 'claude-cli' || engine === 'claude-api';
 
 function DocumentViewer({ rec }: { rec: Rec }) {
   const [zoom, setZoom] = useState(false);
@@ -1219,7 +1227,7 @@ function EarnedEditor({ draft, onChange }: { draft: Draft; onChange: (d: Draft) 
  * of payments (a timesheet, a sheet a month), every sheet read by Claude like a document.
  */
 function SheetReadAs({ rec }: { rec: Rec }) {
-  const byClaude = rec.extraction.engine === 'claude-cli' || rec.extraction.engine === 'claude-api';
+  const byClaude = byModel(rec.extraction.engine);
   const redo = useApiMutation(() => api(`/imports/${rec.id}/reprocess`, { body: { readAs: byClaude ? 'columns' : 'document' } }));
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-line bg-panel px-4 py-2.5 text-[12.5px] text-ink-2">
@@ -1421,10 +1429,59 @@ function ImportName({ rec }: { rec: Rec }) {
   );
 }
 
+/** Are documents read by the local model (Settings → Models)? */
+const readsLocally = (settings: SettingsT) => resolveTask('read-document', settings.models.tasks).engine === 'inference';
+
+/**
+ * Read it with Claude now: for when the local model is away or could not read it. It sends the
+ * document to Anthropic, so it is a click of yours each time.
+ */
+function ReadWithClaude({ rec }: { rec: Rec }) {
+  const redo = useApiMutation(() => api(`/imports/${rec.id}/reprocess`, { body: { engine: 'claude-cli', interrupt: true } }));
+  return (
+    <span className="inline-flex flex-wrap items-center gap-2">
+      <Button size="sm" variant="secondary" loading={redo.isPending} onClick={() => confirm('Read this document with Claude? It is sent to Anthropic.') && redo.mutate(undefined)}>
+        Read with Claude instead
+      </Button>
+      <span className="text-[12px] text-ink-3">Sends this document to Anthropic.</span>
+      {redo.error && <span className="text-[12px] text-bad-ink">{redo.error.message}</span>}
+    </span>
+  );
+}
+
+/** A reading under way: how long it takes, and why it waits when the local model cannot take it. */
+function Reading({ rec }: { rec: Rec }) {
+  const { data } = useAppData();
+  const local = readsLocally(data.settings);
+  const w = rec.extraction.waiting;
+  return (
+    <Card>
+      <div className="flex items-start gap-3 py-4 text-[14px] text-ink-2">
+        <LoaderCircle className="mt-0.5 size-5 shrink-0 animate-spin text-accent" />
+        <div className="flex flex-col gap-2">
+          <div>
+            {local
+              ? 'Reading the document with the local model, on this machine. That takes a few minutes (half an hour for a long statement), and a second reading, when the checks ask for one, takes as long again.'
+              : 'Reading the document… This usually takes 10 to 60 seconds.'}{' '}
+            You can leave this page; it will be waiting on the Import page.
+          </div>
+          {w && (
+            <Callout tone="warn" title={`Waiting since ${new Date(w.since).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}>
+              {w.reason}
+              {w.until ? `; it says to try again at ${new Date(w.until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}. It keeps trying for up to 12 hours.
+            </Callout>
+          )}
+          {local && rec.status === 'processing' && <ReadWithClaude rec={rec} />}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 function Retry({ rec }: { rec: Rec }) {
   const [engine, setEngine] = useState('auto');
   const [model, setModel] = useState('');
-  const sheetRead = /spreadsheet|ms-excel/.test(rec.document.mediaType) && (rec.extraction.engine === 'claude-cli' || rec.extraction.engine === 'claude-api');
+  const sheetRead = /spreadsheet|ms-excel/.test(rec.document.mediaType) && byModel(rec.extraction.engine);
   const retry = useApiMutation(() => api(`/imports/${rec.id}/reprocess`, { body: { engine, ...(model ? { model } : {}), ...(sheetRead ? { readAs: 'document' } : {}) } }));
   const isDoc = rec.document.mediaType.startsWith('image/') || rec.document.mediaType === 'application/pdf' || sheetRead;
   return (
@@ -1432,19 +1489,36 @@ function Retry({ rec }: { rec: Rec }) {
       {isDoc && (
         <>
           <Field label="Engine">
-            <Select value={engine} onChange={(e) => setEngine(e.target.value)} className="h-8 w-40 text-[13px]">
+            <Select
+              value={engine}
+              onChange={(e) => {
+                setEngine(e.target.value);
+                setModel('');
+              }}
+              className="h-8 w-40 text-[13px]"
+            >
               <option value="auto">Default</option>
+              <option value="inference">Local model</option>
               <option value="claude-cli">Claude (CLI login)</option>
               <option value="claude-api">Claude API</option>
               <option value="ocr">Offline OCR</option>
             </Select>
           </Field>
           <Field label="Model">
-            <Select value={model} onChange={(e) => setModel(e.target.value)} className="h-8 w-32 text-[13px]">
+            <Select value={model} onChange={(e) => setModel(e.target.value)} className="h-8 w-40 text-[13px]">
               <option value="">Default</option>
-              <option value="opus">Opus</option>
-              <option value="sonnet">Sonnet</option>
-              <option value="fable">Fable</option>
+              {engine === 'inference'
+                ? INFERENCE_ALIASES.filter((a) => a.vision).map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.id}
+                    </option>
+                  ))
+                : engine !== 'ocr' &&
+                  CLAUDE_MODELS.map((m) => (
+                    <option key={m} value={m}>
+                      {m.charAt(0).toUpperCase() + m.slice(1)}
+                    </option>
+                  ))}
             </Select>
           </Field>
         </>
@@ -1459,6 +1533,7 @@ function Retry({ rec }: { rec: Rec }) {
 
 export default function Review() {
   const { id = '' } = useParams();
+  const { data } = useAppData();
   const navigate = useNavigate();
   const toast = useToast();
   const q = useApi<Rec>(['import', id], `/imports/${id}`, { refetchInterval: 4000 });
@@ -1538,10 +1613,10 @@ export default function Review() {
           {committed ? <ImportName rec={rec} /> : <h1 className="truncate text-[20px] font-semibold text-ink">{rec.document.fileName}</h1>}
           <div className="mt-1 flex flex-wrap items-center gap-2 text-[12.5px] text-ink-3">
             {importStatus(rec)}
-            {rec.extraction.engine && <span>read by {rec.extraction.engine === 'csv' ? `CSV parser (${rec.extraction.detail})` : rec.extraction.engine === 'govuk' ? 'the gov.uk page reader' : rec.extraction.engine === 'payslip' ? 'the payslip reader, on this machine' : rec.extraction.engine}{rec.extraction.model ? ` · ${rec.extraction.model}` : ''}</span>}
-            {rec.extraction.durationMs !== undefined && <span>· {(rec.extraction.durationMs / 1000).toFixed(1)}s</span>}
+            {rec.extraction.engine && <span>read by {rec.extraction.engine === 'csv' ? `CSV parser (${rec.extraction.detail})` : rec.extraction.engine === 'govuk' ? 'the gov.uk page reader' : rec.extraction.engine === 'payslip' ? 'the payslip reader, on this machine' : rec.extraction.engine === 'inference' ? 'the local model, on this machine' : rec.extraction.engine}{rec.extraction.model ? ` · ${rec.extraction.model}` : ''}</span>}
+            {rec.extraction.durationMs !== undefined && <span>· {rec.extraction.durationMs >= 120_000 ? `${Math.round(rec.extraction.durationMs / 60_000)} min` : `${(rec.extraction.durationMs / 1000).toFixed(1)}s`}</span>}
             {rec.extraction.costUsd !== undefined && <span>· ~${rec.extraction.costUsd.toFixed(3)}</span>}
-            {(rec.extraction.engine === 'claude-cli' || rec.extraction.engine === 'claude-api' || rec.status === 'processing' || rec.status === 'failed') && <SessionsLink of={rec.id}>{rec.status === 'processing' ? 'Watch the agent read it' : 'What the agent did'}</SessionsLink>}
+            {(byModel(rec.extraction.engine) || rec.status === 'processing' || rec.status === 'failed') && <SessionsLink of={rec.id}>{rec.status === 'processing' ? 'Watch the agent read it' : 'What the agent did'}</SessionsLink>}
             {draft?.confidence && <Badge tone={draft.confidence === 'high' ? 'good' : draft.confidence === 'medium' ? 'neutral' : 'warn'}>{draft.confidence} confidence</Badge>}
           </div>
         </div>
@@ -1555,18 +1630,16 @@ export default function Review() {
         )}
       </div>
 
-      {(rec.status === 'processing' || rec.status === 'queued') && (
-        <Card>
-          <div className="flex items-center gap-3 py-6 text-[14px] text-ink-2">
-            <LoaderCircle className="size-5 animate-spin text-accent" />
-            Reading the document… This usually takes 10 to 60 seconds. You can leave this page; it will be waiting on the Import page.
-          </div>
-        </Card>
-      )}
+      {(rec.status === 'processing' || rec.status === 'queued') && <Reading rec={rec} />}
       {rec.status === 'failed' && (
         <Callout tone="bad" title="Couldn’t read this file">
           {rec.extraction.error}
           <div className="mt-1 text-ink-3">Try reading it again, perhaps with another engine or model, or discard it.</div>
+          {readsLocally(data.settings) && (
+            <div className="mt-2">
+              <ReadWithClaude rec={rec} />
+            </div>
+          )}
         </Callout>
       )}
       {filed && (
@@ -1600,7 +1673,7 @@ export default function Review() {
         </Callout>
       )}
 
-      {committed && !filed && (rec.extraction.engine === 'claude-cli' || rec.extraction.engine === 'claude-api' || (rec.extraction.engine === 'csv' && !/holdings export/.test(rec.extraction.detail ?? ''))) && (
+      {committed && !filed && (byModel(rec.extraction.engine) || (rec.extraction.engine === 'csv' && !/holdings export/.test(rec.extraction.detail ?? ''))) && (
         <div className="mt-4">
           <ReadAgainCard rec={rec} currentVersion={rereads.data?.current ?? null} />
         </div>

@@ -187,17 +187,20 @@ waiting for review, jobs, proposals waiting for you, tokens), sign-ins and refus
 
 ## Agent sessions
 
-Every time the app runs Claude is a session (`src/server/sessions.ts`), listed on its own page,
+Every time the app runs a model (Claude, or the local model service) is a session (`src/server/sessions.ts`), listed on its own page,
 `/sessions` (*Agent sessions*). The page is linked from Settings → Agents and Agent access, from
 Assumptions & research → Agent jobs, from each import's page and its *Read again* card, from a
 receipt's reading, and from the audit log. A session can belong to any of these, so it has a page
 and an address of its own, and links back to each.
 
-- **What is a session.** One run of an engine, through the `claude` CLI or the Messages API:
+- **What is a session.** One run of an engine, through the `claude` CLI, the Messages API or the
+  local model service (engine `inference`: its request without the images, any waits, its answer
+  with any reasoning, and its provenance, kept whole in the record):
   - an agent job (each kind; a job interrupted by a restart and run again is two);
   - reading an upload: the first reading, and the check by a second model when there is one, each
     a session. Reading again before review (reprocess) makes new sessions;
   - reading a stored document again, for comparison (first reading and check);
+  - a run suggesting categories, and a question answered (each named by its own id);
   - reading a receipt.
   `claude --version`, which looks for the engine, is not a session. Neither is `eval/` (a
   development tool that runs outside the app).
@@ -257,6 +260,51 @@ and an address of its own, and links back to each.
   /api/sessions/:id/transcript?from=<n>` (events from the nth, for a page following a run). A
   token with `read` can read them, like everything else.
 
+## Models per task
+
+Every piece of model work is a task in `src/shared/tasks.ts` (DECISIONS 2026-10-04): what it needs
+(images, the web, tools, reasoning), whose data it sees, which engines may run it, its default
+engine and model, the priority it asks the local model service for, and how long a run may take.
+Settings → Models (`settings.models.tasks`) overrides it per task, and `resolveTask` keeps only what
+the task allows.
+
+| Task | Default | Priority | Why |
+|---|---|---|---|
+| Read documents (`read-document`), and read them again | Claude (CLI), Sonnet; local `vision-extract` when chosen | batch | locally, 98.9% of fields on the evaluation set, but some wrong readings passed every check (DECISIONS 2026-10-04), so Claude stays the default until a local run passes |
+| Check a reading (`check-reading`) | Claude (CLI), Opus; local `vision-extract`, thinking, when chosen | batch | as above |
+| Read receipts (`read-receipt`) | Claude (CLI), Sonnet; local `vision-extract` when chosen | batch | not measured locally yet |
+| Name imports, understand notes (`label-imports`, `interpret-note`) | local `fast-chat` | batch, normal | short answers |
+| Suggest categories (`suggest-categories`) | local `fast-chat`, local only | batch | one payment description per request, as a proposal |
+| Answer questions (`ask`) | local `fast-chat`, thinking | interactive | someone is waiting |
+| Month in review, insights after imports | Claude (CLI), Opus | — | they read with tools, which the local model does not have |
+| Research (funds, providers, assumptions) | Claude (CLI), Opus | — | they need the web, which the local model does not have |
+
+- **The local model service** (`src/server/inference.ts`) is a model service on a machine of your
+  own (an OpenAI-compatible API), reached over your private network at
+  `INFERENCE_BASE_URL` with finance's own key (`INFERENCE_API_KEY`), both in `.env`. It keeps no
+  prompt or output. Settings → Models shows its state from `/health` (each alias, and who holds the
+  GPU); `engines.ts` lists it beside Claude and OCR with `external: false`.
+- **One batch or normal request of finance's at a time**: the service runs them in one slot, so a
+  second would only spend its queue wait. An interactive one (a question) has a slot of its own.
+- **Waits, failures and Claude:** a request the service cannot take (503, 502, 429) is retried
+  after the wait it gives (`Retry-After` points past a GPU lease), for up to 12 hours
+  (`INFERENCE_WAIT_MINUTES`; 10 minutes for a question), then the work fails as unavailable. Any
+  other refusal, output cut off, or output outside the schema fails at once. A task falls back to
+  Claude only when its switch in Settings → Models is on (off by default), since that sends what
+  it sees to Anthropic.
+- **Aliases:** `vision-extract` reads images; `fast-chat` and `classify-small` answer text. The
+  bake-off aliases `chat-q8` and `chat-9b` can be chosen as experiments: loading one swaps the GPU
+  (its first answer takes 2–3 minutes, and it holds the card for at least 10). `embed` and
+  `rerank` are not used yet.
+- **Thinking** is off except for the check of a reading and a question: it helps there, and on a
+  first reading it is slower and worse (the service's BENCH, "M2").
+- **Provenance:** everything a local model produces keeps the service's record of it beside
+  `model` (request id, alias, model sha256, system fingerprint, seed, thinking, schema check):
+  `extraction.inference`, `verification.firstInference/secondInference`, a receipt's
+  `reading.inference`, a record's `provenance.inference` with `provenance.engine: "inference"`.
+  Its session keeps the whole object. Local work has no `costUsd` and does not count against the
+  agents' budget.
+
 ## Ingestion pipeline
 
 `POST /api/imports` (or the inbox watcher, or `npm run import`) goes through
@@ -274,9 +322,11 @@ and an address of its own, and links back to each.
    - A PDF that is one of HMRC's gov.uk pages, or a payslip in a layout known here: read from its
      text on this machine (`govuk`, `payslip`), never sent to Claude (INGESTION.md, "HMRC's pages"
      and "Payslips read on this machine").
-   - Other PDFs and images, via `claude-cli` (`claude -p --json-schema … --tools Read --safe-mode`, run in
-     an empty scratch directory), `claude-api` (Messages API with structured outputs and
-     server-side refusal fallback) or `ocr` (offline).
+   - Other PDFs and images, with the model Settings → Models gives reading documents ("Models
+     per task", below): the local model service (`inference`: page images at 150 dpi to its
+     OpenAI-compatible API, on this machine), `claude-cli` (`claude -p --json-schema … --tools
+     Read --safe-mode`, run in an empty scratch directory), `claude-api` (Messages API with
+     structured outputs and server-side refusal fallback) or `ocr` (offline).
    - The output is normalised (money to pence precision, dates repaired) into an `Extraction`.
 4. **Build the draft.**
    - Each extracted account is matched to one of yours by last 4 digits, provider, type and name

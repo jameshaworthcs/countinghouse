@@ -62,7 +62,7 @@ describe('HMRC’s pages, uploaded', () => {
     config.webDist = path.join(dir, 'no-web');
     app = await createApp(config, { version: 'test', env: {}, inbox: false });
     // Never Claude in a test: a page no local reader knows goes to offline OCR instead.
-    await app.ctx.store.setSettings({ ...app.ctx.store.settings, extraction: { ...app.ctx.store.settings.extraction, engine: 'ocr' } });
+    await app.ctx.store.setSettings({ ...app.ctx.store.settings, models: { tasks: { 'read-document': { engine: 'ocr' } } } });
   });
   afterEach(async () => {
     await app.close();
@@ -424,7 +424,7 @@ describe('format v5 migration', () => {
         { id: 'fig_00000000000000a7', kind: 'pension_income_forecast', label: 'Forecast', amount: 11500.5, currency: 'GBP', date: '2026-09-30', accountId: 'state', source: { importId: 'imp_20260930_120000_0a04' }, createdAt: stamp },
       ];
       await writeFile(path.join(data, 'figures.jsonl'), `${figures.map((f) => JSON.stringify(f)).join('\n')}\n`);
-      expect(await runMigrations(data, () => undefined)).toMatchObject({ from: 4, to: 9 });
+      expect(await runMigrations(data, () => undefined)).toMatchObject({ from: 4, to: 10 });
 
       const store = await Store.open(data);
       expect(store.issues.map((i) => `${i.file}: ${i.message}`)).toEqual([]);
@@ -463,7 +463,7 @@ describe('a job learns what its payslips print', () => {
         { ...slip('Quillon Holdings Limited', '2026-08-28', { payrollNumber: '99007788' }), id: 'pay_00000000000000a2', employmentId: 'holdings', taxYear: '2026/27', source: {}, createdAt: stamp },
       ];
       await writeFile(path.join(data, 'payslips.jsonl'), `${records.map((r) => JSON.stringify(r)).join('\n')}\n`);
-      expect(await runMigrations(data, () => undefined)).toMatchObject({ from: 7, to: 9 });
+      expect(await runMigrations(data, () => undefined)).toMatchObject({ from: 7, to: 10 });
 
       const store = await Store.open(data);
       expect(store.issues).toEqual([]);

@@ -7,7 +7,7 @@ import type { AuditActor, AuditEntry } from './audit';
 /** What a session was for: an agent job, reading an upload, reading a stored document again, a receipt. */
 export type SessionKind = 'job' | 'reading' | 'reread' | 'receipt';
 export type SessionStatus = 'running' | 'succeeded' | 'failed' | 'cancelled';
-export type SessionEngine = 'claude-cli' | 'claude-api';
+export type SessionEngine = 'inference' | 'claude-cli' | 'claude-api';
 
 /** The reading a session made of a document: the first, or the check by a second model. */
 export type ReadingRole = 'first' | 'second';
@@ -40,6 +40,10 @@ export interface SessionRecord {
   model: string;
   modelUsed?: string;
   effort?: string;
+  /** The local model service: whether it thought before answering. */
+  thinking?: boolean;
+  /** The local model service's provenance of the answer, whole (its README §4). */
+  inference?: Record<string, unknown>;
   promptVersion?: string;
   tools: string[];
   /** A job's privacy class: web tools with public inputs, or your data with no web. */

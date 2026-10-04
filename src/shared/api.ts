@@ -3,6 +3,7 @@
 import type { AccessGroup, WrapperGroup } from './accounts';
 import type { PersonSuggestion } from './people';
 import type {
+  InferenceProvenance,
   Account,
   Agreement,
   BalanceEvidence,
@@ -943,7 +944,15 @@ export interface SystemResponse {
   inboxDir: string;
   workDir: string;
   formatVersion: number;
-  engines: { id: string; available: boolean; detail: string; external: boolean }[];
+  engines: {
+    id: string;
+    available: boolean;
+    detail: string;
+    external: boolean;
+    /** The local model service: each alias's state, and who holds its GPU. */
+    health?: { status: string; aliases: Record<string, { state: string; queued?: number; in_flight?: number }>; gpu?: { resident?: string; lease?: { state: string; until?: string } } };
+  }[];
+  /** The engine documents are read with (Settings → Models). */
   selectedEngine: string | null;
   git: { enabled: boolean; branch?: string; dirty: number; ahead?: number; behind?: number; remote?: string; lastCommit?: { hash: string; date: string; subject: string }; lastError?: string };
   inbox: { dir: string; lastError?: string };
@@ -1337,6 +1346,8 @@ export interface Reread {
   finishedAt?: string;
   engine?: string;
   model?: string;
+  /** The local model service's record of the reading (engine "inference"). */
+  inference?: InferenceProvenance;
   engineVersion?: string;
   /** The reader version that made the import. */
   previousVersion?: string;

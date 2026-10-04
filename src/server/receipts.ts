@@ -1,17 +1,22 @@
 // Receipts attached to transactions (docs/DATA_FORMAT.md, receipts.jsonl).
 //
 // The document is kept with your other documents (data/documents, served by id). When reading
-// receipts with Claude is on (Settings → Import & extraction, off unless you turn it on), Claude reads
-// it in a scratch directory holding only that file, with only the Read tool: the receipt and your
-// category names go to Claude, and nothing else leaves. What it reads is a proposal: the split lines
-// change only when you accept them.
+// receipts is on (Settings → Models & import, off unless you turn it on), the model Settings →
+// Models gives receipts reads it: the local model service (nothing leaves this machine), or Claude in
+// a scratch directory holding only that file, with only the Read tool (the receipt and your category
+// names go to Claude, and nothing else leaves). What it reads is a proposal: the split lines change
+// only when you accept them.
 
-import { copyFile, mkdir, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { CategoryIndex } from '../shared/categories';
 import { fromMinor } from '../shared/money';
-import { ReceiptSchema, type Receipt, type Transaction } from '../shared/schema';
+import { ReceiptSchema, type InferenceProvenance, type Receipt, type Transaction } from '../shared/schema';
+import { claudeChoice, resolveTask, TASKS, type TaskChoice } from '../shared/tasks';
+import { chat, InferenceFailed, InferenceUnavailable } from './inference';
+import { prepareImage } from './ingest/images';
+import { renderPdfPages } from './ingest/inference-read';
 import { runAgent, type AgentRunOptions, type AgentRunResult } from './agents/claude';
 import type { Config } from './config';
 import { currentActor } from './audit';
@@ -21,7 +26,7 @@ import { documentId } from './ids';
 import { resolveClaudeBin } from './ingest/claude-cli';
 import { StoreError, type Store } from './store';
 
-export const RECEIPT_PROMPT_VERSION = 'receipt-1';
+export const RECEIPT_PROMPT_VERSION = 'receipt-2';
 export const MAX_RECEIPT_BYTES = 15 * 1024 * 1024;
 const TYPES: Record<string, string> = { 'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp', 'image/heic': '.heic', 'image/heif': '.heif', 'application/pdf': '.pdf' };
 
@@ -62,10 +67,10 @@ export function receiptJsonSchema(categoryIds: string[]): Record<string, unknown
   };
 }
 
-export function receiptPrompt(t: Transaction, categories: { id: string; name: string; group?: string }[]): { system: string; user: string } {
+export function receiptPrompt(t: Transaction, categories: { id: string; name: string; group?: string }[], attached = false): { system: string; user: string } {
   const system = `You read one shop receipt, bill or invoice and return its lines as JSON matching the schema exactly. Read only what is printed: never guess a line or an amount. Amounts are in pounds. Give every line that makes up the total, including discounts (negative), delivery and service charges. For each line choose the category it belongs in from the list given, or null when you are unsure. Say in notes anything you could not read with certainty.`;
   const user = [
-    `The receipt is the file in the current directory. It was attached to a payment of £${Math.abs(t.amount).toFixed(2)} on ${t.date}${t.payee ? ` to ${t.payee}` : ''}: its lines usually add up to that.`,
+    `${attached ? 'The receipt is attached (each image a page or a slice of it, in order).' : 'The receipt is the file in the current directory.'} It was attached to a payment of £${Math.abs(t.amount).toFixed(2)} on ${t.date}${t.payee ? ` to ${t.payee}` : ''}: its lines usually add up to that.`,
     '',
     'Categories (id: name):',
     ...categories.map((c) => `- ${c.id}: ${c.group ? `${c.group} › ` : ''}${c.name}`),
@@ -111,57 +116,98 @@ export async function attachReceipt(store: Store, workDir: string, transactionId
 
 export type ReceiptReader = (opts: AgentRunOptions) => Promise<AgentRunResult>;
 
+/** Receipts being read now (a "reading" one not here was cut off by a restart, and can be read again). */
+const readingNow = new Set<string>();
+
 /**
- * Read a receipt with Claude, when that is turned on: its lines, signed like the payment, each with
- * a suggested category. A proposal: the transaction does not change.
+ * Read a receipt, when that is turned on, with the model Settings → Models gives receipts: its
+ * lines, signed like the payment, each with a suggested category. A proposal: the transaction does
+ * not change. Claude answers while you wait; the local model takes minutes, so its reading runs in
+ * the background and the receipt says "reading" until it ends.
  */
-export async function readReceipt(store: Store, config: Config, id: string, opts: { reader?: ReceiptReader; bin?: string; sessions?: SessionLog | undefined } = {}): Promise<Receipt> {
+export async function readReceipt(store: Store, config: Config, id: string, opts: { reader?: ReceiptReader; bin?: string; sessions?: SessionLog | undefined; fetch?: typeof fetch; wait?: boolean } = {}): Promise<Receipt> {
   const settings = store.settings.extraction;
-  if (!settings.readReceipts) throw new StoreError('Reading receipts with the agent is off: turn it on in Settings → Import & extraction.', 409);
+  if (!settings.readReceipts) throw new StoreError('Reading receipts is off: turn it on in Settings → Models & import.', 409);
   const receipt = store.receipts.find((r) => r.id === id);
   if (!receipt) throw new StoreError('Unknown receipt', 404);
   const t = store.transaction(receipt.transactionId);
   if (!t) throw new StoreError('The receipt’s transaction no longer exists', 404);
-  const bin = opts.bin ?? (await resolveClaudeBin());
-  if (!bin) throw new StoreError('The claude CLI is not installed or not logged in on this server.', 503);
+  if (readingNow.has(id)) return receipt;
+  const choice = resolveTask('read-receipt', store.settings.models.tasks);
+  const bin = choice.engine === 'inference' && !choice.fallback ? undefined : ((opts.bin ?? (await resolveClaudeBin())) || undefined);
+  if (choice.engine !== 'inference' && !bin) throw new StoreError('The claude CLI is not installed or not logged in on this server.', 503);
+  if (choice.engine !== 'inference' || opts.wait) return read(store, config, receipt, t, choice, bin, opts);
+  const marked = ReceiptSchema.parse({ ...receipt, status: 'reading', updatedAt: nowISO() });
+  delete marked.error;
+  readingNow.add(id);
+  await store.upsertRecords('receipts', [marked], 'receipt: reading');
+  void read(store, config, marked, t, choice, bin, opts).finally(() => readingNow.delete(id));
+  return marked;
+}
+
+async function read(store: Store, config: Config, receipt: Receipt, t: Transaction, choice: TaskChoice, bin: string | undefined, opts: { reader?: ReceiptReader; sessions?: SessionLog | undefined; fetch?: typeof fetch }): Promise<Receipt> {
+  const id = receipt.id;
+  const settings = store.settings.extraction;
   const cats = new CategoryIndex(store.categories);
   const categories = store.categories.filter((c) => (c.kind === 'expense' || c.kind === 'income') && !c.hidden && c.parent).map((c) => ({ id: c.id, name: c.name, group: cats.get(c.parent)?.name }));
-  const { system, user } = receiptPrompt(t, categories);
   const scratch = path.join(config.workDir, 'extract', id);
   await rm(scratch, { recursive: true, force: true });
   await mkdir(scratch, { recursive: true, mode: 0o700 });
   const ext = TYPES[receipt.document.mediaType] ?? path.extname(receipt.document.fileName);
-  await copyFile(store.documentAbsPath(receipt.document.path!), path.join(scratch, `receipt${ext}`));
+  const file = path.join(scratch, `receipt${ext}`);
+  await copyFile(store.documentAbsPath(receipt.document.path!), file);
   const stamp = nowISO();
+  const schema = receiptJsonSchema(categories.map((c) => c.id));
   try {
-    // The reading is a Claude session, with its transcript (sessions.ts).
-    const session = await opts.sessions?.start({
-      kind: 'receipt',
-      title: `Read a receipt for ${t.payee ?? t.description} on ${t.date}`,
-      receiptId: receipt.id,
-      transactionId: t.id,
-      engine: 'claude-cli',
-      model: settings.model,
-      effort: settings.effort,
-      promptVersion: RECEIPT_PROMPT_VERSION,
-      tools: ['Read'],
-      privacy: 'personal',
-      startedBy: { actor: currentActor(), reason: 'Read the receipt attached to this payment' },
-    });
-    const readOnce = (transcript: AgentRunOptions['transcript']) =>
-      (opts.reader ?? runAgent)({
-        bin,
-        cwd: scratch,
-        prompt: user,
-        systemPrompt: system,
-        schema: receiptJsonSchema(categories.map((c) => c.id)),
-        tools: ['Read'],
-        model: settings.model,
-        effort: settings.effort,
-        timeoutMs: Math.min(settings.timeoutSeconds, 600) * 1000,
-        transcript,
+    // Each reading is a session, with its transcript (sessions.ts).
+    const once = async (c: TaskChoice): Promise<AgentRunResult & { inference?: InferenceProvenance }> => {
+      const local = c.engine === 'inference';
+      const { system, user } = receiptPrompt(t, categories, local);
+      const session = await opts.sessions?.start({
+        kind: 'receipt',
+        title: `Read a receipt for ${t.payee ?? t.description} on ${t.date}`,
+        receiptId: receipt.id,
+        transactionId: t.id,
+        engine: local ? 'inference' : 'claude-cli',
+        model: c.model,
+        ...(local ? { thinking: c.thinking } : { effort: c.effort }),
+        promptVersion: RECEIPT_PROMPT_VERSION,
+        tools: local ? [] : ['Read'],
+        privacy: 'personal',
+        startedBy: { actor: currentActor(), reason: 'Read the receipt attached to this payment' },
       });
-    const result = session ? await session.run(readOnce) : await readOnce(undefined);
+      const run = async (transcript: AgentRunOptions['transcript']): Promise<AgentRunResult & { inference?: InferenceProvenance }> => {
+        if (local) {
+          const def = TASKS['read-receipt'];
+          const images = receipt.document.mediaType === 'application/pdf' ? await renderPdfPages(file, scratch) : (await prepareImage(await readFile(file), scratch, 'receipt')).files;
+          const res = await chat(config.inference, {
+            alias: c.model,
+            system,
+            content: [...(await Promise.all(images.map(async (f) => ({ type: 'image' as const, mediaType: 'image/png' as const, data: await readFile(f), name: path.basename(f) })))), { type: 'text', text: user }],
+            schema: { name: 'receipt', schema },
+            thinking: c.thinking,
+            maxTokens: def.maxTokens,
+            priority: def.priority,
+            runMinutes: def.runMinutes,
+            transcript,
+            describe: { model: c.model, systemPrompt: system, prompt: user, schema },
+            ...(opts.fetch ? { fetch: opts.fetch } : {}),
+          });
+          return { output: res.output, model: res.provenance.modelId ?? c.model, durationMs: res.durationMs, inference: res.provenance };
+        }
+        if (!bin) throw new Error('The claude CLI is not installed or not logged in on this server.');
+        return (opts.reader ?? runAgent)({ bin, cwd: scratch, prompt: user, systemPrompt: system, schema, tools: ['Read'], model: c.model, effort: c.effort, timeoutMs: Math.min(settings.timeoutSeconds, 600) * 1000, transcript });
+      };
+      return session ? session.run(run) : run(undefined);
+    };
+    let result: AgentRunResult & { inference?: InferenceProvenance };
+    try {
+      result = await once(choice);
+    } catch (err) {
+      // The local model could not, and receipts may fall back to Claude (Settings → Models).
+      if (choice.engine !== 'inference' || !choice.fallback || !bin || !(err instanceof InferenceUnavailable || err instanceof InferenceFailed)) throw err;
+      result = await once(claudeChoice('read-receipt'));
+    }
     const out = ReadingOutput.parse(result.output);
     const sign = t.amount < 0 ? -1 : 1;
     const known = new Set(categories.map((c) => c.id));
@@ -174,6 +220,7 @@ export async function readReceipt(store: Store, config: Config, id: string, opts
         promptVersion: RECEIPT_PROMPT_VERSION,
         at: stamp,
         ...(result.costUsd !== undefined ? { costUsd: result.costUsd } : {}),
+        ...(result.inference ? { inference: result.inference } : {}),
         merchant: out.merchant,
         date: out.date && /^\d{4}-\d{2}-\d{2}$/.test(out.date) ? out.date : null,
         total: out.total === null ? null : money(Math.abs(out.total)),
@@ -194,6 +241,7 @@ export async function readReceipt(store: Store, config: Config, id: string, opts
     await rm(scratch, { recursive: true, force: true });
   }
 }
+
 
 /** Take a receipt off its transaction. Its file goes too, unless something else keeps it. */
 export async function detachReceipt(store: Store, id: string): Promise<void> {

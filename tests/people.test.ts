@@ -629,7 +629,7 @@ describe('format v9: money paid back counts against spending', () => {
       .filter((c) => c.id !== 'repaid')
       .map(({ offsetsSpending: _o, ...c }) => c);
     await writeFile(path.join(data, 'categories.json'), JSON.stringify({ categories: old }));
-    expect(await runMigrations(data, () => undefined)).toMatchObject({ from: 8, to: 9 });
+    expect(await runMigrations(data, () => undefined)).toMatchObject({ from: 8, to: 10 });
     const store = await Store.open(data);
     expect(store.issues).toEqual([]);
     const ids = store.categories.map((c) => c.id);

@@ -1,0 +1,301 @@
+{"summary": {
+ "ranAt": "2026-10-04T16:46:58.480Z",
+ "promptVersion": "extract-15",
+ "label": "local-v10",
+ "engine": "inference",
+ "model": "app default",
+ "effort": "app default",
+ "verifyModel": "app default",
+ "readTwice": 32,
+ "confirmedByFigures": 4,
+ "withDisagreements": 12,
+ "cases": 40,
+ "minutes": 292.6,
+ "costUsd": 0,
+ "fieldAccuracy": 98.9,
+ "rows": {
+  "expected": 280,
+  "found": 275,
+  "extra": 1
+ },
+ "byField": {
+  "nothingNew": {
+   "correct": 40,
+   "total": 40,
+   "pct": 100
+  },
+  "account": {
+   "correct": 33,
+   "total": 36,
+   "pct": 91.7
+  },
+  "row": {
+   "correct": 275,
+   "total": 280,
+   "pct": 98.2
+  },
+  "date": {
+   "correct": 274,
+   "total": 275,
+   "pct": 99.6
+  },
+  "sign": {
+   "correct": 275,
+   "total": 275,
+   "pct": 100
+  },
+  "amount": {
+   "correct": 275,
+   "total": 275,
+   "pct": 100
+  },
+  "description": {
+   "correct": 275,
+   "total": 275,
+   "pct": 100
+  },
+  "pending": {
+   "correct": 275,
+   "total": 275,
+   "pct": 100
+  },
+  "duplicate": {
+   "correct": 275,
+   "total": 275,
+   "pct": 100
+  },
+  "original": {
+   "correct": 2,
+   "total": 6,
+   "pct": 33.3
+  },
+  "noExtra": {
+   "correct": 275,
+   "total": 276,
+   "pct": 99.6
+  },
+  "period": {
+   "correct": 12,
+   "total": 20,
+   "pct": 60
+  },
+  "balance": {
+   "correct": 40,
+   "total": 40,
+   "pct": 100
+  },
+  "balanceDate": {
+   "correct": 16,
+   "total": 16,
+   "pct": 100
+  },
+  "totals": {
+   "correct": 4,
+   "total": 4,
+   "pct": 100
+  },
+  "balanceAfter": {
+   "correct": 121,
+   "total": 121,
+   "pct": 100
+  },
+  "termsLimit": {
+   "correct": 1,
+   "total": 1,
+   "pct": 100
+  },
+  "termsRate": {
+   "correct": 3,
+   "total": 4,
+   "pct": 75
+  },
+  "termsNoExtraRate": {
+   "correct": 2,
+   "total": 2,
+   "pct": 100
+  },
+  "termsMinimum": {
+   "correct": 1,
+   "total": 1,
+   "pct": 100
+  },
+  "holding": {
+   "correct": 12,
+   "total": 12,
+   "pct": 100
+  },
+  "holdingValue": {
+   "correct": 12,
+   "total": 12,
+   "pct": 100
+  },
+  "holdingUnits": {
+   "correct": 8,
+   "total": 8,
+   "pct": 100
+  },
+  "figure": {
+   "correct": 14,
+   "total": 17,
+   "pct": 82.4
+  },
+  "figureYear": {
+   "correct": 16,
+   "total": 16,
+   "pct": 100
+  },
+  "wrapper": {
+   "correct": 11,
+   "total": 11,
+   "pct": 100
+  },
+  "holdingIsin": {
+   "correct": 8,
+   "total": 8,
+   "pct": 100
+  },
+  "noExtraFigure": {
+   "correct": 0,
+   "total": 2,
+   "pct": 0
+  },
+  "printed": {
+   "correct": 1,
+   "total": 1,
+   "pct": 100
+  },
+  "payslip": {
+   "correct": 1,
+   "total": 1,
+   "pct": 100
+  },
+  "payslipNet": {
+   "correct": 1,
+   "total": 1,
+   "pct": 100
+  },
+  "payslipCodes": {
+   "correct": 1,
+   "total": 1,
+   "pct": 100
+  },
+  "payslipLine": {
+   "correct": 8,
+   "total": 8,
+   "pct": 100
+  },
+  "payslipNoExtraLine": {
+   "correct": 2,
+   "total": 2,
+   "pct": 100
+  },
+  "payslipYtd": {
+   "correct": 9,
+   "total": 9,
+   "pct": 100
+  },
+  "noClaim": {
+   "correct": 5,
+   "total": 5,
+   "pct": 100
+  },
+  "schedule": {
+   "correct": 4,
+   "total": 4,
+   "pct": 100
+  },
+  "schedulePayment": {
+   "correct": 19,
+   "total": 19,
+   "pct": 100
+  },
+  "scheduleStatus": {
+   "correct": 6,
+   "total": 6,
+   "pct": 100
+  },
+  "scheduleNoExtra": {
+   "correct": 4,
+   "total": 4,
+   "pct": 100
+  }
+ },
+ "byKind": {
+  "csv": 100,
+  "pdf": 99.1,
+  "png": 97.6
+ },
+ "byTag": {
+  "csv": 100,
+  "fx": 98.7,
+  "refund": 99.8,
+  "card-signs": 99.4,
+  "pending": 99.5,
+  "pdf": 99.1,
+  "statement": 99.4,
+  "overlap": 99.6,
+  "multi-page": 99.5,
+  "multi-account": 100,
+  "savings": 96.8,
+  "new-account": 98.1,
+  "overdraft": 97.1,
+  "pension": 93.5,
+  "holdings": 94.5,
+  "figures": 96.6,
+  "isa": 98.4,
+  "tax": 100,
+  "png": 97.6,
+  "payslip": 100,
+  "long-screenshot": 99.1,
+  "lisa": 94.5,
+  "app-set": 93.1,
+  "cash-ledger": 100,
+  "capture-date": 50,
+  "batch": 100,
+  "nothing-new": 100,
+  "schedules": 100,
+  "everything": 100
+ }
+},
+"results": [
+{"id":"csv-monzo-fx-refund","title":"Monzo CSV: a payment in euros and a refund","tags":["csv","fx","refund"],"kind":"csv","status":"review","engine":"csv","durationMs":31,"confidence":"high","warnings":[],"notes":[],"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"row":{"correct":21,"total":21},"date":{"correct":21,"total":21},"sign":{"correct":21,"total":21},"amount":{"correct":21,"total":21},"description":{"correct":21,"total":21},"pending":{"correct":21,"total":21},"duplicate":{"correct":21,"total":21},"original":{"correct":1,"total":1},"noExtra":{"correct":21,"total":21}},"rows":{"expected":21,"found":21,"extra":0},"errors":[],"score":1}},
+{"id":"csv-amex-signs","title":"Amex CSV: card signs inverted in the file","tags":["csv","card-signs","refund"],"kind":"csv","status":"review","engine":"csv","durationMs":37,"confidence":"high","warnings":[],"notes":[],"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"row":{"correct":20,"total":20},"date":{"correct":20,"total":20},"sign":{"correct":20,"total":20},"amount":{"correct":20,"total":20},"description":{"correct":20,"total":20},"pending":{"correct":20,"total":20},"duplicate":{"correct":20,"total":20},"noExtra":{"correct":20,"total":20}},"rows":{"expected":20,"found":20,"extra":0},"errors":[],"score":1}},
+{"id":"csv-revolut-pending","title":"Revolut CSV: pending and reverted rows are left out","tags":["csv","pending"],"kind":"csv","status":"review","engine":"csv","durationMs":38,"confidence":"high","warnings":[],"notes":["2 row(s) were skipped (filtered or unreadable)."],"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"row":{"correct":5,"total":5},"date":{"correct":5,"total":5},"sign":{"correct":5,"total":5},"amount":{"correct":5,"total":5},"description":{"correct":5,"total":5},"pending":{"correct":5,"total":5},"duplicate":{"correct":5,"total":5},"noExtra":{"correct":5,"total":5}},"rows":{"expected":5,"found":5,"extra":0},"errors":[],"score":1}},
+{"id":"pdf-lloyds-statement","title":"Lloyds PDF statement with a type column (first of an overlapping pair)","tags":["pdf","statement","overlap"],"kind":"pdf","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":730799,"confidence":"high","warnings":[],"notes":[],"verification":{"method":"checks","firstModel":"vision-extract","reasons":0,"disagreements":[],"kept":"first"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"period":{"correct":0,"total":2},"balance":{"correct":2,"total":2},"balanceDate":{"correct":1,"total":1},"totals":{"correct":2,"total":2},"row":{"correct":26,"total":26},"date":{"correct":26,"total":26},"sign":{"correct":26,"total":26},"amount":{"correct":26,"total":26},"description":{"correct":26,"total":26},"pending":{"correct":26,"total":26},"balanceAfter":{"correct":26,"total":26},"duplicate":{"correct":26,"total":26},"noExtra":{"correct":26,"total":26}},"rows":{"expected":26,"found":26,"extra":0},"errors":["lloyds-current period: expected 2026-08-15, got nothing","lloyds-current period: expected 2026-09-14, got nothing"],"score":0.9917695473251029}},
+{"id":"csv-lloyds-overlap","title":"Lloyds CSV overlapping the statement already imported: the overlap is recognised","tags":["csv","overlap"],"kind":"csv","status":"review","engine":"csv","durationMs":5,"confidence":"high","warnings":[],"notes":[],"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"row":{"correct":24,"total":24},"date":{"correct":24,"total":24},"sign":{"correct":24,"total":24},"amount":{"correct":24,"total":24},"description":{"correct":24,"total":24},"pending":{"correct":24,"total":24},"balanceAfter":{"correct":24,"total":24},"duplicate":{"correct":24,"total":24},"noExtra":{"correct":24,"total":24}},"rows":{"expected":24,"found":24,"extra":0},"errors":[],"score":1}},
+{"id":"pdf-barclays-current","title":"Barclays-style statement: paid out / paid in columns, balance on every row","tags":["pdf","statement"],"kind":"pdf","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":1373899,"confidence":"high","warnings":[],"notes":[],"verification":{"method":"second-reading","firstModel":"vision-extract","secondModel":"vision-extract, thinking","reasons":3,"disagreements":["Bank Account, period start: vision-extract read nothing, vision-extract, thinking 2026-08-01","Bank Account, period end: vision-extract read nothing, vision-extract, thinking 2026-08-31","Bank Account, 2026-08-01 Standing Order to J Patel Ref: Flat 4B Rent -£1,450.00: vision-extract read £1,450.00","Bank Account, 2026-08-02 Direct Debit to LB Lambeth Ref: 30114728 -£175.00: vision-extract read £175.00","Bank Account, 2026-08-05 Direct Debit to Octopus Energy Ref: A-12B34C56 -£72.40: vision-extract read £72.40","Bank Account, 2026-08-05 Card Payment to BOOTS 1142 On 5 Aug -£12.03: vision-extract read £12.03","Bank Account, 2026-08-09 Card Payment to COSTA COFFEE 43012 On 9 Aug -£5.98: vision-extract read £5.98","Bank Account, 2026-08-11 Card Payment to Netflix.com -£12.99: vision-extract read £12.99","Bank Account, 2026-08-11 Card Payment to BOOTS 1142 On 11 Aug -£19.42: vision-extract read £19.42","Bank Account, 2026-08-11 Card Refund From Amazon.co.uk £18.92: vision-extract read -£18.92","Bank Account, 2026-08-14 Direct Debit to Puregym Ltd -£45.00: vision-extract read £45.00","Bank Account, 2026-08-15 Card Payment to GREGGS 1234 On 15 Aug -£6.02: vision-extract read £6.02","Bank Account, 2026-08-18 Card Payment to TESCO STORES 3297 On 18 Aug -£43.26: vision-extract read £43.26","Bank Account, 2026-08-20 Card Payment to BOOTS 1142 On 20 Aug -£23.70: vision-extract read £23.70","Bank Account, 2026-08-22 Card Payment to SHELL CLAPHAM On 22 Aug -£69.92: vision-extract read £69.92","Bank Account, 2026-08-25 Card Payment to WAITROSE 721 On 25 Aug -£41.27: vision-extract read £41.27","Bank Account, 2026-08-26 Card Payment to PRET A MANGER On 26 Aug -£7.63: vision-extract read £7.63","Bank Account, 2026-08-27 Bill Payment to Marcus Savings Ref: Savings -£300.00: vision-extract read £300.00","Bank Account, 2026-08-27 Card Payment to SAINSBURY'S S/MKT On 27 Aug -£59.97: vision-extract read £59.97","Bank Account, 2026-08-28 Card Payment to DELIVEROO On 28 Aug -£35.16: vision-extract read £35.16"],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"period":{"correct":2,"total":2},"balance":{"correct":2,"total":2},"balanceDate":{"correct":1,"total":1},"row":{"correct":19,"total":19},"date":{"correct":19,"total":19},"sign":{"correct":19,"total":19},"amount":{"correct":19,"total":19},"description":{"correct":19,"total":19},"pending":{"correct":19,"total":19},"balanceAfter":{"correct":19,"total":19},"duplicate":{"correct":19,"total":19},"noExtra":{"correct":19,"total":19}},"rows":{"expected":19,"found":19,"extra":0},"errors":[],"score":1}},
+{"id":"pdf-hsbc-long","title":"HSBC-style statement: 3 pages, dates once per day, end-of-day balances, brought forward lines","tags":["pdf","statement","multi-page"],"kind":"pdf","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":1274193,"confidence":"high","warnings":["Account 1: 3 balance lines were read as rows and left out (a balance brought or carried forward is not a payment)."],"notes":[],"verification":{"method":"checks","firstModel":"vision-extract","reasons":0,"disagreements":[],"kept":"first"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"period":{"correct":0,"total":2},"balance":{"correct":2,"total":2},"balanceDate":{"correct":1,"total":1},"totals":{"correct":2,"total":2},"row":{"correct":43,"total":43},"date":{"correct":43,"total":43},"sign":{"correct":43,"total":43},"amount":{"correct":43,"total":43},"description":{"correct":43,"total":43},"pending":{"correct":43,"total":43},"duplicate":{"correct":43,"total":43},"balanceAfter":{"correct":25,"total":25},"noExtra":{"correct":43,"total":43}},"rows":{"expected":43,"found":43,"extra":0},"errors":["hsbc-current period: expected 2026-07-19, got nothing","hsbc-current period: expected 2026-08-18, got nothing"],"score":0.9947089947089947}},
+{"id":"pdf-nationwide-multi","title":"Nationwide-style combined statement: two accounts in one PDF","tags":["pdf","statement","multi-account"],"kind":"pdf","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":2007069,"confidence":"high","warnings":[],"notes":["The document contains statements for two accounts: FlexAccount (current) and Flex Instant Saver (savings)."],"verification":{"method":"second-reading","firstModel":"vision-extract","secondModel":"vision-extract, thinking","reasons":1,"disagreements":["FlexAccount, period start: vision-extract read nothing, vision-extract, thinking 2026-08-01","FlexAccount, period end: vision-extract read nothing, vision-extract, thinking 2026-08-31","Flex Instant Saver, period start: vision-extract read nothing, vision-extract, thinking 2026-08-01","Flex Instant Saver, period end: vision-extract read nothing, vision-extract, thinking 2026-08-31"],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":2,"total":2},"period":{"correct":4,"total":4},"balance":{"correct":4,"total":4},"row":{"correct":10,"total":10},"date":{"correct":10,"total":10},"sign":{"correct":10,"total":10},"amount":{"correct":10,"total":10},"description":{"correct":10,"total":10},"pending":{"correct":10,"total":10},"balanceAfter":{"correct":10,"total":10},"duplicate":{"correct":10,"total":10},"noExtra":{"correct":10,"total":10}},"rows":{"expected":10,"found":10,"extra":0},"errors":[],"score":1}},
+{"id":"pdf-amex-card","title":"Amex-style card statement: unsigned amounts with CR credits, spending in euros, a fee","tags":["pdf","card-signs","fx","refund"],"kind":"pdf","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":2123438,"confidence":"high","warnings":[],"notes":[],"verification":{"method":"second-reading","firstModel":"vision-extract","secondModel":"vision-extract, thinking","reasons":1,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"period":{"correct":2,"total":2},"balance":{"correct":2,"total":2},"row":{"correct":15,"total":15},"date":{"correct":15,"total":15},"sign":{"correct":15,"total":15},"amount":{"correct":15,"total":15},"description":{"correct":15,"total":15},"pending":{"correct":15,"total":15},"duplicate":{"correct":15,"total":15},"original":{"correct":1,"total":1},"noExtra":{"correct":15,"total":15}},"rows":{"expected":15,"found":15,"extra":0},"errors":[],"score":1}},
+{"id":"pdf-barclaycard","title":"Barclaycard-style statement: spending positive, payments negative in print","tags":["pdf","card-signs"],"kind":"pdf","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":629165,"confidence":"high","warnings":[],"notes":[],"verification":{"method":"checks","firstModel":"vision-extract","reasons":0,"disagreements":[],"kept":"first"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"period":{"correct":0,"total":2},"balance":{"correct":2,"total":2},"row":{"correct":13,"total":13},"date":{"correct":13,"total":13},"sign":{"correct":13,"total":13},"amount":{"correct":13,"total":13},"description":{"correct":13,"total":13},"pending":{"correct":13,"total":13},"duplicate":{"correct":13,"total":13},"noExtra":{"correct":13,"total":13},"termsLimit":{"correct":1,"total":1},"termsRate":{"correct":2,"total":3},"termsNoExtraRate":{"correct":1,"total":1},"termsMinimum":{"correct":1,"total":1}},"rows":{"expected":13,"found":13,"extra":0},"errors":["barclaycard period: expected 2026-08-05, got nothing","barclaycard period: expected 2026-09-04, got nothing","terms: balance-transfers 0% until 2027-03-15 missing"],"score":0.9741379310344828}},
+{"id":"pdf-marcus-savings","title":"Savings statement for a quarter: deposits, a withdrawal and monthly interest","tags":["pdf","savings"],"kind":"pdf","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":1463703,"confidence":"high","warnings":[],"notes":[],"verification":{"method":"second-reading","firstModel":"vision-extract","secondModel":"vision-extract, thinking","reasons":1,"disagreements":["Online Savings Account, period start: vision-extract read nothing, vision-extract, thinking 2026-06-01","Online Savings Account, period end: vision-extract read nothing, vision-extract, thinking 2026-08-31"],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"period":{"correct":2,"total":2},"balance":{"correct":2,"total":2},"row":{"correct":7,"total":7},"date":{"correct":7,"total":7},"sign":{"correct":7,"total":7},"amount":{"correct":7,"total":7},"description":{"correct":7,"total":7},"pending":{"correct":7,"total":7},"balanceAfter":{"correct":7,"total":7},"duplicate":{"correct":7,"total":7},"noExtra":{"correct":7,"total":7},"termsRate":{"correct":1,"total":1},"termsNoExtraRate":{"correct":1,"total":1}},"rows":{"expected":7,"found":7,"extra":0},"errors":[],"score":1}},
+{"id":"pdf-santander-new-overdrawn","title":"A statement for an account not set up yet, going overdrawn (OD balances)","tags":["pdf","statement","new-account","overdraft"],"kind":"pdf","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":1423021,"confidence":"high","warnings":[],"notes":["OD indicates Overdrawn balance."],"verification":{"method":"second-reading","firstModel":"vision-extract","secondModel":"vision-extract, thinking","reasons":1,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"period":{"correct":0,"total":2},"balance":{"correct":2,"total":2},"row":{"correct":7,"total":7},"date":{"correct":7,"total":7},"sign":{"correct":7,"total":7},"amount":{"correct":7,"total":7},"description":{"correct":7,"total":7},"pending":{"correct":7,"total":7},"balanceAfter":{"correct":7,"total":7},"duplicate":{"correct":7,"total":7},"noExtra":{"correct":7,"total":7}},"rows":{"expected":7,"found":7,"extra":0},"errors":["new current period: expected 2026-08-01, got nothing","new current period: expected 2026-08-31, got nothing"],"score":0.9710144927536232}},
+{"id":"pdf-aviva-pension-annual","title":"Workplace pension annual statement: value, contributions for the tax year, funds","tags":["pdf","pension","holdings","figures"],"kind":"pdf","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":1040806,"confidence":"high","warnings":[],"notes":["Contributions by salary sacrifice are treated as employer contributions per rules.","The value shown is the holdings alone, with no cash. It is recorded as shown; the account’s value that day adds the cash the app knows from its other documents."],"verification":{"method":"second-reading","firstModel":"vision-extract","secondModel":"vision-extract, thinking","reasons":2,"disagreements":["Acme Analytics Ltd Group Personal Pension, period start: vision-extract read 2025-04-06, vision-extract, thinking nothing","Acme Analytics Ltd Group Personal Pension, period end: vision-extract read 2026-04-05, vision-extract, thinking nothing","Total: vision-extract read £4,500.00, vision-extract, thinking £8,400.00","Your contributions (by salary sacrifice, paid by your employer): only vision-extract read it"],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"balance":{"correct":1,"total":1},"balanceDate":{"correct":1,"total":1},"holding":{"correct":2,"total":2},"holdingValue":{"correct":2,"total":2},"holdingUnits":{"correct":2,"total":2},"figure":{"correct":0,"total":2},"figureYear":{"correct":1,"total":1}},"rows":{"expected":0,"found":0,"extra":0},"errors":["figure pension_contribution_employer 4500: got 8400","figure pension_contribution_employer 3900: missing"],"score":0.8461538461538461}},
+{"id":"pdf-ajbell-sipp","title":"SIPP valuation: funds with ISINs, an ETF, cash, and contributions this tax year","tags":["pdf","pension","holdings"],"kind":"pdf","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":950133,"confidence":"high","warnings":[],"notes":["SIPP valuation as at 26 September 2026."],"verification":{"method":"second-reading","firstModel":"vision-extract","secondModel":"vision-extract, thinking","reasons":2,"disagreements":["Self-Invested Personal Pension, total paid in: vision-extract read £4,000.00, vision-extract, thinking nothing","Gross contributions this tax year: period ending none in vision-extract, 2027-04-05 in vision-extract, thinking","Your contributions: only vision-extract read it"],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"balance":{"correct":1,"total":1},"balanceDate":{"correct":1,"total":1},"wrapper":{"correct":2,"total":2},"holding":{"correct":3,"total":3},"holdingValue":{"correct":3,"total":3},"holdingUnits":{"correct":3,"total":3},"holdingIsin":{"correct":3,"total":3},"figure":{"correct":1,"total":2},"figureYear":{"correct":2,"total":2}},"rows":{"expected":0,"found":0,"extra":0},"errors":["figure pension_contribution_employee 4000: got 5000"],"score":0.9545454545454546}},
+{"id":"pdf-vanguard-isa-quarter","title":"Stocks & Shares ISA quarterly statement: contributions, a fee, holdings, subscriptions used","tags":["pdf","isa","holdings"],"kind":"pdf","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":912441,"confidence":"high","warnings":[],"notes":["The value shown is the holdings alone, with no cash. It is recorded as shown; the account’s value that day adds the cash the app knows from its other documents."],"verification":{"method":"second-reading","firstModel":"vision-extract","secondModel":"vision-extract, thinking","reasons":3,"disagreements":["Stocks & Shares ISA, total paid in: vision-extract read £3,000.00, vision-extract, thinking nothing"],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"balance":{"correct":1,"total":1},"balanceDate":{"correct":1,"total":1},"wrapper":{"correct":1,"total":1},"row":{"correct":4,"total":4},"date":{"correct":4,"total":4},"sign":{"correct":4,"total":4},"amount":{"correct":4,"total":4},"description":{"correct":4,"total":4},"pending":{"correct":4,"total":4},"duplicate":{"correct":4,"total":4},"noExtra":{"correct":4,"total":4},"holding":{"correct":2,"total":2},"holdingValue":{"correct":2,"total":2},"holdingUnits":{"correct":2,"total":2},"holdingIsin":{"correct":2,"total":2},"noExtraFigure":{"correct":0,"total":1}},"rows":{"expected":4,"found":4,"extra":0},"errors":["extra figure: tax_deducted 3000 (ISA subscriptions this tax year)"],"score":0.9782608695652174}},
+{"id":"pdf-p60","title":"P60 for 2025/26: pay, tax, National Insurance and student loan","tags":["pdf","figures","tax"],"kind":"pdf","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":1500536,"confidence":"high","warnings":[],"notes":[],"verification":{"method":"second-reading","firstModel":"vision-extract","secondModel":"vision-extract, thinking","reasons":1,"disagreements":["In this employment: period ending none in vision-extract, 2026-04-05 in vision-extract, thinking","In this employment: period ending none in vision-extract, 2026-04-05 in vision-extract, thinking","Employee's contributions due on all earnings above the PT: period ending none in vision-extract, 2026-04-05 in vision-extract, thinking","Student loan deductions in this employment: period ending none in vision-extract, 2026-04-05 in vision-extract, thinking"],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"figure":{"correct":4,"total":4},"figureYear":{"correct":4,"total":4},"printed":{"correct":1,"total":1}},"rows":{"expected":0,"found":0,"extra":0},"errors":[],"score":1}},
+{"id":"png-payslip-scan","title":"A scanned payslip in a layout read by no rule: every line, the totals, the codes and the year to date","tags":["png","figures","payslip"],"kind":"png","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":2014074,"confidence":"high","warnings":[],"notes":[],"verification":{"method":"second-reading","firstModel":"vision-extract","secondModel":"vision-extract, thinking","reasons":2,"disagreements":["gross_pay: period ending none in vision-extract, 2026-08-31 in vision-extract, thinking","tax_deducted: only vision-extract, thinking read it","national_insurance: only vision-extract, thinking read it","pension_contribution_employee: only vision-extract, thinking read it","student_loan_deducted: only vision-extract, thinking read it"],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"figure":{"correct":5,"total":5},"figureYear":{"correct":5,"total":5},"payslip":{"correct":1,"total":1},"payslipNet":{"correct":1,"total":1},"payslipCodes":{"correct":1,"total":1},"payslipLine":{"correct":8,"total":8},"payslipNoExtraLine":{"correct":2,"total":2},"payslipYtd":{"correct":9,"total":9}},"rows":{"expected":0,"found":0,"extra":0},"errors":[],"score":1}},
+{"id":"pdf-interest-certificate","title":"Annual interest certificate for a savings account","tags":["pdf","figures","tax"],"kind":"pdf","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":1969785,"confidence":"high","warnings":[],"notes":["Interest is paid without tax taken off. You may need to tell HMRC about it if it is more than your Personal Savings Allowance."],"verification":{"method":"second-reading","firstModel":"vision-extract","secondModel":"vision-extract, thinking","reasons":1,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"figure":{"correct":1,"total":1},"figureYear":{"correct":1,"total":1}},"rows":{"expected":0,"found":0,"extra":0},"errors":[],"score":1}},
+{"id":"png-monzo-pending-overlap","title":"Monzo-style feed screenshot: pending rows today, and days already imported from the CSV","tags":["png","pending","overlap"],"kind":"png","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":937485,"confidence":"high","warnings":[],"notes":[],"verification":{"method":"second-reading","firstModel":"vision-extract","secondModel":"vision-extract, thinking","reasons":1,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"balance":{"correct":1,"total":1},"row":{"correct":7,"total":7},"date":{"correct":7,"total":7},"sign":{"correct":7,"total":7},"amount":{"correct":7,"total":7},"description":{"correct":7,"total":7},"pending":{"correct":7,"total":7},"duplicate":{"correct":7,"total":7},"noExtra":{"correct":7,"total":7}},"rows":{"expected":7,"found":7,"extra":0},"errors":[],"score":1}},
+{"id":"png-monzo-long-scroll","title":"Long scrolling screenshot (about 60 rows): read once, no rows lost or repeated at the joins","tags":["png","long-screenshot"],"kind":"png","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":1809350,"confidence":"high","warnings":[],"notes":["Screenshot of Monzo app. Transactions are listed in reverse chronological order. 'Today' is 2026-09-14, 'Yesterday' is 2026-09-13. The account name is 'Personal account'."],"verification":{"method":"second-reading","firstModel":"vision-extract","secondModel":"vision-extract, thinking","reasons":2,"disagreements":["Personal account, 2026-08-26 Waitrose -£26.17: only vision-extract, thinking read this row","Personal account, 2026-09-05 Greggs -£3.68: vision-extract dated it 2026-09-06"],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"balance":{"correct":1,"total":1},"row":{"correct":27,"total":27},"date":{"correct":26,"total":27},"sign":{"correct":27,"total":27},"amount":{"correct":27,"total":27},"description":{"correct":27,"total":27},"pending":{"correct":27,"total":27},"duplicate":{"correct":27,"total":27},"noExtra":{"correct":27,"total":28}},"rows":{"expected":27,"found":27,"extra":1},"errors":["monzo-current 2026-09-06 Greggs -3.68: dated 2026-09-05","monzo-current extra row: 2026-08-26 Waitrose -26.17"],"score":0.990909090909091}},
+{"id":"png-amex-app","title":"Card app screenshot: pending section, purchases unsigned, credits with a minus","tags":["png","card-signs","pending","refund"],"kind":"png","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":1750345,"confidence":"high","warnings":[],"notes":[],"verification":{"method":"second-reading","firstModel":"vision-extract","secondModel":"vision-extract, thinking","reasons":1,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"balance":{"correct":1,"total":1},"row":{"correct":6,"total":6},"date":{"correct":6,"total":6},"sign":{"correct":6,"total":6},"amount":{"correct":6,"total":6},"description":{"correct":6,"total":6},"pending":{"correct":6,"total":6},"duplicate":{"correct":6,"total":6},"noExtra":{"correct":6,"total":6}},"rows":{"expected":6,"found":6,"extra":0},"errors":[],"score":1}},
+{"id":"png-revolut-fx","title":"Revolut-style screenshot: payments in euros shown with their sterling amounts","tags":["png","fx"],"kind":"png","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":1883702,"confidence":"high","warnings":[],"notes":[],"verification":{"method":"second-reading","firstModel":"vision-extract","secondModel":"vision-extract, thinking","reasons":1,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":0,"total":1},"balance":{"correct":1,"total":1},"row":{"correct":5,"total":5},"date":{"correct":5,"total":5},"sign":{"correct":5,"total":5},"amount":{"correct":5,"total":5},"description":{"correct":5,"total":5},"pending":{"correct":5,"total":5},"original":{"correct":0,"total":3},"duplicate":{"correct":5,"total":5},"noExtra":{"correct":5,"total":5}},"rows":{"expected":5,"found":5,"extra":0},"errors":["revolut-current: imported into a new current","revolut-current 2026-09-24 Café de Flore -10.84: original none","revolut-current 2026-09-24 Hôtel du Nord -54.12: original none","revolut-current 2026-09-25 RATP -3.47: original none"],"score":0.9130434782608695}},
+{"id":"png-starling-dark","title":"Dark-mode banking screenshot: a refund, a pending row and a payment in euros","tags":["png","refund","pending","fx"],"kind":"png","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":1734615,"confidence":"high","warnings":[],"notes":[],"verification":{"method":"second-reading","firstModel":"vision-extract","secondModel":"vision-extract, thinking","reasons":1,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"balance":{"correct":1,"total":1},"row":{"correct":5,"total":5},"date":{"correct":5,"total":5},"sign":{"correct":5,"total":5},"amount":{"correct":5,"total":5},"description":{"correct":5,"total":5},"pending":{"correct":5,"total":5},"duplicate":{"correct":5,"total":5},"original":{"correct":0,"total":1},"noExtra":{"correct":5,"total":5}},"rows":{"expected":5,"found":5,"extra":0},"errors":["starling-current 2026-09-26 Booking.com -64.2: original none"],"score":0.9772727272727273}},
+{"id":"png-vanguard-isa","title":"ISA app overview: value, total invested, return, allowance used, holdings","tags":["png","isa","holdings"],"kind":"png","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":1250232,"confidence":"high","warnings":[],"notes":["Screenshot captured on 2026-09-26.","The value shown is the holdings alone, with no cash. It is recorded as shown; the account’s value that day adds the cash the app knows from its other documents."],"verification":{"method":"second-reading","firstModel":"vision-extract","secondModel":"vision-extract, thinking","reasons":1,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"balance":{"correct":1,"total":1},"balanceDate":{"correct":1,"total":1},"wrapper":{"correct":2,"total":2},"holding":{"correct":3,"total":3},"holdingValue":{"correct":3,"total":3},"holdingIsin":{"correct":3,"total":3}},"rows":{"expected":0,"found":0,"extra":0},"errors":[],"score":1}},
+{"id":"png-moneybox-lisa","title":"LISA app: balance, government bonus, paid in this tax year","tags":["png","lisa"],"kind":"png","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":1695149,"confidence":"high","warnings":[],"notes":["Screenshot of a Lifetime ISA account. The holding name is truncated.","The value shown is the holdings alone, with no cash. It is recorded as shown; the account’s value that day adds the cash the app knows from its other documents."],"verification":{"method":"second-reading","firstModel":"vision-extract","secondModel":"vision-extract, thinking","reasons":1,"disagreements":["You've paid in £2,000.00 of your £4,000.00 allowance: only vision-extract, thinking read it"],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"balance":{"correct":1,"total":1},"balanceDate":{"correct":1,"total":1},"wrapper":{"correct":3,"total":3},"noExtraFigure":{"correct":0,"total":1}},"rows":{"expected":0,"found":0,"extra":0},"errors":["extra figure: tax_deducted 2000 (You've paid in £2,000.00 of your £4,000.00 allowance)"],"score":0.875}},
+{"id":"png-nest-pension","title":"Workplace pension app: pot value and contributions this tax year","tags":["png","pension"],"kind":"png","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":1702623,"confidence":"high","warnings":[],"notes":["Screenshot of a Nest-style pension account."],"verification":{"method":"second-reading","firstModel":"vision-extract","secondModel":"vision-extract, thinking","reasons":3,"disagreements":["Nest-style pension, total paid in: vision-extract read £3,000.00, vision-extract, thinking nothing"],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"balance":{"correct":1,"total":1},"balanceDate":{"correct":1,"total":1},"wrapper":{"correct":1,"total":1},"figure":{"correct":3,"total":3},"figureYear":{"correct":3,"total":3}},"rows":{"expected":0,"found":0,"extra":0},"errors":[],"score":1}},
+{"id":"png-premium-bonds","title":"Premium Bonds holding with a prize history","tags":["png","savings"],"kind":"png","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":2164608,"confidence":"high","warnings":[],"notes":[],"verification":{"method":"second-reading","firstModel":"vision-extract","secondModel":"vision-extract, thinking","reasons":1,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"balance":{"correct":1,"total":1},"balanceDate":{"correct":1,"total":1}},"rows":{"expected":0,"found":0,"extra":0},"errors":[],"score":1}},
+{"id":"png-nationwide-home-multi","title":"Banking app home screen listing three accounts, one of them new","tags":["png","multi-account","new-account","card-signs"],"kind":"png","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":1652661,"confidence":"high","warnings":[],"notes":["Screenshot of a banking app home screen showing balances for three accounts."],"verification":{"method":"second-reading","firstModel":"vision-extract","secondModel":"vision-extract, thinking","reasons":3,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":3,"total":3},"balance":{"correct":3,"total":3},"balanceDate":{"correct":3,"total":3}},"rows":{"expected":0,"found":0,"extra":0},"errors":[],"score":1}},
+{"id":"png-chase-saver-new","title":"Savings app screenshot for an account not set up yet","tags":["png","new-account","savings"],"kind":"png","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":1421455,"confidence":"high","warnings":[],"notes":["Today"],"verification":{"method":"second-reading","firstModel":"vision-extract","secondModel":"vision-extract, thinking","reasons":1,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"balance":{"correct":1,"total":1},"row":{"correct":3,"total":3},"date":{"correct":3,"total":3},"sign":{"correct":3,"total":3},"amount":{"correct":3,"total":3},"description":{"correct":3,"total":3},"pending":{"correct":3,"total":3},"duplicate":{"correct":3,"total":3},"noExtra":{"correct":3,"total":3}},"rows":{"expected":3,"found":3,"extra":0},"errors":[],"score":1}},
+{"id":"png-lisa-app-overview","title":"Investment LISA overview: value, cash, and only the first holding of the list","tags":["png","lisa","holdings","app-set"],"kind":"png","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":1854382,"confidence":"high","warnings":[],"notes":["The sum of visible cash (£612.30) and holdings (£5,204.77) is £5,817.07, which is less than the total account value (£9,418.62). The list of investments may continue."],"verification":{"method":"second-reading","firstModel":"vision-extract","secondModel":"vision-extract, thinking","reasons":2,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":0,"total":1},"balance":{"correct":1,"total":1},"balanceDate":{"correct":1,"total":1},"wrapper":{"correct":1,"total":1},"holding":{"correct":1,"total":1},"holdingValue":{"correct":1,"total":1}},"rows":{"expected":0,"found":0,"extra":0},"errors":["moneybox-lisa: imported into a new lisa"],"score":0.8571428571428571}},
+{"id":"png-lisa-app-activity","title":"Investment LISA activity, scrolled: the Balance column is the cash, not the value","tags":["png","lisa","cash-ledger","app-set"],"kind":"png","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":750429,"confidence":"high","warnings":[],"notes":["The document is a screenshot of account activity for the period 30 Aug - 29 Sep 2026. The balanceDate is null as no specific date is printed with the closing balance.","The running balances on this screen are the uninvested cash, not the account’s value, so no value is recorded from it."],"verification":{"method":"checks","firstModel":"vision-extract","reasons":0,"disagreements":[],"kept":"first"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"period":{"correct":2,"total":2},"balance":{"correct":2,"total":2},"wrapper":{"correct":1,"total":1},"row":{"correct":3,"total":3},"date":{"correct":3,"total":3},"sign":{"correct":3,"total":3},"amount":{"correct":3,"total":3},"description":{"correct":3,"total":3},"pending":{"correct":3,"total":3},"balanceAfter":{"correct":3,"total":3},"duplicate":{"correct":3,"total":3},"noExtra":{"correct":3,"total":3}},"rows":{"expected":3,"found":3,"extra":0},"errors":[],"score":1}},
+{"id":"png-lisa-app-fund-page","title":"One fund’s own page: a holding with units and amount invested, not an account","tags":["png","lisa","holdings","app-set"],"kind":"png","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":1957528,"confidence":"high","warnings":[],"notes":["This screen shows one holding (Fidelity Index World Fund P Acc); its value is not the account’s, so only the holding is recorded, beside the others of that day."],"verification":{"method":"second-reading","firstModel":"vision-extract","secondModel":"vision-extract, thinking","reasons":1,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":0,"total":1},"balance":{"correct":1,"total":1},"holding":{"correct":1,"total":1},"holdingValue":{"correct":1,"total":1},"holdingUnits":{"correct":1,"total":1}},"rows":{"expected":0,"found":0,"extra":0},"errors":["moneybox-lisa: imported into fidelity-lisa"],"score":0.8333333333333334}},
+{"id":"png-nsi-transactions","title":"Savings app, Transactions tab: the holding with no date printed, and prizes reinvested","tags":["png","savings","app-set","capture-date"],"kind":"png","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":2103258,"confidence":"high","warnings":[],"notes":[],"verification":{"method":"second-reading","firstModel":"vision-extract","secondModel":"vision-extract, thinking","reasons":1,"disagreements":["Premium Bonds, balance date: vision-extract read 2026-09-03, vision-extract, thinking 2026-09-24","Premium Bonds, 2026-07-02 Auto prize reinvestment £25.00: only vision-extract read this row","Premium Bonds, 2026-07-02 Auto prize reinvestment £100.00: only vision-extract read this row","Premium Bonds, 2026-08-05 Auto prize reinvestment £25.00: only vision-extract read this row","Premium Bonds, 2026-09-03 Auto prize reinvestment £25.00: only vision-extract read this row","Premium Bonds, 2026-09-03 Auto prize reinvestment £50.00: only vision-extract read this row"],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"noClaim":{"correct":1,"total":1},"account":{"correct":1,"total":1},"balance":{"correct":1,"total":1},"balanceDate":{"correct":1,"total":1},"row":{"correct":0,"total":5}},"rows":{"expected":5,"found":0,"extra":0},"errors":["premium-bonds 2026-09-03 Auto prize reinvestment 50: missing","premium-bonds 2026-09-03 Auto prize reinvestment 25: missing","premium-bonds 2026-08-05 Auto prize reinvestment 25: missing","premium-bonds 2026-07-02 Auto prize reinvestment 100: missing","premium-bonds 2026-07-02 Auto prize reinvestment 25: missing"],"score":0.5}},
+{"id":"png-nsi-transactions-scrolled","title":"The same tab scrolled: older rows, and nothing on screen saying which account","tags":["png","savings","app-set","batch"],"kind":"png","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":1905865,"confidence":"high","warnings":[],"notes":["Screenshot showing a transaction list for a Premium Bonds account. Includes auto prize reinvestments and a debit card purchase."],"verification":{"method":"second-reading","firstModel":"vision-extract","secondModel":"vision-extract, thinking","reasons":1,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"noClaim":{"correct":1,"total":1},"account":{"correct":1,"total":1},"row":{"correct":4,"total":4},"date":{"correct":4,"total":4},"sign":{"correct":4,"total":4},"amount":{"correct":4,"total":4},"description":{"correct":4,"total":4},"pending":{"correct":4,"total":4},"duplicate":{"correct":4,"total":4},"noExtra":{"correct":4,"total":4}},"rows":{"expected":4,"found":4,"extra":0},"errors":[],"score":1}},
+{"id":"png-nsi-bond-record","title":"Bond record tab: blocks of bond numbers are neither transactions nor holdings","tags":["png","savings","app-set","nothing-new"],"kind":"png","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":1035797,"confidence":"high","warnings":[],"notes":["A bond record: bond numbers eligible for draws in August, September and October 2026."],"verification":{"method":"second-reading","firstModel":"vision-extract","secondModel":"vision-extract, thinking","reasons":1,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"noClaim":{"correct":1,"total":1},"account":{"correct":1,"total":1},"balance":{"correct":1,"total":1},"balanceDate":{"correct":1,"total":1}},"rows":{"expected":0,"found":0,"extra":0},"errors":[],"score":1}},
+{"id":"png-nsi-prize-history","title":"Prize history: the same prizes by bond number and month, not where they went","tags":["png","savings","app-set","nothing-new"],"kind":"png","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":1030452,"confidence":"high","warnings":[],"notes":[],"verification":{"method":"second-reading","firstModel":"vision-extract","secondModel":"vision-extract, thinking","reasons":1,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"noClaim":{"correct":1,"total":1}},"rows":{"expected":0,"found":0,"extra":0},"errors":[],"score":1}},
+{"id":"png-nsi-prize-history-scrolled","title":"Prize history scrolled: older prizes, nothing to record","tags":["png","savings","app-set","nothing-new"],"kind":"png","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":1877154,"confidence":"high","warnings":[],"notes":[],"verification":{"method":"second-reading","firstModel":"vision-extract","secondModel":"vision-extract, thinking","reasons":1,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"noClaim":{"correct":1,"total":1}},"rows":{"expected":0,"found":0,"extra":0},"errors":[],"score":1}},
+{"id":"pdf-student-finance-payments","title":"Student finance payments page: two loans, paid and still to come, as schedules and the loan’s paid instalment","tags":["pdf","schedules","everything"],"kind":"pdf","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":2011634,"confidence":"high","warnings":[],"notes":["A student finance payments page listing scheduled Maintenance and Tuition Fee Loans for the 2026/27 academic year."],"verification":{"method":"second-reading","firstModel":"vision-extract","secondModel":"vision-extract, thinking","reasons":1,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"row":{"correct":1,"total":1},"date":{"correct":1,"total":1},"sign":{"correct":1,"total":1},"amount":{"correct":1,"total":1},"description":{"correct":1,"total":1},"pending":{"correct":1,"total":1},"duplicate":{"correct":1,"total":1},"noExtra":{"correct":1,"total":1},"schedule":{"correct":2,"total":2},"schedulePayment":{"correct":6,"total":6},"scheduleStatus":{"correct":6,"total":6},"scheduleNoExtra":{"correct":2,"total":2}},"rows":{"expected":1,"found":1,"extra":0},"errors":[],"score":1}},
+{"id":"pdf-student-finance-entitlement","title":"Student finance entitlement letter: the tuition fee timetable as a schedule, nothing as transactions","tags":["pdf","schedules","everything"],"kind":"pdf","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":1803766,"confidence":"high","warnings":[],"notes":["A student finance entitlement letter for the 2026/27 academic year. It details a Tuition Fee Loan paid directly to the university and a separate total amount payable to the student (likely a Maintenance Loan, though not explicitly named in the timetable). The Tuition Fee Loan has a payment schedule; the student payment total has no dates listed."],"verification":{"method":"second-reading","firstModel":"vision-extract","secondModel":"vision-extract, thinking","reasons":1,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"schedule":{"correct":1,"total":1},"schedulePayment":{"correct":3,"total":3},"scheduleNoExtra":{"correct":1,"total":1}},"rows":{"expected":0,"found":0,"extra":0},"errors":[],"score":1}},
+{"id":"pdf-council-tax-bill","title":"Council tax bill: ten instalments as a schedule you pay","tags":["pdf","schedules","everything"],"kind":"pdf","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":1025924,"confidence":"high","warnings":[],"notes":["The document is a Council Tax bill, not a credit card statement, but the system prompt requires a specific document type. Based on the content, it is a Council Tax bill."],"verification":{"method":"second-reading","firstModel":"vision-extract","secondModel":"vision-extract, thinking","reasons":1,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"schedule":{"correct":1,"total":1},"schedulePayment":{"correct":10,"total":10},"scheduleNoExtra":{"correct":1,"total":1}},"rows":{"expected":0,"found":0,"extra":0},"errors":[],"score":1}}
+]}

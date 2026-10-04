@@ -109,21 +109,53 @@ Claude. A scan, or a layout not known here, goes to Claude as before.
   `tests/fixtures/payslips/` and a test in `tests/payslips.test.ts`. Bump `PAYSLIP_ENGINE_VERSION`
   when a reader changes what it reads.
 
-## Documents and screenshots (read by Claude)
+## Documents and screenshots (read by a model)
 
 PDF statements, P60s, interest certificates, pension statements and screenshots of any banking,
-ISA, LISA, SIPP or pension app go to the extraction engine chosen in Settings:
+ISA, LISA, SIPP or pension app go to the model Settings → Models gives reading documents
+(`src/shared/tasks.ts`, task `read-document`; DECISIONS 2026-10-04):
 
 | Engine | When | How |
 |---|---|---|
+| `inference` | When Settings → Models gives reading documents to the local model service on this machine (`vision-extract`, Qwen3.6-35B-A3B) | `ingest/inference-read.ts`: the same system prompt, user prompt and JSON Schema as Claude gets, sent to the service's OpenAI-compatible API at `batch` priority. The service takes images only: a PDF is rendered page by page at 150 dpi (`pdftoppm`; at most 40 pages), a screenshot goes as `prepareImage`'s tiles, a spreadsheet as its text. Minutes per document, not seconds. Nothing leaves the machine. Each reading is a session with its transcript, the images left out |
 | `claude-cli` | Default when the `claude` CLI is installed and logged in | `claude -p` with `--json-schema`, `--tools Read`, `--restricted` (file tools confined to the scratch directory), `--safe-mode`, `--no-session-persistence`, `--output-format stream-json`, run in a scratch directory containing only the document. Each reading (the first, and the check) is a Claude session with its transcript (ARCHITECTURE.md, "Claude sessions") |
 | `claude-api` | When `ANTHROPIC_API_KEY` is set (or chosen) | Messages API with structured outputs (`output_config.format`), streaming, and `fallbacks: "default"` so a refusal is retried on the recommended fallback model |
 | `ocr` | Always available offline | tesseract / pdftotext; proposes the headline balance and candidate values, and parses statement-style lines using running balances to infer signs. Low confidence, so review carefully |
 
 Sonnet reads every document, with effort `high`, and its reading is checked (below): Opus reads the
-document again whenever a figure cannot be confirmed from the document itself. Both are set in
-Settings → Import & extraction. You can re-read any draft with a different engine or model from the
-review screen.
+document again whenever a figure cannot be confirmed from the document itself. On the local model
+(Settings → Models & import), `vision-extract` reads with thinking off and checks with thinking on
+(within the service's 16k-token budget). It stays a choice, not the default, until its evaluation
+passes: on `extract-15` it read 98.9% of fields right on 40 documents in 4.9 hours, but some wrong
+readings passed every check (a statement's period left blank, a fund page filed under the wrong
+provider's account, foreign amounts left out; DECISIONS 2026-10-04). You can re-read any draft
+with a different engine or model from the review screen, the local model included.
+
+### The local model: waiting, Claude, and balance lines
+
+- **It waits rather than fails** while the service cannot take a reading (it is starting, a
+  backend crashed, its GPU is lent to another program, its queue is full): the request is retried
+  after the wait the service gives, for up to 12 hours (`INFERENCE_WAIT_MINUTES`). The import
+  says so (`extraction.waiting`: since when, why, and until when), and a restart picks the
+  reading up again.
+- **It never sends a document to Claude by itself.** A reading the local model could not take or
+  finish fails, and the review page offers "Read with Claude instead" (it stops a reading under
+  way); that sends the document to Anthropic, so it is a click each time. A task's
+  "When the local model cannot, use Claude" switch (Settings → Models, off by default) makes it
+  automatic; the import then says Claude read it, and why.
+- **A reading it could not finish is not kept:** output cut off by its token limit, or not in the
+  schema (the service checks every output against the schema sent: `provenance.schema_valid`).
+- **Balance lines read as rows are left out**, for every engine (`normalise.ts`, `BALANCE_LINE`):
+  "Balance brought forward", "Opening balance", "C/F". The prompt says a balance is not a payment
+  (rule 5), and the CSV reader drops such lines too, but a reader sometimes lists one, and the
+  statement then no longer reconciles: the local model did so in 4 of its 7 statements that did not
+  (the service's BENCH, "M2"). Each one left out is a notice on the review page, not a problem: it
+  calls for no second reading.
+- **Provenance:** the import keeps the service's record of the reading kept
+  (`extraction.inference`: request id, alias, model sha256, system fingerprint, seed, thinking,
+  whether the output matched the schema, time queued), and of each reading in
+  `extraction.verification` (`firstInference`, `secondInference`). The session record keeps the
+  whole provenance object. A local reading has no cost.
 
 ### Spreadsheets that are not a list of payments
 
@@ -136,7 +168,7 @@ columns could not be worked out with confidence. A timesheet with a sheet a mont
   row by row, each non-empty cell as `CELL=value`, with how the sheet shows it in brackets
   (`P10=115 [£115.00]`). Dates are `YYYY-MM-DD`. Nothing else of the file is sent. The CLI reads it
   as `workbook.txt` in its scratch directory; the API gets it as a text document.
-- **Claude only.** With no Claude engine (Settings → Extraction set to offline OCR, or none
+- **Claude only.** With no Claude engine (Settings → Models set to offline OCR, or none
   installed) the first table is mapped like a CSV, and the review page says why.
 - **Either way round**: the review page can *Map its columns instead*, or *Read it with Claude
   instead* for one mapped like a CSV (`POST /api/imports/:id/reprocess` with `readAs`).
@@ -165,7 +197,7 @@ is paid ([FORMULAS.md §17](FORMULAS.md), "Earned pay").
 ### Reading everything (`extract-15`)
 
 The reader keeps every value a document prints when **Read everything a document prints** is on
-(Settings → Import & extraction; `settings.extraction.readEverything`). With it off, readings are
+(Settings → Models & import; `settings.extraction.readEverything`). With it off, readings are
 `extract-11`. The gov.uk pages and payslip layouts read on this machine (above) are read in full
 either way. Five rules are added to the prompt (`prompt.ts`), each with its part of the schema:
 
@@ -222,7 +254,8 @@ either way. Five rules are added to the prompt (`prompt.ts`), each with its part
    - a payslip read in full (below, "Reading everything"), when its lines add up to its totals,
      its totals to its net pay, and the tax figures read are what its lines say.
 2. **A reading every check confirms is kept.** Typically a bank or card statement with balances.
-3. **Otherwise Opus reads the document again.** That is when a check failed (balances that don't
+3. **Otherwise the checking model reads the document again** (Settings → Models, `check-reading`: the
+   default Opus; the local model thinking when chosen). That is when a check failed (balances that don't
    add up, wrong card signs, dates outside the period, rows the reader was unsure of, dropped
    rows), or when some figures have nothing to be checked against:
    - a feed screenshot with no balances;
@@ -239,7 +272,10 @@ either way. Five rules are added to the prompt (`prompt.ts`), each with its part
    - each tax figure, paired by its period first (two months of equal pay are two figures).
 
    Wording may differ; figures may not.
-5. **The stronger reading (Opus's) is kept** unless the arithmetic finds more wrong with it. Rows
+5. **The second reading is kept** unless the arithmetic finds more wrong with it. When both
+   readings by the local model still fail a check and checking may fall back to Claude (off by
+   default), Claude reads it a third time and stands in for the second reading when it finds no
+   more wrong than the better local one (`verification.byClaude`). Rows
    the readings disagree on are marked on the review page, the disagreements are listed, and the
    import is held back from "Commit all ready".
 
@@ -862,10 +898,10 @@ read again from its page (Import → History → the document → *Read it again
 the documents worth reading again: those an earlier reader read, and CSVs whose columns were worked
 out.
 
-- **A PDF or screenshot, or a spreadsheet Claude read, is read with the current reader and its
-  check.** That is off until you
-  turn it on (Settings → Import & extraction → *Read stored documents again*). A reading costs what
-  an upload does. Nothing reads by itself.
+- **A PDF or screenshot, or a spreadsheet a model read, is read with the current reader and its
+  check** (the models Settings → Models gives reading and checking documents). That is off until
+  you turn it on (Settings → Models & import → *Read stored documents again*). A reading takes
+  what an upload does (on Claude, it costs what an upload does). Nothing reads by itself.
 - **A CSV or spreadsheet is parsed again on this machine**, at once, whatever that setting says:
   nothing is sent anywhere. It takes a layout that fits it now (one you saved, or a built-in bank's),
   else the columns you chose for this import, else columns worked out afresh. A holdings export has

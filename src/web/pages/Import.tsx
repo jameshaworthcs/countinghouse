@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Link, useLocation, useSearchParams } from 'react-router';
 import type { CaptureAskView, CaptureItemView, CaptureResponse, ImportHistoryResponse, ImportListResponse, MonthlyChecklistResponse, SystemResponse } from '../../shared/api';
 import type { ImportRecord } from '../../shared/schema';
+import { resolveTask } from '../../shared/tasks';
 import { Badge, Button, Callout, Card, Checkbox, EmptyState, Input, Loading, PageHeader, Pager, StatusBadge, useDebounced, useToast } from '../components/ui';
 import { LABEL_BATCH } from '../../shared/api';
 import { ProposalQueue } from '../components/Proposals';
@@ -121,17 +122,19 @@ function EngineLine() {
   const { data } = useAppData();
   if (!sys.data) return null;
   const engine = sys.data.engines.find((e) => e.id === sys.data.selectedEngine);
+  const read = resolveTask('read-document', data.settings.models.tasks);
   return (
     <p className="text-[12.5px] text-ink-3">
       <Sparkles className="mr-1 inline size-3.5 align-[-2px] text-accent" />
       PDFs and screenshots are read by{' '}
       {engine ? (
         <span className="text-ink-2">
-          {engine.id === 'claude-cli' ? `Claude (${data.settings.extraction.model}) via your Claude login` : engine.id === 'claude-api' ? `the Claude API (${data.settings.extraction.model})` : 'offline OCR (lower accuracy)'}
+          {engine.id === 'inference' ? `the local model (${read.model}${read.fallback ? ', or Claude when it cannot' : ''}) on this machine, so they stay here` : engine.id === 'claude-cli' ? `Claude (${read.model}) via your Claude login` : engine.id === 'claude-api' ? `the Claude API (${read.model})` : 'offline OCR (lower accuracy)'}
           {engine.external ? ', which sends them to Anthropic' : ''}
+          {engine.id === 'inference' && !engine.available ? ' (not answering now: uploads wait for it)' : ''}
         </span>
       ) : (
-        <span className="text-bad-ink">nothing yet: no engine is available</span>
+        <span className="text-bad-ink">nothing yet: no engine is set up</span>
       )}
       . CSV, OFX, QIF and TXT exports, HMRC’s pages saved from gov.uk and payslips in a layout known here are read on this machine.{' '}
       <Link to="/settings#extraction" className="text-accent hover:underline">

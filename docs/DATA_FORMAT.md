@@ -22,7 +22,7 @@ point at them with `"$schema"` so editors validate as you type.
 data/
   meta.json            format + version + base currency
   profile.json         you: date of birth, region, salary, retirement age (the tax band is computed), and `employers`: how many months after the work a payroll with no job yet pays a timesheet (`[{name, payLagMonths}]`, optional; a job keeps its own)
-  settings.json        extraction engine/model (and reading receipts or stored documents again, both off by default), agents (with the background budget, and `labelImports`: Claude names imports, off by default), git behaviour, stale threshold, FX rates
+  settings.json        models per task (`models.tasks`: the engine, model, thinking or effort, and Claude fallback for each task in src/shared/tasks.ts), extraction (reading receipts or stored documents again, both off by default; reading everything), agents (with the background budget, and `labelImports`: names for imports, off by default), git behaviour, stale threshold, FX rates
   institutions.json    { institutions: [...] }   banks, platforms, providers (+ FSCS group)
   accounts.json        { accounts: [...] }
   categories.json      { categories: [...] }     editable taxonomy (system ones drive calculations)
@@ -411,8 +411,14 @@ number. Its pay, tax, NI, pension and student loan for the period are also tax f
     (same provenance as `capturedOn`).
   - `image` is `{width, height, device?}`: the size in pixels, upright, and the make and model its
     metadata names. With `capturedAt`, it tells which screenshots were taken together.
-- `extraction`: `{engine, engineVersion, detail, model, durationMs, costUsd, warnings, raw,
-  verification?, alternative?}`.
+- `extraction`: `{engine, engineVersion, detail, model, durationMs, costUsd, inference?, waiting?,
+  warnings, raw, verification?, alternative?}`.
+  - `engine` is the reader: `inference` (the local model service), `claude-cli`, `claude-api`,
+    `ocr`, or a reader of this app (`csv`, `ofx`, `qif`, `santander-txt`, `govuk`, `payslip`).
+  - `inference` is the local model service's record of the reading kept: `{requestId, alias,
+    modelId?, modelSha256?, systemFingerprint?, seed?, thinking?, schemaValid?, queueMs?}`. A local
+    reading has no `costUsd`.
+  - `waiting` is set while a reading waits for the local model: `{since, reason, until?}`.
   - `raw` is the engine's complete output, kept for audit and re-derivation. A reading that read
     everything (`extract-14`) also has `payslips`, `hmrc`, each account's `terms` and `printed`:
     every other labelled value the document prints, `{section?, label, value}` as printed. Since
@@ -420,8 +426,10 @@ number. Its pay, tax, NI, pension and student loan for the period are also tax f
     name, direction (to-you, from-you, to-other), paidTo?, from?, until?, reference?, total?,
     payments [{date, amount, label?, status?}], details}`.
   - `verification` records how the reading was checked (docs/INGESTION.md, "Checking every
-    figure"): `{method: checks|second-reading, firstModel, secondModel?, reasons, disagreements,
-    kept: first|second, error?}`.
+    figure"): `{method: checks|second-reading, firstModel, secondModel?, firstInference?,
+    secondInference?, byClaude?, reasons, disagreements, kept: first|second, error?}`. A model is
+    Claude's model id, or the local model's alias (`vision-extract, thinking`); `byClaude` says
+    Claude read it a third time because both local readings failed a check.
   - `alternative` is the reading that was not kept.
 - `draft`: exactly what you reviewed and committed. Since `extract-4` a draft section can carry
   `statedTotals` (`{moneyIn, moneyOut}` printed on the statement) and a row `uncertain` (what the
@@ -580,8 +588,10 @@ writing them are in [AGENTS.md](AGENTS.md); how they are used is in [FORMULAS.md
 
 Shared pieces:
 
-- **Provenance** is `{setBy: owner|agent|system, model?, promptVersion?, jobId?, session?}`.
-  Records you set (`owner`) always win.
+- **Provenance** is `{setBy: owner|agent|system, model?, engine?, inference?, promptVersion?,
+  jobId?, session?}`. Records you set (`owner`) always win. `engine` is `inference` when the local
+  model service produced it, and `inference` its record of the answer (as an import's
+  `extraction.inference`).
 - **A source** is `{title, url?, publisher?, retrievedOn?, quote?}`: a public page a record rests
   on, with a short quote of the key figure.
 
@@ -688,7 +698,7 @@ A receipt you attached to a transaction (the transaction drawer → Receipts). O
 | `transactionId` | the payment it belongs to |
 | `document` | as an import's (`{id, sha256, fileName, mediaType, size, path}`). The file is kept under `data/documents/` with your statements and served by id |
 | `status` | `attached`, `read`, `failed` (`reading` while it is read) |
-| `reading` | only when reading receipts with Claude is on: `{model, promptVersion, at, costUsd, merchant, date, total, lines: [{description, amount, category}], notes}`. Lines are signed like the payment, and a category is one of yours or null. It is a proposal: the transaction's `splits` change only when you save them |
+| `reading` | only when reading receipts is on: `{model, promptVersion, at, costUsd?, inference?, merchant, date, total, lines: [{description, amount, category}], notes}` (`inference` as an import's, when the local model read it). Lines are signed like the payment, and a category is one of yours or null. It is a proposal: the transaction's `splits` change only when you save them |
 | `error`, `createdAt`, `updatedAt` | |
 
 ## capture.json
@@ -736,6 +746,7 @@ An ask without a check is ticked by you (`doneAt`). Agents cannot set `doneAt` o
 | 7 | Terms. Added `terms.jsonl`, the readings' and drafts' `terms`, `result.termsAdded`, the `set_terms` proposal and `before.terms`. The credit limit and rate each balance kept move into the account's terms for that day and document (the same terms from two balances of one day kept once); balances no longer have `creditLimit` or `interestRate`. One that cannot be made a terms record stays on its balance, and the migration says which | `from: 6` in `src/server/migrations.ts` |
 | 8 | Jobs learn what their payslips print. Each job takes from the payslips stored under it the payroll number and every name they print (a group's as an alias), which payslips filed by format 6 never taught it. No file changes shape | `from: 7` in `src/server/migrations.ts` |
 | 9 | Money paid back to you counts against spending, as refunds do. Categories gain `offsetsSpending`, set on `refunds`; a system category "Paid back to you" (`repaid`, income, `offsetsSpending`) is added beside it. Added `people.json` (empty until you save someone) | `from: 8` in `src/server/migrations.ts` |
+| 10 | Models per task (DECISIONS 2026-10-04). `settings.extraction.engine`, `model`, `verifyModel` and `effort`, and `settings.agents.model` and `effort`, are removed; `settings.models.tasks` holds a choice per task over the defaults in `src/shared/tasks.ts`, which give import names and notes to the local model service, and keep documents and receipts on Claude (Sonnet reads, Opus checks). Kept as choices: the Claude API or offline OCR for documents, another reading or checking model or effort (receipts take the reading model's), checking turned off, and an agents' model or effort other than Opus/high for the jobs that stay on Claude. Added the optional `extraction.inference`, `extraction.waiting`, `verification.firstInference`/`secondInference`/`byClaude`, a receipt reading's `inference`, the `inference` engine, and a provenance's `engine` and `inference` | `from: 9` in `src/server/migrations.ts` |
 
 Data written by a newer version of the app than the one running is read-only until the app is
 updated.

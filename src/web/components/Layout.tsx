@@ -1,24 +1,4 @@
-import {
-  ArrowLeftRight,
-  ChartPie,
-  Eye,
-  EyeOff,
-  Landmark,
-  LayoutDashboard,
-  Library,
-  LogOut,
-  Menu,
-  Monitor,
-  Moon,
-  Settings,
-  Sun,
-  ScrollText,
-  Telescope,
-  TrendingUp,
-  Upload,
-  Wallet,
-  X,
-} from 'lucide-react';
+import { ArrowLeftRight, ChartPie, Eye, EyeOff, Landmark, LayoutDashboard, Library, LogOut, Menu, MessageCircleQuestion, Monitor, Moon, ScrollText, Settings, Sun, Telescope, TrendingUp, Upload, Wallet, X } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router';
 import type { ImportListResponse } from '../../shared/api';
@@ -41,6 +21,7 @@ const NAV: { to: string; label: string; icon: ReactNode; end?: boolean }[] = [
   { to: '/tax', label: 'Tax year', icon: <Landmark className="size-[18px]" /> },
   { to: '/assumptions', label: 'Assumptions & research', icon: <Library className="size-[18px]" /> },
   { to: '/import', label: 'Import', icon: <Upload className="size-[18px]" /> },
+  { to: '/ask', label: 'Ask', icon: <MessageCircleQuestion className="size-[18px]" /> },
   { to: '/sessions', label: 'Agent sessions', icon: <ScrollText className="size-[18px]" /> },
   { to: '/settings', label: 'Settings', icon: <Settings className="size-[18px]" /> },
 ];

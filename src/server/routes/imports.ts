@@ -119,7 +119,7 @@ export function importRoutes(ctx: AppContext): Hono {
       current,
       enabled: ctx.store.settings.extraction.rereadDocuments,
       older: ctx.store.imports
-        .filter((i) => !i.result?.nothingNew && (((i.engine === 'claude-cli' || i.engine === 'claude-api') && number(i.engineVersion) < number(current)) || (i.engine === 'csv' && /auto-detected/.test(i.detail ?? ''))))
+        .filter((i) => !i.result?.nothingNew && (((i.engine === 'inference' || i.engine === 'claude-cli' || i.engine === 'claude-api') && number(i.engineVersion) < number(current)) || (i.engine === 'csv' && /auto-detected/.test(i.detail ?? ''))))
         .map((i) => ({ id: i.id, fileName: i.fileName, engineVersion: i.engineVersion ?? null, reason: i.engine === 'csv' ? 'columns worked out' : null, committedAt: i.committedAt ?? null, reread: svc.getReread(i.id)?.status ?? null })),
       rereads: svc.listRereads(),
     });
@@ -207,7 +207,7 @@ export function importRoutes(ctx: AppContext): Hono {
   });
 
   app.post('/:id/reprocess', async (c) => {
-    const body = await readJson(c, z.object({ engine: z.enum(EXTRACTION_ENGINES).optional(), model: z.string().max(80).optional(), verifyModel: z.string().max(80).optional(), readAs: z.enum(['document', 'columns']).optional() }));
+    const body = await readJson(c, z.object({ engine: z.enum(EXTRACTION_ENGINES).optional(), model: z.string().max(80).optional(), verifyModel: z.string().max(80).optional(), readAs: z.enum(['document', 'columns']).optional(), interrupt: z.boolean().optional() }));
     return c.json(await svc.reprocess(c.req.param('id'), body));
   });
 

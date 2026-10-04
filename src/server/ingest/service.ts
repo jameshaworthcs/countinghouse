@@ -28,8 +28,8 @@ import type { Config } from '../config';
 import { Limiter, nowISO, sha256 } from '../fsutil';
 import { balanceId, documentId, importId, transactionId } from '../ids';
 import { recordInstrumentsFromHoldings } from '../instruments';
-import type { SessionRecord } from '../../shared/sessions';
-import type { SessionLog } from '../sessions';
+import type { SessionEngine, SessionRecord } from '../../shared/sessions';
+import type { SessionLog, TranscriptSink } from '../sessions';
 import { StoreError, type ImportSummary, type Store } from '../store';
 import { extractWithClaudeApi } from './claude-api';
 import { extractWithClaudeCli } from './claude-cli';
@@ -47,7 +47,10 @@ import { buildDraft, draftIsClean, type BatchEvidence } from './draft';
 import { asTransferLeg, findRow, keepLinks, keepYourLinks, linkCandidates, linkViews, replaceRow, sameAccount, sectionAccount, withoutLink, type FoundRow, type RowRef, type SectionAccount } from './links';
 import { assessNovelty, mentionedPayments, type NothingNew } from './novelty';
 import { assessReading, chooseReading, compareReadings, shortModel } from './verify';
-import { detectEngines, pickEngine, type EngineResult } from './engines';
+import { claudeEngine, detectEngines, engineAvailable, type AiEngineId, type EngineResult, type EngineStatus } from './engines';
+import { extractWithInference } from './inference-read';
+import { InferenceFailed, InferenceUnavailable } from '../inference';
+import { claudeChoice, choiceName, isInferenceAlias, resolveTask, TASKS, type TaskChoice, type TaskEngine } from '../../shared/tasks';
 import { captureDate, imageInfo, prepareImage } from './images';
 import { extractWithOcr, OCR_ENGINE_VERSION } from './ocr';
 import { OFX_ENGINE_VERSION, parseOfx } from './ofx';
@@ -98,6 +101,15 @@ function accountShown(r: ImportRecord): string | undefined {
   // A committed screenshot may have created its account.
   const committed = r.result?.sections?.find((x) => x.key === s.key)?.accountId;
   return committed ?? (s.target.mode === 'existing' ? s.target.accountId : undefined);
+}
+
+/**
+ * A reading's reader, as a verification records it: Claude's model id (shortened to "Sonnet" where
+ * it is shown), or the local model's alias ("vision-extract", "vision-extract, thinking").
+ */
+function readerName(c: TaskChoice, r: EngineResult): string {
+  if ((r.engine ?? c.engine) === 'inference') return choiceName({ engine: 'inference', model: r.inference?.alias ?? c.model, thinking: r.inference?.thinking ?? c.thinking });
+  return r.model ?? c.model;
 }
 
 export interface ProcessOptions {
@@ -259,9 +271,15 @@ export class ImportService extends EventEmitter {
     void this.limiter.run(() => runAs({ type: 'app', task: 'reading imports' }, () => this.process(id, opts)));
   }
 
-  async reprocess(id: string, opts: ProcessOptions = {}): Promise<ImportRecord> {
+  async reprocess(id: string, opts: ProcessOptions & { interrupt?: boolean } = {}): Promise<ImportRecord> {
     const record = this.pending.get(id);
     if (!record) throw new StoreError('Only imports that have not been committed can be re-processed.', 404);
+    // Read it another way now (Read with Claude while the local model is busy or away): the reading
+    // under way is stopped first.
+    if (record.status === 'processing' && opts.interrupt) {
+      this.aborts.get(id)?.abort();
+      for (let i = 0; i < 100 && this.pending.get(id)?.status === 'processing'; i++) await new Promise((r) => setTimeout(r, 100));
+    }
     if (record.status === 'processing') throw new StoreError('Already processing.', 409);
     record.status = 'queued';
     record.extraction = { warnings: [] };
@@ -303,9 +321,9 @@ export class ImportService extends EventEmitter {
         if (!known) {
           const all = workbookSheets(bytes);
           if (opts.readAs === 'document' || !looksLikeLedger(suggestMapping(rows, { accountType: record.hintAccountId ? this.store.account(record.hintAccountId)?.type : undefined }), all.length)) {
-            if (await this.claudeAvailable(opts)) sheets = all;
-            else if (opts.readAs === 'document') throw new Error('Reading a spreadsheet as a document needs Claude: see Settings → Extraction.');
-            else noClaude = 'This spreadsheet does not look like a list of payments, but Claude is not available to read it: map its columns, or set up Claude in Settings → Extraction and read it again.';
+            if (await this.modelReaderAvailable(opts)) sheets = all;
+            else if (opts.readAs === 'document') throw new Error('Reading a spreadsheet as a document needs a model: see Settings → Models.');
+            else noClaude = 'This spreadsheet does not look like a list of payments, but no model is set up to read it: map its columns, or choose a model in Settings → Models and read it again.';
           }
         }
       }
@@ -402,6 +420,7 @@ export class ImportService extends EventEmitter {
         ...(detail ? { detail } : {}),
         ...(result.model ? { model: result.model } : {}),
         ...(result.costUsd !== undefined || verified?.otherCostUsd ? { costUsd: Math.round(((result.costUsd ?? 0) + (verified?.otherCostUsd ?? 0)) * 10000) / 10000 } : {}),
+        ...(result.inference ? { inference: result.inference } : {}),
         ...(verified ? { verification: verified.verification } : {}),
         ...(verified?.alternative ? { alternative: verified.alternative } : {}),
       };
@@ -418,17 +437,47 @@ export class ImportService extends EventEmitter {
     }
   }
 
-  /** Is Claude the engine documents would be read with? A spreadsheet is read by nothing else. */
-  private async claudeAvailable(opts: ProcessOptions): Promise<boolean> {
-    const { engines } = await detectEngines({ apiKey: this.config.anthropicApiKey });
-    const chosen = pickEngine(opts.engine ?? this.store.settings.extraction.engine, engines);
-    return chosen === 'claude-cli' || chosen === 'claude-api';
+  /** Can a model read documents now (a spreadsheet that is not a list of payments needs one)? */
+  private async modelReaderAvailable(opts: ProcessOptions): Promise<boolean> {
+    const { engines } = await detectEngines(this.engineOpts());
+    const { read } = this.readChoices(opts, engines);
+    if (read.engine === 'ocr' || read.engine === 'off') return false;
+    // The local model counts while it is set up: work for it waits when it is down.
+    if (read.engine === 'inference') return Boolean(this.config.inference) || (read.fallback && claudeEngine(engines) !== null);
+    return claudeEngine(engines) !== null;
+  }
+
+  private engineOpts() {
+    return { apiKey: this.config.anthropicApiKey, inference: this.config.inference };
   }
 
   /**
-   * Read a PDF, image or spreadsheet (its sheets as text) with the chosen engine, checked by a second
-   * reading when the settings ask for one (docs/INGESTION.md, "Checking every figure"). For an
-   * upload, and for reading a stored document again (the scratch directory is named by `scratchId`).
+   * The models that read and check a document: Settings → Models (src/shared/tasks.ts), unless
+   * this reading asks for others. An engine asked for (Read with Claude) reads and checks with it;
+   * a model asked for picks its engine (an alias of the local model, or Claude's); `verifyModel`
+   * empty turns the check off.
+   */
+  readChoices(opts: Pick<ProcessOptions, 'engine' | 'model' | 'verifyModel'>, engines: EngineStatus[]): { read: TaskChoice; check: TaskChoice } {
+    const tasks = this.store.settings.models.tasks;
+    let read = resolveTask('read-document', tasks);
+    let check = resolveTask('check-reading', tasks);
+    const claudeEng = claudeEngine(engines) ?? 'claude-cli';
+    const engineOf = (model: string): TaskEngine => (isInferenceAlias(model) ? 'inference' : claudeEng);
+    const forced = opts.engine && opts.engine !== 'auto' ? opts.engine : opts.model ? engineOf(opts.model) : undefined;
+    if (forced) {
+      read = resolveTask('read-document', { 'read-document': { engine: forced, ...(opts.model ? { model: opts.model } : {}) } });
+      if (forced !== 'inference' && forced !== 'ocr' && forced !== 'off' && check.engine !== 'off') check = claudeChoice('check-reading', forced);
+    }
+    if (opts.verifyModel !== undefined) check = opts.verifyModel === '' ? { ...check, engine: 'off' } : resolveTask('check-reading', { 'check-reading': { engine: engineOf(opts.verifyModel), model: opts.verifyModel } });
+    return { read, check };
+  }
+
+  /**
+   * Read a PDF, image or spreadsheet (its sheets as text) with the model Settings → Models gives
+   * reading documents, checked by a second reading when the checks ask for one (docs/INGESTION.md,
+   * "Checking every figure"). For an upload, and for reading a stored document again (the scratch
+   * directory is named by `scratchId`). Work for the local model waits while it cannot take it,
+   * and falls back to Claude only where Settings → Models allows that.
    */
   private async readDocument(
     record: ImportRecord,
@@ -445,11 +494,9 @@ export class ImportService extends EventEmitter {
     let engineVersion: string;
     let verified: Awaited<ReturnType<ImportService['verifyReading']>> | undefined;
     const settings = this.store.settings.extraction;
-    const { engines, claudeBin } = await detectEngines({ apiKey: this.config.anthropicApiKey });
-    const chosen = pickEngine(opts.engine ?? settings.engine, engines);
-    if (!chosen) throw new Error('No extraction engine is available for PDFs and images. See Settings → Extraction.');
-    if (kind === 'sheet' && chosen === 'ocr') throw new Error('A spreadsheet that is not a list of payments is read by Claude, which is not available. See Settings → Extraction.');
-    const model = opts.model ?? settings.model;
+    const { engines, claudeBin } = await detectEngines(this.engineOpts());
+    const { read: readChoice, check: checkChoice } = this.readChoices(opts, engines);
+    if (kind === 'sheet' && readChoice.engine === 'ocr') throw new Error('A spreadsheet that is not a list of payments is read by a model, and documents are set to offline OCR. See Settings → Models.');
     const scratch = await this.work.scratch(scratchId);
     let files: { path: string; mediaType: string }[];
     let tiled = false;
@@ -482,62 +529,111 @@ export class ImportService extends EventEmitter {
     // Everything the document prints, when that is turned on (prompt.ts, extract-14).
     const everything = settings.readEverything;
     const engineVersionOf = () => (kind === 'sheet' ? `${XLSX_ENGINE_VERSION}+${promptVersion(everything)}` : promptVersion(everything));
-    // Each reading is a Claude session of its own, with its transcript (sessions.ts).
-    const readWith = async (m: string, role: 'first' | 'second' = 'first'): Promise<EngineResult> => {
-      const session = await this.sessions?.start({
-        kind: sessionKind,
-        title: `${role === 'first' ? (sessionKind === 'reread' ? 'Read again' : 'Read') : 'Check by a second reading of'} ${record.document.fileName}`,
-        role,
-        importId: record.id,
-        engine: chosen === 'claude-api' ? 'claude-api' : 'claude-cli',
-        model: m,
-        effort: settings.effort,
-        promptVersion: engineVersionOf(),
-        tools: chosen === 'claude-cli' ? ['Read'] : [],
-        privacy: 'personal',
-        ...(opts.startedBy ? { startedBy: opts.startedBy } : {}),
-      });
-      const read = (transcript: Parameters<typeof extractWithClaudeCli>[0]['transcript']) => readOnce(m, transcript);
-      return session ? session.run(read, signal) : read(undefined);
-    };
-    const readOnce = async (m: string, transcript: Parameters<typeof extractWithClaudeCli>[0]['transcript']): Promise<EngineResult> => {
-      if (chosen === 'claude-cli') {
+    // While the local model cannot take the reading, the import says so (an upload only).
+    const onWait =
+      sessionKind === 'reading'
+        ? (w: { reason: string; until?: string }) => {
+            if (!this.pending.has(record.id)) return;
+            record.extraction = { ...record.extraction, waiting: { since: record.extraction.waiting?.since ?? nowISO(), reason: `The local model cannot take it yet: ${w.reason}`, ...(w.until ? { until: w.until } : {}) } };
+            void this.save(record);
+          }
+        : undefined;
+    const readOnce = async (c: TaskChoice, task: 'read-document' | 'check-reading', engine: AiEngineId, transcript: TranscriptSink | undefined): Promise<EngineResult> => {
+      if (engine === 'inference') {
+        const def = TASKS[task];
+        return extractWithInference({
+          cfg: this.config.inference,
+          files,
+          scratch,
+          userPrompt: userPrompt(promptCtx),
+          systemPrompt: systemPrompt(everything),
+          schema: extractionJsonSchema(everything),
+          alias: c.model,
+          thinking: c.thinking,
+          priority: def.priority,
+          runMinutes: def.runMinutes,
+          maxTokens: def.maxTokens,
+          signal,
+          transcript,
+          onWait,
+        });
+      }
+      if (engine === 'claude-cli') {
         if (!claudeBin) throw new Error('claude CLI not found');
-        return extractWithClaudeCli({
+        const r = await extractWithClaudeCli({
           bin: claudeBin,
           cwd: scratch,
           userPrompt: userPrompt({ ...promptCtx, files: files.map((f) => `./${path.basename(f.path)}`) }),
           systemPrompt: systemPrompt(everything),
           schema: extractionJsonSchema(everything),
-          model: m,
-          effort: settings.effort,
+          model: c.model,
+          effort: c.effort,
           timeoutMs,
           signal,
           transcript,
         });
+        return { ...r, engine };
       }
-      return extractWithClaudeApi({
-        apiKey: this.config.anthropicApiKey!,
+      if (!this.config.anthropicApiKey) throw new Error('No ANTHROPIC_API_KEY is set for the Claude API.');
+      const r = await extractWithClaudeApi({
+        apiKey: this.config.anthropicApiKey,
         files,
         userPrompt: userPrompt(promptCtx),
         systemPrompt: systemPrompt(everything),
         schema: extractionJsonSchema(everything),
-        model: m,
-        effort: settings.effort,
+        model: c.model,
+        effort: c.effort,
         timeoutMs,
         signal,
         transcript,
       });
+      return { ...r, engine };
     };
-    if (chosen === 'ocr') {
+    // Each reading is a session of its own, with its transcript (sessions.ts).
+    const session = async (c: TaskChoice, engine: AiEngineId, role: 'first' | 'second', task: 'read-document' | 'check-reading'): Promise<EngineResult> => {
+      const s = await this.sessions?.start({
+        kind: sessionKind,
+        title: `${role === 'first' ? (sessionKind === 'reread' ? 'Read again' : 'Read') : 'Check by a second reading of'} ${record.document.fileName}`,
+        role,
+        importId: record.id,
+        engine: engine as SessionEngine,
+        model: c.model,
+        ...(engine === 'inference' ? { thinking: c.thinking } : { effort: c.effort }),
+        promptVersion: engineVersionOf(),
+        tools: engine === 'claude-cli' ? ['Read'] : [],
+        privacy: 'personal',
+        ...(opts.startedBy ? { startedBy: opts.startedBy } : {}),
+      });
+      const run = (transcript: TranscriptSink | undefined) => readOnce(c, task, engine, transcript);
+      return s ? s.run(run, signal) : run(undefined);
+    };
+    // A reading by the chosen model; by Claude instead when the local model cannot and the task allows it.
+    const readWith = async (c: TaskChoice, role: 'first' | 'second', task: 'read-document' | 'check-reading' = role === 'first' ? 'read-document' : 'check-reading'): Promise<EngineResult> => {
+      const claudeEng = claudeEngine(engines);
+      const engine: AiEngineId = c.engine === 'claude-cli' || c.engine === 'claude-api' ? (engineAvailable(engines, c.engine) ? c.engine : (claudeEng ?? c.engine)) : (c.engine as AiEngineId);
+      try {
+        return await session(c, engine, role, task);
+      } catch (err) {
+        if (engine !== 'inference' || !c.fallback || signal.aborted || !(err instanceof InferenceUnavailable || err instanceof InferenceFailed)) throw err;
+        if (!claudeEng) throw new Error(`${err.message} Claude is not available to read it instead.`);
+        const r = await session(claudeChoice(task, claudeEng), claudeEng, role, task);
+        return { ...r, notices: [`${err.message} Claude read it instead, as Settings → Models allows for ${TASKS[task].label.toLowerCase()}.`, ...(r.notices ?? [])] };
+      } finally {
+        if (record.extraction.waiting) {
+          delete record.extraction.waiting;
+          if (this.pending.has(record.id)) await this.save(record);
+        }
+      }
+    };
+    if (readChoice.engine === 'ocr') {
       result = await extractWithOcr(files[0]!, scratch, Number(today().slice(0, 4)));
       engineVersion = OCR_ENGINE_VERSION;
     } else {
-      result = await readWith(model);
+      result = await readWith(readChoice, 'first');
       engineVersion = engineVersionOf();
-      const verifyModel = opts.verifyModel !== undefined ? opts.verifyModel : settings.verifyModel;
-      if (verifyModel && verifyModel !== model) {
-        const checked = await this.verifyReading(record, result, { model, verifyModel, readWith, batch: await this.batchEvidence(record), sheets });
+      const same = checkChoice.engine === readChoice.engine && checkChoice.model === readChoice.model && checkChoice.thinking === readChoice.thinking;
+      if (checkChoice.engine !== 'off' && !same) {
+        const checked = await this.verifyReading(record, result, { read: readChoice, check: checkChoice, readWith, batch: await this.batchEvidence(record), sheets, claudeAvailable: claudeEngine(engines) });
         result = checked.result;
         verified = checked;
       }
@@ -549,7 +645,9 @@ export class ImportService extends EventEmitter {
       }
     }
     await this.work.clearScratch(scratchId);
-    return { result, engine: chosen, engineVersion, verified };
+    // What was put right or done another way goes with the warnings, once the checks are done.
+    if (result.notices?.length) result = { ...result, warnings: [...result.notices, ...result.warnings] };
+    return { result, engine: result.engine ?? (readChoice.engine as EngineId), engineVersion, verified };
   }
 
   // ─── Reading a stored document again (docs/INGESTION.md, "Reading a stored document again") ──
@@ -583,7 +681,7 @@ export class ImportService extends EventEmitter {
       return this.rereads.get(importId)!;
     }
     if (!['claude-cli', 'claude-api', 'ocr'].includes(record.extraction.engine ?? '')) throw new StoreError('OFX, QIF and Santander text files are parsed the same way every time: there is nothing new to read them with.', 409);
-    if (!this.store.settings.extraction.rereadDocuments) throw new StoreError('Reading stored documents again is off: turn it on in Settings → Import & extraction.', 409);
+    if (!this.store.settings.extraction.rereadDocuments) throw new StoreError('Reading stored documents again is off: turn it on in Settings → Models & import.', 409);
     await this.saveReread(reread);
     const startedBy = { actor: currentActor(), reason: 'Read a stored document again, to compare with what was recorded' };
     void this.limiter.run(() => this.runReread(record, reread, startedBy));
@@ -647,6 +745,7 @@ export class ImportService extends EventEmitter {
         finishedAt: nowISO(),
         engine: read.engine,
         ...(read.result.model ? { model: read.result.model } : {}),
+        ...(read.result.inference ? { inference: read.result.inference } : {}),
         engineVersion: read.engineVersion,
         costUsd: Math.round(((read.result.costUsd ?? 0) + (read.verified?.otherCostUsd ?? 0)) * 1000) / 1000,
         sections,
@@ -1061,34 +1160,78 @@ export class ImportService extends EventEmitter {
    * checked against) the document is read again with the checking model, the two readings are
    * compared figure by figure, the better one is kept, and rows they disagree on are marked.
    */
-  private async verifyReading(record: ImportRecord, first: EngineResult, opts: { model: string; verifyModel: string; readWith: (m: string, role: 'first' | 'second') => Promise<EngineResult>; batch?: BatchEvidence | undefined; sheets?: Sheet[] | undefined }) {
+  private async verifyReading(
+    record: ImportRecord,
+    first: EngineResult,
+    opts: { read: TaskChoice; check: TaskChoice; readWith: (c: TaskChoice, role: 'first' | 'second') => Promise<EngineResult>; batch?: BatchEvidence | undefined; sheets?: Sheet[] | undefined; claudeAvailable: 'claude-cli' | 'claude-api' | null },
+  ) {
     const firstDraft = this.draftOf(record, first, opts.batch);
     const a1 = this.assess(record, firstDraft, first.warnings, opts.sheets);
-    const firstModel = first.model ?? opts.model;
+    const firstModel = readerName(opts.read, first);
+    const firstInference = first.inference ? { firstInference: first.inference } : {};
     if (!a1.problems.length && !a1.unconfirmed.length) {
-      return { result: first, draft: firstDraft, otherCostUsd: 0, alternative: undefined, verification: { method: 'checks' as const, firstModel, reasons: [], disagreements: [], kept: 'first' as const } };
+      return { result: first, draft: firstDraft, otherCostUsd: 0, alternative: undefined, verification: { method: 'checks' as const, firstModel, ...firstInference, reasons: [], disagreements: [], kept: 'first' as const } };
     }
     const reasons = [...a1.problems, ...a1.unconfirmed.map((u) => `Nothing on the document confirms: ${u}`)];
     let second: EngineResult;
     try {
-      second = await opts.readWith(opts.verifyModel, 'second');
+      second = await opts.readWith(opts.check, 'second');
     } catch (err) {
       // Without a second reading the first stands; the review page says it is unchecked.
-      return { result: first, draft: firstDraft, otherCostUsd: 0, alternative: undefined, verification: { method: 'second-reading' as const, firstModel, secondModel: opts.verifyModel, reasons, disagreements: [], kept: 'first' as const, error: (err as Error).message.slice(0, 300) } };
+      return { result: first, draft: firstDraft, otherCostUsd: 0, alternative: undefined, verification: { method: 'second-reading' as const, firstModel, ...firstInference, secondModel: choiceName(opts.check), reasons, disagreements: [], kept: 'first' as const, error: (err as Error).message.slice(0, 300) } };
     }
-    const secondDraft = this.draftOf(record, second, opts.batch);
-    const a2 = this.assess(record, secondDraft, second.warnings, opts.sheets);
-    const kept = chooseReading(a1, a2);
-    const names = { first: shortModel(firstModel), second: shortModel(second.model ?? opts.verifyModel) };
-    const [keptResult, keptDraft, other, otherDraft] = kept === 'second' ? [second, secondDraft, first, firstDraft] : [first, firstDraft, second, secondDraft];
+    let secondDraft = this.draftOf(record, second, opts.batch);
+    let a2 = this.assess(record, secondDraft, second.warnings, opts.sheets);
+    let kept = chooseReading(a1, a2);
+    let byClaude = false;
+    let otherCost = 0;
+    // Both local readings still fail a check, and checking may fall back to Claude: Claude reads it,
+    // and stands in for the second reading when it finds no more wrong than the better of the two.
+    const best = kept === 'second' ? a2 : a1;
+    if (best.problems.length && opts.check.engine === 'inference' && opts.check.fallback && opts.claudeAvailable && second.engine === 'inference') {
+      try {
+        const third = await opts.readWith(claudeChoice('check-reading', opts.claudeAvailable), 'second');
+        const thirdDraft = this.draftOf(record, third, opts.batch);
+        const a3 = this.assess(record, thirdDraft, third.warnings, opts.sheets);
+        if (chooseReading(best, a3) === 'second') {
+          // The local reading not kept is set aside; Claude's is compared with the better local one.
+          if (kept === 'second') {
+            otherCost += first.costUsd ?? 0;
+            first = second;
+          }
+          second = { ...third, notices: [`Both readings by the local model failed a check, so Claude read it too, as Settings → Models allows for checking.`, ...(third.notices ?? [])] };
+          secondDraft = thirdDraft;
+          a2 = a3;
+          kept = 'second';
+          byClaude = true;
+        } else otherCost += third.costUsd ?? 0;
+      } catch {
+        // Claude could not read it either: the two local readings stand.
+      }
+    }
+    const firstFinal = this.draftOf(record, first, opts.batch);
+    const stored = { first: readerName(opts.read, first), second: byClaude ? readerName(claudeChoice('check-reading'), second) : readerName(opts.check, second) };
+    const names = { first: shortModel(stored.first), second: shortModel(stored.second) };
+    if (names.first === names.second) names.second = `${names.second} (second reading)`;
+    const [keptResult, keptDraft, other, otherDraft] = kept === 'second' ? [second, secondDraft, first, firstFinal] : [first, firstFinal, second, secondDraft];
     const cmp = kept === 'second' ? compareReadings(otherDraft, keptDraft, { first: names.first, second: names.second }) : compareReadings(otherDraft, keptDraft, { first: names.second, second: names.first });
     markDisagreements(keptDraft, cmp.rowNotes);
     return {
       result: keptResult,
       draft: keptDraft,
-      otherCostUsd: other.costUsd ?? 0,
+      otherCostUsd: (other.costUsd ?? 0) + otherCost,
       alternative: other.extraction,
-      verification: { method: 'second-reading' as const, firstModel, secondModel: second.model ?? opts.verifyModel, reasons, disagreements: cmp.disagreements, kept },
+      verification: {
+        method: 'second-reading' as const,
+        firstModel: stored.first,
+        secondModel: stored.second,
+        ...(first.inference ? { firstInference: first.inference } : {}),
+        ...(second.inference ? { secondInference: second.inference } : {}),
+        ...(byClaude ? { byClaude: true } : {}),
+        reasons,
+        disagreements: cmp.disagreements,
+        kept,
+      },
     };
   }
 

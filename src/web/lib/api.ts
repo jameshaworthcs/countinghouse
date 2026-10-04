@@ -55,13 +55,14 @@ export function qs(params: Record<string, string | number | boolean | undefined 
 }
 
 /** GET with caching; keeps the previous data on screen while refetching (no layout jump). */
-export function useApi<T>(key: QueryKey, path: string | null, opts: { refetchInterval?: number | false; enabled?: boolean } = {}) {
+/** `refetchInterval` may depend on the data: refetch while something is still under way. */
+export function useApi<T>(key: QueryKey, path: string | null, opts: { refetchInterval?: number | false | ((data: T | undefined) => number | false); enabled?: boolean } = {}) {
   return useQuery<T, ApiError>({
     queryKey: key,
     queryFn: ({ signal }) => api<T>(path!, { signal }),
     enabled: path !== null && opts.enabled !== false,
     placeholderData: keepPreviousData,
-    ...(opts.refetchInterval !== undefined ? { refetchInterval: opts.refetchInterval } : {}),
+    ...(opts.refetchInterval !== undefined ? { refetchInterval: typeof opts.refetchInterval === 'function' ? (q: { state: { data: T | undefined } }) => (opts.refetchInterval as (d: T | undefined) => number | false)(q.state.data) : opts.refetchInterval } : {}),
   });
 }
 

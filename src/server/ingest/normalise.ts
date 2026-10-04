@@ -253,8 +253,17 @@ function walk(value: unknown, key = ''): unknown {
   return value;
 }
 
-export function normaliseExtraction(raw: unknown): { extraction: Extraction; warnings: string[] } {
+/** A line that carries a balance, not a payment, as statements word it (csv.ts drops the same). */
+export const BALANCE_LINE = /^(opening|closing|start|end(ing)?) ?balance$|^balance (brought|carried) forward\b|^(balance )?(b\/f|c\/f|brought forward|carried forward)$/i;
+
+/**
+ * The reading made sound: rows and values that cannot be kept are dropped. `warnings` are problems
+ * a check of the reading counts against it (verify.ts); `notices` are what was put right and needs
+ * no second reading, shown with the warnings.
+ */
+export function normaliseExtraction(raw: unknown): { extraction: Extraction; warnings: string[]; notices: string[] } {
   const warnings: string[] = [];
+  const notices: string[] = [];
   const fixed = walk(raw) as Record<string, unknown>;
   // Drop transactions / holdings that lost a required value in repair.
   const accounts = Array.isArray(fixed.accounts) ? (fixed.accounts as Record<string, unknown>[]) : [];
@@ -266,6 +275,16 @@ export function normaliseExtraction(raw: unknown): { extraction: Extraction; war
       );
       const dropped = before - (acc.transactions as unknown[]).length;
       if (dropped) warnings.push(`Account ${ai + 1}: ${dropped} transaction row(s) had an unreadable date or amount and were dropped.`);
+    }
+    // A balance line read as a row ("Balance brought forward"): the prompt says a balance is not a
+    // payment (rule 5), and the CSV reader drops such lines too (csv.ts), but a reader sometimes lists
+    // them; kept, the statement no longer reconciles. The local model did so in 4 of its 7 statements
+    // that did not (the inference service's BENCH, "M2").
+    if (Array.isArray(acc.transactions)) {
+      const before = acc.transactions.length;
+      acc.transactions = (acc.transactions as Record<string, unknown>[]).filter((t) => !BALANCE_LINE.test(String(t.description).trim()));
+      const dropped = before - (acc.transactions as unknown[]).length;
+      if (dropped) notices.push(`Account ${ai + 1}: ${dropped === 1 ? 'a balance line was' : `${dropped} balance lines were`} read as ${dropped === 1 ? 'a row' : 'rows'} and left out (a balance brought or carried forward is not a payment).`);
     }
     // Apps and many statements list newest first; store chronologically (stable within a day).
     const list = acc.transactions as { date: string }[] | undefined;
@@ -280,5 +299,5 @@ export function normaliseExtraction(raw: unknown): { extraction: Extraction; war
   readEverything(fixed, (raw ?? {}) as Record<string, unknown>, warnings);
   const parsed = ExtractionSchema.safeParse(fixed);
   if (!parsed.success) throw new Error(`Extraction did not match the expected shape: ${formatZodError(parsed.error)}`);
-  return { extraction: parsed.data, warnings };
+  return { extraction: parsed.data, warnings, notices };
 }

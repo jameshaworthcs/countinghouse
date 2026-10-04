@@ -5,14 +5,15 @@ import { streamSSE } from 'hono/streaming';
 import type { SystemResponse } from '../../shared/api';
 import type { ImportRecord } from '../../shared/schema';
 import type { AppContext } from '../context';
-import { detectEngines, pickEngine } from '../ingest/engines';
+import { detectEngines } from '../ingest/engines';
+import { resolveTask } from '../../shared/tasks';
 import { FORMAT_VERSION } from '../store';
 
 export function systemRoutes(ctx: AppContext): Hono {
   const app = new Hono();
 
   app.get('/system', async (c) => {
-    const { engines } = await detectEngines({ apiKey: ctx.config.anthropicApiKey, force: c.req.query('refresh') === '1' });
+    const { engines } = await detectEngines({ apiKey: ctx.config.anthropicApiKey, inference: ctx.config.inference, force: c.req.query('refresh') === '1' });
     const git = await ctx.git.status();
     const body: SystemResponse = {
       version: ctx.version,
@@ -21,7 +22,7 @@ export function systemRoutes(ctx: AppContext): Hono {
       workDir: ctx.config.workDir,
       formatVersion: FORMAT_VERSION,
       engines,
-      selectedEngine: pickEngine(ctx.store.settings.extraction.engine, engines),
+      selectedEngine: resolveTask('read-document', ctx.store.settings.models.tasks).engine,
       git: { ...git, ...(ctx.git.lastError ? { lastError: ctx.git.lastError } : {}) },
       inbox: { dir: ctx.config.inboxDir, ...(ctx.inbox?.lastError ? { lastError: ctx.inbox.lastError } : {}) },
       auth: { configured: ctx.auth.configured, method: ctx.auth.method, user: ctx.auth.sessionFrom(c)?.user ?? null },

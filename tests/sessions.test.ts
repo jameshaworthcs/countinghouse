@@ -10,6 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createApp, type App } from '../src/server/app';
+import { CLAUDE_TASKS } from './claude-tasks';
 import { loadConfig } from '../src/server/config';
 import { extractWithClaudeApi } from '../src/server/ingest/claude-api';
 import { SessionLog } from '../src/server/sessions';
@@ -106,6 +107,7 @@ describe('Claude sessions in the app', () => {
     const config = loadConfig({ FINANCE_DATA_DIR: path.join(dir, 'data'), FINANCE_WORK_DIR: work, FINANCE_INBOX_DIR: path.join(dir, 'inbox'), FINANCE_WATCH: '0' });
     config.webDist = path.join(dir, 'no-web');
     app = await createApp(config, { version: 'test', env, inbox: false });
+    await app.ctx.store.setSettings({ ...app.ctx.store.settings, models: CLAUDE_TASKS });
   };
   const req = (p: string, init: RequestInit = {}) => app.app.request(`http://127.0.0.1${p}`, { ...init, headers: { host: '127.0.0.1', ...(init.headers ?? {}) } });
   const get = async <T,>(p: string) => (await (await req(p)).json()) as T;

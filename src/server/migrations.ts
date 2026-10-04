@@ -546,7 +546,59 @@ export const MIGRATIONS: Migration[] = [
       ctx.log('[migrate] refunds and "Paid back to you" count against spending');
     },
   },
+  {
+    from: 9,
+    description: 'Models per task: the reading engine, models and effort move from extraction and agents to settings.models.tasks; import names and notes go to the local model service',
+    async run(ctx) {
+      const settings = (await ctx.readJson('settings.json')) as Record<string, unknown> | undefined;
+      if (!settings) return;
+      const tasks = migrateModelSettings(settings);
+      await ctx.writeJson('settings.json', settings);
+      const kept = Object.keys(tasks);
+      ctx.log(`[migrate] models per task${kept.length ? `; kept your choice for ${kept.join(', ')}` : ''}`);
+    },
+  },
 ];
+
+/**
+ * Format v10 (DECISIONS 2026-10-04, "Model work moves to the local model service"): the reading
+ * engine and models, and the agents' model and effort, become per-task choices. The defaults
+ * (src/shared/tasks.ts) are the owner's decision: import names and notes on the local model;
+ * documents and receipts on Claude until the local model's evaluation passes; the month in review,
+ * insights and research on Claude. What the old settings said that the defaults do not is kept: the
+ * Claude API or offline OCR for documents, other models or effort for reading and checking (and
+ * receipts, which read with the reading model), checking turned off, and the agents' model and
+ * effort for the jobs that stay on Claude. Changes `settings` in place; returns the tasks it set.
+ */
+export function migrateModelSettings(settings: Record<string, unknown>): Record<string, Record<string, unknown>> {
+  const ex = (settings.extraction ?? {}) as Record<string, unknown>;
+  const ag = (settings.agents ?? {}) as Record<string, unknown>;
+  const models = (settings.models ?? {}) as { tasks?: Record<string, Record<string, unknown>> };
+  const tasks: Record<string, Record<string, unknown>> = { ...(models.tasks ?? {}) };
+  const str = (v: unknown) => (typeof v === 'string' && v ? v : undefined);
+  const engine = ex.engine === 'claude-api' ? 'claude-api' : 'claude-cli';
+  const model = str(ex.model) !== 'sonnet' ? str(ex.model) : undefined;
+  const check = str(ex.verifyModel) !== 'opus' ? str(ex.verifyModel) : undefined;
+  const effort = str(ex.effort) !== 'high' ? str(ex.effort) : undefined;
+  const claude = (m: string | undefined) => (engine !== 'claude-cli' || m || effort ? { engine, ...(m ? { model: m } : {}), ...(effort ? { effort } : {}) } : undefined);
+  if (ex.engine === 'ocr') tasks['read-document'] ??= { engine: 'ocr' };
+  else if (claude(model)) tasks['read-document'] ??= claude(model)!;
+  if (ex.verifyModel === '') tasks['check-reading'] ??= { engine: 'off' };
+  else if (claude(check)) tasks['check-reading'] ??= claude(check)!;
+  // Receipts were read with the reading model, always through the CLI.
+  if (model || effort) tasks['read-receipt'] ??= { engine: 'claude-cli', ...(model ? { model } : {}), ...(effort ? { effort } : {}) };
+  const agentModel = typeof ag.model === 'string' && ag.model !== 'opus' ? ag.model : undefined;
+  const agentEffort = typeof ag.effort === 'string' && ag.effort !== 'high' ? ag.effort : undefined;
+  if (agentModel || agentEffort) {
+    for (const t of ['monthly-review', 'insights-after-import', 'research']) tasks[t] ??= { engine: 'claude-cli', ...(agentModel ? { model: agentModel } : {}), ...(agentEffort ? { effort: agentEffort } : {}) };
+  }
+  for (const k of ['engine', 'model', 'verifyModel', 'effort']) delete ex[k];
+  for (const k of ['model', 'effort']) delete ag[k];
+  if (settings.extraction) settings.extraction = ex;
+  if (settings.agents) settings.agents = ag;
+  settings.models = { ...models, tasks };
+  return tasks;
+}
 
 export interface MigrationResult {
   from: number;

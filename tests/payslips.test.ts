@@ -171,7 +171,7 @@ describe('payslips uploaded', () => {
     config.webDist = path.join(dir, 'no-web');
     app = await createApp(config, { version: 'test', env: {}, inbox: false });
     // Never Claude in a test: a payslip no local reader knows goes to offline OCR instead.
-    await app.ctx.store.setSettings({ ...app.ctx.store.settings, extraction: { ...app.ctx.store.settings.extraction, engine: 'ocr' } });
+    await app.ctx.store.setSettings({ ...app.ctx.store.settings, models: { tasks: { 'read-document': { engine: 'ocr' } } } });
   });
   afterEach(async () => {
     await app.close();
@@ -270,7 +270,7 @@ describe('format v6 migration', () => {
         // The student loan line was left out.
       ];
       await writeFile(path.join(data, 'figures.jsonl'), `${figures.map((f) => JSON.stringify(f)).join('\n')}\n`);
-      expect(await runMigrations(data, () => undefined)).toMatchObject({ from: 5, to: 9 });
+      expect(await runMigrations(data, () => undefined)).toMatchObject({ from: 5, to: 10 });
 
       const store = await Store.open(data);
       expect(store.issues).toEqual([]);

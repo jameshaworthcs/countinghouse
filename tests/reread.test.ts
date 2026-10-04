@@ -104,7 +104,7 @@ describe('reading a stored document again', () => {
 
   it('only when turned on, and only for what Claude read', async () => {
     const id = await committed();
-    await expect(svc.startReread(id)).rejects.toThrow('Reading stored documents again is off: turn it on in Settings → Import & extraction.');
+    await expect(svc.startReread(id)).rejects.toThrow('Reading stored documents again is off: turn it on in Settings → Models & import.');
     expect(svc.getReread(id)).toBeUndefined();
   });
 

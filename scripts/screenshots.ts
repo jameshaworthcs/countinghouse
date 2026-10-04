@@ -127,6 +127,7 @@ async function main() {
     ['settings-access', '/settings#access'],
     ['settings-audit', '/settings#audit'],
     ['settings-health', '/settings#health'],
+    ['ask', '/ask'],
     ['sessions', '/sessions'],
     ...(sessionId ? ([['session', `/sessions/${sessionId}`]] as [string, string][]) : []),
   ];

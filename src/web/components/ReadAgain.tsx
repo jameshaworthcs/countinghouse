@@ -53,7 +53,7 @@ export function ReadAgainCard({ rec, currentVersion }: { rec: ImportRecord; curr
     >
       {!enabled && (
         <p className="text-[12.5px] text-ink-3">
-          Off: reading stored documents again runs the agent, on your Claude usage (as an upload does). Turn it on in <Link to="/settings#extraction" className="text-accent hover:underline">Settings → Import & extraction</Link>.
+          Off: reading stored documents again runs the model that reads uploads (Claude’s usage, when that is Claude). Turn it on in <Link to="/settings#extraction" className="text-accent hover:underline">Settings → Models & import</Link>.
         </p>
       )}
       {start.error && <Callout tone="bad">{start.error.message}</Callout>}
@@ -64,7 +64,7 @@ export function ReadAgainCard({ rec, currentVersion }: { rec: ImportRecord; curr
             Read {formatDate(r.finishedAt!.slice(0, 10))} with {r.layout ?? r.engineVersion}
             {r.model ? ` (${r.model.replace(/^claude-/, '')})` : ''}
             {r.costUsd ? `, $${r.costUsd.toFixed(2)}` : ''}. {differences.length ? `${differences.length} difference${differences.length === 1 ? '' : 's'}.` : 'Everything it read is as recorded.'}
-            {r.engine === 'claude-cli' || r.engine === 'claude-api' ? (
+            {r.engine === 'inference' || r.engine === 'claude-cli' || r.engine === 'claude-api' ? (
               <>
                 {' '}
                 <SessionsLink of={r.importId}>What the agent did</SessionsLink>
@@ -168,7 +168,7 @@ export function OlderReadings() {
   return (
     <Card
       title={`${d.older.length} document${d.older.length === 1 ? '' : 's'} worth reading again`}
-      description={`Read by an earlier reader (it is now ${d.current}), or a CSV whose columns were worked out automatically. Open one to read it again and compare${claude && !d.enabled ? '; reading PDFs and screenshots again is off in Settings → Import & extraction' : ''}.`}
+      description={`Read by an earlier reader (it is now ${d.current}), or a CSV whose columns were worked out automatically. Open one to read it again and compare${claude && !d.enabled ? '; reading PDFs and screenshots again is off in Settings → Models & import' : ''}.`}
       padded={false}
     >
       <details className="border-t border-line">

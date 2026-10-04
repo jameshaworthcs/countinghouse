@@ -10,6 +10,7 @@
 import { z } from 'zod';
 import { isISODate } from './dates';
 import { isMoney } from './money';
+import { TASK_KINDS, TaskChoiceSchema } from './tasks';
 
 // ─── Primitives ──────────────────────────────────────────────────────────────────────────────────
 
@@ -1123,25 +1124,16 @@ export const ProfileSchema = z.object({
 });
 export type Profile = z.infer<typeof ProfileSchema>;
 
-export const EXTRACTION_ENGINES = ['auto', 'claude-cli', 'claude-api', 'ocr'] as const;
+export const EXTRACTION_ENGINES = ['auto', 'inference', 'claude-cli', 'claude-api', 'ocr'] as const;
 export type ExtractionEnginePreference = (typeof EXTRACTION_ENGINES)[number];
 
 export const SettingsSchema = z.object({
   extraction: z
     .object({
-      engine: z.enum(EXTRACTION_ENGINES).default('auto'),
-      /** The model that reads every document: "sonnet", "opus" or a full model id. */
-      model: z.string().default('sonnet'),
-      /**
-       * The model that checks it: it reads the document again whenever the checks fail or the
-       * document has nothing to check its figures against. Empty turns checking off.
-       */
-      verifyModel: z.string().default('opus'),
-      effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).default('high'),
       maxConcurrent: z.number().int().min(1).max(4).default(2),
-      /** Seconds before an extraction is abandoned. */
+      /** Seconds before a reading by Claude is abandoned (the local model's limits are in src/shared/tasks.ts). */
       timeoutSeconds: z.number().int().min(30).max(3600).default(900),
-      /** Read receipts you attach with Claude, to propose split lines. Off until you turn it on. */
+      /** Read receipts you attach, to propose split lines. Off until you turn it on. */
       readReceipts: z.boolean().default(false),
       /** Read stored documents again with the current reader, to compare with what was recorded. Off until you turn it on. */
       rereadDocuments: z.boolean().default(false),
@@ -1151,7 +1143,17 @@ export const SettingsSchema = z.object({
        */
       readEverything: z.boolean().default(false),
     })
-    .default({ engine: 'auto', model: 'sonnet', verifyModel: 'opus', effort: 'high', maxConcurrent: 2, timeoutSeconds: 900, readReceipts: false, rereadDocuments: false, readEverything: false }),
+    .default({ maxConcurrent: 2, timeoutSeconds: 900, readReceipts: false, rereadDocuments: false, readEverything: false }),
+  /**
+   * Which model does each piece of model work (src/shared/tasks.ts): your choices over the table's
+   * defaults. Format v10 moved `extraction.engine/model/verifyModel/effort` and `agents.model/effort`
+   * here.
+   */
+  models: z
+    .object({
+      tasks: z.partialRecord(z.enum(TASK_KINDS), TaskChoiceSchema).default({}),
+    })
+    .default({ tasks: {} }),
   git: z
     .object({
       autoCommit: z.boolean().default(true),
@@ -1167,9 +1169,6 @@ export const SettingsSchema = z.object({
   agents: z
     .object({
       enabled: z.boolean().default(true),
-      /** "opus", "sonnet" or a full model id. */
-      model: z.string().default('opus'),
-      effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).default('high'),
       /** Research older than this is refreshed. */
       researchStaleAfterDays: z.number().int().min(7).max(730).default(90),
       /** Produce insights after each committed import. */
@@ -1195,7 +1194,7 @@ export const SettingsSchema = z.object({
       backgroundBudgetPerDayUsd: z.number().min(0).max(100).default(5),
       backgroundBudgetPerMonthUsd: z.number().min(0).max(1000).default(40),
     })
-    .default({ enabled: true, model: 'opus', effort: 'high', researchStaleAfterDays: 90, insightsAfterImport: true, monthlyReview: true, timeoutSeconds: 1200, autoResearch: false, labelImports: false, backgroundBudgetPerDayUsd: 5, backgroundBudgetPerMonthUsd: 40 }),
+    .default({ enabled: true, researchStaleAfterDays: 90, insightsAfterImport: true, monthlyReview: true, timeoutSeconds: 1200, autoResearch: false, labelImports: false, backgroundBudgetPerDayUsd: 5, backgroundBudgetPerMonthUsd: 40 }),
 });
 export type Settings = z.infer<typeof SettingsSchema>;
 
@@ -1213,10 +1212,36 @@ export type Meta = z.infer<typeof MetaSchema>;
 export const SET_BY = ['owner', 'agent', 'system'] as const;
 export type SetBy = (typeof SET_BY)[number];
 
+/**
+ * What the local model service says produced an answer (its README §4): enough to tell two answers
+ * from the same setup. The whole provenance object is kept in the session record (sessions.ts).
+ */
+export const InferenceProvenanceSchema = z.object({
+  requestId: z.string(),
+  /** The alias asked for (vision-extract, fast-chat…). */
+  alias: z.string(),
+  /** The model file that answered, by its id and sha256. */
+  modelId: z.string().optional(),
+  modelSha256: z.string().optional(),
+  /** inf-…: the model file, runtime, launch arguments, chat template and driver together. */
+  systemFingerprint: z.string().optional(),
+  seed: z.number().int().optional(),
+  thinking: z.boolean().optional(),
+  /** The service checked the output against the schema sent. */
+  schemaValid: z.boolean().optional(),
+  /** Milliseconds it waited for its turn (and for a model to load). */
+  queueMs: z.number().nonnegative().optional(),
+});
+export type InferenceProvenance = z.infer<typeof InferenceProvenanceSchema>;
+
 export const ProvenanceSchema = z.object({
   setBy: z.enum(SET_BY),
-  /** Model that produced it (agents), e.g. "claude-opus-5-5". */
+  /** Model that produced it (agents), e.g. "claude-opus-5-5", or the local model's id. */
   model: z.string().optional(),
+  /** The engine that ran it, when not Claude's CLI: "inference" is the local model service. */
+  engine: z.enum(['inference', 'claude-cli', 'claude-api']).optional(),
+  /** The local model service's own record of the answer. */
+  inference: InferenceProvenanceSchema.optional(),
   /** Version of the job prompt that produced it, e.g. "research-instrument-1". */
   promptVersion: z.string().optional(),
   /** The in-app job that wrote it. */
@@ -1752,7 +1777,7 @@ export type Draft = z.infer<typeof DraftSchema>;
 export const IMPORT_STATUSES = ['queued', 'processing', 'needs_mapping', 'review', 'committed', 'failed', 'discarded'] as const;
 export type ImportStatus = (typeof IMPORT_STATUSES)[number];
 
-export const ENGINE_IDS = ['csv', 'ofx', 'qif', 'santander-txt', 'govuk', 'payslip', 'claude-cli', 'claude-api', 'ocr', 'manual'] as const;
+export const ENGINE_IDS = ['csv', 'ofx', 'qif', 'santander-txt', 'govuk', 'payslip', 'inference', 'claude-cli', 'claude-api', 'ocr', 'manual'] as const;
 export type EngineId = (typeof ENGINE_IDS)[number];
 
 export const ImportRecordSchema = z.object({
@@ -1801,6 +1826,13 @@ export const ImportRecordSchema = z.object({
       finishedAt: TimestampSchema.optional(),
       durationMs: z.number().int().nonnegative().optional(),
       costUsd: z.number().nonnegative().optional(),
+      /** The local model service's record of the reading kept (engine "inference"). */
+      inference: InferenceProvenanceSchema.optional(),
+      /**
+       * Waiting for the local model (it is down, or its GPU is lent out): since when, why, and until
+       * when it said to try again. Cleared when the reading ends.
+       */
+      waiting: z.object({ since: TimestampSchema, reason: z.string(), until: TimestampSchema.optional() }).optional(),
       error: z.string().optional(),
       warnings: z.array(z.string()).default([]),
       /** Raw engine output, kept for audit and re-processing. */
@@ -1814,6 +1846,14 @@ export const ImportRecordSchema = z.object({
           method: z.enum(['checks', 'second-reading']),
           firstModel: z.string(),
           secondModel: z.string().optional(),
+          /** The local model service's record of each reading it made. */
+          firstInference: InferenceProvenanceSchema.optional(),
+          secondInference: InferenceProvenanceSchema.optional(),
+          /**
+           * Both readings still failed a check, and the check falls back to Claude (Settings → Models):
+           * Claude read it a third time, and kept says which of the two compared was kept.
+           */
+          byClaude: z.boolean().optional(),
           /** Why a second reading was made. */
           reasons: z.array(z.string()).default([]),
           /** Figures the two readings did not agree on (the rows are marked). */
@@ -2435,6 +2475,8 @@ export const ReceiptSchema = z.object({
       promptVersion: z.string(),
       at: TimestampSchema,
       costUsd: z.number().nonnegative().optional(),
+      /** Read by the local model service: its record of the answer. */
+      inference: InferenceProvenanceSchema.optional(),
       merchant: z.string().nullable().default(null),
       date: ISODateSchema.nullable().default(null),
       total: MoneySchema.nullable().default(null),

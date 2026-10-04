@@ -222,11 +222,12 @@ export async function extractWithClaudeCli(opts: CliOptions): Promise<EngineResu
   if (result.is_error || result.subtype !== 'success' || result.structured_output === undefined) {
     throw new Error(`claude CLI failed (${result.subtype ?? 'error'}): ${(result.result ?? stderr).slice(0, 500)}`);
   }
-  const { extraction, warnings } = normaliseExtraction(result.structured_output);
+  const { extraction, warnings, notices } = normaliseExtraction(result.structured_output);
   const model = Object.keys(result.modelUsage ?? {})[0] ?? opts.model;
   return {
     extraction,
     warnings,
+    ...(notices.length ? { notices } : {}),
     model,
     ...(typeof result.total_cost_usd === 'number' ? { costUsd: result.total_cost_usd } : {}),
     durationMs: result.duration_ms ?? Date.now() - started,

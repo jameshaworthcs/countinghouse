@@ -39,6 +39,48 @@ const PAGE = 25;
 
 const TABS: Tab[] = ['people', 'rules', 'payees', 'guesses'];
 
+interface SuggestStatus {
+  waiting: number;
+  running: boolean;
+  last: { at: string; asked?: number; suggested?: number; proposalId?: string; stopped?: string; error?: string } | null;
+}
+
+/**
+ * The payments nothing else placed, offered to the local model: what it suggests becomes a proposal
+ * you review (src/server/suggest.ts). Nothing leaves this machine.
+ */
+function SuggestCategories() {
+  const s = useApi<SuggestStatus>(['suggest-categories'], '/suggest-categories', { refetchInterval: (d) => (d?.running ? 4000 : false) });
+  const start = useApiMutation(() => api('/suggest-categories', { method: 'POST' }));
+  const d = s.data;
+  if (!d || (!d.waiting && !d.last)) return null;
+  const last = d.last;
+  return (
+    <Callout tone="neutral" className="mb-4">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <span className="min-w-0 flex-1">
+          {d.waiting ? `${d.waiting} payment description${d.waiting === 1 ? '' : 's'} that nothing else placed.` : 'Every payment has a category or is yours to decide.'} The local model can suggest categories for them, on this machine; each suggestion is a change in a proposal you review.
+        </span>
+        {d.waiting > 0 && (
+          <Button size="sm" loading={d.running || start.isPending} onClick={() => start.mutate(undefined)}>
+            {d.running ? 'Suggesting…' : 'Suggest categories'}
+          </Button>
+        )}
+      </div>
+      {last && !d.running && (
+        <div className="mt-1 text-[12.5px] text-ink-3">
+          {last.error
+            ? `The last run failed: ${last.error}`
+            : last.proposalId
+              ? <>Last run: {last.suggested} suggested from {last.asked} descriptions. <Link className="text-accent hover:underline" to={`/proposals/${last.proposalId}`}>Review the proposal</Link>{last.stopped ? ` (stopped early: ${last.stopped})` : ''}</>
+              : `Last run: nothing it was sure enough of, from ${last.asked ?? 0} descriptions${last.stopped ? ` (stopped early: ${last.stopped})` : ''}.`}
+        </div>
+      )}
+      {start.error && <div className="mt-1 text-[12.5px] text-bad-ink">{start.error.message}</div>}
+    </Callout>
+  );
+}
+
 export default function Categorise() {
   // The tab is in the address (#rules, #payees, #guesses), so a link can open it.
   const [tab, setTabState] = useState<Tab>(() => TABS.find((t) => `#${t}` === window.location.hash) ?? 'people');
@@ -75,6 +117,7 @@ export default function Categorise() {
         </Link>
         ), so the app fills what it can by itself.
       </Callout>
+      <SuggestCategories />
       {!data ? (
         q.error ? (
           <Callout tone="bad">{q.error.message}</Callout>

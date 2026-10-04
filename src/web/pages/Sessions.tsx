@@ -15,7 +15,7 @@ import { cn, fileSize, plural } from '../lib/format';
 
 const KIND_NAMES: Record<SessionSummary['kind'], string> = { job: 'Agent job', reading: 'Import reading', reread: 'Read again', receipt: 'Receipt', token: 'Agent with a token' };
 const ROLE_NAMES = { first: 'first reading', second: 'second reading (the check)' };
-const ENGINE_NAMES = { 'claude-cli': 'Claude Code CLI', 'claude-api': 'Claude API' };
+const ENGINE_NAMES = { inference: 'Local model service (this machine)', 'claude-cli': 'Claude Code CLI', 'claude-api': 'Claude API' };
 
 function duration(ms: number | undefined): string {
   if (ms === undefined) return '';
@@ -507,6 +507,13 @@ function SessionPage({ id }: { id: string }) {
   if (s.engine) items.push(['Engine', ENGINE_NAMES[s.engine]]);
   if (s.model) items.push(['Model', <span key="m" className="font-mono text-[12px]">{r && r.modelUsed && r.modelUsed !== r.model ? `${r.modelUsed} (asked for ${r.model})` : s.model}</span>]);
   if (r?.effort) items.push(['Effort', r.effort]);
+  if (r?.thinking !== undefined) items.push(['Thinking', r.thinking ? 'on' : 'off']);
+  if (r?.inference) {
+    const p = r.inference;
+    const t = (p.timings_ms ?? {}) as Record<string, number>;
+    const sampling = (p.sampling ?? {}) as Record<string, unknown>;
+    items.push(['Provenance', <span key="pv" className="font-mono text-[12px] break-all">{[`request ${String(p.request_id)}`, `alias ${String(p.alias)}`, `model ${String(p.model_id)}`, `sha256 ${String(p.model_sha256).slice(0, 16)}…`, `fingerprint ${String(p.system_fingerprint)}`, `seed ${String(sampling.seed)}`, ...(p.schema_valid !== undefined ? [`schema ${p.schema_valid ? 'valid' : 'invalid'}`] : []), ...(t.queue ? [`queued ${duration(t.queue)}`] : []), ...(t.load ? [`model load ${duration(t.load)}`] : [])].join(' · ')}</span>]);
+  }
   if (s.promptVersion) items.push(['Prompt version', <span key="p" className="font-mono text-[12px]">{s.promptVersion}</span>]);
   if (r) items.push(['Tools', r.tools.length ? r.tools.join(', ') : 'none']);
   if (r?.privacy) items.push(['Privacy', r.privacy === 'public' ? 'Public identifiers only, with web tools' : 'Your data, no web access']);

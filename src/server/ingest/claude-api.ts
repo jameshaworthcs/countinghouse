@@ -109,7 +109,7 @@ export async function extractWithClaudeApi(opts: ApiOptions): Promise<EngineResu
   } catch {
     throw new Error('Claude returned output that was not valid JSON.');
   }
-  const { extraction, warnings } = normaliseExtraction(json);
+  const { extraction, warnings, notices } = normaliseExtraction(json);
   const usage = message.usage;
   // List prices per million tokens, for a rough cost record only.
   const price: Record<string, [number, number]> = {
@@ -121,5 +121,5 @@ export async function extractWithClaudeApi(opts: ApiOptions): Promise<EngineResu
   const [pin, pout] = price[message.model] ?? price[model] ?? [0, 0];
   const costUsd = ((usage.input_tokens ?? 0) * pin + (usage.output_tokens ?? 0) * pout) / 1_000_000;
   sink?.write({ type: 'result', subtype: 'success', model: message.model, stop_reason: message.stop_reason, usage, total_cost_usd: costUsd, duration_ms: Date.now() - started, num_turns: 1 });
-  return { extraction, warnings, model: message.model, costUsd, durationMs: Date.now() - started };
+  return { extraction, warnings, ...(notices.length ? { notices } : {}), model: message.model, costUsd, durationMs: Date.now() - started };
 }

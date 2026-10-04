@@ -25,6 +25,11 @@ export interface Config {
   webDist: string;
   allowedHosts: string[];
   anthropicApiKey?: string;
+  /**
+   * The local model service on this machine (INFERENCE_BASE_URL, INFERENCE_API_KEY): documents
+   * sent to it never leave P360. Unset, tasks set to it wait (src/shared/tasks.ts).
+   */
+  inference?: { baseUrl: string; apiKey: string; waitUpToMs?: number };
   /** Watch the inbox folder and the data directory for changes. */
   watch: boolean;
   /** Branch that data auto-commits must land on; commits are held (and reported) on any other. */
@@ -80,5 +85,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, root = PROJECT_
     auditDevices: env.FINANCE_AUDIT_DEVICES ? env.FINANCE_AUDIT_DEVICES === '1' : env.NODE_ENV === 'production',
   };
   if (env.ANTHROPIC_API_KEY) config.anthropicApiKey = env.ANTHROPIC_API_KEY;
+  if (env.INFERENCE_BASE_URL && env.INFERENCE_API_KEY) {
+    // INFERENCE_WAIT_MINUTES: how long work waits while the service cannot take it (default 12 hours).
+    const wait = Number(env.INFERENCE_WAIT_MINUTES);
+    config.inference = { baseUrl: env.INFERENCE_BASE_URL.replace(/\/+$/, ''), apiKey: env.INFERENCE_API_KEY, ...(wait > 0 ? { waitUpToMs: wait * 60_000 } : {}) };
+  }
   return config;
 }

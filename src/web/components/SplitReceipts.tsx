@@ -129,7 +129,7 @@ export function SplitSection({ tx, proposal, onProposalUsed }: { tx: Transaction
 export function ReceiptsSection({ tx, onPropose }: { tx: Transaction; onPropose: (lines: Line[]) => void }) {
   const { data, cats } = useAppData();
   const toast = useToast();
-  const q = useApi<Receipt[]>(['receipts', tx.id], `/receipts?transactionId=${tx.id}`);
+  const q = useApi<Receipt[]>(['receipts', tx.id], `/receipts?transactionId=${tx.id}`, { refetchInterval: (list) => (list?.some((r) => r.status === 'reading') ? 5000 : false) });
   const reading = data.settings.extraction.readReceipts;
   const attach = useApiMutation(
     (file: File) => {
@@ -137,7 +137,7 @@ export function ReceiptsSection({ tx, onPropose }: { tx: Transaction; onPropose:
       form.append('file', file, file.name);
       return api<Receipt>(`/transactions/${tx.id}/receipts`, { body: form });
     },
-    { onSuccess: (r) => toast({ tone: 'good', text: r.status === 'read' ? 'Receipt attached and read' : r.status === 'failed' ? 'Receipt attached; it could not be read' : 'Receipt attached' }) },
+    { onSuccess: (r) => toast({ tone: 'good', text: r.status === 'read' ? 'Receipt attached and read' : r.status === 'reading' ? 'Receipt attached; the local model is reading it (a minute or two)' : r.status === 'failed' ? 'Receipt attached; it could not be read' : 'Receipt attached' }) },
   );
   const read = useApiMutation((id: string) => api<Receipt>(`/receipts/${id}/read`, { method: 'POST' }));
   const remove = useApiMutation((id: string) => api(`/receipts/${id}`, { method: 'DELETE' }), { onSuccess: () => toast({ tone: 'good', text: 'Receipt removed' }) });
@@ -156,6 +156,7 @@ export function ReceiptsSection({ tx, onPropose }: { tx: Transaction; onPropose:
               </a>
               <span className="flex items-center gap-2">
                 {r.status === 'failed' && <Badge tone="warn">Not read</Badge>}
+                {r.status === 'reading' && <Badge tone="neutral">Reading…</Badge>}
                 {reading && r.status !== 'read' && (
                   <Button size="sm" icon={<ScanText className="size-3.5" />} loading={read.isPending && read.variables === r.id} onClick={() => read.mutate(r.id)}>
                     Read with the agent
@@ -170,7 +171,7 @@ export function ReceiptsSection({ tx, onPropose }: { tx: Transaction; onPropose:
             {r.reading && (
               <div className="mt-2 flex flex-col gap-1.5">
                 <div className="text-[12px] text-ink-3">
-                  Read by the agent ({r.reading.model.replace(/^claude-/, '')}): {r.reading.merchant ?? 'shop not read'}
+                  Read by {r.reading.inference ? 'the local model, on this machine' : `the agent (${r.reading.model.replace(/^claude-/, '')})`}: {r.reading.merchant ?? 'shop not read'}
                   {r.reading.date ? `, ${formatDate(r.reading.date)}` : ''}
                   {r.reading.total !== null ? `, total ${money(r.reading.total)}` : ''}. A reading, not a record: nothing changes until you save a split. <SessionsLink of={r.id}>What the agent did</SessionsLink>
                 </div>
@@ -212,7 +213,7 @@ export function ReceiptsSection({ tx, onPropose }: { tx: Transaction; onPropose:
         </label>
         {!reading && (
           <p className="text-[12px] text-ink-3">
-            Receipts are kept with your documents. Reading them with the agent to suggest split lines is off (<Link to="/settings#extraction" className="text-accent hover:underline">Settings → Import & extraction</Link>).
+            Receipts are kept with your documents. Reading them with the agent to suggest split lines is off (<Link to="/settings#extraction" className="text-accent hover:underline">Settings → Models & import</Link>).
           </p>
         )}
         {(attach.error || read.error || remove.error) && <Callout tone="bad">{(attach.error ?? read.error ?? remove.error)!.message}</Callout>}
