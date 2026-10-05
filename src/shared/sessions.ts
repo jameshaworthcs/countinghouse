@@ -110,6 +110,8 @@ export interface SessionSummary {
   receiptId?: string;
   conversationId?: string;
   tokenId?: string;
+  /** A token's activity: the agent's own session id (a Claude Code session), when it sent one. */
+  agentSession?: string;
   engine?: SessionEngine;
   /** Who started it, in a few words, and why. */
   startedBy: string;
@@ -144,9 +146,20 @@ export interface TokenRequest {
   at: string;
   method: string;
   path: string;
+  /** Its query string ("?q=…"), identifiers masked. */
+  query?: string;
   status: number;
+  /** The answer's size. */
+  bytes?: number;
   from: string;
 }
+
+/**
+ * The header an agent outside the app sends to say which of its sessions made a request (`npm run
+ * api` sends a Claude Code session's CLAUDE_CODE_SESSION_ID): its requests are grouped by it.
+ */
+export const AGENT_SESSION_HEADER = 'x-agent-session';
+export const isAgentSessionId = (s: string | undefined): s is string => typeof s === 'string' && /^[A-Za-z0-9._:-]{1,100}$/.test(s);
 
 export interface SessionDetail {
   session: SessionSummary;

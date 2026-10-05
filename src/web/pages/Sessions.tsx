@@ -643,6 +643,7 @@ function parentLinks(s: SessionSummary): [ReactNode, ReactNode][] {
   if (s.receiptId) rows.push(['Receipt', <span key="r" className="font-mono text-[12px]">{s.receiptId}</span>]);
   if (s.conversationId) rows.push(['Conversation', <Link key="c" to={`/ask/${s.conversationId}`} className="font-mono text-[12px] text-accent hover:underline">{s.conversationId}</Link>]);
   if (s.tokenId) rows.push(['Token', <Link key="t" to="/settings#access" className="font-mono text-[12px] text-accent hover:underline">{s.tokenId}</Link>]);
+  if (s.agentSession) rows.push(['Its session', <span key="as" className="font-mono text-[12px] break-all">{s.agentSession}</span>]);
   return rows;
 }
 
@@ -779,9 +780,11 @@ function SessionView({ d }: { d: SessionDetail }) {
               {d.requests.map((u, i) => (
                 <li key={i} className="flex flex-wrap items-baseline gap-x-3 border-t border-line px-5 py-2 text-[12.5px]">
                   <span className="font-mono text-[11.5px] text-ink-3">{u.at.slice(11, 19)}</span>
-                  <span className="font-mono break-all">
+                  <span className="sensitive font-mono break-all">
                     {u.method} {u.path}
+                    {u.query ?? ''}
                   </span>
+                  {u.bytes !== undefined && <span className="text-ink-3">{fileSize(u.bytes)}</span>}
                   {u.status < 400 ? <StatusBadge status="good">{u.status}</StatusBadge> : <StatusBadge status="bad">{u.status}</StatusBadge>}
                 </li>
               ))}

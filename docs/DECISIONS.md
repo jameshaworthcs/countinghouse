@@ -2222,3 +2222,14 @@ Ask v2 (`ask-2`), as the owner decided it:
   a question's first step must be a call (the schema allows only that); and it sent a search with
   every argument null while its `why` named the currency, so a search with no filter is refused
   with a message saying so, and the next step corrects it.
+
+## 2026-10-05: Agents outside the app are seen by their own sessions
+
+- `npm run api` sends `X-Agent-Session: $CLAUDE_CODE_SESSION_ID`. The token log keeps it, with the
+  query string (account numbers masked) and the answer's size; the audit log's token actor names
+  it. The Agent sessions page groups a token's requests by it, falling back to 30-minute stretches
+  for requests without one. Claude Code's own transcript stays out of the app (the owner's choice).
+- `npm run records write` goes through `POST /api/records` with the token, so the audit log knows
+  who wrote it, and stamps `provenance.session` with the Claude Code session. It writes the files
+  itself only when the app cannot be reached, there is no token, or `FINANCE_DATA_DIR` names another
+  directory (the demo, a copy), and says so.

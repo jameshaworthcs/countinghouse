@@ -6,7 +6,7 @@ export type AuditActor =
   /** You, signed in (or, on a server with no login, on this machine directly). */
   | { type: 'owner'; user: string; via: 'session' | 'local'; ip: string; device?: string; tailnetUser?: string; userAgent?: string }
   /** An agent with one of your tokens (Settings → Agent access). */
-  | { type: 'token'; tokenId: string; name: string; scopes: string[]; ip: string; device?: string; tailnetUser?: string; userAgent?: string }
+  | { type: 'token'; tokenId: string; name: string; scopes: string[]; ip: string; device?: string; tailnetUser?: string; userAgent?: string; agentSession?: string }
   /** An agent job the app ran (Assumptions & research → Agent jobs). */
   | { type: 'job'; jobId: string; kind: string; trigger: string; label?: string }
   /** The app by itself: start-up upkeep, the import queue, the inbox folder, git, the job scheduler. */

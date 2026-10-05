@@ -19,6 +19,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { Context, MiddlewareHandler } from 'hono';
 import { withoutNiNumbers } from '../shared/privacy';
+import { AGENT_SESSION_HEADER, isAgentSessionId } from '../shared/sessions';
 import type { AuditActor, AuditActorType, AuditCategory, AuditChild, AuditEntry, AuditOutcome, AuditStatus, AuditVerifyResponse, ChangeDiff } from '../shared/audit';
 import type { Auth } from './auth';
 import { nowISO, randomHex, sha256 } from './fsutil';
@@ -493,7 +494,8 @@ function actorOf(c: Context, who: Awaited<ReturnType<typeof whoFrom>>, auth: Aut
   const credential = /^Bearer\s+(\S+)$/i.exec(c.req.header('authorization') ?? '')?.[1];
   if (credential !== undefined || c.get('agentToken' as never)) {
     const t = credential ? tokens.verify(credential) : undefined;
-    if (t) return { type: 'token', tokenId: t.id, name: t.name, scopes: t.scopes, ...who };
+    const agentSession = c.req.header(AGENT_SESSION_HEADER);
+    if (t) return { type: 'token', tokenId: t.id, name: t.name, scopes: t.scopes, ...who, ...(isAgentSessionId(agentSession) ? { agentSession } : {}) };
     const claimed = /^fin_([0-9a-f]{12})_/.exec(credential ?? '')?.[1];
     return { type: 'anonymous', ...who, ...(claimed ? { claimedToken: `tok_${claimed}` } : {}) };
   }

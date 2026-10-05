@@ -351,6 +351,36 @@ describe('Claude sessions in the app', () => {
     expect(d.noTranscript).toMatch(/ran outside the app/);
     expect(d.audit.some((e) => e.actor.type === 'token' && e.outcome === 'refused')).toBe(true);
   });
+
+  it("groups an agent's requests by the session it names, keeping each query and answer size", async () => {
+    await start({ FINANCE_USERNAME: 'owner', FINANCE_PASSWORD_HASH: 'scrypt$x$y' });
+    const made = (await app.ctx.tokens.create({ name: 'Claude Code on P360', scopes: ['imports'], days: 30 })) as { token: string };
+    const as = (session?: string) => ({ authorization: `Bearer ${made.token}`, ...(session ? { 'x-agent-session': session } : {}) });
+    await req('/api/transactions?q=tesco&accounts=12345678', { headers: as('cc-one') });
+    await req('/api/imports', { headers: as('cc-two') });
+    await req('/api/accounts', { headers: as('cc-one') });
+    await req('/api/settings', { method: 'PUT', headers: { ...as('cc-two'), ...CSRF, 'content-type': 'application/json' }, body: '{}' });
+    await req('/api/imports', { headers: as('not a valid id!') });
+    const list = await until(
+      () => allSessions(app.ctx),
+      (l) => l.filter((s) => s.source === 'token').length === 3,
+    );
+    const tokens = list.filter((x) => x.source === 'token');
+    expect(tokens.map((x) => [x.agentSession ?? null, x.requests!.total]).sort()).toEqual([
+      [null, 1],
+      ['cc-one', 2],
+      ['cc-two', 2],
+    ]);
+    const one = (await sessionDetail(app.ctx, tokens.find((x) => x.agentSession === 'cc-one')!.id))!;
+    expect(one.session.title).toBe('Agent with the token “Claude Code on P360” (session cc-one)');
+    // The query is kept, an account number in it masked; the answer's size too.
+    expect(one.requests![0]).toMatchObject({ path: '/api/transactions', query: '?q=tesco&accounts=••••5678' });
+    expect(one.requests![0]!.bytes).toBeGreaterThan(0);
+    expect(one.noTranscript).toMatch(/It named its session: cc-one/);
+    // The audit log names the session on the request it refused.
+    const refused = (await app.ctx.audit.query({ outcome: 'refused', limit: 10 })).entries.find((e) => e.actor.type === 'token');
+    expect(refused?.actor).toMatchObject({ type: 'token', agentSession: 'cc-two' });
+  });
 });
 
 describe('transcript limits', () => {

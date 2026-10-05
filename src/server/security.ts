@@ -5,7 +5,9 @@ import { getConnInfo } from '@hono/node-server/conninfo';
 import type { Context, MiddlewareHandler } from 'hono';
 import type { Auth } from './auth';
 import { isLoopbackHost } from './config';
+import { maskIdentifiers } from './audit';
 import { nowISO } from './fsutil';
+import { AGENT_SESSION_HEADER, isAgentSessionId } from '../shared/sessions';
 import { requiredScope, type AgentTokens } from './tokens';
 
 export interface SecurityOptions {
@@ -149,7 +151,10 @@ export function authGate(auth: Auth, tokens?: AgentTokens): MiddlewareHandler {
       const credential = /^Bearer\s+(\S+)$/i.exec(authorization)?.[1];
       const token = credential && tokens ? tokens.verify(credential) : undefined;
       if (!token || !tokens) return c.json({ error: 'The token is not valid: wrong, expired or revoked.', code: 'bad_token' }, 401);
-      const use = { tokenId: token.id, name: token.name, method: c.req.method, path, from: clientAddress(c) };
+      // What it asked for, whole (the query too), and which of the agent's sessions asked.
+      const query = new URL(c.req.url).search;
+      const agentSession = c.req.header(AGENT_SESSION_HEADER);
+      const use = { tokenId: token.id, name: token.name, method: c.req.method, path, ...(query ? { query: maskIdentifiers(query).slice(0, 500) } : {}), ...(isAgentSessionId(agentSession) ? { agentSession } : {}), from: clientAddress(c) };
       const scope = requiredScope(c.req.method, path);
       if (!scope || !token.scopes.includes(scope)) {
         await tokens.recordUse({ ...use, at: nowISO(), status: 403 });
@@ -158,7 +163,7 @@ export function authGate(auth: Auth, tokens?: AgentTokens): MiddlewareHandler {
       c.set('user' as never, `agent:${token.name}` as never);
       c.set('agentToken' as never, token.id as never);
       await next();
-      await tokens.recordUse({ ...use, at: nowISO(), status: c.res.status });
+      await tokens.recordUse({ ...use, at: nowISO(), status: c.res.status, ...(await responseBytes(c.res)) });
       return;
     }
     if (!auth.configured) {
@@ -171,4 +176,16 @@ export function authGate(auth: Auth, tokens?: AgentTokens): MiddlewareHandler {
     c.set('user' as never, session.user as never);
     await next();
   };
+}
+
+/** A response's size: its Content-Length, or its body counted (never a stream, which has no end). */
+async function responseBytes(res: Response): Promise<{ bytes?: number }> {
+  const length = Number(res.headers.get('content-length'));
+  if (Number.isFinite(length) && length > 0) return { bytes: length };
+  if ((res.headers.get('content-type') ?? '').includes('text/event-stream') || !res.body) return {};
+  try {
+    return { bytes: (await res.clone().arrayBuffer()).byteLength };
+  } catch {
+    return {};
+  }
 }

@@ -50,7 +50,13 @@ export interface TokenUse {
   name: string;
   method: string;
   path: string;
+  /** The query string, identifiers masked and cut at 500 characters. */
+  query?: string;
   status: number;
+  /** The answer's size in bytes. */
+  bytes?: number;
+  /** The agent's own session (X-Agent-Session: a Claude Code session id). */
+  agentSession?: string;
   from: string;
 }
 

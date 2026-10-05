@@ -173,7 +173,10 @@ interface Activity {
   requests: TokenRequest[];
 }
 
-/** A token's requests, in stretches with no gap longer than TOKEN_ACTIVITY_GAP_MS. */
+/**
+ * A token's requests, grouped by the agent's own session when it named one (`X-Agent-Session`: a
+ * Claude Code session's id), else in stretches with no gap longer than TOKEN_ACTIVITY_GAP_MS.
+ */
 export async function tokenActivity(ctx: AppContext, now = Date.now()): Promise<Activity[]> {
   const uses = (await ctx.tokens.recentUses(5000)).reverse();
   const byToken = new Map<string, typeof uses>();
@@ -181,24 +184,31 @@ export async function tokenActivity(ctx: AppContext, now = Date.now()): Promise<
   const tokens = ctx.tokens.list();
   const out: Activity[] = [];
   for (const [tokenId, list] of byToken) {
+    const named = new Map<string, typeof uses>();
     const groups: (typeof uses)[] = [];
     for (const u of list) {
+      if (u.agentSession) {
+        (named.get(u.agentSession) ?? named.set(u.agentSession, []).get(u.agentSession)!).push(u);
+        continue;
+      }
       const last = groups.at(-1)?.at(-1);
       if (last && Date.parse(u.at) - Date.parse(last.at) <= TOKEN_ACTIVITY_GAP_MS) groups.at(-1)!.push(u);
       else groups.push([u]);
     }
     const token = tokens.find((t) => t.id === tokenId);
-    for (const g of groups) {
+    const all: [string | undefined, typeof uses][] = [...[...named.entries()].map(([k, g]): [string, typeof uses] => [k, g]), ...groups.map((g): [undefined, typeof uses] => [undefined, g])];
+    for (const [agentSession, g] of all) {
       const first = g[0]!;
       const last = g.at(-1)!;
       const name = token?.name ?? first.name;
       out.push({
         summary: {
-          id: `${TOKEN}${tokenId}-${Date.parse(first.at)}`,
+          id: agentSession ? `${TOKEN}${tokenId}-cc-${agentSession}` : `${TOKEN}${tokenId}-${Date.parse(first.at)}`,
           source: 'token',
           kind: 'token',
-          title: `Agent with the token “${name}”`,
+          title: `Agent with the token “${name}”${agentSession ? ` (session ${agentSession.slice(0, 8)})` : ''}`,
           tokenId,
+          ...(agentSession ? { agentSession } : {}),
           startedBy: `Agent token “${name}”`,
           reason: `From ${first.from}${token ? `; it can ${token.scopes.join(', ')}` : ''}`,
           status: now - Date.parse(last.at) < TOKEN_ACTIVITY_GAP_MS ? 'running' : 'succeeded',
@@ -212,7 +222,7 @@ export async function tokenActivity(ctx: AppContext, now = Date.now()): Promise<
           },
           transcript: 'none',
         },
-        requests: g.map((u) => ({ at: u.at, method: u.method, path: u.path, status: u.status, from: u.from })),
+        requests: g.map((u) => ({ at: u.at, method: u.method, path: u.path, ...(u.query ? { query: u.query } : {}), status: u.status, ...(u.bytes !== undefined ? { bytes: u.bytes } : {}), from: u.from })),
       });
     }
   }
@@ -342,7 +352,7 @@ async function outputsOf(ctx: AppContext, s: SessionSummary, siblings: SessionSu
 }
 
 function noTranscriptWords(s: SessionSummary, r: SessionRecord | undefined, since: string, days: number): string | undefined {
-  if (s.source === 'token') return 'This agent ran outside the app, as a Claude Code session or a script holding one of your tokens. The app saw only the requests it made to the API, listed here. It has no transcript.';
+  if (s.source === 'token') return `This agent ran outside the app, as a Claude Code session or a script holding one of your tokens. The app saw only the requests it made to the API, listed here, and keeps no transcript of it.${s.agentSession ? ` It named its session: ${s.agentSession}. That session's own transcript is in Claude Code on the machine it ran on.` : ' It did not name its session, so its requests are grouped by time.'}`;
   if (s.source === 'earlier') return `This session ran before the app kept transcripts (it has since ${since.slice(0, 10)}). What its ${s.kind === 'job' ? 'job' : s.kind === 'receipt' ? 'receipt' : 'import'} recorded is shown here. No transcript was kept, and the app does not reconstruct one.`;
   const removed = r?.transcript.removed;
   if (removed) return removed.why === 'expired' ? `Its transcript was deleted on ${removed.at.slice(0, 10)}: transcripts are kept for ${days} days.` : `Its transcript was deleted on ${removed.at.slice(0, 10)}, oldest first, to keep transcripts under their total size cap.`;

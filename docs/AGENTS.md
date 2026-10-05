@@ -148,8 +148,16 @@ Write a **batch**:
 ```
 
 - **Check, then write:** `npm run records -- check batch.json`, then
-  `npm run records -- write batch.json`. The write commits to git. The running app picks the change
-  up.
+  `npm run records -- write batch.json`.
+  - The write goes through the app (`POST /api/records` with your agent token, which needs the
+    *Agent records* scope), so the audit log records which token, and which Claude Code session,
+    wrote it. The app commits it to git.
+  - Only when the app cannot be reached, or there is no token, does it write the files itself and
+    commit them, saying so; the audit log then sees the change as made outside the app. With
+    `FINANCE_DATA_DIR` set (the demo, a copy) it writes there itself, unless `FINANCE_API_URL`
+    names an app serving that directory.
+  - In a Claude Code session, the batch's `provenance.session` becomes
+    `claude-code:<CLAUDE_CODE_SESSION_ID>`, unless the batch names a session of its own.
 - **In-app jobs** call the same `applyRecords`. So does `POST /api/records`, which accepts agents'
   batches only.
 - **The app assigns** ids, `createdAt` and the stored provenance.

@@ -6,6 +6,12 @@
 //   npm run records -- check <batch.json>       validate a batch without writing
 //   npm run records -- write <batch.json>       validate, write and commit it
 //
+// write goes through the app (POST /api/records with your agent token: scripts/agent-api.ts), so
+// the audit log knows which token and which Claude Code session wrote it. Only when the app cannot
+// be reached, or there is no token, does it write the files itself, and it says so; the audit log
+// then sees the change as made outside the app. In a Claude Code session, the batch's
+// provenance.session names it (claude-code:<CLAUDE_CODE_SESSION_ID>) unless it names one already.
+//
 // A batch is { "provenance": { "setBy": "agent", "model": "...", "session": "claude-code" },
 //              "records": [ { "type": "assumption" | "research" | "insight" | "context" | "instrument", "record": {...} } ],
 //              "supersede": false }
@@ -18,6 +24,7 @@ import { loadConfig, loadDotEnv } from '../src/server/config';
 import { GitCommitter } from '../src/server/git';
 import { applyRecords, checkRecords, RecordBatchSchema, RecordsError } from '../src/server/records';
 import { Store, type ChangeEvent } from '../src/server/store';
+import { agentRequest, agentSession, agentToken, TOKEN_FILE } from './agent-api';
 
 loadDotEnv();
 const config = loadConfig();
@@ -28,6 +35,9 @@ async function readBatch(path: string | undefined) {
   const parsed = RecordBatchSchema.safeParse(JSON.parse(await readFile(path, 'utf8')));
   if (!parsed.success) throw new RecordsError(parsed.error.issues.map((i) => `${i.path.join('.') || 'batch'}: ${i.message}`));
   if (parsed.data.provenance.setBy === 'owner') throw new Error('Owner records are made in the app, not by agents.');
+  // The Claude Code session that wrote it, unless the batch names a session of its own.
+  const session = agentSession();
+  if (session && (!parsed.data.provenance.session || parsed.data.provenance.session === 'claude-code')) parsed.data.provenance.session = `claude-code:${session}`;
   return parsed.data;
 }
 
@@ -67,6 +77,37 @@ async function main() {
     }
     if (command === 'write') {
       const batch = await readBatch(file);
+      const problems = checkRecords(store, batch);
+      if (problems.length) throw new RecordsError(problems);
+      // Through the app, as the token: audited with who wrote it.
+      const token = await agentToken();
+      // Another data directory (the demo, a copy) is not what the app serves: written here.
+      const elsewhere = Boolean(process.env.FINANCE_DATA_DIR) && !process.env.FINANCE_API_URL;
+      let why: string;
+      if (elsewhere) why = `FINANCE_DATA_DIR names ${config.dataDir}, not what the app at the default address serves (set FINANCE_API_URL to write through an app serving it)`;
+      else if (token) {
+        try {
+          const res = await agentRequest(token, 'POST', '/records', JSON.stringify(batch));
+          if (!res.ok) {
+            let error = res.text;
+            try {
+              const said = (JSON.parse(res.text) as { error?: unknown }).error;
+              if (typeof said === 'string') error = said;
+            } catch {
+              // as it came
+            }
+            throw new Error(`The app refused it (HTTP ${res.status}): ${error}`);
+          }
+          const out = JSON.parse(res.text) as { written: { type: string; id: string }[]; skipped: { type: string; reason: string }[] };
+          for (const w of out.written) console.log(`written ${w.type} ${w.id} (through the app)`);
+          for (const s of out.skipped) console.log(`skipped ${s.type}: ${s.reason}`);
+          return;
+        } catch (err) {
+          if (!(err instanceof TypeError)) throw err;
+          why = `the app at ${process.env.FINANCE_API_URL ?? 'http://127.0.0.1:4750'} could not be reached (${(err.cause as Error | undefined)?.message ?? err.message})`;
+        }
+      } else why = `there is no agent token (FINANCE_TOKEN, or ${TOKEN_FILE})`;
+      console.error(`Writing the files directly: ${why}. The audit log will see this change as made outside the app.`);
       const git = await GitCommitter.create(config.dataDir, () => store.settings.git.autoCommit, 0, config.dataBranch);
       store.on('change', (e: ChangeEvent) => git.queue(e));
       const res = await applyRecords(store, batch);
