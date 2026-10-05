@@ -308,8 +308,8 @@ Questions about your money, asked on the Ask page (`src/server/ask.ts`, `ask-too
   `ask/<conversationId>/`. Follow-ups wait behind the turn running, and one turn runs at a time
   across conversations (the local model has one interactive slot). Stop works on the one running,
   and takes back one waiting; the audit log records both, with who did it.
-- **Step by step (prompt `ask-2`).** The model is given the accounts, categories, the last 13
-  months' totals and recent trips (`openingContext`, about 2,000 tokens, kept with the
+- **Step by step (prompt `ask-3`).** The model is given the accounts, categories, the last 13
+  months' totals, this year to date and last year (to the same date and whole), and recent trips (`openingContext`, about 2,000 tokens, kept with the
   conversation so every turn starts from the same prefix and the local model reuses its cached
   prompt). Each step is either a call of one tool or the answer, as one flat JSON schema. The app
   runs the tool and gives back its result, cut to 12,000 characters with counts and totals over
@@ -318,13 +318,19 @@ Questions about your money, asked on the Ask page (`src/server/ask.ts`, `ask-too
   else their questions and answers.
 - **The tools** are read-only, built by fixed rules from the app's code, with no web access:
   `find_transactions` (the Transactions page's search, plus the original currency of a payment
-  abroad), `spending_by` (category, payee, month or account, as the Spending page counts),
-  `trips`, `month`, `balances`, `coverage` (missing days) and `sum` (of chosen ids). Every sum is
-  in integer pence. Each result links to where it can be checked: the Transactions page with the
+  abroad; totals by year when it spans more than one), `spending_by` (category, payee, month or
+  account, as the Spending page counts, with what was paid and refunded; by month, whether each
+  month's data is complete and totals and averages by year), `compare` (two periods, by default
+  the same dates a year earlier: totals, averages, completeness, the difference, the change and the
+  categories that moved most), `trips`, `month`, `balances`, `coverage` (missing days) and `sum`
+  (of chosen ids). Every sum is in integer pence (FORMULAS.md §19). The results give the totals a
+  question needs, so the model has nothing left to add up. Each result links to where it can be checked: the Transactions page with the
   same filters (which takes `currency` too), or the page it came from.
 - **The answer**: its text, figures with the step each is from, confidence, caveats, and whether
   it could not answer. A figure is marked computed when the app finds its number in that step's
-  result; otherwise the page says it is the model's own. The whole answer is labelled an inference.
+  result; otherwise the page says it is the model's own, the answer's confidence is set to low
+  (the model's own is kept beside it), and a caveat says why. The whole answer is labelled an
+  inference.
 - **The model** is picked per question: the local model thinking (the default, from Settings →
   Models), or not thinking, or Claude Sonnet or Opus (each step one `claude -p` call, no tools,
   in an empty directory, its prompt the conversation so far; what it looks up goes to Anthropic).
@@ -338,8 +344,11 @@ Questions about your money, asked on the Ask page (`src/server/ask.ts`, `ask-too
   accounts (the tools' defaults when the model gives none). Suggested questions are built from the
   data by fixed rules (the latest trip, a currency used abroad, the last complete month), with no
   model. The local model's state (`/health`: ready, loading, its GPU lent out until when) is shown.
-- **"This is wrong"**, with a note, is kept with the turn. `GET /api/ask/feedback` lists them:
-  a new prompt version (`ask-3` onward) must answer them at least as well before it ships.
+- **"This is wrong"**, with a note and who said so, is kept with the turn. An agent token with the
+  `records` scope may mark one too (it changes no data). `GET /api/ask/feedback` lists them: a new
+  prompt version must answer them at least as well before it ships. `npm run ask:eval` asks them
+  again on the current prompt, over this checkout's `data/` in a throwaway work area (the live app
+  untouched), and shows the old answer, why it was wrong and the new one.
 - **API.** `GET /api/ask` (conversations, suggestions, models, the service's state), `POST
   /api/ask` (start), `GET /api/ask/:id`, `POST /api/ask/:id/turns` (a follow-up), `POST
   /api/ask/:id/cancel` (`turnId` for one waiting), `POST /api/ask/:id/turns/:turnId/feedback`,

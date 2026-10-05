@@ -44,7 +44,7 @@ const HISTORY_CHARS = 60_000;
 const SWEEP_EVERY_MS = 6 * 3600_000;
 const LIVE_EVERY_MS = 1000;
 
-// ─── The prompt (ask-2) ──────────────────────────────────────────────────────────────────────────
+// ─── The prompt (ask-3) ──────────────────────────────────────────────────────────────────────────
 
 export function systemPrompt(maxToolCalls: number): string {
   return `You answer the owner's questions about their money, for a private UK personal-finance app. You look things up with the app's tools: the app runs them on its own data and gives you the results.
@@ -57,7 +57,9 @@ Tools:
 ${ASK_TOOLS.map((t) => `- ${TOOL_HELP[t]}`).join('\n')}
 
 Rules:
-- Every figure in your answer is from a tool's result, quoted as the result gives it, with the number of the step it came from (figures[].step). Never add up or work out a figure yourself: when you need a total no result gives, call sum with the ids, or find_transactions with filters that select exactly those rows.
+- Every figure in your answer is from a tool's result, quoted as the result gives it, with the number of the step it came from (figures[].step). Never add up, subtract, average, project or estimate a figure yourself, not even months into a year: the tools give totals (total, byYear, averagePerMonth, difference, changePercent). When you need a total no result gives, make the call that gives it: sum with the ids, compare for two periods, or find_transactions or spending_by with filters that select exactly those rows.
+- To compare periods ("more or less", "than last year", "has it changed"), call compare. Read its verdict and difference; when the periods differ in length or one is not complete, say so, and compare averagePerMonth or the same dates instead. Never forecast the rest of a period.
+- Your headline must agree with the figures you give.
 - Look before you say you cannot answer. A country rarely appears in a payment's description: look for its currency (currency: MYR, EUR, THB…), its towns, the Holidays category, or trips. A shop or service: text. A kind of spending: spending_by or categories.
 - Use the ids from the lists you are given for accounts and categories.
 - When the results cannot answer it, set cannotAnswer and say what is missing; coverage says which days have no data.
@@ -126,6 +128,14 @@ export function openingContext(store: Store, analytics: Analytics, now = today()
   const cf = analytics.cashflow(from, now);
   const complete = new Set(analytics.coverage().completeMonths);
   const months = cf.months.map((m) => `- ${m.month}: spending £${m.spending.toFixed(2)}, money in £${m.income.toFixed(2)}, net £${m.net.toFixed(2)}${complete.has(m.month) ? '' : ' (not every account has data for all of it)'}`);
+  // Years, so a year's total is never added up from the months: this year to date, last year to
+  // the same date, and last year whole.
+  const year = Number(now.slice(0, 4));
+  const span = (from: string, to: string, label: string) => {
+    const t = analytics.cashflow(from, to).totals;
+    return `- ${label} (${from} to ${to}): spending £${t.spending.toFixed(2)}, money in £${t.income.toFixed(2)}, net £${t.net.toFixed(2)}`;
+  };
+  const years = [span(`${year}-01-01`, now, `${year} to date`), span(`${year - 1}-01-01`, addMonths(now, -12), `${year - 1} to the same date`), span(`${year - 1}-01-01`, `${year - 1}-12-31`, `${year - 1}, the whole year`)];
   const recent = trips(store, addMonths(now, -24), now).slice(-6);
   return [
     `Today is ${now}.`,
@@ -135,8 +145,11 @@ export function openingContext(store: Store, analytics: Analytics, now = today()
     '',
     `Categories (id (group › name)): ${categories.join('; ')}; uncategorised.`,
     '',
-    'Months (computed by the app, as the Spending page counts them):',
+    'Months, every account together (computed by the app, as the Spending page counts them):',
     ...months,
+    '',
+    'Years, every account together (computed by the app):',
+    ...years,
     ...(recent.length ? ['', `Trips in the last two years (runs of Holidays spending): ${recent.map((t) => `${t.from} to ${t.to}`).join('; ')}.`] : []),
   ].join('\n');
 }
@@ -366,11 +379,11 @@ export class AskService extends EventEmitter {
   }
 
   /** "This is wrong" (or not), with why: kept with the turn, and in the evaluation set. */
-  async feedback(conversationId: string, turnId: string, input: { wrong: boolean; note: string }): Promise<AskTurn> {
+  async feedback(conversationId: string, turnId: string, input: { wrong: boolean; note: string }, actor: AuditActor = currentActor()): Promise<AskTurn> {
     const found = this.turnOf(conversationId, turnId);
     if (!found) throw new StoreError('No such question.', 404);
     const { conversation, turn } = found;
-    if (input.wrong) turn.feedback = { wrong: true, note: input.note.trim().slice(0, 2000), at: nowISO() };
+    if (input.wrong) turn.feedback = { wrong: true, note: input.note.trim().slice(0, 2000), at: nowISO(), by: actorName(actor) };
     else delete turn.feedback;
     await this.save(conversation);
     this.changed(conversation, turn);
@@ -383,7 +396,7 @@ export class AskService extends EventEmitter {
     for (const c of this.conversations.values()) {
       for (const t of c.turns) {
         if (!t.feedback?.wrong) continue;
-        out.push({ conversationId: c.id, turnId: t.id, question: t.question, ...(t.answer ? { answer: t.answer.answer } : {}), note: t.feedback.note, at: t.feedback.at, promptVersion: t.promptVersion, model: t.model.id });
+        out.push({ conversationId: c.id, turnId: t.id, question: t.question, ...(t.answer ? { answer: t.answer.answer } : {}), note: t.feedback.note, at: t.feedback.at, ...(t.feedback.by ? { by: t.feedback.by } : {}), promptVersion: t.promptVersion, model: t.model.id });
       }
     }
     return out.sort((a, b) => b.at.localeCompare(a.at));
@@ -618,12 +631,22 @@ export class AskService extends EventEmitter {
   }
 }
 
-function toAnswer(step: StepOut, steps: AskStep[]): AskAnswer {
+/**
+ * The answer as the page shows it. A figure the app cannot find in what it gave the model is the
+ * model's own: the answer's confidence is then low whatever the model said, and a caveat says why
+ * (the first live question summed months itself, wrongly, with high confidence).
+ */
+export function toAnswer(step: StepOut, steps: AskStep[]): AskAnswer {
+  const figures = markFigures(step.figures, steps);
+  const own = figures.filter((f) => !f.computed).length;
+  const said = step.confidence ?? 'low';
+  const caveats = (step.caveats ?? []).slice(0, 8).map((x) => x.slice(0, 500));
   return {
     answer: (step.answer ?? '').trim() || 'It gave no answer.',
-    figures: markFigures(step.figures, steps),
-    confidence: step.confidence ?? 'low',
-    caveats: (step.caveats ?? []).slice(0, 8).map((x) => x.slice(0, 500)),
+    figures,
+    confidence: own ? 'low' : said,
+    ...(own && said !== 'low' ? { modelConfidence: said } : {}),
+    caveats: own ? [`${own === 1 ? 'One figure is' : `${own} figures are`} not in what the app gave the model: worked out by the model itself, so check ${own === 1 ? 'it' : 'them'}.`, ...caveats] : caveats,
     cannotAnswer: Boolean(step.cannotAnswer),
   };
 }

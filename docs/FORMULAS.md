@@ -1350,3 +1350,28 @@ at the month's end, the next one due in it) or changed price in it.
 **Coming:** your agreements' payments due in the 60 days after the month (`comingDays`), in and out,
 not cancelled.
 
+## 19. Ask's tools (`server/ask-tools.ts`)
+
+What the model is given to quote, so it never adds up itself (ARCHITECTURE.md, "Ask"). Spending
+and money in are §14's, through `flows`; every sum is in integer pence.
+
+- **Totals of flows:** `total` = Σ minor (refunds negative), `paid` = Σ of the positive ones,
+  `refunds` = −Σ of the negative ones, so `total = paid − refunds`; `payments` = how many.
+- **Months in a period** (`monthsIn`): each calendar month it touches counts its share of days in
+  the period, `(days in the period) ÷ (days in the month)`, summed, to 2 dp. A period running past
+  today counts to today.
+- **Average a month:** `total ÷ months`, rounded to the penny.
+- **By month** (`spending_by`): every month from the period's start to today, each with its totals,
+  the part of the month it covers, and `complete` when every account asked about (else every
+  account with payments) has data for all of it (§3, missing days) and it has ended. `byYear` gives
+  each year's totals, months, average a month, and how many months were complete.
+- **Compare:** the period against another, by default the same dates 12 months earlier
+  (`addMonths(−12)`). Each side's totals, months, average a month, whether it is complete (with the
+  missing days); `difference = total − compared total`; `changePercent = difference ÷ compared
+  total × 100`, to 1 dp, none when the compared total is 0; a note when the two differ in length.
+  The 10 categories whose difference is largest either way.
+- **A search's years** (`find_transactions`, when it spans more than one): money in, out and net for
+  each year of the rows matched.
+- **A figure the app computed:** one whose every number is, to the penny, a number in the result of
+  the step it names (any step when it names none). An answer with any other figure has its
+  confidence set to low, and says so.

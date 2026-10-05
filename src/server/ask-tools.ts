@@ -8,23 +8,24 @@
 
 import { z } from 'zod';
 import { CategoryIndex } from '../shared/categories';
-import { addDays, isISODate, today, type ISODate } from '../shared/dates';
+import { addDays, addMonths, diffDays, eachMonth, endOfMonth, isISODate, maxDate, minDate, today, type ISODate } from '../shared/dates';
 import { fromMinor, toMinor } from '../shared/money';
 import { trips } from './agents/digest';
 import type { Analytics } from './analytics';
-import { flows } from './analytics/cashflow';
+import { flows, type FlowTx } from './analytics/cashflow';
 import { estateOn } from './analytics/estate';
-import { missingDays } from './analytics/coverage';
+import { isTransactionAccount, missingDays } from './analytics/coverage';
 import { filterTransactions } from './routes/data';
 import type { Store } from './store';
 
-export const ASK_TOOLS = ['find_transactions', 'spending_by', 'trips', 'month', 'balances', 'coverage', 'sum'] as const;
+export const ASK_TOOLS = ['find_transactions', 'spending_by', 'compare', 'trips', 'month', 'balances', 'coverage', 'sum'] as const;
 export type AskTool = (typeof ASK_TOOLS)[number];
 
 /** What each tool does, for the model (the system prompt lists them). */
 export const TOOL_HELP: Record<AskTool, string> = {
   find_transactions: 'find_transactions(text?, accounts?, categories?, from?, to?, direction? "in"|"out", min?, max?, currency?, limit?): payments matching every filter given. text matches the description, payee, merchant, notes and reference (every word must appear). currency is the original currency of a payment made abroad (MYR, EUR, USD…). min and max are amounts in pounds, either sign. Returns the exact count, money in, money out and net over every match, totals by original currency, and up to limit rows (default 30, at most 100), newest first.',
-  spending_by: 'spending_by(by "category"|"payee"|"month"|"account", from?, to?, accounts?, categories?, text?): spending (money out, as the Spending page counts it: transfers between your accounts and money moved to savings left out) grouped that way, largest first, with the total. text narrows it like find_transactions.',
+  spending_by: 'spending_by(by "category"|"payee"|"month"|"account", from?, to?, accounts?, categories?, text?): spending (as the Spending page counts it: transfers between your accounts and money moved to savings left out) grouped that way, largest first (by month: in order), with the total. Each group gives spent (net of refunds), paid (before refunds), refunds and payments. By month, each month says whether every account has data for all of it, and byYear gives each year\'s total, months and average a month. text narrows it like find_transactions.',
+  compare: 'compare(from, to, compareFrom?, compareTo?, accounts?, categories?, text?, direction? "in"|"out"): spending (or money in, with direction "in") in one period against another: the default other period is the same dates a year earlier. Gives each period\'s total, paid, refunds, payments, months and average a month, whether every account has data for all of it (and which days are missing), the difference and the change in per cent, and the categories that changed most. Use it for any "more or less than", "compared with" or "change" question.',
   trips: 'trips(from?, to?): runs of spending categorised Holidays, a gap of more than a few days ending one: each trip\'s dates, total spent, number of payments and main payees.',
   month: 'month(month "YYYY-MM"): the month\'s figures as the Overview shows them: money in, spending by category, net, what was moved to savings, net worth at its start and end, and whether every account has data for it.',
   balances: 'balances(on? "YYYY-MM-DD", accounts?): each account\'s balance on that day (default today) in pounds, whether it is estimated, and the estate\'s assets, debts and net worth.',
@@ -43,6 +44,8 @@ export const ToolArgs = z.object({
   min: z.number().nullish(),
   max: z.number().nullish(),
   currency: z.string().max(3).nullish(),
+  compareFrom: z.string().nullish(),
+  compareTo: z.string().nullish(),
   limit: z.number().int().nullish(),
   by: z.enum(['category', 'payee', 'month', 'account']).nullish(),
   month: z.string().nullish(),
@@ -55,13 +58,15 @@ export type ToolArgs = z.infer<typeof ToolArgs>;
 export const TOOL_ARGS_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['text', 'accounts', 'categories', 'from', 'to', 'direction', 'min', 'max', 'currency', 'limit', 'by', 'month', 'on', 'ids'],
+  required: ['text', 'accounts', 'categories', 'from', 'to', 'compareFrom', 'compareTo', 'direction', 'min', 'max', 'currency', 'limit', 'by', 'month', 'on', 'ids'],
   properties: {
     text: { type: ['string', 'null'] },
     accounts: { type: ['array', 'null'], items: { type: 'string' } },
     categories: { type: ['array', 'null'], items: { type: 'string' } },
     from: { type: ['string', 'null'] },
     to: { type: ['string', 'null'] },
+    compareFrom: { type: ['string', 'null'] },
+    compareTo: { type: ['string', 'null'] },
     direction: { type: ['string', 'null'], enum: ['in', 'out', null] },
     min: { type: ['number', 'null'] },
     max: { type: ['number', 'null'] },
@@ -135,6 +140,63 @@ function transactionsHref(q: Record<string, string | undefined>): string {
   return `/transactions?${p.toString()}`;
 }
 
+/** Spending (or money in) over a period, as the Spending page counts it, narrowed as asked. */
+function flowsFor(store: Store, cats: CategoryIndex, o: { from: ISODate; to: ISODate; accounts?: string[] | undefined; categories?: string[] | undefined; text?: string | null | undefined; cls?: 'spending' | 'income' }): FlowTx[] {
+  const words = o.text?.trim().toLowerCase().split(/\s+/).filter(Boolean) ?? [];
+  return flows(store, o.from, o.to, o.accounts ? new Set(o.accounts) : undefined).filter((f) => {
+    if (f.cls !== (o.cls ?? 'spending')) return false;
+    const cat = f.t.category ?? 'uncategorised';
+    if (o.categories && !o.categories.some((c) => c === cat || cats.groupOf(cat)?.id === c)) return false;
+    if (!words.length) return true;
+    const hay = `${f.t.description} ${f.t.payee ?? ''} ${f.t.merchant?.name ?? ''} ${f.t.notes ?? ''}`.toLowerCase();
+    return words.every((w) => hay.includes(w));
+  });
+}
+
+/**
+ * Totals of flows in pence, given back in pounds: net (refunds taken off), what was paid before
+ * refunds, the refunds, and how many payments. A refund is a flow with a negative amount.
+ */
+function totals(list: FlowTx[]): { total: number; paid: number; refunds: number; payments: number } {
+  let paid = 0;
+  let refunds = 0;
+  for (const f of list) {
+    if (f.minor >= 0) paid += f.minor;
+    else refunds -= f.minor;
+  }
+  return { total: fromMinor(paid - refunds), paid: fromMinor(paid), refunds: fromMinor(refunds), payments: list.length };
+}
+
+/** The calendar months a period spans, counting a part month by its share of days (2 dp). */
+function monthsIn(from: ISODate, to: ISODate): number {
+  let n = 0;
+  for (const m of eachMonth(from, to)) {
+    const start = maxDate(`${m}-01`, from)!;
+    const end = minDate(endOfMonth(`${m}-01`), to)!;
+    n += (diffDays(start, end) + 1) / (diffDays(`${m}-01`, endOfMonth(`${m}-01`)) + 1);
+  }
+  return Math.round(n * 100) / 100;
+}
+
+/** The accounts a question is about: those asked for, else every account with payments. */
+function accountsAbout(store: Store, ids: string[] | undefined) {
+  return ids ? ids.map((id) => store.account(id)!).filter(Boolean) : store.accounts.filter((a) => isTransactionAccount(a) && store.transactions(a.id).length > 0);
+}
+
+/** The days in a period these accounts have no data for (after today, none is expected). */
+function missingIn(store: Store, ids: string[] | undefined, from: ISODate, to: ISODate): { account: string; from: string; to: string }[] {
+  const end = minDate(to, today())!;
+  if (from > end) return [];
+  return accountsAbout(store, ids).flatMap((a) => missingDays(store, a, from, end).map((g) => ({ account: a.name, from: g.from, to: g.to })));
+}
+
+/** When each account's data ends: a period past it is not all there. */
+function dataUntil(store: Store, analytics: Analytics, ids: string[] | undefined): { account: string; until: string | null }[] {
+  return accountsAbout(store, ids)
+    .slice(0, 12)
+    .map((a) => ({ account: a.name, until: analytics.engine.lastDataDate(a.id) }));
+}
+
 export function runTool(store: Store, analytics: Analytics, tool: AskTool, raw: unknown, defaults: ToolDefaults = {}): ToolResult {
   const parsed = ToolArgs.safeParse(raw ?? {});
   if (!parsed.success) throw new ToolError(`Its arguments are not right: ${parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}.`);
@@ -165,10 +227,16 @@ export function runTool(store: Store, analytics: Analytics, tool: AskTool, raw: 
       let inMinor = 0;
       let outMinor = 0;
       const byCurrency = new Map<string, { minor: number; payments: number }>();
+      const byYear = new Map<string, { in: number; out: number; payments: number }>();
       for (const t of rows) {
         const m = toMinor(t.amount);
         if (m >= 0) inMinor += m;
         else outMinor += m;
+        const y = byYear.get(t.date.slice(0, 4)) ?? { in: 0, out: 0, payments: 0 };
+        if (m >= 0) y.in += m;
+        else y.out += m;
+        y.payments++;
+        byYear.set(t.date.slice(0, 4), y);
         if (t.original) {
           const c = byCurrency.get(t.original.currency) ?? { minor: 0, payments: 0 };
           c.minor += toMinor(t.original.amount);
@@ -185,6 +253,7 @@ export function runTool(store: Store, analytics: Analytics, tool: AskTool, raw: 
           moneyIn: fromMinor(inMinor),
           moneyOut: fromMinor(outMinor),
           net: fromMinor(inMinor + outMinor),
+          ...(byYear.size > 1 ? { byYear: [...byYear.entries()].sort().map(([year, y]) => ({ year, moneyIn: fromMinor(y.in), moneyOut: fromMinor(y.out), net: fromMinor(y.in + y.out), payments: y.payments })) } : {}),
           ...(byCurrency.size ? { byOriginalCurrency: [...byCurrency.entries()].map(([currency, c]) => ({ currency, amount: fromMinor(c.minor), payments: c.payments })) } : {}),
           rows: shown.map((t) => ({
             id: t.id,
@@ -208,36 +277,105 @@ export function runTool(store: Store, analytics: Analytics, tool: AskTool, raw: 
       const { from, to } = period(args, defaults, 365);
       const accounts = accountsOf(store, args, defaults);
       const categories = categoriesOf(store, args.categories);
-      const words = args.text?.trim().toLowerCase().split(/\s+/).filter(Boolean) ?? [];
-      const groups = new Map<string, { label: string; minor: number; payments: number }>();
-      let total = 0;
-      for (const f of flows(store, from, to, accounts ? new Set(accounts) : undefined)) {
-        if (f.cls !== 'spending') continue;
+      const list = flowsFor(store, cats, { from, to, accounts, categories, text: args.text });
+      const groups = new Map<string, { label: string; flows: FlowTx[] }>();
+      for (const f of list) {
         const cat = f.t.category ?? 'uncategorised';
-        if (categories && !categories.some((c) => c === cat || cats.groupOf(cat)?.id === c)) continue;
-        if (words.length) {
-          const hay = `${f.t.description} ${f.t.payee ?? ''} ${f.t.merchant?.name ?? ''} ${f.t.notes ?? ''}`.toLowerCase();
-          if (!words.every((w) => hay.includes(w))) continue;
-        }
         const key = by === 'category' ? cat : by === 'payee' ? (f.t.payee ?? f.t.description) : by === 'month' ? f.t.date.slice(0, 7) : f.t.accountId;
         const label = by === 'category' ? (cats.get(cat)?.name ?? 'Uncategorised') : by === 'account' ? accountName(key) : key;
-        const g = groups.get(key) ?? { label, minor: 0, payments: 0 };
-        g.minor += f.minor;
-        g.payments++;
+        const g = groups.get(key) ?? { label, flows: [] };
+        g.flows.push(f);
         groups.set(key, g);
-        total += f.minor;
       }
-      const list = [...groups.entries()].sort((a, b) => (by === 'month' ? a[0].localeCompare(b[0]) : b[1].minor - a[1].minor));
+      const all = totals(list);
+      const sorted = [...groups.entries()]
+        .map(([key, g]) => ({ key, label: g.label, ...totals(g.flows) }))
+        .sort((a, b) => (by === 'month' ? a.key.localeCompare(b.key) : b.total - a.total));
+      // By month: every month of the period, with or without spending, and whether its data is all there.
+      const months = by === 'month' ? eachMonth(from, minDate(to, today())!) : [];
+      const monthRows = months.map((m) => {
+        const g = sorted.find((x) => x.key === m);
+        const start = maxDate(`${m}-01`, from)!;
+        const end = minDate(endOfMonth(`${m}-01`), to)!;
+        const missing = missingIn(store, accounts, start, end);
+        return { month: m, spent: g?.total ?? 0, paid: g?.paid ?? 0, refunds: g?.refunds ?? 0, payments: g?.payments ?? 0, ...(start !== `${m}-01` || end !== endOfMonth(`${m}-01`) ? { partOfMonth: `${start} to ${end}` } : {}), complete: !missing.length && end <= today() };
+      });
+      const byYear = [...new Set(months.map((m) => m.slice(0, 4)))].map((y) => {
+        const rows = monthRows.filter((r) => r.month.startsWith(y));
+        const yFrom = maxDate(`${y}-01-01`, from)!;
+        const yTo = minDate(`${y}-12-31`, to, today())!;
+        const t = totals(list.filter((f) => f.t.date.startsWith(y)));
+        const span = monthsIn(yFrom, yTo);
+        return { year: y, from: yFrom, to: yTo, spent: t.total, paid: t.paid, refunds: t.refunds, payments: t.payments, months: span, averagePerMonth: span ? fromMinor(Math.round(toMinor(t.total) / span)) : null, monthsComplete: rows.filter((r) => r.complete).length, monthsCounted: rows.length };
+      });
       return {
         result: {
           period: { from, to },
           by,
-          total: fromMinor(total),
-          groups: list.slice(0, GROUPS_MAX).map(([key, g]) => ({ ...(by === 'category' || by === 'account' ? { id: key } : {}), label: g.label, spent: fromMinor(g.minor), payments: g.payments })),
-          ...(list.length > GROUPS_MAX ? { groupsLeftOut: list.length - GROUPS_MAX, note: 'the total covers every group' } : {}),
+          total: all.total,
+          paid: all.paid,
+          refunds: all.refunds,
+          payments: all.payments,
+          ...(by === 'month'
+            ? { months: monthRows, byYear, note: 'spent is net of refunds: a negative month had more refunds than payments. byYear gives each year’s totals: quote them, do not add months up.' }
+            : {
+                groups: sorted.slice(0, GROUPS_MAX).map((g) => ({ ...(by === 'category' || by === 'account' ? { id: g.key } : {}), label: g.label, spent: g.total, paid: g.paid, refunds: g.refunds, payments: g.payments })),
+                ...(sorted.length > GROUPS_MAX ? { groupsLeftOut: sorted.length - GROUPS_MAX, note: 'the totals cover every group' } : {}),
+              }),
+          dataUntil: dataUntil(store, analytics, accounts),
         },
-        summary: `Spending by ${by}: ${list.length} group${list.length === 1 ? '' : 's'}, ${pounds(total)} in all`,
+        summary: `Spending by ${by}: ${by === 'month' ? `${months.length} month${months.length === 1 ? '' : 's'}` : `${sorted.length} group${sorted.length === 1 ? '' : 's'}`}, ${pounds(toMinor(all.total))} in all`,
         href: `/spending?from=${from}&to=${to}`,
+      };
+    }
+    case 'compare': {
+      const direction = args.direction === 'in' ? 'in' : 'out';
+      const aFrom = date(args.from, 'from') ?? date(defaults.from, 'from') ?? `${today().slice(0, 4)}-01-01`;
+      const aTo = date(args.to, 'to') ?? date(defaults.to, 'to') ?? today();
+      if (aFrom > aTo) throw new ToolError(`from (${aFrom}) is after to (${aTo}).`);
+      const bFrom = date(args.compareFrom, 'compareFrom') ?? addMonths(aFrom, -12);
+      const bTo = date(args.compareTo, 'compareTo') ?? addMonths(aTo, -12);
+      if (bFrom > bTo) throw new ToolError(`compareFrom (${bFrom}) is after compareTo (${bTo}).`);
+      const accounts = accountsOf(store, args, defaults);
+      const categories = categoriesOf(store, args.categories);
+      const cls = direction === 'in' ? ('income' as const) : ('spending' as const);
+      const side = (from: ISODate, to: ISODate) => {
+        const list = flowsFor(store, cats, { from, to, accounts, categories, text: args.text, cls });
+        const t = totals(list);
+        const span = monthsIn(from, minDate(to, today())!);
+        const missing = missingIn(store, accounts, from, to);
+        return { list, summary: { from, to, total: t.total, paid: t.paid, refunds: t.refunds, payments: t.payments, months: span, averagePerMonth: span ? fromMinor(Math.round(toMinor(t.total) / span)) : null, complete: !missing.length && to <= today(), ...(missing.length ? { missingDays: missing.slice(0, 10) } : {}), ...(to > today() ? { note: `runs past today (${today()}): only the days to today can have data` } : {}) } };
+      };
+      const a = side(aFrom, aTo);
+      const b = side(bFrom, bTo);
+      const diff = toMinor(a.summary.total) - toMinor(b.summary.total);
+      const byCat = new Map<string, { a: number; b: number }>();
+      for (const [k, list] of [['a', a.list] as const, ['b', b.list] as const]) {
+        for (const f of list) {
+          const c = byCat.get(f.t.category ?? 'uncategorised') ?? { a: 0, b: 0 };
+          c[k] += f.minor;
+          byCat.set(f.t.category ?? 'uncategorised', c);
+        }
+      }
+      const changes = [...byCat.entries()]
+        .map(([id, v]) => ({ id, label: cats.get(id)?.name ?? 'Uncategorised', period: fromMinor(v.a), comparedWith: fromMinor(v.b), difference: fromMinor(v.a - v.b) }))
+        .sort((x, y) => Math.abs(y.difference) - Math.abs(x.difference))
+        .slice(0, 10);
+      const word = direction === 'in' ? 'money in' : 'spending';
+      return {
+        result: {
+          measure: word,
+          period: a.summary,
+          comparedWith: b.summary,
+          difference: fromMinor(diff),
+          changePercent: toMinor(b.summary.total) ? Math.round((diff / toMinor(b.summary.total)) * 1000) / 10 : null,
+          verdict: diff > 0 ? `more ${word} in the period than in the one compared with` : diff < 0 ? `less ${word} in the period than in the one compared with` : 'the same',
+          ...(a.summary.months !== b.summary.months ? { note: 'the periods are of different lengths: compare averagePerMonth, or choose periods of the same length' } : {}),
+          categoriesChangedMost: changes,
+          dataUntil: dataUntil(store, analytics, accounts),
+        },
+        summary: `${word[0]!.toUpperCase()}${word.slice(1)} ${aFrom} to ${aTo}: ${pounds(toMinor(a.summary.total))}, against ${pounds(toMinor(b.summary.total))} for ${bFrom} to ${bTo}`,
+        href: `/spending?from=${aFrom}&to=${aTo}`,
       };
     }
     case 'trips': {

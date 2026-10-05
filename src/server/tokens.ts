@@ -87,6 +87,8 @@ export function requiredScope(method: string, pathname: string): TokenScope | nu
     ['DELETE', /^\/api\/proposals\/prop_[0-9a-z_]+$/, 'records'],
     ['POST', /^\/api\/jobs(\/tick)?$/, 'jobs'],
     ['POST', /^\/api\/jobs\/[0-9a-z_]+\/(cancel|rerun)$/, 'jobs'],
+    // Marking an Ask answer wrong (or not): it adds to the evaluation set, and changes no data.
+    ['POST', /^\/api\/ask\/conv_[0-9a-z]+\/turns\/turn_[0-9a-z]+\/feedback$/, 'records'],
   ];
   return routes.find(([m, re]) => m === method && re.test(p))?.[2] ?? null;
 }

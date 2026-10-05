@@ -1,6 +1,6 @@
 // Ask (src/server/ask.ts): conversations, each on a page of its own; follow-ups, Stop, Delete
-// (which hides), and "This is wrong". Only you ask, signed in: no agent token can (none of these
-// changes is in a token's scopes). Tokens can read them, like everything else.
+// (which hides), and "This is wrong". Only you ask, signed in: no agent token can. Tokens can read
+// them, like everything else, and one with the records scope can mark an answer wrong.
 
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
@@ -102,8 +102,8 @@ export function askRoutes(ctx: AppContext): Hono {
     return c.json(await ask().cancel(c.req.param('id'), body.turnId));
   });
 
+  /** "This is wrong": you, or an agent token with the records scope (it changes no data; who said so is kept). */
   app.post('/:id/turns/:turnId/feedback', async (c) => {
-    yours(c);
     const body = await readJson(c, z.object({ wrong: z.boolean(), note: z.string().max(2000).default('') }));
     return c.json(await ask().feedback(c.req.param('id'), c.req.param('turnId'), body));
   });

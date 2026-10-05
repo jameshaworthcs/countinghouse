@@ -4,7 +4,7 @@
 
 import type { AuditActor } from './audit';
 
-export const ASK_PROMPT_VERSION = 'ask-2';
+export const ASK_PROMPT_VERSION = 'ask-3';
 
 /** The models a question can be asked of (Settings → Models gives the default). */
 export const ASK_MODEL_OPTIONS = [
@@ -45,6 +45,8 @@ export interface AskAnswer {
   answer: string;
   figures: AskFigure[];
   confidence: 'high' | 'medium' | 'low';
+  /** The model's own confidence, when the app lowered it: a figure in the answer was not in what the app gave it. */
+  modelConfidence?: 'high' | 'medium' | 'low';
   caveats: string[];
   cannotAnswer: boolean;
 }
@@ -91,8 +93,8 @@ export interface AskTurn {
   /** Claude answered because the local model could not, and why. */
   fellBack?: string;
   promptVersion: string;
-  /** "This is wrong", with why: kept as an evaluation set for the next prompt version. */
-  feedback?: { wrong: boolean; note: string; at: string };
+  /** "This is wrong", with why, and who said so: kept as an evaluation set for the next prompt version. */
+  feedback?: { wrong: boolean; note: string; at: string; by?: string };
   /** While it runs, what it is doing now (not kept). */
   live?: AskLive;
 }
@@ -158,6 +160,7 @@ export interface AskFeedbackItem {
   answer?: string;
   note: string;
   at: string;
+  by?: string;
   promptVersion: string;
   model: string;
 }

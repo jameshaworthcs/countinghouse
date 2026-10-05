@@ -2260,3 +2260,23 @@ thinking).
   sums a comparison needs, so there is nothing left to add: `spending_by` by month to give totals
   by year (and the period's total, which it does), or a comparison tool. A figure the app cannot
   find should also lower the answer's confidence rather than leave it as the model set it.
+
+## 2026-10-05: Ask gives the model the totals a question needs (`ask-3`)
+
+What the first real question showed (above), built:
+
+- **Nothing left to add up.** `spending_by` by month gives totals, averages and completeness by
+  year, and what was paid and refunded (a refund month no longer reads as a puzzle); a new
+  `compare` tool gives two periods' totals (by default the same dates a year earlier), their
+  difference, change and verdict, whether each is complete, and the categories that moved most;
+  a search across years gives each year's totals; the opening gives this year to date, last year
+  to the same date and last year whole. Formulas in FORMULAS.md §19.
+- **The prompt** forbids sums, averages and forecasts of its own, sends comparisons to `compare`,
+  and asks that the headline agree with the figures.
+- **A figure the app cannot find lowers the answer's confidence to low**, keeps the model's own
+  beside it, and adds a caveat saying why.
+- **Agents may mark an answer wrong** (a token with `records`; it changes no data, and names who).
+- **The gate** (`npm run ask:eval`, on a copy of the data in a throwaway directory): the one answer
+  marked wrong, asked again on `ask-3` (local model, thinking, 168 s), made one `compare` call and
+  answered the right way round, every figure the app's, saying which days at the end were not in
+  yet. Passed; shipped.

@@ -25,7 +25,7 @@ import { SettingsSchema } from '../src/shared/schema';
 import type { SessionDetail, SessionListResponse, TranscriptResponse } from '../src/shared/sessions';
 import type { AskConversation, AskFeedbackItem, AskListResponse } from '../src/shared/ask';
 import type { AuditResponse } from '../src/shared/audit';
-import { AskService, markFigures } from '../src/server/ask';
+import { AskService, markFigures, openingContext } from '../src/server/ask';
 import { runTool } from '../src/server/ask-tools';
 import type { AskStep } from '../src/shared/ask';
 import { claudeChoice, resolveTask, taskOfJob } from '../src/shared/tasks';
@@ -304,7 +304,7 @@ interface Seen {
   stream?: boolean;
 }
 
-const NO_ARGS = { text: null, accounts: null, categories: null, from: null, to: null, direction: null, min: null, max: null, currency: null, limit: null, by: null, month: null, on: null, ids: null };
+const NO_ARGS = { text: null, accounts: null, categories: null, from: null, to: null, compareFrom: null, compareTo: null, direction: null, min: null, max: null, currency: null, limit: null, by: null, month: null, on: null, ids: null };
 const NO_ANSWER = { answer: null, figures: null, confidence: null, caveats: null, cannotAnswer: null };
 
 function standIn(): { server: Server; seen: Seen[]; mode: { value: Mode }; url: () => string } {
@@ -622,7 +622,7 @@ describe('through the app', () => {
     const conv = (await res.json()) as AskConversation;
     const c = await turnDone(conv.id, 1);
     const t = c.turns[0]!;
-    expect(t).toMatchObject({ status: 'answered', promptVersion: 'ask-2', model: { id: 'local-thinking' } });
+    expect(t).toMatchObject({ status: 'answered', promptVersion: 'ask-3', model: { id: 'local-thinking' } });
     expect(t.steps).toHaveLength(1);
     expect(t.steps[0]).toMatchObject({ n: 1, tool: 'find_transactions', args: { currency: 'MYR' }, why: 'Payments in Malaysian ringgit', summary: '2 payments found, money out £8.40' });
     expect(t.steps[0]!.href).toContain('currency=MYR');
@@ -632,13 +632,16 @@ describe('through the app', () => {
       ['£8.40', true],
       ['£99.99', false],
     ]);
+    // A figure of the model's own lowers the answer's confidence, and says why.
+    expect(t.answer).toMatchObject({ confidence: 'low', modelConfidence: 'high' });
+    expect(t.answer!.caveats[0]).toMatch(/^One figure is not in what the app gave the model/);
     expect(svc.seen.map((x) => [x.schema, x.priority, x.thinking, x.stream, x.messages])).toEqual([
       ['step', 'interactive', true, true, 2],
       ['step', 'interactive', true, true, 4],
     ]);
     // Its session: kind ask, beside the conversation, every step in the transcript.
     const s = (await get<SessionListResponse>('/api/sessions')).sessions.find((x) => x.kind === 'ask')!;
-    expect(s).toMatchObject({ conversationId: c.id, status: 'succeeded', promptVersion: 'ask-2' });
+    expect(s).toMatchObject({ conversationId: c.id, status: 'succeeded', promptVersion: 'ask-3' });
     expect(t.sessions).toEqual([s.id]);
     const types = (await get<TranscriptResponse>(`/api/sessions/${s.id}/transcript`)).events.map((e) => (e as { type: string }).type);
     expect(types).toEqual(['finance.request', 'assistant', 'result', 'finance.tool', 'finance.request', 'assistant', 'result', 'finance.answer']);
@@ -660,7 +663,13 @@ describe('through the app', () => {
 
     // "This is wrong" goes into the evaluation set; Delete takes it off the list but keeps it.
     await post(`/api/ask/${c.id}/turns/${t.id}/feedback`, { wrong: true, note: 'It missed the hotel.' });
-    expect((await get<{ items: AskFeedbackItem[] }>('/api/ask/feedback')).items).toMatchObject([{ conversationId: c.id, turnId: t.id, note: 'It missed the hotel.', promptVersion: 'ask-2' }]);
+    expect((await get<{ items: AskFeedbackItem[] }>('/api/ask/feedback')).items).toMatchObject([{ conversationId: c.id, turnId: t.id, note: 'It missed the hotel.', promptVersion: 'ask-3' }]);
+    // An agent token with the records scope may mark one too, and is named; it may not ask.
+    const made = (await app.ctx.tokens.create({ name: 'Reviewer', scopes: ['records'], days: 7 })) as { token: string };
+    const bearer = { authorization: `Bearer ${made.token}`, ...CSRF, 'content-type': 'application/json' };
+    expect((await req(`/api/ask/${c.id}/turns/${c2.turns[1]!.id}/feedback`, { method: 'POST', headers: bearer, body: JSON.stringify({ wrong: true, note: 'Counted twice.' }) })).status).toBe(200);
+    expect((await get<AskConversation>(`/api/ask/${c.id}`)).turns[1]!.feedback).toMatchObject({ wrong: true, by: 'Agent token “Reviewer”' });
+    expect((await req(`/api/ask/${c.id}/turns`, { method: 'POST', headers: bearer, body: JSON.stringify({ question: 'And in July?' }) })).status).toBe(403);
     expect((await req(`/api/ask/${c.id}`, { method: 'DELETE', headers: CSRF })).status).toBe(200);
     expect((await get<AskListResponse>('/api/ask')).conversations).toEqual([]);
     expect((await get<AskConversation>(`/api/ask/${c.id}`)).hidden).toBeTruthy();
@@ -684,6 +693,33 @@ describe('through the app', () => {
     // Figures with thousands separators are found; the step they name is the one looked in.
     const steps = [{ n: 1, resultText: '{"moneyOut":-1234.56}' }, { n: 2, resultText: '{"count":3}' }] as AskStep[];
     expect(markFigures([{ label: 'a', value: '£1,234.56', step: 1 }, { label: 'b', value: '£1,234.56', step: 2 }, { label: 'c', value: '3 payments', step: null }], steps).map((f) => f.computed)).toEqual([true, false, true]);
+  });
+
+  it('gives a year-on-year question totals by year and a comparison, so there is nothing left to add up', async () => {
+    const stamp = '2025-01-01T10:00:00.000Z';
+    const { store, analytics } = app.ctx;
+    await store.setAccounts([{ id: 'amex', name: 'Amex', type: 'credit_card', currency: 'GBP', status: 'open', aliases: [], includeInNetWorth: true, createdAt: stamp, updatedAt: stamp }]);
+    const row = (id: string, date: string, amount: number): Transaction => ({ id, accountId: 'amex', date, amount, currency: 'GBP', description: 'SHOP', category: 'groceries', source: {} });
+    // A refund in September 2025 counts as negative spending, as the Spending page counts it.
+    await store.addTransactions([row('tx_00000000000000c1', '2025-03-10', -100), row('tx_00000000000000c2', '2025-09-10', 50), row('tx_00000000000000c3', '2025-11-10', -80), row('tx_00000000000000c4', '2026-03-10', -120), row('tx_00000000000000c5', '2026-08-10', -30)], 'test: payments');
+    const by = runTool(store, analytics, 'spending_by', { by: 'month', accounts: ['amex'], from: '2025-01-01', to: '2026-08-31' }).result as { total: number; refunds: number; months: { month: string; spent: number }[]; byYear: { year: string; spent: number; paid: number; refunds: number; months: number; averagePerMonth: number }[] };
+    expect(by).toMatchObject({ total: 280, refunds: 50 });
+    expect(by.months).toHaveLength(20);
+    expect(by.months.find((m) => m.month === '2025-09')!.spent).toBe(-50);
+    expect(by.byYear).toEqual([
+      expect.objectContaining({ year: '2025', spent: 130, paid: 180, refunds: 50, months: 12, averagePerMonth: 10.83 }),
+      expect.objectContaining({ year: '2026', spent: 150, paid: 150, refunds: 0, months: 8, averagePerMonth: 18.75 }),
+    ]);
+    // compare: the same dates a year earlier unless told; its verdict, difference and change are the app's.
+    const cmp = runTool(store, analytics, 'compare', { accounts: ['amex'], from: '2026-01-01', to: '2026-08-31' }).result as Record<string, unknown>;
+    expect(cmp).toMatchObject({ measure: 'spending', period: { from: '2026-01-01', to: '2026-08-31', total: 150 }, comparedWith: { from: '2025-01-01', to: '2025-08-31', total: 100 }, difference: 50, changePercent: 50, verdict: 'more spending in the period than in the one compared with' });
+    const unequal = runTool(store, analytics, 'compare', { accounts: ['amex'], from: '2026-01-01', to: '2026-08-31', compareFrom: '2025-01-01', compareTo: '2025-12-31' }).result as { comparedWith: { total: number; months: number }; difference: number; note: string };
+    expect(unequal).toMatchObject({ comparedWith: { total: 130, months: 12 }, difference: 20 });
+    expect(unequal.note).toMatch(/different lengths/);
+    // A search over two years gives each year's totals too.
+    expect(runTool(store, analytics, 'find_transactions', { accounts: ['amex'], from: '2025-01-01', to: '2026-12-31' }).result).toMatchObject({ byYear: [{ year: '2025', moneyIn: 50, moneyOut: -180, net: -130 }, { year: '2026', moneyOut: -150 }] });
+    // The opening gives years, so the model need not add months either.
+    expect(openingContext(store, analytics)).toMatch(/to the same date \(/);
   });
 
   it('stops a question being answered, and takes back one waiting', async () => {

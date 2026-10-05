@@ -293,7 +293,7 @@ function Feedback({ c, t }: { c: AskConversation; t: AskTurn }) {
   if (t.feedback?.wrong && !editing)
     return (
       <div className="flex flex-wrap items-baseline gap-2 text-[12.5px]">
-        <Badge tone="warn">You marked this wrong</Badge>
+        <Badge tone="warn">{t.feedback.by && !t.feedback.by.startsWith('You') ? `Marked wrong by ${t.feedback.by}` : 'You marked this wrong'}</Badge>
         {t.feedback.note && <span className="sensitive text-ink-2">{t.feedback.note}</span>}
         <button type="button" className="text-accent hover:underline" onClick={() => setEditing(true)}>
           Edit
@@ -362,6 +362,7 @@ function TurnCard({ c, t, list }: { c: AskConversation; t: AskTurn; list: AskLis
             <div className="flex flex-wrap gap-2">
               <Badge tone="neutral">inferred by {t.model.engine === 'inference' && !t.fellBack ? 'the local model' : 'Claude'}</Badge>
               <Badge tone={t.answer.confidence === 'high' ? 'good' : 'warn'}>{t.answer.confidence} confidence</Badge>
+              {t.answer.modelConfidence && <Badge tone="warn">lowered from {t.answer.modelConfidence}: not every figure is the app’s</Badge>}
               {t.answer.cannotAnswer && <Badge tone="warn">it could not answer</Badge>}
             </div>
             <p className="sensitive whitespace-pre-line text-ink">{t.answer.answer}</p>
