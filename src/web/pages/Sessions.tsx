@@ -7,9 +7,9 @@ import { ArrowLeft, ChevronDown, ChevronRight, CircleStop } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router';
 import { actorName, type AuditEntry } from '../../shared/audit';
-import type { SessionDetail, SessionListResponse, SessionSummary, TranscriptResponse } from '../../shared/sessions';
+import type { SessionDetail, SessionListResponse, SessionSearchResponse, SessionSummary, SessionTotalsResponse, SessionTotalsRow, TranscriptResponse } from '../../shared/sessions';
 import { when } from '../components/Audit';
-import { Badge, Button, Callout, Card, Checkbox, Field, Input, KeyValue, Loading, PageHeader, Select, StatusBadge, useDebounced } from '../components/ui';
+import { Badge, Button, Callout, Card, Checkbox, Field, Input, KeyValue, Loading, PageHeader, Select, StatusBadge, tableClasses, useDebounced } from '../components/ui';
 import { api, useApi, useApiMutation } from '../lib/api';
 import { cn, fileSize, plural } from '../lib/format';
 
@@ -65,7 +65,75 @@ function Facts({ s }: { s: SessionSummary }) {
   );
 }
 
-function Row({ s }: { s: SessionSummary }) {
+/** Spend and local-model time by month, task and engine. */
+function Totals() {
+  const res = useApi<SessionTotalsResponse>(['sessions', 'totals'], '/sessions/totals');
+  const months = useMemo(() => [...new Set((res.data?.rows ?? []).map((r) => r.month))], [res.data]);
+  const [month, setMonth] = useState('');
+  const shown = month || months[0] || '';
+  const rows = (res.data?.rows ?? []).filter((r) => r.month === shown);
+  const sum = (k: keyof Pick<SessionTotalsRow, 'sessions' | 'failed' | 'cancelled' | 'inputTokens' | 'outputTokens' | 'costUsd' | 'gpuMs'>) => rows.reduce((n, r) => n + r[k], 0);
+  if (!res.data || !months.length) return null;
+  const th = tableClasses.th;
+  const td = tableClasses.td;
+  const num = `${tableClasses.td} ${tableClasses.num}`;
+  return (
+    <Card
+      title="Totals"
+      description="Each kind of work the app ran, by engine. Claude’s cost is what it reports at API prices: on your plan (the CLI) it is an estimate of the plan’s use, not a charge; on the API it is the charge. Local model time is the GPU reading prompts and writing answers."
+      actions={
+        <Select value={shown} onChange={(e) => setMonth(e.target.value)} aria-label="Month" className="h-8 w-36">
+          {months.map((m) => (
+            <option key={m} value={m}>
+              {m}
+            </option>
+          ))}
+        </Select>
+      }
+      padded={false}
+    >
+      <div className="overflow-x-auto">
+        <table className={tableClasses.table}>
+          <thead>
+            <tr>
+              <th className={th}>Work</th>
+              <th className={th}>Engine</th>
+              <th className={`${th} text-right`}>Sessions</th>
+              <th className={`${th} text-right`}>Failed / stopped</th>
+              <th className={`${th} text-right`}>Tokens in / out</th>
+              <th className={`${th} text-right`}>Claude, at API prices</th>
+              <th className={`${th} text-right`}>Local model time</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={`${r.task}|${r.engine}`}>
+                <td className={td}>{r.task}</td>
+                <td className={td}>{r.engine === 'inference' ? 'Local model' : r.engine === 'claude-api' ? 'Claude API' : 'Claude (plan)'}</td>
+                <td className={num}>{r.sessions}</td>
+                <td className={num}>{r.failed || r.cancelled ? `${r.failed} / ${r.cancelled}` : ''}</td>
+                <td className={num}>{r.inputTokens || r.outputTokens ? `${r.inputTokens.toLocaleString()} / ${r.outputTokens.toLocaleString()}` : ''}</td>
+                <td className={num}>{r.engine === 'inference' ? '' : cost(r.costUsd)}</td>
+                <td className={num}>{r.gpuMs ? duration(r.gpuMs) : ''}</td>
+              </tr>
+            ))}
+            <tr className="font-medium">
+              <td className={td}>All</td>
+              <td className={td} />
+              <td className={num}>{sum('sessions')}</td>
+              <td className={num}>{`${sum('failed')} / ${sum('cancelled')}`}</td>
+              <td className={num}>{`${sum('inputTokens').toLocaleString()} / ${sum('outputTokens').toLocaleString()}`}</td>
+              <td className={num}>{cost(sum('costUsd'))}</td>
+              <td className={num}>{duration(sum('gpuMs'))}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
+function Row({ s, snippet }: { s: SessionSummary; snippet?: string | undefined }) {
   return (
     <li className="border-t border-line">
       <Link to={`/sessions/${s.id}`} className="flex items-start gap-3 px-5 py-3 hover:bg-panel-2/60">
@@ -76,6 +144,7 @@ function Row({ s }: { s: SessionSummary }) {
             {s.role && <span className="text-ink-3"> · {ROLE_NAMES[s.role]}</span>}
           </span>
           <Facts s={s} />
+          {snippet && <span className="sensitive mt-1 block font-mono text-[11.5px] break-words text-ink-3">{snippet}</span>}
         </span>
       </Link>
     </li>
@@ -92,7 +161,11 @@ function SessionList() {
   const [status, setStatus] = useState('');
   const [limit, setLimit] = useState(STEP);
   const q = useDebounced(text.trim().toLowerCase(), 200);
+  const [inside, setInside] = useState(false);
   const res = useApi<SessionListResponse>(['sessions'], '/sessions');
+  // Searching inside the transcripts too: on the server, newest first.
+  const found = useApi<SessionSearchResponse>(['sessions', 'search', q], inside && q.length >= 2 ? `/sessions/search?q=${encodeURIComponent(q)}` : null);
+  const hits = useMemo(() => new Map((found.data?.hits ?? []).map((h) => [h.id, h])), [found.data]);
   const d = res.data;
   const rows = useMemo(
     () =>
@@ -101,9 +174,9 @@ function SessionList() {
           (!forId || [s.id, s.jobId, s.importId, s.receiptId, s.conversationId, s.tokenId].includes(forId)) &&
           (!kind || s.kind === kind) &&
           (!status || s.status === status) &&
-          (!q || `${s.title} ${s.startedBy} ${s.reason ?? ''} ${s.model ?? ''} ${s.promptVersion ?? ''} ${s.id} ${s.jobKind ?? ''} ${s.jobId ?? ''} ${s.importId ?? ''}`.toLowerCase().includes(q)),
+          (!q || hits.has(s.id) || `${s.title} ${s.startedBy} ${s.reason ?? ''} ${s.model ?? ''} ${s.promptVersion ?? ''} ${s.id} ${s.jobKind ?? ''} ${s.jobId ?? ''} ${s.importId ?? ''} ${s.conversationId ?? ''} ${s.agentSession ?? ''}`.toLowerCase().includes(q)),
       ),
-    [d, forId, kind, status, q],
+    [d, forId, kind, status, q, hits],
   );
   const running = d?.sessions.filter((s) => s.status === 'running' && s.source !== 'token').length ?? 0;
   const spent = rows.reduce((sum, s) => sum + (s.costUsd ?? 0), 0);
@@ -116,11 +189,20 @@ function SessionList() {
             Transcripts include what the agent saw, document contents too, apart from the files’ own bytes. Account and card numbers keep only their last 4 digits. They’re kept in the work area beside their job or import, never in your data, git or logs. Each is deleted after {d.retention.days} days, and each is cut at {fileSize(d.retention.maxBytesPerSession)}. Together they’re held under {fileSize(d.retention.maxBytesTotal)}, oldest deleted first, and they use {fileSize(d.retention.bytes)} now. Sessions from before transcripts were kept show what their job, import or receipt recorded.
           </Callout>
         )}
+        <Totals />
         <Card padded={false}>
           <div className="grid gap-3 px-5 py-4 sm:grid-cols-3">
             <Field label="Search" className="sm:col-span-3">
-              <Input type="search" value={text} onChange={(e) => setText(e.target.value)} placeholder="A file, a job, a model, a prompt version, an id…" />
+              <Input type="search" value={text} onChange={(e) => setText(e.target.value)} placeholder={inside ? 'Words in what agents were given and said: a payee, a tool, an error…' : 'A file, a job, a model, a prompt version, an id…'} />
             </Field>
+            <div className="sm:col-span-3">
+              <Checkbox checked={inside} onChange={setInside} label="Search inside the transcripts too (every word must appear)" />
+              {inside && q.length >= 2 && (
+                <div className="mt-1 text-[12px] text-ink-3">
+                  {found.isLoading ? 'Searching…' : found.error ? found.error.message : found.data ? `Found in ${plural(found.data.hits.length, 'transcript')}, of ${found.data.searched} searched${found.data.partial ? '; it stopped early, so older ones were not searched: add a word' : ''}.` : ''}
+                </div>
+              )}
+            </div>
             <Field label="Kind">
               <Select value={kind} onChange={(e) => setKind(e.target.value)}>
                 <option value="">Every kind</option>
@@ -159,7 +241,7 @@ function SessionList() {
           ) : (
             <ul>
               {rows.slice(0, limit).map((s) => (
-                <Row key={s.id} s={s} />
+                <Row key={s.id} s={s} snippet={inside ? hits.get(s.id)?.snippet : undefined} />
               ))}
             </ul>
           )}

@@ -6,7 +6,7 @@
 
 import { actorName, type AuditActor } from '../shared/audit';
 import type { ImportRecord, InsightPage } from '../shared/schema';
-import { TOKEN_ACTIVITY_GAP_MS, type SessionDetail, type SessionOutput, type SessionRecord, type SessionSummary, type TokenRequest } from '../shared/sessions';
+import { TOKEN_ACTIVITY_GAP_MS, type SessionDetail, type SessionOutput, type SessionRecord, type SessionSummary, type SessionTotalsRow, type TokenRequest } from '../shared/sessions';
 import { TRIGGER_WORDS, type JobRecord } from './agents/jobs';
 import { nowISO } from './fsutil';
 import type { AppContext } from './context';
@@ -443,6 +443,47 @@ export function sessionsOfEntry(index: Map<string, { id: string; title: string }
   const out = new Map<string, { id: string; title: string }>();
   for (const id of ids) for (const s of index.get(id) ?? []) out.set(s.id, s);
   return [...out.values()].slice(0, 6);
+}
+
+// ─── Totals ──────────────────────────────────────────────────────────────────────────────────────
+
+/** What a session's work was, in a few words, for the totals. */
+export function taskOf(s: Pick<SessionSummary, 'kind' | 'jobKind' | 'role'>): string {
+  if (s.kind === 'ask' || s.jobKind === 'ask') return 'Questions (Ask)';
+  if (s.kind === 'reading') return s.role === 'second' ? 'Checking readings' : 'Reading documents';
+  if (s.kind === 'reread') return 'Reading documents again';
+  if (s.kind === 'receipt') return 'Receipts';
+  if (s.jobKind === 'suggest-categories') return 'Suggesting categories';
+  return s.jobKind ? `Job: ${s.jobKind}` : 'Other';
+}
+
+/**
+ * Sessions by month, task and engine: how many, failed and stopped, tokens, what Claude reported
+ * at API prices, and the local model's time (reading prompts and writing). Agents with tokens are
+ * left out: the app does not run them.
+ */
+export async function sessionTotals(ctx: AppContext): Promise<SessionTotalsRow[]> {
+  const rows = new Map<string, SessionTotalsRow>();
+  for (const s of await allSessions(ctx)) {
+    if (s.source === 'token' || !s.engine) continue;
+    const month = s.startedAt.slice(0, 7);
+    const task = taskOf(s);
+    const key = `${month}|${task}|${s.engine}`;
+    const row = rows.get(key) ?? { month, task, engine: s.engine, sessions: 0, failed: 0, cancelled: 0, inputTokens: 0, outputTokens: 0, costUsd: 0, gpuMs: 0 };
+    row.sessions++;
+    if (s.status === 'failed') row.failed++;
+    if (s.status === 'cancelled') row.cancelled++;
+    row.costUsd = Math.round((row.costUsd + (s.costUsd ?? 0)) * 10_000) / 10_000;
+    const r = s.source === 'recorded' ? ctx.sessions.get(s.id) : undefined;
+    if (r?.usage) {
+      row.inputTokens += (r.usage.inputTokens ?? 0) + (r.usage.cacheReadTokens ?? 0) + (r.usage.cacheCreationTokens ?? 0);
+      row.outputTokens += r.usage.outputTokens ?? 0;
+    }
+    const t = (r?.inference?.timings_ms ?? {}) as Record<string, unknown>;
+    if (r?.engine === 'inference') row.gpuMs += Math.round((typeof t.prompt === 'number' ? t.prompt : 0) + (typeof t.generate === 'number' ? t.generate : 0));
+    rows.set(key, row);
+  }
+  return [...rows.values()].sort((a, b) => b.month.localeCompare(a.month) || b.costUsd - a.costUsd || b.gpuMs - a.gpuMs || a.task.localeCompare(b.task));
 }
 
 export { EARLIER as EARLIER_PREFIX, TOKEN as TOKEN_PREFIX };

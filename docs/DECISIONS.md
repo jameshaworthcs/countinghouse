@@ -2233,3 +2233,9 @@ Ask v2 (`ask-2`), as the owner decided it:
   who wrote it, and stamps `provenance.session` with the Claude Code session. It writes the files
   itself only when the app cannot be reached, there is no token, or `FINANCE_DATA_DIR` names another
   directory (the demo, a copy), and says so.
+
+## 2026-10-05: Totals and search on Agent sessions
+
+The last part of the research (§3, "Overview"): a Totals card (sessions, failures and stops,
+tokens, Claude at API prices labelled as an estimate on the plan, local model time, by month, work
+and engine) and a search inside transcripts, run on the server within a time and size budget.

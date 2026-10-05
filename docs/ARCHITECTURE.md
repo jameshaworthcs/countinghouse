@@ -288,7 +288,13 @@ and an address of its own, and links back to each.
   (one, with what it produced, its audit rows and related sessions), `GET
   /api/sessions/:id/transcript?from=<n>` (events from the nth, for a page following a run), `GET
   /api/sessions/:id/inputs/<name>` (an input file, `?download=1` to save it), `POST
-  /api/sessions/:id/stop`. A token with `read` can read them, like everything else.
+  /api/sessions/:id/stop`, `GET /api/sessions/totals`, `GET /api/sessions/search?q=`. A token
+  with `read` can read them, like everything else.
+- **Totals and search.** The page's Totals card counts sessions by month, kind of work and engine:
+  how many, failed and stopped, tokens, what Claude reported at API prices (on the plan an estimate,
+  on the API the charge) and the local model's time (its prompt and generation timings). Search
+  can look inside the transcripts too: on the server, newest first, every word must appear, within
+  5 seconds and 300 MB (it says when it stopped early), with a snippet of where it matched.
 
 ## Ask
 

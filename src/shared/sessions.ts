@@ -192,5 +192,43 @@ export interface TranscriptResponse {
   total: number;
 }
 
+/** One row of the totals: a task on an engine in a month. */
+export interface SessionTotalsRow {
+  month: string;
+  /** What the work was: "Questions (Ask)", "Reading documents", a job's kind… */
+  task: string;
+  engine: SessionEngine;
+  sessions: number;
+  failed: number;
+  cancelled: number;
+  inputTokens: number;
+  outputTokens: number;
+  /** What Claude reported, at API prices: what it would cost on the API (the CLI runs on your plan). */
+  costUsd: number;
+  /** Time the local model spent reading prompts and writing answers. */
+  gpuMs: number;
+}
+
+export interface SessionTotalsResponse {
+  rows: SessionTotalsRow[];
+  /** Sessions before the app kept their records have no tokens or GPU time: only cost, where known. */
+  since: string;
+}
+
+export interface SessionSearchHit {
+  id: string;
+  /** Where it matched, with some text either side (identifiers already masked in the transcript). */
+  snippet: string;
+  /** Events that matched. */
+  events: number;
+}
+
+export interface SessionSearchResponse {
+  hits: SessionSearchHit[];
+  /** Transcripts read, and whether the search stopped early (its time or size budget). */
+  searched: number;
+  partial: boolean;
+}
+
 /** How long a gap in a token's requests ends one stretch of activity and starts the next. */
 export const TOKEN_ACTIVITY_GAP_MS = 30 * 60_000;

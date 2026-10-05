@@ -519,6 +519,52 @@ export class SessionLog extends EventEmitter {
     return { events, total: lines.length };
   }
 
+  /**
+   * Transcripts (newest first) holding every word of `q`, with where: for the Agent sessions page.
+   * Within a budget of time and bytes, so a search of a gigabyte of transcripts stays quick.
+   */
+  async search(q: string, opts: { limit?: number; maxBytes?: number; maxMs?: number } = {}): Promise<{ hits: { id: string; snippet: string; events: number }[]; searched: number; partial: boolean }> {
+    const words = q.toLowerCase().split(/\s+/).filter(Boolean).slice(0, 8);
+    const hits: { id: string; snippet: string; events: number }[] = [];
+    if (!words.length) return { hits, searched: 0, partial: false };
+    const started = Date.now();
+    const maxBytes = opts.maxBytes ?? 300 * 1024 * 1024;
+    let bytes = 0;
+    let searched = 0;
+    let partial = false;
+    for (const r of this.list()) {
+      if (r.transcript.removed || !r.transcript.bytes) continue;
+      if (hits.length >= (opts.limit ?? 100) || bytes > maxBytes || Date.now() - started > (opts.maxMs ?? 5000)) {
+        partial = true;
+        break;
+      }
+      let text: string;
+      try {
+        text = await readFile(path.join(this.workDir, r.transcript.path), 'utf8');
+      } catch {
+        continue;
+      }
+      bytes += text.length;
+      searched++;
+      const lower = text.toLowerCase();
+      if (!words.every((w) => lower.includes(w))) continue;
+      const lines = text.split('\n');
+      const matching = lines.filter((l) => words.some((w) => l.toLowerCase().includes(w)));
+      // The snippet: the first event with the first word, decoded, around it.
+      const line = lines.find((l) => l.toLowerCase().includes(words[0]!)) ?? '';
+      let plain = line;
+      try {
+        plain = JSON.stringify(JSON.parse(line)).replace(/\\n/g, ' ');
+      } catch {
+        // as it is
+      }
+      const at = plain.toLowerCase().indexOf(words[0]!);
+      const snippet = `${at > 120 ? '…' : ''}${plain.slice(Math.max(0, at - 120), at + 200)}${at + 200 < plain.length ? '…' : ''}`;
+      hits.push({ id: r.id, snippet, events: matching.length });
+    }
+    return { hits, searched, partial };
+  }
+
   /** Bytes held by transcripts (and the inputs kept with them) not yet removed. */
   bytes(): number {
     return this.list().reduce((sum, r) => sum + held(r), 0);

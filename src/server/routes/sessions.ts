@@ -2,9 +2,9 @@
 // requests), one session in full, and its transcript (sessions.ts, sessionviews.ts).
 
 import { Hono } from 'hono';
-import type { SessionListResponse, TranscriptResponse } from '../../shared/sessions';
+import type { SessionListResponse, SessionSearchResponse, SessionTotalsResponse, TranscriptResponse } from '../../shared/sessions';
 import type { AppContext } from '../context';
-import { allSessions, sessionDetail } from '../sessionviews';
+import { allSessions, sessionDetail, sessionTotals } from '../sessionviews';
 import { StoreError } from '../store';
 
 export function sessionRoutes(ctx: AppContext): Hono {
@@ -20,6 +20,16 @@ export function sessionRoutes(ctx: AppContext): Hono {
 
   /** How many sessions are running now, for the sidebar (cheap: the records are in memory). */
   app.get('/running', (c) => c.json({ running: ctx.sessions.list().filter((s) => s.status === 'running').length }));
+
+  /** Sessions by month, task and engine: counts, failures, tokens, cost at API prices, GPU time. */
+  app.get('/totals', async (c) => c.json({ rows: await sessionTotals(ctx), since: ctx.sessions.since } satisfies SessionTotalsResponse));
+
+  /** Transcripts holding every word of `q`, newest first (within a time and size budget). */
+  app.get('/search', async (c) => {
+    const q = (c.req.query('q') ?? '').trim().slice(0, 200);
+    if (q.length < 2) throw new StoreError('Search for at least 2 characters.', 400);
+    return c.json((await ctx.sessions.search(q)) satisfies SessionSearchResponse);
+  });
 
   app.get('/:id', async (c) => {
     const detail = await sessionDetail(ctx, c.req.param('id'));

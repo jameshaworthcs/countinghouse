@@ -19,7 +19,7 @@ import { SessionLog, SessionStopped } from '../src/server/sessions';
 import { allSessions, sessionDetail } from '../src/server/sessionviews';
 import type { AuditResponse } from '../src/shared/audit';
 import type { ImportRecord } from '../src/shared/schema';
-import type { SessionDetail, SessionListResponse, TranscriptResponse } from '../src/shared/sessions';
+import type { SessionDetail, SessionListResponse, SessionTotalsResponse, TranscriptResponse } from '../src/shared/sessions';
 import { textPdf } from './pdf';
 
 const CSRF = { 'x-finance-csrf': '1' };
@@ -262,6 +262,15 @@ describe('Claude sessions in the app', () => {
     const sha = createHash('sha256').update(await readFile(path.join(work, d.record!.transcript.path))).digest('hex');
     expect(d.record!.transcript.sha256).toBe(sha);
     expect(d.audit.find((e) => e.action === 'session.succeeded')?.details).toMatchObject({ transcriptSha256: sha });
+ 
+    // The totals count it, with the reading before it, at what Claude reported.
+    const totals = await get<SessionTotalsResponse>('/api/sessions/totals');
+    expect(totals.rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ task: 'Job: label-imports', engine: 'claude-cli', sessions: 1, failed: 0, costUsd: 0.0123 }),
+        expect.objectContaining({ task: 'Reading documents', engine: 'claude-cli', sessions: 1, inputTokens: 1500, outputTokens: 200 }),
+      ]),
+    );
   });
 
   it('a running session can be stopped from its page: the engine stops, and the audit log says who', async () => {
@@ -479,6 +488,24 @@ describe('transcript limits', () => {
     expect(existsSync(path.join(dir, r.inputs!.dir))).toBe(false);
     expect(log.get(s.id)!.inputs!.removed).toMatchObject({ why: 'expired' });
     expect(await log.input(s.id, 'transactions.jsonl')).toBeUndefined();
+  });
+
+  it('finds transcripts by their words, newest first, within its budget', async () => {
+    const log = new SessionLog(dir, { days: 90, maxBytes: 1e6, totalBytes: 1e9 });
+    await log.init({ sweep: false });
+    const a = await session(log, 'job_a');
+    a.write({ type: 'assistant', message: { content: [{ type: 'text', text: 'Payments at EXAMPLE CAFE in ringgit' }] } });
+    await a.finish('succeeded');
+    await new Promise((r) => setTimeout(r, 5));
+    const b = await session(log, 'job_b');
+    b.write({ type: 'assistant', message: { content: [{ type: 'text', text: 'Nothing in ringgit here' }] } });
+    await b.finish('succeeded');
+    const both = await log.search('Ringgit');
+    expect(both.hits.map((h) => h.id)).toEqual([b.id, a.id]);
+    const one = await log.search('ringgit cafe');
+    expect(one.hits.map((h) => h.id)).toEqual([a.id]);
+    expect(one.hits[0]!.snippet).toContain('EXAMPLE CAFE in ringgit');
+    expect(await log.search('ringgit', { limit: 1 })).toMatchObject({ hits: [{ id: b.id }], partial: true });
   });
 
   it('a session stopped by a restart is marked failed', async () => {
