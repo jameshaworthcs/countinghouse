@@ -48,6 +48,7 @@ export default function Transactions() {
     transfers: params.get('transfers') ?? undefined,
     tag: params.get('tag') ?? undefined,
     source: params.get('source') ?? undefined,
+    currency: params.get('currency') ?? undefined,
     sort: params.get('sort') ?? undefined,
     limit: 5000,
   };
@@ -105,7 +106,7 @@ export default function Transactions() {
   useEffect(() => {
     parentRef.current?.scrollTo({ top: 0 });
   }, [filters.sort]);
-  const active = [filters.accounts, filters.categories, filters.direction, filters.transfers, filters.tag, filters.source, q].some(Boolean);
+  const active = [filters.accounts, filters.categories, filters.direction, filters.transfers, filters.tag, filters.source, filters.currency, q].some(Boolean);
 
   return (
     <div>
@@ -165,6 +166,14 @@ export default function Transactions() {
         <div className="mb-2 flex items-center gap-1.5 text-[13px] text-ink-3">
           <Tag className="size-3.5" aria-hidden /> Tagged “{filters.tag}”
           <button type="button" className="rounded p-0.5 hover:bg-panel-2 hover:text-ink" onClick={() => set('tag', undefined)} aria-label={`Stop filtering by ${filters.tag}`}>
+            <X className="size-3.5" />
+          </button>
+        </div>
+      )}
+      {filters.currency && (
+        <div className="mb-2 flex items-center gap-1.5 text-[13px] text-ink-3">
+          Paid in {filters.currency}
+          <button type="button" className="rounded p-0.5 hover:bg-panel-2 hover:text-ink" onClick={() => set('currency', undefined)} aria-label={`Stop filtering by ${filters.currency}`}>
             <X className="size-3.5" />
           </button>
         </div>

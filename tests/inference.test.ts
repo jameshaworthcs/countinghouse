@@ -23,6 +23,11 @@ import { sanitiseEvent } from '../src/server/sessions';
 import type { ImportRecord, Receipt, Transaction } from '../src/shared/schema';
 import { SettingsSchema } from '../src/shared/schema';
 import type { SessionDetail, SessionListResponse, TranscriptResponse } from '../src/shared/sessions';
+import type { AskConversation, AskFeedbackItem, AskListResponse } from '../src/shared/ask';
+import type { AuditResponse } from '../src/shared/audit';
+import { AskService, markFigures } from '../src/server/ask';
+import { runTool } from '../src/server/ask-tools';
+import type { AskStep } from '../src/shared/ask';
 import { claudeChoice, resolveTask, taskOfJob } from '../src/shared/tasks';
 
 const CSRF = { 'x-finance-csrf': '1' };
@@ -287,14 +292,20 @@ describe('the client', () => {
 /** The extraction the stand-in returns; "unbalanced" makes the first reading fail its check. */
 const statement = (closing: number) => ({ documentType: 'bank_statement', institutionName: 'Example Bank', documentDate: '2026-09-30', accounts: [{ accountType: 'current', name: 'Current account', last4: '5678', currency: 'GBP', periodStart: '2026-09-01', periodEnd: '2026-09-30', openingBalance: 100, closingBalance: closing, transactions: [{ date: '2026-09-12', description: 'TESCO STORES', amount: -12.3 }] }], figures: [], notes: [], confidence: 'high' });
 
-type Mode = 'ok' | 'unbalanced' | 'busy-once' | 'down' | 'garbled' | 'nsandi';
+type Mode = 'ok' | 'unbalanced' | 'busy-once' | 'down' | 'garbled' | 'nsandi' | 'hang';
 interface Seen {
   alias: string;
   priority: string | undefined;
   thinking: boolean;
   images: number;
   schema: string | undefined;
+  /** Ask's steps: how many messages it was sent, and whether it asked for a stream. */
+  messages?: number;
+  stream?: boolean;
 }
+
+const NO_ARGS = { text: null, accounts: null, categories: null, from: null, to: null, direction: null, min: null, max: null, currency: null, limit: null, by: null, month: null, on: null, ids: null };
+const NO_ANSWER = { answer: null, figures: null, confidence: null, caveats: null, cannotAnswer: null };
 
 function standIn(): { server: Server; seen: Seen[]; mode: { value: Mode }; url: () => string } {
   const seen: Seen[] = [];
@@ -313,16 +324,35 @@ function standIn(): { server: Server; seen: Seen[]; mode: { value: Mode }; url: 
       };
       if (req.headers.authorization !== 'Bearer inf_finance_test') return send(401, { error: { code: 'invalid_api_key' } });
       if (req.url === '/health') return send(200, { status: mode.value === 'down' ? 'down' : 'ok', aliases: { 'vision-extract': { state: mode.value === 'down' ? 'unavailable' : 'ready' }, 'fast-chat': { state: 'ready' } }, gpu: { resident: 'moe35', lease: { state: 'none' } } });
-      const b = JSON.parse(await body(req)) as { model: string; messages: { role: string; content: unknown }[]; chat_template_kwargs?: { enable_thinking?: boolean }; response_format?: { json_schema?: { name: string } } };
-      const user = b.messages.find((m) => m.role === 'user')!.content as { type: string }[];
+      const b = JSON.parse(await body(req)) as { model: string; messages: { role: string; content: unknown }[]; stream?: boolean; chat_template_kwargs?: { enable_thinking?: boolean }; response_format?: { json_schema?: { name: string } } };
+      const user = b.messages.find((m) => m.role === 'user')!.content as { type: string }[] | string;
       const thinking = Boolean(b.chat_template_kwargs?.enable_thinking);
-      seen.push({ alias: b.model, priority: req.headers['x-inference-priority'] as string | undefined, thinking, images: user.filter((p) => p.type === 'image_url').length, schema: b.response_format?.json_schema?.name });
+      const step = b.response_format?.json_schema?.name === 'step';
+      seen.push({ alias: b.model, priority: req.headers['x-inference-priority'] as string | undefined, thinking, images: Array.isArray(user) ? user.filter((p) => p.type === 'image_url').length : 0, schema: b.response_format?.json_schema?.name, ...(step ? { messages: b.messages.length, stream: Boolean(b.stream) } : {}) });
       if (mode.value === 'down') return send(503, { error: { code: 'backend_unavailable', message: 'restarting' } }, { 'retry-after': '1' });
       if (mode.value === 'busy-once' && busy) {
         busy = false;
         return send(503, { error: { code: 'queue_timeout', message: 'the GPU is leased until 14:30' } }, { 'retry-after': '1' });
       }
       const name = b.response_format?.json_schema?.name;
+      if (step) {
+        // Ask: look for payments in ringgit, then answer from the result (and one figure made up).
+        const last = b.messages.at(-1)!.content as { type: string; text: string }[];
+        const after = last.some((p) => p.text.startsWith('Result of step'));
+        const out = after
+          ? { step: 'answer', why: 'The search gives the total', tool: null, args: NO_ARGS, answer: 'You spent £8.40 in ringgit.', figures: [{ label: 'Spent in MYR', value: '£8.40', step: 1 }, { label: 'A guess', value: '£99.99', step: 1 }], confidence: 'high', caveats: [], cannotAnswer: false }
+          : { step: 'call', why: 'Payments in Malaysian ringgit', tool: 'find_transactions', args: { ...NO_ARGS, currency: 'MYR' }, ...NO_ANSWER };
+        const text = JSON.stringify(out);
+        res.writeHead(200, { 'content-type': 'text/event-stream' });
+        const chunk = (o: unknown) => res.write(`data: ${JSON.stringify(o)}\n\n`);
+        chunk({ choices: [{ delta: { reasoning_content: 'Malaysia: ringgit.' } }] });
+        if (mode.value === 'hang') return void req.on('close', () => res.end());
+        chunk({ choices: [{ delta: { content: text.slice(0, 25) } }] });
+        chunk({ choices: [{ delta: { content: text.slice(25) }, finish_reason: 'stop' }] });
+        chunk({ model: 'qwen3.6-35b-a3b-q4_k_m', choices: [], usage: { prompt_tokens: 2000, completion_tokens: 60 }, provenance: { ...PROVENANCE, request_id: `inf_${seen.length}`, alias: b.model, sampling: { seed: 42, thinking }, schema_valid: true } });
+        res.write('data: [DONE]\n\n');
+        return void res.end();
+      }
       if (mode.value === 'nsandi' && name === 'extraction') {
         const bonds = { documentType: 'account_overview_screenshot', institutionName: 'NS&I', accounts: [{ accountType: 'premium_bonds', name: 'Premium Bonds', currency: 'GBP', closingBalance: 5000, transactions: [] }], figures: [], notes: [], confidence: 'high' };
         return send(200, { model: 'qwen3.6-35b-a3b-q4_k_m', choices: [{ message: { content: JSON.stringify(bonds) }, finish_reason: 'stop' }], usage: {}, provenance: { ...PROVENANCE, request_id: `inf_${seen.length}`, alias: b.model, schema_valid: true } });
@@ -568,14 +598,117 @@ describe('through the app', () => {
     expect(store.transaction('tx_00000000000000a1')!.category).toBeUndefined();
   });
 
-  it('answers a question from the computed figures, at interactive priority, thinking, and keeps it as an inference', async () => {
-    const res = await req('/api/ask', { method: 'POST', headers: { ...CSRF, 'content-type': 'application/json' }, body: JSON.stringify({ question: 'How much did I spend at Tesco?' }) });
-    expect(res.status).toBe(202);
-    const done = await until(
-      () => get<{ questions: { status: string; answer?: { answer: string }; engine?: string }[] }>('/api/ask'),
-      (x) => x.questions[0]!.status !== 'running',
+  /** Two payments made abroad in ringgit, and one at home. */
+  async function abroad() {
+    const stamp = '2026-08-12T10:00:00.000Z';
+    await app.ctx.store.setAccounts([{ id: 'card', name: 'Card', type: 'credit_card', currency: 'GBP', status: 'open', aliases: [], includeInNetWorth: true, createdAt: stamp, updatedAt: stamp }]);
+    const row = (id: string, date: string, description: string, extra: Partial<Transaction> = {}): Transaction => ({ id, accountId: 'card', date, amount: -4.2, currency: 'GBP', description, source: {}, ...extra });
+    await app.ctx.store.addTransactions(
+      [row('tx_00000000000000b1', '2026-08-03', 'NASI KANDAR KL', { original: { amount: -25, currency: 'MYR' }, category: 'holidays' }), row('tx_00000000000000b2', '2026-08-04', 'GRAB KUALA LUMPUR', { original: { amount: -25, currency: 'MYR' }, category: 'holidays' }), row('tx_00000000000000b3', '2026-08-20', 'TESCO STORES')],
+      'test: payments',
     );
-    expect(done.questions[0]).toMatchObject({ status: 'answered', engine: 'inference', answer: { answer: 'You spent £12.30 at Tesco in September.' } });
-    expect(svc.seen).toEqual([{ alias: 'fast-chat', priority: 'interactive', thinking: true, images: 0, schema: 'output' }]);
+  }
+  const post = (p: string, body: unknown) => req(p, { method: 'POST', headers: { ...CSRF, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  const turnDone = (id: string, n: number) =>
+    until(
+      () => get<AskConversation>(`/api/ask/${id}`),
+      (c) => c.turns.length >= n && c.turns[n - 1]!.status !== 'running' && c.turns[n - 1]!.status !== 'queued',
+    );
+
+  it('answers a question step by step with the app’s tools, streamed at interactive priority, and marks which figures the app computed', async () => {
+    await abroad();
+    const res = await post('/api/ask', { question: 'How much did I spend in Malaysia?' });
+    expect(res.status).toBe(202);
+    const conv = (await res.json()) as AskConversation;
+    const c = await turnDone(conv.id, 1);
+    const t = c.turns[0]!;
+    expect(t).toMatchObject({ status: 'answered', promptVersion: 'ask-2', model: { id: 'local-thinking' } });
+    expect(t.steps).toHaveLength(1);
+    expect(t.steps[0]).toMatchObject({ n: 1, tool: 'find_transactions', args: { currency: 'MYR' }, why: 'Payments in Malaysian ringgit', summary: '2 payments found, money out £8.40' });
+    expect(t.steps[0]!.href).toContain('currency=MYR');
+    expect(t.steps[0]!.resultText).toContain('"byOriginalCurrency":[{"currency":"MYR","amount":-50,"payments":2}]');
+    // A figure is the app's only when it is in what the app gave back.
+    expect(t.answer!.figures.map((f) => [f.value, f.computed])).toEqual([
+      ['£8.40', true],
+      ['£99.99', false],
+    ]);
+    expect(svc.seen.map((x) => [x.schema, x.priority, x.thinking, x.stream, x.messages])).toEqual([
+      ['step', 'interactive', true, true, 2],
+      ['step', 'interactive', true, true, 4],
+    ]);
+    // Its session: kind ask, beside the conversation, every step in the transcript.
+    const s = (await get<SessionListResponse>('/api/sessions')).sessions.find((x) => x.kind === 'ask')!;
+    expect(s).toMatchObject({ conversationId: c.id, status: 'succeeded', promptVersion: 'ask-2' });
+    expect(t.sessions).toEqual([s.id]);
+    const types = (await get<TranscriptResponse>(`/api/sessions/${s.id}/transcript`)).events.map((e) => (e as { type: string }).type);
+    expect(types).toEqual(['finance.request', 'assistant', 'result', 'finance.tool', 'finance.request', 'assistant', 'result', 'finance.answer']);
+    const detail = await get<SessionDetail>(`/api/sessions/${s.id}`);
+    expect(detail.produced.map((o) => o.type)).toEqual(['step 1: find_transactions', 'answer']);
+    expect(detail.record!.requestId).toMatch(/^req_/);
+
+    // A follow-up carries the conversation: the first question, its step and answer come before it.
+    await post(`/api/ask/${c.id}/turns`, { question: 'And how many payments was that?' });
+    const c2 = await turnDone(c.id, 2);
+    expect(c2.turns[1]!.status).toBe('answered');
+    expect(svc.seen[2]!.messages).toBe(6);
+
+    // Listed, and kept across a restart.
+    expect((await get<AskListResponse>('/api/ask')).conversations.map((x) => [x.id, x.turns])).toEqual([[c.id, 2]]);
+    const again = new AskService(app.ctx.store, app.ctx.analytics, app.ctx.config, app.ctx.sessions);
+    await again.init({ sweep: false });
+    expect(again.get(c.id)!.turns.map((x) => x.status)).toEqual(['answered', 'answered']);
+
+    // "This is wrong" goes into the evaluation set; Delete takes it off the list but keeps it.
+    await post(`/api/ask/${c.id}/turns/${t.id}/feedback`, { wrong: true, note: 'It missed the hotel.' });
+    expect((await get<{ items: AskFeedbackItem[] }>('/api/ask/feedback')).items).toMatchObject([{ conversationId: c.id, turnId: t.id, note: 'It missed the hotel.', promptVersion: 'ask-2' }]);
+    expect((await req(`/api/ask/${c.id}`, { method: 'DELETE', headers: CSRF })).status).toBe(200);
+    expect((await get<AskListResponse>('/api/ask')).conversations).toEqual([]);
+    expect((await get<AskConversation>(`/api/ask/${c.id}`)).hidden).toBeTruthy();
+  });
+
+  it('gives the model the app’s own sums from its tools, and says plainly what is wrong with a call', async () => {
+    await abroad();
+    const { store, analytics } = app.ctx;
+    const by = runTool(store, analytics, 'spending_by', { by: 'category', from: '2026-08-01', to: '2026-08-31' });
+    expect(by.result).toMatchObject({ total: 12.6, groups: [{ id: 'holidays', spent: 8.4, payments: 2 }, { spent: 4.2, payments: 1 }] });
+    expect(runTool(store, analytics, 'sum', { ids: ['tx_00000000000000b1', 'tx_00000000000000b2', 'tx_nope'] }).result).toEqual({ count: 2, moneyIn: 0, moneyOut: -8.4, net: -8.4, notFound: ['tx_nope'] });
+    const tesco = runTool(store, analytics, 'find_transactions', { text: 'tesco', limit: 1 });
+    expect(tesco.result).toMatchObject({ count: 1, moneyOut: -4.2 });
+    // The owner's defaults apply when the model gives no period.
+    expect(runTool(store, analytics, 'find_transactions', { text: null }, { from: '2026-08-10', to: '2026-08-31' }).result).toMatchObject({ count: 1 });
+    expect(runTool(store, analytics, 'trips', { from: '2026-08-01', to: '2026-08-31' }).result).toMatchObject({ trips: [{ from: '2026-08-03', to: '2026-08-04', spent: 8.4, payments: 2 }] });
+    expect(() => runTool(store, analytics, 'find_transactions', { accounts: ['nope'] })).toThrow(/No account with the id nope/);
+    expect(() => runTool(store, analytics, 'find_transactions', { text: null, currency: null })).toThrow(/at least one filter/);
+    expect(() => runTool(store, analytics, 'find_transactions', { from: 'last week' })).toThrow(/YYYY-MM-DD/);
+    expect(() => runTool(store, analytics, 'month', { month: '2026-13' })).toThrow(/YYYY-MM/);
+    // Figures with thousands separators are found; the step they name is the one looked in.
+    const steps = [{ n: 1, resultText: '{"moneyOut":-1234.56}' }, { n: 2, resultText: '{"count":3}' }] as AskStep[];
+    expect(markFigures([{ label: 'a', value: '£1,234.56', step: 1 }, { label: 'b', value: '£1,234.56', step: 2 }, { label: 'c', value: '3 payments', step: null }], steps).map((f) => f.computed)).toEqual([true, false, true]);
+  });
+
+  it('stops a question being answered, and takes back one waiting', async () => {
+    await abroad();
+    svc.mode.value = 'hang';
+    const conv = (await (await post('/api/ask', { question: 'How much did I spend in Malaysia?' })).json()) as AskConversation;
+    await until(
+      () => get<AskConversation>(`/api/ask/${conv.id}`),
+      (c) => c.turns[0]!.live?.phase === 'thinking',
+    );
+    // A follow-up waits behind it, and can be taken back.
+    const queued = (await (await post(`/api/ask/${conv.id}/turns`, { question: 'And in July?' })).json()) as AskConversation;
+    expect(queued.turns[1]!.status).toBe('queued');
+    await post(`/api/ask/${conv.id}/cancel`, { turnId: queued.turns[1]!.id });
+    expect((await post(`/api/ask/${conv.id}/cancel`, {})).status).toBe(200);
+    const c = await turnDone(conv.id, 1);
+    expect(c.turns.map((t) => [t.status, t.stoppedBy])).toEqual([
+      ['cancelled', 'You (on this machine, no login)'],
+      ['cancelled', 'You (on this machine, no login)'],
+    ]);
+    const s = await until(
+      async () => (await get<SessionListResponse>('/api/sessions')).sessions.find((x) => x.kind === 'ask')!,
+      (x) => x.status !== 'running',
+    );
+    expect(s.status).toBe('cancelled');
+    expect((await get<AuditResponse>('/api/audit?all=1')).entries.map((e) => e.action)).toEqual(expect.arrayContaining(['session.cancel', 'ask.cancel']));
   });
 });

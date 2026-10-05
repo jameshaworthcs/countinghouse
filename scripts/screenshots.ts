@@ -83,6 +83,9 @@ async function main() {
   // A Claude session with its transcript, when the data has one; else the first listed.
   const sessions = (await (await fetch(`${base}/api/sessions`, { headers: { host: '127.0.0.1', cookie } })).json()) as { sessions: { id: string; source: string }[] };
   const sessionId = (sessions.sessions.find((x) => x.source === 'recorded') ?? sessions.sessions[0])?.id;
+  // A conversation in Ask, when the work area has one.
+  const asked = (await (await fetch(`${base}/api/ask`, { headers: { host: '127.0.0.1', cookie } })).json()) as { conversations: { id: string }[] };
+  const conversationId = asked.conversations[0]?.id;
   const accountPage = (name: string, type: string): [string, string][] => {
     const id = boot.accounts.find((a) => a.type === type)?.id;
     return id ? [[name, `/accounts/${id}`]] : [];
@@ -128,6 +131,7 @@ async function main() {
     ['settings-audit', '/settings#audit'],
     ['settings-health', '/settings#health'],
     ['ask', '/ask'],
+    ...(conversationId ? ([['ask-conversation', `/ask/${conversationId}`]] as [string, string][]) : []),
     ['sessions', '/sessions'],
     ...(sessionId ? ([['session', `/sessions/${sessionId}`]] as [string, string][]) : []),
   ];

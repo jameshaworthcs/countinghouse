@@ -13,7 +13,9 @@ import { Badge, Button, Callout, Card, Checkbox, Field, Input, KeyValue, Loading
 import { api, useApi, useApiMutation } from '../lib/api';
 import { cn, fileSize, plural } from '../lib/format';
 
-const KIND_NAMES: Record<SessionSummary['kind'], string> = { job: 'Agent job', reading: 'Import reading', reread: 'Read again', receipt: 'Receipt', token: 'Agent with a token' };
+const KIND_NAMES: Record<SessionSummary['kind'], string> = { job: 'Agent job', reading: 'Import reading', reread: 'Read again', receipt: 'Receipt', ask: 'Question (Ask)', token: 'Agent with a token' };
+/** What a session belongs to, in a word. */
+const PARENT_WORD = (s: SessionSummary) => (s.kind === 'job' ? 'job' : s.kind === 'receipt' ? 'receipt' : s.kind === 'ask' ? 'conversation' : 'import');
 const ROLE_NAMES = { first: 'first reading', second: 'second reading (the check)' };
 const ENGINE_NAMES = { inference: 'Local model service (this machine)', 'claude-cli': 'Claude Code CLI', 'claude-api': 'Claude API' };
 
@@ -96,7 +98,7 @@ function SessionList() {
     () =>
       (d?.sessions ?? []).filter(
         (s) =>
-          (!forId || [s.id, s.jobId, s.importId, s.receiptId, s.tokenId].includes(forId)) &&
+          (!forId || [s.id, s.jobId, s.importId, s.receiptId, s.conversationId, s.tokenId].includes(forId)) &&
           (!kind || s.kind === kind) &&
           (!status || s.status === status) &&
           (!q || `${s.title} ${s.startedBy} ${s.reason ?? ''} ${s.model ?? ''} ${s.promptVersion ?? ''} ${s.id} ${s.jobKind ?? ''} ${s.jobId ?? ''} ${s.importId ?? ''}`.toLowerCase().includes(q)),
@@ -450,6 +452,35 @@ function Event({ e }: { e: Ev }) {
           </span>
         </Step>
       );
+    case 'finance.tool':
+      return (
+        <Step label={`Step ${str(e.step)}: ${str(e.tool)}`} at={at} tone={e.error ? 'bad' : 'accent'}>
+          <div className="flex flex-col gap-1.5">
+            <span className="text-ink-2">
+              {str(e.why)}
+              {e.summary ? ` → ${str(e.summary)} (computed by the app)` : ''}
+              {e.error ? ` → failed: ${str(e.error)}` : ''}
+            </span>
+            {typeof e.href === 'string' && (
+              <Link to={e.href} className="text-[12.5px] text-accent hover:underline">
+                See it in the app
+              </Link>
+            )}
+            <Fold title="The call">
+              <Pre>{json(e.args)}</Pre>
+            </Fold>
+            <Fold title="What the app gave back">
+              <Pre>{str(e.result)}</Pre>
+            </Fold>
+          </div>
+        </Step>
+      );
+    case 'finance.answer':
+      return (
+        <Step label="Answer" at={at} tone="accent">
+          <Pre className="bg-transparent p-0 font-sans text-[13px]">{str((e.answer as Ev | undefined)?.answer)}</Pre>
+        </Step>
+      );
     case 'finance.proposed':
       return (
         <Step label="Proposed" at={at} tone="accent">
@@ -547,7 +578,7 @@ function Output({ events, s }: { events: Ev[]; s: SessionSummary }) {
   const out = finalOutput(events);
   if (out === undefined) return null;
   return (
-    <Card title="Its output" description={`What it returned, as it returned it${s.kind === 'job' && s.jobKind === 'ask' ? ': an inference, not a figure the app computed' : ''}. What the app made of it is under What it produced.`}>
+    <Card title="Its output" description={`What it returned, as it returned it${s.kind === 'ask' || (s.kind === 'job' && s.jobKind === 'ask') ? ': an inference, not a figure the app computed' : ''}. What the app made of it is under What it produced.`}>
       <Pre>{json(out)}</Pre>
     </Card>
   );
@@ -610,6 +641,7 @@ function parentLinks(s: SessionSummary): [ReactNode, ReactNode][] {
   if (s.jobId) rows.push(['Job', <Link key="j" to="/assumptions#jobs" className="font-mono text-[12px] text-accent hover:underline">{s.jobId}</Link>]);
   if (s.importId) rows.push(['Import', <Link key="i" to={`/import/${s.importId}`} className="font-mono text-[12px] text-accent hover:underline">{s.importId}</Link>]);
   if (s.receiptId) rows.push(['Receipt', <span key="r" className="font-mono text-[12px]">{s.receiptId}</span>]);
+  if (s.conversationId) rows.push(['Conversation', <Link key="c" to={`/ask/${s.conversationId}`} className="font-mono text-[12px] text-accent hover:underline">{s.conversationId}</Link>]);
   if (s.tokenId) rows.push(['Token', <Link key="t" to="/settings#access" className="font-mono text-[12px] text-accent hover:underline">{s.tokenId}</Link>]);
   return rows;
 }
@@ -786,9 +818,9 @@ function SessionView({ d }: { d: SessionDetail }) {
         <Transcript d={d} events={events} error={error} />
         <Card
           title="In the audit log"
-          description={s.source === 'token' ? 'What its requests did, in this stretch of activity.' : `This session’s own rows, and those of its ${s.kind === 'job' ? 'job' : s.kind === 'receipt' ? 'receipt' : 'import'}. Open one to see it in Settings → Audit log.`}
+          description={s.source === 'token' ? 'What its requests did, in this stretch of activity.' : `This session’s own rows, and those of its ${PARENT_WORD(s)}. Open one to see it in Settings → Audit log.`}
           actions={
-            <Link to={`/settings?audit=${encodeURIComponent(s.source === 'recorded' ? s.id : (s.jobId ?? s.importId ?? s.receiptId ?? s.tokenId ?? s.id))}#audit`} className="text-[12.5px] text-accent hover:underline">
+            <Link to={`/settings?audit=${encodeURIComponent(s.source === 'recorded' ? s.id : (s.jobId ?? s.importId ?? s.receiptId ?? s.conversationId ?? s.tokenId ?? s.id))}#audit`} className="text-[12.5px] text-accent hover:underline">
               Search the audit log
             </Link>
           }
@@ -797,7 +829,7 @@ function SessionView({ d }: { d: SessionDetail }) {
           <AuditRows entries={d.audit} />
         </Card>
         {d.related.length > 0 && (
-          <Card title={`Other sessions of this ${s.kind === 'job' ? 'job' : s.kind === 'receipt' ? 'receipt' : 'import'}`} padded={false}>
+          <Card title={`Other sessions of this ${PARENT_WORD(s)}`} padded={false}>
             <ul>
               {d.related.map((x) => (
                 <Row key={x.id} s={x} />

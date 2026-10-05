@@ -85,9 +85,10 @@ export function sanitiseEvent(v: unknown, depth = 0): unknown {
 }
 
 /** Which directory of the work area a session's transcript sits in, beside what it belongs to. */
-function transcriptDir(kind: SessionKind, r: Pick<SessionRecord, 'jobId' | 'importId' | 'receiptId'>): string {
+function transcriptDir(kind: SessionKind, r: Pick<SessionRecord, 'jobId' | 'importId' | 'receiptId' | 'conversationId'>): string {
   const safe = (s: string | undefined) => (s ?? 'unknown').replace(/[^A-Za-z0-9_-]/g, '_');
   if (kind === 'job') return path.join('jobs', safe(r.jobId));
+  if (kind === 'ask') return path.join('ask', safe(r.conversationId));
   if (kind === 'reading') return path.join('imports', safe(r.importId));
   if (kind === 'reread') return path.join('rereads', safe(r.importId));
   return path.join('receipts', safe(r.receiptId));
@@ -360,7 +361,7 @@ export class SessionLog extends EventEmitter {
       action: 'session.cancel',
       actor,
       summary: `Agent session stopped by ${actorName(actor)}: ${r.title}`,
-      targets: [r.id, ...[r.jobId ?? r.importId ?? r.receiptId].filter((x): x is string => Boolean(x))],
+      targets: [r.id, ...[r.jobId ?? r.importId ?? r.receiptId ?? r.conversationId].filter((x): x is string => Boolean(x))],
       details: { sessionId: r.id, kind: r.kind, engine: r.engine },
     });
     s.stop(actor);
@@ -404,7 +405,7 @@ export class SessionLog extends EventEmitter {
     const session = new Session(this, record, path.join(this.workDir, rel));
     this.live.set(id, session);
     await this.persist(record);
-    const parent = record.jobId ?? record.importId ?? record.receiptId;
+    const parent = record.jobId ?? record.importId ?? record.receiptId ?? record.conversationId;
     this.audit?.record({
       category: 'session',
       action: 'session.start',
@@ -454,7 +455,7 @@ export class SessionLog extends EventEmitter {
     this.live.delete(s.id);
     const r = s.record;
     await this.persist(r);
-    const parent = r.jobId ?? r.importId ?? r.receiptId;
+    const parent = r.jobId ?? r.importId ?? r.receiptId ?? r.conversationId;
     const cost = r.costUsd !== undefined ? `, $${r.costUsd.toFixed(2)}` : '';
     this.audit?.record({
       category: 'session',
@@ -546,7 +547,7 @@ export class SessionLog extends EventEmitter {
       removed++;
     }
     // A transcript directory left empty goes too.
-    for (const sub of ['jobs', 'imports', 'rereads', 'receipts']) {
+    for (const sub of ['jobs', 'imports', 'rereads', 'receipts', 'ask']) {
       let dirs: string[] = [];
       try {
         dirs = (await readdir(path.join(this.workDir, sub), { withFileTypes: true })).filter((d) => d.isDirectory()).map((d) => d.name);

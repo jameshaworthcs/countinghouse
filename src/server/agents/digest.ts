@@ -536,7 +536,8 @@ function payeesYear(store: Store, cats: CategoryIndex, context: Analytics['month
 const TRIP_GAP_DAYS = 6;
 
 /** Trips: spending filed as holidays, in runs with no gap longer than a few days, with where it went (digest v5). */
-function trips(store: Store, from: ISODate, to: ISODate) {
+/** Runs of holiday spending (a gap of TRIP_GAP_DAYS ends one): the trips. */
+export function trips(store: Store, from: ISODate, to: ISODate) {
   const rows = flows(store, from, to)
     .filter((f) => f.cls === 'spending' && f.t.category === 'holidays')
     .sort((a, b) => a.t.date.localeCompare(b.t.date));

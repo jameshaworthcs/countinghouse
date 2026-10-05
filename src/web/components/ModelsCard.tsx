@@ -6,7 +6,7 @@ import { CircleAlert, CircleCheck } from 'lucide-react';
 import type { SystemResponse } from '../../shared/api';
 import type { Settings } from '../../shared/schema';
 import { CLAUDE_MODELS, EFFORTS, INFERENCE_ALIASES, modelFits, resolveTask, TASK_KINDS, TASKS, type TaskChoiceInput, type TaskEngine, type TaskKind } from '../../shared/tasks';
-import { Badge, Callout, Card, Field, Select, Switch } from './ui';
+import { Badge, Callout, Card, Field, Input, Select, Switch } from './ui';
 
 const ENGINE_NAMES: Record<TaskEngine, string> = {
   inference: 'Local model (this machine)',
@@ -146,6 +146,9 @@ export function ModelsCard({ s, setS, sys }: { s: Settings; setS: (s: Settings) 
           <TaskRow key={t} task={t} s={s} set={set} />
         ))}
       </div>
+      <Field label="Ask: tool calls for one question" hint="How many times the model may look something up (search payments, a month’s figures…) before it must answer. More finds more, and takes longer." className="mt-4 max-w-sm">
+        <Input type="number" min={1} max={30} value={s.ask.maxToolCalls} onChange={(e) => setS({ ...s, ask: { ...s.ask, maxToolCalls: Math.min(30, Math.max(1, Math.round(Number(e.target.value) || 8))) } })} />
+      </Field>
     </Card>
   );
 }

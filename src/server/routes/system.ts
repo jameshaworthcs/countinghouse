@@ -55,12 +55,14 @@ export function systemRoutes(ctx: AppContext): Hono {
       const onJob = (j: { id: string; status: string }) => send('job', { id: j.id, status: j.status });
       const onProposal = (p: { id: string; status: string }) => send('proposal', { id: p.id, status: p.status });
       const onSession = (s: { id: string; status: string; transcript: { events: number } }) => send('session', { id: s.id, status: s.status, events: s.transcript.events });
+      const onAsk = (a: { id: string; turnId?: string; status?: string }) => send('ask', a);
       ctx.store.on('change', onData);
       ctx.store.on('reload', onData);
       ctx.imports.on('update', onImport);
       ctx.runner?.on('update', onJob);
       ctx.proposals.on('update', onProposal);
       ctx.sessions.on('update', onSession);
+      ctx.ask?.on('update', onAsk);
       stream.onAbort(() => {
         closed = true;
         ctx.store.off('change', onData);
@@ -69,6 +71,7 @@ export function systemRoutes(ctx: AppContext): Hono {
         ctx.runner?.off('update', onJob);
         ctx.proposals.off('update', onProposal);
         ctx.sessions.off('update', onSession);
+        ctx.ask?.off('update', onAsk);
       });
       send('hello', { version: ctx.store.version });
       while (!closed) {

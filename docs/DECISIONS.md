@@ -2195,3 +2195,30 @@ all of it. First part:
 - A session's audit rows stay rows of their own and name the request in their details: folded into
   the request's row, a job's session (started long after the request answered) would vanish from
   the log's default view.
+
+## 2026-10-05: Ask looks things up with the app's tools, in conversations of its own
+
+"How much did I spend on holiday?" took 6.5 minutes on the local model and answered that it could
+not say. It had been given only a fixed digest (16,000 tokens: the last 30 days, the largest
+payments, monthly totals), though the payments were in the data, in a foreign currency, categorised Holidays.
+Ask v2 (`ask-2`), as the owner decided it:
+
+- **Tools, not a digest.** A small opening (accounts, categories, months, trips; about 2,000
+  tokens), then a step loop: the model calls read-only tools built from the app's own code, and
+  quotes their sums. A schema step loop works on the local model and the Claude CLI alike; native
+  tool calls come later.
+- **Figures checked.** A figure is marked computed only when the app finds it in the result of the
+  step it names. The rest is shown as the model's.
+- **Conversations** in the work area for 90 days; Delete hides (the owner's choice). Follow-ups
+  queue; Stop works at any point; one turn at a time.
+- **The model is the owner's pick per question** (the local model by default; Claude if picked).
+  The tool-call cap is a setting, 8 by default. It ships on: it runs only when the owner asks.
+- **"This is wrong"** builds the evaluation set the next prompt version must pass.
+- Suggested questions are computed by fixed rules, with no model.
+- **Checked on the real service** (4 interactive requests on `fast-chat`, thinking off, invented
+  data): the flat schema with nullable types is accepted (`schema_valid`), and the stream parses
+  (first text after about 9–12 s on a 1,100–1,600-token prompt, about 25 s a step). Two things it
+  showed, now held by the app rather than the prompt: it answered "cannot say" before looking, so
+  a question's first step must be a call (the schema allows only that); and it sent a search with
+  every argument null while its `why` named the currency, so a search with no filter is refused
+  with a message saying so, and the next step corrects it.

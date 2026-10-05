@@ -71,6 +71,17 @@ export function useLiveUpdates(): void {
         void qc.invalidateQueries({ queryKey: ['sessions'] });
         void qc.invalidateQueries({ queryKey: id ? ['session', id] : ['session'] });
       });
+      // A question was asked, took a step, or was answered (Ask).
+      es.addEventListener('ask', (ev) => {
+        let id: string | undefined;
+        try {
+          id = (JSON.parse((ev as MessageEvent<string>).data) as { id?: string }).id;
+        } catch {
+          // no id: refresh them all
+        }
+        void qc.invalidateQueries({ queryKey: id ? ['ask', id] : ['ask'], exact: Boolean(id) });
+        void qc.invalidateQueries({ queryKey: ['ask'], exact: true });
+      });
       // An agent proposed a fix, or took one back.
       es.addEventListener('proposal', () => {
         void qc.invalidateQueries({ queryKey: ['proposals'] });

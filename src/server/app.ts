@@ -33,6 +33,8 @@ import { sessionRoutes } from './routes/sessions';
 import { auditRoutes } from './routes/audit';
 import { systemRoutes } from './routes/system';
 import { modelRoutes } from './routes/models';
+import { askRoutes } from './routes/ask';
+import { AskService } from './ask';
 import { tokenRoutes } from './routes/tokens';
 import { AgentTokens } from './tokens';
 import { authGate, csrfGuard, hostGuard, isPageRequest, securityHeaders } from './security';
@@ -167,7 +169,11 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
   await tokens.load();
   const devices = config.auditDevices ? new DeviceNames() : undefined;
 
-  const ctx: AppContext = { config, store, analytics, imports, proposals, git, auth, oidc, inbox, jobs: runner, runner, tokens, audit, sessions, devices, version: opts.version };
+  // Ask's conversations, in the work area (ask.ts).
+  const ask = new AskService(store, analytics, config, sessions, audit);
+  await ask.init();
+
+  const ctx: AppContext = { config, store, analytics, imports, proposals, git, auth, oidc, inbox, jobs: runner, runner, tokens, audit, sessions, ask, devices, version: opts.version };
   const app = new Hono();
   const secOpts = { allowedHosts: config.allowedHosts, production: config.production };
 
@@ -195,6 +201,7 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
   app.route('/api/tokens', tokenRoutes(ctx));
   app.route('/api/audit', auditRoutes(ctx));
   app.route('/api/sessions', sessionRoutes(ctx));
+  app.route('/api/ask', askRoutes(ctx));
   app.route('/api/documents', documentRoutes(ctx));
   app.route('/api', dataRoutes(ctx));
   app.route('/api', recordRoutes(ctx));
@@ -245,6 +252,7 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
     ctx,
     async close() {
       runner.stop();
+      ask.stop();
       sessions.stop();
       proposals.stop();
       inbox?.stop();

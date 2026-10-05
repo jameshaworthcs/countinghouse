@@ -94,6 +94,7 @@ const router = createBrowserRouter([
           { path: 'sessions', element: page(<Sessions />) },
           { path: 'sessions/:id', element: page(<Sessions />) },
           { path: 'ask', element: page(<Ask />) },
+          { path: 'ask/:id', element: page(<Ask />) },
           { path: '*', element: <div className="py-20 text-center text-ink-3">Page not found.</div> },
         ],
       },

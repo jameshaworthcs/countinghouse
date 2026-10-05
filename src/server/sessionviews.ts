@@ -8,7 +8,6 @@ import { actorName, type AuditActor } from '../shared/audit';
 import type { ImportRecord, InsightPage } from '../shared/schema';
 import { TOKEN_ACTIVITY_GAP_MS, type SessionDetail, type SessionOutput, type SessionRecord, type SessionSummary, type TokenRequest } from '../shared/sessions';
 import { TRIGGER_WORDS, type JobRecord } from './agents/jobs';
-import { listQuestions } from './ask';
 import { nowISO } from './fsutil';
 import type { AppContext } from './context';
 import { shortModel } from './ingest/verify';
@@ -31,6 +30,7 @@ export function summaryOf(r: SessionRecord): SessionSummary {
     ...(r.jobId ? { jobId: r.jobId } : {}),
     ...(r.importId ? { importId: r.importId } : {}),
     ...(r.receiptId ? { receiptId: r.receiptId } : {}),
+    ...(r.conversationId ? { conversationId: r.conversationId } : {}),
     engine: r.engine,
     startedBy: actorName(r.startedBy.actor),
     ...(r.startedBy.reason ? { reason: r.startedBy.reason } : {}),
@@ -298,17 +298,24 @@ async function readingOutputs(ctx: AppContext, s: SessionSummary, later: boolean
   return out;
 }
 
-/** What a question's session produced: its answer, an inference (Ask). */
-function askOutputs(s: SessionSummary): SessionOutput[] {
-  const q = listQuestions().find((x) => x.id === s.jobId);
-  if (!q) return [];
-  if (q.answer) return [{ type: 'answer', id: q.id, label: q.answer.answer, href: '/ask', note: `${q.answer.confidence} confidence${q.answer.cannotAnswer ? '; it could not answer from what it was given' : ''}; an inference, not a computed figure` }];
-  if (q.status === 'failed' && s.status !== 'running') return [{ type: 'error', label: q.error ?? 'It failed' }];
-  return [];
+/** What a question's session produced: the steps it took and its answer, an inference (Ask). */
+function askOutputs(ctx: AppContext, s: SessionSummary): SessionOutput[] {
+  const r = ctx.sessions.get(s.id);
+  const found = ctx.ask?.turnOf(r?.conversationId, r?.turnId);
+  if (!found) return s.kind === 'job' ? [{ type: 'answer', label: 'Asked before conversations were kept: the answer was not kept' }] : [{ type: 'answer', label: 'The conversation is no longer kept (past the retention period)' }];
+  const { conversation, turn } = found;
+  const href = `/ask/${conversation.id}#${turn.id}`;
+  const out: SessionOutput[] = [];
+  // Its own steps: Claude standing in starts again, so a turn's steps are its last session's.
+  if (turn.sessions.at(-1) === s.id) for (const st of turn.steps) out.push({ type: `step ${st.n}: ${st.tool}`, label: st.error ? `${st.why}: failed (${st.error})` : `${st.why}: ${st.summary ?? ''}`, ...(st.href ? { href: st.href } : {}), note: 'computed by the app' });
+  if (turn.answer && turn.sessions.at(-1) === s.id) out.push({ type: 'answer', id: turn.id, label: turn.answer.answer, href, note: `${turn.answer.confidence} confidence${turn.answer.cannotAnswer ? '; it could not answer' : ''}; an inference, not a computed figure` });
+  else if (turn.error && s.status !== 'running') out.push({ type: turn.status === 'cancelled' ? 'stopped' : 'error', label: turn.error, href });
+  if (turn.feedback?.wrong) out.push({ type: 'marked wrong', label: turn.feedback.note || 'You marked the answer wrong', href });
+  return out;
 }
 
 async function outputsOf(ctx: AppContext, s: SessionSummary, siblings: SessionSummary[]): Promise<SessionOutput[]> {
-  if (s.kind === 'job' && s.jobKind === 'ask') return askOutputs(s);
+  if (s.kind === 'ask' || (s.kind === 'job' && s.jobKind === 'ask')) return askOutputs(ctx, s);
   if (s.kind === 'job' && s.jobId) return jobOutputs(ctx, s.jobId);
   if (s.kind === 'reading' && s.importId) {
     // A later first reading (read again before review) replaced this one's.
@@ -374,8 +381,8 @@ export async function sessionDetail(ctx: AppContext, id: string): Promise<Sessio
   const s = all.find((x) => x.id === id);
   if (!s) return undefined;
   const record = s.source === 'recorded' ? ctx.sessions.get(id) : undefined;
-  const parent = s.jobId ?? s.importId ?? s.receiptId ?? s.tokenId;
-  const related = parent ? all.filter((x) => x.id !== id && (x.jobId ?? x.importId ?? x.receiptId ?? x.tokenId) === parent && x.source !== 'token') : [];
+  const parent = s.jobId ?? s.importId ?? s.receiptId ?? s.conversationId ?? s.tokenId;
+  const related = parent ? all.filter((x) => x.id !== id && (x.jobId ?? x.importId ?? x.receiptId ?? x.conversationId ?? x.tokenId) === parent && x.source !== 'token') : [];
   const produced = s.source === 'token' ? [] : await outputsOf(ctx, s, related);
   // Its rows in the audit log: the session's own, and its job's, import's, receipt's or token's.
   const about = [...(s.source === 'recorded' ? [s.id] : []), ...(parent ? [parent] : []), ...(record?.transactionId ? [record.transactionId] : [])];
@@ -415,6 +422,7 @@ export async function sessionIndex(ctx: AppContext): Promise<Map<string, { id: s
     add(s.jobId, s);
     add(s.importId, s);
     add(s.receiptId, s);
+    add(s.conversationId, s);
   }
   return map;
 }

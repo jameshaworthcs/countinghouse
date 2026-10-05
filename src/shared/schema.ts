@@ -1154,6 +1154,12 @@ export const SettingsSchema = z.object({
       tasks: z.partialRecord(z.enum(TASK_KINDS), TaskChoiceSchema).default({}),
     })
     .default({ tasks: {} }),
+  /** Ask (src/server/ask.ts): how many tools the model may call for one question before it must answer. */
+  ask: z
+    .object({
+      maxToolCalls: z.number().int().min(1).max(30).default(8),
+    })
+    .default({ maxToolCalls: 8 }),
   git: z
     .object({
       autoCommit: z.boolean().default(true),

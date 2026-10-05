@@ -4,8 +4,8 @@
 
 import type { AuditActor, AuditEntry } from './audit';
 
-/** What a session was for: an agent job, reading an upload, reading a stored document again, a receipt. */
-export type SessionKind = 'job' | 'reading' | 'reread' | 'receipt';
+/** What a session was for: an agent job, reading an upload, reading a stored document again, a receipt, a question asked. */
+export type SessionKind = 'job' | 'reading' | 'reread' | 'receipt' | 'ask';
 export type SessionStatus = 'running' | 'succeeded' | 'failed' | 'cancelled';
 export type SessionEngine = 'inference' | 'claude-cli' | 'claude-api';
 
@@ -33,6 +33,9 @@ export interface SessionRecord {
   importId?: string;
   receiptId?: string;
   transactionId?: string;
+  /** A question asked (Ask): its conversation and turn. */
+  conversationId?: string;
+  turnId?: string;
   engine: SessionEngine;
   /** Who started it (as the audit log names them) and why. */
   startedBy: { actor: AuditActor; reason: string };
@@ -105,6 +108,7 @@ export interface SessionSummary {
   jobId?: string;
   importId?: string;
   receiptId?: string;
+  conversationId?: string;
   tokenId?: string;
   engine?: SessionEngine;
   /** Who started it, in a few words, and why. */

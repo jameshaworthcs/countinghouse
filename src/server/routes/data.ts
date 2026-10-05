@@ -250,7 +250,7 @@ export function sortTransactions(ctx: AppContext, list: Transaction[], sort: str
     .map((x) => x.t);
 }
 
-export function filterTransactions(ctx: AppContext, q: Record<string, string | undefined>): Transaction[] {
+export function filterTransactions(ctx: Pick<AppContext, 'store'>, q: Record<string, string | undefined>): Transaction[] {
   const from = queryDate(q.from);
   const to = queryDate(q.to);
   const accounts = q.accounts ? new Set(q.accounts.split(',')) : null;
@@ -277,6 +277,8 @@ export function filterTransactions(ctx: AppContext, q: Record<string, string | u
     if (max !== undefined && Math.abs(t.amount) > max) return false;
     if (tag && !t.tags?.some((x) => x.toLowerCase() === tag)) return false;
     if (q.source && t.source.importId !== q.source) return false;
+    // Paid in another currency (a card abroad): the original amount's currency.
+    if (q.currency && t.original?.currency !== q.currency.toUpperCase()) return false;
     if (text) {
       // What other documents called it too: a statement's "Outgoing transaction" is found as "Example Cafe".
       const said = (t.seenIn ?? []).map((x) => x.said?.description ?? '').join(' ');

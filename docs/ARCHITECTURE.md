@@ -200,7 +200,8 @@ and an address of its own, and links back to each.
   - reading an upload: the first reading, and the check by a second model when there is one, each
     a session. Reading again before review (reprocess) makes new sessions;
   - reading a stored document again, for comparison (first reading and check);
-  - a run suggesting categories, and a question answered (each named by its own id);
+  - a run suggesting categories (named by its own id);
+  - a question asked (kind `ask`: one per question in a conversation, beside it in `ask/<id>/`);
   - reading a receipt.
   `claude --version`, which looks for the engine, is not a session. Neither is `eval/` (a
   development tool that runs outside the app).
@@ -288,6 +289,55 @@ and an address of its own, and links back to each.
   /api/sessions/:id/transcript?from=<n>` (events from the nth, for a page following a run), `GET
   /api/sessions/:id/inputs/<name>` (an input file, `?download=1` to save it), `POST
   /api/sessions/:id/stop`. A token with `read` can read them, like everything else.
+
+## Ask
+
+Questions about your money, asked on the Ask page (`src/server/ask.ts`, `ask-tools.ts`; DECISIONS
+2026-10-05). Each conversation has a page of its own, `/ask/:id`.
+
+- **Kept** in the work area, `ask/<conversationId>.json` (0600), never in `data/`: an answer is an
+  inference. A conversation goes 90 days after its last question (the transcripts' retention).
+  Delete only takes it off the list (the owner's choice); a follow-up puts it back.
+- **A question is a turn**, and each turn a session (kind `ask`) with its transcript in
+  `ask/<conversationId>/`. Follow-ups wait behind the turn running, and one turn runs at a time
+  across conversations (the local model has one interactive slot). Stop works on the one running,
+  and takes back one waiting; the audit log records both, with who did it.
+- **Step by step (prompt `ask-2`).** The model is given the accounts, categories, the last 13
+  months' totals and recent trips (`openingContext`, about 2,000 tokens, kept with the
+  conversation so every turn starts from the same prefix and the local model reuses its cached
+  prompt). Each step is either a call of one tool or the answer, as one flat JSON schema. The app
+  runs the tool and gives back its result, cut to 12,000 characters with counts and totals over
+  every row. At most `settings.ask.maxToolCalls` calls (8 by default; Settings → Models), then it
+  must answer. A follow-up is given the earlier turns, whole while they fit in 60,000 characters,
+  else their questions and answers.
+- **The tools** are read-only, built by fixed rules from the app's code, with no web access:
+  `find_transactions` (the Transactions page's search, plus the original currency of a payment
+  abroad), `spending_by` (category, payee, month or account, as the Spending page counts),
+  `trips`, `month`, `balances`, `coverage` (missing days) and `sum` (of chosen ids). Every sum is
+  in integer pence. Each result links to where it can be checked: the Transactions page with the
+  same filters (which takes `currency` too), or the page it came from.
+- **The answer**: its text, figures with the step each is from, confidence, caveats, and whether
+  it could not answer. A figure is marked computed when the app finds its number in that step's
+  result; otherwise the page says it is the model's own. The whole answer is labelled an inference.
+- **The model** is picked per question: the local model thinking (the default, from Settings →
+  Models), or not thinking, or Claude Sonnet or Opus (each step one `claude -p` call, no tools,
+  in an empty directory, its prompt the conversation so far; what it looks up goes to Anthropic).
+  When the local model cannot answer and Settings → Models lets Claude stand in for Ask, Claude
+  starts the turn again, as a session of its own linked to the one it replaces.
+- **Live.** On the local model each step is streamed (`stream: true`; the provenance comes in the
+  usage chunk). The page shows what it is doing: waiting for the service and why, thinking (how
+  much), the step it is writing, the tool it is running, the answer as it is written. An `ask`
+  event on `/api/events` tells the page, at most once a second.
+- **The input.** Enter sends, Shift+Enter starts a new line. Options: the model, a period and
+  accounts (the tools' defaults when the model gives none). Suggested questions are built from the
+  data by fixed rules (the latest trip, a currency used abroad, the last complete month), with no
+  model. The local model's state (`/health`: ready, loading, its GPU lent out until when) is shown.
+- **"This is wrong"**, with a note, is kept with the turn. `GET /api/ask/feedback` lists them:
+  a new prompt version (`ask-3` onward) must answer them at least as well before it ships.
+- **API.** `GET /api/ask` (conversations, suggestions, models, the service's state), `POST
+  /api/ask` (start), `GET /api/ask/:id`, `POST /api/ask/:id/turns` (a follow-up), `POST
+  /api/ask/:id/cancel` (`turnId` for one waiting), `POST /api/ask/:id/turns/:turnId/feedback`,
+  `DELETE /api/ask/:id` (hide). Only the owner asks, signed in; a token can read.
 
 ## Models per task
 

@@ -239,7 +239,7 @@ describe('Claude sessions in the app', () => {
     // Its last steps (the names written) follow the end of the Claude session.
     const d = await until(
       () => get<SessionDetail>(`/api/sessions/${s!.id}`),
-      (x) => x.produced.some((o) => o.type === 'import name'),
+      (x) => x.produced.some((o) => o.type === 'import name') && x.audit.some((e) => e.action === 'session.succeeded'),
     );
     expect(d.record!.transcript.path).toBe(path.join('jobs', job.id, `${s!.id}.jsonl`));
     expect(d.record!.privacy).toBe('personal');

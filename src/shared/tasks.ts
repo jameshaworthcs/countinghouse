@@ -212,7 +212,7 @@ export const TASKS: Record<TaskKind, TaskDef> = {
   ask: {
     kind: 'ask',
     label: 'Answer questions',
-    description: 'A question you ask about your money, answered from the figures the app works out (never from its own sums).',
+    description: 'A question you ask about your money, answered by looking things up with the app’s own tools, step by step (never from the model’s own sums).',
     needs: ['reasoning', 'structured'],
     privacy: 'personal',
     engines: ['inference', 'claude-cli'],

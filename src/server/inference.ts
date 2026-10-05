@@ -30,6 +30,8 @@ export type ContentPart = { type: 'text'; text: string } | { type: 'image'; medi
 export interface ChatRequest {
   alias: string;
   system?: string;
+  /** Earlier turns of a conversation, before `content` (Ask's steps): the service reuses their cached prompt. */
+  history?: { role: 'user' | 'assistant'; content: string }[];
   content: ContentPart[];
   /** Constrains the output to this JSON Schema; the service checks the output against it too. */
   schema?: { name: string; schema: Record<string, unknown> };
@@ -46,6 +48,11 @@ export interface ChatRequest {
   onWait?: ((wait: { reason: string; until?: string }) => void) | undefined;
   /** What the transcript's first event says about the request (prompt, schema, files). */
   describe?: Record<string, unknown>;
+  /**
+   * Stream the answer: called with its reasoning and text so far as they arrive (Ask shows them).
+   * Without it the answer comes whole, as before.
+   */
+  onDelta?: ((so: { reasoning: string; content: string }) => void) | undefined;
   /** Tests only: stand in for the network and the clock. */
   fetch?: typeof fetch;
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
@@ -88,6 +95,82 @@ export function postLong(url: string, init: { method?: string; headers?: Record<
         const headers = new Headers();
         for (const [k, v] of Object.entries(res.headers)) if (typeof v === 'string') headers.set(k, v);
         resolve(new Response(Buffer.concat(chunks), { status: res.statusCode ?? 0, headers }));
+      });
+      res.on('error', reject);
+    });
+    const abort = () => req.destroy(init.signal?.reason instanceof Error ? init.signal.reason : new Error('Cancelled'));
+    if (init.signal?.aborted) return abort();
+    init.signal?.addEventListener('abort', abort, { once: true });
+    req.on('error', reject);
+    req.on('close', () => init.signal?.removeEventListener('abort', abort));
+    req.end(init.body);
+  });
+}
+
+/**
+ * A streamed POST (`stream: true`): the service's server-sent events are read as they arrive, the
+ * reasoning and text so far passed to `onDelta`, and the whole given back as the response a request
+ * without `stream` would have had (its usage chunk carries the provenance). An error answer (a 503
+ * while the service cannot take it) is not a stream and comes back as it is.
+ */
+export function postStream(url: string, init: { headers?: Record<string, string>; body?: string; signal?: AbortSignal }, onDelta: (so: { reasoning: string; content: string }) => void): Promise<Response> {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const send = u.protocol === 'https:' ? httpsRequest : httpRequest;
+    const req = send(u, { method: 'POST', headers: { ...init.headers, Accept: 'text/event-stream', 'Content-Length': String(Buffer.byteLength(init.body ?? '')) } }, (res) => {
+      const headers = new Headers();
+      for (const [k, v] of Object.entries(res.headers)) if (typeof v === 'string') headers.set(k, v);
+      if (res.statusCode !== 200 || !String(res.headers['content-type'] ?? '').includes('text/event-stream')) {
+        const chunks: Buffer[] = [];
+        res.on('data', (c: Buffer) => chunks.push(c));
+        res.on('end', () => resolve(new Response(Buffer.concat(chunks), { status: res.statusCode ?? 0, headers })));
+        res.on('error', reject);
+        return;
+      }
+      let buf = '';
+      let reasoning = '';
+      let content = '';
+      let finish: string | undefined;
+      let error: unknown;
+      const whole: Record<string, unknown> = {};
+      const event = (data: string) => {
+        if (data === '[DONE]') return;
+        let chunk: Record<string, unknown>;
+        try {
+          chunk = JSON.parse(data) as Record<string, unknown>;
+        } catch {
+          return;
+        }
+        if (chunk.error) error = chunk.error;
+        for (const k of ['id', 'model', 'system_fingerprint', 'usage', 'provenance']) if (chunk[k] !== undefined && chunk[k] !== null) whole[k] = chunk[k];
+        const choice = (chunk.choices as { delta?: { content?: unknown; reasoning_content?: unknown }; finish_reason?: string | null }[] | undefined)?.[0];
+        if (!choice) return;
+        if (typeof choice.delta?.reasoning_content === 'string') reasoning += choice.delta.reasoning_content;
+        if (typeof choice.delta?.content === 'string') content += choice.delta.content;
+        if (choice.finish_reason) finish = choice.finish_reason;
+        if (choice.delta?.reasoning_content || choice.delta?.content) onDelta({ reasoning, content });
+      };
+      res.setEncoding('utf8');
+      res.on('data', (d: string) => {
+        buf += d;
+        let i: number;
+        while ((i = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, i).replace(/\r$/, '');
+          buf = buf.slice(i + 1);
+          if (line.startsWith('data:')) event(line.slice(5).trim());
+        }
+      });
+      let ended = false;
+      // Cut off before its end (stopped, or the connection dropped): not an answer.
+      res.on('close', () => {
+        if (!ended) reject(init.signal?.aborted ? new Error('Cancelled') : new Error('The stream ended before the answer did.'));
+      });
+      res.on('end', () => {
+        ended = true;
+        if (buf.startsWith('data:')) event(buf.slice(5).trim());
+        // An error sent mid-stream: the service failed after it took the request.
+        if (error) return resolve(new Response(JSON.stringify({ error }), { status: 502, headers }));
+        resolve(new Response(JSON.stringify({ ...whole, choices: [{ message: { content, ...(reasoning ? { reasoning_content: reasoning } : {}) }, finish_reason: finish ?? null }] }), { status: 200, headers }));
       });
       res.on('error', reject);
     });
@@ -176,7 +259,13 @@ function waitReason(status: number, code: string | undefined, message: string | 
 
 export async function chat(cfg: InferenceConfig | undefined, req: ChatRequest): Promise<ChatResult> {
   if (!cfg) throw new InferenceUnavailable('The local model service is not set up here: set INFERENCE_BASE_URL and INFERENCE_API_KEY in .env.');
-  const doFetch = req.fetch ?? ((url: string | URL | Request, init?: RequestInit) => postLong(url as string, init as { headers?: Record<string, string>; body?: string; signal?: AbortSignal }));
+  const onDelta = req.onDelta;
+  const doFetch =
+    req.fetch ??
+    ((url: string | URL | Request, init?: RequestInit) => {
+      const i = init as { headers?: Record<string, string>; body?: string; signal?: AbortSignal };
+      return onDelta ? postStream(url as string, i, onDelta) : postLong(url as string, i);
+    });
   const sleep = req.sleep ?? defaultSleep;
   const sink = req.transcript;
   // Stopping the session (its page's Stop) stops the request too.
@@ -184,7 +273,8 @@ export async function chat(cfg: InferenceConfig | undefined, req: ChatRequest): 
   const content = req.content.map((p) => (p.type === 'text' ? { type: 'text', text: p.text } : { type: 'image_url', image_url: { url: `data:${p.mediaType};base64,${p.data.toString('base64')}` } }));
   const body: Record<string, unknown> = {
     model: req.alias,
-    messages: [...(req.system ? [{ role: 'system', content: req.system }] : []), { role: 'user', content }],
+    messages: [...(req.system ? [{ role: 'system', content: req.system }] : []), ...(req.history ?? []), { role: 'user', content }],
+    ...(req.onDelta ? { stream: true, stream_options: { include_usage: true } } : {}),
     ...(req.thinking ? { chat_template_kwargs: { enable_thinking: true } } : req.maxTokens ? { max_tokens: req.maxTokens } : {}),
     ...(req.schema ? { response_format: { type: 'json_schema', json_schema: { name: req.schema.name, schema: req.schema.schema, strict: true } } } : {}),
   };
@@ -199,6 +289,7 @@ export async function chat(cfg: InferenceConfig | undefined, req: ChatRequest): 
     priority: req.priority,
     thinking: Boolean(req.thinking),
     ...(req.maxTokens ? { maxTokens: req.maxTokens } : {}),
+    ...(req.history?.length ? { earlierMessages: req.history.length } : {}),
     ...req.describe,
     ...(texts.length ? (described === undefined && texts.length === 1 ? { prompt: texts[0] } : { texts }) : {}),
     files: req.content.filter((p): p is Extract<ContentPart, { type: 'image' }> => p.type === 'image').map((p) => ({ name: p.name, mediaType: p.mediaType, bytes: p.data.length, ...(p.source ? { source: p.source } : {}) })),
