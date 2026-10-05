@@ -209,16 +209,33 @@ and an address of its own, and links back to each.
     queueing) and why;
   - its kind, the job, import or receipt it belongs to, the engine, the model asked for and the one
     that answered, effort, prompt version, tools and privacy class;
-  - status, start, end, turns, tokens and cost (from the engine's result event), and any error.
+  - status, start, end, turns, tokens and cost (from the engine's result event), and any error;
+  - the request that started it (`requestId`, its audit row: a job carries the one that queued
+    it), the state of `data/` it ran against (the git commit, files not yet committed, the format),
+    and who stopped it, if someone did;
+  - for a session Claude ran because the local model could not (where Settings → Models allows
+    it), the session it stood in for (`fallbackOf`) and why;
+  - when it ends, the SHA-256 of its transcript (also in its audit row).
+- **Its input files.** A job's scratch directory (the files it was given to read, such as the month
+  in review's transactions) is kept gzipped beside the transcript, as `<sessionId>.inputs/`, under
+  the same retention and total cap. It is deleted with the transcript. One session keeps up to the
+  transcript cap; files over it are listed as not kept. Its page opens or downloads each.
 - **The transcript** is a JSON-lines file beside what it belongs to: `jobs/<jobId>/`,
   `imports/<importId>/`, `rereads/<importId>/` or `receipts/<receiptId>/`, as `<sessionId>.jsonl`.
   Files are 0600 and directories 0700. It is never in `data/`, git or the server's log.
   - The first event is what the app sent: system prompt, prompt, output schema, tools, model,
-    effort, and the files the run could read (names and sizes). For the API, it is the request as sent.
+    effort, and the files the run could read (names and sizes). For the API, it is the request as
+    sent. For the local model, every text part (a spreadsheet's text too) and each image by name,
+    size and page of its document.
   - Then every event the engine gave. The CLI runs with `--output-format stream-json --verbose`:
     its init, each assistant turn (text, thinking, tool calls), each tool result, the final output
     and the result with usage and cost. The API gives its content blocks as they complete, the
-    final message, then a result with usage and cost.
+    final message, then a result with usage and cost. The local model gives its answer and
+    reasoning, then a result with its parsed output (`structured_output`), usage and provenance.
+  - The app's own steps: a job's check of the answer (`finance.check`: the problems found, and
+    whether it was asked again), what it wrote (`finance.applied`: records, proposals, what is
+    unresolved), a run's proposal (`finance.proposed`), waits for the local model, and a stop
+    (`finance.cancelled`, who stopped it).
   - Each event is written as it arrives. A running session's page shows them live: the record is
     saved and a `session` event sent at most once a second.
   - Claude Code keeps nothing itself (`--no-session-persistence`): this file is the only
@@ -251,14 +268,26 @@ and an address of its own, and links back to each.
     replaced by a later reading), the check, the draft, and what was committed;
   - a re-reading: the comparison;
   - a receipt: the lines it read, a proposed split.
+- **Stop.** A running session's page has Stop (signed in; no token may). The session's signal
+  reaches its engine: the CLI's process is ended, the API's stream and the local model's request
+  are aborted. It ends `cancelled`, nothing it would have produced is applied, its transcript is
+  kept, and a job's session cancels its job. The audit log records the stop (`session.cancel`, in
+  the request's row) with who did it.
+- **The page.** Besides the record and transcript: its output as returned (whichever engine), the
+  local model's answer and reasoning, its timings (reading the prompt and writing, with tokens per
+  second), the request that started it, the session it stood in for or that took it over, the data
+  it ran on, the transcript's hash and its input files.
 - **Audit log.** A session's start and end are entries of their own (category `session`, with
-  model, cost and outcome). A session's page lists those, and its job's, import's, receipt's or
+  model, cost and outcome, the request that started it, and the end's transcript hash: the log is
+  hash-chained and the transcript is not, so an edited or cut transcript shows, even after it has
+  been deleted). A session's page lists those, and its job's, import's, receipt's or
   token's rows (`about`); each opens in Settings → Audit log. The log, in turn, links every entry
   that concerns a session (by its id, its job, import or receipt) to that session.
 - **API.** `GET /api/sessions` (the list, and how transcripts are kept), `GET /api/sessions/:id`
   (one, with what it produced, its audit rows and related sessions), `GET
-  /api/sessions/:id/transcript?from=<n>` (events from the nth, for a page following a run). A
-  token with `read` can read them, like everything else.
+  /api/sessions/:id/transcript?from=<n>` (events from the nth, for a page following a run), `GET
+  /api/sessions/:id/inputs/<name>` (an input file, `?download=1` to save it), `POST
+  /api/sessions/:id/stop`. A token with `read` can read them, like everything else.
 
 ## Models per task
 

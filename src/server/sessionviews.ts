@@ -8,6 +8,7 @@ import { actorName, type AuditActor } from '../shared/audit';
 import type { ImportRecord, InsightPage } from '../shared/schema';
 import { TOKEN_ACTIVITY_GAP_MS, type SessionDetail, type SessionOutput, type SessionRecord, type SessionSummary, type TokenRequest } from '../shared/sessions';
 import { TRIGGER_WORDS, type JobRecord } from './agents/jobs';
+import { listQuestions } from './ask';
 import { nowISO } from './fsutil';
 import type { AppContext } from './context';
 import { shortModel } from './ingest/verify';
@@ -40,6 +41,7 @@ export function summaryOf(r: SessionRecord): SessionSummary {
     ...(r.finishedAt ? { finishedAt: r.finishedAt } : {}),
     ...(r.durationMs !== undefined ? { durationMs: r.durationMs } : {}),
     ...(r.costUsd !== undefined ? { costUsd: r.costUsd } : {}),
+    ...(r.fallbackOf ? { fallbackOf: r.fallbackOf } : {}),
     transcript: r.transcript.removed ? 'removed' : r.transcript.truncated ? 'truncated' : 'kept',
   };
 }
@@ -296,7 +298,17 @@ async function readingOutputs(ctx: AppContext, s: SessionSummary, later: boolean
   return out;
 }
 
+/** What a question's session produced: its answer, an inference (Ask). */
+function askOutputs(s: SessionSummary): SessionOutput[] {
+  const q = listQuestions().find((x) => x.id === s.jobId);
+  if (!q) return [];
+  if (q.answer) return [{ type: 'answer', id: q.id, label: q.answer.answer, href: '/ask', note: `${q.answer.confidence} confidence${q.answer.cannotAnswer ? '; it could not answer from what it was given' : ''}; an inference, not a computed figure` }];
+  if (q.status === 'failed' && s.status !== 'running') return [{ type: 'error', label: q.error ?? 'It failed' }];
+  return [];
+}
+
 async function outputsOf(ctx: AppContext, s: SessionSummary, siblings: SessionSummary[]): Promise<SessionOutput[]> {
+  if (s.kind === 'job' && s.jobKind === 'ask') return askOutputs(s);
   if (s.kind === 'job' && s.jobId) return jobOutputs(ctx, s.jobId);
   if (s.kind === 'reading' && s.importId) {
     // A later first reading (read again before review) replaced this one's.

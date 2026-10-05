@@ -17,7 +17,7 @@ import { assumptionDef, AssumptionSet } from '../../shared/assumptions';
 import { addDays, diffDays, today } from '../../shared/dates';
 import type { Analytics } from '../analytics';
 import type { AuditActor } from '../../shared/audit';
-import { currentActor, runAs } from '../audit';
+import { currentActor, currentRequestId, runAs } from '../audit';
 import { latestResearch } from '../analytics/research';
 import type { Config } from '../config';
 import type { JobQueue } from '../context';
@@ -25,7 +25,7 @@ import { atomicWrite, nowISO, randomHex } from '../fsutil';
 import { detectEngines } from '../ingest/engines';
 import { recordInstrumentsFromHoldings } from '../instruments';
 import type { ProposalService } from '../proposals';
-import type { SessionLog } from '../sessions';
+import { SessionStopped, type SessionLog } from '../sessions';
 import type { Store } from '../store';
 import { callModel, mayFallBack, sessionEngine } from './run-model';
 import { claudeChoice, resolveTask, taskOfJob, type TaskChoice } from '../../shared/tasks';
@@ -56,6 +56,8 @@ export const JobRecordSchema = z.object({
   error: z.string().optional(),
   /** Who queued it, as the audit log names them (its Claude session says so). */
   requestedBy: z.custom<AuditActor>((v) => typeof v === 'object' && v !== null && typeof (v as { type?: unknown }).type === 'string').optional(),
+  /** The audit row of the request that queued it, when a request did: its sessions link back to it. */
+  requestId: z.string().optional(),
 });
 export type JobRecord = z.infer<typeof JobRecordSchema>;
 
@@ -213,6 +215,8 @@ export class JobRunner extends EventEmitter implements JobQueue {
       createdAt: nowISO(),
       requestedBy: currentActor(),
     };
+    const requestId = currentRequestId();
+    if (requestId) job.requestId = requestId;
     void this.save(job).then(() => this.pump());
     return job;
   }
@@ -342,21 +346,34 @@ export class JobRunner extends EventEmitter implements JobQueue {
       job = { ...job, engine: choice.engine === 'inference' ? 'inference' : 'claude-cli' };
       await this.save(job);
       const call = { task, bin: claudeOk ? claudeBin : null, inference: this.config.inference, cwd: scratch, prompt, systemPrompt: def.systemPrompt, schema: outputJsonSchema(def), tools: def.tools, timeoutMs: this.store.settings.agents.timeoutSeconds * 1000, signal };
-      // One run on one engine is a session, with its transcript (sessions.ts).
-      const attempt = async (c: TaskChoice) => {
+      // One run on one engine is a session, with its transcript (sessions.ts): the model's answer,
+      // the app's check of it, and what was written from it.
+      let lastSession: string | undefined;
+      const attempt = async (c: TaskChoice, fallback?: { fallbackOf?: string; fallbackReason: string }) => {
         const ask = (text: string, transcript: TranscriptSink | undefined) => callModel(call, c, transcript, text);
         // An answer the app can check that is wrong is asked for once more, with what is wrong.
         const runOnce = async (transcript: TranscriptSink | undefined) => {
           const first = await ask(prompt, transcript);
           if (!def.check || !def.recheck) return { res: first, unresolved: [] as string[] };
           const problems = await def.check(ctx, def.output.parse(first.output));
+          transcript?.write({ type: 'finance.check', attempt: 1, problems, recheck: problems.length > 0 });
           if (!problems.length) return { res: first, unresolved: [] as string[] };
           const second = await ask(`${prompt}\n\n${def.recheck(problems, first.output)}`, transcript);
           const unresolved = await def.check(ctx, def.output.parse(second.output));
+          transcript?.write({ type: 'finance.check', attempt: 2, problems: unresolved, recheck: false });
           const add = (a?: number, b?: number) => (a === undefined && b === undefined ? undefined : (a ?? 0) + (b ?? 0));
           const costUsd = add(first.costUsd, second.costUsd);
           const turns = add(first.turns, second.turns);
           return { res: { ...second, ...(costUsd !== undefined ? { costUsd } : {}), ...(turns !== undefined ? { turns } : {}), durationMs: first.durationMs + second.durationMs }, unresolved };
+        };
+        // What the answer becomes: records written and proposals made, in the transcript too.
+        const runAll = async (transcript: TranscriptSink | undefined) => {
+          const { res, unresolved } = await runOnce(transcript);
+          const output = def.output.parse(res.output);
+          const outcome = await def.apply(ctx, output, { setBy: 'agent', model: res.model, promptVersion: def.promptVersion, jobId: job.id, ...(res.engine === 'inference' ? { engine: 'inference' as const, ...(res.inference ? { inference: res.inference } : {}) } : {}) }, unresolved);
+          const proposed = this.opts.proposals?.list().pending.filter((v) => v.proposal.provenance.jobId === job.id).map((v) => ({ id: v.proposal.id, title: v.proposal.title })) ?? [];
+          transcript?.write({ type: 'finance.applied', summary: outcome.summary, written: outcome.result?.written ?? [], ...(proposed.length ? { proposals: proposed } : {}), ...(unresolved.length ? { unresolved } : {}) });
+          return { res, outcome };
         };
         const session = await this.opts.sessions?.start({
           kind: 'job',
@@ -367,8 +384,14 @@ export class JobRunner extends EventEmitter implements JobQueue {
           promptVersion: def.promptVersion,
           privacy: def.privacy,
           startedBy: { actor: job.requestedBy ?? currentActor(), reason: TRIGGER_WORDS[job.trigger] },
+          ...(job.requestId ? { requestId: job.requestId } : {}),
+          ...(fallback?.fallbackOf ? { fallbackOf: fallback.fallbackOf } : {}),
+          ...(fallback ? { fallbackReason: fallback.fallbackReason } : {}),
         });
-        return session ? session.run(runOnce, signal) : runOnce(undefined);
+        lastSession = session?.id;
+        // The files the job was given (its scratch directory), kept with the session.
+        await session?.keepInputs(scratch);
+        return session ? session.run(runAll, signal) : runAll(undefined);
       };
       let fellBack: string | undefined;
       let ran: Awaited<ReturnType<typeof attempt>>;
@@ -378,12 +401,10 @@ export class JobRunner extends EventEmitter implements JobQueue {
         // The local model could not, and this task may fall back to Claude (Settings → Models).
         if (!mayFallBack(choice, err, call.bin, signal)) throw err;
         fellBack = (err as Error).message;
-        ran = await attempt(claudeChoice(task));
+        ran = await attempt(claudeChoice(task), { ...(lastSession ? { fallbackOf: lastSession } : {}), fallbackReason: fellBack });
       }
-      const { res, unresolved } = ran;
+      const { res, outcome } = ran;
       job = { ...job, engine: res.engine };
-      const output = def.output.parse(res.output);
-      const outcome = await def.apply(ctx, output, { setBy: 'agent', model: res.model, promptVersion: def.promptVersion, jobId: job.id, ...(res.engine === 'inference' ? { engine: 'inference' as const, ...(res.inference ? { inference: res.inference } : {}) } : {}) }, unresolved);
       job = {
         ...job,
         status: 'succeeded',
@@ -396,7 +417,7 @@ export class JobRunner extends EventEmitter implements JobQueue {
         written: outcome.result?.written ?? [],
       };
     } catch (err) {
-      const cancelled = signal.aborted || this.jobs.get(job.id)?.status === 'cancelled';
+      const cancelled = signal.aborted || err instanceof SessionStopped || this.jobs.get(job.id)?.status === 'cancelled';
       if (err instanceof NothingToDo && !cancelled) job = { ...job, status: 'succeeded', finishedAt: nowISO(), durationMs: Date.now() - started, summary: err.message, written: [] };
       else job = { ...job, status: cancelled ? 'cancelled' : 'failed', finishedAt: nowISO(), durationMs: Date.now() - started, error: (err as Error).message.slice(0, 2000) };
     } finally {

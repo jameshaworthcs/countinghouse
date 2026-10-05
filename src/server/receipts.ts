@@ -160,7 +160,9 @@ async function read(store: Store, config: Config, receipt: Receipt, t: Transacti
   const schema = receiptJsonSchema(categories.map((c) => c.id));
   try {
     // Each reading is a session, with its transcript (sessions.ts).
-    const once = async (c: TaskChoice): Promise<AgentRunResult & { inference?: InferenceProvenance }> => {
+    // The session Claude stands in for, when the local model could not.
+    let lastSession: string | undefined;
+    const once = async (c: TaskChoice, fallback?: { fallbackOf?: string; fallbackReason: string }): Promise<AgentRunResult & { inference?: InferenceProvenance }> => {
       const local = c.engine === 'inference';
       const { system, user } = receiptPrompt(t, categories, local);
       const session = await opts.sessions?.start({
@@ -175,7 +177,10 @@ async function read(store: Store, config: Config, receipt: Receipt, t: Transacti
         tools: local ? [] : ['Read'],
         privacy: 'personal',
         startedBy: { actor: currentActor(), reason: 'Read the receipt attached to this payment' },
+        ...(fallback?.fallbackOf ? { fallbackOf: fallback.fallbackOf } : {}),
+        ...(fallback ? { fallbackReason: fallback.fallbackReason } : {}),
       });
+      lastSession = session?.id;
       const run = async (transcript: AgentRunOptions['transcript']): Promise<AgentRunResult & { inference?: InferenceProvenance }> => {
         if (local) {
           const def = TASKS['read-receipt'];
@@ -183,7 +188,7 @@ async function read(store: Store, config: Config, receipt: Receipt, t: Transacti
           const res = await chat(config.inference, {
             alias: c.model,
             system,
-            content: [...(await Promise.all(images.map(async (f) => ({ type: 'image' as const, mediaType: 'image/png' as const, data: await readFile(f), name: path.basename(f) })))), { type: 'text', text: user }],
+            content: [...(await Promise.all(images.map(async (f, i) => ({ type: 'image' as const, mediaType: 'image/png' as const, data: await readFile(f), name: path.basename(f), source: { receiptId: receipt.id, page: i + 1 } })))), { type: 'text', text: user }],
             schema: { name: 'receipt', schema },
             thinking: c.thinking,
             maxTokens: def.maxTokens,
@@ -206,7 +211,7 @@ async function read(store: Store, config: Config, receipt: Receipt, t: Transacti
     } catch (err) {
       // The local model could not, and receipts may fall back to Claude (Settings → Models).
       if (choice.engine !== 'inference' || !choice.fallback || !bin || !(err instanceof InferenceUnavailable || err instanceof InferenceFailed)) throw err;
-      result = await once(claudeChoice('read-receipt'));
+      result = await once(claudeChoice('read-receipt'), { ...(lastSession ? { fallbackOf: lastSession } : {}), fallbackReason: err.message });
     }
     const out = ReadingOutput.parse(result.output);
     const sign = t.amount < 0 ? -1 : 1;

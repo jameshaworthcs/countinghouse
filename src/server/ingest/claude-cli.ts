@@ -13,7 +13,7 @@ import { spawn } from 'node:child_process';
 import { access, constants, readdir, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import type { TranscriptSink } from '../sessions';
+import { stopSignal, type TranscriptSink } from '../sessions';
 import { normaliseExtraction } from './normalise';
 import type { EngineResult } from './engines';
 
@@ -179,7 +179,8 @@ export async function runClaudeCli(
     const out = await runProcess(bin, args, {
       cwd: opts.cwd,
       timeoutMs: opts.timeoutMs,
-      signal: opts.signal,
+      // Stopping the session (its page's Stop) ends the process too.
+      signal: stopSignal(opts.signal, sink),
       ...(opts.input !== undefined ? { input: opts.input } : {}),
       env: { ...process.env, NO_COLOR: '1', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', DISABLE_AUTOUPDATER: '1' },
       onLine: (line) => {

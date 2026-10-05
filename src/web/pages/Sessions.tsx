@@ -3,14 +3,14 @@
 // started it, its transcript, everything it produced and its rows in the audit log
 // (src/server/sessions.ts, sessionviews.ts).
 
-import { ArrowLeft, ChevronDown, ChevronRight } from 'lucide-react';
+import { ArrowLeft, ChevronDown, ChevronRight, CircleStop } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router';
 import { actorName, type AuditEntry } from '../../shared/audit';
 import type { SessionDetail, SessionListResponse, SessionSummary, TranscriptResponse } from '../../shared/sessions';
 import { when } from '../components/Audit';
-import { Badge, Callout, Card, Checkbox, Field, Input, KeyValue, Loading, PageHeader, Select, StatusBadge, useDebounced } from '../components/ui';
-import { api, useApi } from '../lib/api';
+import { Badge, Button, Callout, Card, Checkbox, Field, Input, KeyValue, Loading, PageHeader, Select, StatusBadge, useDebounced } from '../components/ui';
+import { api, useApi, useApiMutation } from '../lib/api';
 import { cn, fileSize, plural } from '../lib/format';
 
 const KIND_NAMES: Record<SessionSummary['kind'], string> = { job: 'Agent job', reading: 'Import reading', reread: 'Read again', receipt: 'Receipt', token: 'Agent with a token' };
@@ -299,11 +299,18 @@ function Event({ e }: { e: Ev }) {
             <div className="text-[12.5px] text-ink-2">
               {ENGINE_NAMES[e.engine as 'claude-cli'] ?? str(e.engine)}, model {str(e.model)}
               {e.effort ? `, effort ${str(e.effort)}` : ''}; tools: {Array.isArray(e.tools) && e.tools.length ? e.tools.join(', ') : 'none'}
-              {Array.isArray(e.files) && e.files.length > 0 && <>; files it could read: {(e.files as Ev[]).map((f) => `${str(f.name)}${typeof f.bytes === 'number' ? ` (${fileSize(f.bytes)})` : ''}`).join(', ')}</>}
+              {e.engine === 'inference' && <>; {e.thinking ? 'thinking on' : 'thinking off'}, {str(e.priority)} priority{typeof e.maxTokens === 'number' ? `, at most ${e.maxTokens.toLocaleString()} tokens` : ''}</>}
+              {Array.isArray(e.files) && e.files.length > 0 && <>; {e.engine === 'inference' ? 'images it was shown' : 'files it could read'}: {(e.files as Ev[]).map((f) => `${str(f.name)}${f.source && typeof (f.source as Ev).page === 'number' ? ` (page ${str((f.source as Ev).page)})` : ''}${typeof f.bytes === 'number' ? ` (${fileSize(f.bytes)})` : ''}`).join(', ')}</>}
             </div>
             <Fold title="System prompt">
               <Pre>{str(e.systemPrompt ?? '')}</Pre>
             </Fold>
+            {Array.isArray(e.texts) &&
+              (e.texts as unknown[]).map((t, i) => (
+                <Fold key={i} title={`Text it was given${(e.texts as unknown[]).length > 1 ? ` (${i + 1})` : ''}: ${fileSize(str(t).length)}`}>
+                  <Pre>{str(t)}</Pre>
+                </Fold>
+              ))}
             <Fold title="Prompt" open>
               <Pre>{str(e.prompt ?? '')}</Pre>
             </Fold>
@@ -340,6 +347,25 @@ function Event({ e }: { e: Ev }) {
       );
     case 'assistant':
     case 'user': {
+      // The local model's answer: its text, and what it thought first (top-level, not a message).
+      if (e.type === 'assistant' && !e.message && (typeof e.content === 'string' || typeof e.reasoning === 'string'))
+        return (
+          <>
+            {typeof e.reasoning === 'string' && e.reasoning && (
+              <Step label="Thinking" at={at} tone="muted">
+                <Fold title={`Show its thinking (${plural(e.reasoning.length, 'character')})`}>
+                  <Pre>{e.reasoning}</Pre>
+                </Fold>
+              </Step>
+            )}
+            <Step label="Agent" at={at}>
+              <div className="flex flex-col gap-1">
+                {e.finish_reason !== undefined && e.finish_reason !== 'stop' && <span className="text-[12px] text-bad-ink">Stopped: {str(e.finish_reason)}</span>}
+                <Pre>{json(parsed(e.content))}</Pre>
+              </div>
+            </Step>
+          </>
+        );
       const content = (e.message as Ev | undefined)?.content;
       if (typeof content === 'string') return <Step label={e.type === 'user' ? 'Prompt' : 'Agent'} at={at}><Pre>{content}</Pre></Step>;
       if (!Array.isArray(content)) return null;
@@ -372,6 +398,64 @@ function Event({ e }: { e: Ev }) {
               </Fold>
             )}
           </div>
+        </Step>
+      );
+    case 'finance.cancelled':
+      return (
+        <Step label="Stopped" at={at} tone="bad">
+          <span className="text-ink-2">Stopped by {str(e.by)}. Nothing it would have produced was applied.</span>
+        </Step>
+      );
+    case 'finance.check':
+      return (
+        <Step label={`App's check ${str(e.attempt)}`} at={at} tone={Array.isArray(e.problems) && e.problems.length ? 'bad' : 'accent'}>
+          {Array.isArray(e.problems) && e.problems.length ? (
+            <div className="flex flex-col gap-1 text-ink-2">
+              <span>
+                {plural(e.problems.length, 'problem')} the app found in its answer{e.recheck ? '; it was asked again, with them' : '; they go with the answer as unresolved'}:
+              </span>
+              <ul className="list-disc pl-4">
+                {(e.problems as unknown[]).map((p, i) => (
+                  <li key={i}>{str(p)}</li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <span className="text-ink-2">Its answer passed the app’s checks.</span>
+          )}
+        </Step>
+      );
+    case 'finance.applied':
+      return (
+        <Step label="Applied" at={at} tone="accent">
+          <div className="flex flex-col gap-1 text-ink-2">
+            <span>{str(e.summary)}</span>
+            {Array.isArray(e.written) && e.written.length > 0 && <span className="text-[12.5px]">Written: {(e.written as Ev[]).map((w) => `${str(w.type)} ${str(w.id)}`).join(', ')}</span>}
+            {Array.isArray(e.proposals) &&
+              (e.proposals as Ev[]).map((p) => (
+                <Link key={str(p.id)} to={`/proposals/${str(p.id)}`} className="text-[12.5px] text-accent hover:underline">
+                  Proposal: {str(p.title)}
+                </Link>
+              ))}
+          </div>
+        </Step>
+      );
+    case 'finance.waiting':
+    case 'finance.unavailable':
+      return (
+        <Step label={e.type === 'finance.waiting' ? 'Waiting' : 'Gave up waiting'} at={at} tone={e.type === 'finance.waiting' ? 'muted' : 'bad'}>
+          <span className="text-ink-2">
+            The local model service could not take it: {str(e.reason)}
+            {typeof e.retryInSeconds === 'number' ? `. Trying again in ${duration(e.retryInSeconds * 1000)}.` : '.'}
+          </span>
+        </Step>
+      );
+    case 'finance.proposed':
+      return (
+        <Step label="Proposed" at={at} tone="accent">
+          <Link to={`/proposals/${str(e.proposalId)}`} className="text-accent hover:underline">
+            A proposal of {plural(Number(e.changes), 'change')}
+          </Link>
         </Step>
       );
     case 'finance.truncated':
@@ -429,9 +513,48 @@ function useTranscript(id: string, total: number | undefined): { events: Ev[]; e
   return { events, ...(state.id === id && state.error ? { error: state.error } : {}) };
 }
 
-function Transcript({ d }: { d: SessionDetail }) {
+/** Text that is JSON, parsed (a local model's structured answer), else the text. */
+function parsed(v: unknown): unknown {
+  if (typeof v !== 'string' || !/^\s*[[{]/.test(v)) return v;
+  try {
+    return JSON.parse(v) as unknown;
+  } catch {
+    return v;
+  }
+}
+
+/** The session's final output, whichever engine gave it: the result's, or its last StructuredOutput call. */
+function finalOutput(events: Ev[]): unknown {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i]!;
+    if (e.type === 'result' && e.structured_output !== undefined) return e.structured_output;
+    // The local model (sessions before its result carried the output).
+    if (e.type === 'assistant' && !e.message && typeof e.content === 'string' && e.content) return parsed(e.content);
+    const content = (e.message as Ev | undefined)?.content;
+    if (e.type === 'assistant' && Array.isArray(content)) {
+      const so = (content as Ev[]).findLast((b) => b.type === 'tool_use' && b.name === 'StructuredOutput');
+      if (so) return so.input;
+      // The Claude API: the answer is the message's text, JSON when a schema was asked for.
+      const text = (content as Ev[]).filter((b) => b.type === 'text').map((b) => str(b.text)).join('');
+      if (text) return parsed(text);
+    }
+    if (e.type === 'finance.content_block' && (e.block as Ev | undefined)?.type === 'text') return parsed(str((e.block as Ev).text));
+  }
+  return undefined;
+}
+
+function Output({ events, s }: { events: Ev[]; s: SessionSummary }) {
+  const out = finalOutput(events);
+  if (out === undefined) return null;
+  return (
+    <Card title="Its output" description={`What it returned, as it returned it${s.kind === 'job' && s.jobKind === 'ask' ? ': an inference, not a figure the app computed' : ''}. What the app made of it is under What it produced.`}>
+      <Pre>{json(out)}</Pre>
+    </Card>
+  );
+}
+
+function Transcript({ d, events, error }: { d: SessionDetail; events: Ev[]; error?: string | undefined }) {
   const r = d.record;
-  const { events, error } = useTranscript(d.session.id, r && !r.transcript.removed ? r.transcript.events : undefined);
   const [all, setAll] = useState(false);
   if (!r || r.transcript.removed) return null;
   const hidden = events.filter(housekeeping).length;
@@ -491,12 +614,43 @@ function parentLinks(s: SessionSummary): [ReactNode, ReactNode][] {
   return rows;
 }
 
+/** The local model's timings: reading the prompt, and writing the answer, with their speed. */
+function timings(r: NonNullable<SessionDetail['record']>): string | undefined {
+  const t = (r.inference?.timings_ms ?? {}) as Record<string, number | undefined>;
+  if (t.prompt === undefined && t.generate === undefined) return undefined;
+  const rate = (tokens: number | undefined, ms: number | undefined) => (tokens && ms ? ` (${(tokens / (ms / 1000)).toFixed(1)} tokens/s)` : '');
+  return [
+    t.prompt !== undefined ? `reading the prompt ${duration(Math.round(t.prompt))}${rate(r.usage?.inputTokens, t.prompt)}` : '',
+    t.prompt_tokens_cached ? `${t.prompt_tokens_cached.toLocaleString()} prompt tokens already cached` : '',
+    t.generate !== undefined ? `writing ${duration(Math.round(t.generate))}${rate(r.usage?.outputTokens, t.generate)}` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
+
+function StopButton({ id }: { id: string }) {
+  const stop = useApiMutation(() => api(`/sessions/${encodeURIComponent(id)}/stop`, { method: 'POST' }));
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <Button variant="danger" icon={<CircleStop className="size-4" />} loading={stop.isPending} disabled={stop.isSuccess} onClick={() => confirm('Stop this session? Nothing it would have produced is applied; its transcript is kept.') && stop.mutate(undefined)}>
+        {stop.isSuccess ? 'Stopping…' : 'Stop'}
+      </Button>
+      {stop.error && <span className="text-[12px] text-bad-ink">{stop.error.message}</span>}
+    </div>
+  );
+}
+
 function SessionPage({ id }: { id: string }) {
   const res = useApi<SessionDetail>(['session', id], `/sessions/${encodeURIComponent(id)}`, { refetchInterval: 10_000 });
   const d = res.data;
   if (!d) return res.error ? <Callout tone="bad">{res.error.message}</Callout> : <Loading />;
+  return <SessionView d={d} />;
+}
+
+function SessionView({ d }: { d: SessionDetail }) {
   const s = d.session;
   const r = d.record;
+  const { events, error } = useTranscript(s.id, r && !r.transcript.removed ? r.transcript.events : undefined);
   const items: [ReactNode, ReactNode][] = [
     ['Kind', `${KIND_NAMES[s.kind]}${s.jobKind ? `: ${s.jobKind}` : ''}${s.role ? `, ${ROLE_NAMES[s.role]}` : ''}`],
     ['Started by', `${s.startedBy}${s.reason ? `. ${s.reason}` : ''}`],
@@ -508,6 +662,7 @@ function SessionPage({ id }: { id: string }) {
   if (s.model) items.push(['Model', <span key="m" className="font-mono text-[12px]">{r && r.modelUsed && r.modelUsed !== r.model ? `${r.modelUsed} (asked for ${r.model})` : s.model}</span>]);
   if (r?.effort) items.push(['Effort', r.effort]);
   if (r?.thinking !== undefined) items.push(['Thinking', r.thinking ? 'on' : 'off']);
+  if (r && timings(r)) items.push(['Time', timings(r)]);
   if (r?.inference) {
     const p = r.inference;
     const t = (p.timings_ms ?? {}) as Record<string, number>;
@@ -522,6 +677,28 @@ function SessionPage({ id }: { id: string }) {
   if (r?.usage) items.push(['Tokens', (Object.entries(r.usage) as [string, number][]).map(([k, v]) => `${k.replace(/Tokens$/, '').replace(/([A-Z])/g, ' $1').toLowerCase()} ${v.toLocaleString()}`).join(' · ')]);
   if (s.requests) items.push(['Requests', `${plural(s.requests.total, 'request')}: ${s.requests.changes} that changed something, ${s.requests.refused} refused`]);
   items.push(...parentLinks(s));
+  if (r?.fallbackOf)
+    items.push([
+      'Stood in for',
+      <span key="fb">
+        <Link to={`/sessions/${r.fallbackOf}`} className="font-mono text-[12px] text-accent hover:underline">
+          {r.fallbackOf}
+        </Link>
+        {r.fallbackReason ? `: the local model could not (${r.fallbackReason})` : ''}
+      </span>,
+    ]);
+  if (d.related.some((x) => x.fallbackOf === s.id))
+    items.push(['Taken over by', <span key="tb">{d.related.filter((x) => x.fallbackOf === s.id).map((x) => <Link key={x.id} to={`/sessions/${x.id}`} className="font-mono text-[12px] text-accent hover:underline">{x.id}</Link>)} (Claude, when this could not finish)</span>]);
+  if (r?.requestId)
+    items.push([
+      'Started by request',
+      <Link key="rq" to={`/settings?audit=${encodeURIComponent(r.requestId)}#audit`} className="font-mono text-[12px] text-accent hover:underline">
+        {r.requestId}
+      </Link>,
+    ]);
+  if (r?.stoppedBy) items.push(['Stopped by', `${actorName(r.stoppedBy.actor)}, ${when(r.stoppedBy.at)}`]);
+  if (r?.data) items.push(['Data it ran on', <span key="da" className="font-mono text-[12px]">{[r.data.commit ? `commit ${r.data.commit.slice(0, 10)}` : 'no git commit', r.data.uncommitted ? `${plural(r.data.uncommitted, 'file')} not yet committed` : '', r.data.format !== undefined ? `format v${r.data.format}` : ''].filter(Boolean).join(' · ')}</span>]);
+  if (r?.transcript.sha256) items.push(['Transcript SHA-256', <span key="sh" className="font-mono text-[12px] break-all">{r.transcript.sha256}</span>]);
   items.push(['Session id', <span key="id" className="font-mono text-[12px]">{s.id}</span>]);
   if (r?.error) items.push(['Error', <span key="e" className="text-bad-ink">{r.error}</span>]);
   return (
@@ -529,11 +706,12 @@ function SessionPage({ id }: { id: string }) {
       <Link to="/sessions" className="mb-3 inline-flex items-center gap-1 text-[13px] text-ink-3 hover:text-ink">
         <ArrowLeft className="size-3.5" aria-hidden /> Agent sessions
       </Link>
-      <PageHeader title={s.title} subtitle={s.source === 'token' ? 'An agent outside the app, seen by its requests' : s.source === 'earlier' ? 'From before transcripts were kept' : undefined} />
+      <PageHeader title={s.title} subtitle={s.source === 'token' ? 'An agent outside the app, seen by its requests' : s.source === 'earlier' ? 'From before transcripts were kept' : undefined} actions={s.source === 'recorded' && s.status === 'running' ? <StopButton id={s.id} /> : undefined} />
       <div className="flex flex-col gap-5">
         <Card>
           <KeyValue items={items} />
         </Card>
+        <Output events={events} s={s} />
         {d.noTranscript && <Callout tone="neutral" title="No transcript">{d.noTranscript}</Callout>}
         {d.recorded && (
           <Card title="What was recorded" description="As its job, import or receipt recorded it at the time.">
@@ -578,7 +756,34 @@ function SessionPage({ id }: { id: string }) {
             </ul>
           </Card>
         )}
-        <Transcript d={d} />
+        {r?.inputs && (r.inputs.files.length > 0 || r.inputs.skipped?.length) && (
+          <Card title="Its input files" description={r.inputs.removed ? `Deleted on ${r.inputs.removed.at.slice(0, 10)}, with its transcript.` : 'The files it was given to read, as they were, kept gzipped beside its transcript and deleted with it.'} padded={false}>
+            <ul>
+              {r.inputs.files.map((f) => (
+                <li key={f.name} className="flex flex-wrap items-baseline gap-x-3 border-t border-line px-5 py-2 text-[12.5px]">
+                  <span className="font-mono">{f.name}</span>
+                  <span className="text-ink-3">{fileSize(f.bytes)}</span>
+                  {!r.inputs!.removed && (
+                    <>
+                      <a href={`/api/sessions/${encodeURIComponent(s.id)}/inputs/${f.name.split('/').map(encodeURIComponent).join('/')}`} target="_blank" rel="noreferrer" className="text-accent hover:underline">
+                        Open
+                      </a>
+                      <a href={`/api/sessions/${encodeURIComponent(s.id)}/inputs/${f.name.split('/').map(encodeURIComponent).join('/')}?download=1`} className="text-accent hover:underline">
+                        Download
+                      </a>
+                    </>
+                  )}
+                </li>
+              ))}
+              {r.inputs.skipped?.map((f) => (
+                <li key={f.name} className="border-t border-line px-5 py-2 text-[12.5px] text-ink-3">
+                  <span className="font-mono">{f.name}</span> ({fileSize(f.bytes)}): not kept, over the size cap
+                </li>
+              ))}
+            </ul>
+          </Card>
+        )}
+        <Transcript d={d} events={events} error={error} />
         <Card
           title="In the audit log"
           description={s.source === 'token' ? 'What its requests did, in this stretch of activity.' : `This session’s own rows, and those of its ${s.kind === 'job' ? 'job' : s.kind === 'receipt' ? 'receipt' : 'import'}. Open one to see it in Settings → Audit log.`}

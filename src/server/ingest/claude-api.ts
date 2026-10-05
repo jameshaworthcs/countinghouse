@@ -9,7 +9,7 @@
 import { readFile } from 'node:fs/promises';
 import Anthropic from '@anthropic-ai/sdk';
 import type { BetaContentBlockParam } from '@anthropic-ai/sdk/resources/beta/messages/messages';
-import type { TranscriptSink } from '../sessions';
+import { stopSignal, type TranscriptSink } from '../sessions';
 import { normaliseExtraction } from './normalise';
 import type { EngineResult } from './engines';
 
@@ -77,7 +77,7 @@ export async function extractWithClaudeApi(opts: ApiOptions): Promise<EngineResu
   const sink = opts.transcript;
   // The request as sent; the transcript leaves a file's base64 out (sessions.ts).
   sink?.write({ type: 'finance.request', engine: 'claude-api', model: opts.model, effort: opts.effort, tools: [], systemPrompt: opts.systemPrompt, prompt: opts.userPrompt, schema: opts.schema, files: opts.files.map((f) => ({ name: f.path.split('/').pop(), mediaType: f.mediaType })), request: params });
-  const stream = client.beta.messages.stream(params, { signal: opts.signal });
+  const stream = client.beta.messages.stream(params, { signal: stopSignal(opts.signal, sink) });
   if (sink) {
     stream.on('streamEvent', (e) => {
       if (e.type === 'message_start') sink.write({ type: 'system', subtype: 'init', model: e.message.model, id: e.message.id });

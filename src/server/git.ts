@@ -142,6 +142,14 @@ export class GitCommitter {
     }
   }
 
+  /** The commit data/ is at, and how many of its files have changes not yet committed. */
+  async head(): Promise<{ commit?: string; uncommitted?: number }> {
+    if (!this.repoRoot) return {};
+    const [hash, porcelain] = await Promise.all([git(this.repoRoot, ['rev-parse', 'HEAD'], true), git(this.repoRoot, ['status', '--porcelain', '--', this.dataRel], true)]);
+    const commit = hash.trim();
+    return { ...(commit ? { commit } : {}), uncommitted: porcelain.split('\n').filter(Boolean).length };
+  }
+
   async status(): Promise<GitStatus> {
     if (!this.repoRoot) return { enabled: false, dirty: 0 };
     const [branch, porcelain, upstream, last] = await Promise.all([

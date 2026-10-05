@@ -116,10 +116,13 @@ export async function suggestCategories(store: Store, config: Config, proposals:
       for (const g of groups) {
         const t = g.rows[0]!;
         try {
+          const text = prompt(t, g.rows.length, store.account(t.accountId)?.type, categories);
           const res = await chat(config.inference, {
             alias: choice.model,
             system: SYSTEM,
-            content: [{ type: 'text', text: prompt(t, g.rows.length, store.account(t.accountId)?.type, categories) }],
+            content: [{ type: 'text', text }],
+            // The transcript shows what was asked: the system prompt, this payment's prompt, the schema.
+            describe: { model: choice.model, systemPrompt: SYSTEM, prompt: text, schema },
             schema: { name: 'category', schema },
             thinking: choice.thinking,
             maxTokens: def.maxTokens,

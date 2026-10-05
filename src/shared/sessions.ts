@@ -56,7 +56,27 @@ export interface SessionRecord {
   turns?: number;
   usage?: SessionUsage;
   error?: string;
+  /** The audit row of the request that started it (req_…), when a request did. */
+  requestId?: string;
+  /** Claude stood in for this session: the local model's session it took over from, and why. */
+  fallbackOf?: string;
+  fallbackReason?: string;
+  /** The state of data/ it ran against: the git commit, changes not yet committed, the format. */
+  data?: { commit?: string; uncommitted?: number; format?: number };
+  /** Who stopped it, when it was stopped (Stop on its page, or its job cancelled). */
+  stoppedBy?: { actor: AuditActor; at: string };
+  /** The files it was given to read (a job's scratch directory), kept gzipped beside the transcript. */
+  inputs?: SessionInputs;
   transcript: TranscriptInfo;
+}
+
+export interface SessionInputs {
+  /** The directory, relative to the work area. */
+  dir: string;
+  files: { name: string; bytes: number; storedBytes: number }[];
+  /** Files left out: over the cap for one session's inputs. */
+  skipped?: { name: string; bytes: number }[];
+  removed?: { at: string; why: 'expired' | 'over-total' };
 }
 
 export interface TranscriptInfo {
@@ -69,6 +89,8 @@ export interface TranscriptInfo {
   truncated?: boolean;
   /** It was deleted: past the retention period, or to keep transcripts under their total cap. */
   removed?: { at: string; why: 'expired' | 'over-total' };
+  /** The SHA-256 of the whole file when the session ended, also in its audit row (the log is hash-chained, the file is not). */
+  sha256?: string;
 }
 
 /** One row of the list: a recorded session, one from before transcripts were kept, or a token's activity. */
@@ -95,6 +117,7 @@ export interface SessionSummary {
   finishedAt?: string;
   durationMs?: number;
   costUsd?: number;
+  fallbackOf?: string;
   /** A token's activity: how many requests, and how many changed something or were refused. */
   requests?: { total: number; changes: number; refused: number };
   transcript: 'kept' | 'truncated' | 'removed' | 'none';

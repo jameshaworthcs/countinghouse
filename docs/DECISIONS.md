@@ -2176,3 +2176,22 @@ Later the same day, after the owner's first runs (`label-imports-2`):
   read NS&I's documents (`read-document`'s `claudeFor`, a switch in Settings → Models). A document
   is known to be NS&I's when it is dropped onto an NS&I account, or once the local model has read
   it; Claude then reads and checks it, and the review page says why.
+
+## 2026-10-05: Every session can be stopped, and shows everything it was given and gave back
+
+A review of how sessions are recorded found the local model's answers hidden on
+session pages, no way to stop a run, job inputs deleted, and fallbacks unlinked. The owner approved
+all of it. First part:
+
+- **Shown:** the local model's answer, reasoning and timings; each session's output as returned;
+  Ask answers under "What it produced"; spreadsheet text and image pages sent to the local model;
+  suggest-categories' prompts.
+- **Stop** on every running session, through a signal each engine honours. Stopping discards what
+  the run would have produced and keeps its transcript (owner's decision).
+- **Recorded:** the request that started a session, the data commit it ran on, the session a
+  fallback stood in for, a job's checks and what it applied, and its input files (gzipped, 90 days,
+  owner's decision).
+- **The transcript's SHA-256** is in the session's end row of the hash-chained audit log.
+- A session's audit rows stay rows of their own and name the request in their details: folded into
+  the request's row, a job's session (started long after the request answered) would vanish from
+  the log's default view.

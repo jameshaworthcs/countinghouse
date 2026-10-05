@@ -58,7 +58,9 @@ export async function extractWithInference(opts: InferenceReadOptions): Promise<
     if (f.mediaType === 'text/plain') {
       content.push({ type: 'text', text: (await readFile(f.path)).toString('utf8') });
     } else if (f.mediaType === 'application/pdf') {
-      for (const page of await renderPdfPages(f.path, opts.scratch, opts.run ? { run: opts.run } : {})) content.push({ type: 'image', mediaType: 'image/png', data: await readFile(page), name: path.basename(page) });
+      const pages = await renderPdfPages(f.path, opts.scratch, opts.run ? { run: opts.run } : {});
+      // Each page names its page of the stored document (the session belongs to its import).
+      for (const [i, page] of pages.entries()) content.push({ type: 'image', mediaType: 'image/png', data: await readFile(page), name: path.basename(page), source: { page: i + 1 } });
     } else {
       content.push({ type: 'image', mediaType: f.mediaType === 'image/jpeg' ? 'image/jpeg' : 'image/png', data: await readFile(f.path), name: path.basename(f.path) });
     }

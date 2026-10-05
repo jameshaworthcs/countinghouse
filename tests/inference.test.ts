@@ -22,7 +22,7 @@ import { runModel } from '../src/server/agents/run-model';
 import { sanitiseEvent } from '../src/server/sessions';
 import type { ImportRecord, Receipt, Transaction } from '../src/shared/schema';
 import { SettingsSchema } from '../src/shared/schema';
-import type { SessionListResponse, TranscriptResponse } from '../src/shared/sessions';
+import type { SessionDetail, SessionListResponse, TranscriptResponse } from '../src/shared/sessions';
 import { claudeChoice, resolveTask, taskOfJob } from '../src/shared/tasks';
 
 const CSRF = { 'x-finance-csrf': '1' };
@@ -160,6 +160,46 @@ describe('the client', () => {
     expect(res.output).toEqual({ labels: [] });
     expect(res.provenance).toEqual({ requestId: 'inf_test_1', alias: 'fast-chat', modelId: 'qwen-test-q4', modelSha256: 'ab'.repeat(32), systemFingerprint: 'inf-0123456789abcdef', seed: 42, thinking: false, schemaValid: true, queueMs: 1500 });
     expect(provenanceOf({ request_id: 'r', alias: 'a' }, 'inf-fallback')).toEqual({ requestId: 'r', alias: 'a', systemFingerprint: 'inf-fallback' });
+  });
+
+  it('records every part of the request and the parsed output in the transcript, but no image', async () => {
+    const events: Record<string, unknown>[] = [];
+    const png = await sharp({ create: { width: 2, height: 2, channels: 3, background: '#fff' } }).png().toBuffer();
+    await chat(CFG, {
+      ...base,
+      content: [{ type: 'text', text: 'Sheet 1\nDate,Amount' }, { type: 'image', mediaType: 'image/png', data: png, name: 'page-1.png', source: { page: 1 } }, { type: 'text', text: 'Read it.' }],
+      describe: { model: 'fast-chat', systemPrompt: 'You read.', prompt: 'Read it.', schema: { type: 'object' } },
+      transcript: { write: (e) => events.push(e) },
+      fetch: () => Promise.resolve(answer({ ok: true })),
+    });
+    expect(events.map((e) => e.type)).toEqual(['finance.request', 'assistant', 'result']);
+    expect(events[0]).toMatchObject({ prompt: 'Read it.', texts: ['Sheet 1\nDate,Amount'], files: [{ name: 'page-1.png', mediaType: 'image/png', bytes: png.length, source: { page: 1 } }] });
+    expect(JSON.stringify(events[0])).not.toContain(png.toString('base64'));
+    expect(events[2]).toMatchObject({ subtype: 'success', structured_output: { ok: true } });
+    // Without a description, its one text is the prompt.
+    const plain: Record<string, unknown>[] = [];
+    await chat(CFG, { ...base, transcript: { write: (e) => plain.push(e) }, fetch: () => Promise.resolve(answer({ ok: true })) });
+    expect(plain[0]).toMatchObject({ prompt: 'Name it.' });
+    expect(plain[0]!.texts).toBeUndefined();
+  });
+
+  it('stops when its session is stopped, mid-request', async () => {
+    const stop = new AbortController();
+    let sent = false;
+    const call = chat(CFG, {
+      ...base,
+      priority: 'interactive',
+      transcript: { write: () => undefined, signal: stop.signal },
+      fetch: (_url, init) =>
+        new Promise<Response>((_, reject) => {
+          sent = true;
+          init!.signal!.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+        }),
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(sent).toBe(true);
+    stop.abort();
+    await expect(call).rejects.toThrow('Cancelled');
   });
 
   it('thinks only when asked, within the service’s own limits', async () => {
@@ -442,6 +482,11 @@ describe('through the app', () => {
       ['claude-cli', 'succeeded'],
       ['inference', 'failed'],
     ]);
+    // Claude's session names the one it stood in for, and why.
+    const local = sessions.find((x) => x.engine === 'inference')!;
+    const claude = (await get<SessionDetail>(`/api/sessions/${sessions.find((x) => x.engine === 'claude-cli')!.id}`)).record!;
+    expect(claude.fallbackOf).toBe(local.id);
+    expect(claude.fallbackReason).toMatch(/The local model could not take this/);
   });
 
   it('has Claude read a document of a provider Settings → Models names, and says so', async () => {

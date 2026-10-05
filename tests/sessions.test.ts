@@ -4,6 +4,7 @@
 // seen by their requests. The reader here is a stand-in `claude` that streams events like the real
 // CLI: no Claude is run. All data is invented.
 
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
@@ -13,7 +14,8 @@ import { createApp, type App } from '../src/server/app';
 import { CLAUDE_TASKS } from './claude-tasks';
 import { loadConfig } from '../src/server/config';
 import { extractWithClaudeApi } from '../src/server/ingest/claude-api';
-import { SessionLog } from '../src/server/sessions';
+import { AuditLog } from '../src/server/audit';
+import { SessionLog, SessionStopped } from '../src/server/sessions';
 import { allSessions, sessionDetail } from '../src/server/sessionviews';
 import type { AuditResponse } from '../src/shared/audit';
 import type { ImportRecord } from '../src/shared/schema';
@@ -249,6 +251,50 @@ describe('Claude sessions in the app', () => {
     expect(d.audit.some((e) => e.action === 'data.change' && e.actor.type === 'job')).toBe(true);
     const jobRows = await get<AuditResponse>(`/api/audit?about=${job.id}`);
     expect(jobRows.entries.every((e) => e.sessions?.some((x) => x.id === s!.id))).toBe(true);
+    // The request that queued the job is linked from its session, and the session's own audit rows carry it.
+    expect(d.record!.requestId).toMatch(/^req_[0-9a-f]{12}$/);
+    expect(d.audit.find((e) => e.action === 'session.start')?.details).toMatchObject({ requestId: d.record!.requestId });
+    // What the answer became is in the transcript; the data it ran on is on the record.
+    const events = (await get<TranscriptResponse>(`/api/sessions/${s!.id}/transcript`)).events as { type: string; summary?: string }[];
+    expect(events.find((e) => e.type === 'finance.applied')?.summary).toBeTruthy();
+    expect(typeof d.record!.data?.format).toBe('number');
+    // The transcript's hash is on the record and in the hash-chained audit log.
+    const sha = createHash('sha256').update(await readFile(path.join(work, d.record!.transcript.path))).digest('hex');
+    expect(d.record!.transcript.sha256).toBe(sha);
+    expect(d.audit.find((e) => e.action === 'session.succeeded')?.details).toMatchObject({ transcriptSha256: sha });
+  });
+
+  it('a running session can be stopped from its page: the engine stops, and the audit log says who', async () => {
+    process.env.FAKE_CLAUDE_MODE = 'slow';
+    await start();
+    const form = new FormData();
+    form.append('file', new Blob([textPdf(['Example Bank', 'stop me'])]), 'stop.pdf');
+    const { results } = (await (await req('/api/imports', { method: 'POST', headers: CSRF, body: form })).json()) as { results: { id: string }[] };
+    const running = await until(
+      async () => (await get<SessionListResponse>('/api/sessions')).sessions.find((x) => x.kind === 'reading'),
+      (x) => x?.status === 'running',
+    );
+    // Not for a session that is not running, and not for an agent token (the route is not open to one).
+    expect((await req('/api/sessions/ses_nope/stop', { method: 'POST', headers: CSRF })).status).toBe(404);
+    expect((await req(`/api/sessions/${running!.id}/stop`, { method: 'POST', headers: CSRF })).status).toBe(200);
+    const d = await until(
+      () => get<SessionDetail>(`/api/sessions/${running!.id}`),
+      (x) => x.audit.some((e) => e.action === 'session.cancelled'),
+    );
+    expect(d.session.status).toBe('cancelled');
+    expect(d.record!.stoppedBy?.actor.type).toBeTruthy();
+    expect(d.record!.error).toMatch(/^Stopped by /);
+    const types = (await get<TranscriptResponse>(`/api/sessions/${running!.id}/transcript`)).events.map((e) => (e as { type: string }).type);
+    expect(types).toContain('finance.cancelled');
+    expect(types).not.toContain('result');
+    // The stop is the request's doing: its row names the session and lists the stop.
+    expect(d.audit.find((e) => e.action === 'request' && e.request?.path === `/api/sessions/${running!.id}/stop`)?.changes?.map((x) => x.action)).toEqual(['session.cancel']);
+    const rec = await until(
+      () => get<ImportRecord>(`/api/imports/${results[0]!.id}`),
+      (r) => r.status !== 'processing' && r.status !== 'queued',
+    );
+    expect(rec.status).toBe('failed');
+    expect((await req(`/api/sessions/${running!.id}/stop`, { method: 'POST', headers: CSRF })).status).toBe(409);
   });
 
   it('a running session updates: its record and transcript grow before it ends', async () => {
@@ -361,6 +407,48 @@ describe('transcript limits', () => {
     const again = new SessionLog(path.join(dir, 'w2'));
     await again.init({ sweep: false });
     expect(again.get(ids[0]!)!.transcript.removed?.why).toBe('over-total');
+  });
+
+  it('a stopped session tells its engine through its signal, ends cancelled, and is audited with who stopped it', async () => {
+    const audit = AuditLog.open(path.join(dir, 'audit'));
+    const log = new SessionLog(dir, { days: 90, maxBytes: 1e6, totalBytes: 1e9 }, audit);
+    await log.init({ sweep: false });
+    const s = await session(log);
+    const engine = new Promise<void>((_, reject) => s.signal.addEventListener('abort', () => reject(new Error('Cancelled')), { once: true }));
+    const run = s.run(async (sink) => {
+      sink.write({ type: 'system', subtype: 'init' });
+      await engine;
+    });
+    expect(log.cancel(s.id, { type: 'owner', user: 'owner', via: 'session', ip: '127.0.0.1' })).toBe(true);
+    await expect(run).rejects.toBeInstanceOf(SessionStopped);
+    expect(log.get(s.id)).toMatchObject({ status: 'cancelled', error: 'Stopped by You.', stoppedBy: { actor: { type: 'owner' } } });
+    expect(log.cancel(s.id)).toBe(false);
+    const t = (await log.transcript(s.id))!;
+    expect(t.events.map((e) => (e as { type: string }).type)).toEqual(['system', 'finance.cancelled', 'finance.error']);
+    const rows = await audit.query({ about: [s.id], limit: 10 });
+    expect(rows.entries.map((e) => e.action).sort()).toEqual(['session.cancel', 'session.cancelled', 'session.start']);
+  });
+
+  it("keeps a session's input files gzipped beside its transcript, serves them back, and deletes them with it", async () => {
+    const log = new SessionLog(dir, { days: 90, maxBytes: 1e6, totalBytes: 1e9 });
+    await log.init({ sweep: false });
+    const scratch = path.join(dir, 'scratch');
+    await mkdir(path.join(scratch, 'sub'), { recursive: true });
+    await writeFile(path.join(scratch, 'transactions.jsonl'), '{"id":"t1"}\n'.repeat(100));
+    await writeFile(path.join(scratch, 'sub', 'digest.json'), '{"months":[]}');
+    const s = await session(log);
+    await s.keepInputs(scratch);
+    await s.finish('succeeded');
+    const r = log.get(s.id)!;
+    expect(r.inputs!.files.map((f) => f.name)).toEqual([path.join('sub', 'digest.json'), 'transactions.jsonl']);
+    expect(r.inputs!.files[1]!.storedBytes).toBeLessThan(r.inputs!.files[1]!.bytes);
+    expect((await log.input(s.id, 'transactions.jsonl'))!.toString()).toBe('{"id":"t1"}\n'.repeat(100));
+    expect(await log.input(s.id, '../escape')).toBeUndefined();
+    expect(log.bytes()).toBe(r.transcript.bytes + r.inputs!.files.reduce((n, f) => n + f.storedBytes, 0));
+    await log.sweep(Date.now() + 91 * 86_400_000);
+    expect(existsSync(path.join(dir, r.inputs!.dir))).toBe(false);
+    expect(log.get(s.id)!.inputs!.removed).toMatchObject({ why: 'expired' });
+    expect(await log.input(s.id, 'transactions.jsonl')).toBeUndefined();
   });
 
   it('a session stopped by a restart is marked failed', async () => {

@@ -13,12 +13,15 @@
 //   together at another (the oldest go first), and each is deleted after the retention period. The
 //   record stays, saying so.
 
+import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { closeSync, mkdirSync, openSync, writeSync } from 'node:fs';
-import { readdir, readFile, rm, stat } from 'node:fs/promises';
+import { closeSync, createReadStream, mkdirSync, openSync, writeSync } from 'node:fs';
+import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { SessionKind, SessionRecord, SessionStatus } from '../shared/sessions';
-import { currentActor, maskIdentifiers, type AuditLog } from './audit';
+import { gunzipSync, gzipSync } from 'node:zlib';
+import { actorName, type AuditActor } from '../shared/audit';
+import type { SessionInputs, SessionKind, SessionRecord, SessionStatus } from '../shared/sessions';
+import { currentActor, currentRequestId, maskIdentifiers, type AuditLog } from './audit';
 import { atomicWrite, randomHex } from './fsutil';
 
 /** Session times: UTC to the millisecond, so the order of quick runs is kept. */
@@ -38,6 +41,15 @@ export const DEFAULT_SESSION_LIMITS: SessionLimits = { days: 90, maxBytes: 10 * 
 /** Where a session's events go as they arrive (the engines write to it). */
 export interface TranscriptSink {
   write(event: Record<string, unknown>): void;
+  /** Aborted when the session is stopped (Stop on its page): the engine writing here stops too. */
+  readonly signal?: AbortSignal | undefined;
+}
+
+/** The engine's own signal and its session's, as one: either stops the work. */
+export function stopSignal(signal: AbortSignal | undefined, sink: TranscriptSink | undefined): AbortSignal | undefined {
+  const own = sink?.signal;
+  if (!own) return signal;
+  return signal ? AbortSignal.any([signal, own]) : own;
 }
 
 export type StartSession = Omit<SessionRecord, 'id' | 'status' | 'startedAt' | 'transcript' | 'startedBy'> & { startedBy?: SessionRecord['startedBy'] };
@@ -86,6 +98,7 @@ export class Session implements TranscriptSink {
   private fd: number | undefined;
   private done = false;
   private cut = false;
+  private readonly stopper = new AbortController();
 
   constructor(
     private readonly log: SessionLog,
@@ -102,6 +115,53 @@ export class Session implements TranscriptSink {
 
   get id(): string {
     return this.record.id;
+  }
+
+  /** Aborted when someone stops the session. */
+  get signal(): AbortSignal {
+    return this.stopper.signal;
+  }
+
+  /** Stop it: the engine is told, and the session ends cancelled, saying who stopped it. */
+  stop(actor: AuditActor): void {
+    if (this.done || this.stopper.signal.aborted) return;
+    const at = new Date().toISOString();
+    this.record.stoppedBy = { actor, at };
+    this.write({ type: 'finance.cancelled', by: actorName(actor), actor });
+    this.stopper.abort(new Error(`Stopped by ${actorName(actor)}`));
+  }
+
+  /**
+   * Keep a copy of the files the session is given to read (a job's scratch directory), gzipped
+   * beside its transcript, under the same retention: what it saw can be read and run again.
+   */
+  async keepInputs(dir: string): Promise<void> {
+    const names = await filesUnder(dir);
+    if (!names.length) return;
+    const rel = this.record.transcript.path.replace(/\.jsonl$/, '.inputs');
+    const abs = path.join(this.log.workDir, rel);
+    const inputs: SessionInputs = { dir: rel, files: [] };
+    let stored = 0;
+    try {
+      await mkdir(abs, { recursive: true, mode: 0o700 });
+      for (const name of names) {
+        const bytes = await readFile(path.join(dir, name));
+        const gz = gzipSync(bytes);
+        if (stored + gz.length > this.log.limits.maxBytes) {
+          (inputs.skipped ??= []).push({ name, bytes: bytes.length });
+          continue;
+        }
+        const out = path.join(abs, `${name}.gz`);
+        await mkdir(path.dirname(out), { recursive: true, mode: 0o700 });
+        await writeFile(out, gz, { mode: 0o600 });
+        stored += gz.length;
+        inputs.files.push({ name, bytes: bytes.length, storedBytes: gz.length });
+      }
+    } catch (err) {
+      console.warn(`[sessions] could not keep a session's inputs: ${(err as Error).message}`);
+    }
+    // The record lists them; the transcript's first event, the request, names them too.
+    this.record.inputs = inputs;
   }
 
   write(event: Record<string, unknown>): void {
@@ -170,22 +230,54 @@ export class Session implements TranscriptSink {
     const r = this.record;
     r.status = status;
     r.finishedAt = nowISO();
+    r.transcript.sha256 = await fileSha256(path.join(this.log.workDir, r.transcript.path));
     r.durationMs = Date.parse(r.finishedAt) - Date.parse(r.startedAt);
     if (error) r.error = maskIdentifiers(error).slice(0, 2000);
     await this.log.ended(this);
   }
 
-  /** Run `fn` as this session: it ends succeeded, or failed (cancelled when `signal` was aborted). */
+  /** Run `fn` as this session: it ends succeeded, or failed (cancelled when `signal` was aborted, or it was stopped). */
   async run<T>(fn: (sink: TranscriptSink) => Promise<T>, signal?: AbortSignal): Promise<T> {
     try {
       const out = await fn(this);
       await this.finish('succeeded');
       return out;
     } catch (err) {
-      await this.finish(signal?.aborted ? 'cancelled' : 'failed', (err as Error).message);
-      throw err;
+      const stopped = this.stopper.signal.aborted;
+      await this.finish(signal?.aborted || stopped ? 'cancelled' : 'failed', stopped ? `${(this.stopper.signal.reason as Error).message}.` : (err as Error).message);
+      throw stopped ? new SessionStopped((this.stopper.signal.reason as Error).message) : err;
     }
   }
+}
+
+/** The session was stopped by someone (Stop on its page): not a failure of the engine. */
+export class SessionStopped extends Error {}
+
+/** Files under a directory, as paths relative to it, in order. */
+async function filesUnder(dir: string, prefix = ''): Promise<string[]> {
+  let entries;
+  try {
+    entries = await readdir(path.join(dir, prefix), { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const out: string[] = [];
+  for (const e of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+    const rel = prefix ? path.join(prefix, e.name) : e.name;
+    if (e.isDirectory()) out.push(...(await filesUnder(dir, rel)));
+    else if (e.isFile()) out.push(rel);
+  }
+  return out;
+}
+
+function fileSha256(file: string): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    const h = createHash('sha256');
+    createReadStream(file)
+      .on('data', (d) => h.update(d))
+      .on('end', () => resolve(h.digest('hex')))
+      .on('error', () => resolve(undefined));
+  });
 }
 
 export class SessionLog extends EventEmitter {
@@ -197,6 +289,8 @@ export class SessionLog extends EventEmitter {
   /** When the app first kept sessions here: anything before has no transcript. */
   since = nowISO();
   readonly dir: string;
+  /** The state of data/ a session starts against (app.ts sets it: the git commit and format). */
+  dataState?: (() => Promise<SessionRecord['data']>) | undefined;
 
   constructor(
     readonly workDir: string,
@@ -251,13 +345,56 @@ export class SessionLog extends EventEmitter {
     return this.records.get(id);
   }
 
+  /** The running session, to stop it. */
+  running(id: string): Session | undefined {
+    return this.live.get(id);
+  }
+
+  /** Stop a running session; the audit log records who did. False when it is not running. */
+  cancel(id: string, actor: AuditActor = currentActor()): boolean {
+    const s = this.live.get(id);
+    if (!s) return false;
+    const r = s.record;
+    this.audit?.record({
+      category: 'session',
+      action: 'session.cancel',
+      actor,
+      summary: `Agent session stopped by ${actorName(actor)}: ${r.title}`,
+      targets: [r.id, ...[r.jobId ?? r.importId ?? r.receiptId].filter((x): x is string => Boolean(x))],
+      details: { sessionId: r.id, kind: r.kind, engine: r.engine },
+    });
+    s.stop(actor);
+    return true;
+  }
+
+  /** One kept input file of a session, unzipped. */
+  async input(id: string, name: string): Promise<Buffer | undefined> {
+    const r = this.records.get(id);
+    const f = r?.inputs?.files.find((x) => x.name === name);
+    if (!r?.inputs || !f || r.inputs.removed) return undefined;
+    try {
+      return gunzipSync(await readFile(path.join(this.workDir, r.inputs.dir, `${f.name}.gz`)));
+    } catch {
+      return undefined;
+    }
+  }
+
   /** A session starts: its record is written and the audit log told before the engine runs. */
   async start(input: StartSession): Promise<Session> {
     const id = `ses_${Date.now().toString(36)}${randomHex(4)}`;
     const rel = path.join(transcriptDir(input.kind, input), `${id}.jsonl`);
+    const requestId = input.requestId ?? currentRequestId();
+    let data: SessionRecord['data'];
+    try {
+      data = await this.dataState?.();
+    } catch {
+      // not known: the session still runs
+    }
     const record: SessionRecord = {
       ...input,
       id,
+      ...(requestId ? { requestId } : {}),
+      ...(data ? { data } : {}),
       startedBy: input.startedBy ?? { actor: currentActor(), reason: '' },
       status: 'running',
       startedAt: nowISO(),
@@ -271,9 +408,26 @@ export class SessionLog extends EventEmitter {
     this.audit?.record({
       category: 'session',
       action: 'session.start',
-      summary: `Agent session started: ${record.title} (${record.model}, ${record.engine})`,
-      targets: [id, ...(parent ? [parent] : []), ...(record.transactionId ? [record.transactionId] : [])],
-      details: { sessionId: id, kind: record.kind, ...(record.jobKind ? { jobKind: record.jobKind } : {}), ...(record.role ? { role: record.role } : {}), engine: record.engine, model: record.model, ...(record.promptVersion ? { promptVersion: record.promptVersion } : {}), tools: record.tools, reason: record.startedBy.reason },
+      actor: record.startedBy.actor,
+      // Its own row, not folded into the request's (a job's session starts long after it): the
+      // request is named in its details, and the session's record links to it.
+      requestId: undefined,
+      summary: `Agent session started: ${record.title} (${record.model}, ${record.engine})${record.fallbackOf ? ', standing in for the local model' : ''}`,
+      targets: [id, ...(parent ? [parent] : []), ...(record.transactionId ? [record.transactionId] : []), ...(record.fallbackOf ? [record.fallbackOf] : [])],
+      details: {
+        sessionId: id,
+        kind: record.kind,
+        ...(record.jobKind ? { jobKind: record.jobKind } : {}),
+        ...(record.role ? { role: record.role } : {}),
+        engine: record.engine,
+        model: record.model,
+        ...(record.promptVersion ? { promptVersion: record.promptVersion } : {}),
+        tools: record.tools,
+        reason: record.startedBy.reason,
+        ...(requestId ? { requestId } : {}),
+        ...(record.fallbackOf ? { fallbackOf: record.fallbackOf, fallbackReason: record.fallbackReason } : {}),
+        ...(data ? { data } : {}),
+      },
     });
     this.emit('update', record);
     this.prune();
@@ -305,17 +459,25 @@ export class SessionLog extends EventEmitter {
     this.audit?.record({
       category: 'session',
       action: `session.${r.status}`,
+      requestId: undefined,
       outcome: r.status === 'failed' ? 'failed' : 'ok',
       summary: `Agent session ${r.status === 'succeeded' ? 'finished' : r.status}: ${r.title}${cost}${r.error ? ` (${r.error.slice(0, 200)})` : ''}`,
       targets: [r.id, ...(parent ? [parent] : [])],
       details: {
         sessionId: r.id,
         kind: r.kind,
+        ...(r.requestId ? { requestId: r.requestId } : {}),
         model: r.modelUsed ?? r.model,
         ...(r.durationMs !== undefined ? { durationMs: r.durationMs } : {}),
         ...(r.costUsd !== undefined ? { costUsd: r.costUsd } : {}),
         ...(r.turns !== undefined ? { turns: r.turns } : {}),
         events: r.transcript.events,
+        bytes: r.transcript.bytes,
+        // The transcript's hash: the audit log is hash-chained and the transcript is not, so an
+        // edited or cut transcript shows, even after it has been deleted.
+        ...(r.transcript.sha256 ? { transcriptSha256: r.transcript.sha256 } : {}),
+        ...(r.inputs?.files.length ? { inputs: r.inputs.files.length } : {}),
+        ...(r.stoppedBy ? { stoppedBy: actorName(r.stoppedBy.actor) } : {}),
         ...(r.transcript.truncated ? { truncated: true } : {}),
         ...(r.error ? { error: r.error } : {}),
       },
@@ -356,9 +518,9 @@ export class SessionLog extends EventEmitter {
     return { events, total: lines.length };
   }
 
-  /** Bytes held by transcripts not yet removed. */
+  /** Bytes held by transcripts (and the inputs kept with them) not yet removed. */
   bytes(): number {
-    return this.list().reduce((sum, r) => sum + (r.transcript.removed ? 0 : r.transcript.bytes), 0);
+    return this.list().reduce((sum, r) => sum + held(r), 0);
   }
 
   /** Delete transcripts past the retention period, then the oldest while over the total cap. */
@@ -373,8 +535,13 @@ export class SessionLog extends EventEmitter {
       const expired = Date.parse(r.finishedAt ?? r.startedAt) < cutoff;
       if (!expired && total <= this.limits.totalBytes) continue;
       await rm(path.join(this.workDir, r.transcript.path), { force: true });
-      total -= r.transcript.bytes;
-      r.transcript.removed = { at: nowISO(new Date(now)), why: expired ? 'expired' : 'over-total' };
+      total -= held(r);
+      const gone = { at: nowISO(new Date(now)), why: expired ? ('expired' as const) : ('over-total' as const) };
+      r.transcript.removed = gone;
+      if (r.inputs && !r.inputs.removed) {
+        await rm(path.join(this.workDir, r.inputs.dir), { recursive: true, force: true });
+        r.inputs.removed = gone;
+      }
       await this.persist(r);
       removed++;
     }
@@ -406,8 +573,14 @@ export class SessionLog extends EventEmitter {
       this.records.delete(r.id);
       void rm(path.join(this.dir, `${r.id}.json`), { force: true });
       void rm(path.join(this.workDir, r.transcript.path), { force: true });
+      if (r.inputs) void rm(path.join(this.workDir, r.inputs.dir), { recursive: true, force: true });
     }
   }
+}
+
+/** What a session's files hold on disk: its transcript, and the inputs kept with it. */
+function held(r: SessionRecord): number {
+  return (r.transcript.removed ? 0 : r.transcript.bytes) + (r.inputs && !r.inputs.removed ? r.inputs.files.reduce((n, f) => n + f.storedBytes, 0) : 0);
 }
 
 /** The limits from the environment: FINANCE_TRANSCRIPT_DAYS, FINANCE_TRANSCRIPT_MAX_MB, FINANCE_TRANSCRIPTS_TOTAL_MB. */

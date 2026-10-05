@@ -23,8 +23,8 @@ export interface ModelRunOptions {
   tools: AgentTool[];
   timeoutMs: number;
   signal?: AbortSignal | undefined;
-  /** Starts the session each call is recorded in (one per engine tried). */
-  session?: ((s: Pick<SessionRecord, 'engine' | 'model' | 'effort' | 'thinking' | 'tools'>) => ReturnType<SessionLog['start']>) | undefined;
+  /** Starts the session each call is recorded in (one per engine tried; Claude's names the one it stands in for). */
+  session?: ((s: Pick<SessionRecord, 'engine' | 'model' | 'effort' | 'thinking' | 'tools' | 'fallbackOf' | 'fallbackReason'>) => ReturnType<SessionLog['start']>) | undefined;
   /** Tests only. */
   fetch?: typeof fetch;
 }
@@ -74,18 +74,21 @@ export function mayFallBack(c: TaskChoice, err: unknown, bin: string | null, sig
   return c.engine === 'inference' && c.fallback && Boolean(bin) && !signal?.aborted && (err instanceof InferenceUnavailable || err instanceof InferenceFailed);
 }
 
-async function once(opts: ModelRunOptions, c: TaskChoice): Promise<ModelRunResult> {
-  const s = await opts.session?.(sessionEngine(c, opts.tools));
+async function once(opts: ModelRunOptions, c: TaskChoice, started: { id?: string }, fallback?: Pick<SessionRecord, 'fallbackOf' | 'fallbackReason'>): Promise<ModelRunResult> {
+  const s = await opts.session?.({ ...sessionEngine(c, opts.tools), ...fallback });
+  started.id = s?.id;
   const run = (transcript: TranscriptSink | undefined) => callModel(opts, c, transcript);
   return s ? s.run(run, opts.signal) : run(undefined);
 }
 
 export async function runModel(opts: ModelRunOptions): Promise<ModelRunResult> {
+  const first: { id?: string } = {};
   try {
-    return await once(opts, opts.choice);
+    return await once(opts, opts.choice, first);
   } catch (err) {
     if (!mayFallBack(opts.choice, err, opts.bin, opts.signal)) throw err;
-    const r = await once(opts, claudeChoice(opts.task));
-    return { ...r, fellBack: (err as Error).message };
+    const reason = (err as Error).message;
+    const r = await once(opts, claudeChoice(opts.task), {}, { ...(first.id ? { fallbackOf: first.id } : {}), fallbackReason: reason });
+    return { ...r, fellBack: reason };
   }
 }

@@ -605,7 +605,8 @@ export class ImportService extends EventEmitter {
       return { ...r, engine };
     };
     // Each reading is a session of its own, with its transcript (sessions.ts).
-    const session = async (c: TaskChoice, engine: AiEngineId, role: 'first' | 'second', task: 'read-document' | 'check-reading'): Promise<EngineResult> => {
+    let lastSession: string | undefined;
+    const session = async (c: TaskChoice, engine: AiEngineId, role: 'first' | 'second', task: 'read-document' | 'check-reading', fallback?: { fallbackOf?: string; fallbackReason: string }): Promise<EngineResult> => {
       const s = await this.sessions?.start({
         kind: sessionKind,
         title: `${role === 'first' ? (sessionKind === 'reread' ? 'Read again' : 'Read') : 'Check by a second reading of'} ${record.document.fileName}`,
@@ -618,7 +619,10 @@ export class ImportService extends EventEmitter {
         tools: engine === 'claude-cli' ? ['Read'] : [],
         privacy: 'personal',
         ...(opts.startedBy ? { startedBy: opts.startedBy } : {}),
+        ...(fallback?.fallbackOf ? { fallbackOf: fallback.fallbackOf } : {}),
+        ...(fallback ? { fallbackReason: fallback.fallbackReason } : {}),
       });
+      lastSession = s?.id;
       const run = (transcript: TranscriptSink | undefined) => readOnce(c, task, engine, transcript);
       return s ? s.run(run, signal) : run(undefined);
     };
@@ -631,7 +635,7 @@ export class ImportService extends EventEmitter {
       } catch (err) {
         if (engine !== 'inference' || !c.fallback || signal.aborted || !(err instanceof InferenceUnavailable || err instanceof InferenceFailed)) throw err;
         if (!claudeEng) throw new Error(`${err.message} Claude is not available to read it instead.`);
-        const r = await session(claudeChoice(task, claudeEng), claudeEng, role, task);
+        const r = await session(claudeChoice(task, claudeEng), claudeEng, role, task, { ...(lastSession ? { fallbackOf: lastSession } : {}), fallbackReason: err.message });
         return { ...r, notices: [`${err.message} Claude read it instead, as Settings → Models allows for ${TASKS[task].label.toLowerCase()}.`, ...(r.notices ?? [])] };
       } finally {
         if (record.extraction.waiting) {

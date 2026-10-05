@@ -106,6 +106,8 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
   const work = new WorkArea(config.workDir);
   // Every Claude session the app runs, with its transcript, in the work area (sessions.ts).
   const sessions = new SessionLog(config.workDir, sessionLimitsFromEnv(env), audit);
+  // Each session records the state of data/ it ran against, so its inputs can be rebuilt.
+  sessions.dataState = async () => ({ ...(await git.head()), format: store.meta.version });
   await sessions.init();
   const imports = new ImportService(store, config, work, sessions);
   await imports.init();

@@ -49,6 +49,11 @@ export function currentActor(): AuditActor {
   return scopes.getStore()?.actor() ?? BACKGROUND;
 }
 
+/** The request whose answer started this work (its audit row), even after it has answered. */
+export function currentRequestId(): string | undefined {
+  return scopes.getStore()?.requestId;
+}
+
 // ─── The log ─────────────────────────────────────────────────────────────────────────────────────
 
 export interface AuditInput {

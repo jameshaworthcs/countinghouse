@@ -15,7 +15,7 @@ import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import type { InferenceProvenance } from '../shared/schema';
 import type { Priority } from '../shared/tasks';
-import type { TranscriptSink } from './sessions';
+import { stopSignal, type TranscriptSink } from './sessions';
 
 export interface InferenceConfig {
   baseUrl: string;
@@ -24,8 +24,8 @@ export interface InferenceConfig {
   waitUpToMs?: number;
 }
 
-/** A part of the user's message: text, or an image (PNG or JPEG). */
-export type ContentPart = { type: 'text'; text: string } | { type: 'image'; mediaType: 'image/png' | 'image/jpeg'; data: Buffer; name?: string };
+/** A part of the user's message: text, or an image (PNG or JPEG), with the stored document it is a page of. */
+export type ContentPart = { type: 'text'; text: string } | { type: 'image'; mediaType: 'image/png' | 'image/jpeg'; data: Buffer; name?: string; source?: { importId?: string; receiptId?: string; page?: number } };
 
 export interface ChatRequest {
   alias: string;
@@ -179,6 +179,8 @@ export async function chat(cfg: InferenceConfig | undefined, req: ChatRequest): 
   const doFetch = req.fetch ?? ((url: string | URL | Request, init?: RequestInit) => postLong(url as string, init as { headers?: Record<string, string>; body?: string; signal?: AbortSignal }));
   const sleep = req.sleep ?? defaultSleep;
   const sink = req.transcript;
+  // Stopping the session (its page's Stop) stops the request too.
+  const signal = stopSignal(req.signal, sink);
   const content = req.content.map((p) => (p.type === 'text' ? { type: 'text', text: p.text } : { type: 'image_url', image_url: { url: `data:${p.mediaType};base64,${p.data.toString('base64')}` } }));
   const body: Record<string, unknown> = {
     model: req.alias,
@@ -186,14 +188,20 @@ export async function chat(cfg: InferenceConfig | undefined, req: ChatRequest): 
     ...(req.thinking ? { chat_template_kwargs: { enable_thinking: true } } : req.maxTokens ? { max_tokens: req.maxTokens } : {}),
     ...(req.schema ? { response_format: { type: 'json_schema', json_schema: { name: req.schema.name, schema: req.schema.schema, strict: true } } } : {}),
   };
+  // Every part of the request: text the description does not already give (a spreadsheet's text),
+  // and each image by name, size and the stored document it came from (its bytes are not kept).
+  const described = typeof req.describe?.prompt === 'string' ? req.describe.prompt : undefined;
+  const texts = req.content.filter((p): p is Extract<ContentPart, { type: 'text' }> => p.type === 'text' && p.text !== described).map((p) => p.text);
   sink?.write({
     type: 'finance.request',
     engine: 'inference',
     alias: req.alias,
     priority: req.priority,
     thinking: Boolean(req.thinking),
+    ...(req.maxTokens ? { maxTokens: req.maxTokens } : {}),
     ...req.describe,
-    files: req.content.filter((p) => p.type === 'image').map((p) => ({ name: (p as { name?: string }).name, mediaType: (p as { mediaType: string }).mediaType, bytes: (p as { data: Buffer }).data.length })),
+    ...(texts.length ? (described === undefined && texts.length === 1 ? { prompt: texts[0] } : { texts }) : {}),
+    files: req.content.filter((p): p is Extract<ContentPart, { type: 'image' }> => p.type === 'image').map((p) => ({ name: p.name, mediaType: p.mediaType, bytes: p.data.length, ...(p.source ? { source: p.source } : {}) })),
   });
   const started = Date.now();
   const waitUpTo = req.waitUpToMs ?? cfg.waitUpToMs ?? DEFAULT_WAIT_MS;
@@ -202,19 +210,19 @@ export async function chat(cfg: InferenceConfig | undefined, req: ChatRequest): 
   let waited = 0;
   let dropped = 0;
   for (let attempt = 1; ; attempt++) {
-    if (req.signal?.aborted) throw new Error('Cancelled');
+    if (signal?.aborted) throw new Error('Cancelled');
     let status = 0;
     let json: Record<string, unknown> | undefined;
     let retryAfterMs: number | undefined;
     let netError: string | undefined;
     const sent = Date.now();
     try {
-      const res = await inTurn(req.priority, req.signal, () =>
+      const res = await inTurn(req.priority, signal, () =>
         doFetch(`${cfg.baseUrl}/chat/completions`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}`, 'X-Inference-Priority': req.priority },
           body: payload,
-          signal: req.signal ? AbortSignal.any([req.signal, AbortSignal.timeout(attemptMs)]) : AbortSignal.timeout(attemptMs),
+          signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(attemptMs)]) : AbortSignal.timeout(attemptMs),
         }),
       );
       status = res.status;
@@ -222,7 +230,7 @@ export async function chat(cfg: InferenceConfig | undefined, req: ChatRequest): 
       if (Number.isFinite(ra) && ra > 0) retryAfterMs = ra * 1000;
       json = (await res.json().catch(() => undefined)) as Record<string, unknown> | undefined;
     } catch (err) {
-      if (req.signal?.aborted) throw new Error('Cancelled');
+      if (signal?.aborted) throw new Error('Cancelled');
       if ((err as Error).name === 'TimeoutError') throw new InferenceFailed(`The local model did not answer within ${Math.round(attemptMs / 60_000)} minutes.`);
       status = 0; // not answering: down, or the network
       netError = (err as NodeJS.ErrnoException).code ?? (err as Error).message.slice(0, 120);
@@ -249,7 +257,7 @@ export async function chat(cfg: InferenceConfig | undefined, req: ChatRequest): 
     }
     sink?.write({ type: 'finance.waiting', status, code: error.code, reason, retryInSeconds: Math.round(waitMs / 1000), ...(until ? { until } : {}) });
     req.onWait?.({ reason, ...(until ? { until } : {}) });
-    await sleep(waitMs, req.signal);
+    await sleep(waitMs, signal);
     waited += waitMs;
   }
 }
@@ -265,7 +273,8 @@ function finish(json: Record<string, unknown>, req: ChatRequest, started: number
   const usage = { ...(typeof u.prompt_tokens === 'number' ? { promptTokens: u.prompt_tokens } : {}), ...(typeof u.completion_tokens === 'number' ? { completionTokens: u.completion_tokens } : {}) };
   const model = typeof json.model === 'string' ? json.model : provenance.modelId;
   sink?.write({ type: 'assistant', model, finish_reason: choice.finish_reason, ...(reasoning ? { reasoning } : {}), content: text });
-  const result = (subtype: string) => sink?.write({ type: 'result', subtype, model, finish_reason: choice.finish_reason, usage: { input_tokens: usage.promptTokens, output_tokens: usage.completionTokens }, duration_ms: Date.now() - started, provenance: full });
+  const result = (subtype: string, output?: unknown) =>
+    sink?.write({ type: 'result', subtype, model, finish_reason: choice.finish_reason, usage: { input_tokens: usage.promptTokens, output_tokens: usage.completionTokens }, duration_ms: Date.now() - started, ...(output !== undefined ? { structured_output: output } : {}), provenance: full });
   if (choice.finish_reason === 'length') {
     result('max_tokens');
     throw new InferenceFailed('The local model ran out of room before it finished (its output was cut off).');
@@ -284,7 +293,7 @@ function finish(json: Record<string, unknown>, req: ChatRequest, started: number
       throw new InferenceFailed('The local model returned output that was not valid JSON.');
     }
   }
-  result('success');
+  result('success', output);
   return { text, ...(output !== undefined ? { output } : {}), ...(reasoning ? { reasoning } : {}), provenance, provenanceFull: full, usage, durationMs: Date.now() - started };
 }
 
