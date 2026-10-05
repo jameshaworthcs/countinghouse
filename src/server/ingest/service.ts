@@ -6,6 +6,7 @@ import path from 'node:path';
 import { slugify } from '../../shared/accounts';
 import type { DraftLinkView, LinkCandidate, Reread } from '../../shared/api';
 import { CategoryIndex } from '../../shared/categories';
+import { findInstitution } from '../../shared/institutions';
 import { today } from '../../shared/dates';
 import { formatMoney, toMinor } from '../../shared/money';
 import { sectionChecks } from '../../shared/review';
@@ -101,6 +102,18 @@ function accountShown(r: ImportRecord): string | undefined {
   // A committed screenshot may have created its account.
   const committed = r.result?.sections?.find((x) => x.key === s.key)?.accountId;
   return committed ?? (s.target.mode === 'existing' ? s.target.accountId : undefined);
+}
+
+/** The provider, of those listed, whose document a reading says this is (by name, or Premium Bonds). */
+function weakProvider(extraction: Extraction, providers: string[]): string | undefined {
+  if (!providers.length) return undefined;
+  const names = [extraction.institutionName, ...extraction.accounts.map((a) => a.institutionName)];
+  for (const n of names) {
+    const inst = findInstitution(n);
+    if (inst && providers.includes(inst.id)) return inst.name;
+  }
+  if (providers.includes('ns-and-i') && extraction.accounts.some((a) => a.accountType === 'premium_bonds')) return 'NS&I';
+  return undefined;
 }
 
 /**
@@ -495,7 +508,9 @@ export class ImportService extends EventEmitter {
     let verified: Awaited<ReturnType<ImportService['verifyReading']>> | undefined;
     const settings = this.store.settings.extraction;
     const { engines, claudeBin } = await detectEngines(this.engineOpts());
-    const { read: readChoice, check: checkChoice } = this.readChoices(opts, engines);
+    const choices = this.readChoices(opts, engines);
+    let readChoice = choices.read;
+    let checkChoice = choices.check;
     if (kind === 'sheet' && readChoice.engine === 'ocr') throw new Error('A spreadsheet that is not a list of payments is read by a model, and documents are set to offline OCR. See Settings → Models.');
     const scratch = await this.work.scratch(scratchId);
     let files: { path: string; mediaType: string }[];
@@ -629,7 +644,27 @@ export class ImportService extends EventEmitter {
       result = await extractWithOcr(files[0]!, scratch, Number(today().slice(0, 4)));
       engineVersion = OCR_ENGINE_VERSION;
     } else {
+      // A provider the local model reads poorly (Settings → Models, read-document's claudeFor): known
+      // before reading when the document was dropped onto its account, else from the reading itself.
+      const claudeEng = claudeEngine(engines);
+      const toClaude = (why: string) => {
+        readChoice = claudeChoice('read-document', claudeEng!);
+        if (checkChoice.engine !== 'off') checkChoice = claudeChoice('check-reading', claudeEng!);
+        return why;
+      };
+      let routed: string | undefined;
+      // The account's provider by its catalogue id ("ns-and-i"); Premium Bonds are NS&I's whatever they are named.
+      const hintProvider = !hint ? undefined : hint.type === 'premium_bonds' ? 'ns-and-i' : findInstitution((hint.institutionId ? this.store.institution(hint.institutionId)?.name : undefined) ?? hint.name)?.id;
+      if (readChoice.engine === 'inference' && claudeEng && hintProvider && readChoice.claudeFor.includes(hintProvider)) routed = toClaude(`Claude read it: it was dropped onto ${hint!.name}, and Settings → Models has Claude read that provider's documents.`);
       result = await readWith(readChoice, 'first');
+      const weak = readChoice.engine === 'inference' && result.engine === 'inference' ? weakProvider(result.extraction, readChoice.claudeFor) : undefined;
+      if (weak) {
+        if (claudeEng) {
+          routed = toClaude(`The local model read it as ${weak}'s, whose documents Claude reads (Settings → Models): Claude read it again, and its reading is the one kept.`);
+          result = await readWith(readChoice, 'first');
+        } else result = { ...result, notices: [`It is ${weak}'s, whose documents Claude reads (Settings → Models), but Claude is not available: the local model's reading is kept.`, ...(result.notices ?? [])] };
+      }
+      if (routed) result = { ...result, notices: [routed, ...(result.notices ?? [])] };
       engineVersion = engineVersionOf(result.engine === 'inference');
       const same = checkChoice.engine === readChoice.engine && checkChoice.model === readChoice.model && checkChoice.thinking === readChoice.thinking;
       if (checkChoice.engine !== 'off' && !same) {

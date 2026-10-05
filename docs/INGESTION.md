@@ -117,19 +117,25 @@ ISA, LISA, SIPP or pension app go to the model Settings → Models gives reading
 
 | Engine | When | How |
 |---|---|---|
-| `inference` | When Settings → Models gives reading documents to the local model service on this machine (`vision-extract`, Qwen3.6-35B-A3B) | `ingest/inference-read.ts`: the same system prompt, user prompt and JSON Schema as Claude gets, sent to the service's OpenAI-compatible API at `batch` priority. The service takes images only: a PDF is rendered page by page at 150 dpi (`pdftoppm`; at most 40 pages), a screenshot goes as `prepareImage`'s tiles, a spreadsheet as its text. Minutes per document, not seconds. Nothing leaves the machine. Each reading is a session with its transcript, the images left out |
+| `inference` | The default since 2026-10-05: the local model service on this machine (`vision-extract`, Qwen3.6-35B-A3B) | `ingest/inference-read.ts`: the same system prompt, user prompt and JSON Schema as Claude gets, sent to the service's OpenAI-compatible API at `batch` priority. The service takes images only: a PDF is rendered page by page at 150 dpi (`pdftoppm`; at most 40 pages), a screenshot goes as `prepareImage`'s tiles, a spreadsheet as its text. Minutes per document, not seconds. Nothing leaves the machine. Each reading is a session with its transcript, the images left out |
 | `claude-cli` | Default when the `claude` CLI is installed and logged in | `claude -p` with `--json-schema`, `--tools Read`, `--restricted` (file tools confined to the scratch directory), `--safe-mode`, `--no-session-persistence`, `--output-format stream-json`, run in a scratch directory containing only the document. Each reading (the first, and the check) is a Claude session with its transcript (ARCHITECTURE.md, "Claude sessions") |
 | `claude-api` | When `ANTHROPIC_API_KEY` is set (or chosen) | Messages API with structured outputs (`output_config.format`), streaming, and `fallbacks: "default"` so a refusal is retried on the recommended fallback model |
 | `ocr` | Always available offline | tesseract / pdftotext; proposes the headline balance and candidate values, and parses statement-style lines using running balances to infer signs. Low confidence, so review carefully |
 
-Sonnet reads every document, with effort `high`, and its reading is checked (below): Opus reads the
-document again whenever a figure cannot be confirmed from the document itself. On the local model
-(Settings → Models & import), `vision-extract` reads with thinking off and checks with thinking on
-(within the service's 16k-token budget). It stays a choice, not the default, until its evaluation
-passes: on `extract-15` it read 98.9% of fields right on 40 documents in 4.9 hours, but some wrong
-readings passed every check (a statement's period left blank, a fund page filed under the wrong
-provider's account, foreign amounts left out; DECISIONS 2026-10-04). You can re-read any draft
-with a different engine or model from the review screen, the local model included.
+The local model reads every document, thinking off, and its reading is checked (below): it reads
+the document again, thinking (within the service's 16k-token budget), whenever a figure cannot be
+confirmed from the document itself. It follows four rules of its own besides Claude's prompt
+(`LOCAL_RULES`: the statement period, foreign amounts, a fund's manager is not the provider, the
+document's own date), and its reader's version says so (`extract-15+local-1`). On `extract-15` it
+read 99.3% of fields right on 40 documents (5.4 hours, about 8 minutes a document), and every
+wrong figure was marked as a disagreement between its two readings (DECISIONS 2026-10-05).
+
+**NS&I's documents are read by Claude** (Sonnet, checked by Opus): the local model read its
+Premium Bonds screens poorly. A document dropped onto an NS&I account goes to Claude straight away;
+otherwise the local model's reading says whose it is (NS&I by name, or Premium Bonds), and Claude
+reads it again; the review page says so. Settings → Models can turn that off. Before 2026-10-05,
+Sonnet read and Opus checked every document; both remain a choice in Settings → Models & import.
+You can re-read any draft with a different engine or model from the review screen.
 
 ### The local model: waiting, Claude, and balance lines
 
@@ -255,7 +261,7 @@ either way. Five rules are added to the prompt (`prompt.ts`), each with its part
      its totals to its net pay, and the tax figures read are what its lines say.
 2. **A reading every check confirms is kept.** Typically a bank or card statement with balances.
 3. **Otherwise the checking model reads the document again** (Settings → Models, `check-reading`: the
-   default Opus; the local model thinking when chosen). That is when a check failed (balances that don't
+   the local model thinking by default; Opus for a document Claude read). That is when a check failed (balances that don't
    add up, wrong card signs, dates outside the period, rows the reader was unsure of, dropped
    rows), or when some figures have nothing to be checked against:
    - a feed screenshot with no balances;

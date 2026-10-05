@@ -98,6 +98,15 @@
               },
               "fallback": {
                 "type": "boolean"
+              },
+              "claudeFor": {
+                "maxItems": 40,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 60
+                }
               }
             }
           }

@@ -28,14 +28,14 @@ import { claudeChoice, resolveTask, taskOfJob } from '../src/shared/tasks';
 const CSRF = { 'x-finance-csrf': '1' };
 
 describe('the task table', () => {
-  it('gives names and notes to the local model, and documents, receipts, the month in review, insights and research to Claude', () => {
-    // Documents and receipts stay on Claude until the local model's evaluation passes.
-    expect(resolveTask('read-document')).toEqual({ engine: 'claude-cli', model: 'sonnet', thinking: false, effort: 'high', fallback: false });
-    expect(resolveTask('check-reading')).toMatchObject({ engine: 'claude-cli', model: 'opus' });
-    expect(resolveTask('read-receipt')).toMatchObject({ engine: 'claude-cli', model: 'sonnet' });
-    // Moved to the local model, a task takes its local alias and thinking.
-    expect(resolveTask('read-document', { 'read-document': { engine: 'inference' } })).toEqual({ engine: 'inference', model: 'vision-extract', thinking: false, effort: 'high', fallback: false });
-    expect(resolveTask('check-reading', { 'check-reading': { engine: 'inference' } })).toMatchObject({ engine: 'inference', model: 'vision-extract', thinking: true });
+  it('gives documents (but NS&I’s), receipts, names and notes to the local model, and the month in review, insights and research to Claude', () => {
+    expect(resolveTask('read-document')).toEqual({ engine: 'inference', model: 'vision-extract', thinking: false, effort: 'high', fallback: false, claudeFor: ['ns-and-i'] });
+    expect(resolveTask('check-reading')).toMatchObject({ engine: 'inference', model: 'vision-extract', thinking: true, claudeFor: [] });
+    expect(resolveTask('read-receipt')).toMatchObject({ engine: 'inference', model: 'vision-extract' });
+    // Moved to Claude, a task takes Claude's model, and back again its local alias and thinking.
+    expect(resolveTask('read-document', { 'read-document': { engine: 'claude-cli' } })).toMatchObject({ engine: 'claude-cli', model: 'sonnet', claudeFor: [] });
+    expect(resolveTask('check-reading', { 'check-reading': { engine: 'claude-api' } })).toMatchObject({ engine: 'claude-api', model: 'opus' });
+    expect(resolveTask('read-document', { 'read-document': { claudeFor: [] } }).claudeFor).toEqual([]);
     expect(resolveTask('label-imports')).toMatchObject({ engine: 'inference', model: 'fast-chat', thinking: false });
     expect(resolveTask('interpret-note')).toMatchObject({ engine: 'inference', model: 'fast-chat' });
     expect(resolveTask('ask')).toMatchObject({ engine: 'inference', model: 'fast-chat', thinking: true });
@@ -52,7 +52,7 @@ describe('the task table', () => {
     expect(local('fast-chat')).toBe('vision-extract');
     expect(local('opus')).toBe('vision-extract');
     expect(local('chat-q8')).toBe('chat-q8');
-    expect(resolveTask('read-document', { 'read-document': { model: 'vision-extract' } }).model).toBe('sonnet');
+    expect(resolveTask('read-document', { 'read-document': { engine: 'claude-cli', model: 'vision-extract' } }).model).toBe('sonnet');
     // Moving a task to Claude takes Claude's model for it, not the alias.
     expect(resolveTask('read-document', { 'read-document': { engine: 'claude-cli' } })).toMatchObject({ engine: 'claude-cli', model: 'sonnet', thinking: false, fallback: false });
     expect(resolveTask('check-reading', { 'check-reading': { engine: 'claude-api', effort: 'max' } })).toMatchObject({ engine: 'claude-api', model: 'opus', effort: 'max' });
@@ -72,8 +72,8 @@ describe('format v10 migration', () => {
     expect(migrateModelSettings(s)).toEqual({});
     expect(s).toEqual({ extraction: { maxConcurrent: 2, timeoutSeconds: 900, readReceipts: true, rereadDocuments: true, readEverything: true }, agents: { enabled: false, labelImports: true }, models: { tasks: {} } });
     const parsed = SettingsSchema.parse(s);
-    expect(resolveTask('read-document', parsed.models.tasks)).toMatchObject({ engine: 'claude-cli', model: 'sonnet' });
-    expect(resolveTask('check-reading', parsed.models.tasks)).toMatchObject({ engine: 'claude-cli', model: 'opus' });
+    expect(resolveTask('read-document', parsed.models.tasks)).toMatchObject({ engine: 'inference', model: 'vision-extract' });
+    expect(resolveTask('check-reading', parsed.models.tasks)).toMatchObject({ engine: 'inference', thinking: true });
     expect(resolveTask('label-imports', parsed.models.tasks).engine).toBe('inference');
 
     const other = { extraction: { engine: 'ocr', model: 'opus', verifyModel: '' }, agents: { model: 'sonnet', effort: 'medium' } } as Record<string, unknown>;
@@ -247,7 +247,7 @@ describe('the client', () => {
 /** The extraction the stand-in returns; "unbalanced" makes the first reading fail its check. */
 const statement = (closing: number) => ({ documentType: 'bank_statement', institutionName: 'Example Bank', documentDate: '2026-09-30', accounts: [{ accountType: 'current', name: 'Current account', last4: '5678', currency: 'GBP', periodStart: '2026-09-01', periodEnd: '2026-09-30', openingBalance: 100, closingBalance: closing, transactions: [{ date: '2026-09-12', description: 'TESCO STORES', amount: -12.3 }] }], figures: [], notes: [], confidence: 'high' });
 
-type Mode = 'ok' | 'unbalanced' | 'busy-once' | 'down' | 'garbled';
+type Mode = 'ok' | 'unbalanced' | 'busy-once' | 'down' | 'garbled' | 'nsandi';
 interface Seen {
   alias: string;
   priority: string | undefined;
@@ -283,6 +283,10 @@ function standIn(): { server: Server; seen: Seen[]; mode: { value: Mode }; url: 
         return send(503, { error: { code: 'queue_timeout', message: 'the GPU is leased until 14:30' } }, { 'retry-after': '1' });
       }
       const name = b.response_format?.json_schema?.name;
+      if (mode.value === 'nsandi' && name === 'extraction') {
+        const bonds = { documentType: 'account_overview_screenshot', institutionName: 'NS&I', accounts: [{ accountType: 'premium_bonds', name: 'Premium Bonds', currency: 'GBP', closingBalance: 5000, transactions: [] }], figures: [], notes: [], confidence: 'high' };
+        return send(200, { model: 'qwen3.6-35b-a3b-q4_k_m', choices: [{ message: { content: JSON.stringify(bonds) }, finish_reason: 'stop' }], usage: {}, provenance: { ...PROVENANCE, request_id: `inf_${seen.length}`, alias: b.model, schema_valid: true } });
+      }
       const out = name === 'category' ? { category: 'groceries', confidence: 'high' } : name === 'output' ? { answer: 'You spent £12.30 at Tesco in September.', figures: [{ label: 'Spending', value: '£12.30', from: 'months[2026-09].spending' }], confidence: 'high', caveats: [], cannotAnswer: false } : name === 'receipt' ? { merchant: 'Example Shop', date: '2026-09-12', total: 12.3, lines: [{ description: 'Bread', amount: 2.3, category: 'groceries' }, { description: 'Socks', amount: 10, category: 'clothing' }], notes: [] } : statement(mode.value === 'unbalanced' && !thinking ? 999 : 87.7);
       send(200, {
         model: 'qwen3.6-35b-a3b-q4_k_m',
@@ -438,6 +442,19 @@ describe('through the app', () => {
       ['claude-cli', 'succeeded'],
       ['inference', 'failed'],
     ]);
+  });
+
+  it('has Claude read a document of a provider Settings → Models names, and says so', async () => {
+    svc.mode.value = 'nsandi';
+    await app.ctx.store.setSettings({ ...app.ctx.store.settings, models: { tasks: {} } });
+    const rec = await upload();
+    expect(rec).toMatchObject({ status: 'review', extraction: { engine: 'claude-cli', model: 'claude-sonnet-5-5' } });
+    expect(rec.extraction.engineVersion).not.toMatch(/local/);
+    expect(rec.extraction.warnings[0]).toMatch(/The local model read it as NS&I's, whose documents Claude reads \(Settings → Models\)/);
+    // One local reading found it out; Claude read it (and its own figures confirmed it).
+    expect(svc.seen).toHaveLength(1);
+    const sessions = (await get<SessionListResponse>('/api/sessions')).sessions.filter((x) => x.importId === rec.id);
+    expect(sessions.map((x) => x.engine).sort()).toEqual(['claude-cli', 'inference']);
   });
 
   it('fails a reading outside the schema rather than keep it', async () => {

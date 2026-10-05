@@ -16,6 +16,8 @@ const ENGINE_NAMES: Record<TaskEngine, string> = {
   off: 'Off',
 };
 
+const PROVIDER_NAMES: Record<string, string> = { 'ns-and-i': 'NS&I' };
+
 const NEED_NAMES: Record<string, string> = { vision: 'reads images', web: 'web search', tools: 'tools', reasoning: 'reasoning', 'long-context': 'long input', structured: 'structured output' };
 
 function TaskRow({ task, s, set }: { task: TaskKind; s: Settings; set: (task: TaskKind, patch: TaskChoiceInput) => void }) {
@@ -87,6 +89,15 @@ function TaskRow({ task, s, set }: { task: TaskKind; s: Settings; set: (task: Ta
           {c.engine === 'inference' && (
             <div className="sm:col-span-3">
               <Switch checked={c.thinking} onChange={(v) => set(task, { thinking: v })} label="Think before answering" description="Slower (several times as long), within a 16k-token budget. It helps checking a reading and adding things up; it does not help a first reading." />
+              {(def.local?.claudeFor ?? []).map((id) => (
+                <Switch
+                  key={id}
+                  checked={c.claudeFor.includes(id)}
+                  onChange={(v) => set(task, { claudeFor: v ? [...c.claudeFor.filter((x) => x !== id), id] : c.claudeFor.filter((x) => x !== id) })}
+                  label={`Claude reads ${PROVIDER_NAMES[id] ?? id}’s documents`}
+                  description={`The local model reads them poorly (on the evaluation set, NS&I’s Premium Bonds screens scored 50% and 29%). On: once a reading shows a document is ${PROVIDER_NAMES[id] ?? id}’s, or when you drop it onto that account, Claude reads and checks it, which sends it to Anthropic.`}
+                />
+              ))}
               {def.engines.some((e) => e === 'claude-cli' || e === 'claude-api') && (
                 <Switch
                   checked={c.fallback}

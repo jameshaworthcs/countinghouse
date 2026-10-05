@@ -2154,3 +2154,25 @@ Later the same day, after the owner's first runs (`label-imports-2`):
   on the local model; fix the silent misses on the finance side, run the local evaluation again,
   and move documents only when it passes. Suggestions and questions, being new and started by the
   owner, run locally.
+
+## 2026-10-05: Documents move to the local model, except NS&I's
+
+- **Owner (2026-10-04):** fix what the local model's first evaluation let through unnoticed, run it
+  again, and move documents only when it passes.
+- **Fixed:** rules for the local model only (`LOCAL_RULES`, `local-1`: the statement period,
+  foreign amounts in every reading, a fund's manager is not the provider, the document's own date);
+  a provider named only by the start of a fund's name no longer decides the account, for any
+  engine; the evaluation pins the check to the reading's engine (one run, by that bug, was checked
+  by Opus and spent $2.70 of the Claude plan; its results were discarded).
+- **Evaluated** (`npm run eval -- --everything --engine inference`, 40 documents, every reading and
+  check local, $0; eval/results/2026-10-05-04-19_extract-15_local-v10-local1.json): **99.3% of
+  fields**, 271 of 280 rows, 5.4 hours. Every wrong figure (an employer pension contribution, a
+  LISA's allowance read as tax, pension figures without their tax year, missed Premium Bonds prize
+  rows) was marked as a disagreement between the two readings. Not marked: a credit card's 0%
+  balance-transfer rate left out of its terms, and a Revolut screen made a new account (which the
+  review shows, and which keeps it out of "Commit all ready"). NS&I's Premium Bonds screens scored
+  50% and 29%.
+- **Owner (2026-10-05):** move documents, checking and receipts to the local model, and have Claude
+  read NS&I's documents (`read-document`'s `claudeFor`, a switch in Settings → Models). A document
+  is known to be NS&I's when it is dropped onto an NS&I account, or once the local model has read
+  it; Claude then reads and checks it, and the review page says why.

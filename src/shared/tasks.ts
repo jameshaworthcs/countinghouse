@@ -65,6 +65,13 @@ export const TaskChoiceSchema = z.object({
    * Anthropic, so it is off unless you turn it on.
    */
   fallback: z.boolean().optional(),
+  /**
+   * Local model only: providers (catalogue ids, src/shared/institutions.ts) whose documents Claude
+   * reads instead, because the local model reads them poorly. A document is known to be one once it
+   * is read (or dropped onto that provider's account); Claude then reads and checks it, which sends
+   * it to Anthropic.
+   */
+  claudeFor: z.array(z.string().min(1).max(60)).max(40).optional(),
 });
 export type TaskChoiceInput = z.infer<typeof TaskChoiceSchema>;
 
@@ -75,6 +82,7 @@ export interface TaskChoice {
   thinking: boolean;
   effort: Effort;
   fallback: boolean;
+  claudeFor: string[];
 }
 
 export interface TaskDef {
@@ -89,8 +97,8 @@ export interface TaskDef {
   default: TaskChoice;
   /** The Claude model a fallback (or a "Read with Claude") uses. */
   claude: { model: string; effort: Effort };
-  /** The local model's alias and thinking, when the task runs there. */
-  local?: { model: string; thinking: boolean };
+  /** The local model's alias and thinking, when the task runs there, and the providers Claude reads instead. */
+  local?: { model: string; thinking: boolean; claudeFor?: string[] };
   /** What the local model service is asked for (its README §5, "Priorities"). */
   priority: Priority;
   /** Minutes a local run may take once its turn comes (the queue wait is on top). */
@@ -101,8 +109,15 @@ export interface TaskDef {
   jobs?: string[];
 }
 
-const local = (model: string, thinking = false): TaskChoice => ({ engine: 'inference', model, thinking, effort: 'high', fallback: false });
-const claude = (model: string): TaskChoice => ({ engine: 'claude-cli', model, thinking: false, effort: 'high', fallback: false });
+const local = (model: string, thinking = false, claudeFor: string[] = []): TaskChoice => ({ engine: 'inference', model, thinking, effort: 'high', fallback: false, claudeFor });
+const claude = (model: string): TaskChoice => ({ engine: 'claude-cli', model, thinking: false, effort: 'high', fallback: false, claudeFor: [] });
+
+/**
+ * NS&I's screens (Premium Bonds transactions and prizes) are the ones the local model reads poorly:
+ * 50% and 29% of fields on the evaluation set, prize rows missed (DECISIONS 2026-10-05). The owner's
+ * choice: Claude reads them.
+ */
+const CLAUDE_FOR = ['ns-and-i'];
 
 export const TASKS: Record<TaskKind, TaskDef> = {
   'read-document': {
@@ -112,11 +127,11 @@ export const TASKS: Record<TaskKind, TaskDef> = {
     needs: ['vision', 'structured'],
     privacy: 'personal',
     engines: ['inference', 'claude-cli', 'claude-api', 'ocr'],
-    // Claude until the local model's evaluation passes (DECISIONS 2026-10-04: 98.9% of fields, but
-    // some wrong readings passed every check).
-    default: claude('sonnet'),
+    // Local since its evaluation passed (DECISIONS 2026-10-05: 99.3% of fields, every wrong figure
+    // marked), except NS&I's documents.
+    default: local('vision-extract', false, CLAUDE_FOR),
     claude: { model: 'sonnet', effort: 'high' },
-    local: { model: 'vision-extract', thinking: false },
+    local: { model: 'vision-extract', thinking: false, claudeFor: CLAUDE_FOR },
     priority: 'batch',
     runMinutes: 60,
     maxTokens: 49_152,
@@ -128,7 +143,7 @@ export const TASKS: Record<TaskKind, TaskDef> = {
     needs: ['vision', 'structured', 'reasoning'],
     privacy: 'personal',
     engines: ['inference', 'claude-cli', 'claude-api', 'off'],
-    default: claude('opus'),
+    default: local('vision-extract', true),
     claude: { model: 'opus', effort: 'high' },
     local: { model: 'vision-extract', thinking: true },
     priority: 'batch',
@@ -142,7 +157,7 @@ export const TASKS: Record<TaskKind, TaskDef> = {
     needs: ['vision', 'structured'],
     privacy: 'personal',
     engines: ['inference', 'claude-cli'],
-    default: claude('sonnet'),
+    default: local('vision-extract'),
     claude: { model: 'sonnet', effort: 'high' },
     local: { model: 'vision-extract', thinking: false },
     priority: 'batch',
@@ -284,13 +299,14 @@ export function resolveTask(task: TaskKind, overrides?: Partial<Record<TaskKind,
     thinking: engine === 'inference' ? (o.thinking ?? (sameEngine ? def.default.thinking : (def.local?.thinking ?? false))) : false,
     effort: o.effort ?? (sameEngine && engine !== 'inference' ? def.default.effort : def.claude.effort),
     fallback: engine === 'inference' && def.engines.some((e) => e === 'claude-cli' || e === 'claude-api') ? (o.fallback ?? false) : false,
+    claudeFor: engine === 'inference' && def.engines.some((e) => e === 'claude-cli' || e === 'claude-api') ? (o.claudeFor ?? def.local?.claudeFor ?? []) : [],
   };
 }
 
 /** The Claude choice a fallback, or a "Read with Claude", uses for a task. */
 export function claudeChoice(task: TaskKind, engine: 'claude-cli' | 'claude-api' = 'claude-cli'): TaskChoice {
   const def = TASKS[task];
-  return { engine, model: def.claude.model, thinking: false, effort: def.claude.effort, fallback: false };
+  return { engine, model: def.claude.model, thinking: false, effort: def.claude.effort, fallback: false, claudeFor: [] };
 }
 
 /** A model choice as words: "vision-extract, thinking" or "opus". */

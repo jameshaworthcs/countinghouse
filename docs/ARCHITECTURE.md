@@ -270,9 +270,9 @@ the task allows.
 
 | Task | Default | Priority | Why |
 |---|---|---|---|
-| Read documents (`read-document`), and read them again | Claude (CLI), Sonnet; local `vision-extract` when chosen | batch | locally, 98.9% of fields on the evaluation set, but some wrong readings passed every check (DECISIONS 2026-10-04), so Claude stays the default until a local run passes |
-| Check a reading (`check-reading`) | Claude (CLI), Opus; local `vision-extract`, thinking, when chosen | batch | as above |
-| Read receipts (`read-receipt`) | Claude (CLI), Sonnet; local `vision-extract` when chosen | batch | not measured locally yet |
+| Read documents (`read-document`), and read them again | local `vision-extract`; NS&I's documents by Claude (CLI), Sonnet | batch | 99.3% of fields on the evaluation set, every wrong figure marked as a disagreement (DECISIONS 2026-10-05); NS&I's screens read poorly |
+| Check a reading (`check-reading`) | local `vision-extract`, thinking (Claude, Opus, for a document Claude read) | batch | as above |
+| Read receipts (`read-receipt`) | local `vision-extract` | batch | a proposal you accept; not measured on receipts |
 | Name imports, understand notes (`label-imports`, `interpret-note`) | local `fast-chat` | batch, normal | short answers |
 | Suggest categories (`suggest-categories`) | local `fast-chat`, local only | batch | one payment description per request, as a proposal |
 | Answer questions (`ask`) | local `fast-chat`, thinking | interactive | someone is waiting |
