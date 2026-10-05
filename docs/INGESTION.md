@@ -329,7 +329,9 @@ on every import):
   letters has no last four digits.
 - **Statement dates.** A statement's balance is dated at the end of its period, never at its
   "statement date" (the day it was produced); the draft corrects a balance dated after the period
-  when no rows run past it (`extract-7`).
+  when no rows run past it (`extract-7`). A period read with no rows and no opening balance is
+  dropped from the draft, with a note: the page only gives a balance, and the period would count
+  its days as covered (FORMULAS.md §3).
 - **Tax figures** from P60s, payslips, P11Ds, interest certificates, pension and dividend
   statements. A payslip gives the figures for its own pay period, never its year-to-date column
   (`extract-6`); a P60 gives the year's. A payslip's or P60's tax code goes on its gross pay

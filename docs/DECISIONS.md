@@ -2280,3 +2280,18 @@ What the first real question showed (above), built:
   marked wrong, asked again on `ask-3` (local model, thinking, 168 s), made one `compare` call and
   answered the right way round, every figure the app's, saying which days at the end were not in
   yet. Passed; shipped.
+
+## 2026-10-05: A period with nothing in it covers no days
+
+The student loan's balance page prints a "2026-27 summary" of what
+was repaid and the interest added since 6 April. One reading took that as the page's period
+(6 April to 4 October), the other left it out, so the import was held for a disagreement. Kept, the
+period would have counted the loan as complete for six months from a page that lists none of its
+payments, and Data health would no longer have said if one was missing.
+
+- **The draft keeps a period only with rows or an opening balance** (`draft.ts`). With neither, the
+  period is dropped with a note, both readings agree, and the page records its balance and rate.
+  Every committed statement with a period and no rows had an opening balance, so none would change.
+- **Not a prompt rule.** A rule for the local model needs its five-hour evaluation; this is a
+  deterministic rule about what counts as coverage, so it belongs in the draft.
+

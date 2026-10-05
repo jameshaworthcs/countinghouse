@@ -9,6 +9,7 @@ import { enrich } from '../src/server/enrich';
 import { figureId, transactionId } from '../src/server/ids';
 import { commitDraft } from '../src/server/ingest/commit';
 import { buildDraft } from '../src/server/ingest/draft';
+import { compareReadings } from '../src/server/ingest/verify';
 import { normaliseExtraction } from '../src/server/ingest/normalise';
 import { parseOfx } from '../src/server/ingest/ofx';
 import { Store } from '../src/server/store';
@@ -392,5 +393,36 @@ describe('ingestion details', () => {
     const c = new Categoriser([], new CategoryIndex(defaultCategories()), accounts, [{ id: 'chip', name: 'Chip', kind: 'investment_platform' }]);
     expect(c.categorise({ accountId: 'current', description: 'CHIP AND PIN FISH BAR', amount: -8.5 }).categorisedBy).not.toBe('transfer');
     expect(c.categorise({ accountId: 'current', description: 'TRANSFER TO CHIP SAVINGS', amount: -100 }).categorisedBy).toBe('transfer');
+  });
+});
+
+describe('a period the document gives no rows for', () => {
+  const doc = { id: 'doc_0000000000000003', sha256: '3'.repeat(64), fileName: 'balance.pdf', mediaType: 'application/pdf', size: 1 };
+  const loanPage = (periodStart: string | null, periodEnd: string | null) =>
+    normaliseExtraction({
+      documentType: 'other',
+      accounts: [{ accountType: 'student_loan', last4: '4321', closingBalance: -21500.4, balanceDate: '2026-10-04', periodStart, periodEnd, transactions: [] }],
+    }).extraction;
+
+  it('a balance page with a "since 6 April" summary covers no days, so its readings do not disagree on them', async () => {
+    await store.setAccounts([acct('loan', 'student_loan', { last4: '4321' })]);
+    const summary = buildDraft(loanPage('2026-04-06', '2026-10-04'), { store, document: doc, uploadedOn: '2026-10-05' });
+    const s = summary.sections[0]!;
+    expect(s.periodStart).toBeUndefined();
+    expect(s.periodEnd).toBeUndefined();
+    expect(s).toMatchObject({ balance: -21500.4, balanceDate: '2026-10-04' });
+    expect(summary.notes.join('\n')).toMatch(/not counted as covered/);
+    const plain = buildDraft(loanPage(null, null), { store, document: doc, uploadedOn: '2026-10-05' });
+    expect(compareReadings(plain, summary, { first: 'first', second: 'second' }).disagreements).toEqual([]);
+  });
+
+  it('a statement with no rows keeps its period when it gives its opening balance', async () => {
+    await store.setAccounts([acct('current', 'current', { last4: '1006' })]);
+    const { extraction } = normaliseExtraction({
+      documentType: 'bank_statement',
+      accounts: [{ accountType: 'current', last4: '1006', openingBalance: 2, closingBalance: 2, periodStart: '2026-08-01', periodEnd: '2026-08-31', transactions: [] }],
+    });
+    const draft = buildDraft(extraction, { store, document: doc, uploadedOn: '2026-09-02' });
+    expect(draft.sections[0]).toMatchObject({ periodStart: '2026-08-01', periodEnd: '2026-08-31' });
   });
 });

@@ -58,7 +58,9 @@ in this order:
 account it is, is the union of intervals:
 
 - each committed import's statement period for the account (`periodStart`–`periodEnd`), or the
-  span of its rows (a statement with an opening balance and no rows: its closing day);
+  span of its rows (a statement with an opening balance and no rows: its closing day). A draft
+  keeps a period only with rows or an opening balance: a page that gives neither (a loan's balance
+  with a "since 6 April" summary) has none, so it covers no days;
   - a document that does not print its period (an export, a screenshot of a list) covers from its
     first row to its last, widened to the range you gave while reviewing it (`coversFrom`,
     `coversTo`). A range inside its rows never narrows it;

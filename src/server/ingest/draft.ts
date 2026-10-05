@@ -467,6 +467,11 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
       : [];
     // Screenshots of wrapper accounts rarely show a list of flows; statements do.
     const isScreenshot = /screenshot/.test(extraction.documentType) || ctx.document.mediaType.startsWith('image/');
+    // A period counts as covered (FORMULAS.md §3), so it must come with what happened in it: rows, or
+    // an opening balance for a statement with none. A page with neither (a loan's balance with a
+    // "since 6 April" summary) only gives a balance, and its dates say nothing is missing.
+    const periodShown = acc.transactions.length > 0 || acc.openingBalance !== null;
+    if (!periodShown && acc.periodStart && acc.periodEnd) notes.push(`${detected.accountName ?? 'An account'}: no rows or opening balance for ${formatDate(acc.periodStart)} to ${formatDate(acc.periodEnd)}, so those days are not counted as covered.`);
     const section: DraftSection = {
       key: `s${si}`,
       detected: Object.fromEntries(Object.entries(detected).filter(([, v]) => v !== undefined)),
@@ -497,8 +502,8 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
       ...(balanceDateSource ? { balanceDateSource } : {}),
       ...(balance !== undefined ? { balance } : {}),
       readBalance: balance ?? null,
-      ...(acc.periodStart ? { periodStart: acc.periodStart } : {}),
-      ...(acc.periodEnd ? { periodEnd: acc.periodEnd } : {}),
+      ...(acc.periodStart && periodShown ? { periodStart: acc.periodStart } : {}),
+      ...(acc.periodEnd && periodShown ? { periodEnd: acc.periodEnd } : {}),
       ...(acc.openingBalance !== null ? { openingBalance: acc.openingBalance } : {}),
       ...(acc.availableBalance !== null ? { availableBalance: acc.availableBalance } : {}),
       ...(acc.creditLimit !== null ? { creditLimit: acc.creditLimit } : {}),
