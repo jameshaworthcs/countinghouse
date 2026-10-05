@@ -2239,3 +2239,24 @@ Ask v2 (`ask-2`), as the owner decided it:
 The last part of the research (§3, "Overview"): a Totals card (sessions, failures and stops,
 tokens, Claude at API prices labelled as an estimate on the plan, local model time, by month, work
 and engine) and a search inside transcripts, run on the server within a time and size budget.
+
+## 2026-10-05: The first real question on Ask v2
+
+The owner asked a year-on-year question about one card's spending (local model,
+thinking).
+
+- **What worked.** It looked rather than guessed: one `spending_by` call (the card, by month, both
+  years), the right tool and arguments, with the app's sums in pence. It took 1 minute 42 seconds
+  (13 s reading a 4,200-token prompt, 3,385 of them already cached; 35 s writing), against 6.5
+  minutes for the digest-only `ask-1` question that could not answer. The session, its step and
+  its answer are all on the Agent sessions page.
+- **What did not.** It then added the months up itself, against the prompt's rule, and both yearly
+  totals it gave are wrong (one by more than £1,000; checked against the step's own result). Its
+  headline ("more in 2026") contradicts its own figures, and it made a year-end projection the app
+  never gave. It labelled its confidence high.
+- **The guard held.** Both figures are marked on the page as the model's own, not in what the app
+  gave it: the check this version added is what tells the owner not to trust them.
+- **What follows.** A rule in the prompt does not stop the model adding up. The app should give the
+  sums a comparison needs, so there is nothing left to add: `spending_by` by month to give totals
+  by year (and the period's total, which it does), or a comparison tool. A figure the app cannot
+  find should also lower the answer's confidence rather than leave it as the model set it.
