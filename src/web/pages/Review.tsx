@@ -11,7 +11,7 @@ import { FIGURE_KINDS, type CsvProfile, type Draft, type DraftJob, type DraftSec
 import { CLAUDE_MODELS, INFERENCE_ALIASES, isInferenceAlias, resolveTask } from '../../shared/tasks';
 import { AccountTypeSelect } from '../components/AccountForms';
 import { CategorySelect } from '../components/TransactionList';
-import { Badge, Button, Callout, Card, Checkbox, type ClickModifiers, ErrorNote, Field, IconButton, Input, KeyValue, Loading, Money, Select, StatusBadge, tableClasses, useToast } from '../components/ui';
+import { Badge, Button, Callout, Card, Checkbox, type ClickModifiers, ErrorNote, Field, IconButton, Input, KeyValue, Loading, Money, NumberInput, Select, StatusBadge, tableClasses, useToast } from '../components/ui';
 import { api, useApi, useApiMutation } from '../lib/api';
 import { useAppData } from '../lib/data';
 import { cn, fileSize, money, plural } from '../lib/format';
@@ -333,7 +333,7 @@ function TxRow({ t, currency, flags, onChange, onTick, linking }: { t: DraftTran
         </td>
         <td className={cn(tableClasses.td, tableClasses.num)}>
           {editing ? (
-            <Input value={String(t.amount)} onChange={(e) => onChange({ amount: Number(e.target.value) || 0 })} inputMode="decimal" className="h-8 w-28 text-right" />
+            <NumberInput signed value={t.amount} onValue={(v) => onChange({ amount: v ?? 0 })} className="h-8 w-28 text-right" />
           ) : (
             <Money value={t.amount} className={cn('font-medium', t.amount > 0 ? 'text-good-ink' : 'text-ink')} />
           )}
@@ -509,7 +509,7 @@ function SectionEditor({ section, index, total, latest, periodFromRows, onChange
               <Checkbox checked={section.recordBalance} onChange={(v) => set({ recordBalance: v })} label={<span className="font-medium text-ink">Record the {market ? 'value' : 'balance'}</span>} />
               <div className="mt-3 grid gap-3 sm:grid-cols-2">
                 <Field label={market ? 'Value' : 'Balance'} hint={type && ACCOUNT_TYPE_META[type].liability ? 'Money owed is negative' : undefined}>
-                  <Input value={section.balance ?? ''} onChange={(e) => set({ balance: e.target.value === '' ? undefined : Number(e.target.value) })} inputMode="decimal" placeholder={section.transactions.length ? 'Balance shown in your app' : ''} />
+                  <NumberInput signed value={section.balance} onValue={(v) => set({ balance: v })} placeholder={section.transactions.length ? 'Balance shown in your app' : ''} />
                 </Field>
                 <Field label="On" hint={section.balanceDateSource ? DATE_SOURCE_LABEL[section.balanceDateSource] : undefined} error={section.balanceDateSource === 'upload' ? 'The date could not be read; set the date the screenshot was taken' : undefined}>
                   <Input type="date" value={section.balanceDate ?? ''} onChange={(e) => set({ balanceDate: e.target.value, balanceDateSource: 'manual' })} />
@@ -518,7 +518,7 @@ function SectionEditor({ section, index, total, latest, periodFromRows, onChange
                   .filter((k) => section[k] !== undefined)
                   .map((k) => (
                     <Field key={k} label={{ contributions: 'Total paid in', gain: 'Growth (as shown)', bonusToDate: 'LISA bonus received', taxYearContributions: 'Paid in this tax year', cash: 'Uninvested cash', availableBalance: 'Available', annualIncome: 'Income per year' }[k]}>
-                      <Input value={section[k] ?? ''} onChange={(e) => set({ [k]: e.target.value === '' ? undefined : Number(e.target.value) })} inputMode="decimal" />
+                      <NumberInput signed={k === 'gain' || k === 'availableBalance'} value={section[k]} onValue={(v) => set({ [k]: v })} />
                     </Field>
                   ))}
               </div>
@@ -536,12 +536,12 @@ function SectionEditor({ section, index, total, latest, periodFromRows, onChange
                   <div className="mt-3 grid gap-3 sm:grid-cols-2">
                     {section.creditLimit !== undefined && (
                       <Field label={limitName(type)}>
-                        <Input value={section.creditLimit} onChange={(e) => set({ creditLimit: e.target.value === '' ? undefined : Number(e.target.value) })} inputMode="decimal" />
+                        <NumberInput value={section.creditLimit} onValue={(v) => set({ creditLimit: v })} />
                       </Field>
                     )}
                     {section.interestRate !== undefined && (
                       <Field label={`${RATE_NAMES[headlineApplies(type ?? 'current')]} (% a year)`}>
-                        <Input value={section.interestRate} onChange={(e) => set({ interestRate: e.target.value === '' ? undefined : Number(e.target.value) })} inputMode="decimal" />
+                        <NumberInput value={section.interestRate} onValue={(v) => set({ interestRate: v })} />
                       </Field>
                     )}
                   </div>
@@ -748,7 +748,7 @@ function FiguresEditor({ draft, onChange }: { draft: Draft; onChange: (d: Draft)
                   <td className={cn(tableClasses.td, 'hidden sm:table-cell')}>{label}</td>
                   <td className={cn(tableClasses.td, 'hidden sm:table-cell')}>{year}</td>
                   <td className={cn(tableClasses.td, tableClasses.num, 'align-top sm:align-middle')}>
-                    <Input value={String(f.amount)} onChange={(e) => set(f.key, { amount: Number(e.target.value) || 0 })} inputMode="decimal" className="h-8 w-24 text-right sm:w-28" />
+                    <NumberInput value={f.amount} onValue={(v) => set(f.key, { amount: v ?? 0 })} className="h-8 w-24 text-right sm:w-28" />
                   </td>
                 </tr>
               );
@@ -1211,7 +1211,7 @@ function EarnedEditor({ draft, onChange }: { draft: Draft; onChange: (d: Draft) 
                 <td className={cn(tableClasses.td, tableClasses.num)}>{days(f.work?.holidayDays)}</td>
                 <td className={cn(tableClasses.td, tableClasses.num)}>{f.work?.rate !== undefined ? `${money(f.work.rate)} a ${f.work.ratePer ?? 'day'}` : '—'}</td>
                 <td className={cn(tableClasses.td, tableClasses.num)}>
-                  <Input value={String(f.amount)} onChange={(e) => set(f.key, { amount: Number(e.target.value) || 0 })} inputMode="decimal" className="h-8 w-28 text-right" />
+                  <NumberInput value={f.amount} onValue={(v) => set(f.key, { amount: v ?? 0 })} className="h-8 w-28 text-right" />
                 </td>
               </tr>
             ))}

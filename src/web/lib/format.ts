@@ -29,6 +29,20 @@ export const compact = (v: number | null | undefined) => (v === null || v === un
 
 export const pct = (v: number | null | undefined, decimals = 1, sign = false) => (v === null || v === undefined || !Number.isFinite(v) ? '—' : formatPercent(v, decimals, sign));
 
+/** What a number field's text means: undefined when empty, null while it is not yet a number ("-", "."). */
+export function parseNumberText(text: string): number | undefined | null {
+  const s = text.replace(/[,£\s]/g, '');
+  if (s === '') return undefined;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** A number field's text with its sign changed: "12" and "-12" swap; empty text becomes "-" to type after. */
+export function flipSign(text: string): string {
+  const t = text.trim();
+  return t.startsWith('-') ? t.slice(1) : `-${t}`;
+}
+
 export function plural(n: number, word: string, pluralWord = `${word}s`): string {
   return `${n.toLocaleString('en-GB')} ${n === 1 ? word : pluralWord}`;
 }

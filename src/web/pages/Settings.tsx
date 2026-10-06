@@ -9,7 +9,7 @@ import { AuditLog } from '../components/Audit';
 import { CoverageGaps, CoverageGrid } from '../components/Coverage';
 import { HandoverText } from '../components/Handover';
 import { CategorySelect } from '../components/TransactionList';
-import { Badge, Button, Callout, Card, Checkbox, Dialog, Field, Input, KeyValue, Loading, Money, PageHeader, Segmented, Select, SortHeader, StatusBadge, Switch, Tabs, tableClasses, useToast } from '../components/ui';
+import { Badge, Button, Callout, Card, Checkbox, Dialog, Field, Input, KeyValue, Loading, Money, NumberInput, PageHeader, Segmented, Select, SortHeader, StatusBadge, Switch, Tabs, tableClasses, useToast } from '../components/ui';
 import { api, useApi, useApiMutation } from '../lib/api';
 import { useAppData } from '../lib/data';
 import { bandLabel, cn, money, timeAgo } from '../lib/format';
@@ -92,7 +92,7 @@ function ProfileForm() {
           </Select>
         </Field>
         <Field label="Gross salary (optional)" hint="Estimates your tax band until your P60 is imported; pension taper warnings">
-          <Input value={p.grossSalary ?? ''} onChange={(e) => set({ grossSalary: e.target.value ? Number(e.target.value) : undefined })} inputMode="decimal" />
+          <NumberInput value={p.grossSalary} onValue={(v) => set({ grossSalary: v })} />
         </Field>
         <Field label="Retirement age">
           <Input type="number" min={50} max={80} value={p.retirementAge} onChange={(e) => set({ retirementAge: Number(e.target.value) || 67 })} />

@@ -7,7 +7,7 @@ import type { Rule, Transaction } from '../../shared/schema';
 import { api, useApi, useApiMutation } from '../lib/api';
 import { useAppData } from '../lib/data';
 import { cn, formatDate, money } from '../lib/format';
-import { Badge, Button, Callout, Dialog, Drawer, Field, Input, KeyValue, Money, Select, Textarea, useToast } from './ui';
+import { AmountInput, Badge, Button, Callout, Dialog, Drawer, Field, Input, KeyValue, Money, Select, Textarea, useToast } from './ui';
 import { ReceiptsSection, SplitSection, type SplitLineDraft } from './SplitReceipts';
 
 /**
@@ -493,7 +493,7 @@ function CorrectSource({ tx, onDone }: { tx: Transaction; onDone: () => void }) 
             <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
           </Field>
           <Field label="Amount" hint="Money out is negative" error={parsed === null ? 'Not an amount' : undefined}>
-            <Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} />
+            <AmountInput signed value={amount} onText={setAmount} />
           </Field>
         </div>
         <Field label="Description">

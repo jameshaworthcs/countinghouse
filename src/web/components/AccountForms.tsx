@@ -5,7 +5,7 @@ import { INSTITUTION_CATALOG } from '../../shared/institutions';
 import type { Account, AccountType } from '../../shared/schema';
 import { api, useApiMutation } from '../lib/api';
 import { useAppData } from '../lib/data';
-import { Button, Callout, Checkbox, Dialog, Field, Input, Select, Textarea, useToast } from './ui';
+import { AmountInput, Button, Callout, Checkbox, Dialog, Field, Input, Select, Textarea, useToast } from './ui';
 
 export function AccountTypeSelect({ value, onChange }: { value: AccountType; onChange: (t: AccountType) => void }) {
   return (
@@ -163,7 +163,7 @@ export function AccountDialog({ open, onOpenChange, account }: { open: boolean; 
         {!account && (
           <>
             <Field label={meta.balanceMode === 'market' ? 'Current value' : 'Current balance'} hint={meta.liability ? 'Amounts owed are negative, e.g. -1200' : undefined}>
-              <Input value={balance} onChange={(e) => setBalance(e.target.value)} inputMode="decimal" placeholder="optional" />
+              <AmountInput signed value={balance} onText={setBalance} placeholder="optional" />
             </Field>
             <Field label="As of">
               <Input type="date" value={balanceDate} onChange={(e) => setBalanceDate(e.target.value)} />
@@ -232,7 +232,7 @@ export function BalanceDialog({ open, onOpenChange, account }: { open: boolean; 
           <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
         </Field>
         <Field label={forecast ? 'Transfer value (optional)' : meta.balanceMode === 'market' ? 'Value' : 'Balance'} hint={meta.liability ? 'Owed amounts are negative' : undefined}>
-          <Input value={balance} onChange={(e) => setBalance(e.target.value)} inputMode="decimal" autoFocus />
+          <AmountInput signed value={balance} onText={setBalance} autoFocus />
         </Field>
         {meta.balanceMode === 'market' && !forecast && (
           <Field label="Total paid in (optional)">

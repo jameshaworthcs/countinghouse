@@ -10,6 +10,7 @@ import {
   useEffect,
   useId,
   useMemo,
+  useRef,
   useState,
   type ButtonHTMLAttributes,
   type InputHTMLAttributes,
@@ -17,7 +18,7 @@ import {
   type SelectHTMLAttributes,
   type TextareaHTMLAttributes,
 } from 'react';
-import { cn, compact as compactMoney, money, pct } from '../lib/format';
+import { cn, compact as compactMoney, flipSign, money, parseNumberText, pct } from '../lib/format';
 import type { SortProps } from '../lib/sort';
 
 // ─── Buttons ─────────────────────────────────────────────────────────────────────────────────────
@@ -269,6 +270,61 @@ const inputBase = 'h-9 w-full rounded-lg border border-line-strong bg-panel px-3
 export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(function Input({ className, ...rest }, ref) {
   return <input ref={ref} className={cn(inputBase, className)} {...rest} />;
 });
+
+type AmountProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange'> & {
+  /** Adds a ± button after the field on touch screens, whose keypad may have no minus key (iPhone's has none). */
+  signed?: boolean;
+};
+
+/** A field for an amount kept as the text typed. */
+export function AmountInput({ value, onText, signed, className, ...rest }: AmountProps & { value: string; onText: (text: string) => void }) {
+  const ref = useRef<HTMLInputElement>(null);
+  const input = <Input ref={ref} inputMode="decimal" {...rest} className={cn(signed && 'min-w-0', className)} value={value} onChange={(e) => onText(e.target.value)} />;
+  if (!signed) return input;
+  return (
+    <span className="flex items-stretch justify-end gap-1">
+      {input}
+      <button
+        type="button"
+        aria-label="Change sign"
+        title="Change sign"
+        disabled={rest.disabled}
+        // Keeps the field focused where a mouse is used; a tap refocuses it below.
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => {
+          onText(flipSign(value));
+          ref.current?.focus();
+        }}
+        className="hidden shrink-0 items-center rounded-lg border border-line-strong bg-panel px-2.5 text-sm font-medium text-ink-2 hover:bg-panel-2 disabled:opacity-60 pointer-coarse:flex"
+      >
+        ±
+      </button>
+    </span>
+  );
+}
+
+/**
+ * A number field that keeps what is typed ("-", "12.", "0.0") while it is focused, and reports
+ * the number whenever the text is one (undefined when emptied). On blur it shows the value again.
+ */
+export function NumberInput({ value, onValue, onBlur, ...rest }: AmountProps & { value: number | undefined; onValue: (value: number | undefined) => void }) {
+  const [text, setText] = useState<string | null>(null);
+  return (
+    <AmountInput
+      {...rest}
+      value={text ?? (value === undefined ? '' : String(value))}
+      onText={(t) => {
+        setText(t);
+        const n = parseNumberText(t);
+        if (n !== null) onValue(n);
+      }}
+      onBlur={(e) => {
+        setText(null);
+        onBlur?.(e);
+      }}
+    />
+  );
+}
 
 export const Textarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<HTMLTextAreaElement>>(function Textarea({ className, ...rest }, ref) {
   return <textarea ref={ref} className={cn(inputBase, 'h-auto min-h-[72px] py-2', className)} {...rest} />;
