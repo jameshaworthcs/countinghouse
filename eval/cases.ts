@@ -1092,6 +1092,30 @@ export function buildCases(): EvalCase[] {
         schedules: [{ direction: 'to-other', provider: /student finance/i, paidTo: /exampleton/i, payments: [{ date: '2026-10-21', amount: 1733.75 }, { date: '2027-02-03', amount: 1733.75 }, { date: '2027-05-05', amount: 3467.5 }] }],
       },
     });
+    // A loan's balance page with a summary of the tax year so far: the summary's totals are not
+    // rows, and "since 6 April" is not a statement period. The local model still makes rows of it
+    // at times; a rule for it was tried and dropped (DECISIONS 2026-10-06).
+    const repay = brand('Student Loan Repayment-style Service', '#1d70b8', 'Account: A N Example');
+    cases.push({
+      id: 'pdf-student-loan-balance',
+      title: 'Student loan balance page: the balance and rate; the tax year’s summary is not rows or a period',
+      tags: ['pdf', 'everything'],
+      // Dropped onto the loan, as the page is uploaded: it names no account number.
+      hintAccountId: 'student-loan',
+      file: {
+        name: 'Your balance - Manage your student loan.pdf',
+        kind: 'pdf',
+        html: simpleDocHtml(repay, 'Manage your student loan balance', [
+          { heading: 'Your balance', rows: [['Your balance', '£21,480.15'], ['', 'as of 4 October 2026'], ['Your interest rate', '4.1%']] },
+          { heading: '2026-27 summary', text: 'This summary shows any repayments you’ve made along with any interest added to your account since 6 April 2026. The time it takes for a repayment to appear on your account can vary.' },
+          { table: { head: ['Repayment type', 'Amount'], rows: [['Salary repayments', '£0.00'], ['Direct repayments', '£0.00'], ['Interest added', '+£412.37']], numeric: [1] } },
+        ]),
+      },
+      expected: {
+        sections: [{ account: 'student-loan', balance: -21480.15, balanceDate: '2026-10-04', transactions: [] }],
+        printed: [{ label: /interest added/i, value: /412\.37/ }],
+      },
+    });
     const council = brand('Exampleshire District Council', '#00594f', 'Council Tax, PO Box 99, Exampleton EX1 1AA');
     const months = ['01 May 2026', '01 June 2026', '01 July 2026', '01 August 2026', '01 September 2026', '01 October 2026', '01 November 2026', '01 December 2026', '01 January 2027', '01 February 2027'];
     const iso = ['2026-05-01', '2026-06-01', '2026-07-01', '2026-08-01', '2026-09-01', '2026-10-01', '2026-11-01', '2026-12-01', '2027-01-01', '2027-02-01'];

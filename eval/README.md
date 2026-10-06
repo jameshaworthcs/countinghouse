@@ -16,6 +16,8 @@ npm run eval -- --everything --only png-payslip-scan,pdf-p60,pdf-barclaycard,pdf
 
 By default a run uses the app's own settings: Sonnet reads, and Opus checks anything the
 document's arithmetic cannot confirm (docs/INGESTION.md). Each case records how it was checked.
+A local run (`--engine inference`) reads and checks every document locally, NS&I's too (which the
+app sends to Claude), and stops at once if a document is read by Claude: it must cost $0.
 
 ## What it runs
 

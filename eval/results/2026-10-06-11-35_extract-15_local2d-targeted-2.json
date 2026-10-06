@@ -1,0 +1,180 @@
+{"summary": {
+ "ranAt": "2026-10-06T11:35:43.265Z",
+ "promptVersion": "extract-15",
+ "label": "local2d-targeted-2",
+ "engine": "inference",
+ "model": "app default",
+ "effort": "app default",
+ "verifyModel": "app default",
+ "readTwice": 4,
+ "confirmedByFigures": 1,
+ "withDisagreements": 2,
+ "cases": 5,
+ "minutes": 37.8,
+ "costUsd": 0,
+ "fieldAccuracy": 98.7,
+ "rows": {
+  "expected": 32,
+  "found": 32,
+  "extra": 0
+ },
+ "byField": {
+  "nothingNew": {
+   "correct": 5,
+   "total": 5,
+   "pct": 100
+  },
+  "account": {
+   "correct": 4,
+   "total": 5,
+   "pct": 80
+  },
+  "period": {
+   "correct": 4,
+   "total": 4,
+   "pct": 100
+  },
+  "balance": {
+   "correct": 7,
+   "total": 7,
+   "pct": 100
+  },
+  "row": {
+   "correct": 32,
+   "total": 32,
+   "pct": 100
+  },
+  "date": {
+   "correct": 32,
+   "total": 32,
+   "pct": 100
+  },
+  "sign": {
+   "correct": 32,
+   "total": 32,
+   "pct": 100
+  },
+  "amount": {
+   "correct": 32,
+   "total": 32,
+   "pct": 100
+  },
+  "description": {
+   "correct": 32,
+   "total": 32,
+   "pct": 100
+  },
+  "pending": {
+   "correct": 32,
+   "total": 32,
+   "pct": 100
+  },
+  "duplicate": {
+   "correct": 32,
+   "total": 32,
+   "pct": 100
+  },
+  "original": {
+   "correct": 1,
+   "total": 1,
+   "pct": 100
+  },
+  "noExtra": {
+   "correct": 32,
+   "total": 32,
+   "pct": 100
+  },
+  "termsLimit": {
+   "correct": 1,
+   "total": 1,
+   "pct": 100
+  },
+  "termsRate": {
+   "correct": 2,
+   "total": 3,
+   "pct": 66.7
+  },
+  "termsNoExtraRate": {
+   "correct": 1,
+   "total": 1,
+   "pct": 100
+  },
+  "termsMinimum": {
+   "correct": 1,
+   "total": 1,
+   "pct": 100
+  },
+  "balanceDate": {
+   "correct": 3,
+   "total": 3,
+   "pct": 100
+  },
+  "wrapper": {
+   "correct": 2,
+   "total": 2,
+   "pct": 100
+  },
+  "holding": {
+   "correct": 2,
+   "total": 2,
+   "pct": 100
+  },
+  "holdingValue": {
+   "correct": 2,
+   "total": 2,
+   "pct": 100
+  },
+  "holdingUnits": {
+   "correct": 2,
+   "total": 2,
+   "pct": 100
+  },
+  "holdingIsin": {
+   "correct": 2,
+   "total": 2,
+   "pct": 100
+  },
+  "figure": {
+   "correct": 3,
+   "total": 3,
+   "pct": 100
+  },
+  "figureYear": {
+   "correct": 3,
+   "total": 3,
+   "pct": 100
+  },
+  "noExtraFigure": {
+   "correct": 0,
+   "total": 1,
+   "pct": 0
+  },
+  "printed": {
+   "correct": 0,
+   "total": 1,
+   "pct": 0
+  }
+ },
+ "byKind": {
+  "pdf": 99,
+  "png": 91.7
+ },
+ "byTag": {
+  "pdf": 99,
+  "card-signs": 99.6,
+  "fx": 100,
+  "refund": 100,
+  "isa": 100,
+  "holdings": 100,
+  "png": 91.7,
+  "pension": 91.7,
+  "everything": 60
+ }
+},
+"results": [
+{"id":"pdf-amex-card","title":"Amex-style card statement: unsigned amounts with CR credits, spending in euros, a fee","tags":["pdf","card-signs","fx","refund"],"kind":"pdf","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":1140665,"confidence":"high","warnings":[],"notes":[],"verification":{"method":"second-reading","firstModel":"vision-extract","secondModel":"vision-extract, thinking","reasons":1,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"period":{"correct":2,"total":2},"balance":{"correct":2,"total":2},"row":{"correct":15,"total":15},"date":{"correct":15,"total":15},"sign":{"correct":15,"total":15},"amount":{"correct":15,"total":15},"description":{"correct":15,"total":15},"pending":{"correct":15,"total":15},"duplicate":{"correct":15,"total":15},"original":{"correct":1,"total":1},"noExtra":{"correct":15,"total":15}},"rows":{"expected":15,"found":15,"extra":0},"errors":[],"score":1}},
+{"id":"pdf-barclaycard","title":"Barclaycard-style statement: spending positive, payments negative in print","tags":["pdf","card-signs"],"kind":"pdf","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":222427,"confidence":"high","warnings":[],"notes":[],"verification":{"method":"checks","firstModel":"vision-extract","reasons":0,"disagreements":[],"kept":"first"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"period":{"correct":2,"total":2},"balance":{"correct":2,"total":2},"row":{"correct":13,"total":13},"date":{"correct":13,"total":13},"sign":{"correct":13,"total":13},"amount":{"correct":13,"total":13},"description":{"correct":13,"total":13},"pending":{"correct":13,"total":13},"duplicate":{"correct":13,"total":13},"noExtra":{"correct":13,"total":13},"termsLimit":{"correct":1,"total":1},"termsRate":{"correct":2,"total":3},"termsNoExtraRate":{"correct":1,"total":1},"termsMinimum":{"correct":1,"total":1}},"rows":{"expected":13,"found":13,"extra":0},"errors":["terms: balance-transfers 0% until 2027-03-15 missing"],"score":0.9913793103448276}},
+{"id":"pdf-vanguard-isa-quarter","title":"Stocks & Shares ISA quarterly statement: contributions, a fee, holdings, subscriptions used","tags":["pdf","isa","holdings"],"kind":"pdf","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":1665708,"confidence":"high","warnings":[],"notes":["The value shown is the holdings alone, with no cash. It is recorded as shown; the account’s value that day adds the cash the app knows from its other documents."],"verification":{"method":"second-reading","firstModel":"vision-extract","secondModel":"vision-extract, thinking","reasons":5,"disagreements":["Stocks & Shares ISA, cash: vision-extract read £28,682.40, vision-extract, thinking nothing","ISA subscriptions this tax year: only vision-extract read it"],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"balance":{"correct":1,"total":1},"balanceDate":{"correct":1,"total":1},"wrapper":{"correct":1,"total":1},"row":{"correct":4,"total":4},"date":{"correct":4,"total":4},"sign":{"correct":4,"total":4},"amount":{"correct":4,"total":4},"description":{"correct":4,"total":4},"pending":{"correct":4,"total":4},"duplicate":{"correct":4,"total":4},"noExtra":{"correct":4,"total":4},"holding":{"correct":2,"total":2},"holdingValue":{"correct":2,"total":2},"holdingUnits":{"correct":2,"total":2},"holdingIsin":{"correct":2,"total":2}},"rows":{"expected":4,"found":4,"extra":0},"errors":[],"score":1}},
+{"id":"png-nest-pension","title":"Workplace pension app: pot value and contributions this tax year","tags":["png","pension"],"kind":"png","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":1777739,"confidence":"high","warnings":[],"notes":["Retirement date: 14 May 2061"],"verification":{"method":"second-reading","firstModel":"vision-extract","secondModel":"vision-extract, thinking","reasons":3,"disagreements":["Contributions this tax year: only vision-extract, thinking read it"],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"balance":{"correct":1,"total":1},"balanceDate":{"correct":1,"total":1},"wrapper":{"correct":1,"total":1},"figure":{"correct":3,"total":3},"figureYear":{"correct":3,"total":3},"noExtraFigure":{"correct":0,"total":1}},"rows":{"expected":0,"found":0,"extra":0},"errors":["extra figure: tax_deducted 3000 (Contributions this tax year)"],"score":0.9166666666666666}},
+{"id":"pdf-student-loan-balance","title":"Student loan balance page: the balance and rate; the tax year’s summary is not rows or a period","tags":["pdf","everything"],"kind":"pdf","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":1123753,"confidence":"high","warnings":[],"notes":["The document shows a student loan balance summary for the 2026-27 tax year, with no individual transactions listed."],"verification":{"method":"second-reading","firstModel":"vision-extract","secondModel":"vision-extract, thinking","reasons":1,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":0,"total":1},"balance":{"correct":1,"total":1},"balanceDate":{"correct":1,"total":1},"printed":{"correct":0,"total":1}},"rows":{"expected":0,"found":0,"extra":0},"errors":["student-loan: imported into a new current","printed: interest added missing"],"score":0.6}}
+]}

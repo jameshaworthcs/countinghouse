@@ -1,0 +1,173 @@
+{"summary": {
+ "ranAt": "2026-10-05T20:06:14.934Z",
+ "promptVersion": "extract-15",
+ "label": "local2b-targeted",
+ "engine": "inference",
+ "model": "app default",
+ "effort": "app default",
+ "verifyModel": "app default",
+ "readTwice": 6,
+ "confirmedByFigures": 1,
+ "withDisagreements": 3,
+ "cases": 7,
+ "minutes": 45.6,
+ "costUsd": 0,
+ "fieldAccuracy": 97.5,
+ "rows": {
+  "expected": 17,
+  "found": 17,
+  "extra": 0
+ },
+ "byField": {
+  "nothingNew": {
+   "correct": 7,
+   "total": 7,
+   "pct": 100
+  },
+  "account": {
+   "correct": 7,
+   "total": 7,
+   "pct": 100
+  },
+  "period": {
+   "correct": 2,
+   "total": 2,
+   "pct": 100
+  },
+  "balance": {
+   "correct": 8,
+   "total": 8,
+   "pct": 100
+  },
+  "row": {
+   "correct": 17,
+   "total": 17,
+   "pct": 100
+  },
+  "date": {
+   "correct": 17,
+   "total": 17,
+   "pct": 100
+  },
+  "sign": {
+   "correct": 17,
+   "total": 17,
+   "pct": 100
+  },
+  "amount": {
+   "correct": 17,
+   "total": 17,
+   "pct": 100
+  },
+  "description": {
+   "correct": 17,
+   "total": 17,
+   "pct": 100
+  },
+  "pending": {
+   "correct": 17,
+   "total": 17,
+   "pct": 100
+  },
+  "duplicate": {
+   "correct": 17,
+   "total": 17,
+   "pct": 100
+  },
+  "noExtra": {
+   "correct": 17,
+   "total": 17,
+   "pct": 100
+  },
+  "termsLimit": {
+   "correct": 1,
+   "total": 1,
+   "pct": 100
+  },
+  "termsRate": {
+   "correct": 0,
+   "total": 3,
+   "pct": 0
+  },
+  "termsNoExtraRate": {
+   "correct": 1,
+   "total": 1,
+   "pct": 100
+  },
+  "termsMinimum": {
+   "correct": 1,
+   "total": 1,
+   "pct": 100
+  },
+  "balanceDate": {
+   "correct": 6,
+   "total": 6,
+   "pct": 100
+  },
+  "holding": {
+   "correct": 4,
+   "total": 4,
+   "pct": 100
+  },
+  "holdingValue": {
+   "correct": 4,
+   "total": 4,
+   "pct": 100
+  },
+  "holdingUnits": {
+   "correct": 4,
+   "total": 4,
+   "pct": 100
+  },
+  "figure": {
+   "correct": 3,
+   "total": 5,
+   "pct": 60
+  },
+  "figureYear": {
+   "correct": 4,
+   "total": 4,
+   "pct": 100
+  },
+  "wrapper": {
+   "correct": 5,
+   "total": 5,
+   "pct": 100
+  },
+  "holdingIsin": {
+   "correct": 2,
+   "total": 2,
+   "pct": 100
+  },
+  "printed": {
+   "correct": 1,
+   "total": 1,
+   "pct": 100
+  }
+ },
+ "byKind": {
+  "pdf": 97.2,
+  "png": 100
+ },
+ "byTag": {
+  "pdf": 97.2,
+  "card-signs": 97.4,
+  "pension": 91.7,
+  "holdings": 96.6,
+  "figures": 84.6,
+  "isa": 100,
+  "png": 100,
+  "lisa": 100,
+  "savings": 100,
+  "everything": 100
+ }
+},
+"results": [
+{"id":"pdf-barclaycard","title":"Barclaycard-style statement: spending positive, payments negative in print","tags":["pdf","card-signs"],"kind":"pdf","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":543285,"confidence":"high","warnings":[],"notes":[],"verification":{"method":"checks","firstModel":"vision-extract","reasons":0,"disagreements":[],"kept":"first"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"period":{"correct":2,"total":2},"balance":{"correct":2,"total":2},"row":{"correct":13,"total":13},"date":{"correct":13,"total":13},"sign":{"correct":13,"total":13},"amount":{"correct":13,"total":13},"description":{"correct":13,"total":13},"pending":{"correct":13,"total":13},"duplicate":{"correct":13,"total":13},"noExtra":{"correct":13,"total":13},"termsLimit":{"correct":1,"total":1},"termsRate":{"correct":0,"total":3},"termsNoExtraRate":{"correct":1,"total":1},"termsMinimum":{"correct":1,"total":1}},"rows":{"expected":13,"found":13,"extra":0},"errors":["terms: purchases 24.9% missing","terms: cash 27.9% missing","terms: balance-transfers 0% until 2027-03-15 missing"],"score":0.9741379310344828}},
+{"id":"pdf-aviva-pension-annual","title":"Workplace pension annual statement: value, contributions for the tax year, funds","tags":["pdf","pension","holdings","figures"],"kind":"pdf","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":1123000,"confidence":"high","warnings":[],"notes":["Contributions include salary sacrifice (paid by employer) of £3,900.00 and employer contributions of £4,500.00.","Retirement age is 67.","The value shown is the holdings alone, with no cash. It is recorded as shown; the account’s value that day adds the cash the app knows from its other documents."],"verification":{"method":"second-reading","firstModel":"vision-extract","secondModel":"vision-extract, thinking","reasons":2,"disagreements":["Total: vision-extract read £4,500.00, vision-extract, thinking £8,400.00","Total: period ending none in vision-extract, 2026-04-05 in vision-extract, thinking","Total: vision-extract read £3,900.00, vision-extract, thinking £0.00","Total: period ending none in vision-extract, 2026-04-05 in vision-extract, thinking"],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"balance":{"correct":1,"total":1},"balanceDate":{"correct":1,"total":1},"holding":{"correct":2,"total":2},"holdingValue":{"correct":2,"total":2},"holdingUnits":{"correct":2,"total":2},"figure":{"correct":0,"total":2},"figureYear":{"correct":1,"total":1}},"rows":{"expected":0,"found":0,"extra":0},"errors":["figure pension_contribution_employer 4500: got 8400","figure pension_contribution_employer 3900: missing"],"score":0.8461538461538461}},
+{"id":"pdf-vanguard-isa-quarter","title":"Stocks & Shares ISA quarterly statement: contributions, a fee, holdings, subscriptions used","tags":["pdf","isa","holdings"],"kind":"pdf","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":812080,"confidence":"high","warnings":[],"notes":["Quarterly statement for Stocks & Shares ISA.","The value shown is the holdings alone, with no cash. It is recorded as shown; the account’s value that day adds the cash the app knows from its other documents."],"verification":{"method":"second-reading","firstModel":"vision-extract","secondModel":"vision-extract, thinking","reasons":4,"disagreements":["Stocks & Shares ISA, total paid in: vision-extract read £3,000.00, vision-extract, thinking nothing","Stocks & Shares ISA, cash: vision-extract read £28,682.40, vision-extract, thinking nothing"],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"balance":{"correct":1,"total":1},"balanceDate":{"correct":1,"total":1},"wrapper":{"correct":1,"total":1},"row":{"correct":4,"total":4},"date":{"correct":4,"total":4},"sign":{"correct":4,"total":4},"amount":{"correct":4,"total":4},"description":{"correct":4,"total":4},"pending":{"correct":4,"total":4},"duplicate":{"correct":4,"total":4},"noExtra":{"correct":4,"total":4},"holding":{"correct":2,"total":2},"holdingValue":{"correct":2,"total":2},"holdingUnits":{"correct":2,"total":2},"holdingIsin":{"correct":2,"total":2}},"rows":{"expected":4,"found":4,"extra":0},"errors":[],"score":1}},
+{"id":"png-moneybox-lisa","title":"LISA app: balance, government bonus, paid in this tax year","tags":["png","lisa"],"kind":"png","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":1256736,"confidence":"high","warnings":[],"notes":["The value shown is the holdings alone, with no cash. It is recorded as shown; the account’s value that day adds the cash the app knows from its other documents."],"verification":{"method":"second-reading","firstModel":"vision-extract","secondModel":"vision-extract, thinking","reasons":1,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"balance":{"correct":1,"total":1},"balanceDate":{"correct":1,"total":1},"wrapper":{"correct":3,"total":3}},"rows":{"expected":0,"found":0,"extra":0},"errors":[],"score":1}},
+{"id":"png-nest-pension","title":"Workplace pension app: pot value and contributions this tax year","tags":["png","pension"],"kind":"png","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":1175783,"confidence":"high","warnings":[],"notes":["Contributions for the current tax year (2026/27) are shown."],"verification":{"method":"second-reading","firstModel":"vision-extract","secondModel":"vision-extract, thinking","reasons":3,"disagreements":["Nest-style pension, total paid in: vision-extract read £3,000.00, vision-extract, thinking nothing"],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"balance":{"correct":1,"total":1},"balanceDate":{"correct":1,"total":1},"wrapper":{"correct":1,"total":1},"figure":{"correct":3,"total":3},"figureYear":{"correct":3,"total":3}},"rows":{"expected":0,"found":0,"extra":0},"errors":[],"score":1}},
+{"id":"png-premium-bonds","title":"Premium Bonds holding with a prize history","tags":["png","savings"],"kind":"png","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":1217307,"confidence":"high","warnings":[],"notes":["The 'Recent prizes' list is a history of prizes, not account movements (Rule 5).","Institution name is not clearly visible; 'NS&I-style' appears to be a category label."],"verification":{"method":"second-reading","firstModel":"vision-extract","secondModel":"vision-extract, thinking","reasons":1,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"balance":{"correct":1,"total":1},"balanceDate":{"correct":1,"total":1}},"rows":{"expected":0,"found":0,"extra":0},"errors":[],"score":1}},
+{"id":"pdf-student-loan-balance","title":"Student loan balance page: the balance and rate; the tax year’s summary is not rows or a period","tags":["pdf","everything"],"kind":"pdf","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":932989,"confidence":"high","warnings":[],"notes":["Summary covers period since 6 April 2026."],"verification":{"method":"second-reading","firstModel":"vision-extract","secondModel":"vision-extract, thinking","reasons":1,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"balance":{"correct":1,"total":1},"balanceDate":{"correct":1,"total":1},"printed":{"correct":1,"total":1}},"rows":{"expected":0,"found":0,"extra":0},"errors":[],"score":1}}
+]}

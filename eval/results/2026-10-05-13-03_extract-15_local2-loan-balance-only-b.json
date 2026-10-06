@@ -1,0 +1,58 @@
+{"summary": {
+ "ranAt": "2026-10-05T13:03:56.767Z",
+ "promptVersion": "extract-15",
+ "label": "local2-loan-balance-only-b",
+ "engine": "inference",
+ "model": "app default",
+ "effort": "app default",
+ "verifyModel": "app default",
+ "readTwice": 1,
+ "confirmedByFigures": 0,
+ "withDisagreements": 0,
+ "cases": 1,
+ "minutes": 19.3,
+ "costUsd": 0,
+ "fieldAccuracy": 80,
+ "rows": {
+  "expected": 0,
+  "found": 0,
+  "extra": 0
+ },
+ "byField": {
+  "nothingNew": {
+   "correct": 1,
+   "total": 1,
+   "pct": 100
+  },
+  "account": {
+   "correct": 0,
+   "total": 1,
+   "pct": 0
+  },
+  "balance": {
+   "correct": 1,
+   "total": 1,
+   "pct": 100
+  },
+  "balanceDate": {
+   "correct": 1,
+   "total": 1,
+   "pct": 100
+  },
+  "printed": {
+   "correct": 1,
+   "total": 1,
+   "pct": 100
+  }
+ },
+ "byKind": {
+  "pdf": 80
+ },
+ "byTag": {
+  "pdf": 80,
+  "everything": 80
+ }
+},
+"results": [
+{"id":"pdf-student-loan-balance","title":"Student loan balance page: the balance and rate; the tax year’s summary is not rows or a period","tags":["pdf","everything"],"kind":"pdf","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":1157760,"confidence":"high","warnings":[],"notes":["Balance is a loan amount, shown as negative.","Summary lines are totals for the period since 6 April 2026, not individual transactions."],"verification":{"method":"second-reading","firstModel":"vision-extract","secondModel":"vision-extract, thinking","reasons":1,"disagreements":[],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":0,"total":1},"balance":{"correct":1,"total":1},"balanceDate":{"correct":1,"total":1},"printed":{"correct":1,"total":1}},"rows":{"expected":0,"found":0,"extra":0},"errors":["student-loan: imported into a new student_loan 1234"],"score":0.8}}
+]}

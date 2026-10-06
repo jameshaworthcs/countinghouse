@@ -2295,3 +2295,30 @@ payments, and Data health would no longer have said if one was missing.
 - **Not a prompt rule.** A rule for the local model needs its five-hour evaluation; this is a
   deterministic rule about what counts as coverage, so it belongs in the draft.
 
+## 2026-10-06: A local rule for summary pages, tried and dropped
+
+The loan's balance page was read by the local model as three rows
+(its "2026-27 summary": interest added and two £0.00 repayment lines), dated at the balance's date
+or at 6 April, and held for the disagreement. A rule for the local model only (`L5`, `local-2`)
+was tried against a new evaluation case, `pdf-student-loan-balance`, an invented copy of the page.
+
+- **Three wordings.** Telling the reader a summary of totals is never rows also stopped it
+  recording the figures in such boxes: an ISA's subscriptions this tax year, a pension's
+  contributions, a card's rates. Naming only pages with no movements of their own (the last
+  wording) kept those, and made no rows of the loan page in every run.
+- **Why it was dropped.** A payslip is a page with no movements too: on the last wording the
+  payslip scan lost its deduction lines or its tax figures in all three runs (84.8%, 82.1%,
+  84.8%; 100% in every run without the rule), and the Amex statement its opening balance in three
+  of five. The full run scored 99.1% against 99.3%
+  (eval/results/2026-10-06-17-47_extract-15_local-v10-local2.json). Each loss was marked as a
+  disagreement, but payslips come monthly and feed the tax pages; the loan page is rare, and its
+  invented rows are already marked and held. The local rules stay at `local-1`.
+- **Kept.** The evaluation case (it shows the loan page still read as rows at times). A local
+  evaluation now reads NS&I's documents locally too and stops if any document reaches Claude: one
+  run of this work sent the six NS&I cases to Claude through `read-document`'s `claudeFor` and
+  spent $0.94 of the Claude plan (its results,
+  eval/results/2026-10-05-19-19_extract-15_local-v10-local2.json, are not a local measure).
+- **What handles the page meanwhile.** The draft keeps no period without rows or an opening
+  balance (DECISIONS 2026-10-05), so a summary's dates never count as covered; rows a reading
+  makes of a summary are marked as a disagreement and are yours to untick.
+

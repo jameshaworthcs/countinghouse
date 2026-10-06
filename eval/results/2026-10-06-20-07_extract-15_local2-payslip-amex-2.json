@@ -1,0 +1,145 @@
+{"summary": {
+ "ranAt": "2026-10-06T20:07:43.582Z",
+ "promptVersion": "extract-15",
+ "label": "local2-payslip-amex-2",
+ "engine": "inference",
+ "model": "app default",
+ "effort": "app default",
+ "verifyModel": "app default",
+ "readTwice": 2,
+ "confirmedByFigures": 0,
+ "withDisagreements": 2,
+ "cases": 2,
+ "minutes": 41.6,
+ "costUsd": 0,
+ "fieldAccuracy": 96.3,
+ "rows": {
+  "expected": 15,
+  "found": 15,
+  "extra": 0
+ },
+ "byField": {
+  "nothingNew": {
+   "correct": 2,
+   "total": 2,
+   "pct": 100
+  },
+  "account": {
+   "correct": 1,
+   "total": 1,
+   "pct": 100
+  },
+  "period": {
+   "correct": 2,
+   "total": 2,
+   "pct": 100
+  },
+  "balance": {
+   "correct": 1,
+   "total": 2,
+   "pct": 50
+  },
+  "row": {
+   "correct": 15,
+   "total": 15,
+   "pct": 100
+  },
+  "date": {
+   "correct": 15,
+   "total": 15,
+   "pct": 100
+  },
+  "sign": {
+   "correct": 15,
+   "total": 15,
+   "pct": 100
+  },
+  "amount": {
+   "correct": 15,
+   "total": 15,
+   "pct": 100
+  },
+  "description": {
+   "correct": 15,
+   "total": 15,
+   "pct": 100
+  },
+  "pending": {
+   "correct": 15,
+   "total": 15,
+   "pct": 100
+  },
+  "duplicate": {
+   "correct": 15,
+   "total": 15,
+   "pct": 100
+  },
+  "original": {
+   "correct": 1,
+   "total": 1,
+   "pct": 100
+  },
+  "noExtra": {
+   "correct": 15,
+   "total": 15,
+   "pct": 100
+  },
+  "figure": {
+   "correct": 5,
+   "total": 5,
+   "pct": 100
+  },
+  "figureYear": {
+   "correct": 5,
+   "total": 5,
+   "pct": 100
+  },
+  "payslip": {
+   "correct": 1,
+   "total": 1,
+   "pct": 100
+  },
+  "payslipNet": {
+   "correct": 1,
+   "total": 1,
+   "pct": 100
+  },
+  "payslipCodes": {
+   "correct": 1,
+   "total": 1,
+   "pct": 100
+  },
+  "payslipLine": {
+   "correct": 3,
+   "total": 8,
+   "pct": 37.5
+  },
+  "payslipNoExtraLine": {
+   "correct": 2,
+   "total": 2,
+   "pct": 100
+  },
+  "payslipYtd": {
+   "correct": 9,
+   "total": 9,
+   "pct": 100
+  }
+ },
+ "byKind": {
+  "pdf": 99.2,
+  "png": 84.8
+ },
+ "byTag": {
+  "pdf": 99.2,
+  "card-signs": 99.2,
+  "fx": 99.2,
+  "refund": 99.2,
+  "png": 84.8,
+  "figures": 84.8,
+  "payslip": 84.8
+ }
+},
+"results": [
+{"id":"pdf-amex-card","title":"Amex-style card statement: unsigned amounts with CR credits, spending in euros, a fee","tags":["pdf","card-signs","fx","refund"],"kind":"pdf","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":2494492,"confidence":"high","warnings":[],"notes":["Statement period: 12 August 2026 to 11 September 2026.","Gold Card: the balance owed was shown as a positive number and has been stored as negative (money owed). Change it if the account is actually in credit."],"verification":{"method":"second-reading","firstModel":"vision-extract","secondModel":"vision-extract, thinking","reasons":1,"disagreements":["Gold Card, opening balance: vision-extract read -£612.40, vision-extract, thinking £612.40"],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"account":{"correct":1,"total":1},"period":{"correct":2,"total":2},"balance":{"correct":1,"total":2},"row":{"correct":15,"total":15},"date":{"correct":15,"total":15},"sign":{"correct":15,"total":15},"amount":{"correct":15,"total":15},"description":{"correct":15,"total":15},"pending":{"correct":15,"total":15},"duplicate":{"correct":15,"total":15},"original":{"correct":1,"total":1},"noExtra":{"correct":15,"total":15}},"rows":{"expected":15,"found":15,"extra":0},"errors":["amex-gold balance: expected -612.4, got 612.4"],"score":0.9921259842519685}},
+{"id":"png-payslip-scan","title":"A scanned payslip in a layout read by no rule: every line, the totals, the codes and the year to date","tags":["png","figures","payslip"],"kind":"png","status":"review","engine":"inference","model":"qwen3.6-35b-a3b-q4_k_m","durationMs":1079262,"confidence":"high","warnings":[],"notes":[],"verification":{"method":"second-reading","firstModel":"vision-extract","secondModel":"vision-extract, thinking","reasons":2,"disagreements":["Total payments: period ending 2026-08-31 in vision-extract, none in vision-extract, thinking","PAYE tax: only vision-extract, thinking read it","National Insurance: only vision-extract, thinking read it","Pension (net pay): only vision-extract, thinking read it","Student loan (Plan 2): only vision-extract, thinking read it"],"kept":"second"},"score":{"fields":{"nothingNew":{"correct":1,"total":1},"figure":{"correct":5,"total":5},"figureYear":{"correct":5,"total":5},"payslip":{"correct":1,"total":1},"payslipNet":{"correct":1,"total":1},"payslipCodes":{"correct":1,"total":1},"payslipLine":{"correct":3,"total":8},"payslipNoExtraLine":{"correct":2,"total":2},"payslipYtd":{"correct":9,"total":9}},"rows":{"expected":0,"found":0,"extra":0},"errors":["payslip deductions: PAYE tax 398.4 missing","payslip deductions: National Insurance 140.72 missing","payslip deductions: Pension (net pay) 125 missing","payslip deductions: Student loan (Plan 2) 37 missing","payslip deductions: Cycle to work 41.67 missing"],"score":0.8484848484848485}}
+]}

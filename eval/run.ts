@@ -91,7 +91,9 @@ interface RunOptions {
 function modelSettings(opts: RunOptions): Settings['models'] {
   const engineOf = (m: string): TaskEngine => (isInferenceAlias(m) ? 'inference' : 'claude-cli');
   const engine = (opts.engine ?? (opts.model ? engineOf(opts.model) : undefined)) as TaskEngine | undefined;
-  const read = { ...(engine ? { engine } : {}), ...(opts.model ? { model: opts.model } : {}), ...(opts.effort ? { effort: opts.effort as 'high' } : {}), ...(opts.thinking ? { thinking: true } : {}) };
+  // A local run reads every provider locally: the providers Settings → Models sends to Claude
+  // (NS&I's) would spend the Claude plan, and would not measure the local model.
+  const read = { ...(engine ? { engine } : {}), ...(engine === 'inference' ? { claudeFor: [] } : {}), ...(opts.model ? { model: opts.model } : {}), ...(opts.effort ? { effort: opts.effort as 'high' } : {}), ...(opts.thinking ? { thinking: true } : {}) };
   // The reading's engine checks too (the local model checks a local reading; never Claude unless
   // asked: a local run must not spend the Claude plan), unless --verify-model says otherwise.
   const check = opts.verifyModel === 'off' ? { engine: 'off' as const } : opts.verifyModel ? { engine: engineOf(opts.verifyModel), model: opts.verifyModel } : engine && engine !== 'ocr' ? { engine } : {};
@@ -209,7 +211,11 @@ async function main() {
     Array.from({ length: concurrency }, async () => {
       while (next < groups.length) {
         const g = groups[next++]!;
-        results.push(...(await runGroup(g, files, opts)));
+        const done = await runGroup(g, files, opts);
+        results.push(...done);
+        // A local run that reached Claude stops at once, before it spends more of the plan.
+        const elsewhere = opts.engine === 'inference' ? done.filter((r) => r.engine === 'claude-cli' || r.engine === 'claude-api') : [];
+        if (elsewhere.length) throw new Error(`A local run read ${elsewhere.map((r) => `${r.id} on ${r.engine}`).join(', ')}: stopped`);
       }
     }),
   );
