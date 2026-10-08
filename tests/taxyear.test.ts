@@ -36,6 +36,10 @@ describe('the tax year in full', () => {
   const record = (r: ExtractedHmrc, extra: Partial<HmrcRecord> = {}): HmrcRecord => ({ ...r, id: hmrcId(r), source: {}, createdAt: stamp, ...extra }) as HmrcRecord;
   const fig = (kind: Figure['kind'], amount: number, payer: string, employmentId: string, extra: Partial<Figure> = {}): Figure => ({ id: figureId(kind, amount, '2025/26', payer, kind, employmentId), kind, label: kind, amount, currency: 'GBP', taxYear: '2025/26', payer, employmentId, source: {}, createdAt: stamp, ...extra });
 
+  // A full forecast, as HMRC's page gives it: the year is the week × 365.25 / 7, the month a twelfth.
+  const spYear = Math.round(((241.3 * 365.25) / 7) * 100) / 100;
+  const spMonth = Math.round((spYear / 12) * 100) / 100;
+
   beforeEach(async () => {
     dir = await mkdtemp(path.join(os.tmpdir(), 'finance-taxyear-'));
     store = await Store.open(path.join(dir, 'data'));
@@ -51,7 +55,7 @@ describe('the tax year in full', () => {
         record({ type: 'settlement', taxYear: '2025/26', asOf: '2026-09-30', outcome: 'underpaid', amount: 76.2, calculatedOn: '2026-07-01', outstanding: 0, payments: [{ date: '2026-08-19', amount: 76.2, how: 'bank transfer' }] }),
         record({ type: 'ni-year', asOf: '2026-09-30', taxYear: '2025/26', status: 'full', contributions: [{ kind: 'Paid employment', amount: 715 }] }),
         record({ type: 'ni-year', asOf: '2026-09-30', taxYear: '2023/24', status: 'not-full', contributions: [], voluntaryCost: 612, payBy: '2030-04-05' }),
-        record({ type: 'state-pension-forecast', asOf: '2026-09-30', weekly: 241.3, monthly: Math.round(((241.3 * 365.25) / 7 / 12) * 100) / 100, annual: Math.round(((241.3 * 365.25) / 7) * 100) / 100, payableFrom: '2073-03-21', recordTo: '2026-04-05', qualifyingYears: 3, yearsNeeded: 10, assumesYears: 32, maximum: true }),
+        record({ type: 'state-pension-forecast', asOf: '2026-09-30', weekly: 241.3, monthly: spMonth, annual: spYear, payableFrom: '2073-03-21', recordTo: '2026-04-05', qualifyingYears: 3, yearsNeeded: 10, assumesYears: 32, maximum: true }),
       ],
       'test: HMRC',
     );
@@ -76,7 +80,7 @@ describe('the tax year in full', () => {
 
   it('shows the State Pension forecast in full and the NI record, newest year first', () => {
     const r = investments(store, new BalanceEngine(store)).retirement;
-    expect(r.statePension).toMatchObject({ annual: Math.round(((241.3 * 365.25) / 7) * 100) / 100, source: 'forecast', startsOn: '2073-03-21', hmrc: { weekly: 241.3, qualifyingYears: 3, assumesYears: 32, yearsNeeded: 10, maximum: true } });
+    expect(r.statePension).toMatchObject({ annual: spYear, source: 'forecast', startsOn: '2073-03-21', hmrc: { weekly: 241.3, qualifyingYears: 3, assumesYears: 32, yearsNeeded: 10, maximum: true } });
     expect(r.niRecord.map((y) => [y.taxYear, y.status, y.voluntaryCost ?? null])).toEqual([
       ['2025/26', 'full', null],
       ['2023/24', 'not-full', 612],

@@ -1,6 +1,7 @@
 // The extraction contract shared by the Claude CLI and Claude API engines: one system prompt, one
 // JSON schema. Bump PROMPT_VERSION whenever either changes; it is recorded on every import so old
-// extractions can be told apart (and re-run) later.
+// extractions can be told apart (and re-run) later. An example's values swapped for other invented
+// ones is not a change: the rules and the schema are the same (docs/DECISIONS.md, 2026-10-08).
 //
 // Reading everything (Settings → Models & import, `readEverything`) adds rules 20 to 24 and their
 // part of the schema: a payslip in full, HMRC's pages as records, an account's terms (its rates,

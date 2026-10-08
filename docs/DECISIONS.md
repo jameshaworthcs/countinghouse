@@ -2376,3 +2376,25 @@ the rest.
 - **Noise, tuned against the code:** payees made only of common words ("Cheque paid in") are bank
   wording, not anyone's; amounts must be distinctive and not public UK figures; an employer's own
   word counts unless it is a given name, a common word or a town.
+
+## 2026-10-08: The code is published; the data stays private
+
+The app is to be published as open source, under the owner's name. Data and code have shared one
+repository; the published one holds only the code, with its history rebuilt from this one's.
+
+- **Two repositories.** The code is public. The data moves to a private repository of its own, with
+  no remote, which the app reads and writes as before; its history, the audit log's record, stays
+  as it is.
+- **Invented values only**, in code, tests, fixtures, docs and commit messages. The leak guard
+  (above) checks every exit.
+- **Real values taken out.** Tests, fixtures, comments, docs and prompt examples that had the
+  owner's values (names, employers, references, amounts, places, holdings, a card's terms) now have
+  invented ones: one invented value for each real one, everywhere, with each test's arithmetic kept.
+  Decision-log entries keep what was decided and why, without the owner's figures.
+- **Swapping an example's values is not a prompt change.** The extraction prompt
+  (`extract-11`, `extract-15`) and the month in review (`monthly-review-6`) keep their versions:
+  their rules and schemas are the same, and a new version would list every stored document as worth
+  reading again and every month as not reviewed.
+- **Exposure the owner accepts:** their name, and what a reader can infer from the providers the
+  code supports. Not: real values, people, references, amounts, local places or private
+  infrastructure.

@@ -121,7 +121,8 @@ for the map and [docs/DATA_FORMAT.md](docs/DATA_FORMAT.md) before touching data 
 - Agents follow [docs/AGENTS.md](docs/AGENTS.md).
   - A new job kind declares its privacy class: web tools with public inputs, or the owner's data
     with no web.
-  - Bump a job's `promptVersion` whenever its prompt or output schema changes.
+  - Bump a job's `promptVersion` whenever its prompt or output schema changes (an example's values
+    swapped for other invented ones is not a change).
   - Only real data (tracked in git) starts jobs by itself: never the demo or a throwaway copy (they
     spend the owner's Claude plan).
 - Charts follow the data-viz rules baked into `src/web/components/charts/`:
