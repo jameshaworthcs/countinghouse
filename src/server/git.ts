@@ -5,6 +5,7 @@
 import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { parseRemotes, remoteWarning, type DataRemote } from './datarepo';
 import type { ChangeEvent } from './store';
 
 const exec = promisify(execFile);
@@ -19,6 +20,10 @@ export interface GitStatus {
   behind?: number;
   remote?: string;
   lastCommit?: { hash: string; date: string; subject: string };
+  /** The repository's remotes: a data repository should have none (datarepo.ts). */
+  remotes?: DataRemote[];
+  /** What to do about them, in a sentence, when there are any. */
+  remoteWarning?: string;
 }
 
 export interface GitLogEntry {
@@ -152,11 +157,12 @@ export class GitCommitter {
 
   async status(): Promise<GitStatus> {
     if (!this.repoRoot) return { enabled: false, dirty: 0 };
-    const [branch, porcelain, upstream, last] = await Promise.all([
+    const [branch, porcelain, upstream, last, remotes] = await Promise.all([
       git(this.repoRoot, ['rev-parse', '--abbrev-ref', 'HEAD'], true),
       git(this.repoRoot, ['status', '--porcelain', '--', this.dataRel], true),
       git(this.repoRoot, ['rev-list', '--left-right', '--count', '@{upstream}...HEAD'], true),
       git(this.repoRoot, ['log', '-1', '--format=%h%x1f%aI%x1f%s', '--', this.dataRel], true),
+      git(this.repoRoot, ['remote', '-v'], true),
     ]);
     const status: GitStatus = {
       enabled: this.enabled,
@@ -169,6 +175,11 @@ export class GitCommitter {
       status.behind = Number(counts[0]);
       status.ahead = Number(counts[1]);
       status.remote = (await git(this.repoRoot, ['rev-parse', '--abbrev-ref', '@{upstream}'], true)).trim();
+    }
+    const found = parseRemotes(remotes);
+    if (found.length) {
+      status.remotes = found;
+      status.remoteWarning = remoteWarning(found);
     }
     const [hash, date, subject] = last.trim().split('\x1f');
     if (hash && date && subject) status.lastCommit = { hash, date, subject };

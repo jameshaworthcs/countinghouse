@@ -1059,6 +1059,11 @@ function DataAndGit() {
           </div>
         )}
         {g?.lastError && <Callout tone="bad" className="mt-3">{g.lastError}</Callout>}
+        {g?.remoteWarning && (
+          <Callout tone={g.remotes?.some((r) => r.public) ? 'bad' : 'warn'} className="mt-3">
+            {g.remoteWarning}
+          </Callout>
+        )}
       </Card>
       {log.data && log.data.length > 0 && (
         <Card title="Recent data commits" padded={false}>
@@ -1146,11 +1151,17 @@ function Health() {
   const h = q.data;
   if (!h) return <Loading />;
   const clean =
+    !h.remotes &&
     !h.issues.length && !h.gaps.length && !h.noBalance.length && !h.stale.length && !h.coverageGaps?.some((g) => g.evidence.status === 'unexplained') && !h.handovers?.some((x) => x.status === 'unexplained') && !h.closedHolding?.length;
   const cov = h.coverage;
   return (
     <div className="flex flex-col gap-5">
       {clean && <Callout tone="good" title="All good">No problems found in your data.</Callout>}
+      {h.remotes && (
+        <Callout tone={h.remotes.public ? 'bad' : 'warn'} title="Your data repository has a remote">
+          {h.remotes.warning}
+        </Callout>
+      )}
       {cov && cov.accounts.length > 0 && (
         <Card
           title="Coverage"

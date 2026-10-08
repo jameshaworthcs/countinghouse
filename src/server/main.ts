@@ -10,7 +10,13 @@ import { createApp } from './app';
 import { isLoopbackHost, loadConfig, loadDotEnv, PROJECT_ROOT } from './config';
 
 loadDotEnv();
-const config = loadConfig();
+let config: ReturnType<typeof loadConfig>;
+try {
+  config = loadConfig();
+} catch (err) {
+  console.error(`finance: ${(err as Error).message}`);
+  process.exit(1);
+}
 const version = (JSON.parse(readFileSync(path.join(PROJECT_ROOT, 'package.json'), 'utf8')) as { version: string }).version;
 
 const loginMethod = !process.env.FINANCE_USERNAME ? null : process.env.FINANCE_OIDC_CLIENT_ID ? `OIDC (${process.env.FINANCE_OIDC_NAME?.trim() || process.env.FINANCE_OIDC_ISSUER?.trim() || 'no issuer set'})` : process.env.FINANCE_PASSWORD_HASH ? 'password' : null;
@@ -43,6 +49,9 @@ const server = serve({ fetch: app.fetch.bind(app), hostname: config.host, port: 
   console.log(`  login:  ${loginMethod ? `required (user ${process.env.FINANCE_USERNAME}, ${loginMethod})` : 'not configured: only direct local access is allowed'}`);
   if (config.allowedHosts.length) console.log(`  hosts:  ${config.allowedHosts.join(', ')}`);
   if (ctx.store.issues.length) console.log(`  ⚠ ${ctx.store.issues.length} data issue(s); see Settings → Data health`);
+  void ctx.git.status().then((g) => {
+    if (g.remoteWarning) console.warn(`  ⚠ ${g.remoteWarning}`);
+  });
 });
 
 server.on('error', (err: NodeJS.ErrnoException) => {

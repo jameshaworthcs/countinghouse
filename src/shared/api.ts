@@ -670,6 +670,8 @@ export interface ClosedHolding {
 
 export interface DataHealthResponse {
   coverage?: CoverageResponse;
+  /** The data repository has a remote (it should have none): what to do, and whether its host can be public. */
+  remotes?: { warning: string; public: boolean };
   /** Each link between your accounts, with what carried over. */
   handovers?: Handover[];
   /** Closed accounts that still held money on their last day, with no account carrying it on. */
@@ -956,7 +958,7 @@ export interface SystemResponse {
   }[];
   /** The engine documents are read with (Settings → Models). */
   selectedEngine: string | null;
-  git: { enabled: boolean; branch?: string; dirty: number; ahead?: number; behind?: number; remote?: string; lastCommit?: { hash: string; date: string; subject: string }; lastError?: string };
+  git: { enabled: boolean; branch?: string; dirty: number; ahead?: number; behind?: number; remote?: string; lastCommit?: { hash: string; date: string; subject: string }; lastError?: string; remotes?: { name: string; url: string; public: boolean }[]; remoteWarning?: string };
   inbox: { dir: string; lastError?: string };
   auth: { configured: boolean; method: 'oidc' | 'password' | null; provider: string | null; user: string | null };
   counts: { accounts: number; transactions: number; balances: number; imports: number; figures: number };

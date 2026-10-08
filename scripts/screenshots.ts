@@ -9,11 +9,15 @@
 //
 // `--only <text>` shoots only the pages whose name has it (light, desktop), for a change that
 // touches a few pages; add `--dark` or `--mobile` (or both) to shoot those that way instead.
+//
+// It shoots demo data only. A server on real data is refused unless you pass `--allow-real` and an
+// `--out` directory outside every git repository: screenshots of your finances never belong in one.
 
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import puppeteer, { type Browser } from 'puppeteer-core';
 import { PROJECT_ROOT } from '../src/server/config';
+import { commonDir } from '../src/server/datarepo';
 
 const argv = process.argv.slice(2);
 const arg = (name: string, fallback: string) => {
@@ -26,6 +30,7 @@ const chrome = process.env.CHROME_BIN ?? '/usr/bin/google-chrome';
 const only = arg('only', '');
 const dark = argv.includes('--dark');
 const mobile = argv.includes('--mobile');
+const allowReal = argv.includes('--allow-real');
 const login = process.env.SCREENS_USER && process.env.SCREENS_PASSWORD ? { user: process.env.SCREENS_USER, password: process.env.SCREENS_PASSWORD } : null;
 
 /** Sign in through the login page as a person would; returns the session cookie. */
@@ -75,7 +80,19 @@ async function main() {
   // A document with a schedule of payments (a student finance page).
   const scheduleId = imports.pending.find((p) => p.draft?.agreements?.length && p.id !== pendingId)?.id;
   // Account pages from whatever data is being shot: the first current account and the first ISA.
-  const boot = (await (await fetch(`${base}/api/bootstrap`, { headers: { host: '127.0.0.1', cookie } })).json()) as { accounts: { id: string; type: string }[] };
+  const boot = (await (await fetch(`${base}/api/bootstrap`, { headers: { host: '127.0.0.1', cookie } })).json()) as { accounts: { id: string; type: string }[]; demo?: boolean };
+  // Real data is shot only on purpose, and only into a directory no repository can take in.
+  if (!boot.demo) {
+    if (!allowReal) {
+      await browser.close();
+      throw new Error('This server is not serving demo data. Use the demo (npm run demo), or pass --allow-real with --out <a directory outside every git repository>.');
+    }
+    if (commonDir(out)) {
+      await browser.close();
+      throw new Error(`--allow-real needs --out outside every git repository: ${out} is inside one.`);
+    }
+    console.log(`! real data: the screenshots in ${out} are yours alone; delete them after viewing`);
+  }
   const txs = (await (await fetch(`${base}/api/transactions?limit=1`, { headers: { host: '127.0.0.1', cookie } })).json()) as { total: number };
   // A proposed fix waiting, when the data has one.
   const proposals = (await (await fetch(`${base}/api/proposals`, { headers: { host: '127.0.0.1', cookie } })).json()) as { pending: { proposal: { id: string } }[] };
@@ -229,4 +246,9 @@ async function main() {
   console.log(`\nScreenshots in ${out}`);
 }
 
-await main();
+try {
+  await main();
+} catch (err) {
+  console.error(`screens: ${(err as Error).message}`);
+  process.exit(1);
+}

@@ -38,7 +38,10 @@ describe('agent jobs on throwaway data', () => {
         const { git, store } = app.ctx;
         const runner = app.ctx.runner!;
         expect(git.tracked).toBe(false);
-        // Agents are on and research is due (none has been done), yet nothing starts by itself.
+        // Agents are off in a new data directory; turned on, with research due (none has been done),
+        // still nothing starts by itself.
+        expect(store.settings.agents.enabled).toBe(false);
+        await store.setSettings({ ...store.settings, agents: { ...store.settings.agents, enabled: true } });
         // (No tick is run here: if this ever failed, a tick would spend the owner's plan.)
         expect(store.settings.agents.enabled).toBe(true);
         expect(runner.suggestions().some((s) => s.auto)).toBe(true);

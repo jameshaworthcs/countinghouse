@@ -72,7 +72,11 @@ export function analyticsRoutes(ctx: AppContext): Hono {
     return c.json(a.month(month));
   });
   app.get('/capture', (c) => c.json(a.capture()));
-  app.get('/data-health', (c) => c.json(a.health()));
+  app.get('/data-health', async (c) => {
+    // A data repository with a remote is a health problem of its own: one push publishes it.
+    const g = await ctx.git.status();
+    return c.json({ ...a.health(), ...(g.remoteWarning ? { remotes: { warning: g.remoteWarning, public: Boolean(g.remotes?.some((r) => r.public)) } } : {}) });
+  });
 
   return app;
 }

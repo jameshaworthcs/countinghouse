@@ -38,6 +38,13 @@ Hono server  (Node 24, tsx; 127.0.0.1:4750 live, 4760 in development)
         selfassessment · monthly · capture list · health (+coverage, FSCS)
 ```
 
+Code and data live in two repositories (docs/SELF_HOSTING.md, "The layout"): this one, the code,
+and a private **data repository** of your own (`npm run init-data`) holding `data/`, the work area
+(`.work/`) and the inbox, with no remote. The server finds them through `FINANCE_DATA_DIR`,
+`FINANCE_WORK_DIR` and `FINANCE_INBOX_DIR` (`src/server/config.ts`); in production the data
+directory must be named. Development and the demo use generated data in the code checkout,
+gitignored. `src/server/datarepo.ts` makes a data repository and warns when it has a remote.
+
 Source layout:
 
 | Path | What lives there |
@@ -52,9 +59,9 @@ Source layout:
 | `src/server/sessions.ts` | Agent sessions: each run's record and transcript in the work area, their caps and retention; `sessionviews.ts` lists them (with earlier ones and agents with tokens) and says what each produced |
 | `src/server/proposals.ts` | Fixes agents propose to your data, checked against it and applied only by you ([AGENTS.md §5](AGENTS.md)) |
 | `src/web/` | The React app: `pages/`, `components/` (UI kit, charts), `lib/` (API client, prefs, data context) |
-| `scripts/` | Demo data, import CLI, records CLI, validate, schema export, screenshots, set-password, deploy; the leak guard (`leak-guard.ts`, `leak-guard/`) and its git hooks (`hooks-install.ts`) keep personal data out of the repository ([LEAK_GUARD.md](LEAK_GUARD.md)) |
+| `scripts/` | Demo data, import CLI, records CLI, validate, schema export, screenshots (demo data only), set-password, deploy, `init-data` (a new data repository); the leak guard (`leak-guard.ts`, `leak-guard/`) and its git hooks (`hooks-install.ts`) keep personal data out of the repository ([LEAK_GUARD.md](LEAK_GUARD.md)), and `fixture-anonymise.ts` turns a real import's document into a synthetic fixture |
 | `tests/` | Vitest suites + synthetic fixtures for every supported bank format |
-| `deploy/` | systemd unit template, Caddy site block, installer |
+| `deploy/` | systemd unit template and an example Caddy site block ([SELF_HOSTING.md](SELF_HOSTING.md)) |
 
 ## The layered data model
 

@@ -165,7 +165,7 @@
     },
     "agents": {
       "default": {
-        "enabled": true,
+        "enabled": false,
         "researchStaleAfterDays": 90,
         "insightsAfterImport": true,
         "monthlyReview": true,
@@ -178,7 +178,7 @@
       "type": "object",
       "properties": {
         "enabled": {
-          "default": true,
+          "default": false,
           "type": "boolean"
         },
         "researchStaleAfterDays": {

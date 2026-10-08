@@ -164,6 +164,7 @@ describe('job outputs become records', () => {
 
 describe('what is stale', () => {
   it('jobs the app starts by itself stop at the background budget; yours do not count', async () => {
+    await store.setSettings({ ...store.settings, agents: { ...store.settings.agents, enabled: true } });
     const config = loadConfig({ FINANCE_DATA_DIR: path.join(dir, 'data'), FINANCE_WORK_DIR: path.join(dir, 'work'), FINANCE_WATCH: '0' });
     const first = new JobRunner(store, new Analytics(store), config, { autoRun: false });
     await first.init();

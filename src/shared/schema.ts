@@ -1171,10 +1171,13 @@ export const SettingsSchema = z.object({
   staleAfterDays: z.number().int().min(1).max(3650).default(35),
   /** Manual FX: value of one unit of each currency in GBP, e.g. { "USD": 0.74 }. */
   fx: z.record(CurrencySchema, z.number().positive()).default({}),
-  /** In-app agent jobs (research, insights, reviews) run through the same Claude engine. */
+  /**
+   * In-app agent jobs (research, insights, reviews) run through the same Claude engine. Off until you
+   * turn them on: a new data directory spends nothing by itself.
+   */
   agents: z
     .object({
-      enabled: z.boolean().default(true),
+      enabled: z.boolean().default(false),
       /** Research older than this is refreshed. */
       researchStaleAfterDays: z.number().int().min(7).max(730).default(90),
       /** Produce insights after each committed import. */
@@ -1200,7 +1203,7 @@ export const SettingsSchema = z.object({
       backgroundBudgetPerDayUsd: z.number().min(0).max(100).default(5),
       backgroundBudgetPerMonthUsd: z.number().min(0).max(1000).default(40),
     })
-    .default({ enabled: true, researchStaleAfterDays: 90, insightsAfterImport: true, monthlyReview: true, timeoutSeconds: 1200, autoResearch: false, labelImports: false, backgroundBudgetPerDayUsd: 5, backgroundBudgetPerMonthUsd: 40 }),
+    .default({ enabled: false, researchStaleAfterDays: 90, insightsAfterImport: true, monthlyReview: true, timeoutSeconds: 1200, autoResearch: false, labelImports: false, backgroundBudgetPerDayUsd: 5, backgroundBudgetPerMonthUsd: 40 }),
 });
 export type Settings = z.infer<typeof SettingsSchema>;
 

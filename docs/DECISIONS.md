@@ -2420,3 +2420,29 @@ the page title, the wordmark, the sign-in page, messages that name the app, the 
 (`short_name` "Counting", so a phone's home screen does not cut it off), the API-only page, the
 package and the service's description. Settings (`FINANCE_*`), the `finance.service` unit, the
 cookies and every path keep their names, so nothing about a running installation changes.
+
+## 2026-10-08: The data in a repository of its own
+
+With the code shared, the data cannot share its repository. The owner's data moves to a private
+data repository; the code supports that layout for everyone.
+
+- **`npm run init-data -- <dir>`** makes one: git with no remote and a `pre-push` hook that refuses
+  every push, a data directory the app can open, a `.gitignore` for the work area and the inbox, a
+  `schemas` link to the code checkout (the data files name `../schemas/…`), a README and a first
+  commit. It refuses a directory that is not empty or is inside another repository, and prints the
+  `.env` lines.
+- **Configuration** (`config.ts`): in production `FINANCE_DATA_DIR` must be set, since a default
+  would put real data in the code checkout. Data outside the code checkout is a data repository's
+  `data/`, and its work area and inbox default to sit beside it; the demo's data, in the
+  checkout, keeps them there.
+- **A remote on the data repository is a warning** in Settings → Data & git, Data health and the
+  server's log, louder for a public host, with the command that removes it. It is not refused:
+  the owner may have reasons, and the app cannot undo a push anyway.
+- **Agents are off in a new data directory**, so it spends nothing by itself until turned on.
+  Directories that set it keep their choice.
+- **Screenshots are of demo data.** `npm run screens` refuses a server that is not serving demo
+  data, unless given `--allow-real` and an `--out` directory outside every git repository.
+- **`npm run fixture:anonymise`** turns a document a real import failed on into a synthetic
+  fixture (dates moved by whole weeks, amounts scaled by one factor, identifiers, emails and
+  postcodes replaced, names and places invented, public and common words kept) and checks the
+  result with the leak guard, so a regression test needs none of the real rows.

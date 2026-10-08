@@ -101,7 +101,7 @@ function* objects(v: unknown): Generator<Json> {
 // ─── What counts as generic ──────────────────────────────────────────────────────────────────────
 
 /** Words that say what kind of account, product or payment something is, not whose. */
-const GENERIC_WORDS = new Set(
+export const GENERIC_WORDS = new Set(
   (
     'a an and the of for to from in on at by with my your our new old main joint sole ' +
     'account accounts current saver savings saving save easy access instant notice fixed rate rates bond bonds term ' +
@@ -121,7 +121,7 @@ const GENERIC_WORDS = new Set(
 );
 
 /** Words of names this code base already makes public: the institution catalogue and the merchant list. */
-async function publicVocabulary(): Promise<{ words: Set<string>; names: Set<string>; merchantPatterns: RegExp[] }> {
+export async function publicVocabulary(): Promise<{ words: Set<string>; names: Set<string>; merchantPatterns: RegExp[] }> {
   const words = new Set(GENERIC_WORDS);
   const names = new Set<string>();
   const merchantPatterns: RegExp[] = [];
@@ -155,7 +155,7 @@ const DICTIONARY_FILES = ['/usr/share/dict/british-english', '/usr/share/dict/wo
  * descriptions and places made only of these ("Cheque paid in") are bank wording, not anyone's. No
  * list, no filter: more matches, never fewer.
  */
-function commonWords(): Set<string> | undefined {
+export function commonWords(): Set<string> | undefined {
   const words = new Set<string>();
   for (const file of DICTIONARY_FILES) {
     try {
@@ -168,7 +168,7 @@ function commonWords(): Set<string> | undefined {
 }
 
 /** The given names src/shared/people.ts knows (read as text: that module needs the bundler's imports). */
-function givenNames(): Set<string> {
+export function givenNames(): Set<string> {
   try {
     const text = readFileSync(path.join(ROOT, 'src/shared/people.ts'), 'utf8');
     const start = text.indexOf('const FIRST_NAMES');

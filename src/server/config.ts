@@ -61,19 +61,36 @@ export function isLoopbackHost(host: string): boolean {
   return LOOPBACK.has(host) || host.startsWith('127.');
 }
 
+const inside = (child: string, parent: string) => {
+  const rel = path.relative(parent, child);
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+};
+
+/**
+ * Where the data, its work area and its inbox are. In production FINANCE_DATA_DIR must be set: a
+ * default would put real data in the code checkout. Data in the code checkout (the demo data,
+ * gitignored) keeps its work area and inbox there too; data anywhere else is a data repository's
+ * `data/` (`npm run init-data`), and its work area (`.work/<name>`) and inbox sit beside it.
+ */
 export function loadConfig(env: NodeJS.ProcessEnv = process.env, root = PROJECT_ROOT): Config {
   const abs = (p: string) => (path.isAbsolute(p) ? p : path.resolve(root, p));
+  const production = env.NODE_ENV === 'production';
+  if (production && !env.FINANCE_DATA_DIR) {
+    throw new Error('FINANCE_DATA_DIR must be set in production: the data directory of your data repository (make one with `npm run init-data -- <dir>`).');
+  }
   const dataDir = abs(env.FINANCE_DATA_DIR || 'data');
   const dataName = path.basename(dataDir);
+  const inCode = inside(dataDir, root);
+  const dataRepo = inCode ? root : path.dirname(dataDir);
   const host = env.HOST || '127.0.0.1';
   const config: Config = {
     host,
     port: Number(env.PORT || DEV_PORT),
-    production: env.NODE_ENV === 'production',
+    production,
     projectRoot: root,
     dataDir,
-    inboxDir: abs(env.FINANCE_INBOX_DIR || (dataName === 'data' ? 'inbox' : path.join('.work', `inbox-${dataName}`))),
-    workDir: abs(env.FINANCE_WORK_DIR || path.join('.work', dataName)),
+    inboxDir: abs(env.FINANCE_INBOX_DIR || (!inCode ? path.join(dataRepo, 'inbox') : dataName === 'data' ? 'inbox' : path.join('.work', `inbox-${dataName}`))),
+    workDir: abs(env.FINANCE_WORK_DIR || path.join(dataRepo, '.work', dataName)),
     webDist: path.join(root, 'dist', 'web'),
     allowedHosts: (env.FINANCE_ALLOWED_HOSTS || '')
       .split(',')

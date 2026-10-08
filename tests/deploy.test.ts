@@ -76,6 +76,15 @@ describe('start-up guards', () => {
     }
   });
 
+  it('needs the data named in production, and keeps a data repository\'s work area and inbox beside its data', () => {
+    expect(() => loadConfig({ NODE_ENV: 'production' })).toThrow(/FINANCE_DATA_DIR must be set in production/);
+    const outside = loadConfig({ FINANCE_DATA_DIR: '/srv/money/data' });
+    expect([outside.workDir, outside.inboxDir]).toEqual(['/srv/money/.work/data', '/srv/money/inbox']);
+    // Data in the code checkout (the demo's) keeps them in the checkout, as before.
+    const demo = loadConfig({ FINANCE_DATA_DIR: 'demo-data' });
+    expect([path.relative(demo.projectRoot, demo.workDir), path.relative(demo.projectRoot, demo.inboxDir)]).toEqual([path.join('.work', 'demo-data'), path.join('.work', 'inbox-demo-data')]);
+  });
+
   it('refuses to create a missing data directory in production unless asked to', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'finance-init-'));
     try {

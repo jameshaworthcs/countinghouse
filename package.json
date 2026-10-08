@@ -32,6 +32,8 @@
     "records": "tsx scripts/records.ts",
     "api": "tsx scripts/api.ts",
     "eval": "tsx eval/run.ts",
+    "init-data": "tsx scripts/init-data.ts",
+    "fixture:anonymise": "tsx scripts/fixture-anonymise.ts",
     "leak-guard": "node scripts/leak-guard.ts",
     "hooks:install": "node scripts/hooks-install.ts",
     "prepare": "node scripts/hooks-install.ts --quiet"
