@@ -2416,9 +2416,11 @@ the sign-in page. Published, it should work with anyone's.
 ## 2026-10-08: The app is called Counting House
 
 Published, "Finance" says what it is about but not what it is. The app is now **Counting House**:
-the page title, the wordmark, the sign-in page, messages that name the app, the web manifest
-(`short_name` "Counting", so a phone's home screen does not cut it off), the API-only page, the
-package and the service's description. Settings (`FINANCE_*`), the `finance.service` unit, the
+the page title, the wordmark, the sign-in page, messages that name the app, the web manifest, the
+API-only page, the package and the service's description. The manifest's `short_name`, the
+home-screen label, is the full name too, at the owner's wish: a phone draws it in its own font, so
+one with room shows it whole and a narrow grid cuts it to "Counting Ho…" (iOS lets you edit the
+name when adding it). Settings (`FINANCE_*`), the `finance.service` unit, the
 cookies and every path keep their names, so nothing about a running installation changes.
 
 ## 2026-10-08: The data in a repository of its own
