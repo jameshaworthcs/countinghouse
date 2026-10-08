@@ -17,13 +17,13 @@
 // (repeatable), --repo <dir>. Output is always masked. Exit 0 clean, 1 findings, 2 error (for
 // --claude-hook, 2 blocks the write).
 
-import { chmodSync, existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { configDir, loadDenylist, loadExtras, resolveDataDir, type BuildStats, type Denylist, type Extras } from './leak-guard/denylist.ts';
 import { commitAdded, commitInfo, catBlobs, diffAdded, git, historyIndex, isCombined, isPrivatePath, repoRoot, revList, treeFiles, tryGit, ZERO, type FileChange, type AddedBlock } from './leak-guard/git.ts';
 import { fileRules } from './leak-guard/patterns.ts';
 import { ALLOW_FILE, Allowlist, describe, Scanner, type Finding } from './leak-guard/scan.ts';
-import { globToRegExp, isBinary, mask } from './leak-guard/text.ts';
+import { globToRegExp, isBinary, mask, tokenKey } from './leak-guard/text.ts';
 
 interface Args {
   mode?: string;
@@ -253,36 +253,62 @@ async function claudeHook(args: Args): Promise<number> {
   return 2;
 }
 
-/** Postcodes and address-like lines in the readings under data/imports: candidates for the extras file, never added by themselves. */
-function deep(args: Args): number {
+/**
+ * Postcodes and address-like lines in the readings under data/imports: candidates for the extras
+ * file, never added by themselves. Ranked by how many documents print them: your address is on
+ * every statement, a shop's on one.
+ */
+async function deep(args: Args): Promise<number> {
   const dataDir = resolveDataDir(args.data);
   if (!dataDir) throw new Error('--deep needs a data directory');
-  const counts = new Map<string, number>();
+  // What the denylist has already (shops' addresses from your payments) needs no decision.
+  const known = new Set((await loadDenylist(dataDir)).denylist.tokens.map(([k]) => k));
+  const documents = new Map<string, Set<string>>();
   const POSTCODE = /\b(?:[A-PR-UWYZ][A-HK-Y]?\d[A-Z\d]? ?\d[ABD-HJLNP-UW-Z]{2})\b/g;
   const ADDRESS = /\b(?:flat \d+[a-z]?|\d+[a-z]?,? [a-z' -]{2,40} (?:road|street|lane|avenue|close|drive|way|court|place|crescent|terrace|grove|gardens|hill|row|walk|square|mews|park|view|rise|gate|green))\b/gi;
-  const walk = (v: unknown) => {
-    if (typeof v === 'string') {
-      for (const m of [...v.matchAll(POSTCODE), ...v.matchAll(ADDRESS)]) {
-        const key = m[0].replace(/\s+/g, ' ');
-        counts.set(key, (counts.get(key) ?? 0) + 1);
-      }
-    } else if (Array.isArray(v)) v.forEach(walk);
-    else if (v && typeof v === 'object') Object.values(v).forEach(walk);
-  };
   const imports = path.join(dataDir, 'imports');
   const files = existsSync(imports) ? readdirSync(imports, { recursive: true, encoding: 'utf8' }).filter((f) => f.endsWith('.json')) : [];
   for (const f of files) {
+    const walk = (v: unknown) => {
+      if (typeof v === 'string') {
+        for (const m of [...v.matchAll(POSTCODE), ...v.matchAll(ADDRESS)]) {
+          const key = m[0].replace(/\s+/g, ' ');
+          let seen = documents.get(key);
+          if (!seen) documents.set(key, (seen = new Set()));
+          seen.add(f);
+        }
+      } else if (Array.isArray(v)) v.forEach(walk);
+      else if (v && typeof v === 'object') Object.values(v).forEach(walk);
+    };
     try {
       walk(JSON.parse(readFileSync(path.join(imports, f), 'utf8')));
     } catch {
       // Unreadable: skipped.
     }
   }
+  mkdirSync(configDir(), { recursive: true, mode: 0o700 });
   const out = path.join(configDir(), 'leak-extra.candidates.txt');
-  const lines = [...counts].sort((a, b) => b[1] - a[1]).map(([v, n]) => `${v}    # seen ${n}×`);
-  writeFileSync(out, `# Candidates from the readings under ${dataDir}/imports. Copy the ones that are yours (your\n# addresses, past and present) into leak-extra.txt, without the "# seen" part. Delete this file after.\n${lines.join('\n')}\n`, { mode: 0o600 });
+  const ranked = [...documents].filter(([v]) => !known.has(tokenKey(v))).sort((a, b) => b[1].size - a[1].size || (a[0] < b[0] ? -1 : 1));
+  const line = ([v, docs]: [string, Set<string>]) => `${v}    # in ${docs.size} document${docs.size === 1 ? '' : 's'}`;
+  const many = ranked.filter(([, d]) => d.size >= 3);
+  const few = ranked.filter(([, d]) => d.size < 3);
+  writeFileSync(
+    out,
+    [
+      `# Candidates from the readings under ${dataDir}/imports. Copy the ones that are yours (your`,
+      '# addresses, past and present) into leak-extra.txt, without the "# in" part. Delete this file after.',
+      '',
+      '# In three or more documents: your addresses are likely here, beside banks\' own.',
+      ...many.map(line),
+      '',
+      '# In one or two documents: mostly shops and payees.',
+      ...few.map(line),
+      '',
+    ].join('\n'),
+    { mode: 0o600 },
+  );
   chmodSync(out, 0o600);
-  warn(`${lines.length} candidates (${[...counts.keys()].filter((k) => /\d[A-Z]{2}$/.test(k)).length} postcodes) written to ${out}`);
+  warn(`${ranked.length} candidates (${documents.size - ranked.length} more are in the denylist already), ${many.length} of them in three or more documents, written to ${out}`);
   return 0;
 }
 
@@ -308,7 +334,7 @@ function report(args: Args, findings: Finding[], stats?: BuildStats): number {
 async function main(argv: string[]): Promise<number> {
   const args = parseArgs(argv);
   if (args.mode === '--claude-hook') return claudeHook(args);
-  if (args.mode === '--deep') return deep(args);
+  if (args.mode === '--deep') return await deep(args);
 
   const root = repoRoot(path.resolve(args.repo ?? process.cwd()));
   const quiet = args.json;

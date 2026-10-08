@@ -310,6 +310,19 @@ describe('the command', () => {
     expect(run(['--rebuild', '--data', dataDir], { env: { GIT_DIR: path.join(repo, '.git') } }).code).toBe(0);
   });
 
+  it('offers address candidates from the readings for the extras file, and prints none of them', () => {
+    const postcode = ['YO10', '5DD'].join(' ');
+    mkdirSync(path.join(dataDir, 'imports', '2026'), { recursive: true });
+    writeFileSync(path.join(dataDir, 'imports', '2026', 'imp_1.json'), JSON.stringify({ extraction: { raw: { printed: [{ label: 'Address', value: `12 Lark Rise, Exampleton ${postcode}` }] } } }));
+    const r = run(['--deep', '--data', dataDir]);
+    expect(r.code).toBe(0);
+    expect(r.all).not.toContain(postcode);
+    const file = path.join(tmp, 'home', '.config', 'finance', 'leak-extra.candidates.txt');
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+    expect(readFileSync(file, 'utf8')).toContain(`${postcode}    # in 1 document`);
+    expect(readFileSync(file, 'utf8')).toContain('12 Lark Rise');
+  });
+
   it('runs on patterns alone without data, as CI does', () => {
     const r = run(['--stdin', '--patterns-only'], { input: `${OWNER} ${['olly', 'mail.co.uk'].join('@')}\n` });
     expect(r.code).toBe(1);
