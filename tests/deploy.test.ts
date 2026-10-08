@@ -1,7 +1,7 @@
 // Guards that keep the live data safe once development and the live service are separated.
 
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -41,6 +41,37 @@ describe('data auto-commits', () => {
       expect(committer.lastError).toBeUndefined();
       expect(git('log', '--format=%s', 'main').trim().split('\n')[0]).toBe('data: catch up');
       expect(git('show', '--name-only', '--format=', 'HEAD').trim()).toBe('data/accounts.json');
+    } finally {
+      await rm(repo, { recursive: true, force: true, maxRetries: 5 });
+    }
+  });
+
+  it('commits new data files though the repository leaves data/ out, and keeps documents out when you say so', async () => {
+    const { repo, git } = await repoWithData();
+    try {
+      const store = await Store.open(path.join(repo, 'data'));
+      await (await GitCommitter.create(path.join(repo, 'data'), () => true, 10, 'main')).flush('data: initialise');
+      // A code checkout that tracks its data, with a .gitignore that leaves data/ out (as the code
+      // repository's does): new data files must not wait on it.
+      await writeFile(path.join(repo, '.gitignore'), 'data/\n');
+      git('add', '.gitignore');
+      git('commit', '-q', '-m', 'ignore data');
+      const committer = await GitCommitter.create(path.join(repo, 'data'), () => true, 10, 'main');
+      expect(committer.tracked).toBe(true);
+      // A new file (a document) in a directory the repository ignores is committed too.
+      await mkdir(path.join(repo, 'data', 'documents', '2026', '10'), { recursive: true });
+      await writeFile(path.join(repo, 'data', 'documents', '2026', '10', 'a.pdf'), 'one');
+      await committer.flush('data: a document');
+      expect(git('show', '--name-only', '--format=', 'HEAD').trim()).toBe('data/documents/2026/10/a.pdf');
+      // Documents kept out of git: the next is left out, and the marker that says so is committed.
+      await store.setSettings({ ...store.settings, git: { ...store.settings.git, trackDocuments: false } });
+      await writeFile(path.join(repo, 'data', 'documents', '2026', '10', 'b.pdf'), 'two');
+      await committer.flush();
+      const last = git('show', '--name-only', '--format=', 'HEAD');
+      expect(last).toMatch(/^data\/documents\/\.gitignore$/m);
+      expect(last).not.toMatch(/b\.pdf/);
+      expect(git('status', '--porcelain', '--ignored', '--', 'data/documents/2026/10/b.pdf')).toMatch(/b\.pdf/);
+      store.stopWatching();
     } finally {
       await rm(repo, { recursive: true, force: true, maxRetries: 5 });
     }

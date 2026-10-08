@@ -3,6 +3,7 @@
 // under the data directory are ever staged or committed.
 
 import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { parseRemotes, remoteWarning, type DataRemote } from './datarepo';
@@ -125,7 +126,9 @@ export class GitCommitter {
         `data changes are not being committed: the repository is on ${head ? `branch "${head}"` : 'a detached HEAD'}, not "${this.branch ?? 'a branch'}". Check out ${this.branch ?? 'a branch'} in ${this.repoRoot}; the next change commits everything pending.`,
       );
     }
-    await withLockRetry(() => git(this.repoRoot!, ['add', '-A', '--', this.dataRel]));
+    const { paths, docsIgnore } = this.dataPaths();
+    await withLockRetry(() => git(this.repoRoot!, ['add', '-A', '--force', '--', ...paths]));
+    if (docsIgnore) await withLockRetry(() => git(this.repoRoot!, ['add', '--force', '--', docsIgnore]));
     const staged = await git(this.repoRoot, ['diff', '--cached', '--name-only', '--', this.dataRel]);
     if (!staged.trim()) {
       this.lastError = undefined;
@@ -145,6 +148,18 @@ export class GitCommitter {
       const hash = (await git(this.repoRoot, ['rev-parse', '--short', 'HEAD'], true)).trim();
       if (hash) this.onCommit({ hash, subject, auditSeqs });
     }
+  }
+
+  /**
+   * What a data commit stages: everything in the data directory, whatever the repository's own
+   * .gitignore says (a code checkout ignores data/, and new files must not wait on that), except the
+   * documents when you keep them out of git (Settings → Data & git), which documents/.gitignore
+   * marks: then that file alone, staged on its own (an excluded directory's files match nothing).
+   */
+  private dataPaths(): { paths: string[]; docsIgnore?: string } {
+    const docs = this.dataRel === '.' ? 'documents' : `${this.dataRel}/documents`;
+    if (!existsSync(path.join(this.repoRoot!, docs, '.gitignore'))) return { paths: [this.dataRel] };
+    return { paths: [this.dataRel, `:(exclude)${docs}`], docsIgnore: `${docs}/.gitignore` };
   }
 
   /** The commit data/ is at, and how many of its files have changes not yet committed. */
