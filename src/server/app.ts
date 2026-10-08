@@ -133,7 +133,7 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
   });
   // Local access without a login is for throwaway data only (demo-data, temporary directories).
   // Real data, tracked in git, always needs a login, even on loopback: other local accounts (the
-  // isolated service users on P360) must not be able to read it from a development server.
+  // isolated service users on a shared host) must not be able to read it from a development server.
   if (git.tracked && !auth.configured) {
     store.stopWatching();
     throw new Error(`${config.dataDir} holds real data (it is tracked in git), so a login is required. Run \`npm run set-password\`, or use the demo data (npm run dev / npm run demo).`);

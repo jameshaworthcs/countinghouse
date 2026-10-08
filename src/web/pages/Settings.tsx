@@ -1280,7 +1280,9 @@ const whenTime = (iso: string) => `${formatDate(iso.slice(0, 10))} ${iso.slice(1
 function AgentAccess() {
   const toast = useToast();
   const q = useApi<TokensResponse>(['tokens'], '/tokens');
-  const [name, setName] = useState('Claude Code on P360');
+  // Until you type one, a new token is named for the server it is made on.
+  const [typed, setName] = useState<string>();
+  const name = typed ?? `Claude Code on ${q.data?.host ?? 'this server'}`;
   const [scopes, setScopes] = useState<string[]>(['imports']);
   const [days, setDays] = useState('90');
   const [made, setMade] = useState<{ token: string; name: string } | null>(null);
@@ -1347,7 +1349,7 @@ function AgentAccess() {
             </Button>
           </div>
           <p>
-            For agents on P360, keep it where <code>npm run api</code> looks. Run this, paste the token, press Enter, then Ctrl-D:
+            For agents on this server, keep it where <code>npm run api</code> looks. Run this, paste the token, press Enter, then Ctrl-D:
           </p>
           <code className="block rounded-lg bg-panel-2 p-3 font-mono text-[12px] break-all text-ink">mkdir -p ~/.config/finance && (umask 077; cat &gt; ~/.config/finance/token)</code>
         </div>

@@ -134,7 +134,7 @@ export function DecidedNotice({ decided, next, last, onHide }: { decided: Decide
   );
 }
 
-/** "Claude Code on P360 (claude-opus-5-5)", or the in-app job that proposed it. */
+/** "Claude Code on my-server (claude-opus-5-5)", or the in-app job that proposed it. */
 export function proposedBy(p: Provenance): string {
   const who = p.jobId ? `an agent job${p.promptVersion ? ` (${p.promptVersion})` : ''}` : (p.session ?? 'an agent');
   return p.model ? `${who}, ${p.model}` : who;

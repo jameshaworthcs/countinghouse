@@ -25,12 +25,12 @@ describe('the token store', () => {
   it('keeps only a hash, readable by you alone, and always lets a token read', async () => {
     const tokens = AgentTokens.forWorkDir(dir);
     await tokens.load();
-    const made = await tokens.create({ name: 'Claude Code on P360', scopes: ['imports'], days: 30 });
+    const made = await tokens.create({ name: 'Claude Code on my-server', scopes: ['imports'], days: 30 });
     expect(made.token).toMatch(/^fin_[0-9a-f]{12}_[A-Za-z0-9_-]{43}$/);
     const file = path.join(dir, 'agent-tokens.json');
     expect(await readFile(file, 'utf8')).not.toContain(made.token.slice(17));
     expect((await stat(file)).mode & 0o777).toBe(0o600);
-    expect(made.view).toMatchObject({ name: 'Claude Code on P360', scopes: ['read', 'imports'], status: 'active' });
+    expect(made.view).toMatchObject({ name: 'Claude Code on my-server', scopes: ['read', 'imports'], status: 'active' });
     expect(made.view).not.toHaveProperty('hash');
   });
 
@@ -161,7 +161,7 @@ describe('the API with a token', () => {
 
   it('you make and revoke tokens with your session; every use is logged, refusals too', async () => {
     const cookie = await signIn();
-    const made = await req('/api/tokens', { method: 'POST', headers: { ...CSRF, cookie, 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Claude Code on P360', scopes: ['imports'], days: 90 }) });
+    const made = await req('/api/tokens', { method: 'POST', headers: { ...CSRF, cookie, 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Claude Code on my-server', scopes: ['imports'], days: 90 }) });
     expect(made.status).toBe(201);
     const { token: secret, view } = (await made.json()) as { token: string; view: { id: string; scopes: string[] } };
     expect(view.scopes).toEqual(['read', 'imports']);

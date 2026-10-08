@@ -1,4 +1,4 @@
-// Call the app's API with an agent token, for Claude Code sessions and scripts on P360
+// Call the app's API with an agent token, for Claude Code sessions and scripts on the server
 // (docs/SELF_HOSTING.md, "Agent access"). The token never appears in the output.
 //
 //   npm run -s api -- GET /imports

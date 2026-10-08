@@ -1,5 +1,6 @@
 // Agent access tokens: yours to make, see and revoke (tokens.ts). No token can reach these routes.
 
+import { hostname } from 'node:os';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { readJson, type AppContext } from '../context';
@@ -14,6 +15,7 @@ export function tokenRoutes(ctx: AppContext): Hono {
       tokens: ctx.tokens.list(),
       uses: await ctx.tokens.recentUses(30),
       scopes: TOKEN_SCOPES.map((id) => ({ id, label: TOKEN_SCOPE_LABELS[id] })),
+      host: hostname(),
     }),
   );
 

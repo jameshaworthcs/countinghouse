@@ -82,12 +82,12 @@ describe('the log', () => {
   it('finds entries by any words, who, what, outcome and day, newest first and a page at a time', async () => {
     const log = AuditLog.open(dir);
     log.record({ category: 'data', action: 'data.change', summary: 'transaction: categorise TESCO', actor: ME, diff: { changed: 1, items: [{ id: 'tx_0123456789abcdef', op: 'changed', fields: { category: ['shopping', 'groceries'] } }] } });
-    log.record({ category: 'request', action: 'request', outcome: 'refused', summary: 'Refused: POST /api/records', actor: { type: 'token', tokenId: 'tok_aaaaaaaaaaaa', name: 'Claude', scopes: ['read'], ip: '100.64.0.9', device: 'p360' } });
+    log.record({ category: 'request', action: 'request', outcome: 'refused', summary: 'Refused: POST /api/records', actor: { type: 'token', tokenId: 'tok_aaaaaaaaaaaa', name: 'Claude', scopes: ['read'], ip: '100.64.0.9', device: 'my-server' } });
     log.record({ category: 'job', action: 'job.succeeded', summary: 'Agent job research-instrument: finished', actor: { type: 'job', jobId: 'job_x1', kind: 'research-instrument', trigger: 'owner' } });
     const seqs = async (q: Parameters<AuditLog['query']>[0]) => (await log.query({ all: true, ...q })).entries.map((e) => e.seq);
     expect(await seqs({})).toEqual([3, 2, 1]);
     expect(await seqs({ q: 'groceries' })).toEqual([1]);
-    expect(await seqs({ q: 'P360 claude' })).toEqual([2]);
+    expect(await seqs({ q: 'my-server claude' })).toEqual([2]);
     expect(await seqs({ q: 'groceries claude' })).toEqual([]);
     expect(await seqs({ actors: ['job'] })).toEqual([3]);
     expect(await seqs({ categories: ['data', 'request'] })).toEqual([2, 1]);
@@ -260,7 +260,7 @@ describe('the app records who did what', () => {
   it('refusals are recorded with who tried: a wrong password, no session, a token out of scope, a bad token', async () => {
     await req('/api/auth/login', { method: 'POST', headers: { ...CSRF, 'content-type': 'application/json' }, body: JSON.stringify({ username: 'james', password: 'wrong' }) });
     expect((await req('/api/settings', { method: 'PUT', headers: { ...CSRF, 'content-type': 'application/json' }, body: '{}' })).status).toBe(401);
-    const made = await app.ctx.tokens.create({ name: 'Claude Code on P360', scopes: ['imports'], days: 30 });
+    const made = await app.ctx.tokens.create({ name: 'Claude Code on my-server', scopes: ['imports'], days: 30 });
     expect((await req('/api/records', { method: 'POST', headers: { ...CSRF, authorization: `Bearer ${made.token}`, 'content-type': 'application/json' }, body: '{}' })).status).toBe(403);
     const fake = `fin_${made.view.id.slice(4)}_${'A'.repeat(43)}`;
     expect((await req('/api/records', { method: 'POST', headers: { ...CSRF, authorization: `Bearer ${fake}`, 'content-type': 'application/json' }, body: '{}' })).status).toBe(401);
@@ -269,7 +269,7 @@ describe('the app records who did what', () => {
     const refused = (await audit(cookie, '?outcome=refused')).entries;
     expect(refused.map((e) => e.actor.type)).toEqual(['anonymous', 'token', 'anonymous', 'anonymous']);
     expect(refused[0]).toMatchObject({ actor: { claimedToken: made.view.id }, request: { status: 401 } });
-    expect(refused[1]).toMatchObject({ actor: { tokenId: made.view.id, name: 'Claude Code on P360', scopes: ['read', 'imports'] }, request: { path: '/api/records', status: 403 } });
+    expect(refused[1]).toMatchObject({ actor: { tokenId: made.view.id, name: 'Claude Code on my-server', scopes: ['read', 'imports'] }, request: { path: '/api/records', status: 403 } });
     expect(refused[1]!.request?.error).toContain('"records" scope');
     expect(refused[2]).toMatchObject({ request: { method: 'PUT', path: '/api/settings', status: 401 } });
     expect(refused[3]).toMatchObject({ category: 'auth', action: 'auth.sign-in', summary: 'Sign-in refused: wrong username or password' });

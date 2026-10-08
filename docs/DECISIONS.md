@@ -82,7 +82,7 @@ Newest last. Each entry says what was decided, what else was considered, and why
   Committing onto a feature branch or a detached HEAD would scatter the audit log. The changes
   stay on disk, the reason shows in Settings, and the next change commits everything.
 - **Real data needs a login even on loopback.** A server on a directory tracked in git refuses to
-  start without one. P360 runs network-facing services as isolated local users; a login-free
+  start without one. The host runs network-facing services as isolated local users; a login-free
   development server on real data would have let any of them read it.
 - **Ports:** live 4750, development 4760 (Vite 4761), demo 4770.
 - **A missing data directory in production is an error, not an empty start.**
@@ -415,7 +415,7 @@ needed a `fetch` loop pasted into the signed-in browser console.
   - A new token has read and import upkeep ticked. Records and jobs must be ticked on purpose.
   - A job an agent starts waits for the background budget, and is refused while agents are off,
     because agent work stays off unless the owner turns it on.
-- **Reachable from P360 and the tailnet (the owner's choice).** The helper defaults to the loopback
+- **Reachable from the host and the tailnet (the owner's choice).** The helper defaults to the loopback
   service. Caddy passes tokens from other tailnet devices.
 - **The CSRF header is still required with a token.** A token is not a cookie, so CSRF cannot
   forge it, but keeping one rule for every change is simpler to reason about. The helper sends the
@@ -473,7 +473,7 @@ needed a `fetch` loop pasted into the signed-in browser console.
 
 ## 2026-09-29: Tidy merchant addresses
 
-- **Fixed rules, not a model.** The plan allowed a local model on P360, but that is a new engine
+- **Fixed rules, not a model.** The plan allowed a local model on the owner's machine, but that is a new engine
   under the privacy rules. A deterministic tidy handles the card exports seen so far: wrapped lines,
   capitals, quoted towns, stray phone numbers, and postcodes missing their space.
 - **Enrichment beside the source, worked out again at every start.** `place` is a function of the
@@ -743,7 +743,7 @@ to decide.
   fitting says why.
 - **Agents propose with the `records` scope; only the owner applies or dismisses.** Proposing
   changes nothing, so it sits with the other agent-written records. The existing "Claude Code on
-  P360" token can propose without a new token.
+  the server" token can propose without a new token.
   - Applying, dismissing and checking are closed to every token.
   - An agent can withdraw its own waiting proposal.
 - **Background agents use the same service** through `JobContext.proposals`, under the job's
@@ -1461,7 +1461,7 @@ Later the same day, after the owner's first runs (`label-imports-2`):
 - **Request bodies kept, with limits.** Secrets redacted, NI numbers removed, account and card
   numbers cut to their last 4 digits (they arrive before the app's own rules apply), long values cut, an import's draft only as
   its shape (it is a document's contents), uploads never read.
-- **Device names from the tailnet** (`tailscale whois` on P360's own daemon): an address alone
+- **Device names from the tailnet** (`tailscale whois` on the host's own daemon): an address alone
   (100.x.y.z) says little. It is local, so nothing leaves the machine.
 - **Not covered by name:** `npm run records`, hand edits and `git checkout` write `data/` from
   another process; the live app records them as changed outside the app, with the files, when its
@@ -2072,7 +2072,7 @@ Later the same day, after the owner's first runs (`label-imports-2`):
 
 ## 2026-10-04: Model work moves to the local model service, task by task
 
-- **Owner:** a shared, OpenAI-compatible model service (`inference`, on P360, tailnet only) now
+- **Owner:** a shared, OpenAI-compatible model service (`inference`, on the owner's machine, tailnet only) now
   runs Qwen3.6-35B-A3B and smaller models. Decide with the owner which of finance's model work
   moves to it; documents then never leave the machine.
 - **Measured by inference on finance's own samples** (its README §9 and BENCH "M2"): 99.4% / 99.3%

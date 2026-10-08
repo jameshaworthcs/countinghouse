@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deploy a commit of this repository to the live service (finance.service on P360).
+# Deploy a commit of this repository to the live service (finance.service).
 #
 #   npm run deploy                  deploy main
 #   npm run deploy -- <ref>         deploy a commit, tag or branch

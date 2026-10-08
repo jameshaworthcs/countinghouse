@@ -10,7 +10,7 @@ import { StoreError } from '../store';
 const LeaveOut = z.object({ leaveOut: z.array(z.string().max(40)).max(MAX_PROPOSED_CHANGES).default([]) });
 const Dismiss = z.object({ reason: z.string().max(1000).optional() });
 
-/** The name the owner gave the token ("Claude Code on P360"): where the agent ran. */
+/** The name the owner gave the token ("Claude Code on my-server"): where the agent ran. */
 const agentName = (c: Context) => String(c.get('user' as never) ?? '').replace(/^agent:/, '');
 
 export function proposalRoutes(ctx: AppContext): Hono {

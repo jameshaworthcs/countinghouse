@@ -1,6 +1,6 @@
 // The local model service (inference.service on this machine; its README "For callers"): an
-// OpenAI-compatible API, reached over the tailnet with finance's own key. Nothing sent to it leaves
-// P360, and it keeps no prompt, image or output. It has no web access and no tools, and it is slow
+// OpenAI-compatible API, reached over a private network with finance's own key. Nothing sent to it
+// leaves the owner's machines, and it keeps no prompt, image or output. It has no web access and no tools, and it is slow
 // (minutes per document), so every call here:
 //   - names an alias (vision-extract, fast-chat…), never a model file;
 //   - asks for the task's priority (batch for anything that takes minutes);

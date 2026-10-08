@@ -1,4 +1,4 @@
-// Agent access: bearer tokens that let agents (a Claude Code session on P360, a script) use the API
+// Agent access: bearer tokens that let agents (a Claude Code session on the server, a script) use the API
 // without a browser session (docs/SELF_HOSTING.md, "Agent access").
 //
 // - You make a token in Settings while signed in. It has a name, scopes and an expiry, and it is

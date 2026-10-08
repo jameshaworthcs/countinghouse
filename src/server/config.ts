@@ -27,7 +27,7 @@ export interface Config {
   anthropicApiKey?: string;
   /**
    * The local model service on this machine (INFERENCE_BASE_URL, INFERENCE_API_KEY): documents
-   * sent to it never leave P360. Unset, tasks set to it wait (src/shared/tasks.ts).
+   * sent to it never leave the owner's machines. Unset, tasks set to it wait (src/shared/tasks.ts).
    */
   inference?: { baseUrl: string; apiKey: string; waitUpToMs?: number };
   /** Watch the inbox folder and the data directory for changes. */

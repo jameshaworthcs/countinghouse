@@ -107,7 +107,7 @@ export interface AuditVerifyResponse {
   problems: { file: string; line: number; seq?: number; problem: string }[];
 }
 
-/** Who, in a few words: "You", "Token “Claude Code on P360”", "Job research-instrument". */
+/** Who, in a few words: "You", "Token “Claude Code on my-server”", "Job research-instrument". */
 export function actorName(a: AuditActor): string {
   switch (a.type) {
     case 'owner':

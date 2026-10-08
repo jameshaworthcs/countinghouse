@@ -344,7 +344,7 @@ describe('Claude sessions in the app', () => {
 
   it('agents with a token are seen by their requests, without a transcript', async () => {
     await start({ FINANCE_USERNAME: 'owner', FINANCE_PASSWORD_HASH: 'scrypt$x$y' });
-    const made = (await app.ctx.tokens.create({ name: 'Claude Code on P360', scopes: ['imports'], days: 30 })) as { token: string };
+    const made = (await app.ctx.tokens.create({ name: 'Claude Code on my-server', scopes: ['imports'], days: 30 })) as { token: string };
     const bearer = { authorization: `Bearer ${made.token}` };
     await req('/api/imports', { headers: bearer });
     await req('/api/accounts', { headers: bearer });
@@ -354,7 +354,7 @@ describe('Claude sessions in the app', () => {
       (l) => l.some((s) => s.source === 'token'),
     );
     const s = list.find((x) => x.source === 'token')!;
-    expect(s).toMatchObject({ kind: 'token', title: 'Agent with the token “Claude Code on P360”', status: 'running', requests: { total: 3, changes: 0, refused: 1 }, transcript: 'none' });
+    expect(s).toMatchObject({ kind: 'token', title: 'Agent with the token “Claude Code on my-server”', status: 'running', requests: { total: 3, changes: 0, refused: 1 }, transcript: 'none' });
     const d = (await sessionDetail(app.ctx, s.id))!;
     expect(d.requests!.map((r) => `${r.method} ${r.path} ${r.status}`)).toEqual(['GET /api/imports 200', 'GET /api/accounts 200', 'PUT /api/settings 403']);
     expect(d.noTranscript).toMatch(/ran outside the app/);
@@ -363,7 +363,7 @@ describe('Claude sessions in the app', () => {
 
   it("groups an agent's requests by the session it names, keeping each query and answer size", async () => {
     await start({ FINANCE_USERNAME: 'owner', FINANCE_PASSWORD_HASH: 'scrypt$x$y' });
-    const made = (await app.ctx.tokens.create({ name: 'Claude Code on P360', scopes: ['imports'], days: 30 })) as { token: string };
+    const made = (await app.ctx.tokens.create({ name: 'Claude Code on my-server', scopes: ['imports'], days: 30 })) as { token: string };
     const as = (session?: string) => ({ authorization: `Bearer ${made.token}`, ...(session ? { 'x-agent-session': session } : {}) });
     await req('/api/transactions?q=tesco&accounts=12345678', { headers: as('cc-one') });
     await req('/api/imports', { headers: as('cc-two') });
@@ -381,7 +381,7 @@ describe('Claude sessions in the app', () => {
       ['cc-two', 2],
     ]);
     const one = (await sessionDetail(app.ctx, tokens.find((x) => x.agentSession === 'cc-one')!.id))!;
-    expect(one.session.title).toBe('Agent with the token “Claude Code on P360” (session cc-one)');
+    expect(one.session.title).toBe('Agent with the token “Claude Code on my-server” (session cc-one)');
     // The query is kept, an account number in it masked; the answer's size too.
     expect(one.requests![0]).toMatchObject({ path: '/api/transactions', query: '?q=tesco&accounts=••••5678' });
     expect(one.requests![0]!.bytes).toBeGreaterThan(0);

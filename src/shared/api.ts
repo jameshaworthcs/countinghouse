@@ -989,6 +989,8 @@ export interface TokensResponse {
   tokens: AgentTokenInfo[];
   uses: AgentTokenUse[];
   scopes: { id: string; label: string }[];
+  /** The server's host name: a new token's name says where its agent runs ("Claude Code on …"). */
+  host: string;
 }
 
 /** One budget against a month's spending (GET /api/budgets; docs/FORMULAS.md §15). */
