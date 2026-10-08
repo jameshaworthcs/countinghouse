@@ -9,8 +9,13 @@ screens/
 .env.*
 !.env.example
 
-# your own operating notes for Claude Code (they may import private ones)
+# your own operating notes for Claude Code (they may import private ones), and your local settings
 CLAUDE.local.md
+.claude/settings.local.json
+
+# real data and private operations material belong in your data repository, never here
+data/
+ops/
 
 # work area: uploads and drafts that have not been reviewed and committed yet
 .work/

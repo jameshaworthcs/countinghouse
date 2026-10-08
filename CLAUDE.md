@@ -1,8 +1,10 @@
 # CLAUDE.md: Counting House (operating contract)
 
-A private UK personal-finance tracker: a Hono + React app over a git-versioned `data/` directory.
-It holds real financial data. Read this file, then [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-for the map and [docs/DATA_FORMAT.md](docs/DATA_FORMAT.md) before touching data or schemas.
+A private, local-first UK personal-finance tracker: a Hono + React app over a git-versioned data
+directory. This repository is the code, and it is public: real data lives in a private **data
+repository** of its own (`npm run init-data`; [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md), "The
+layout"), never here. Read this file, then [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the map
+and [docs/DATA_FORMAT.md](docs/DATA_FORMAT.md) before touching data or schemas.
 
 ## Commands
 
@@ -35,7 +37,10 @@ for the map and [docs/DATA_FORMAT.md](docs/DATA_FORMAT.md) before touching data 
   - A live site signs in through OIDC or a password; its settings are in the live worktree's
     `.env`, never this checkout's.
     - The screenshot run and the demo use a throwaway password login instead (no OIDC client set).
-- `npm run validate`: format check of `data/`.
+- `npm run validate`: format check of the data directory (`FINANCE_DATA_DIR`).
+- `npm run init-data -- <dir>`: a new private data repository (no remote; pushes refused).
+- `npm run fixture:anonymise -- <file>`: a document a real import failed on, as a synthetic
+  fixture (checked by the leak guard).
 - `npm run -s api -- GET /imports` (any method and path): the live API with an agent token the owner
   made in Settings → Agent access, kept in `~/.config/finance/token`. Tokens can read, and change
   only what their scopes allow (import upkeep, agent records, jobs); never commit
@@ -108,7 +113,10 @@ for the map and [docs/DATA_FORMAT.md](docs/DATA_FORMAT.md) before touching data 
 ## How to work here
 
 - Tests live in `tests/`. Add a fixture and a test for any parser change (`tests/fixtures/*`).
-  Synthetic data only: never commit real statements to `tests/`.
+  Synthetic data only: never commit real statements to `tests/`. A real import that fails becomes
+  a fixture through `npm run fixture:anonymise`, never by copying its rows.
+- Screenshots come from the demo data (`npm run screens` refuses real data); keep screenshots of
+  real data out of every repository.
 - Invented values only, in code, tests, fixtures, docs and commit messages: never copy a real
   name, reference, amount or descriptor from `data/`. The leak guard
   ([docs/LEAK_GUARD.md](docs/LEAK_GUARD.md)) blocks them before a write (Claude Code hook), a
