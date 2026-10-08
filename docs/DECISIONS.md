@@ -2322,3 +2322,35 @@ was tried against a new evaluation case, `pdf-student-loan-balance`, an invented
   balance (DECISIONS 2026-10-05), so a summary's dates never count as covered; rows a reading
   makes of a summary are marked as a disagreement and are yours to untick.
 
+
+## 2026-10-08: A pension provider's own exports, and payroll pension money counted once
+
+Four exports from a workplace pension's site (its trade history, current investments, and two
+contribution summaries) were uploaded together. Two failed ("no date and description column"), the
+history's columns were guessed (the fund's name as the description, so no row was categorised),
+and the holdings were dated by the file rather than their "Price Date". A rehearsal on a copy of
+the data showed what committing them would have done: once categorised, the year's pension
+contributions counted twice (the account's rows and the job's payslips); the projection kept paying
+in after the job had ended; and a contribution taken from a tax year's last pay but invested in the
+next was counted again after a statement at the year's end that already held it.
+
+- **New readers** (`ingest/pension-csv.ts`): a fund trade history (units and price kept, its total
+  lines a check that makes it the whole history to the day it was downloaded) and a contributions
+  summary (figures since the start, or this tax year's when its file name says so). They are
+  generic headers, not one provider's profile: other providers' exports have these columns too.
+- **Type before description** for wrapper flows: the description of a switch into a "Fixed
+  Interest Fund" says interest.
+- **Payroll pensions** (`analytics/payroll-pensions.ts`): a row that is a payslip's deduction and
+  the employer's together, to the penny, within 62 days, is that payslip's money, counted in its
+  tax year and split as it splits it. The job's link to the account is found from the money when
+  neither names the other, so no proposal or setting is needed for it. The match is exact to the
+  penny on purpose: a near match is not evidence.
+- **Ended jobs** stop their payroll money in the projection. The job's end date comes from HMRC's
+  record when you have not set one.
+- **Valuations that hold later flows**, and **summaries that prove a start**: only when a stated
+  total is matched to the penny, never by a tolerance.
+- **Paid in** prefers a provider's summary as new as the latest valuation. Adding the flows since
+  an older total was tried and dropped: without the flows going back to the start, it double
+  counts a contribution the older statement already held.
+- The summary since the start is stored as two figures with no tax year, not on a balance: it has
+  no value of its own, and a balance needs one.

@@ -447,14 +447,18 @@ export class Categoriser {
       return { payee: fallbackPayee, category: account?.type === 'credit_card' ? 'credit-card-payment' : 'transfer', categorisedBy: 'transfer' };
     }
 
-    // 3. Flows inside wrapper accounts.
+    // 3. Flows inside wrapper accounts: by the provider's type for the row first ("Contribution",
+    // "Switch In"), then by its description, which may name a fund ("Fixed Interest Fund") with words
+    // of another flow.
     if (isWrapper) {
       const dir = input.amount >= 0 ? 'in' : 'out';
-      for (const [re, category, direction, names] of WRAPPER_RULES) {
-        if (direction && direction !== dir) continue;
-        if (re.test(input.description)) {
-          const investment = input.payee || input.aiPayee ? undefined : names?.exec(input.description)?.[1]?.replace(/\s+/g, ' ').trim();
-          return { payee: investment || fallbackPayee, category, categorisedBy: 'builtin' };
+      for (const text of input.type ? [input.type, input.description] : [input.description]) {
+        for (const [re, category, direction, names] of WRAPPER_RULES) {
+          if (direction && direction !== dir) continue;
+          if (re.test(text)) {
+            const investment = input.payee || input.aiPayee ? undefined : names?.exec(input.description)?.[1]?.replace(/\s+/g, ' ').trim();
+            return { payee: investment || fallbackPayee, category, categorisedBy: 'builtin' };
+          }
         }
       }
     }

@@ -4,18 +4,34 @@
 
 import { ACCOUNT_TYPE_META, balanceModeOf } from '../../shared/accounts';
 import type { InvestmentAccountSummary, InvestmentsResponse } from '../../shared/api';
-import { EXTERNAL_FLOW_CATEGORIES } from '../../shared/categories';
 import { diffDays, formatDate, today } from '../../shared/dates';
 import { fromMinor, roundMoney, subMoney, toMinor } from '../../shared/money';
 import type { Account, HmrcRecord } from '../../shared/schema';
 import { ageOn, birthdayAt, lisaPenaltyAdjustedValue, pensionAccessDate, statePensionDate, statePensionFullYearly, taxYearOf, taxYearParams } from '../../shared/uk';
 import type { Store } from '../store';
-import { flowsFromStart, type BalanceEngine } from './balances';
+import { providerPaidIn, type BalanceEngine } from './balances';
 import { computeBaseline, standardPeriods } from './baseline';
 import { Coverage } from './coverage';
 import { feeDrag, retirement as retirementModel } from './model';
 import { accountParams, makeResolver, poolStats } from './params';
 import { assumptionsInUse, summariseParams } from './projections';
+
+/**
+ * What went into a market account (docs/FORMULAS.md §12, "Paid in"): the newest total a document
+ * states, the latest valuation's or a provider's summary as new as it; else its flows, when they go
+ * back to the start; else not known.
+ */
+export function paidIn(store: Store, engine: BalanceEngine, a: Account): { amount: number; source: 'provider' | 'transactions'; asOf?: string } | null {
+  const lastSnap = store.balances(a.id).findLast((b) => !b.approximate || b.contributions !== undefined);
+  const summary = providerPaidIn(store.figures, a.id)
+    .filter((p) => !lastSnap || p.date >= lastSnap.date)
+    .at(-1);
+  if (summary) return { amount: fromMinor(summary.minor), source: 'provider', asOf: summary.date };
+  if (lastSnap?.contributions !== undefined) return { amount: lastSnap.contributions, source: 'provider', asOf: lastSnap.date };
+  const flows = engine.flowsOf(a.id);
+  if (flows.length && engine.fromStart(a.id)) return { amount: fromMinor(flows.reduce((s, f) => s + toMinor(f.amount), 0)), source: 'transactions' };
+  return null;
+}
 
 /** Money-weighted annual return. Flows: negative = money you put in, positive = value out. */
 export function xirr(flows: { date: string; amount: number }[]): number | null {
@@ -91,20 +107,12 @@ export function investments(store: Store, engine: BalanceEngine): InvestmentsRes
     const all = store.balances(a.id);
     const snaps = all.filter((b) => !b.approximate);
     const lastSnap = all.findLast((b) => !b.approximate || b.contributions !== undefined);
-    const flowsTx = store.transactions(a.id).filter((t) => t.category && EXTERNAL_FLOW_CATEGORIES.has(t.category));
-    // Summed contributions are what went in only when they go back to the start (flowsFromStart).
-    // Otherwise they are only what went in since the data starts.
-    const firstFlow = flowsTx.reduce<string | null>((m, t) => (m === null || t.date < m ? t.date : m), null);
-    const fromStart = flowsFromStart(a, snaps, firstFlow);
-    let contributions: number | null = null;
-    let contributionsSource: InvestmentAccountSummary['contributionsSource'] = null;
-    if (lastSnap?.contributions !== undefined) {
-      contributions = lastSnap.contributions;
-      contributionsSource = 'provider';
-    } else if (flowsTx.length && fromStart) {
-      contributions = fromMinor(flowsTx.reduce((s, t) => s + toMinor(t.amount), 0));
-      contributionsSource = 'transactions';
-    }
+    // External flows, each dated from when the value holds it (balances.ts, insideValuations).
+    const flowsTx = engine.flowsOf(a.id);
+    const fromStart = engine.fromStart(a.id);
+    const paid = paidIn(store, engine, a);
+    const contributions = paid?.amount ?? null;
+    const contributionsSource: InvestmentAccountSummary['contributionsSource'] = paid?.source ?? null;
     const value = latest?.gbp ?? null;
     // LISA providers usually report your contributions and the government bonus separately; the
     // bonus is not investment growth.

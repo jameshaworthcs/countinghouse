@@ -147,7 +147,7 @@ export default function AccountDetail() {
 
   if (q.error) return <ErrorNote error={q.error} />;
   if (!q.data) return <Loading />;
-  const { account, summary, balances, holdings, series, gaps, imports } = q.data;
+  const { account, summary, balances, holdings, series, gaps, imports, paidIn } = q.data;
   const meta = ACCOUNT_TYPE_META[account.type];
   const market = balanceModeOf(account) === 'market';
   const latestHoldings = holdings[holdings.length - 1];
@@ -184,8 +184,8 @@ export default function AccountDetail() {
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label={market ? 'Value' : 'Balance'} value={<Money value={summary.balance} currency={account.currency} />} sub={summary.asOf ? `as of ${formatDate(summary.asOf)}${summary.estimated ? ' (estimated)' : ''}` : summary.balance !== null ? 'estimated: no statement data yet' : 'no data yet'} />
         <Stat label="Last updated" value={summary.asOf ? timeAgo(summary.asOf) : '—'} sub={summary.stale ? <span className="inline-flex items-center gap-1 text-warn-ink"><TriangleAlert className="size-3.5" /> needs new data</span> : 'up to date'} />
-        {market && lastBal?.contributions !== undefined ? (
-          <Stat label="Paid in" value={<Money value={lastBal.contributions} />} sub={summary.balance !== null ? <span>growth {money(summary.balance - lastBal.contributions - (lastBal.bonusToDate ?? 0))} ({pct((summary.balance - lastBal.contributions - (lastBal.bonusToDate ?? 0)) / Math.max(1, lastBal.contributions + (lastBal.bonusToDate ?? 0)))})</span> : undefined} />
+        {market && paidIn ? (
+          <Stat label="Paid in" value={<Money value={paidIn.amount} />} sub={summary.balance !== null ? <span>growth {money(summary.balance - paidIn.amount - (lastBal?.bonusToDate ?? 0))} ({pct((summary.balance - paidIn.amount - (lastBal?.bonusToDate ?? 0)) / Math.max(1, paidIn.amount + (lastBal?.bonusToDate ?? 0)))})</span> : undefined} />
         ) : (
           <Stat label="Transactions" value={summary.transactionCount.toLocaleString()} sub={summary.lastTransaction ? `latest ${formatDate(summary.lastTransaction)}` : undefined} />
         )}

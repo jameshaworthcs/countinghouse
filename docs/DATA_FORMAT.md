@@ -97,7 +97,7 @@ depend on).
 | `original`?, `exchangeRate`?, `fee`? | foreign amount `{amount, currency}`; FX; fee included in `amount` |
 | `pending`? | |
 | `raw`? | the source row verbatim (every CSV column, OFX tag or QIF field) |
-| `attributes`? | anything else, namespaced keys welcome |
+| `attributes`? | anything else, namespaced keys welcome. A fund trade history's rows keep `units` (signed: units sold are negative), `price` and `fund` |
 
 **Corrections** to what was read (a misread amount or date) keep what was there:
 
@@ -215,6 +215,11 @@ Standalone figures from documents, used for Self Assessment and the Pay tab:
 - Several documents can state one job's figure for a year (a P60, a P45, HMRC's pages, the
   payslips). All are kept; exactly one counts ([FORMULAS.md §11](FORMULAS.md), "One source per
   employer and year").
+- `pension_contribution_employee` and `pension_contribution_employer` on an `accountId` with no
+  `taxYear` and no `periodStart` are a provider's summary of what was paid in since the start, up
+  to `periodEnd` (the day it was downloaded): its "Contributor / Contribution Amount" export. They
+  count for no tax year; summed, they are the account's paid in ([FORMULAS.md §12](FORMULAS.md)).
+  With a `taxYear`, they are the year's (or the year so far, to `periodEnd`).
 - `pension_income_forecast` is a State Pension or defined-benefit pension's forecast income per
   year, as at `date`, on its `accountId`: a forecast has no balance to carry it. It is never
   income for tax.

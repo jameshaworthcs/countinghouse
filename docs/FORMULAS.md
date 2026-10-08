@@ -175,6 +175,10 @@ Income and spending classification is §14.
   - Payroll-funded pensions (workplace, net pay, salary sacrifice) never count as from your cash.
 - **External (not from your cash):** employer contributions, tax relief, LISA bonus, and
   payroll-funded contributions, ÷ the months with data.
+  - Rows that are a job's payslip money (§11, "Payroll pensions") do not go on once that job has
+    ended (`endedOn`, else HMRC's end date) by the period's end: you left, so its payroll pays
+    nothing more in. The wrapper says so ("Not continued: …"); your own payments into it still
+    count.
 - **Expected but not yet seen:**
   - LISA bonus = min(personal, allowance/12) × bonus rate;
   - relief at source = personal × r/(1−r), with r = 20% from the UK tables.
@@ -391,6 +395,12 @@ years), both paths grow at the median:
   account held that day: the nearest cash figure within 31 days (a balance's `cash` or a
   snapshot's), carried to the day by the account's rows between; with none, nothing. The figure
   is kept as the document gave it.
+- **Flows a valuation already holds** (`insideValuations`): a valuation that states what was paid
+  in, more than the flows up to its day, holds the flows just after it that make up the difference
+  to the penny, within 31 days. They count from the valuation's day, not their own: a contribution
+  taken from March's pay is in a statement of 5 April although the provider invested it on 7 April,
+  and adding it again after the statement would count it twice. Only when the flows go back to the
+  start (§12), so that "the flows up to its day" is everything.
 - After the last valuation: the valuation + the flows since. Nothing grows, and nothing is flagged.
 - **Between valuations** (a day after one valuation V₁ on d₁ and before the next V₂ on d₂, not a
   rough figure you gave): flagged estimated, and meeting both valuations exactly. The first of
@@ -815,14 +825,28 @@ schedules and the names the merchant list knows are not guesses.
   relief the provider added separately (`pension_contribution_employee`, `pension_tax_relief`):
   their sum is your gross contribution, and a statement that shows relief is relief at source.
   Salary sacrifice is an employer contribution.
+- **Payroll pensions** (`analytics/payroll-pensions.ts`). Each payslip's pension money is your
+  deduction (its pension lines, else the rise in its year to date) and the employer's (printed,
+  else the rise in its year to date: §17). A row of a pension account is a payslip's money when it
+  is the two together, to the penny, dated from 7 days before the pay date to 62 days after
+  (`PAYROLL_ARRIVAL_DAYS`); each payslip takes the first such row, oldest payslip first, each row
+  used once. A job pays into the account it names (`pensionAccountId`), else the one naming it
+  (`pension.employer`), else the one where two of its payslips' money arrives (or its only one).
+  - Its rows that are payslip money count with their payslip: in the payslip's tax year, yours and
+    the employer's as the payslip splits them. The rest of its rows count by their own dates.
+  - Its job's payslips in the year count on the account (labelled "with its payslips"), even
+    before their money arrives.
+- **A statement's figures to a day before the year ends** (a summary of the year so far) stand for
+  the year up to that day; the account's own money after it (rows by date, payslips by pay date)
+  is added.
 - **Payslip deductions** are their job's scheme (else their employer's). For a job whose payslips
   were read in full, the year so far is the year to date they print (your contributions and the
   employer's, "Payslips in full" in §17), so contributions the employer makes, which payslips show
   only in that column, count. When they add up to a statement's figure to the penny (your
   contributions, else the employer's), they are that statement's money and count once. A job whose
   pension goes into an account that has its own rows or statement for the year (the job's
-  `pensionAccountId`, or an account whose `pension.employer` is the job) is counted there, not
-  again. Otherwise they are a scheme of their own.
+  `pensionAccountId`, an account whose `pension.employer` is the job, or the account its payslips'
+  money arrives in) is counted there, not again. Otherwise they are a scheme of their own.
 - The total is every scheme's: a SIPP's employer contributions and a workplace scheme's both count.
 
 **Pension arrangements** (a job's `pensionArrangements`, `analytics/arrangements.ts`): what an
@@ -944,12 +968,17 @@ and so does a voucher whose payment is not in your data.
 
 **Paid in** (per account), the first that applies:
 
-- the total paid in on the latest valuation that states one;
+- a provider's summary of what was paid in since the start (your and your employer's contributions
+  to date, figures with no tax year: [DATA_FORMAT.md](DATA_FORMAT.md)) as new as the latest
+  valuation or newer, the newest;
+- the total paid in on the latest valuation, when it states one;
   - approximate figures count only when you entered a total with them;
 - Σ external flows (contributions, employer, relief, bonus, withdrawals, transfers), only when they
   go back to the start;
   - every valuation before the first flow is nothing, and there is one;
   - or the first flow comes within 31 days of `openedOn`;
+  - or a total paid in that a document states (a valuation's or a provider's summary) is what the
+    flows up to its day add up to, to the penny;
 - otherwise not known: a few months of statements are not everything paid in.
 
 **Growth** = value − (paid in + a LISA bonus the provider reports separately), only with both

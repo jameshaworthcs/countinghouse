@@ -87,7 +87,7 @@ export function isLiveView(documentType: Extraction['documentType'], mediaType: 
  * its file name, else the day the file was saved, never after the upload. (Not a PDF's saved day: a
  * statement downloaded today can be last year's.)
  */
-function exportDate(document: DocumentRef, uploadedOn: string): { date: string; source: DateSource } | undefined {
+export function exportDate(document: DocumentRef, uploadedOn: string): { date: string; source: DateSource } | undefined {
   const named = dateFromFileName(document.fileName);
   if (named && named <= uploadedOn) return { date: named, source: 'filename' };
   const saved = document.lastModified ? dateOf(document.lastModified) : undefined;
@@ -102,6 +102,11 @@ const DATE_SOURCE_WORDS: Record<DateSource, string> = {
   upload: 'the upload day',
   manual: 'as you set it',
 };
+
+/** Pension contributions and relief, as a provider's document states them. */
+const PENSION_KINDS = new Set<string>(['pension_contribution_employee', 'pension_contribution_employer', 'pension_tax_relief']);
+/** Documents a pension provider makes, whose figures are about the account they come from (not a payslip or P60). */
+const PROVIDER_DOCUMENTS = new Set<Extraction['documentType']>(['pension_statement', 'csv_export']);
 
 const TRANSFER_CATEGORIES = new Set(['transfer', 'credit-card-payment', 'savings-transfer', 'investment-transfer', 'contribution', 'withdrawal']);
 
@@ -553,10 +558,14 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
     const job = jobs.find((j) => j.key === jobKeyOf.get(ref));
     return job?.target.mode === 'existing' ? job.target.employmentId : undefined;
   };
+  // A pension provider's own document, uploaded to one of your pension accounts and naming no other
+  // account: its contribution figures are that account's.
+  const hinted = ctx.hintAccountId ? store.account(ctx.hintAccountId) : undefined;
+  const pensionHint = hinted && ACCOUNT_TYPE_META[hinted.type].pension && PROVIDER_DOCUMENTS.has(extraction.documentType) && extraction.accounts.length <= 1 ? hinted : undefined;
   const figures: DraftFigure[] = extraction.figures.map((f, fi) => {
     // Matched by last 4 digits only when exactly one account has them.
     const byLast4 = f.accountLast4 ? store.accounts.filter((a) => a.last4 === f.accountLast4) : [];
-    const account = byLast4.length === 1 ? byLast4[0] : undefined;
+    const account = byLast4.length === 1 ? byLast4[0] : !f.accountLast4 && PENSION_KINDS.has(f.kind) ? pensionHint : undefined;
     const dup = store.figures.find(
       (x) =>
         x.kind === f.kind &&

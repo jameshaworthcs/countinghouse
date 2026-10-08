@@ -3,7 +3,7 @@
 
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { ACCOUNT_TYPE_META, slugify } from '../../shared/accounts';
+import { ACCOUNT_TYPE_META, balanceModeOf, slugify } from '../../shared/accounts';
 import type { AccountDetailResponse, BootstrapResponse, EnrichGroup, EnrichPreview, TransactionsResponse } from '../../shared/api';
 import { addTags, appendNote, removeTags } from '../../shared/annotations';
 import { CategoryIndex } from '../../shared/categories';
@@ -60,6 +60,7 @@ import { taxDocuments } from '../analytics/taxdocuments';
 import { matchEmployment } from '../employments';
 import { StoreError } from '../store';
 import { accountSummary } from '../analytics/estate';
+import { paidIn } from '../analytics/investments';
 import { handoverOf } from '../analytics/handover';
 import { categoriseQueue, payeeRuleMatch } from '../analytics/queue';
 
@@ -376,6 +377,7 @@ export function dataRoutes(ctx: AppContext): Hono {
     const carriesOnFrom = handoverOf(store, engine, account) ?? undefined;
     const successor = store.accounts.find((a) => a.continues?.accountId === account.id);
     const carriedOnAs = successor ? (handoverOf(store, engine, successor) ?? undefined) : undefined;
+    const paid = balanceModeOf(account) === 'market' ? paidIn(store, engine, account) : null;
     const body: AccountDetailResponse = {
       account,
       ...(carriesOnFrom || carriedOnAs ? { links: { ...(carriesOnFrom ? { carriesOnFrom } : {}), ...(carriedOnAs ? { carriedOnAs } : {}) } } : {}),
@@ -388,6 +390,7 @@ export function dataRoutes(ctx: AppContext): Hono {
       imports: store.imports
         .filter((i) => i.result?.accountIds.includes(account.id))
         .map((i) => ({ id: i.id, fileName: i.fileName, ...(i.label ? { label: i.label.text } : {}), documentId: i.documentId, ...(i.committedAt ? { committedAt: i.committedAt } : {}) })),
+      ...(paid ? { paidIn: paid } : {}),
     };
     return c.json(body);
   });

@@ -22,12 +22,12 @@ import { EXTERNAL_FLOW_CATEGORIES } from '../../shared/categories';
 import { addDays, diffDays, today, type ISODate } from '../../shared/dates';
 import { fromMinor, toMinor } from '../../shared/money';
 import type { BalanceBasis } from '../../shared/api';
-import type { Account, BalanceEvidence, BalanceSnapshot, HoldingsSnapshot, Settings, Transaction } from '../../shared/schema';
+import type { Account, BalanceEvidence, BalanceSnapshot, Figure, HoldingsSnapshot, Settings, Transaction } from '../../shared/schema';
 import type { Store } from '../store';
 import { covers, holdingsPath, indexNear, PriceBook, type HoldingsPath, type PriceIndex } from './prices';
 
 /** What the engine reads: a store, or a store as a proposal would leave it; holdings and prices when it has them. */
-export type BalanceSource = Pick<Store, 'accounts' | 'transactions' | 'balances' | 'settings'> & Partial<Pick<Store, 'holdings' | 'instruments' | 'research'>>;
+export type BalanceSource = Pick<Store, 'accounts' | 'transactions' | 'balances' | 'settings'> & Partial<Pick<Store, 'holdings' | 'instruments' | 'research' | 'figures'>>;
 
 interface Anchor {
   date: ISODate;
@@ -83,6 +83,66 @@ interface AccountData {
   fx: number | null;
   /** Market accounts: the external flows go back to the account's start (flowsFromStart). */
   fromStart: boolean;
+  /** Market accounts: the external flows, each dated from when the value holds it (`insideValuations`). */
+  flowRows: { id: string; date: ISODate; amount: number }[];
+}
+
+/** A total paid in that a document states for a day: a valuation's, or a provider's summary. */
+export interface StatedPaidIn {
+  date: ISODate;
+  minor: number;
+}
+
+/**
+ * A provider's summary of what was paid in since the start (a contributions export: you and your
+ * employer, no tax year, no start), one total per import, oldest first (docs/FORMULAS.md §12).
+ */
+export function providerPaidIn(figures: readonly Figure[], accountId: string): StatedPaidIn[] {
+  const byImport = new Map<string, StatedPaidIn>();
+  for (const f of figures) {
+    if (f.accountId !== accountId || f.taxYear || f.periodStart || (f.kind !== 'pension_contribution_employee' && f.kind !== 'pension_contribution_employer')) continue;
+    const date = f.periodEnd ?? f.date;
+    if (!date) continue;
+    const key = f.source.importId ?? date;
+    const sum = byImport.get(key) ?? { date, minor: 0 };
+    sum.minor += toMinor(f.amount);
+    if (date > sum.date) sum.date = date;
+    byImport.set(key, sum);
+  }
+  return [...byImport.values()].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/** The totals paid in that a market account's documents state: its valuations' and its provider's summaries. */
+export function statedPaidIn(store: Pick<BalanceSource, 'balances' | 'figures'>, accountId: string): StatedPaidIn[] {
+  const fromValuations = store
+    .balances(accountId)
+    .filter((b) => !b.approximate && b.contributions !== undefined)
+    .map((b) => ({ date: b.date, minor: toMinor(b.contributions!) }));
+  return [...fromValuations, ...providerPaidIn(store.figures ?? [], accountId)].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/**
+ * Flows a valuation already holds (docs/FORMULAS.md §9): a valuation that states what was paid in,
+ * more than the flows up to its day, holds the flows just after it that make up the difference to
+ * the penny, within 31 days (a contribution taken from pay before a statement's date and invested
+ * after it). Those are dated on the valuation's day. Only when the flows go back to the start.
+ */
+export function insideValuations<T extends { date: ISODate; amount: number }>(flows: readonly T[], stated: readonly StatedPaidIn[], valuations: ReadonlySet<ISODate>): (T & { counted: ISODate })[] {
+  const out = flows.map((f) => ({ ...f, counted: f.date }));
+  for (const s of stated) {
+    if (!valuations.has(s.date)) continue;
+    const before = out.filter((f) => f.counted <= s.date).reduce((x, f) => x + toMinor(f.amount), 0);
+    if (before >= s.minor) continue;
+    let sum = before;
+    const held: typeof out = [];
+    for (const f of out.filter((x) => x.counted > s.date && x.counted <= addDays(s.date, 31)).sort((a, b) => a.counted.localeCompare(b.counted))) {
+      sum += toMinor(f.amount);
+      held.push(f);
+      if (sum >= s.minor) break;
+    }
+    if (sum === s.minor) for (const f of held) f.counted = s.date;
+  }
+  return out.sort((a, b) => a.counted.localeCompare(b.counted));
 }
 
 /**
@@ -91,8 +151,15 @@ interface AccountData {
  * nothing, and there is one, or the first flow comes within 31 days of the account's opening.
  * Otherwise the data starts part-way through the account's life.
  */
-export function flowsFromStart(account: Pick<Account, 'openedOn'>, valuations: { date: ISODate; balance: number }[], firstFlow: ISODate | null): boolean {
+export function flowsFromStart(
+  account: Pick<Account, 'openedOn'>,
+  valuations: { date: ISODate; balance: number }[],
+  firstFlow: ISODate | null,
+  proof: { stated: readonly StatedPaidIn[]; flows: readonly { date: ISODate; amount: number }[] } = { stated: [], flows: [] },
+): boolean {
   if (firstFlow === null) return false;
+  // A total paid in that a document states, which the flows up to its day add up to, to the penny.
+  if (proof.stated.some((s) => s.minor > 0 && proof.flows.filter((f) => f.date <= s.date).reduce((x, f) => x + toMinor(f.amount), 0) === s.minor)) return true;
   const before = valuations.filter((b) => b.date < firstFlow);
   return before.every((b) => Math.abs(b.balance) < 1) && (before.length > 0 || (account.openedOn !== undefined && diffDays(account.openedOn, firstFlow) <= 31));
 }
@@ -327,7 +394,11 @@ export class BalanceEngine {
       }
       for (const s of placeholders) if (!anchors.has(s.date)) anchors.set(s.date, { date: s.date, minor: toMinor(s.balance), source: 'approximate' });
       const sortedAnchors = [...anchors.values()].sort((a, b) => (a.date < b.date ? -1 : 1));
-      const flows = txs.filter((t) => t.category && EXTERNAL_FLOW_CATEGORIES.has(t.category));
+      const external = txs.filter((t) => t.category && EXTERNAL_FLOW_CATEGORIES.has(t.category));
+      const stated = mode === 'market' ? statedPaidIn(store, account.id) : [];
+      const fromStart = flowsFromStart(account, real, external[0]?.date ?? null, { stated, flows: external });
+      // Flows a valuation already holds count from its day (insideValuations).
+      const flows = fromStart && stated.length ? insideValuations(external, stated, new Set(real.map((b) => b.date))).map((t) => ({ ...t, date: t.counted })) : external;
       const firstTx = txs[0]?.date ?? null;
       const lastTx = txs[txs.length - 1]?.date ?? null;
       const firstAnchor = sortedAnchors[0]?.date ?? null;
@@ -349,9 +420,20 @@ export class BalanceEngine {
         lastSnapshot,
         lastTransaction: lastTx,
         fx: fxRate(account.currency, store.settings),
-        fromStart: flowsFromStart(account, real, firstFlow),
+        fromStart,
+        flowRows: flows.map((t) => ({ id: t.id, date: t.date, amount: t.amount })),
       });
     }
+  }
+
+  /** A market account's external flows, each dated from when its value holds it. */
+  flowsOf(accountId: string): readonly { id: string; date: ISODate; amount: number }[] {
+    return this.data.get(accountId)?.flowRows ?? [];
+  }
+
+  /** Whether a market account's external flows go back to its start (flowsFromStart). */
+  fromStart(accountId: string): boolean {
+    return this.data.get(accountId)?.fromStart ?? false;
   }
 
   has(accountId: string): boolean {

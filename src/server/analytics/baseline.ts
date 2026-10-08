@@ -3,13 +3,15 @@
 
 import { ACCOUNT_TYPE_META, balanceModeOf } from '../../shared/accounts';
 import { AssumptionSet } from '../../shared/assumptions';
-import { addMonths, diffDays, eachMonth, endOfMonth, formatMonth, maxDate, minDate, type ISODate } from '../../shared/dates';
+import { addMonths, diffDays, eachMonth, endOfMonth, formatDate, formatMonth, maxDate, minDate, type ISODate } from '../../shared/dates';
 import { fromMinor, toMinor } from '../../shared/money';
 import type { Account } from '../../shared/schema';
 import { taxYearOf, taxYearParams } from '../../shared/uk';
 import type { Store } from '../store';
 import { flows, type FlowTx } from './cashflow';
 import { covers, coveredDays, type Coverage, type Interval } from './coverage';
+import { payrollPensions } from './payroll-pensions';
+import { jobEndedOn } from './sources';
 
 export const DAYS_PER_MONTH = 365.25 / 12;
 /**
@@ -122,9 +124,18 @@ export function computeBaseline(store: Store, coverage: Coverage, from: ISODate,
       else if (!other && t.category === 'investment-transfer') unassigned += -toMinor(t.amount);
     }
   }
+  // Pension money from a job's payroll goes on only while the job does: rows that are the payslips'
+  // money from a job that ended by the period's end do not continue (FORMULAS.md §3).
+  const payroll = payrollPensions(store);
+  const stoppedJobs = new Map<string, string>();
+  for (const job of payroll.accountOf.keys()) {
+    const ended = jobEndedOn(store, job);
+    if (ended && ended <= to) stoppedJobs.set(job, ended);
+  }
   for (const a of store.accounts.filter((x) => isWrapper(x) && x.status === 'open' && x.includeInNetWorth)) {
     const notes: string[] = [];
     const txs = store.transactions(a.id);
+    const stopped = new Set(txs.flatMap((t) => (stoppedJobs.has(payroll.paired.get(t.id)?.employmentId ?? '') ? [t.id] : [])));
     const snaps = store.balances(a.id);
     // The months this account has any data for within the period.
     const dataFrom = minDate(txs[0]?.date, snaps[0]?.date);
@@ -132,7 +143,10 @@ export function computeBaseline(store: Store, coverage: Coverage, from: ISODate,
     const spanFrom = maxDate(from, dataFrom) ?? from;
     const spanTo = minDate(to, dataTo) ?? to;
     const months = spanFrom <= spanTo ? eachMonth(spanFrom, spanTo).length : 0;
-    const inPeriod = txs.filter((t) => t.date >= from && t.date <= to && t.amount > 0);
+    const inPeriod = txs.filter((t) => t.date >= from && t.date <= to && t.amount > 0 && !stopped.has(t.id));
+    const endedJobs = [...stoppedJobs].filter(([job]) => payroll.accountOf.get(job) === a.id);
+    if (endedJobs.length && txs.some((t) => stopped.has(t.id) && t.date >= from && t.date <= to))
+      notes.push(`Not continued: the money from ${endedJobs.map(([job, on]) => `${store.employment(job)?.employer ?? job}’s payroll, which ended on ${formatDate(on)}`).join(' and ')}`);
     const sum = (cats: string[]) => inPeriod.filter((t) => t.category && cats.includes(t.category)).reduce((s, t) => s + toMinor(t.amount), 0);
     const own = sum(['contribution']);
     const employer = sum(['employer-contribution']);
@@ -167,7 +181,7 @@ export function computeBaseline(store: Store, coverage: Coverage, from: ISODate,
       external += personal * ty.reliefAtSourceRate / (1 - ty.reliefAtSourceRate);
       notes.push(`Adds basic-rate relief at source (${Math.round(ty.reliefAtSourceRate * 100)}% of the gross; none recorded yet)`);
     }
-    if (personal || external) wrappers.push({ accountId: a.id, personal: Math.round(personal * 100) / 100, external: Math.round(external * 100) / 100, notes });
+    if (personal || external || notes.length) wrappers.push({ accountId: a.id, personal: Math.round(personal * 100) / 100, external: Math.round(external * 100) / 100, notes });
   }
 
   const confidence = useMonths ? (joint.completeMonths.length >= 3 ? 'high' : 'medium') : 'low';

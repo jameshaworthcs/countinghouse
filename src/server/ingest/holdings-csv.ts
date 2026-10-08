@@ -2,11 +2,12 @@
 // portfolio page, and similar), one row per holding with quantity, price, value and cost. Not
 // transactions, so the transaction profiles do not apply. Deterministic, read on this machine.
 
+import { parseFlexibleDate, type ISODate } from '../../shared/dates';
 import { parseAmount } from '../../shared/money';
 import { ExtractionSchema, type AccountType, type Extraction } from '../../shared/schema';
 import { normHeader } from './csv';
 
-export const HOLDINGS_CSV_VERSION = 'holdings-csv-2';
+export const HOLDINGS_CSV_VERSION = 'holdings-csv-3';
 
 const pick = (headers: string[], ...names: RegExp[]) => {
   for (const re of names) {
@@ -17,7 +18,7 @@ const pick = (headers: string[], ...names: RegExp[]) => {
 };
 
 /** A price as printed: "290.19p" is pence, "£7.1375" pounds; any precision. */
-function price(cell: string | undefined): number | null {
+export function price(cell: string | undefined): number | null {
   if (!cell) return null;
   const s = cell.replace(/[£,\s]/g, '');
   const pence = /p$/i.test(s);
@@ -58,7 +59,9 @@ export function parseHoldingsCsv(rows: string[][], fileName: string): Extraction
     name: pick(headers, /^(name|investment|holding|security|stock|description|fund)( name)?$/),
     symbol: pick(headers, /^(symbol|ticker|epic|code|sedol|isin)$/),
     units: pick(headers, /^(qty|quantity|units|shares|holding)$/),
-    price: pick(headers, /^(price|last price|current price)$/),
+    price: pick(headers, /^(price|last price|current price|unit price)$/),
+    // The day the prices are from, when the file prints one (a pension provider's "Price Date").
+    priced: pick(headers, /^(price date|priced at|valuation date|value date|as at|as of)$/),
     value: pick(headers, /^market value £$/, /^(market value|value|value £|value \(£\)|current value)$/),
     cost: pick(headers, /^(book cost|cost|total cost|amount invested)$/),
     gain: pick(headers, /^(gain\/loss|gain \/ loss|profit\/loss|total gain\/loss|gain)$/),
@@ -69,6 +72,7 @@ export function parseHoldingsCsv(rows: string[][], fileName: string): Extraction
   let printedTotal: number | null = null;
   let printedGain: number | null = null;
   const notes: string[] = [];
+  const pricedOn: ISODate[] = [];
   for (const row of rows.slice(headerIndex + 1)) {
     const name = row[col.name]?.trim() ?? '';
     const value = parseAmount(row[col.value]);
@@ -84,6 +88,8 @@ export function parseHoldingsCsv(rows: string[][], fileName: string): Extraction
       notes.push(`"${name}" has no value and was left out.`);
       continue;
     }
+    const day = col.priced >= 0 ? parseFlexibleDate(row[col.priced], 'DMY') : null;
+    if (day) pricedOn.push(day);
     const units = Number((row[col.units] ?? '').replace(/,/g, ''));
     const cost = col.cost >= 0 ? parseAmount(row[col.cost]) : null;
     const gain = col.gain >= 0 ? parseAmount(row[col.gain]) : null;
@@ -111,6 +117,9 @@ export function parseHoldingsCsv(rows: string[][], fileName: string): Extraction
   notes.push('A holdings export lists investments only: any uninvested cash is not in it, so the value recorded is what the investments are worth.');
   // interactive investor's export has its own set of columns.
   const ii = headers.includes('day gain/loss') && headers.includes('average price');
+  // Priced on one day: the holdings' value is as at that day, whenever the file was saved.
+  const valuedOn = pricedOn.length === holdings.length && new Set(pricedOn).size === 1 ? pricedOn[0]! : null;
+  if (pricedOn.length && !valuedOn) notes.push(`Its funds are priced on different days (${[...new Set(pricedOn)].sort().join(', ')}), so it is dated by the file.`);
   return ExtractionSchema.parse({
     documentType: 'csv_export',
     institutionName: ii ? 'interactive investor' : null,
@@ -120,6 +129,7 @@ export function parseHoldingsCsv(rows: string[][], fileName: string): Extraction
         accountType: typeFromName(fileName),
         currency: 'GBP',
         closingBalance: printedTotal ?? sum,
+        balanceDate: valuedOn,
         gainLoss: printedGain,
         holdings,
       },

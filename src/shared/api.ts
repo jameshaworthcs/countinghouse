@@ -720,6 +720,8 @@ export interface AccountDetailResponse {
   gaps: { from: string; to: string; difference: number }[];
   figures: Figure[];
   imports: { id: string; fileName: string; label?: string; committedAt?: string; documentId: string }[];
+  /** A market account's total paid in, when known (FORMULAS.md §12): a document's, or its flows from the start. */
+  paidIn?: { amount: number; source: 'provider' | 'transactions'; asOf?: string };
 }
 
 export interface TransactionsResponse {

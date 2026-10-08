@@ -43,8 +43,9 @@ import { candidateOf, classifyDuplicates, recheckDraft } from './dedup';
 import { compareReading } from './reread';
 import { CSV_ENGINE_VERSION, findProfile, parseWithProfile, readCsvRows, suggestMapping, withCardSigns } from './csv';
 import { HOLDINGS_CSV_VERSION, parseHoldingsCsv } from './holdings-csv';
+import { PENSION_CSV_VERSION, parseContributionsCsv, parseFundTradesCsv } from './pension-csv';
 import { decodeText, detectKind, MAX_UPLOAD_BYTES, mediaTypeFor } from './detect';
-import { buildDraft, draftIsClean, type BatchEvidence } from './draft';
+import { buildDraft, draftIsClean, exportDate, type BatchEvidence } from './draft';
 import { asTransferLeg, findRow, keepLinks, keepYourLinks, linkCandidates, linkViews, replaceRow, sameAccount, sectionAccount, withoutLink, type FoundRow, type RowRef, type SectionAccount } from './links';
 import { assessNovelty, mentionedPayments, type NothingNew } from './novelty';
 import { assessReading, chooseReading, compareReadings, shortModel } from './verify';
@@ -330,7 +331,7 @@ export class ImportService extends EventEmitter {
       let local: Awaited<ReturnType<typeof readTextPdf>> = null;
       if (kind === 'xlsx' && opts.readAs !== 'columns') {
         const { rows } = sheetRows(bytes);
-        const known = opts.readAs === 'document' ? false : Boolean(findProfile(rows, this.store.csvProfiles) ?? parseHoldingsCsv(rows, record.document.fileName));
+        const known = opts.readAs === 'document' ? false : Boolean(findProfile(rows, this.store.csvProfiles) ?? parseFundTradesCsv(rows) ?? parseHoldingsCsv(rows, record.document.fileName) ?? parseContributionsCsv(rows, record.document.fileName));
         if (!known) {
           const all = workbookSheets(bytes);
           if (opts.readAs === 'document' || !looksLikeLedger(suggestMapping(rows, { accountType: record.hintAccountId ? this.store.account(record.hintAccountId)?.type : undefined }), all.length)) {
@@ -349,11 +350,21 @@ export class ImportService extends EventEmitter {
         const table = kind === 'xlsx' ? sheetRows(bytes) : undefined;
         const { rows } = table ?? readCsvRows(decodeText(bytes));
         const match = findProfile(rows, this.store.csvProfiles);
+        // An export with no date in it is as at the day it was downloaded.
+        const asOf = exportDate(record.document, record.createdAt.slice(0, 10))?.date;
+        // A pension or fund provider's trades, with their units and prices.
+        const trades = match ? null : parseFundTradesCsv(rows, { asOf });
         // A platform's portfolio export lists holdings, not transactions.
-        const holdings = match ? null : parseHoldingsCsv(rows, record.document.fileName);
+        const holdings = match || trades ? null : parseHoldingsCsv(rows, record.document.fileName);
+        // A provider's summary of what you and your employer have paid in.
+        const contributions = match || trades || holdings ? null : parseContributionsCsv(rows, record.document.fileName, { asOf });
+        const own = trades ?? contributions;
         if (holdings) {
           result = { extraction: holdings, warnings: [], durationMs: Date.now() - started };
           detail = 'holdings export';
+        } else if (own) {
+          result = { extraction: own, warnings: [], durationMs: Date.now() - started };
+          detail = trades ? 'fund trades' : 'contributions summary';
         } else if (match) {
           const layout = withCardSigns(rows, match, record.hintAccountId ? this.store.account(record.hintAccountId)?.type : undefined);
           const parsed = parseWithProfile(rows, layout);
@@ -386,7 +397,7 @@ export class ImportService extends EventEmitter {
           detail = 'auto-detected';
         }
         engine = 'csv';
-        engineVersion = holdings ? HOLDINGS_CSV_VERSION : CSV_ENGINE_VERSION;
+        engineVersion = holdings ? HOLDINGS_CSV_VERSION : own ? PENSION_CSV_VERSION : CSV_ENGINE_VERSION;
         if (table) {
           engineVersion = `${XLSX_ENGINE_VERSION}+${engineVersion}`;
           detail = `sheet “${table.sheet}”${detail ? `, ${detail}` : ''}`;
@@ -745,6 +756,7 @@ export class ImportService extends EventEmitter {
       const ctx: ImportRecord = { ...record, ...(accountIds.length === 1 ? { hintAccountId: accountIds[0] } : {}) };
       let layout: string;
       let parsed: ReturnType<typeof parseWithProfile>;
+      let trades: Extraction | null;
       if (match) {
         const signed = withCardSigns(rows, match, ctx.hintAccountId ? this.store.account(ctx.hintAccountId)?.type : undefined);
         parsed = parseWithProfile(rows, signed);
@@ -752,8 +764,12 @@ export class ImportService extends EventEmitter {
       } else if (own) {
         parsed = parseWithProfile(rows, own);
         layout = 'the columns you chose';
+      } else if ((trades = parseFundTradesCsv(rows, { asOf: exportDate(record.document, record.createdAt.slice(0, 10))?.date }))) {
+        parsed = { extraction: trades, rowCount: trades.accounts[0]!.transactions.length, skipped: 0 };
+        layout = 'a fund trade history';
       } else {
         if (parseHoldingsCsv(rows, record.document.fileName)) throw new Error('It lists holdings, not transactions: there are no rows to compare.');
+        if (parseContributionsCsv(rows, record.document.fileName)) throw new Error('It sums up contributions, not transactions: there are no rows to compare.');
         const suggestion = suggestMapping(rows, { accountType: ctx.hintAccountId ? this.store.account(ctx.hintAccountId)?.type : undefined });
         if (!suggestion) throw new Error('Could not find a date and description column in it.');
         parsed = parseWithProfile(rows, { profile: suggestion.profile, headerIndex: suggestion.headerIndex, headerless: false });
@@ -761,7 +777,8 @@ export class ImportService extends EventEmitter {
       }
       const draft = this.draftOf(ctx, { extraction: parsed.extraction, warnings: [] });
       const { sections, notes } = compareReading(this.store, record, draft, { byRow: true });
-      await this.saveReread({ ...reread, status: 'done', finishedAt: nowISO(), engine: 'csv', engineVersion: table ? `${XLSX_ENGINE_VERSION}+${CSV_ENGINE_VERSION}` : CSV_ENGINE_VERSION, layout, sections, notes });
+      const version = layout === 'a fund trade history' ? PENSION_CSV_VERSION : CSV_ENGINE_VERSION;
+      await this.saveReread({ ...reread, status: 'done', finishedAt: nowISO(), engine: 'csv', engineVersion: table ? `${XLSX_ENGINE_VERSION}+${version}` : version, layout, sections, notes });
     } catch (err) {
       await this.saveReread({ ...reread, status: 'failed', finishedAt: nowISO(), error: (err as Error).message.slice(0, 500) });
     }
