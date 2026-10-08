@@ -13,10 +13,12 @@ import { pensionTotals } from '../src/server/analytics/allowances';
 import { BalanceEngine, insideValuations } from '../src/server/analytics/balances';
 import { computeBaseline } from '../src/server/analytics/baseline';
 import { Coverage } from '../src/server/analytics/coverage';
+import { captureList } from '../src/server/analytics/capture';
 import { paidIn } from '../src/server/analytics/investments';
 import { payrollPensions } from '../src/server/analytics/payroll-pensions';
 import { balanceId, figureId, payslipId, transactionId } from '../src/server/ids';
 import { readCsvRows } from '../src/server/ingest/csv';
+import { applyRecords } from '../src/server/records';
 import { decodeText } from '../src/server/ingest/detect';
 import { buildDraft, draftIsClean } from '../src/server/ingest/draft';
 import { parseHoldingsCsv } from '../src/server/ingest/holdings-csv';
@@ -252,5 +254,35 @@ describe('what a valuation already holds, and paid in', () => {
     expect(paidIn(store, engine(), store.account('workplace')!)).toEqual({ amount: 2100, source: 'provider', asOf: '2026-05-20' });
     // The money of 8 April is not added to the statement's value a second time.
     expect(engine().balanceOn('workplace', '2026-04-09')!.value).toBe(1900);
+  });
+});
+
+describe('a summary of what was paid in since the start', () => {
+  let dir: string;
+  let store: Store;
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), 'finance-paid-in-to-date-'));
+    store = await Store.open(path.join(dir, 'data'));
+    await store.setAccounts([acct('workplace', 'workplace_pension')]);
+  });
+  afterEach(async () => {
+    store.stopWatching();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('is no tax year’s: it does not tick off an ask for the year it is dated in', async () => {
+    await applyRecords(store, {
+      provenance: { setBy: 'agent', model: 'claude-opus-5-5' },
+      supersede: false,
+      records: [{ type: 'capture', record: { id: 'pension', title: 'Pension', priority: 'normal', asks: [{ id: 'year', what: 'Contributions for 2026/27', check: { type: 'figures', kinds: ['pension_contribution_employee'], taxYear: '2026/27' } }] } }],
+    });
+    const ask = () => captureList(store, '2026-06-01').items[0]!.asks[0]!.state;
+    const fig = (id: string, extra: Partial<Figure>): Figure => ({ id, kind: 'pension_contribution_employee', label: 'You', amount: 480, currency: 'GBP', periodEnd: '2026-05-20', date: '2026-05-20', accountId: 'workplace', source: {}, createdAt: stamp, ...extra });
+    // Since the start, downloaded on 20 May 2026: not 2026/27's.
+    await store.addFigures([fig('fig_0000000000000001', {})], 'test: to date');
+    expect(ask()).toBe('todo');
+    // The year so far is.
+    await store.addFigures([fig('fig_0000000000000002', { amount: 240, taxYear: '2026/27', periodStart: '2026-04-06' })], 'test: this year');
+    expect(ask()).toBe('done');
   });
 });

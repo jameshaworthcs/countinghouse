@@ -94,13 +94,20 @@ export interface StatedPaidIn {
 }
 
 /**
- * A provider's summary of what was paid in since the start (a contributions export: you and your
- * employer, no tax year, no start), one total per import, oldest first (docs/FORMULAS.md §12).
+ * A figure of a provider's summary of what was paid in since the start (a contributions export: your
+ * or your employer's contributions with no tax year and no start, docs/DATA_FORMAT.md). It belongs
+ * to no tax year, whatever its date.
+ */
+export const isPaidInToDate = (f: Pick<Figure, 'kind' | 'taxYear' | 'periodStart'>): boolean => !f.taxYear && !f.periodStart && (f.kind === 'pension_contribution_employee' || f.kind === 'pension_contribution_employer');
+
+/**
+ * A provider's summary of what was paid in since the start (`isPaidInToDate`), one total per import,
+ * oldest first (docs/FORMULAS.md §12).
  */
 export function providerPaidIn(figures: readonly Figure[], accountId: string): StatedPaidIn[] {
   const byImport = new Map<string, StatedPaidIn>();
   for (const f of figures) {
-    if (f.accountId !== accountId || f.taxYear || f.periodStart || (f.kind !== 'pension_contribution_employee' && f.kind !== 'pension_contribution_employer')) continue;
+    if (f.accountId !== accountId || !isPaidInToDate(f)) continue;
     const date = f.periodEnd ?? f.date;
     if (!date) continue;
     const key = f.source.importId ?? date;

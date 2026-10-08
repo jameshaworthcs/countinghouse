@@ -8,6 +8,7 @@ import { formatDate, formatSpan, today, type ISODate } from '../../shared/dates'
 import type { CaptureAsk, CaptureItem } from '../../shared/schema';
 import { parseTaxYear } from '../../shared/uk';
 import type { Store } from '../store';
+import { isPaidInToDate } from './balances';
 import { coveredIntervals, missingDays } from './coverage';
 import { isPayslipFigure, payerKey } from './pay';
 
@@ -50,7 +51,9 @@ function checkAsk(store: Store, item: CaptureItem, ask: CaptureAsk, now: ISODate
       const found = store.figures.filter(
         (f) =>
           check.kinds.includes(f.kind) &&
-          (f.taxYear === check.taxYear || (!f.taxYear && ty && (f.periodEnd ?? f.date ?? '') >= ty.start && (f.periodEnd ?? f.date ?? '') <= ty.end)) &&
+          // A figure with no tax year is the year's it is dated in, except a summary of what was paid
+          // in since the start, which is no year's.
+          (f.taxYear === check.taxYear || (!f.taxYear && !isPaidInToDate(f) && ty && (f.periodEnd ?? f.date ?? '') >= ty.start && (f.periodEnd ?? f.date ?? '') <= ty.end)) &&
           (!check.from || isPayslipFigure(store, f) === (check.from === 'payslip')) &&
           (!payer || payerKey(f.payer).includes(payer)),
       );

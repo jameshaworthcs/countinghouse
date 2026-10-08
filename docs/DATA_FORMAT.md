@@ -733,8 +733,9 @@ while anything is left.
 - `{type: "valuation", since, holdings?}`: a balance that is not approximate, dated on or after
   `since`, plus a holdings snapshot when `holdings` is true.
 - `{type: "figures", kinds, taxYear, from?, payer?}`: a tax figure of one of those kinds for that
-  year; `from` limits it to a P60's (`p60`) or a payslip's (`payslip`) figures, and `payer` to one
-  employer's.
+  year (its `taxYear`, else the year its end or date falls in, except a summary of what was paid
+  in since the start, which is no year's); `from` limits it to a P60's (`p60`) or a payslip's
+  (`payslip`) figures, and `payer` to one employer's.
 
 An ask without a check is ticked by you (`doneAt`). Agents cannot set `doneAt` or `skippedAt`.
 
