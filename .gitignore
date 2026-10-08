@@ -9,6 +9,9 @@ screens/
 .env.*
 !.env.example
 
+# your own operating notes for Claude Code (they may import private ones)
+CLAUDE.local.md
+
 # work area: uploads and drafts that have not been reviewed and committed yet
 .work/
 

@@ -1276,7 +1276,7 @@ function Health() {
 const SCOPE_NAMES: Record<string, string> = { read: 'Read', imports: 'Import upkeep', records: 'Agent records', jobs: 'Jobs' };
 const whenTime = (iso: string) => `${formatDate(iso.slice(0, 10))} ${iso.slice(11, 16)}`;
 
-/** Tokens for agents (docs/DEPLOY.md, "Agent access"): made, seen and revoked only here. */
+/** Tokens for agents (docs/SELF_HOSTING.md, "Agent access"): made, seen and revoked only here. */
 function AgentAccess() {
   const toast = useToast();
   const q = useApi<TokensResponse>(['tokens'], '/tokens');

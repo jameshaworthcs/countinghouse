@@ -74,7 +74,7 @@ The digest holds:
 It leaves out identifiers the analysis does not need: PAYE references, payroll numbers and account
 numbers.
 
-**The live app's API** is open to an agent that holds a token the owner made (DEPLOY.md, "Agent
+**The live app's API** is open to an agent that holds a token the owner made (SELF_HOSTING.md, "Agent
 access"): `npm run -s api -- GET /imports`.
 - It is how an agent does upkeep on imports waiting for review. It can read a document again, draft
   it again, choose its account, edit its draft or link its transfers.

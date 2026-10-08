@@ -535,7 +535,7 @@ and a card in credit counts as cash.
 
 ## Security model
 
-- **Network.** The server binds to `127.0.0.1`. Caddy fronts it on the tailnet (see DEPLOY.md). A
+- **Network.** The server binds to `127.0.0.1`. Caddy fronts it on the tailnet (see SELF_HOSTING.md). A
   non-loopback `HOST` refuses to start without a login.
 - **Host guard.** Unknown `Host` headers get a 421 (DNS rebinding).
 - **CSRF.** Mutating `/api` calls require the `x-finance-csrf: 1` header, and `Origin` must match
@@ -559,7 +559,7 @@ and a card in credit counts as cash.
     the password hash, or the jemedia-auth issuer, client and allowed addresses. Changing either,
     or switching method, signs everyone out.
   - Client IP and `https` are trusted from `X-Forwarded-*` only when the peer is loopback (Caddy).
-- **Agent tokens** (`src/server/tokens.ts`; DEPLOY.md, "Agent access") let an agent use the API
+- **Agent tokens** (`src/server/tokens.ts`; SELF_HOSTING.md, "Agent access") let an agent use the API
   without a session.
   - The owner makes them in Settings. Each has scopes and an expiry, is shown once, and is kept only
     as a SHA-256 hash in the work area.

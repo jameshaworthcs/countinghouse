@@ -6,7 +6,7 @@
 #   npm run deploy -- --setup       first time: create the live worktree and its .env, install the unit
 #   npm run deploy -- --status      show what is deployed
 #
-# How it fits together (docs/DEPLOY.md, "Development and live"):
+# How it fits together (docs/SELF_HOSTING.md, "Development and live"):
 #   - The service runs from its own worktree of this repository, LIVE_DIR (default ~/dev/finance-live),
 #     at a detached commit, with a sparse checkout that leaves out data/.
 #   - It reads and writes THIS checkout's data/ (FINANCE_DATA_DIR in LIVE_DIR/.env), so the app's

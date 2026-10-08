@@ -1,4 +1,4 @@
-// Calling the app's API as an agent outside it (docs/DEPLOY.md, "Agent access"), for `npm run api`
+// Calling the app's API as an agent outside it (docs/SELF_HOSTING.md, "Agent access"), for `npm run api`
 // and `npm run records`. The token comes from FINANCE_TOKEN or ~/.config/finance/token, and never
 // appears in the output; the server from FINANCE_API_URL (default: the live service on this
 // machine). A Claude Code session's id (CLAUDE_CODE_SESSION_ID) goes with each request, so the

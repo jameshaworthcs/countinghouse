@@ -1,5 +1,5 @@
 // Start the server. The live service runs this from its own worktree on 127.0.0.1:4750 (see
-// docs/DEPLOY.md); from a development checkout `npm run dev` serves the API on :4760 (Vite on :4761)
+// docs/SELF_HOSTING.md); from a development checkout `npm run dev` serves the API on :4760 (Vite on :4761)
 // and `npm run demo` serves the built UI on :4770.
 
 import { execFileSync } from 'node:child_process';

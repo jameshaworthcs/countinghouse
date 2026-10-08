@@ -1,4 +1,4 @@
-// Agent access tokens (src/server/tokens.ts; docs/DEPLOY.md, "Agent access"): how a token is kept,
+// Agent access tokens (src/server/tokens.ts; docs/SELF_HOSTING.md, "Agent access"): how a token is kept,
 // what it can and cannot do, and that every use is logged. No test here starts a job: one that ran
 // would spend the owner's Claude plan.
 

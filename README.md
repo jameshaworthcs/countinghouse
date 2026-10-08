@@ -43,7 +43,7 @@ The agents that write insights read a digest of the app's own figures, with no w
 npm install
 npm run demo          # generated demo data at http://127.0.0.1:4770 — nothing real is touched
 npm run dev           # development on demo data: API on :4760, UI with hot reload on http://127.0.0.1:4761
-npm run deploy        # put main live (the service runs from its own worktree; see docs/DEPLOY.md)
+npm run deploy        # put main live (the service runs from its own worktree; see docs/SELF_HOSTING.md)
 ```
 
 Requirements: Node 22.12+ (24 here). Optional: `tesseract-ocr` and `poppler-utils` for the offline
@@ -96,7 +96,7 @@ duckdb -c "select category, sum(amount) from read_json('data/transactions/*/*.js
 ```
 
 The app commits every change to `data/` automatically, so git history is a complete audit log.
-Every night the whole repository is backed up, encrypted, off the machine (docs/DEPLOY.md,
+Every night the whole repository is backed up, encrypted, off the machine (docs/SELF_HOSTING.md,
 Operations).
 Format changes are handled by versioned migrations, and derived fields (payees, categories,
 transfer links) can be recomputed from stored source fields at any time. You never need to
@@ -106,7 +106,7 @@ re-import old documents. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 - **Network exposure.** The server binds to `127.0.0.1` only. On P360, Caddy exposes it to the
   to a private network such as a tailnet. There is no public exposure; see
-  [docs/DEPLOY.md](docs/DEPLOY.md).
+  [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md).
 - **Login.** The live site signs in through jemedia-auth (OpenID Connect with PKCE), and only a
   verified address on `FINANCE_OIDC_ALLOWED_EMAILS` gets in. Elsewhere (the demo, screenshots) it
   is a username and password, with a scrypt hash in `.env` and login throttling. Either way the
@@ -129,5 +129,5 @@ re-import old documents. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 | [docs/UK_RULES.md](docs/UK_RULES.md) | Tax-year rules and allowance tables, with sources |
 | [docs/FORMULAS.md](docs/FORMULAS.md) | Every computed figure: the formula, its inputs and its tests |
 | [docs/AGENTS.md](docs/AGENTS.md) | The contract for agents: research, assumptions, insights and the write path |
-| [docs/DEPLOY.md](docs/DEPLOY.md) | Running it as a service on P360 behind Caddy on the tailnet |
+| [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md) | Running it as a service behind Caddy on a private network |
 | [docs/DECISIONS.md](docs/DECISIONS.md) | Decision log |

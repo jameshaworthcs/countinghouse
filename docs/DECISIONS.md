@@ -41,7 +41,7 @@ Newest last. Each entry says what was decided, what else was considered, and why
   because the owner wants everything in the repo; Settings can turn that off.
 - **Login is username/password now, OIDC later** (superseded on 2026-09-29: see "Sign-in through
   jemedia-auth"). Sessions are independent of how you logged in,
-  so a jemedia-auth OIDC login can issue the same session cookie later (DEPLOY.md). No login
+  so an OIDC login can issue the same session cookie later (SELF_HOSTING.md). No login
   configured means local-only access, so a mis-deployment fails closed.
 - **Charts are hand-built SVG, not a charting library.** This was the way to meet the data-viz
   rules exactly:

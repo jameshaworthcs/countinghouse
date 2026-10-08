@@ -1,5 +1,5 @@
 // Call the app's API with an agent token, for Claude Code sessions and scripts on P360
-// (docs/DEPLOY.md, "Agent access"). The token never appears in the output.
+// (docs/SELF_HOSTING.md, "Agent access"). The token never appears in the output.
 //
 //   npm run -s api -- GET /imports
 //   npm run -s api -- POST /imports/imp_20260929_220730_9e18/refresh

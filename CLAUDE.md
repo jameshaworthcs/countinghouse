@@ -24,22 +24,22 @@ for the map and [docs/DATA_FORMAT.md](docs/DATA_FORMAT.md) before touching data 
   - When a change touches what a page shows with little data, repeat it on one month of data:
     `npm run demo:sparse`, serve `FINANCE_DATA_DIR=demo-sparse` on another port, and pass
     `--out <dir>` to `npm run screens`.
-- **The live site runs from its own worktree**, `~/dev/finance-live`, at the commit last deployed
-  (`finance.service` on P360; see [docs/DEPLOY.md](docs/DEPLOY.md)).
+- **A live site runs from its own worktree**, at the commit last deployed (`finance.service`; see
+  [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md)).
   - Nothing here reaches it until `npm run deploy` (main by default; it rolls back on failure).
     `npm run deploy -- --status` shows what is live.
-  - It reads and writes this checkout's `data/`, so keep this checkout on `main`: data
+  - While it reads and writes this checkout's `data/`, keep this checkout on `main`: data
     auto-commits are held while it is on another branch.
   - Commit code with explicit paths, never `git add -A`, so a pending data change is not swept
     into a code commit.
-  - The live site signs in through jemedia-auth (OIDC; password sign-in is off there). Its settings
-    are in `~/dev/finance-live/.env`; this checkout's `.env` has no production settings.
+  - A live site signs in through OIDC or a password; its settings are in the live worktree's
+    `.env`, never this checkout's.
     - The screenshot run and the demo use a throwaway password login instead (no OIDC client set).
 - `npm run validate`: format check of `data/`.
 - `npm run -s api -- GET /imports` (any method and path): the live API with an agent token the owner
   made in Settings → Agent access, kept in `~/.config/finance/token`. Tokens can read, and change
   only what their scopes allow (import upkeep, agent records, jobs); never commit
-  ([docs/DEPLOY.md](docs/DEPLOY.md), "Agent access").
+  ([docs/SELF_HOSTING.md](docs/SELF_HOSTING.md), "Agent access").
 - `npm run records -- keys | status | check <batch.json> | write <batch.json>`: the validated
   write path for assumptions, research, insights and instruments
   ([docs/AGENTS.md](docs/AGENTS.md)). Research and assumptions go through this, never by hand
@@ -66,10 +66,10 @@ for the map and [docs/DATA_FORMAT.md](docs/DATA_FORMAT.md) before touching data 
   write extracted data straight to `data/`.
 - **Privacy.**
   - Nothing may call third-party services except Claude, the engine the owner chose (CLI or API),
-    for extraction and agent jobs, and jemedia-auth (`auth.jemedia.xyz`), the owner's own identity
-    provider, for sign-in. Only the OIDC protocol goes there, never financial data.
-  - The local model service (`inference`, `INFERENCE_BASE_URL`, on P360 over the tailnet; its repo
-    is separate) is not a third party: personal data may go to it, and nothing sent to it
+    for extraction and agent jobs, and the identity provider the owner configures for sign-in
+    (OIDC). Only the OIDC protocol goes there, never financial data.
+  - The local model service (`inference`, `INFERENCE_BASE_URL`, on a machine of the owner's,
+    reached over their private network) is not a third party: personal data may go to it, and nothing sent to it
     leaves the machine. It has no web access or tools. Its key (`INFERENCE_API_KEY`) is in `.env`
     and is never logged. Which task runs where is `src/shared/tasks.ts` (Settings → Models); a
     task falls back from it to Claude only where the owner turned that on.
@@ -134,3 +134,5 @@ for the map and [docs/DATA_FORMAT.md](docs/DATA_FORMAT.md) before touching data 
 - Keep docs describing the system as built. When you deviate from a doc, fix the doc in the same
   change and add a line to `docs/DECISIONS.md`.
 - The app auto-commits `data/` only (pathspec-limited). Code commits are yours to make when asked.
+- Your own operating notes (where your live site runs, how it signs in) belong in a gitignored
+  `CLAUDE.local.md`, never in this file.
