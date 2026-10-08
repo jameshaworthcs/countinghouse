@@ -11,7 +11,7 @@ import { chmodSync, existsSync, readFileSync, renameSync, writeFileSync, mkdirSy
 import path from 'node:path';
 
 /** Bump when a hook's text changes. */
-export const HOOKS_VERSION = 1;
+export const HOOKS_VERSION = 2;
 const MARKER = '# leak-guard hooks';
 
 const quiet = process.argv.includes('--quiet');
@@ -55,9 +55,19 @@ const HOOKS: Record<string, string> = {
 if [ -x __CHAINED__ ]; then exec __CHAINED__ "$@"; fi
 exit 0`,
   ),
+  // Then Conventional Commits, where the repository has a commitlint config (CONTRIBUTING.md).
   'commit-msg': hook(
     'commit-msg',
-    `if ! data_only; then guard --commit-msg "$1" || exit 1; fi
+    `if ! data_only; then
+  guard --commit-msg "$1" || exit 1
+  if [ -f "$root/commitlint.config.js" ]; then
+    if [ ! -x "$root/node_modules/.bin/commitlint" ]; then
+      echo "commitlint is not installed, so this message cannot be checked: run npm ci" >&2
+      exit 1
+    fi
+    "$root/node_modules/.bin/commitlint" --edit "$1" || exit 1
+  fi
+fi
 if [ -x __CHAINED__ ]; then exec __CHAINED__ "$@"; fi
 exit 0`,
   ),
