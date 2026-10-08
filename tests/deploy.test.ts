@@ -116,6 +116,27 @@ describe('start-up guards', () => {
     expect([path.relative(demo.projectRoot, demo.workDir), path.relative(demo.projectRoot, demo.inboxDir)]).toEqual([path.join('.work', 'demo-data'), path.join('.work', 'inbox-demo-data')]);
   });
 
+  it('refuses data tracked in the code repository: in production it will not start, in development nothing is committed', async () => {
+    const { repo, git } = await repoWithData();
+    try {
+      // The code checkout is the repository the data is tracked in (projectRoot = repo).
+      const store = await Store.open(path.join(repo, 'data'));
+      store.stopWatching();
+      git('add', 'data');
+      git('commit', '-q', '-m', 'data in the code repository');
+      const env = { FINANCE_USERNAME: 'owner', FINANCE_PASSWORD_HASH: await hashPassword('a long test password') };
+      const base = { FINANCE_DATA_DIR: path.join(repo, 'data'), FINANCE_WORK_DIR: path.join(repo, '.work'), FINANCE_WATCH: '0' };
+      await expect(createApp(loadConfig({ ...base, NODE_ENV: 'production' }, repo), { version: 'test', env, inbox: false })).rejects.toThrow(/tracked in the code's own repository.*npm run init-data/);
+      const app = await createApp(loadConfig(base, repo), { version: 'test', env, inbox: false });
+      expect(app.ctx.git.tracked).toBe(true);
+      expect(app.ctx.git.enabled).toBe(false);
+      expect(app.ctx.git.lastError).toMatch(/^Data changes are not being committed/);
+      await app.close();
+    } finally {
+      await rm(repo, { recursive: true, force: true, maxRetries: 5 });
+    }
+  });
+
   it('refuses to create a missing data directory in production unless asked to', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'finance-init-'));
     try {

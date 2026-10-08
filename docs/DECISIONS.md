@@ -2446,3 +2446,13 @@ data repository; the code supports that layout for everyone.
   fixture (dates moved by whole weeks, amounts scaled by one factor, identifiers, emails and
   postcodes replaced, names and places invented, public and common words kept) and checks the
   result with the leak guard, so a regression test needs none of the real rows.
+
+## 2026-10-08: Data in the code's repository is refused
+
+Once the code is shared, data committed into its repository would be published with the next push.
+The app therefore checks, at start-up, whether the data directory is tracked in the code's own
+repository: the same `git rev-parse --git-common-dir`, so a worktree of it (the live worktree)
+counts too. In production it refuses to start and points at `npm run init-data`; in development it
+leaves the data as it is and commits nothing, saying why in Settings → Data & git. The owner's own
+installation used that layout until its data moved to a data repository, which is when this check
+went live.

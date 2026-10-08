@@ -63,6 +63,10 @@ until you deploy.
 - **Real data always needs a login.** A server started on a data directory tracked in git refuses
   to run without one, even on loopback, so other local accounts cannot read your finances from a
   development server. Demo and temporary data need no login.
+- **Data tracked in the code's own repository is refused.** That is the layout before code and data
+  were split: its commits would land in the code's history. In production the app will not start;
+  in development the data is left as it is and nothing is committed (Settings → Data & git says
+  why). Move it with `npm run init-data`.
 - **A missing data directory is an error in production.** A wrong `FINANCE_DATA_DIR` fails the start
   instead of creating an empty dataset. `FINANCE_INIT_DATA=1` creates one on purpose.
 

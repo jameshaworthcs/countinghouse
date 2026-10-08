@@ -18,6 +18,7 @@ import { ImportService } from './ingest/service';
 import { WorkArea } from './ingest/workarea';
 import { recordInstrumentsFromHoldings } from './instruments';
 import { runMigrations } from './migrations';
+import { dataInCodeRepository } from './datarepo';
 import { LOGIN_PATH, OidcClient, oidcSettingsFromEnv } from './oidc';
 import { ProposalProblems, ProposalService } from './proposals';
 import { SessionLog, sessionLimitsFromEnv } from './sessions';
@@ -74,6 +75,17 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
   if (migrated) audit.record({ category: 'data', action: 'data.migrate', actor: startUp, summary: `Migrated the data from format v${migrated.from} to v${migrated.to}`, details: { from: migrated.from, to: migrated.to } });
   const store = await Store.open(config.dataDir, { watch: config.watch });
   const git = await GitCommitter.create(config.dataDir, () => store.settings.git.autoCommit, 2500, config.dataBranch);
+  // Data tracked in the code's own repository (or a worktree of it), the layout before code and data
+  // were split: its commits would land in the code's history, which is shared. In production that
+  // is refused outright; in development the data is left as it is, and nothing is committed.
+  if (dataInCodeRepository(config.dataDir, config.projectRoot)) {
+    const why = `${config.dataDir} is tracked in the code's own repository, which is shared. Move your data to a data repository of its own (npm run init-data; docs/SELF_HOSTING.md, "The layout").`;
+    if (config.production) {
+      store.stopWatching();
+      throw new Error(why);
+    }
+    git.refuse(`Data changes are not being committed: ${why}`);
+  }
   store.on('change', (e: ChangeEvent) => {
     // The audit entry first, so the commit can name it.
     e.auditSeq = audit.record({ category: 'data', action: 'data.change', summary: e.message, paths: e.paths, diff: e.diff, targets: e.diff?.items?.map((i) => i.id) ?? [] }).seq;

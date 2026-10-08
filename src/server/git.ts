@@ -61,6 +61,8 @@ export class GitCommitter {
   private timer?: NodeJS.Timeout | undefined;
   private committing: Promise<void> = Promise.resolve();
   lastError?: string | undefined;
+  /** Why data commits are refused altogether, when they are (refuse()). */
+  private refused?: string | undefined;
 
   private constructor(
     readonly repoRoot: string | null,
@@ -87,7 +89,14 @@ export class GitCommitter {
   }
 
   get enabled(): boolean {
-    return this.repoRoot !== null && this.isEnabled();
+    return this.repoRoot !== null && !this.refused && this.isEnabled();
+  }
+
+  /** Commit nothing from now on, and say why wherever the last error shows (Settings → Data & git). */
+  refuse(why: string): void {
+    this.refused = why;
+    this.lastError = why;
+    clearTimeout(this.timer);
   }
 
   /** Record a change; a commit follows once changes stop arriving. */
@@ -116,7 +125,7 @@ export class GitCommitter {
   }
 
   private async commit(messages: string[], auditSeqs: number[] = []): Promise<void> {
-    if (!this.repoRoot) return;
+    if (!this.repoRoot || this.refused) return;
     // Data commits belong on one branch. If the checkout holding data/ is on another branch or a
     // detached HEAD, hold them (the changes stay on disk) and say so, rather than scatter the audit
     // log across branches. They are committed by the next flush once the branch is right again.
