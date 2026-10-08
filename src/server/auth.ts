@@ -3,8 +3,8 @@
 // One user (FINANCE_USERNAME) and a signed, HttpOnly session cookie. The session doesn't care how
 // the user proved who they are; there are two ways, and a server uses exactly one:
 //
-// - jemedia-auth (OIDC, oidc.ts) when FINANCE_OIDC_CLIENT_ID is set. This is the live site's.
-//   Password sign-in is then refused outright.
+// - An OpenID Connect provider (oidc.ts) when FINANCE_OIDC_CLIENT_ID is set. Password sign-in is
+//   then refused outright.
 // - Otherwise a password (scrypt hash in .env, set with `npm run set-password`): the demo, the
 //   screenshot run and any server without an OIDC client.
 //
@@ -58,7 +58,7 @@ export interface AuthConfig {
   username?: string | undefined;
   passwordHash?: string | undefined;
   /**
-   * Set when sign-in goes through jemedia-auth: what identifies that setup (issuer, client and the
+   * Set when sign-in goes through OIDC: what identifies that setup (issuer, client and the
    * allowed addresses). Changing any of it signs every session out, as a new password does.
    */
   oidcIdentity?: string | undefined;
@@ -108,7 +108,7 @@ export class Auth {
   }
 
   /**
-   * Changing the password, or the jemedia-auth setup, changes this, which invalidates every existing
+   * Changing the password, or the OIDC setup, changes this, which invalidates every existing
    * session. Switching between the two methods does too.
    */
   private get epoch(): string {

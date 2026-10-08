@@ -13,7 +13,7 @@ loadDotEnv();
 const config = loadConfig();
 const version = (JSON.parse(readFileSync(path.join(PROJECT_ROOT, 'package.json'), 'utf8')) as { version: string }).version;
 
-const loginMethod = !process.env.FINANCE_USERNAME ? null : process.env.FINANCE_OIDC_CLIENT_ID ? 'jemedia-auth' : process.env.FINANCE_PASSWORD_HASH ? 'password' : null;
+const loginMethod = !process.env.FINANCE_USERNAME ? null : process.env.FINANCE_OIDC_CLIENT_ID ? `OIDC (${process.env.FINANCE_OIDC_NAME?.trim() || process.env.FINANCE_OIDC_ISSUER?.trim() || 'no issuer set'})` : process.env.FINANCE_PASSWORD_HASH ? 'password' : null;
 if (!isLoopbackHost(config.host) && !loginMethod) {
   console.error(`Refusing to listen on ${config.host} without a login. Run \`npm run set-password\` first, or keep HOST=127.0.0.1.`);
   process.exit(1);

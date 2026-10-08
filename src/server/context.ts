@@ -36,7 +36,7 @@ export interface AppContext {
   proposals: ProposalService;
   git: GitCommitter;
   auth: Auth;
-  /** Sign-in through jemedia-auth, when configured (it then replaces the password). */
+  /** Sign-in through an OIDC provider, when configured (it then replaces the password). */
   oidc?: OidcClient | undefined;
   inbox?: InboxWatcher | undefined;
   jobs?: JobQueue | undefined;

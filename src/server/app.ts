@@ -183,7 +183,7 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
   app.use('/api/*', auditRequests(audit, { auth, tokens, devices }));
   app.use('/api/*', csrfGuard());
   app.use('/api/*', authGate(auth, tokens));
-  // With jemedia-auth, opening any page signed out goes straight to it. (The SPA does the same for
+  // With OIDC, opening any page signed out goes straight to the provider. (The SPA does the same for
   // the pages Vite serves in development.) /login stays reachable: it explains failed sign-ins.
   if (oidc) {
     app.use('*', async (c: Context, next) => {

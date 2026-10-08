@@ -14,12 +14,13 @@ const REDIRECT = `https://${HOST}/api/auth/oidc/callback`;
 const CSRF = { 'x-finance-csrf': '1' };
 
 describe('OIDC settings', () => {
-  const base = { FINANCE_USERNAME: 'james', FINANCE_OIDC_CLIENT_ID: 'finance', FINANCE_OIDC_CLIENT_SECRET: 's3cret', FINANCE_OIDC_ALLOWED_EMAILS: ' James@EXAMPLE.com , ' };
+  const base = { FINANCE_USERNAME: 'james', FINANCE_OIDC_ISSUER: 'https://auth.example.com/', FINANCE_OIDC_CLIENT_ID: 'finance', FINANCE_OIDC_CLIENT_SECRET: 's3cret', FINANCE_OIDC_ALLOWED_EMAILS: ' James@EXAMPLE.com , ' };
 
   it('is off without a client id, and derives the rest from the allowed host', () => {
     expect(oidcSettingsFromEnv({}, [HOST])).toBeNull();
     expect(oidcSettingsFromEnv(base, [HOST])).toEqual({
-      issuer: 'https://auth.jemedia.xyz',
+      issuer: 'https://auth.example.com',
+      name: 'auth.example.com',
       clientId: 'finance',
       clientSecret: 's3cret',
       redirectUri: REDIRECT,
@@ -27,7 +28,15 @@ describe('OIDC settings', () => {
     });
   });
 
+  it('names the provider as you say, else by its host', () => {
+    expect(oidcSettingsFromEnv({ ...base, FINANCE_OIDC_NAME: ' Example ID ' }, [HOST])!.name).toBe('Example ID');
+  });
+
   it('fails closed when half configured', () => {
+    // No issuer is assumed: whoever runs it names their own provider.
+    expect(() => oidcSettingsFromEnv({ ...base, FINANCE_OIDC_ISSUER: '' }, [HOST])).toThrow(/FINANCE_OIDC_ISSUER/);
+    expect(() => oidcSettingsFromEnv({ ...base, FINANCE_OIDC_ISSUER: 'http://auth.example.com' }, [HOST])).toThrow(/https/);
+    expect(() => oidcSettingsFromEnv({ ...base, FINANCE_OIDC_ISSUER: 'not a url' }, [HOST])).toThrow(/URL/);
     expect(() => oidcSettingsFromEnv({ ...base, FINANCE_OIDC_CLIENT_SECRET: '' }, [HOST])).toThrow(/FINANCE_OIDC_CLIENT_SECRET/);
     expect(() => oidcSettingsFromEnv({ ...base, FINANCE_OIDC_ALLOWED_EMAILS: ' , ' }, [HOST])).toThrow(/FINANCE_OIDC_ALLOWED_EMAILS/);
     expect(() => oidcSettingsFromEnv({ ...base, FINANCE_USERNAME: '' }, [HOST])).toThrow(/FINANCE_USERNAME/);
@@ -42,7 +51,7 @@ describe('OIDC settings', () => {
   });
 });
 
-describe('sign-in with jemedia-auth', () => {
+describe('sign-in with an OIDC provider', () => {
   let idp: MockIdp;
   let app: App;
   let dir: string;
@@ -105,15 +114,16 @@ describe('sign-in with jemedia-auth', () => {
 
   it('reports the method, and refuses password sign-in even with a password configured', async () => {
     await app.close();
-    app = await makeApp({ FINANCE_PASSWORD_HASH: await hashPassword('correct horse') });
-    const status = (await (await req('/api/auth/status')).json()) as { configured: boolean; method: string; user: string | null };
-    expect(status).toMatchObject({ configured: true, method: 'oidc', user: null });
+    app = await makeApp({ FINANCE_PASSWORD_HASH: await hashPassword('correct horse'), FINANCE_OIDC_NAME: 'Example ID' });
+    const status = (await (await req('/api/auth/status')).json()) as { configured: boolean; method: string; provider: string | null; user: string | null };
+    expect(status).toMatchObject({ configured: true, method: 'oidc', provider: 'Example ID', user: null });
     const res = await req('/api/auth/login', { method: 'POST', headers: { ...CSRF, 'content-type': 'application/json' }, body: JSON.stringify({ username: 'james', password: 'correct horse' }) });
     expect(res.status).toBe(403);
+    expect(((await res.json()) as { error: string }).error).toBe('Password sign-in is off. Sign in with Example ID.');
     expect(cookieOf(res, 'finance_session')).toBeUndefined();
   });
 
-  it('sends a signed-out page load to jemedia-auth, but not the API, files or /login', async () => {
+  it('sends a signed-out page load to the provider, but not the API, files or /login', async () => {
     const page = await req('/accounts?tab=1');
     expect(page.status).toBe(302);
     expect(page.headers.get('location')).toBe(`/api/auth/oidc/login?next=${encodeURIComponent('/accounts?tab=1')}`);
@@ -178,7 +188,7 @@ describe('sign-in with jemedia-auth', () => {
     }
   });
 
-  it('explains a refusal at jemedia-auth without echoing its text', async () => {
+  it('explains a refusal at the provider without echoing its text', async () => {
     idp.denyWith = 'access_denied';
     const { res } = await signIn();
     expect(res.headers.get('location')).toBe('/login?error=idp_denied');
@@ -222,7 +232,7 @@ describe('sign-in with jemedia-auth', () => {
     expect((await req('/api/summary', { headers: { cookie: session } })).status).toBe(401);
   });
 
-  it('sends you back to sign in, not an error page, when jemedia-auth is unreachable', async () => {
+  it('sends you back to sign in, not an error page, when the provider is unreachable', async () => {
     await app.close();
     app = await makeApp({ FINANCE_OIDC_ISSUER: 'http://127.0.0.1:1' });
     const res = await req('/api/auth/oidc/login?next=/');

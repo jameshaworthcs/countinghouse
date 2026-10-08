@@ -159,7 +159,7 @@ waiting for review, jobs, proposals waiting for you, tokens), sign-ins and refus
     cover the rest); a single file such as settings field by field. Also `data.external`,
     `data.migrate`, and `git.commit` naming the entries each commit holds (the commit message
     carries `Audit: #12–#14` back).
-  - `auth`: signing in (password or jemedia-auth, refused attempts with why) and out.
+  - `auth`: signing in (password or OIDC, refused attempts with why) and out.
   - `import`, `job`, `proposal`: each change of state of an import, an agent job (with its cost,
     what it wrote, or its error) and a proposed fix.
   - `session`: each agent session's start and end (`session.start`, `session.succeeded`,
@@ -541,11 +541,13 @@ and a card in credit counts as cash.
 - **CSRF.** Mutating `/api` calls require the `x-finance-csrf: 1` header, and `Origin` must match
   `Host`. The session cookie is `SameSite=Strict`.
 - **Auth.** One user (`FINANCE_USERNAME`), signed in one of two ways; a server uses exactly one.
-  - **jemedia-auth** (`src/server/oidc.ts`, when `FINANCE_OIDC_CLIENT_ID` is set; the live site):
+  - **OIDC** (`src/server/oidc.ts`, when `FINANCE_OIDC_CLIENT_ID` is set, with the provider's
+    `FINANCE_OIDC_ISSUER`; `FINANCE_OIDC_NAME` is what the sign-in page calls it):
     - authorization code flow with PKCE (S256), state and nonce, through `openid-client`;
-    - the ES256 ID token is checked against the provider's JWKS (issuer, audience, expiry, nonce);
-    - who may reach the client at all is jemedia-auth's tenant membership; the app then admits only
-      a verified address on `FINANCE_OIDC_ALLOWED_EMAILS`, as `FINANCE_USERNAME`;
+    - the ID token is checked against the provider's JWKS (issuer, audience, expiry, nonce), signed
+      with RS256 when the provider offers it, else the first algorithm it lists;
+    - the provider may limit who reaches the client at all; the app then admits only a verified
+      address on `FINANCE_OIDC_ALLOWED_EMAILS`, as `FINANCE_USERNAME`;
     - state, nonce and verifier ride in a signed, 10-minute, `SameSite=Lax` cookie scoped to
       `/api/auth/oidc` (Lax, because the callback arrives from the provider's site);
     - the callback answers with a page that moves on by meta refresh, so the Strict session cookie
@@ -556,7 +558,7 @@ and a card in credit counts as cash.
   - **Password** otherwise: a scrypt hash in `.env`, throttled at 10 failures per client and 50 in
     total per 15 minutes.
   - The session cookie is an HMAC-signed `v1.user.expiry.sig`, keyed by a secret plus an epoch:
-    the password hash, or the jemedia-auth issuer, client and allowed addresses. Changing either,
+    the password hash, or the OIDC issuer, client and allowed addresses. Changing either,
     or switching method, signs everyone out.
   - Client IP and `https` are trusted from `X-Forwarded-*` only when the peer is loopback (Caddy).
 - **Agent tokens** (`src/server/tokens.ts`; SELF_HOSTING.md, "Agent access") let an agent use the API

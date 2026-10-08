@@ -1082,7 +1082,7 @@ function DataAndGit() {
             ['Data format', `v${sys.data?.formatVersion ?? '?'} · see docs/DATA_FORMAT.md`],
             ['App version', sys.data?.version],
             ['Stored', sys.data ? `${sys.data.counts.accounts} accounts, ${sys.data.counts.transactions.toLocaleString()} transactions, ${sys.data.counts.balances} balances, ${sys.data.counts.figures} tax figures, ${sys.data.counts.imports} imports` : ''],
-            ['Signed in as', sys.data?.auth.user ? `${sys.data.auth.user}${sys.data.auth.method === 'oidc' ? ' (with JEMEDIA)' : ''}` : (sys.data?.auth.configured ? '—' : 'local access (no login configured)')],
+            ['Signed in as', sys.data?.auth.user ? `${sys.data.auth.user}${sys.data.auth.method === 'oidc' ? ` (with ${sys.data.auth.provider ?? 'OIDC'})` : ''}` : (sys.data?.auth.configured ? '—' : 'local access (no login configured)')],
           ]}
         />
       </Card>

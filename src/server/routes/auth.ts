@@ -35,6 +35,8 @@ export function authRoutes(ctx: AppContext): Hono {
     return c.json({
       configured: ctx.auth.configured,
       method: ctx.auth.method,
+      // What the sign-in page calls the identity provider ("Sign in with …").
+      provider: ctx.oidc?.settings.name ?? null,
       user: session?.user ?? null,
       // Without configured credentials only direct local access works.
       localAccess: !ctx.auth.configured && isDirectLocal(c),
@@ -51,7 +53,7 @@ export function authRoutes(ctx: AppContext): Hono {
     }
     const why = { 'use-oidc': 'password sign-in is off', throttled: 'too many attempts', 'not-configured': 'no login is configured', invalid: 'wrong username or password' }[result] ?? result;
     await audit(c, 'auth.sign-in', 'refused', `Sign-in refused: ${why}`, null, { method: 'password', reason: result });
-    if (result === 'use-oidc') return c.json({ error: 'Password sign-in is off. Sign in with JEMEDIA.', code: 'use_oidc' }, 403);
+    if (result === 'use-oidc') return c.json({ error: `Password sign-in is off. Sign in with ${ctx.oidc?.settings.name ?? 'your identity provider'}.`, code: 'use_oidc' }, 403);
     // A small constant delay blunts guessing and timing differences.
     await new Promise((r) => setTimeout(r, 400));
     if (result === 'throttled') return c.json({ error: 'Too many attempts. Try again in 15 minutes.' }, 429);
@@ -66,7 +68,7 @@ export function authRoutes(ctx: AppContext): Hono {
     return c.json({ ok: true });
   });
 
-  // jemedia-auth. Both are top-level browser navigations, so they answer with redirects, and every
+  // OIDC. Both are top-level browser navigations, so they answer with redirects, and every
   // failure lands on the sign-in page with a short code it explains (never the provider's own text).
   const fail = (c: Context, code: string) => c.redirect(`/login?error=${code}`, 302);
 
@@ -75,7 +77,7 @@ export function authRoutes(ctx: AppContext): Hono {
     if (!oidc) return c.json({ error: 'Not found' }, 404);
     try {
       const { url, flow } = await oidc.start(safeNext(c.req.query('next')));
-      // Lax, not Strict: the callback arrives as a navigation from auth.jemedia.xyz, and a Strict
+      // Lax, not Strict: the callback arrives as a navigation from the provider, and a Strict
       // cookie would not be sent with it.
       setCookie(c, FLOW_COOKIE, ctx.auth.seal(flow, FLOW_SECONDS), { httpOnly: true, secure: isHttps(c), sameSite: 'Lax', path: FLOW_PATH, maxAge: FLOW_SECONDS });
       return c.redirect(url, 302);
@@ -92,22 +94,22 @@ export function authRoutes(ctx: AppContext): Hono {
     deleteCookie(c, FLOW_COOKIE, { path: FLOW_PATH, secure: isHttps(c), sameSite: 'Lax', httpOnly: true });
     // No flow: it expired, it was started in another tab, or this is a replayed callback URL.
     if (!flow?.state || !flow.nonce || !flow.verifier) {
-      await audit(c, 'auth.sign-in', 'refused', 'Sign-in with JEMEDIA refused: the sign-in had expired or was started elsewhere', null, { method: 'jemedia-auth', reason: 'flow_expired' });
+      await audit(c, 'auth.sign-in', 'refused', `Sign-in with ${oidc.settings.name} refused: the sign-in had expired or was started elsewhere`, null, { method: 'oidc', reason: 'flow_expired' });
       return fail(c, 'flow_expired');
     }
     try {
       const who = await oidc.finish(new URL(c.req.url).searchParams, flow);
       ctx.auth.setSessionCookie(c, ctx.auth.username!, isHttps(c));
-      console.log(`[auth] signed in as ${ctx.auth.username} via jemedia-auth (${who.email})`);
-      await audit(c, 'auth.sign-in', 'ok', `Signed in with JEMEDIA as ${who.email}`, ctx.auth.username!, { method: 'jemedia-auth', email: who.email });
+      console.log(`[auth] signed in as ${ctx.auth.username} via ${oidc.settings.name} (${who.email})`);
+      await audit(c, 'auth.sign-in', 'ok', `Signed in with ${oidc.settings.name} as ${who.email}`, ctx.auth.username!, { method: 'oidc', email: who.email });
     } catch (err) {
       console.error(`[auth] ${(err as Error).message}`);
       const code = err instanceof OidcError ? err.code : 'invalid_response';
-      await audit(c, 'auth.sign-in', 'refused', `Sign-in with JEMEDIA refused (${code})`, null, { method: 'jemedia-auth', reason: code });
+      await audit(c, 'auth.sign-in', 'refused', `Sign-in with ${oidc.settings.name} refused (${code})`, null, { method: 'oidc', reason: code });
       return fail(c, code);
     }
     // The session cookie is SameSite=Strict, and this response ends a navigation that began at
-    // auth.jemedia.xyz: a redirect would still count as cross-site, the cookie would be left off, and
+    // the provider: a redirect would still count as cross-site, the cookie would be left off, and
     // the app would send you back to sign in. A page that moves on by itself is a same-site
     // navigation, so the cookie goes with it. (A meta refresh, since the CSP allows no inline script.)
     const next = escapeHtml(safeNext(flow.next));

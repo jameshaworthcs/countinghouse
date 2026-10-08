@@ -40,7 +40,7 @@ Newest last. Each entry says what was decided, what else was considered, and why
   and the owner's code changes are never swept in. Original documents are committed by default
   because the owner wants everything in the repo; Settings can turn that off.
 - **Login is username/password now, OIDC later** (superseded on 2026-09-29: see "Sign-in through
-  jemedia-auth"). Sessions are independent of how you logged in,
+  the owner's identity provider"). Sessions are independent of how you logged in,
   so an OIDC login can issue the same session cookie later (SELF_HOSTING.md). No login
   configured means local-only access, so a mis-deployment fails closed.
 - **Charts are hand-built SVG, not a charting library.** This was the way to meet the data-viz
@@ -282,28 +282,28 @@ as invariants.
 - **A fact read from a document with nothing to import** (an email about pay not received) is a
   context record with `origin.kind: "document"`, not an import that can never be committed.
 
-## 2026-09-29: Sign-in through jemedia-auth
+## 2026-09-29: Sign-in through the owner's identity provider
 
-- **jemedia-auth replaces the password on the live site, at the owner's request.**
-  - An OIDC client in its own jemedia-auth tenant, whose only member is the owner. Membership is
-    what jemedia-auth checks before it will sign anyone in to the client.
+- **OIDC replaces the password on the live site, at the owner's request.**
+  - An OIDC client at the owner's own identity provider, in a tenant whose only member is the
+    owner. Membership is what the provider checks before it will sign anyone in to the client.
   - The app checks again: only the owner's email address, verified, gets in, and it maps to the existing
     user `james`, so nothing keyed on the user changes.
-  - A signed-out visit goes straight to jemedia-auth. Password sign-in is refused while OIDC is
+  - A signed-out visit goes straight to the provider. Password sign-in is refused while OIDC is
     configured, with no break-glass: a password beside SSO is a second way in to guard. If
-    jemedia-auth is down, the way back is to unset `FINANCE_OIDC_CLIENT_ID` and set a password
+    the provider is down, the way back is to unset `FINANCE_OIDC_CLIENT_ID` and set a password
     in the live `.env`.
   - The demo and the screenshot run keep the password login, since they have no client.
-- **The site stays tailnet-only.** Only the browser visits `auth.jemedia.xyz`; the callback comes
+- **The site stays tailnet-only.** Only the browser visits the provider; the callback comes
   back to the tailnet name. The server's own calls to the provider (discovery, token exchange,
-  signing keys) are outbound HTTPS from P360.
-- **jemedia-auth is the one other service the server may call.** The privacy invariant in
+  signing keys) are outbound HTTPS from the host.
+- **The identity provider is the one other service the server may call.** The privacy invariant in
   CLAUDE.md now names it next to Claude. Only the OIDC protocol goes there, never financial data.
 - **The session cookie stays `SameSite=Strict`.** The callback ends a navigation that started on
   another site, so it returns a page that moves on by meta refresh (the CSP allows no inline
   script) rather than a redirect, and the cookie is sent with the next request.
-- **Signing out of Finance does not sign you out of jemedia-auth.** That would end every JEMEDIA
-  session. The sign-in page then waits for a click instead of going straight back.
+- **Signing out of Finance does not sign you out of the provider.** That would end every session
+  there. The sign-in page then waits for a click instead of going straight back.
 - **`openid-client` (v6, with `jose`) does the protocol,** as in verifiedhandles, rather than
   hand-written JWT checks.
 - **Background agent jobs have a budget** ($5 a day, $40 a month by default, in Settings). The first
@@ -396,8 +396,9 @@ would have added the whole holding to the estate a second time.
 The owner asked for agents to do API tasks without them: re-reading six pending NS&I imports had
 needed a `fetch` loop pasted into the signed-in browser console.
 
-- **Tokens the owner makes in Settings, not a jemedia-auth machine client (the owner's choice).**
-  - A client-credentials client would need admin setup at jemedia-auth, and support there, for one
+- **Tokens the owner makes in Settings, not a machine client at the identity provider (the owner's
+  choice).**
+  - A client-credentials client would need admin setup at the provider, and support there, for one
     user.
   - App tokens are small and local, and are revoked in one click.
 - **Only a hash is kept, outside `data/` and git.**
@@ -2398,3 +2399,16 @@ repository; the published one holds only the code, with its history rebuilt from
 - **Exposure the owner accepts:** their name, and what a reader can infer from the providers the
   code supports. Not: real values, people, references, amounts, local places or private
   infrastructure.
+
+## 2026-10-08: OIDC names its provider in configuration
+
+The sign-in code named one provider, the owner's: its issuer was the default and its name was on
+the sign-in page. Published, it should work with anyone's.
+
+- **`FINANCE_OIDC_ISSUER` is required** whenever `FINANCE_OIDC_CLIENT_ID` is set: there is no
+  default issuer. It must be https (plain http only on this machine, for the tests' stand-in).
+- **`FINANCE_OIDC_NAME`** is what the sign-in page, its messages and Settings call the provider
+  ("Sign in with …"); without it, the issuer's host. New audit entries record the method as
+  `oidc`.
+- **The ID token's algorithm comes from the provider**: RS256, OIDC's default, when it offers it,
+  else the first it lists (the owner's signs with ES256). Nothing to configure.

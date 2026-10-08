@@ -8,16 +8,18 @@ import { Button, Callout, Field, Input, Loading } from '../components/ui';
 interface AuthStatus {
   configured: boolean;
   method: 'oidc' | 'password' | null;
+  /** The identity provider's name (FINANCE_OIDC_NAME), when sign-in goes through one. */
+  provider: string | null;
   user: string | null;
 }
 
-/** Why a jemedia-auth sign-in came back here (the callback's ?error= codes). */
-const OIDC_ERRORS: Record<string, string> = {
-  not_allowed: 'JEMEDIA signed you in, but not with an account that can use Finance.',
-  idp_denied: 'JEMEDIA didn’t sign you in. You may have cancelled, or your account isn’t a member of Finance.',
-  flow_expired: 'That sign-in took too long, or was started in another tab. Try again.',
-  idp_unreachable: 'Couldn’t reach JEMEDIA. Try again in a moment.',
-  invalid_response: 'JEMEDIA’s answer couldn’t be verified. Try again; if it keeps happening, check the server log.',
+/** Why an OIDC sign-in came back here (the callback's ?error= codes), in the provider's name. */
+const OIDC_ERRORS: Record<string, (provider: string) => string> = {
+  not_allowed: (p) => `${p} signed you in, but not with an account that can use Finance.`,
+  idp_denied: (p) => `${p} didn’t sign you in. You may have cancelled, or your account may not be allowed to use Finance.`,
+  flow_expired: () => 'That sign-in took too long, or was started in another tab. Try again.',
+  idp_unreachable: (p) => `Couldn’t reach ${p}. Try again in a moment.`,
+  invalid_response: (p) => `${p}’s answer couldn’t be verified. Try again; if it keeps happening, check the server log.`,
 };
 
 function Panel({ children }: { children: ReactNode }) {
@@ -50,15 +52,15 @@ export function Login() {
   }, [signedIn, navigate, target]);
 
   if (!status.data || signedIn) return <Panel>{status.error ? <Callout tone="bad">{status.error.message}</Callout> : <Loading />}</Panel>;
-  if (status.data.method === 'oidc') return <OidcLogin target={target} error={params.get('error')} signedOut={params.has('signedout')} />;
+  if (status.data.method === 'oidc') return <OidcLogin provider={status.data.provider ?? 'your identity provider'} target={target} error={params.get('error')} signedOut={params.has('signedout')} />;
   return <PasswordLogin target={target} signedOut={params.has('signedout')} />;
 }
 
 /**
- * jemedia-auth: go straight there, unless this visit is to say why the last attempt failed or that
+ * OIDC: go straight to the provider, unless this visit is to say why the last attempt failed or that
  * you signed out (going straight back would sign you in again, or loop on the same failure).
  */
-function OidcLogin({ target, error, signedOut }: { target: string; error: string | null; signedOut: boolean }) {
+function OidcLogin({ provider, target, error, signedOut }: { provider: string; target: string; error: string | null; signedOut: boolean }) {
   const href = `/api/auth/oidc/login?next=${encodeURIComponent(target)}`;
   const stay = Boolean(error) || signedOut;
   useEffect(() => {
@@ -68,14 +70,14 @@ function OidcLogin({ target, error, signedOut }: { target: string; error: string
   return (
     <Panel>
       <div className="flex flex-col gap-3.5">
-        {error && <Callout tone="bad">{OIDC_ERRORS[error] ?? 'Sign-in failed. Try again.'}</Callout>}
-        {signedOut && !error && <Callout tone="neutral">You’ve signed out of Finance. You’re still signed in to JEMEDIA.</Callout>}
+        {error && <Callout tone="bad">{OIDC_ERRORS[error]?.(provider) ?? 'Sign-in failed. Try again.'}</Callout>}
+        {signedOut && !error && <Callout tone="neutral">You’ve signed out of Finance. You’re still signed in to {provider}.</Callout>}
         {stay ? (
           <Button variant="primary" size="lg" icon={<LogIn className="size-4" />} className="w-full" onClick={() => window.location.assign(href)}>
-            Sign in with JEMEDIA
+            Sign in with {provider}
           </Button>
         ) : (
-          <Loading label="Taking you to JEMEDIA…" />
+          <Loading label={`Taking you to ${provider}…`} />
         )}
       </div>
     </Panel>

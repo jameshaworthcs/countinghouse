@@ -1,6 +1,6 @@
-// A stand-in for jemedia-auth on loopback, for the OIDC tests: discovery, a JWKS, an authorize
+// A stand-in for an OpenID Connect provider on loopback, for the OIDC tests: discovery, a JWKS, an authorize
 // endpoint that signs in whoever the test says and redirects straight back, a token endpoint that
-// checks the client secret, the redirect URI and PKCE, and ES256 ID tokens as jemedia-auth issues.
+// checks the client secret, the redirect URI and PKCE, and ES256 ID tokens (an algorithm other than OIDC's default RS256).
 
 import { createHash, randomBytes } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
