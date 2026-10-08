@@ -15,8 +15,8 @@ interface AuthStatus {
 
 /** Why an OIDC sign-in came back here (the callback's ?error= codes), in the provider's name. */
 const OIDC_ERRORS: Record<string, (provider: string) => string> = {
-  not_allowed: (p) => `${p} signed you in, but not with an account that can use Finance.`,
-  idp_denied: (p) => `${p} didn’t sign you in. You may have cancelled, or your account may not be allowed to use Finance.`,
+  not_allowed: (p) => `${p} signed you in, but not with an account that can use Counting House.`,
+  idp_denied: (p) => `${p} didn’t sign you in. You may have cancelled, or your account may not be allowed to use Counting House.`,
   flow_expired: () => 'That sign-in took too long, or was started in another tab. Try again.',
   idp_unreachable: (p) => `Couldn’t reach ${p}. Try again in a moment.`,
   invalid_response: (p) => `${p}’s answer couldn’t be verified. Try again; if it keeps happening, check the server log.`,
@@ -29,7 +29,7 @@ function Panel({ children }: { children: ReactNode }) {
         <div className="mb-6 flex items-center gap-3">
           <img src="/favicon.svg" alt="" className="size-9" />
           <div>
-            <h1 className="text-lg font-semibold text-ink">Finance</h1>
+            <h1 className="text-lg font-semibold text-ink">Counting House</h1>
             <p className="text-[13px] text-ink-3">Sign in to continue</p>
           </div>
         </div>
@@ -71,7 +71,7 @@ function OidcLogin({ provider, target, error, signedOut }: { provider: string; t
     <Panel>
       <div className="flex flex-col gap-3.5">
         {error && <Callout tone="bad">{OIDC_ERRORS[error]?.(provider) ?? 'Sign-in failed. Try again.'}</Callout>}
-        {signedOut && !error && <Callout tone="neutral">You’ve signed out of Finance. You’re still signed in to {provider}.</Callout>}
+        {signedOut && !error && <Callout tone="neutral">You’ve signed out of Counting House. You’re still signed in to {provider}.</Callout>}
         {stay ? (
           <Button variant="primary" size="lg" icon={<LogIn className="size-4" />} className="w-full" onClick={() => window.location.assign(href)}>
             Sign in with {provider}

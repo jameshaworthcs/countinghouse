@@ -234,7 +234,7 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
   } else {
     app.get('*', (c) =>
       c.html(
-        '<!doctype html><meta charset="utf-8"><title>Finance</title><body style="font-family:system-ui;padding:2rem"><h1>Finance API is running</h1><p>The web app is not built. Run <code>npm run build</code> (or use <code>npm run dev</code> and open port 4761).</p></body>',
+        '<!doctype html><meta charset="utf-8"><title>Counting House</title><body style="font-family:system-ui;padding:2rem"><h1>Counting House API is running</h1><p>The web app is not built. Run <code>npm run build</code> (or use <code>npm run dev</code> and open port 4761).</p></body>',
       ),
     );
   }

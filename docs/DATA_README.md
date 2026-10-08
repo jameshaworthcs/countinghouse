@@ -1,4 +1,4 @@
-# Finance data
+# Counting House data
 
 This directory is written by the finance app and versioned in git: every change is a commit.
 Records are plain JSON and JSONL, readable by people, `jq`, DuckDB, pandas or an LLM.

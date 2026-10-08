@@ -1,4 +1,4 @@
-# Finance
+# Counting House
 
 A private, local-first personal finance tracker for the UK. It runs as a website on this machine
 website you reach on that machine or your private network. You feed it bank statements, CSV/OFX/QIF

@@ -6,7 +6,7 @@
 # the data repository's data/ (@DATA_REPO@/data, set in @APP_DIR@/.env), so the app's auto-commits
 # land on main there.
 [Unit]
-Description=Finance (private personal-finance tracker)
+Description=Counting House (private personal-finance tracker)
 Documentation=file://@APP_DIR@/docs/SELF_HOSTING.md
 After=network-online.target
 Wants=network-online.target

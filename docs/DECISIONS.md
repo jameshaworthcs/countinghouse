@@ -2412,3 +2412,11 @@ the sign-in page. Published, it should work with anyone's.
   `oidc`.
 - **The ID token's algorithm comes from the provider**: RS256, OIDC's default, when it offers it,
   else the first it lists (the owner's signs with ES256). Nothing to configure.
+
+## 2026-10-08: The app is called Counting House
+
+Published, "Finance" says what it is about but not what it is. The app is now **Counting House**:
+the page title, the wordmark, the sign-in page, messages that name the app, the web manifest
+(`short_name` "Counting", so a phone's home screen does not cut it off), the API-only page, the
+package and the service's description. Settings (`FINANCE_*`), the `finance.service` unit, the
+cookies and every path keep their names, so nothing about a running installation changes.

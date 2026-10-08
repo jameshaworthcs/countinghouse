@@ -109,7 +109,7 @@ export function Layout() {
         <div className="mb-5 flex items-center gap-2 px-2">
           <img src="/favicon.svg" alt="" className="size-7" />
           <div className="leading-tight">
-            <div className="text-[15px] font-semibold text-ink">Finance</div>
+            <div className="text-[15px] font-semibold text-ink">Counting House</div>
             <div className="text-[11.5px] text-ink-3">{data.demo ? 'Demo data' : 'Private · local'}</div>
           </div>
         </div>
@@ -132,7 +132,7 @@ export function Layout() {
         </IconButton>
         <div className="flex items-center gap-2">
           <img src="/favicon.svg" alt="" className="size-6" />
-          <span className="font-semibold text-ink">Finance</span>
+          <span className="font-semibold text-ink">Counting House</span>
         </div>
         <div className="ml-auto flex items-center">
           <PrivacyButton />
@@ -144,7 +144,7 @@ export function Layout() {
           <div className="absolute inset-0 bg-black/40" onClick={() => setMenuOpen(false)} />
           <div className="absolute inset-y-0 left-0 flex w-72 flex-col bg-canvas px-3 py-3 shadow-xl">
             <div className="mb-3 flex items-center justify-between px-1">
-              <span className="font-semibold text-ink">Finance</span>
+              <span className="font-semibold text-ink">Counting House</span>
               <IconButton label="Close menu" onClick={() => setMenuOpen(false)}>
                 <X className="size-5" />
               </IconButton>

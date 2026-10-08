@@ -29,7 +29,7 @@ export async function api<T>(path: string, init: { method?: string; body?: Json 
   } catch (err) {
     // Offline, or the server restarting mid-deploy: say so, not the browser's "Failed to fetch".
     if (err instanceof DOMException && err.name === 'AbortError') throw err;
-    throw new ApiError('Couldn’t reach Finance. Check your connection, then try again.', 0, 'network');
+    throw new ApiError('Couldn’t reach Counting House. Check your connection, then try again.', 0, 'network');
   }
   if (res.status === 401 && !path.startsWith('/auth/')) {
     if (!location.pathname.startsWith('/login')) location.assign(signInPath(location.pathname + location.search));

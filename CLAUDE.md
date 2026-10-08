@@ -1,4 +1,4 @@
-# CLAUDE.md: Finance (operating contract)
+# CLAUDE.md: Counting House (operating contract)
 
 A private UK personal-finance tracker: a Hono + React app over a git-versioned `data/` directory.
 It holds real financial data. Read this file, then [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)

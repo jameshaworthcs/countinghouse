@@ -1,6 +1,6 @@
 {
-  "name": "Finance",
-  "short_name": "Finance",
+  "name": "Counting House",
+  "short_name": "Counting",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#f9f9f7",

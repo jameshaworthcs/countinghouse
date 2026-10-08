@@ -67,7 +67,7 @@ export function RouteError() {
   if (state !== 'failed') {
     return (
       <div className="flex min-h-[50vh] items-center justify-center px-4">
-        <Loading label={failure === 'stale-build' ? 'Finance has been updated. Loading the new version…' : failure === 'signed-out' ? 'Taking you to sign in…' : 'Loading…'} />
+        <Loading label={failure === 'stale-build' ? 'Counting House has been updated. Loading the new version…' : failure === 'signed-out' ? 'Taking you to sign in…' : 'Loading…'} />
       </div>
     );
   }
