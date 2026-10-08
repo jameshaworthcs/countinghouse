@@ -71,8 +71,8 @@ export class Allowlist {
 
 // ─── Scanning ────────────────────────────────────────────────────────────────────────────────────
 
-/** An amount as written in text: optional sign and £, thousands separators, up to 2 decimals. */
-const AMOUNT = /(?<![\p{L}\p{N}_.])-?£?(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?(?![\p{L}\p{N}_]|[.,]\d)/gu;
+/** An amount as written in text: optional sign and £, thousands separators, up to 2 decimals (not a %-escape or a #colour). */
+const AMOUNT = /(?<![\p{L}\p{N}_.%#])-?£?(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?(?![\p{L}\p{N}_]|[.,]\d)/gu;
 const UNITS = /(?<![\p{L}\p{N}_.])\d+\.\d{3,}(?![\p{N}])/gu;
 const PENCE = /(?<![\p{L}\p{N}_.])\d{6,}(?![\p{N}]|\.\d)/gu;
 /** Where a last-4 is meant: within 24 characters after one of these. */

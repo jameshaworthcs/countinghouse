@@ -10,7 +10,7 @@ import path from 'node:path';
 import { tokenKey } from './text.ts';
 
 /** Bump when the build changes what it collects, so caches are rebuilt. */
-const BUILDER_VERSION = 6;
+const BUILDER_VERSION = 8;
 
 export interface Denylist {
   version: number;
@@ -193,12 +193,17 @@ const MONEY_KEYS = new Set(
   ).split(/\s+/),
 );
 
-/** £100 or more with pence, or £1,000 or more in whole pounds that is neither round (a multiple of £50) nor a year. */
+/**
+ * £100 or more with pence, or £1,000 or more in whole pounds that is neither round (a multiple of £50)
+ * nor a year. Placeholders are not distinctive however large: one digit repeated (9999) or all nines
+ * (999.99).
+ */
 export function distinctiveAmount(n: number): string | undefined {
   const pence = Math.round(Math.abs(n) * 100);
   if (!Number.isFinite(pence)) return undefined;
   const pounds = Math.floor(pence / 100);
   const rest = pence % 100;
+  if (/^(\d)\1+$/.test(String(rest ? pence : pounds))) return undefined;
   if (rest) return pounds >= 100 ? `${pounds}.${String(rest).padStart(2, '0')}` : undefined;
   if (pounds < 1000 || pounds % 50 === 0 || (pounds >= 1900 && pounds <= 2100)) return undefined;
   return `${pounds}.00`;
@@ -295,6 +300,7 @@ export interface BuildStats {
 export async function buildDenylist(dataDir: string): Promise<{ denylist: Denylist; stats: BuildStats }> {
   const { words, names: publicNameSet, merchantPatterns } = await publicVocabulary();
   const file = (name: string) => path.join(dataDir, name);
+  const given = givenNames();
   const dictionary = commonWords();
   const tokens = new Map<string, string>();
   const stats: BuildStats = {};
@@ -305,12 +311,13 @@ export async function buildDenylist(dataDir: string): Promise<{ denylist: Denyli
     if (key.length < (opts.min ?? 4) || tokens.has(key)) return;
     const generic = opts.generic ?? 'names';
     if (generic && (genericName(key, words, generic === 'words' ? dictionary : undefined) || publicNameSet.has(key))) return;
+    // A given name on its own ("Gordon") is a payee no one can be found by.
+    if (generic === 'words' && given.has(key)) return;
     tokens.set(key, category);
     stats[category] = (stats[category] ?? 0) + 1;
   };
   // An employer's or company's own word ("Quillfeather" of "Quillfeather Analytics Ltd") names it on its own too,
   // unless it is a given name, a common word, a public name or a town (a city is allowed to show).
-  const given = givenNames();
   const txs: Json[] = [];
   for (const f of listFiles(file('transactions'), (n) => n.endsWith('.jsonl'))) txs.push(...readJsonl(f).filter(isObject));
   const towns = new Set(txs.flatMap((t) => (isObject(t.merchant) && str(t.merchant.city) ? tokenKey(str(t.merchant.city)!).split(/[^\p{L}\p{N}]+/u) : [])));

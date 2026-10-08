@@ -7,6 +7,7 @@
 //   npm run leak-guard -- --range <a>..<b>         each commit's message, identity, added lines and new files
 //   npm run leak-guard -- --pre-push <remote>      the commits git is about to push (reads the pre-push input)
 //   npm run leak-guard -- --tree [<rev>]           every file at a revision (HEAD by default)
+//   npm run leak-guard -- --worktree               every file as it is on disk, tracked or not (not ignored ones)
 //   npm run leak-guard -- --history                every file version and message reachable from any ref
 //   npm run leak-guard -- --stdin --path <p>       stdin, as the content of <p>
 //   npm run leak-guard -- --claude-hook            a Claude Code PreToolUse hook (Write, Edit, NotebookEdit)
@@ -17,7 +18,7 @@
 // (repeatable), --repo <dir>. Output is always masked. Exit 0 clean, 1 findings, 2 error (for
 // --claude-hook, 2 blocks the write).
 
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { configDir, loadDenylist, loadExtras, resolveDataDir, type BuildStats, type Denylist, type Extras } from './leak-guard/denylist.ts';
 import { commitAdded, commitInfo, catBlobs, diffAdded, git, historyIndex, isCombined, isPrivatePath, repoRoot, revList, treeFiles, tryGit, ZERO, type FileChange, type AddedBlock } from './leak-guard/git.ts';
@@ -39,7 +40,7 @@ interface Args {
   exclude: RegExp[];
 }
 
-const MODES = ['--staged', '--commit-msg', '--range', '--pre-push', '--tree', '--history', '--stdin', '--claude-hook', '--deep', '--rebuild'];
+const MODES = ['--staged', '--commit-msg', '--range', '--pre-push', '--tree', '--worktree', '--history', '--stdin', '--claude-hook', '--deep', '--rebuild'];
 const TAKES_VALUE = new Set(['--commit-msg', '--range', '--pre-push', '--tree']);
 
 function parseArgs(argv: string[]): Args {
@@ -167,6 +168,22 @@ async function scanTree(ctx: Context, rev: string): Promise<Finding[]> {
     if (!bytes) continue;
     if (!isBinary(bytes)) out.push(...ctx.scanner.scanText(f.path, bytes.toString('utf8')));
     for (const hit of await fileRules(f.path, bytes)) out.push({ path: f.path, line: 0, category: 'file', rule: hit.rule, masked: hit.message, ...(hit.warning ? { warning: true } : {}) });
+  }
+  return out;
+}
+
+/** Every file as it is now: tracked ones and new ones git does not ignore. */
+async function scanWorktree(ctx: Context): Promise<Finding[]> {
+  const files = git(ctx.root, ['ls-files', '-z', '--cached', '--others', '--exclude-standard'])
+    .split('\0')
+    // Regular files only: a symlink (even to a directory) or a deleted file has nothing of its own.
+    .filter((p) => p && !skipped(ctx, p) && lstatSync(path.join(ctx.root, p), { throwIfNoEntry: false })?.isFile());
+  const out: Finding[] = [];
+  for (const p of [...new Set(files)]) {
+    out.push(...privatePathFinding(ctx, p));
+    const bytes = readFileSync(path.join(ctx.root, p));
+    if (!isBinary(bytes)) out.push(...ctx.scanner.scanText(p, bytes.toString('utf8')));
+    for (const hit of await fileRules(p, bytes)) out.push({ path: p, line: 0, category: 'file', rule: hit.rule, masked: hit.message, ...(hit.warning ? { warning: true } : {}) });
   }
   return out;
 }
@@ -371,6 +388,8 @@ async function main(argv: string[]): Promise<number> {
       return report(args, await scanCommits(ctx, prePushCommits(root, readFileSync(0, 'utf8'))));
     case '--tree':
       return report(args, await scanTree(ctx, args.value ?? 'HEAD'), stats);
+    case '--worktree':
+      return report(args, await scanWorktree(ctx), stats);
     case '--history':
       return report(args, await scanHistory(ctx), stats);
   }

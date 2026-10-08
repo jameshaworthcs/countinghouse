@@ -39,6 +39,9 @@ const ACCOUNT_EXAMPLES = new Set(['00000000', '12345678', '87654321', '11111111'
 /** Tax office numbers docs use for made-up employer PAYE references (HMRC's own example is 123/AB456). */
 const PAYE_EXAMPLE_OFFICES = new Set(['000', '123']);
 
+/** Postcodes used to show the format (Wikipedia's examples of each shape, and the best-known two). */
+const POSTCODE_EXAMPLES = new Set(['M1 1AE', 'B33 8TH', 'W1A 0AX', 'CR2 6XH', 'DN55 1PT', 'EC1A 1BB', 'SW1A 1AA', 'GIR 0AA']);
+
 /** Tailscale's own fixed addresses, documented publicly. */
 const CGNAT_EXAMPLES = new Set(['100.100.100.100', '100.64.0.0', '100.64.0.1']);
 
@@ -134,7 +137,10 @@ export function scanPatterns(text: string): PatternHit[] {
     hits.push({ rule: 'tailnet-address', index: m.index, value: m[0] });
   }
   for (const m of text.matchAll(TAILSCALE_V6)) hits.push({ rule: 'tailnet-address', index: m.index, value: m[0] });
-  for (const m of text.matchAll(POSTCODE)) hits.push({ rule: 'postcode', index: m.index, value: m[0] });
+  for (const m of text.matchAll(POSTCODE)) {
+    const spaced = m[0].includes(' ') ? m[0] : `${m[0].slice(0, -3)} ${m[0].slice(-3)}`;
+    if (!POSTCODE_EXAMPLES.has(spaced)) hits.push({ rule: 'postcode', index: m.index, value: m[0] });
+  }
   for (const m of text.matchAll(PAYE)) {
     if (!/\d/.test(m[2]!) || PAYE_EXAMPLE_OFFICES.has(m[1]!)) continue;
     hits.push({ rule: 'paye-reference', index: m.index, value: m[0] });

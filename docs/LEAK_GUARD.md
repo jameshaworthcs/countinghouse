@@ -28,8 +28,9 @@ logs and Claude transcripts stay clean.
      `src/shared/institutions.ts`) and not plain bank wording, with their places; and, for a payee
      seen at most three times, its descriptions and references;
    - amounts that are distinctive (£100 or more with pence, or £1,000 or more in whole pounds that
-     is not a multiple of £50 or a year), from every record that holds money, except figures the UK
-     rules make public (`src/shared/uk.ts`, `docs/UK_RULES.md`); and holdings' units.
+     is not a multiple of £50 or a year, and not a placeholder such as 9999 or 999.99), from every
+     record that holds money, except figures the UK rules make public (`src/shared/uk.ts`,
+     `docs/UK_RULES.md`); and holdings' units.
 
    Words the system dictionary (`/usr/share/dict`) knows in lower case count as plain wording for
    payees, descriptions and places; an initial ("J Smith") keeps a name a name. A town a payment
@@ -77,6 +78,7 @@ only within 24 characters after "ending", "last 4", `**`, `xx`, `•`, "account"
 | `--range <a>..<b>` | Each commit's message, its author's and committer's email (they must be yours), the lines it adds and its new files |
 | `--pre-push <remote>` | The same, for what git is about to push (the pre-push hook; for a new branch, every commit on no remote) |
 | `--tree [<rev>]` | Every file at a revision |
+| `--worktree` | Every file as it is on disk, tracked or new (ignored files are left out) |
 | `--history` | Every file version and every message reachable from any ref; `--json` adds each finding's line key (sha256 of the line) |
 | `--stdin --path <p>` | Standard input, as the content of `<p>` |
 | `--claude-hook` | A Claude Code PreToolUse call (Write, Edit, NotebookEdit) |

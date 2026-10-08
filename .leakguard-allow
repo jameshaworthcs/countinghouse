@@ -21,8 +21,20 @@ README.md:James Haworth
 456/HW12
 581/NM2207
 
-# The best-known example postcode.
-SW1A 1AA
+# Providers' own wording that the code recognises: student finance's payments, and interactive
+# investor's mark for an employer's contribution.
+SLC Disbursements
+Reg Contribution (E)
+your university or college
+
+# Well-known payment brands the code names.
+GrabPay
+
+# A city as card terminals print it.
+London LND
+
+# Tailscale IPv6 addresses invented for tests.
+**:fd7a:115c:a1e0::1:2
 
 # Banks' and providers' published head-office and correspondence addresses in the synthetic
 # extraction evaluation, and the invented customers and council there.

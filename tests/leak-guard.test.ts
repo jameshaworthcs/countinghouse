@@ -187,6 +187,9 @@ describe('the denylist', () => {
     expect(distinctiveAmount(2026)).toBeUndefined();
     expect(distinctiveAmount(1234)).toBe('1234.00');
     expect(distinctiveAmount(150.5)).toBe('150.50');
+    expect(distinctiveAmount(9999)).toBeUndefined();
+    expect(distinctiveAmount(999.99)).toBeUndefined();
+    expect(distinctiveAmount(487.65)).toBe('487.65');
   });
 });
 
@@ -432,6 +435,10 @@ describe('git modes and hooks', () => {
     const tree = run(['--tree', 'HEAD', '--data', dataDir, '--exclude', 'data/**'], { cwd: repo });
     expect(tree.out).toMatch(/d\.ts:2 \[denylist\/payroll-number\]/);
     expect(tree.out).not.toMatch(/data\/x\.json/);
+    writeFileSync(path.join(repo, 'new.md'), `Thanks, ${FRIEND}.\n`);
+    const worktree = run(['--worktree', '--data', dataDir, '--exclude', 'data/**'], { cwd: repo });
+    expect(worktree.out).toMatch(/new\.md:1 \[denylist\/person\]/);
+    expect(worktree.out).toMatch(/d\.ts:2 \[denylist\/payroll-number\]/);
     const history = run(['--history', '--data', dataDir, '--json'], { cwd: repo });
     const json = JSON.parse(history.out) as { findings: { rule: string; lineKey?: string }[] };
     expect(json.findings.some((f) => f.rule === 'payroll-number' && f.lineKey?.length === 64)).toBe(true);
