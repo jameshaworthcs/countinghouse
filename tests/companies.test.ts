@@ -41,7 +41,7 @@ describe('shares you hold in a company', () => {
   });
   afterEach(async () => {
     await app.close();
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
   });
   const req = (p: string, init: RequestInit = {}) => app.app.request(`http://localhost${p}`, { ...init, headers: { host: 'localhost', ...(init.headers ?? {}) } });
   const proposal = (holdingShares = 4): ProposalInput => ({

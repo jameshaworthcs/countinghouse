@@ -400,7 +400,7 @@ describe('through the app', () => {
   });
   afterAll(async () => {
     svc.server.close();
-    await rm(binDir, { recursive: true, force: true });
+    await rm(binDir, { recursive: true, force: true, maxRetries: 5 });
     for (const [k, v] of Object.entries({ HOME: saved.HOME, PATH: saved.PATH, FINANCE_CLAUDE_BIN: saved.bin })) {
       if (v === undefined) delete process.env[k];
       else process.env[k] = v;
@@ -418,7 +418,7 @@ describe('through the app', () => {
   });
   afterEach(async () => {
     await app.close();
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
   });
   const req = (p: string, init: RequestInit = {}) => app.app.request(`http://127.0.0.1${p}`, { ...init, headers: { host: '127.0.0.1', ...(init.headers ?? {}) } });
   const get = async <T,>(p: string) => (await (await req(p)).json()) as T;

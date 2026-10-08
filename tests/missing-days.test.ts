@@ -30,7 +30,7 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   store.stopWatching();
-  await rm(dir, { recursive: true, force: true });
+  await rm(dir, { recursive: true, force: true, maxRetries: 5 });
 });
 
 /** A committed statement for `accountId` covering [from, to], with the rows given recorded from it. */

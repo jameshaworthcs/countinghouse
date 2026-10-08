@@ -97,7 +97,7 @@ describe('an agreement to pay', () => {
   });
   afterEach(async () => {
     await app.close();
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
   });
   const req = (p: string, init: RequestInit = {}) => app.app.request(`http://localhost${p}`, { ...init, headers: { host: 'localhost', ...(init.headers ?? {}) } });
   const proposal = (agreement = offer()): ProposalInput => ({ title: 'Your Example Hall offer', summary: 'Its offer page.', provenance: { model: 'test-model' }, changes: [{ key: 'offer', kind: 'add_agreement', why: 'The offer page gives the let, its total and three instalments.', agreement }] });

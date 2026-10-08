@@ -292,7 +292,7 @@ describe('the To categorise queue', () => {
     await store.setAccounts([acct('bank', 'current'), acct('card', 'credit_card'), acct('isa', 'stocks_isa')]);
   });
   afterEach(async () => {
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
   });
 
   it('groups each person’s payments however they are written, with what each looks like', async () => {
@@ -491,7 +491,7 @@ describe('deciding on the To categorise page', () => {
   });
   afterEach(async () => {
     await app.close();
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
   });
 
   it('confirms each payment as yours and saves who they are, adding the names their payments carry', async () => {
@@ -618,7 +618,7 @@ describe('format v9: money paid back counts against spending', () => {
     dir = await mkdtemp(path.join(os.tmpdir(), 'finance-migrate9-'));
   });
   afterEach(async () => {
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
   });
 
   it('marks refunds and adds "Paid back to you" beside them, then counts both as less spending', async () => {

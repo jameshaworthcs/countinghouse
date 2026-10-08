@@ -43,7 +43,7 @@ describe('coverage beyond documents', () => {
   });
   afterEach(async () => {
     store.stopWatching();
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
   });
 
   /** A committed import of one section for `card`. */
@@ -214,7 +214,7 @@ describe('confirming coverage through the API', () => {
   });
   afterEach(async () => {
     await app.close();
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
   });
   const req = (p: string, init: RequestInit = {}) => app.app.request(`http://localhost${p}`, { ...init, headers: { host: 'localhost', ...(init.headers ?? {}) } });
 

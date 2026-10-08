@@ -231,7 +231,7 @@ describe('store, balances and analytics', () => {
   });
   afterEach(async () => {
     store.stopWatching();
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
   });
 
   it('rolls ledger balances forwards and backwards from anchors', async () => {

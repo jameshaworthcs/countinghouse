@@ -98,7 +98,7 @@ describe('the validated write path', () => {
   });
   afterEach(async () => {
     store.stopWatching();
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
   });
   const agent = { setBy: 'agent' as const, model: 'claude-test', promptVersion: 'test-1' };
 
@@ -193,7 +193,7 @@ describe('the capture list', () => {
   });
   afterEach(async () => {
     store.stopWatching();
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
   });
   const session = { setBy: 'agent' as const, session: 'claude-code' };
   const batch = (asks: string[] = ['statements', 'letter']): RecordBatch => ({
@@ -288,7 +288,7 @@ describe('format v2 migration', () => {
     dir = await mkdtemp(path.join(os.tmpdir(), 'finance-migrate-'));
   });
   afterEach(async () => {
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
   });
   const v1 = async (profile: Record<string, unknown>) => {
     await mkdir(dir, { recursive: true });

@@ -67,7 +67,7 @@ describe('an app screen listing Space moves', () => {
   });
   afterEach(async () => {
     store.stopWatching();
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
   });
 
   it('leaves them unticked, names the Space, and remembers it on commit', async () => {

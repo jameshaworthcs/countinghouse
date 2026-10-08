@@ -120,7 +120,7 @@ beforeAll(async () => {
 });
 
 afterAll(() => {
-  rmSync(tmp, { recursive: true, force: true });
+  rmSync(tmp, { recursive: true, force: true, maxRetries: 5 });
 });
 
 // ─── Text ────────────────────────────────────────────────────────────────────────────────────────

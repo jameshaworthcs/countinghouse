@@ -131,7 +131,7 @@ describe('an import that knows more about recorded payments', () => {
   });
   afterEach(async () => {
     store.stopWatching();
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
   });
 
   it('offers what each row adds: ticked by itself when the match is certain, or close with nothing in conflict', () => {
@@ -228,7 +228,7 @@ describe('cash from a machine', () => {
   });
   afterEach(async () => {
     store.stopWatching();
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
   });
 
   it('is cash, not a transfer to your account at the bank that runs the machine', () => {

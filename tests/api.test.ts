@@ -51,7 +51,7 @@ describe('agent jobs on throwaway data', () => {
         await app.close();
       }
     } finally {
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, { recursive: true, force: true, maxRetries: 5 });
     }
   });
 });
@@ -63,7 +63,7 @@ describe('API without login configured', () => {
   });
   afterEach(async () => {
     await ctx.app.close();
-    await rm(ctx.dir, { recursive: true, force: true });
+    await rm(ctx.dir, { recursive: true, force: true, maxRetries: 5 });
   });
   const req = (p: string, init: RequestInit = {}, host = 'localhost') =>
     ctx.app.app.request(`http://${host}${p}`, { ...init, headers: { host, ...(init.headers ?? {}) } });
@@ -305,7 +305,7 @@ describe('API with login configured', () => {
   });
   afterEach(async () => {
     await ctx.app.close();
-    await rm(ctx.dir, { recursive: true, force: true });
+    await rm(ctx.dir, { recursive: true, force: true, maxRetries: 5 });
   });
   const req = (p: string, init: RequestInit = {}) =>
     ctx.app.app.request(`http://finance.example.test${p}`, {

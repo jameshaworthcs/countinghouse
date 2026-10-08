@@ -49,7 +49,7 @@ describe('estate value classification', () => {
     store = await Store.open(dir);
     await store.setAccounts([acct('current', 'current'), acct('card', 'credit_card')]);
   });
-  afterEach(async () => rm(dir, { recursive: true, force: true }));
+  afterEach(async () => rm(dir, { recursive: true, force: true, maxRetries: 5 }));
 
   it('treats a card in credit as cash and an overdraft as a debt', async () => {
     await store.addBalances([bal('card', '2026-05-01', 25), bal('current', '2026-05-01', -300)], 'test');
@@ -127,7 +127,7 @@ describe('investment returns', () => {
       expect(a.xirr!).toBeLessThan(0.15);
       expect(a.xirr!).toBeGreaterThan(0);
     } finally {
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, { recursive: true, force: true, maxRetries: 5 });
     }
   });
 });
@@ -142,7 +142,7 @@ describe('paid in and growth are only what is known', () => {
   });
   afterEach(async () => {
     store.stopWatching();
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
   });
 
   it('an account whose paid in is not known adds its value, not growth', async () => {
@@ -215,7 +215,7 @@ describe('git auto-commit', () => {
       expect(git('status', '--porcelain')).toContain('?? app.txt');
       expect(git('show', '--name-only', '--format=', 'HEAD').trim()).toBe('data/accounts.json');
     } finally {
-      await rm(repo, { recursive: true, force: true });
+      await rm(repo, { recursive: true, force: true, maxRetries: 5 });
     }
   });
 });

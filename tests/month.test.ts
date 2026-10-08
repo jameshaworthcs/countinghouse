@@ -56,7 +56,7 @@ beforeEach(async () => {
   await store.setAccounts([acct('bank', 'current'), acct('saver', 'savings'), acct('isa', 'stocks_isa'), acct('slc', 'student_loan', { includeInNetWorth: false })]);
 });
 afterEach(async () => {
-  await rm(dir, { recursive: true, force: true });
+  await rm(dir, { recursive: true, force: true, maxRetries: 5 });
 });
 
 /** Eight months of a current account and a saver: pay, rent, shopping, saving, and interest on each one's last day. */

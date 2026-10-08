@@ -70,7 +70,7 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   await app.close();
-  await rm(dir, { recursive: true, force: true });
+  await rm(dir, { recursive: true, force: true, maxRetries: 5 });
 });
 
 const req = (p: string, init: RequestInit = {}) => app.app.request(`http://localhost${p}`, { ...init, headers: { host: 'localhost', ...(init.headers ?? {}) } });
@@ -533,7 +533,7 @@ describe('each decision is a commit of its own', () => {
       expect(git('log', '--format=%s').trim().split('\n').slice(0, 2)).toEqual(['proposal: Re-link the October transfers (already done)', 'proposal: The October moves, again (3 changes applied)']);
       expect(git('status', '--porcelain', '--', 'data')).toBe('');
     } finally {
-      await rm(repo, { recursive: true, force: true });
+      await rm(repo, { recursive: true, force: true, maxRetries: 5 });
     }
   });
 });

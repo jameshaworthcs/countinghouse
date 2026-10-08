@@ -45,7 +45,7 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   await app.close();
-  await rm(dir, { recursive: true, force: true });
+  await rm(dir, { recursive: true, force: true, maxRetries: 5 });
 });
 
 const req = (p: string) => app.app.request(`http://localhost${p}`, { headers: { host: 'localhost' } });

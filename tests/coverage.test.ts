@@ -66,7 +66,7 @@ describe('coverage-aware baselines', () => {
   });
   afterEach(async () => {
     store.stopWatching();
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
   });
 
   /** Months of salary 3000 and spending 2000 (1200 current + 800 card), on both accounts. */

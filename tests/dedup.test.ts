@@ -153,7 +153,7 @@ describe('an import that corrects the record', () => {
   });
   afterEach(async () => {
     store.stopWatching();
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
   });
 
   it('takes the second copy away on commit, and says so on the import', async () => {

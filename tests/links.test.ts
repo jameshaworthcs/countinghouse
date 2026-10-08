@@ -70,7 +70,7 @@ describe('linking transfers before commit', () => {
   });
   afterEach(async () => {
     store.stopWatching();
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
   });
 
   it('links rows of two imports, and makes them a transfer once both are committed, in either order', async () => {

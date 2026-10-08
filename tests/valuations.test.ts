@@ -48,7 +48,7 @@ describe('between two valuations', () => {
     store = await Store.open(dir);
     await store.setAccounts([acct('isa', 'stocks_isa')]);
   });
-  afterEach(async () => rm(dir, { recursive: true, force: true }));
+  afterEach(async () => rm(dir, { recursive: true, force: true, maxRetries: 5 }));
 
   it('with no prices, grows at one steady rate that meets both valuations, and money grows only once it is in', async () => {
     await store.addTransactions([tx('isa', '2025-07-01', 10_000)], 'test');

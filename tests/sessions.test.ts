@@ -84,7 +84,7 @@ beforeAll(async () => {
   process.env.FINANCE_CLAUDE_BIN = bin;
 });
 afterAll(async () => {
-  await rm(binDir, { recursive: true, force: true });
+  await rm(binDir, { recursive: true, force: true, maxRetries: 5 });
   for (const [k, v] of Object.entries({ HOME: saved.HOME, PATH: saved.PATH, FINANCE_CLAUDE_BIN: saved.bin, FAKE_CLAUDE_LOG: saved.log, FAKE_CLAUDE_MODE: saved.mode })) {
     if (v === undefined) delete process.env[k];
     else process.env[k] = v;
@@ -103,7 +103,7 @@ describe('Claude sessions in the app', () => {
   });
   afterEach(async () => {
     await app?.close();
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
   });
   const start = async (env: Record<string, string> = {}) => {
     const config = loadConfig({ FINANCE_DATA_DIR: path.join(dir, 'data'), FINANCE_WORK_DIR: work, FINANCE_INBOX_DIR: path.join(dir, 'inbox'), FINANCE_WATCH: '0' });
@@ -398,7 +398,7 @@ describe('transcript limits', () => {
     dir = await mkdtemp(path.join(os.tmpdir(), 'finance-transcripts-'));
   });
   afterEach(async () => {
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
   });
   const session = (log: SessionLog, jobId = 'job_a') => log.start({ kind: 'job', title: 'A job', jobKind: 'monthly-review', jobId, engine: 'claude-cli', model: 'opus', tools: [], startedBy: { actor: { type: 'app', task: 'test' }, reason: 'test' } });
 

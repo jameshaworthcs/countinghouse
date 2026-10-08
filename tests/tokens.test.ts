@@ -19,7 +19,7 @@ describe('the token store', () => {
     dir = await mkdtemp(path.join(os.tmpdir(), 'finance-tokens-'));
   });
   afterEach(async () => {
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
   });
 
   it('keeps only a hash, readable by you alone, and always lets a token read', async () => {
@@ -98,7 +98,7 @@ describe('the API with a token', () => {
   });
   afterEach(async () => {
     await app.close();
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
   });
   const req = (p: string, init: RequestInit = {}) =>
     app.app.request(`http://finance.example.test${p}`, { ...init, headers: { host: 'finance.example.test', 'x-forwarded-for': '100.64.0.2', 'x-forwarded-proto': 'https', ...(init.headers ?? {}) } });

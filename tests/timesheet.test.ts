@@ -136,7 +136,7 @@ describe('importing a timesheet', () => {
     process.env.FINANCE_CLAUDE_BIN = bin;
   });
   afterAll(async () => {
-    await rm(binDir, { recursive: true, force: true });
+    await rm(binDir, { recursive: true, force: true, maxRetries: 5 });
     for (const [k, v] of Object.entries({ HOME: saved.HOME, PATH: saved.PATH, FINANCE_CLAUDE_BIN: saved.bin, FAKE_CLAUDE_LOG: saved.log, FAKE_CLAUDE_MODE: saved.mode })) {
       if (v === undefined) delete process.env[k];
       else process.env[k] = v;
@@ -154,7 +154,7 @@ describe('importing a timesheet', () => {
   });
   afterEach(async () => {
     await app.close();
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
   });
   const req = (p: string, init: RequestInit = {}) => app.app.request(`http://127.0.0.1${p}`, { ...init, headers: { host: '127.0.0.1', ...(init.headers ?? {}) } });
   const json = (body: unknown) => ({ method: 'POST', headers: { ...CSRF, 'content-type': 'application/json' }, body: JSON.stringify(body) });

@@ -75,7 +75,7 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   store.stopWatching();
-  await rm(dir, { recursive: true, force: true });
+  await rm(dir, { recursive: true, force: true, maxRetries: 5 });
 });
 
 describe('the digest', () => {

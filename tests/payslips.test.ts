@@ -175,7 +175,7 @@ describe('payslips uploaded', () => {
   });
   afterEach(async () => {
     await app.close();
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
   });
   const req = (p: string, init: RequestInit = {}) => app.app.request(`http://localhost${p}`, { ...init, headers: { host: 'localhost', ...(init.headers ?? {}) } });
   const upload = async (name: string, lines: string[]) => {
@@ -282,7 +282,7 @@ describe('format v6 migration', () => {
       expect(store.figures.filter((f) => f.kind === 'student_loan_deducted')).toMatchObject([{ amount: 45, payer: 'Quillon Systems Limited', employmentId: 'quillon', date: '2025-10-31' }]);
       store.stopWatching();
     } finally {
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, { recursive: true, force: true, maxRetries: 5 });
     }
   });
 });

@@ -42,7 +42,7 @@ describe('data auto-commits', () => {
       expect(git('log', '--format=%s', 'main').trim().split('\n')[0]).toBe('data: catch up');
       expect(git('show', '--name-only', '--format=', 'HEAD').trim()).toBe('data/accounts.json');
     } finally {
-      await rm(repo, { recursive: true, force: true });
+      await rm(repo, { recursive: true, force: true, maxRetries: 5 });
     }
   });
 
@@ -57,7 +57,7 @@ describe('data auto-commits', () => {
       expect(committer.lastError).toMatch(/detached HEAD/);
       expect(git('log', '--format=%s').trim()).toBe('start');
     } finally {
-      await rm(repo, { recursive: true, force: true });
+      await rm(repo, { recursive: true, force: true, maxRetries: 5 });
     }
   });
 });
@@ -72,7 +72,7 @@ describe('start-up guards', () => {
       const app = await createApp(config, { version: 'test', env, inbox: false });
       await app.close();
     } finally {
-      await rm(repo, { recursive: true, force: true });
+      await rm(repo, { recursive: true, force: true, maxRetries: 5 });
     }
   });
 
@@ -93,7 +93,7 @@ describe('start-up guards', () => {
       const app = await createApp(loadConfig({ ...base, FINANCE_INIT_DATA: '1' }), { version: 'test', env: {}, inbox: false });
       await app.close();
     } finally {
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, { recursive: true, force: true, maxRetries: 5 });
     }
   });
 
@@ -106,7 +106,7 @@ describe('start-up guards', () => {
       expect(await res.json()).toEqual({ ok: true, version: 'test', commit: 'abc1234' });
       await app.close();
     } finally {
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, { recursive: true, force: true, maxRetries: 5 });
     }
   });
 });

@@ -16,7 +16,7 @@ beforeEach(async () => {
   await writeFile(path.join(dir, 'doc.pdf'), '%PDF-1.4 test');
 });
 afterEach(async () => {
-  await rm(dir, { recursive: true, force: true });
+  await rm(dir, { recursive: true, force: true, maxRetries: 5 });
 });
 
 /** A streamed Messages API reply carrying `text`, as server-sent events. */

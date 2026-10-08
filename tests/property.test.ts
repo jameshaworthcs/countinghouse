@@ -174,7 +174,7 @@ describe('balance engine (ledger accounts)', () => {
         { numRuns: 60 },
       );
     } finally {
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, { recursive: true, force: true, maxRetries: 5 });
     }
   });
 
@@ -204,7 +204,7 @@ describe('balance engine (ledger accounts)', () => {
         { numRuns: 60 },
       );
     } finally {
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, { recursive: true, force: true, maxRetries: 5 });
     }
   });
 });

@@ -66,7 +66,7 @@ describe('HMRC’s pages, uploaded', () => {
   });
   afterEach(async () => {
     await app.close();
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
   });
   const req = (p: string, init: RequestInit = {}) => app.app.request(`http://localhost${p}`, { ...init, headers: { host: 'localhost', ...(init.headers ?? {}) } });
   const upload = async (name: string, lines: string[]) => {
@@ -222,7 +222,7 @@ describe('jobs, HMRC’s records and the Pay tab', () => {
   });
   afterEach(async () => {
     store.stopWatching();
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
   });
   const quillon = (p: PayResponse) => p.employers.find((e) => e.employmentId === 'quillon')!;
 
@@ -442,7 +442,7 @@ describe('format v5 migration', () => {
       expect(store.hmrc.filter((r) => r.type === 'state-pension-forecast')).toMatchObject([{ accountId: 'state', source: { importId: 'imp_20260930_120000_0a04' } }]);
       expect(store.profile).not.toHaveProperty('employers');
     } finally {
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, { recursive: true, force: true, maxRetries: 5 });
     }
   });
 });
@@ -480,7 +480,7 @@ describe('a job learns what its payslips print', () => {
       expect(inFull.jobs).toMatchObject([{ target: { mode: 'existing', employmentId: 'quillon' }, matchedBy: 'payrollNumber' }]);
       store.stopWatching();
     } finally {
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, { recursive: true, force: true, maxRetries: 5 });
     }
   });
 
@@ -500,7 +500,7 @@ describe('a job learns what its payslips print', () => {
       expect(learnFromPayslip(store.employment('quillon')!, { employer: 'Quillon Group Ltd', payrollNumber: 'Q1' }).payrollNumbers).toEqual(['88001234']);
       store.stopWatching();
     } finally {
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, { recursive: true, force: true, maxRetries: 5 });
     }
   });
 });
@@ -526,7 +526,7 @@ describe('a State Pension forecast keeps its account up to date', () => {
     store = await Store.open(path.join(dir, 'data'));
     await store.setAccounts([state]);
   });
-  afterEach(() => rm(dir, { recursive: true, force: true }));
+  afterEach(() => rm(dir, { recursive: true, force: true, maxRetries: 5 }));
 
   it('is never updated until a forecast is on it', () => {
     expect(status()).toEqual({ checklist: 'never', lastData: null, asOf: null, stale: true, inHealth: false });

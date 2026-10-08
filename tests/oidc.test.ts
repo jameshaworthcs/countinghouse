@@ -88,7 +88,7 @@ describe('sign-in with an OIDC provider', () => {
   });
   afterEach(async () => {
     await app.close();
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
   });
 
   // As Caddy forwards it: over https, from a tailnet address.

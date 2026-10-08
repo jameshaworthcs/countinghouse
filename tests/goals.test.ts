@@ -35,7 +35,7 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   store.stopWatching();
-  await rm(dir, { recursive: true, force: true });
+  await rm(dir, { recursive: true, force: true, maxRetries: 5 });
 });
 
 const progress = () => goalsProgress(store, new BalanceEngine(store), '2026-09-15');

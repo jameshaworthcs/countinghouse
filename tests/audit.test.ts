@@ -24,7 +24,7 @@ describe('the log', () => {
     dir = await mkdtemp(path.join(os.tmpdir(), 'finance-audit-'));
   });
   afterEach(async () => {
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
   });
 
   it('writes each entry at once, readable by you alone, and carries the chain on after a restart', async () => {
@@ -181,7 +181,7 @@ describe('commits name their audit entries', () => {
     dir = await mkdtemp(path.join(os.tmpdir(), 'finance-audit-git-'));
   });
   afterEach(async () => {
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
   });
 
   it('folds runs of entries, and says which entries each commit holds', async () => {
@@ -215,7 +215,7 @@ describe('the app records who did what', () => {
   });
   afterEach(async () => {
     await app.close();
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
   });
   const req = (p: string, init: RequestInit = {}) =>
     app.app.request(`http://finance.example.test${p}`, { ...init, headers: { host: 'finance.example.test', 'x-forwarded-for': '100.64.0.2', 'x-forwarded-proto': 'https', 'user-agent': 'TestBrowser/1.0', ...(init.headers ?? {}) } });

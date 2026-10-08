@@ -72,7 +72,7 @@ describe('linking transfers', () => {
   });
   afterEach(async () => {
     store.stopWatching();
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
   });
 
   /** Rows as an import would add them: categorised, then linked to what was committed before. */
@@ -232,7 +232,7 @@ describe('two of your accounts under one number', () => {
     });
     afterEach(async () => {
       store.stopWatching();
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, { recursive: true, force: true, maxRetries: 5 });
     });
 
     it('takes the name of the account it is linked with, when it named another of yours', async () => {

@@ -47,7 +47,7 @@ describe('balances of one day', () => {
   });
   afterEach(async () => {
     store.stopWatching();
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
   });
 
   it('takes the later: your £1 at 18:26, a payment, then the £0 you typed from the confirmation at 22:59', async () => {
@@ -144,7 +144,7 @@ describe('an imported balance you typed', () => {
     });
     afterEach(async () => {
       store.stopWatching();
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, { recursive: true, force: true, maxRetries: 5 });
     });
 
     it('from a payment confirmation with no balance, is yours and as of when you committed it', async () => {
@@ -177,7 +177,7 @@ describe('format v3 migration', () => {
     dir = await mkdtemp(path.join(os.tmpdir(), 'finance-migrate3-'));
   });
   afterEach(async () => {
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
   });
 
   it('says when balances were seen and which imported figures you typed', async () => {

@@ -101,7 +101,7 @@ describe('drafts of a provider’s exports', () => {
   });
   afterEach(async () => {
     store.stopWatching();
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
   });
 
   it('categorises its rows by their type first: a switch into a fixed interest fund is a trade, not interest', () => {
@@ -150,7 +150,7 @@ describe('pension money from a payroll', () => {
   });
   afterEach(async () => {
     store.stopWatching();
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
   });
 
   it('finds the account a job pays into from its payslips’ money arriving there', () => {
@@ -230,7 +230,7 @@ describe('what a valuation already holds, and paid in', () => {
   });
   afterEach(async () => {
     store.stopWatching();
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
   });
 
   it('dates a contribution a statement already counts on the statement’s day', () => {
@@ -267,7 +267,7 @@ describe('a summary of what was paid in since the start', () => {
   });
   afterEach(async () => {
     store.stopWatching();
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
   });
 
   it('is no tax year’s: it does not tick off an ask for the year it is dated in', async () => {

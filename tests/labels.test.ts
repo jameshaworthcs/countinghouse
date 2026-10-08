@@ -74,7 +74,7 @@ beforeAll(async () => {
   process.env.FINANCE_CLAUDE_BIN = bin;
 });
 afterAll(async () => {
-  await rm(binDir, { recursive: true, force: true });
+  await rm(binDir, { recursive: true, force: true, maxRetries: 5 });
   for (const [k, v] of Object.entries({ HOME: saved.HOME, PATH: saved.PATH, FINANCE_CLAUDE_BIN: saved.bin, FAKE_CLAUDE_LOG: saved.log })) {
     if (v === undefined) delete process.env[k];
     else process.env[k] = v;
@@ -91,7 +91,7 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   await app.close();
-  await rm(dir, { recursive: true, force: true });
+  await rm(dir, { recursive: true, force: true, maxRetries: 5 });
 });
 
 describe('naming imports', () => {

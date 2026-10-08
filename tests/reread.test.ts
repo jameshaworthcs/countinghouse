@@ -99,7 +99,7 @@ describe('reading a stored document again', () => {
   });
   afterEach(async () => {
     store.stopWatching();
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
   });
 
   it('only when turned on, and only for what Claude read', async () => {

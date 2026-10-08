@@ -63,7 +63,7 @@ describe('the tax year in full', () => {
   });
   afterEach(async () => {
     store.stopWatching();
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
   });
 
   it('gives an employment page per job, the deadlines, HMRC’s working out with its payment, and the year’s NI', () => {

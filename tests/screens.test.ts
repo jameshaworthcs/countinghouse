@@ -37,7 +37,7 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   store.stopWatching();
-  await rm(dir, { recursive: true, force: true });
+  await rm(dir, { recursive: true, force: true, maxRetries: 5 });
 });
 
 // An activity list as a platform's app shows it: newest first, a running balance that is the cash.

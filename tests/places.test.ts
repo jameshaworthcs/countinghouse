@@ -79,7 +79,7 @@ describe('stored transactions get their place, and keep it current', () => {
       expect(await refreshPlaces(store)).toBe(0);
     } finally {
       store.stopWatching();
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, { recursive: true, force: true, maxRetries: 5 });
     }
   });
 });

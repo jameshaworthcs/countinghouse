@@ -23,7 +23,7 @@ beforeAll(() => {
 afterAll(() => {
   delete process.env.GIT_CONFIG_GLOBAL;
   delete process.env.GIT_CONFIG_NOSYSTEM;
-  rmSync(tmp, { recursive: true, force: true });
+  rmSync(tmp, { recursive: true, force: true, maxRetries: 5 });
 });
 
 describe('a new data repository', () => {

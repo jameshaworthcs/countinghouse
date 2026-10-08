@@ -53,7 +53,7 @@ describe('format v7 migration', () => {
       expect(logged.join('\n')).toMatch(/left on its balance: saver 2026-04-30/);
       store.stopWatching();
     } finally {
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, { recursive: true, force: true, maxRetries: 5 });
     }
   });
 });
@@ -97,7 +97,7 @@ describe('terms from a statement', () => {
   });
   afterEach(async () => {
     store.stopWatching();
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
   });
 
   it('are kept as the account’s terms on its date, whether or not its balance is; the same again is nothing new', async () => {
@@ -156,7 +156,7 @@ describe('an account’s terms over time', () => {
   });
   afterEach(async () => {
     store.stopWatching();
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
   });
 
   it('shows the latest, how the limit and rates changed, and what ends within 60 days', () => {
@@ -214,7 +214,7 @@ describe('an agent sets an account’s terms from its document', () => {
   });
   afterEach(async () => {
     await app.close();
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
   });
   const req = (p: string, init: RequestInit = {}) => app.app.request(`http://localhost${p}`, { ...init, headers: { host: 'localhost', ...(init.headers ?? {}) } });
   const CSRF = { 'x-finance-csrf': '1', 'content-type': 'application/json' };
@@ -276,7 +276,7 @@ describe('an agent takes away terms read into the wrong account', () => {
   });
   afterEach(async () => {
     await app.close();
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
   });
   const req = (p: string, init: RequestInit = {}) => app.app.request(`http://localhost${p}`, { ...init, headers: { host: 'localhost', ...(init.headers ?? {}) } });
   const CSRF = { 'x-finance-csrf': '1', 'content-type': 'application/json' };
