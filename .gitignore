@@ -22,9 +22,8 @@ eval/.out/
 demo-data/
 demo-sparse/
 
-# inbox: files waiting to be ingested (they move into data/documents once committed)
-inbox/*
-!inbox/README.md
+# an inbox in the code checkout (the data repository holds yours: docs/INGESTION.md)
+inbox/
 
 # OS / editor noise
 .DS_Store

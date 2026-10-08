@@ -9,9 +9,11 @@ this page covers the formats, the engines, and how to extend them.
 - **Anywhere in the app**: drop a file on any page.
 - **An account page** (or a row in the monthly checklist): the upload is pinned to that account,
   so no matching is needed.
-- **The `inbox/` folder**, or wherever `FINANCE_INBOX_DIR` points. Files are ingested when they
-  stop growing, then moved out. Point a Syncthing folder here and phone screenshots arrive
-  automatically.
+- **The inbox**: the data repository's `inbox/`, or wherever `FINANCE_INBOX_DIR` points. Drop
+  statements, exports and screenshots there while the app runs: each is ingested when it stops
+  growing, moved into the work area, and waits for your review on the Import page (on commit it
+  goes into `data/documents/`). The inbox is gitignored. Point a Syncthing folder at it and phone
+  screenshots arrive automatically.
 - **The terminal**: `npm run import -- files…` copies them to the inbox.
 
 The same file twice (by SHA-256) is recognised as already imported.

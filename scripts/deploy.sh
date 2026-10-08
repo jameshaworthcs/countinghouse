@@ -8,9 +8,11 @@
 #
 # How it fits together (docs/SELF_HOSTING.md, "Development and live"):
 #   - The service runs from its own worktree of this repository, LIVE_DIR (default ~/dev/finance-live),
-#     at a detached commit, with a sparse checkout that leaves out data/.
-#   - It reads and writes THIS checkout's data/ (FINANCE_DATA_DIR in LIVE_DIR/.env), so the app's
-#     data auto-commits keep landing on main here.
+#     at a detached commit.
+#   - It reads and writes the data repository, DATA_REPO (FINANCE_DATA_REPO, default
+#     ~/dev/finance-data, made by `npm run init-data`): its data/, work area and inbox, set in
+#     LIVE_DIR/.env. A checkout that still tracks data/ itself is its own data repository, and the
+#     live worktree then leaves data/ out (a sparse checkout).
 #   - Building, testing or editing code here never touches the live site until you deploy.
 #
 # A deploy checks out the commit in LIVE_DIR, installs dependencies if the lockfile changed, builds
@@ -20,6 +22,14 @@ set -euo pipefail
 
 REPO="$(git -C "$(dirname "${BASH_SOURCE[0]}")/.." rev-parse --show-toplevel)"
 LIVE_DIR="${FINANCE_LIVE_DIR:-$HOME/dev/finance-live}"
+# A checkout that tracks data/ (the layout before code and data were split) is its own data repository.
+if git -C "$REPO" ls-files --error-unmatch -- data/meta.json >/dev/null 2>&1; then
+  DATA_IN_REPO=1
+  DATA_REPO="${FINANCE_DATA_REPO:-$REPO}"
+else
+  DATA_IN_REPO=0
+  DATA_REPO="${FINANCE_DATA_REPO:-$HOME/dev/finance-data}"
+fi
 UNIT=/etc/systemd/system/finance.service
 HEALTH=http://127.0.0.1:4750/api/health
 
@@ -30,7 +40,7 @@ render_unit() {
   local node_bin
   node_bin="$(dirname "$(command -v node)")"
   sed -e "s#@NODE_BIN@#$node_bin#g" -e "s#@APP_DIR@#$LIVE_DIR#g" -e "s#@USER@#$(id -un)#g" \
-      -e "s#@HOME@#$HOME#g" -e "s#@DATA_REPO@#$REPO#g" "$REPO/deploy/finance.service.in"
+      -e "s#@HOME@#$HOME#g" -e "s#@DATA_REPO@#$DATA_REPO#g" "$REPO/deploy/finance.service.in"
 }
 
 install_unit_if_changed() {
@@ -69,10 +79,11 @@ build_live() {
 setup() {
   local commit
   commit="$(git -C "$REPO" rev-parse --verify main^{commit})"
+  [[ -d "$DATA_REPO/.git" ]] || die "no data repository at $DATA_REPO: make one with 'npm run init-data -- $DATA_REPO', or set FINANCE_DATA_REPO"
   if [[ ! -e "$LIVE_DIR/.git" ]]; then
-    say "Creating the live worktree at $LIVE_DIR (without data/)…"
+    say "Creating the live worktree at $LIVE_DIR…"
     git -C "$REPO" worktree add --no-checkout --detach "$LIVE_DIR" "$commit"
-    git -C "$LIVE_DIR" sparse-checkout set --no-cone '/*' '!/data/'
+    if [[ $DATA_IN_REPO == 1 ]]; then git -C "$LIVE_DIR" sparse-checkout set --no-cone '/*' '!/data/'; fi
     git -C "$LIVE_DIR" checkout --quiet --detach "$commit"
   fi
   if [[ ! -f "$LIVE_DIR/.env" ]]; then
@@ -82,7 +93,7 @@ setup() {
     {
       grep -E '^(FINANCE_USERNAME|FINANCE_PASSWORD_HASH|FINANCE_OIDC_[A-Z_]+|FINANCE_SESSION_SECRET|FINANCE_ALLOWED_HOSTS|ANTHROPIC_API_KEY)=' "$REPO/.env" || true
       printf 'HOST=127.0.0.1\nPORT=4750\n'
-      printf 'FINANCE_DATA_DIR=%s/data\nFINANCE_INBOX_DIR=%s/inbox\nFINANCE_WORK_DIR=%s/.work/live\nFINANCE_DATA_BRANCH=main\n' "$REPO" "$REPO" "$REPO"
+      printf 'FINANCE_DATA_DIR=%s/data\nFINANCE_INBOX_DIR=%s/inbox\nFINANCE_WORK_DIR=%s/.work/live\nFINANCE_DATA_BRANCH=main\n' "$DATA_REPO" "$DATA_REPO" "$DATA_REPO"
     } >"$LIVE_DIR/.env"
     chmod 600 "$LIVE_DIR/.env"
   fi
@@ -97,6 +108,7 @@ status() {
   [[ -e "$LIVE_DIR/.git" ]] || die "no live worktree at $LIVE_DIR (run: npm run deploy -- --setup)"
   say "Deployed:  $(git -C "$LIVE_DIR" log -1 --format='%h %s (%cr)')"
   say "main:      $(git -C "$REPO" log -1 --format='%h %s (%cr)' main)"
+  say "Data:      $DATA_REPO"
   say "Behind by: $(git -C "$REPO" rev-list --count "$(git -C "$LIVE_DIR" rev-parse HEAD)..main") commit(s)"
   say "Health:    $(curl -fsS "$HEALTH" 2>/dev/null || echo 'no response')"
 }

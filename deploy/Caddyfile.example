@@ -1,0 +1,37 @@
+# A Caddy site block for the app on a private network (a tailnet, say), never the public internet.
+# Add it to /etc/caddy/Caddyfile with your own name and addresses (docs/SELF_HOSTING.md, "Caddy").
+finance.example.com {
+	# Private-network sockets only: the name resolves to this machine's addresses on that network
+	# and nothing else, so no one off it can reach the site even if they know the name.
+	bind 192.0.2.10 2001:db8::10
+
+	# A certificate for a private name needs a DNS challenge (your DNS provider's Caddy module), or
+	# use your network's own certificates (Tailscale's, for a *.ts.net name).
+	# tls {
+	# 	dns <provider> …
+	# }
+
+	# Statements and screenshots; the app itself caps each file at 50 MB.
+	request_body {
+		max_size 250MB
+	}
+
+	reverse_proxy 127.0.0.1:4750 {
+		# The app checks Origin against Host (CSRF) and allow-lists Host (DNS rebinding).
+		header_up Host {host}
+		# Live updates are server-sent events: never buffer them.
+		flush_interval -1
+		lb_try_duration 10s
+	}
+
+	# Compress everything except the event stream.
+	@compressible not header Accept text/event-stream
+	encode @compressible zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000;"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+}
