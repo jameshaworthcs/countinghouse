@@ -118,8 +118,12 @@ export class Scanner {
     this.units = new Set(options.denylist?.units ?? []);
   }
 
-  /** Findings in a text that is the whole of a file, or a block of lines starting at `firstLine`. */
-  scanText(filePath: string, text: string, firstLine = 1): Finding[] {
+  /**
+   * Findings in a text that is the whole of a file, or a block of lines starting at `firstLine`.
+   * The allowlist is applied by `filePath`; findings are reported under `label` (a range or history
+   * scan adds the commit or blob to it).
+   */
+  scanText(filePath: string, text: string, firstLine = 1, label = filePath): Finding[] {
     const out: Finding[] = [];
     const nfkc = text.normalize('NFKC');
     const norm = normalise(text);
@@ -130,7 +134,7 @@ export class Scanner {
     const push = (category: string, rule: string, value: string, starts: number[], index: number) => {
       if (this.allow.allows(value, filePath)) return;
       const shown = starts === normStarts && sameLength ? nfkc.slice(index, index + value.length) : value;
-      out.push({ path: filePath, line: firstLine - 1 + lineAt(starts, index), category, rule, masked: mask(shown) });
+      out.push({ path: label, line: firstLine - 1 + lineAt(starts, index), category, rule, masked: mask(shown) });
     };
 
     if (this.tokenRe) {

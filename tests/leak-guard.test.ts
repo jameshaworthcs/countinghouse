@@ -445,6 +445,23 @@ describe('git modes and hooks', () => {
     expectMasked(history.all);
   });
 
+  it('applies the allowlist by path in a range and a history scan', () => {
+    const { repo, git } = newRepo('allow-repo');
+    const base = git('rev-parse', 'HEAD').trim();
+    writeFileSync(path.join(repo, '.leakguard-allow'), `CREDITS.md:${FRIEND}\n`);
+    writeFileSync(path.join(repo, 'CREDITS.md'), `Thanks, ${FRIEND}.\n`);
+    writeFileSync(path.join(repo, 'other.md'), `With thanks to ${FRIEND}.\n`);
+    git('add', '.leakguard-allow', 'CREDITS.md', 'other.md');
+    git('commit', '-q', '-m', 'docs: credits');
+    for (const mode of [['--range', `${base}..HEAD`], ['--history']]) {
+      const r = run([...mode, '--data', dataDir], { cwd: repo });
+      expect(r.code).toBe(1);
+      expect(r.out).toMatch(/other\.md @\w+:1 \[denylist\/person\]/);
+      expect(r.out).not.toMatch(/CREDITS\.md|\.leakguard-allow/);
+      expectMasked(r.all);
+    }
+  });
+
   it('checks what a push would publish', () => {
     const { repo, git } = newRepo('push-repo');
     writeFileSync(path.join(repo, 'e.ts'), `export const z = '${PAYEE}';\n`);

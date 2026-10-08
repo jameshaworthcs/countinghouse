@@ -107,7 +107,7 @@ function privatePathFinding(ctx: Context, p: string, where = p): Finding[] {
 
 async function scanAdded(ctx: Context, files: FileChange[], blocks: AddedBlock[], label = (p: string) => p): Promise<Finding[]> {
   const out: Finding[] = [];
-  for (const b of blocks) if (!skipped(ctx, b.path)) out.push(...ctx.scanner.scanText(label(b.path), b.text, b.firstLine));
+  for (const b of blocks) if (!skipped(ctx, b.path)) out.push(...ctx.scanner.scanText(b.path, b.text, b.firstLine, label(b.path)));
   const relevant = files.filter((f) => f.status !== 'D' && !skipped(ctx, f.path));
   for (const f of files) if (f.status === 'A') out.push(...privatePathFinding(ctx, f.path, label(f.path)));
   const contents = catBlobs(ctx.root, relevant.map((f) => f.blob));
@@ -197,9 +197,21 @@ async function scanHistory(ctx: Context): Promise<Finding[]> {
   for (const [blob, paths] of wanted) {
     const bytes = contents.get(blob);
     if (!bytes) continue;
-    // One scan per file version; it is reported under its first path, with the others counted.
-    const where = paths.length > 1 ? `${paths[0]} (+${paths.length - 1} paths) @${blob.slice(0, 10)}` : `${paths[0]} @${blob.slice(0, 10)}`;
-    if (!isBinary(bytes)) out.push(...ctx.scanner.scanText(where, bytes.toString('utf8')));
+    if (!isBinary(bytes)) {
+      // The allowlist goes by path: a version at several paths is scanned as each of them, and a
+      // finding is reported once, under the first path it is not allowed at, with the others counted.
+      const text = bytes.toString('utf8');
+      const seen = new Set<string>();
+      for (const p of paths) {
+        const where = `${p}${paths.length > 1 ? ` (+${paths.length - 1} paths)` : ''} @${blob.slice(0, 10)}`;
+        for (const f of ctx.scanner.scanText(p, text, 1, where)) {
+          const k = `${f.line}\0${f.category}/${f.rule}\0${f.masked}`;
+          if (seen.has(k)) continue;
+          seen.add(k);
+          out.push(f);
+        }
+      }
+    }
     for (const p of paths) for (const hit of await fileRules(p, bytes)) out.push({ path: `${p} @${blob.slice(0, 10)}`, line: 0, category: 'file', rule: hit.rule, masked: hit.message, ...(hit.warning ? { warning: true } : {}) });
   }
   const email = tryGit(ctx.root, ['config', 'user.email'])?.trim();
