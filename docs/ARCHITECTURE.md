@@ -52,7 +52,7 @@ Source layout:
 | `src/server/sessions.ts` | Agent sessions: each run's record and transcript in the work area, their caps and retention; `sessionviews.ts` lists them (with earlier ones and agents with tokens) and says what each produced |
 | `src/server/proposals.ts` | Fixes agents propose to your data, checked against it and applied only by you ([AGENTS.md §5](AGENTS.md)) |
 | `src/web/` | The React app: `pages/`, `components/` (UI kit, charts), `lib/` (API client, prefs, data context) |
-| `scripts/` | Demo data, import CLI, records CLI, validate, schema export, screenshots, set-password, deploy |
+| `scripts/` | Demo data, import CLI, records CLI, validate, schema export, screenshots, set-password, deploy; the leak guard (`leak-guard.ts`, `leak-guard/`) and its git hooks (`hooks-install.ts`) keep personal data out of the repository ([LEAK_GUARD.md](LEAK_GUARD.md)) |
 | `tests/` | Vitest suites + synthetic fixtures for every supported bank format |
 | `deploy/` | systemd unit template, Caddy site block, installer |
 

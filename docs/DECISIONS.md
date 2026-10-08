@@ -2354,3 +2354,25 @@ next was counted again after a statement at the year's end that already held it.
   counts a contribution the older statement already held.
 - The summary since the start is stored as two figures with no tax year, not on a balance: it has
   no value of its own, and a balance needs one.
+
+## 2026-10-08: A leak guard keeps personal data out of the repository
+
+Real values have reached code before: a regression test copied from a real import, a comment
+written while debugging one, an example in a doc. Reviews catch some; a check at every exit catches
+the rest.
+
+- **What it knows** (`scripts/leak-guard.ts`, [LEAK_GUARD.md](LEAK_GUARD.md)): a denylist built
+  from the data directory and cached outside every repository (0600), a private extras file for
+  what the data cannot supply, built-in patterns for shapes of personal data (they need no data, so
+  CI can run them), and file rules for documents and images with location metadata.
+- **Where it runs:** git's pre-commit, commit-msg and pre-push hooks (installed by `npm install`),
+  a Claude Code PreToolUse hook on every write, and CI with patterns only.
+- **Plain Node:** it runs with types stripped, not through tsx, so a hook costs about 0.2 s; its
+  own modules import each other with `.ts` extensions (`allowImportingTsExtensions`), and the
+  engines field asks for Node 22.18 or later.
+- **Masked output only:** it never prints what it found, so CI logs and transcripts stay clean.
+- **The app's data commits** are not scanned where data and code share a repository: the hooks
+  check that in the shell before starting Node, so the live service's commits are untouched.
+- **Noise, tuned against the code:** payees made only of common words ("Cheque paid in") are bank
+  wording, not anyone's; amounts must be distinctive and not public UK figures; an employer's own
+  word counts unless it is a given name, a common word or a town.

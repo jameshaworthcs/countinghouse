@@ -5,7 +5,7 @@
   "description": "Private, local-first UK personal finance tracker: ingest statements and screenshots into git-versioned structured data.",
   "type": "module",
   "engines": {
-    "node": ">=22.12"
+    "node": ">=22.18"
   },
   "scripts": {
     "dev": "tsx scripts/demo-data.ts --if-missing && FINANCE_DATA_DIR=\"${FINANCE_DATA_DIR:-demo-data}\" concurrently -k -n api,web -c blue,magenta \"tsx watch --clear-screen=false src/server/main.ts\" \"vite\"",
@@ -31,7 +31,10 @@
     "ask:eval": "tsx scripts/ask-eval.ts",
     "records": "tsx scripts/records.ts",
     "api": "tsx scripts/api.ts",
-    "eval": "tsx eval/run.ts"
+    "eval": "tsx eval/run.ts",
+    "leak-guard": "node scripts/leak-guard.ts",
+    "hooks:install": "node scripts/hooks-install.ts",
+    "prepare": "node scripts/hooks-install.ts --quiet"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.129.0",

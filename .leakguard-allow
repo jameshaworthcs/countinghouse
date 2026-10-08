@@ -1,0 +1,42 @@
+# Leak guard allowlist (docs/LEAK_GUARD.md). Public: everything here is invented, generic or already
+# public. One term per line; `path-glob:term` allows a term only in matching paths.
+#
+# Add a term only when it is generic or invented and the guard confuses it with something personal.
+# Never add a real value to make a finding go away: change the value instead.
+
+# The author, where credits belong.
+LICENSE:James Haworth
+README.md:James Haworth
+
+# Tailnet (CGNAT) addresses invented for tests.
+100.64.0.2
+100.64.0.9
+100.127.255.1
+
+# Employer PAYE references invented for tests, docs, the demo and the extraction prompt.
+120/AB12345
+120/QS123
+111/AL123
+222/BI456
+456/HW12
+581/NM2207
+
+# The best-known example postcode.
+SW1A 1AA
+
+# Banks' and providers' published head-office and correspondence addresses in the synthetic
+# extraction evaluation, and the invented customers and council there.
+eval/**:B1 1HQ
+eval/**:BN88 1AH
+eval/**:BS1 4DA
+eval/**:BX1 1LT
+eval/**:CM99 2AT
+eval/**:EX1 1AA
+eval/**:L30 4GB
+eval/**:LE87 2BB
+eval/**:LS1 1AA
+eval/**:M5 3EE
+eval/**:NN4 7SG
+eval/**:NR1 3WG
+eval/**:SN38 1NW
+eval/**:SW2 5SG

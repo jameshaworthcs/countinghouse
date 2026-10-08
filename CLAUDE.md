@@ -109,6 +109,10 @@ for the map and [docs/DATA_FORMAT.md](docs/DATA_FORMAT.md) before touching data 
 
 - Tests live in `tests/`. Add a fixture and a test for any parser change (`tests/fixtures/*`).
   Synthetic data only: never commit real statements to `tests/`.
+- Invented values only, in code, tests, fixtures, docs and commit messages: never copy a real
+  name, reference, amount or descriptor from `data/`. The leak guard
+  ([docs/LEAK_GUARD.md](docs/LEAK_GUARD.md)) blocks them before a write (Claude Code hook), a
+  commit and a push; `npm run leak-guard -- --tree` checks the whole tree. Never `--no-verify`.
 - Any change to a computed figure updates [docs/FORMULAS.md](docs/FORMULAS.md) and its tests:
   - property-based tests (fast-check) for money and the balance engine;
   - the Monte Carlo check for the projection model.
