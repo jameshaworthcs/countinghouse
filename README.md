@@ -160,6 +160,6 @@ never need to re-import old documents. See [docs/ARCHITECTURE.md](docs/ARCHITECT
 
 ## Licence
 
-To be decided.
+Counting House is released under the [MIT License](LICENSE).
 
 Made by James Haworth.

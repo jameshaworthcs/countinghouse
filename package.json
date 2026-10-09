@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Private, local-first UK personal finance tracker: ingest statements and screenshots into git-versioned structured data.",
+  "license": "MIT",
   "type": "module",
   "engines": {
     "node": ">=22.18"
