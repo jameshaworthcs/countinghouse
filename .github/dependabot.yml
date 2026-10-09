@@ -1,0 +1,20 @@
+# Dependabot opens security updates only (turned on in the repository's security settings).
+# Version updates are off: open-pull-requests-limit 0 stops them, and security updates have their
+# own limit. Its commit headers are Conventional; commitlint skips the rest of its messages
+# (commitlint.config.js).
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+    commit-message:
+      prefix: build(deps)
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+    commit-message:
+      prefix: ci(deps)

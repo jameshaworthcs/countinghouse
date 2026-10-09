@@ -76,6 +76,9 @@ BREAKING CHANGE: <what someone running the app must do>
   `deps`.
 - `BREAKING CHANGE:` only when someone running the app must act (new required configuration, a
   removed default). No other trailers: no `Co-authored-by`, `Signed-off-by` or `Refs`.
+- Dependabot's security updates are the one exception: their headers are Conventional
+  (`build(deps): …`, `ci(deps): …`, set in `.github/dependabot.yml`), and commitlint skips the rest
+  of their messages.
 
 ## Issues and pull requests
 

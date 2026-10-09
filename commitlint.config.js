@@ -17,8 +17,12 @@ const noTrailers = (parsed) => {
   return [!(isTrailerBlock && trailers.length), `no trailers (${trailers.map((t) => t.split(':')[0]).join(', ')}): only a BREAKING CHANGE footer`];
 };
 
+/** Dependabot's security updates sign off and quote release notes; .github/dependabot.yml sets their headers. */
+const isDependabot = (message) => /^Signed-off-by: dependabot\[bot\] </m.test(message);
+
 export default {
   extends: ['@commitlint/config-conventional'],
+  ignores: [isDependabot],
   plugins: [{ rules: { 'body-wrap': bodyWrap, 'no-trailers': noTrailers } }],
   rules: {
     'type-enum': [2, 'always', ['feat', 'fix', 'perf', 'refactor', 'test', 'docs', 'build', 'ci', 'chore', 'style', 'revert']],
