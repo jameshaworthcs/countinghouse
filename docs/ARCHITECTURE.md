@@ -546,7 +546,9 @@ and a card in credit counts as cash.
   non-loopback `HOST` refuses to start without a login.
 - **Host guard.** Unknown `Host` headers get a 421 (DNS rebinding).
 - **CSRF.** Mutating `/api` calls require the `x-finance-csrf: 1` header, and `Origin` must match
-  `Host`. The session cookie is `SameSite=Strict`.
+  `Host` (`X-Forwarded-Host` through the local proxy). The session cookie is `SameSite=Strict`.
+  The demo in a codespace (`FINANCE_DEMO_CODESPACE`, untracked demo data only; SELF_HOSTING.md)
+  also accepts the `http://localhost:<port>` Origin GitHub's port forwarding writes.
 - **Auth.** One user (`FINANCE_USERNAME`), signed in one of two ways; a server uses exactly one.
   - **OIDC** (`src/server/oidc.ts`, when `FINANCE_OIDC_CLIENT_ID` is set, with the provider's
     `FINANCE_OIDC_ISSUER`; `FINANCE_OIDC_NAME` is what the sign-in page calls it):

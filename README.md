@@ -35,6 +35,13 @@ side.
 
 ## Try it on demo data
 
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/jameshaworthcs/countinghouse?quickstart=1)
+
+In a codespace of your own (on your GitHub account and its Codespaces quota), the demo builds and
+opens in your browser after a minute or two: an invented household, nothing real, and no Claude. Its
+sign-in page shows a throwaway login, made afresh each time it starts
+([SELF_HOSTING.md](docs/SELF_HOSTING.md), "The demo in a codespace"). Or run it yourself:
+
 ```bash
 npm install
 npm run demo          # generated demo data at http://127.0.0.1:4770: nothing real is touched

@@ -1,0 +1,13 @@
+// "Open in GitHub Codespaces": the demo (invented data, scripts/demo-data.ts) in the visitor's own
+// codespace, on their own quota. No prebuilds: those bill the repository's owner.
+// What it runs, and why it signs in: docs/SELF_HOSTING.md, "The demo in a codespace".
+{
+  "name": "Counting House demo",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:4-24-bookworm",
+  "postCreateCommand": "npm ci",
+  "postStartCommand": "bash .devcontainer/start-demo.sh",
+  "forwardPorts": [4770],
+  "portsAttributes": {
+    "4770": { "label": "Counting House demo", "onAutoForward": "openBrowser" }
+  }
+}

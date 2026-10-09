@@ -40,6 +40,8 @@ export function authRoutes(ctx: AppContext): Hono {
       user: session?.user ?? null,
       // Without configured credentials only direct local access works.
       localAccess: !ctx.auth.configured && isDirectLocal(c),
+      // The demo's throwaway login in a codespace (codespace.ts), for the form to show. Never set otherwise.
+      demoLogin: ctx.demoLogin ?? null,
     });
   });
 
