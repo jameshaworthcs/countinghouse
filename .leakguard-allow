@@ -52,3 +52,6 @@ eval/**:NN4 7SG
 eval/**:NR1 3WG
 eval/**:SN38 1NW
 eval/**:SW2 5SG
+
+# GitHub's public support address, in Dependabot's sign-off on its security updates.
+support@github.com
