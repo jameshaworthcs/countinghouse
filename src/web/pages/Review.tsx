@@ -514,10 +514,10 @@ function SectionEditor({ section, index, total, latest, periodFromRows, onChange
                 <Field label="On" hint={section.balanceDateSource ? DATE_SOURCE_LABEL[section.balanceDateSource] : undefined} error={section.balanceDateSource === 'upload' ? 'The date could not be read; set the date the screenshot was taken' : undefined}>
                   <Input type="date" value={section.balanceDate ?? ''} onChange={(e) => set({ balanceDate: e.target.value, balanceDateSource: 'manual' })} />
                 </Field>
-                {(['contributions', 'gain', 'bonusToDate', 'taxYearContributions', 'cash', 'availableBalance', 'annualIncome'] as const)
+                {(['contributions', 'gain', 'bonusToDate', 'taxYearContributions', 'taxYearInterest', 'cash', 'availableBalance', 'annualIncome'] as const)
                   .filter((k) => section[k] !== undefined)
                   .map((k) => (
-                    <Field key={k} label={{ contributions: 'Total paid in', gain: 'Growth (as shown)', bonusToDate: 'LISA bonus received', taxYearContributions: 'Paid in this tax year', cash: 'Uninvested cash', availableBalance: 'Available', annualIncome: 'Income per year' }[k]}>
+                    <Field key={k} label={{ contributions: 'Total paid in', gain: 'Growth (as shown)', bonusToDate: 'LISA bonus received', taxYearContributions: 'Paid in this tax year', taxYearInterest: 'Interest added this tax year', cash: 'Uninvested cash', availableBalance: 'Available', annualIncome: 'Income per year' }[k]}>
                       <NumberInput signed={k === 'gain' || k === 'availableBalance'} value={section[k]} onValue={(v) => set({ [k]: v })} />
                     </Field>
                   ))}

@@ -299,13 +299,13 @@ describe('format v2 migration', () => {
   it('drops the default return and adds the new collections', async () => {
     await v1({ name: 'A', taxRegion: 'england', retirementAge: 67, assumedRealReturn: 0.04 });
     const res = await runMigrations(dir, () => undefined);
-    expect(res).toMatchObject({ from: 1, to: 10 });
+    expect(res).toMatchObject({ from: 1, to: 11 });
     const profile = JSON.parse(await readFile(path.join(dir, 'profile.json'), 'utf8')) as Record<string, unknown>;
     expect(profile).not.toHaveProperty('assumedRealReturn');
     expect(await readFile(path.join(dir, 'assumptions.jsonl'), 'utf8')).toBe('');
     for (const f of ['research.jsonl', 'insights.jsonl', 'context.jsonl', 'notes.jsonl', 'instruments.json']) await expect(readFile(path.join(dir, f), 'utf8')).resolves.toBeDefined();
     const store = await Store.open(dir);
-    expect(store.meta.version).toBe(10);
+    expect(store.meta.version).toBe(11);
     expect(store.issues).toEqual([]);
   });
 

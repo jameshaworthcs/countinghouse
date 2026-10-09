@@ -10,8 +10,8 @@
 
 import { ACCOUNT_TYPES, AGREEMENT_PAYMENT_STATUSES, ASSET_CLASSES, EXTRACTION_DOC_TYPES, FIGURE_KINDS, SCHEDULE_DIRECTIONS, TERMS_RATE_APPLIES } from '../../shared/schema';
 
-export const PROMPT_VERSION = 'extract-11';
-export const PROMPT_VERSION_EVERYTHING = 'extract-15';
+export const PROMPT_VERSION = 'extract-12';
+export const PROMPT_VERSION_EVERYTHING = 'extract-16';
 
 /** The prompt version a reading is made with. */
 export const promptVersion = (everything: boolean) => (everything ? PROMPT_VERSION_EVERYTHING : PROMPT_VERSION);
@@ -34,6 +34,7 @@ Accuracy matters more than completeness:
 6. description is the transaction text exactly as printed. payee is a clean merchant or counterparty name when obvious ("Tesco"), otherwise null. category is the best id from the category list in the request, or null if unsure. type is the bank's transaction type/code if printed (e.g. "DD", "Card payment"); reference is a payment reference printed separately; time is HH:MM if shown.
 7. closingBalance is the balance or value at the end of the period, or the headline balance/value on a screenshot. balanceDate is the date it applies to: the last day of the statement period, or an "as at" / "valued on" date printed with the balance. A "statement date" (the day the statement was produced, often the day after the period ends) is documentDate, not balanceDate. The dates of rows or list items are not it. On a screenshot with no such date, balanceDate is null (the app knows when the screenshot was taken). documentDate is any date printed on the document itself.
    Rows labelled "Today", "Yesterday" or only by weekday are dated from the capture date in the request. If the request gives no capture date, use the upload date and set uncertain on those rows to "date assumed from the upload day".
+   A student loan's balance page: closingBalance is the balance owed (negative). Its summary of the tax year so far ("since 6 April") gives taxYearInterest, its "Interest added" (positive). That summary's repayments and interest are totals for the year, never transactions.
 8. For investment, ISA, LISA and pension documents, closingBalance is the total value of the whole account ("total account value", the headline figure). Also capture:
    - contributionsToDate ("total paid in", "net contributions")
    - gainLoss (growth or return in money)
@@ -208,6 +209,7 @@ export function extractionJsonSchema(everything = false): Record<string, unknown
     gainLoss: nullable(num()),
     governmentBonusToDate: nullable(num()),
     taxYearContributions: nullable(num()),
+    taxYearInterest: nullable(num('Student loan: interest added this tax year, positive')),
     cashBalance: nullable(num()),
     annualIncome: nullable(num('DB / State Pension forecast per year')),
     interestRate: nullable(num('AER % if shown')),

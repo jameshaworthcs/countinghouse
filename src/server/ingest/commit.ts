@@ -310,6 +310,7 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
         ...(section.taxYearContributions !== undefined
           ? { taxYearContributions: section.taxYearContributions, taxYear: taxYearOf(section.balanceDate).label }
           : {}),
+        ...(section.taxYearInterest !== undefined ? { taxYearInterest: section.taxYearInterest, taxYear: taxYearOf(section.balanceDate).label } : {}),
       });
     }
     if (section.recordHoldings && section.holdings.length) {

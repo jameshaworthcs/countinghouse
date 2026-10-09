@@ -23,7 +23,8 @@ import { EmploymentSchema, HmrcRecordSchema, PayslipRecordSchema, TermsSchema, t
 import { learnFromPayslip } from './employments';
 import { sameTerms, termsOfReading } from '../shared/terms';
 import { toMinor } from '../shared/money';
-import { taxYearOf } from '../shared/uk';
+import { parseTaxYear, taxYearOf } from '../shared/uk';
+import { ACCOUNT_TYPE_META } from '../shared/accounts';
 import { FORMAT_VERSION } from './store';
 
 export interface MigrationContext {
@@ -558,6 +559,49 @@ export const MIGRATIONS: Migration[] = [
       ctx.log(`[migrate] models per task${kept.length ? `; kept your choice for ${kept.join(', ')}` : ''}`);
     },
   },
+  {
+    from: 10,
+    description: "A student loan's balance keeps the interest added in the tax year so far (taxYearInterest), backfilled from the readings that printed it",
+    async run(ctx) {
+      interface Rec {
+        id?: string;
+        status?: string;
+        extraction?: { raw?: { printed?: unknown[]; notes?: unknown[] } };
+        draft?: { sections?: { key: string; target?: { mode?: string }; balanceDate?: string; taxYearInterest?: number }[] };
+        result?: { sections?: { key: string; accountId: string }[] };
+      }
+      const accounts = ((await ctx.readJson('accounts.json')) as { accounts?: { id: string; type: AccountType }[] } | undefined)?.accounts ?? [];
+      const loans = new Set(accounts.filter((a) => ACCOUNT_TYPE_META[a.type]?.interestUnrecorded).map((a) => a.id));
+      // importId|date → the total and its tax year, for the one student loan balance each import recorded.
+      const found = new Map<string, { amount: number; taxYear: string }>();
+      for await (const file of walk(path.join(ctx.dataDir, 'imports'))) {
+        if (!file.endsWith('.json')) continue;
+        let rec: Rec;
+        try {
+          rec = JSON.parse(await readFile(file, 'utf8')) as Rec;
+        } catch {
+          continue;
+        }
+        if (rec.status !== 'committed' || !rec.id) continue;
+        const sections = (rec.draft?.sections ?? []).filter((s) => s.target?.mode !== 'skip' && s.balanceDate && loans.has(rec.result?.sections?.find((x) => x.key === s.key)?.accountId ?? ''));
+        // With two loans on one reading, its printed figures and notes do not say which is which.
+        if (sections.length !== 1) continue;
+        const s = sections[0]!;
+        const year = taxYearOf(s.balanceDate!);
+        const amount = s.taxYearInterest ?? statedTaxYearInterest(rec.extraction?.raw ?? {}, year.label);
+        if (amount !== null) found.set(`${rec.id}|${s.balanceDate}`, { amount, taxYear: year.label });
+      }
+      let n = 0;
+      await ctx.mapJsonl('balances', (b) => {
+        const source = b.source as { importId?: string } | undefined;
+        const hit = source?.importId ? found.get(`${source.importId}|${String(b.date)}`) : undefined;
+        if (!hit || b.taxYearInterest !== undefined || (b.taxYear !== undefined && b.taxYear !== hit.taxYear)) return null;
+        n++;
+        return { ...b, taxYearInterest: hit.amount, taxYear: hit.taxYear };
+      });
+      ctx.log(`[migrate] ${n} student loan balance${n === 1 ? '' : 's'} now keep the interest added in the tax year`);
+    },
+  },
 ];
 
 /**
@@ -570,6 +614,34 @@ export const MIGRATIONS: Migration[] = [
  * receipts, which read with the reading model), checking turned off, and the agents' model and
  * effort for the jobs that stay on Claude. Changes `settings` in place; returns the tasks it set.
  */
+/**
+ * The interest a student loan's page says was added in tax year `label` ("2026/27"), from a stored
+ * reading made before `taxYearInterest` existed: its printed "Interest added" in a summary of that
+ * year, else a note that gives it with the year. Null when neither does.
+ */
+export function statedTaxYearInterest(raw: { printed?: unknown[]; notes?: unknown[] }, label: string): number | null {
+  const year = parseTaxYear(label);
+  if (!year) return null;
+  // "2026/27", "2026-27" or "since 6 April 2026".
+  const names = (text: string) => new RegExp(`\\b${year.startYear}[/-]${String((year.startYear + 1) % 100).padStart(2, '0')}\\b|6 April ${year.startYear}\\b`).test(text);
+  const money = (text: string) => {
+    const m = /^\+?£?\s*([\d,]+\.\d{2})$/.exec(text.trim());
+    return m ? Number(m[1]!.replace(/,/g, '')) : null;
+  };
+  for (const p of raw.printed ?? []) {
+    const { section, label: what, value } = (p ?? {}) as { section?: unknown; label?: unknown; value?: unknown };
+    if (typeof what !== 'string' || !/^interest added$/i.test(what.trim()) || typeof section !== 'string' || !names(section)) continue;
+    const amount = typeof value === 'number' ? Math.abs(value) : typeof value === 'string' ? money(value) : null;
+    if (amount !== null) return amount;
+  }
+  for (const note of raw.notes ?? []) {
+    if (typeof note !== 'string' || !names(note)) continue;
+    const m = /interest added (?:of )?\+?£\s*([\d,]+\.\d{2})/i.exec(note);
+    if (m) return Number(m[1]!.replace(/,/g, ''));
+  }
+  return null;
+}
+
 export function migrateModelSettings(settings: Record<string, unknown>): Record<string, Record<string, unknown>> {
   const ex = (settings.extraction ?? {}) as Record<string, unknown>;
   const ag = (settings.agents ?? {}) as Record<string, unknown>;

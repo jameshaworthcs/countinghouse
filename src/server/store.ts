@@ -84,7 +84,7 @@ import { diffById, DiffCollector, diffFields, listed } from './auditdiff';
 import { atomicWrite, Mutex, nowISO, readTextIfExists, sha256 } from './fsutil';
 
 /** Bump when the on-disk format changes, and add a migration in migrations.ts. */
-export const FORMAT_VERSION = 10;
+export const FORMAT_VERSION = 11;
 
 export interface DataIssue {
   file: string;

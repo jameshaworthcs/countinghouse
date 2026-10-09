@@ -23,7 +23,7 @@ export interface NothingNew {
 }
 
 /** The figures recorded with a balance (commitDraft writes them into one snapshot). */
-const BALANCE_FIELDS = ['balance', 'availableBalance', 'contributions', 'gain', 'cash', 'bonusToDate', 'taxYearContributions', 'annualIncome'] as const;
+const BALANCE_FIELDS = ['balance', 'availableBalance', 'contributions', 'gain', 'cash', 'bonusToDate', 'taxYearContributions', 'taxYearInterest', 'annualIncome'] as const;
 type BalanceField = (typeof BALANCE_FIELDS)[number];
 
 type Fact =

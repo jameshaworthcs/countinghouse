@@ -518,6 +518,7 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
       ...(cash !== undefined ? { cash } : {}),
       ...(acc.governmentBonusToDate !== null ? { bonusToDate: acc.governmentBonusToDate } : {}),
       ...(acc.taxYearContributions !== null ? { taxYearContributions: acc.taxYearContributions } : {}),
+      ...(acc.taxYearInterest !== null ? { taxYearInterest: acc.taxYearInterest } : {}),
       ...(acc.annualIncome !== null ? { annualIncome: acc.annualIncome } : {}),
       ...(acc.interestRate !== null ? { interestRate: acc.interestRate } : {}),
       ...(acc.statedMoneyIn !== null || acc.statedMoneyOut !== null
@@ -634,7 +635,7 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
 
   // An account the document only mentions (the account on an interest certificate, say) has
   // nothing to import: leave it out rather than offer to create it.
-  const importable = sections.filter((s) => s.transactions.length || s.holdings.length || s.balance !== undefined || [s.contributions, s.bonusToDate, s.taxYearContributions, s.cash, s.annualIncome].some((v) => v !== undefined));
+  const importable = sections.filter((s) => s.transactions.length || s.holdings.length || s.balance !== undefined || [s.contributions, s.bonusToDate, s.taxYearContributions, s.taxYearInterest, s.cash, s.annualIncome].some((v) => v !== undefined));
   // HMRC's records, each ticked unless the same record is stored already.
   const hmrc = extraction.hmrc.map((record, hi) => {
     const id = hmrcId(record);
@@ -713,6 +714,7 @@ export function splitAtLinks(store: Store, accounts: readonly ExtractedAccount[]
       gainLoss: null,
       governmentBonusToDate: null,
       taxYearContributions: null,
+      taxYearInterest: null,
       cashBalance: null,
       annualIncome: null,
       interestRate: null,

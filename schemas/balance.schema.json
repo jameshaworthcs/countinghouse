@@ -63,6 +63,10 @@
       "type": "number",
       "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
     },
+    "taxYearInterest": {
+      "type": "number",
+      "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+    },
     "taxYear": {
       "type": "string",
       "pattern": "^\\d{4}\\/\\d{2}$"

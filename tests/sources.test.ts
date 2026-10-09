@@ -243,7 +243,7 @@ describe('format v4 migration', () => {
     };
     await writeFile(path.join(data, 'imports', '2026', `${imp.id}.json`), `${JSON.stringify(imp, null, 2)}\n`);
     await writeFile(path.join(data, 'figures.jsonl'), `${JSON.stringify({ id: 'fig_00000000000000a1', kind: 'pension_contribution_employee', label: 'paid', amount: 50, currency: 'GBP', taxYear: '2025/26', payer: 'Quillon UK', payerReference: 'QQ123456C', source: {}, createdAt: stamp })}\n`);
-    expect(await runMigrations(data, () => undefined)).toMatchObject({ from: 3, to: 10 });
+    expect(await runMigrations(data, () => undefined)).toMatchObject({ from: 3, to: 11 });
     const figures = (await readFile(path.join(data, 'figures.jsonl'), 'utf8')).trim().split('\n').map((l) => JSON.parse(l) as Record<string, unknown>);
     expect(figures[0]).not.toHaveProperty('payerReference');
     expect(figures[1]).toMatchObject({ kind: 'pension_income_forecast', accountId: 'state', amount: 11500.5, date: '2026-09-30', source: { importId: imp.id } });

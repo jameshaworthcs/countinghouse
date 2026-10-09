@@ -143,7 +143,7 @@ describe('when a screenshot was taken', () => {
 
 describe('the reader: views that are not the account’s movements', () => {
   it('no longer teaches that prizes go to another account, and says a list is not movements', () => {
-    expect(PROMPT_VERSION).toBe('extract-11');
+    expect(PROMPT_VERSION).toBe('extract-12');
     expect(SYSTEM_PROMPT).not.toMatch(/paid to a bank account/i);
     expect(SYSTEM_PROMPT).toMatch(/never where money went/);
     expect(SYSTEM_PROMPT).toMatch(/Premium Bond numbers[^.]*are not holdings/);

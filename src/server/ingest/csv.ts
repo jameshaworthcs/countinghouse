@@ -303,6 +303,7 @@ export function parseWithProfile(rows: string[][], match: ProfileMatch): CsvPars
       gainLoss: null,
       governmentBonusToDate: null,
       taxYearContributions: null,
+      taxYearInterest: null,
       cashBalance: null,
       annualIncome: null,
       interestRate: null,

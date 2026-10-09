@@ -21,6 +21,7 @@ import { ACCOUNT_TYPE_META, balanceModeOf } from '../../shared/accounts';
 import { EXTERNAL_FLOW_CATEGORIES } from '../../shared/categories';
 import { addDays, diffDays, today, type ISODate } from '../../shared/dates';
 import { fromMinor, toMinor } from '../../shared/money';
+import { parseTaxYear, taxYearOf } from '../../shared/uk';
 import type { BalanceBasis } from '../../shared/api';
 import type { Account, BalanceEvidence, BalanceSnapshot, Figure, HoldingsSnapshot, Settings, Transaction } from '../../shared/schema';
 import type { Store } from '../store';
@@ -41,6 +42,8 @@ interface Anchor {
   at?: string;
   /** Seen mid-day with rows of its day that may come after it: weak for gap checks. */
   midDay?: boolean;
+  /** Interest the provider says it added in the tax year starting `from`, up to this day (`taxYearInterest`). */
+  interest?: { from: ISODate; minor: number };
 }
 
 /**
@@ -389,7 +392,8 @@ export class BalanceEngine {
       for (const s of real) {
         const source = s.kind === 'screenshot' && s.enteredBy !== 'user' ? 'screenshot' : 'snapshot';
         const at = timeOnDay(s);
-        const next: Anchor = { date: s.date, minor: toMinor(s.balance) + plusCash(s), source, ...(at ? { at } : {}) };
+        const interest = s.taxYearInterest !== undefined ? { interest: { from: (s.taxYear ? parseTaxYear(s.taxYear) : null)?.start ?? taxYearOf(s.date).start, minor: toMinor(s.taxYearInterest) } } : {};
+        const next: Anchor = { date: s.date, minor: toMinor(s.balance) + plusCash(s), source, ...(at ? { at } : {}), ...interest };
         const current = anchors.get(s.date);
         if (!current || outranks(next, current)) anchors.set(s.date, next);
       }
@@ -702,8 +706,9 @@ export class BalanceEngine {
     const out: Anchor[] = [];
     if (d && d.mode === 'ledger' && d.tx.dates.length > 0) {
       const strong = d.anchors.filter(isStrong);
-      // The balance at a day's close, carried from an anchor forwards or back by the rows between.
-      const closeOf = (a: Anchor, day: ISODate) => a.minor + (sumTo(d.tx, day) - sumTo(d.tx, a.date));
+      // The balance at a day's close, carried from an anchor forwards or back by the rows between
+      // and the interest the documents say was added between (statedInterest).
+      const closeOf = (a: Anchor, day: ISODate, b: Anchor) => a.minor + (sumTo(d.tx, day) - sumTo(d.tx, a.date)) - (a.date < b.date ? this.statedInterest(d, a, b) : -this.statedInterest(d, b, a));
       for (const a of d.anchors) {
         if (a.source === 'approximate') continue;
         if (isStrong(a)) {
@@ -713,8 +718,9 @@ export class BalanceEngine {
         const ref = out.at(-1) ?? strong.find((s) => s.date > a.date);
         if (!ref) continue;
         const dayBefore = addDays(a.date, -1);
-        if (closeOf(ref, a.date) === a.minor) out.push({ date: a.date, minor: a.minor, source: a.source });
-        else if (closeOf(ref, dayBefore) === a.minor && out.at(-1)?.date !== dayBefore) out.push({ date: dayBefore, minor: a.minor, source: a.source });
+        const kept = { minor: a.minor, source: a.source, ...(a.interest ? { interest: a.interest } : {}) };
+        if (closeOf(ref, a.date, a) === a.minor) out.push({ date: a.date, ...kept });
+        else if (closeOf(ref, dayBefore, a) === a.minor && out.at(-1)?.date !== dayBefore) out.push({ date: dayBefore, ...kept });
       }
     }
     this.usable.set(accountId, out);
@@ -723,7 +729,20 @@ export class BalanceEngine {
 
   private unexplained(accountId: string, a: Anchor, b: Anchor): { from: ISODate; to: ISODate; difference: number } {
     const d = this.data.get(accountId)!;
-    const expected = a.minor + (sumTo(d.tx, b.date) - sumTo(d.tx, a.date));
+    const expected = a.minor + (sumTo(d.tx, b.date) - sumTo(d.tx, a.date)) - this.statedInterest(d, a, b);
     return { from: a.date, to: b.date, difference: fromMinor(b.minor - expected) };
+  }
+
+  /**
+   * Interest the documents say was added between two balances of an account whose interest is not
+   * listed as movements (docs/FORMULAS.md §9, "Gaps"), in pence: what the tax year's total grew by
+   * when both give it for the same year, or all of the later one's when the earlier balance is
+   * before its year began. Nothing otherwise, or when the total went down.
+   */
+  private statedInterest(d: AccountData, a: Anchor, b: Anchor): number {
+    if (!ACCOUNT_TYPE_META[d.account.type].interestUnrecorded || !b.interest) return 0;
+    if (a.date < b.interest.from) return b.interest.minor;
+    if (a.interest?.from !== b.interest.from) return 0;
+    return Math.max(0, b.interest.minor - a.interest.minor);
   }
 }

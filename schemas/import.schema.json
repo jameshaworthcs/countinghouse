@@ -896,6 +896,18 @@
                       }
                     ]
                   },
+                  "taxYearInterest": {
+                    "default": null,
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "cashBalance": {
                     "default": null,
                     "anyOf": [
@@ -2763,6 +2775,18 @@
                       }
                     ]
                   },
+                  "taxYearInterest": {
+                    "default": null,
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "cashBalance": {
                     "default": null,
                     "anyOf": [
@@ -4573,6 +4597,10 @@
                 "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
               },
               "taxYearContributions": {
+                "type": "number",
+                "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+              },
+              "taxYearInterest": {
                 "type": "number",
                 "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
               },

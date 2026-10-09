@@ -12,7 +12,7 @@ const NI = /[A-Z]{2} ?\d{2} ?\d{2} ?\d{2} ?[A-D]/;
 
 describe('the reader, reading everything', () => {
   it('is a prompt version of its own, with five more rules and their part of the schema', () => {
-    expect([promptVersion(false), promptVersion(true)]).toEqual(['extract-11', 'extract-15']);
+    expect([promptVersion(false), promptVersion(true)]).toEqual(['extract-12', 'extract-16']);
     expect(systemPrompt(false)).not.toMatch(/^20\. payslips/m);
     expect(systemPrompt(false)).not.toMatch(/^24\. schedules/m);
     expect(systemPrompt(true)).toMatch(/^20\. payslips:/m);

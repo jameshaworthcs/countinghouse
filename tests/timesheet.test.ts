@@ -178,7 +178,7 @@ describe('importing a timesheet', () => {
     const rec = await upload();
     expect(rec.extraction.error).toBeUndefined();
     expect(rec.status).toBe('review');
-    expect(rec.extraction).toMatchObject({ engine: 'claude-cli', engineVersion: 'xlsx-1+extract-11', detail: '3 sheets, claude-sonnet-5-5' });
+    expect(rec.extraction).toMatchObject({ engine: 'claude-cli', engineVersion: 'xlsx-1+extract-12', detail: '3 sheets, claude-sonnet-5-5' });
     // One reading: the sheets confirmed it, so no second one.
     expect(rec.extraction.verification).toMatchObject({ method: 'checks' });
     const [call, ...more] = await calls();

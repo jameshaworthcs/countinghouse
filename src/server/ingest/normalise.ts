@@ -22,6 +22,7 @@ const MONEY_KEYS = new Set([
   'gainLoss',
   'governmentBonusToDate',
   'taxYearContributions',
+  'taxYearInterest',
   'cashBalance',
   'annualIncome',
   'costBasis',

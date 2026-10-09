@@ -102,6 +102,7 @@ export function assessReading(
     if (!settled.length && s.balance !== undefined && !(s.holdings.length && passed.has('holdings'))) unconfirmed.push(`${label}: a balance with nothing to check it against`);
     if (s.holdings.length && !passed.has('holdings')) unconfirmed.push(`${label}: holdings with no total to check them against`);
     if ([s.contributions, s.bonusToDate, s.taxYearContributions, s.gain, s.annualIncome].some((v) => v !== undefined)) unconfirmed.push(`${label}: contribution and allowance figures`);
+    if (s.taxYearInterest !== undefined) unconfirmed.push(`${label}: the interest added this tax year`);
   });
   // A payslip read in full confirms its own figures when it adds up (its lines to its totals, its
   // totals to its net pay) and the figures read are what its lines say (ingest/payslips.ts).
@@ -160,6 +161,7 @@ export function compareReadings(first: Draft, second: Draft, names: { first: str
       ['total paid in', a.contributions, b.contributions],
       ['LISA bonus', a.bonusToDate, b.bonusToDate],
       ['paid in this tax year', a.taxYearContributions, b.taxYearContributions],
+      ['interest added this tax year', a.taxYearInterest, b.taxYearInterest],
       ['cash', a.cash, b.cash],
       ['credit limit', a.creditLimit, b.creditLimit],
       ['income per year', a.annualIncome, b.annualIncome],

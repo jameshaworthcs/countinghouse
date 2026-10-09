@@ -2458,3 +2458,15 @@ counts too. In production it refuses to start and points at `npm run init-data`;
 leaves the data as it is and commits nothing, saying why in Settings → Data & git. The owner's own
 installation used that layout until its data moved to a data repository, which is when this check
 went live.
+
+## 2026-10-09: A student loan's interest comes from its tax-year total
+
+A student loan's documents list no interest as movements: its balance page shows the balance and a
+summary of the tax year so far ("since 6 April": repayments and interest added). The gap check
+took every month's interest between two of its balances for a missing statement. Each balance now
+keeps that summary's interest (`taxYearInterest`, format 11), and the gap check counts what it grew
+by between two balances as interest ([FORMULAS.md](FORMULAS.md) §9, "Gaps"). It is the
+document's own figure, so a gap it leaves is still shown. The alternative, not treating a growing
+debt as a gap at all, would also have hidden an instalment of the loan that was never recorded.
+The summary is still never a transaction. Balances recorded before are backfilled from their
+stored readings: the printed figure, or a note that gives it with its tax year.

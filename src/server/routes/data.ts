@@ -114,6 +114,7 @@ const ManualBalance = z.object({
   cash: MoneySchema.optional(),
   bonusToDate: MoneySchema.optional(),
   taxYearContributions: MoneySchema.optional(),
+  taxYearInterest: MoneySchema.optional(),
   taxYear: z
     .string()
     .regex(/^\d{4}\/\d{2}$/)

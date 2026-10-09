@@ -382,7 +382,9 @@ years), both paths grow at the median:
   account's £0, rests on none.
 - An account whose interest its documents do not list as movements (a student loan,
   `interestUnrecorded`) has every balance but a statement's own day flagged estimated: worked out
-  from its movements (instalments lent and fees paid), it leaves the interest out.
+  from its movements (instalments lent and fees paid), it leaves the interest out. Its documents
+  give the interest only as a total for the tax year so far (`taxYearInterest`), which the gap
+  check uses (**Gaps**).
 - Prefix sums and binary search make each lookup O(log n).
 
 **Market accounts:**
@@ -452,8 +454,16 @@ years), both paths grow at the median:
 
 **Gaps:**
 
-- Consecutive usable anchors with anchor_b ≠ anchor_a + Σ tx in (a, b], each transaction on the
-  day it counts from.
+- Consecutive usable anchors with anchor_b ≠ anchor_a + Σ tx in (a, b] − interest(a, b), each
+  transaction on the day it counts from.
+- interest(a, b) is the interest the documents say was added between them, on an account whose
+  interest is not listed as movements (`interestUnrecorded`, a student loan), from each balance's
+  `taxYearInterest` (the total added in its tax year up to its day):
+  - both in one tax year: b's total − a's, when that is not below nothing;
+  - a before b's tax year began (before 6 April): all of b's total;
+  - otherwise, or without b's total, or on any other account: nothing.
+
+  A screenshot's balance adds up (below) with the same interest counted.
 - Usable anchors are the strong ones (not screenshots or approximate figures), and each weak one
   that adds up exactly (`usableAnchors`).
 - A balance seen mid-day (`at`) is strong only when every row of its day shows a time no later

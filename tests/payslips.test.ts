@@ -270,7 +270,7 @@ describe('format v6 migration', () => {
         // The student loan line was left out.
       ];
       await writeFile(path.join(data, 'figures.jsonl'), `${figures.map((f) => JSON.stringify(f)).join('\n')}\n`);
-      expect(await runMigrations(data, () => undefined)).toMatchObject({ from: 5, to: 10 });
+      expect(await runMigrations(data, () => undefined)).toMatchObject({ from: 5, to: 11 });
 
       const store = await Store.open(data);
       expect(store.issues).toEqual([]);

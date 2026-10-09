@@ -338,6 +338,12 @@ export const BalanceSnapshotSchema = z.object({
   bonusToDate: MoneySchema.optional(),
   /** Provider-reported contributions/subscriptions in `taxYear` (e.g. ISA allowance used). */
   taxYearContributions: MoneySchema.optional(),
+  /**
+   * Interest added in `taxYear` up to `date`, as the provider reports it: a student loan's summary
+   * of the tax year so far. Positive; it adds to what you owe. The gap check counts what it grew by
+   * between two balances as interest (docs/FORMULAS.md §9, "Gaps").
+   */
+  taxYearInterest: MoneySchema.optional(),
   taxYear: z
     .string()
     .regex(/^\d{4}\/\d{2}$/)
@@ -1372,6 +1378,8 @@ export const ExtractedAccountSchema = z.object({
   gainLoss: MoneySchema.nullable().default(null),
   governmentBonusToDate: MoneySchema.nullable().default(null),
   taxYearContributions: MoneySchema.nullable().default(null),
+  /** Interest added since 6 April, from a student loan's summary of the tax year so far (positive). */
+  taxYearInterest: MoneySchema.nullable().default(null),
   cashBalance: MoneySchema.nullable().default(null),
   annualIncome: MoneySchema.nullable().default(null),
   interestRate: z.number().nullable().default(null),
@@ -1636,6 +1644,7 @@ export const DraftSectionSchema = z.object({
   cash: MoneySchema.optional(),
   bonusToDate: MoneySchema.optional(),
   taxYearContributions: MoneySchema.optional(),
+  taxYearInterest: MoneySchema.optional(),
   annualIncome: MoneySchema.optional(),
   interestRate: z.number().optional(),
   /** Its terms in detail, when the reading gives them: with the limit and the rate, kept as a terms record. */

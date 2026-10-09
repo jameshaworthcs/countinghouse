@@ -175,6 +175,7 @@ export function parseOfx(text: string): Extraction {
       gainLoss: null,
       governmentBonusToDate: null,
       taxYearContributions: null,
+      taxYearInterest: null,
       cashBalance: null,
       annualIncome: null,
       interestRate: null,
