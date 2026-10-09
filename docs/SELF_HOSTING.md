@@ -156,8 +156,10 @@ Changing the password, the OIDC client or the allowed addresses signs everyone o
 ## The demo in a codespace
 
 The README's "Open in GitHub Codespaces" button runs the demo in the visitor's own codespace
-(`.devcontainer/`): `npm ci` when it is created, then `npm run demo` on `127.0.0.1:4770` each time it
-starts (log in `.work/codespace-demo.log`), with port 4770 forwarded and opened in the browser. It
+(`.devcontainer/`): `npm ci` when it is created, then `npm run demo` on `127.0.0.1:4770` in a terminal
+each time the editor attaches (`postAttachCommand`: Codespaces kills what a `postStartCommand`
+leaves running in the background), with port 4770 forwarded and opened in the browser. Closing that
+terminal stops the demo; `bash .devcontainer/start-demo.sh` starts it again. It
 has no prebuilds, so it costs the repository nothing; no Claude, no local model and no real data.
 
 GitHub's port forwarding reaches the app on loopback, with `Host: localhost:4770`, the codespace's
