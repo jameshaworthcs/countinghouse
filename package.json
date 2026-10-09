@@ -79,7 +79,7 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.1",
-    "concurrently": "^10.0.5",
+    "concurrently": "^10.0.6",
     "eslint": "^9.39.5",
     "eslint-plugin-react-hooks": "^7.1.1",
     "fast-check": "^4.10.2",
