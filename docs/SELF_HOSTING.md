@@ -153,6 +153,35 @@ One user, `FINANCE_USERNAME`, signs in one of two ways; a server uses exactly on
 Changing the password, the OIDC client or the allowed addresses signs everyone out, as does a new
 `FINANCE_SESSION_SECRET`.
 
+## The demo in a codespace
+
+The README's "Open in GitHub Codespaces" button runs the demo in the visitor's own codespace
+(`.devcontainer/`): `npm ci` when it is created, then `npm run demo` on `127.0.0.1:4770` in a terminal
+each time the editor attaches (`postAttachCommand`: Codespaces kills what a `postStartCommand`
+leaves running in the background), with port 4770 forwarded and opened in the browser. Closing that
+terminal stops the demo; `bash .devcontainer/start-demo.sh` starts it again. It
+has no prebuilds, so it costs the repository nothing; no Claude, no local model and no real data.
+
+GitHub's port forwarding reaches the app on loopback, with `Host: localhost:4770`, the codespace's
+address in `X-Forwarded-Host`, and `X-Forwarded-For`/`-Proto`. So the app sees a proxied request,
+which needs a login, and the cookie stays `Secure`. It also rewrites the `Origin` of the page's own
+requests to `http://localhost:4770` (other origins pass through unchanged), which the CSRF check
+would refuse. The devcontainer sets `FINANCE_DEMO_CODESPACE=1` for both (`src/server/codespace.ts`):
+
+- **A throwaway login.** User `demo` with a random password, made at each start, kept in memory
+  only, and shown on the sign-in page with a "Fill in" button. Anyone who can open the page can
+  read it: the data is invented, and the port is private to the codespace's owner unless they make
+  it public.
+- **The proxy's Origin.** The CSRF check also accepts an `Origin` of `http://` + the `Host`, on a
+  proxied request to a loopback `Host`. The `x-finance-csrf` header is still required, and every
+  other guard is unchanged: `FINANCE_ALLOWED_HOSTS` stays empty, because the proxy never sends the
+  public host as `Host`.
+
+The app refuses to start with `FINANCE_DEMO_CODESPACE=1` unless the data already exists, is not
+tracked in git, and its directory's name contains `demo`, and unless no login of its own
+(`FINANCE_USERNAME`, `FINANCE_PASSWORD_HASH`, `FINANCE_OIDC_CLIENT_ID`) is set. Never set it
+anywhere else.
+
 ## Agent access
 
 Agents (a Claude Code session on the server, a script) use the live API with a token, without you

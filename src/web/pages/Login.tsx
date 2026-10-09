@@ -11,6 +11,8 @@ interface AuthStatus {
   /** The identity provider's name (FINANCE_OIDC_NAME), when sign-in goes through one. */
   provider: string | null;
   user: string | null;
+  /** The demo's throwaway login in a GitHub codespace: only ever set there, over invented data. */
+  demoLogin?: { username: string; password: string } | null;
 }
 
 /** Why an OIDC sign-in came back here (the callback's ?error= codes), in the provider's name. */
@@ -53,7 +55,7 @@ export function Login() {
 
   if (!status.data || signedIn) return <Panel>{status.error ? <Callout tone="bad">{status.error.message}</Callout> : <Loading />}</Panel>;
   if (status.data.method === 'oidc') return <OidcLogin provider={status.data.provider ?? 'your identity provider'} target={target} error={params.get('error')} signedOut={params.has('signedout')} />;
-  return <PasswordLogin target={target} signedOut={params.has('signedout')} />;
+  return <PasswordLogin target={target} signedOut={params.has('signedout')} demoLogin={status.data.demoLogin ?? null} />;
 }
 
 /**
@@ -84,7 +86,7 @@ function OidcLogin({ provider, target, error, signedOut }: { provider: string; t
   );
 }
 
-function PasswordLogin({ target, signedOut }: { target: string; signedOut: boolean }) {
+function PasswordLogin({ target, signedOut, demoLogin }: { target: string; signedOut: boolean; demoLogin: AuthStatus['demoLogin'] }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -114,6 +116,30 @@ function PasswordLogin({ target, signedOut }: { target: string; signedOut: boole
     <Panel>
       <form onSubmit={(e) => void submit(e)} className="flex flex-col gap-3.5">
         {signedOut && !error && <Callout tone="neutral">You’ve signed out.</Callout>}
+        {demoLogin && (
+          <Callout
+            tone="accent"
+            title="Demo login"
+            action={
+              <Button
+                size="sm"
+                onClick={() => {
+                  setUsername(demoLogin.username);
+                  setPassword(demoLogin.password);
+                }}
+              >
+                Fill in
+              </Button>
+            }
+          >
+            <div>
+              Username <code className="font-mono text-ink select-all">{demoLogin.username}</code>
+            </div>
+            <div>
+              Password <code className="font-mono whitespace-nowrap text-ink select-all">{demoLogin.password}</code>
+            </div>
+          </Callout>
+        )}
         <Field label="Username">
           <Input autoComplete="username" autoFocus value={username} onChange={(e) => setUsername(e.target.value)} required />
         </Field>

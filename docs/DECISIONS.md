@@ -2470,3 +2470,18 @@ document's own figure, so a gap it leaves is still shown. The alternative, not t
 debt as a gap at all, would also have hidden an instalment of the loan that was never recorded.
 The summary is still never a transaction. Balances recorded before are backfilled from their
 stored readings: the printed figure, or a note that gives it with its tax year.
+
+## 2026-10-09: The demo opens in a codespace, with a throwaway login
+
+An "Open in GitHub Codespaces" button runs the demo in the visitor's own codespace, so anyone with a
+GitHub account can try it without the owner hosting anything. A probe in a real codespace showed
+how GitHub forwards the port: from loopback, with `Host: localhost:<port>`, the public address in
+`X-Forwarded-Host`, `X-Forwarded-For`/`-Proto` set, and the page's own `Origin` rewritten to
+`http://localhost:<port>`. So the app needs a login (the request is proxied), and the CSRF Origin
+check refused every write, signing in included. With the owner's agreement, one setting,
+`FINANCE_DEMO_CODESPACE=1`, set only by `.devcontainer/`, makes a throwaway login shown on the
+sign-in page and accepts that Origin on a proxied request to a loopback Host. It is refused unless
+the data exists, is untracked and is a demo directory, and unless no login of its own is set, so it
+can never apply to real data or show a real credential. Considered instead: VS Code's port
+forwarding to the visitor's own localhost (no guard change, but no one-click page), and loosening
+the Origin check for everyone (it would have weakened the live site for a demo).

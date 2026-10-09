@@ -79,21 +79,28 @@ export const CSRF_HEADER = 'x-finance-csrf';
 /**
  * Mutating API calls must carry a custom header (which a cross-site page cannot send without a CORS
  * preflight this server never grants) and, when present, a same-origin Origin header.
+ *
+ * `codespace` (the demo in a GitHub codespace only; codespace.ts): GitHub's proxy rewrites the
+ * Origin of the page's own requests to `http://localhost:<port>`, the Host it sends, and passes any
+ * other Origin through unchanged. That Origin is accepted too, on a proxied request to a loopback Host.
  */
-export function csrfGuard(): MiddlewareHandler {
+export function csrfGuard(opts: { codespace?: boolean } = {}): MiddlewareHandler {
   return async (c, next) => {
     if (SAFE_METHODS.has(c.req.method) || !c.req.path.startsWith('/api/')) return next();
     if (c.req.header(CSRF_HEADER) !== '1') return c.json({ error: 'Missing CSRF header' }, 403);
     const origin = c.req.header('origin');
     if (origin) {
-      let originHost = '';
+      let originUrl: URL;
       try {
-        originHost = new URL(origin).host.toLowerCase();
+        originUrl = new URL(origin);
       } catch {
         return c.json({ error: 'Bad Origin' }, 403);
       }
-      const host = (c.req.header('x-forwarded-host') && isProxied(c) ? c.req.header('x-forwarded-host') : c.req.header('host'))?.toLowerCase();
-      if (originHost !== host) return c.json({ error: 'Cross-origin request refused' }, 403);
+      const originHost = originUrl.host.toLowerCase();
+      const hostHeader = c.req.header('host')?.toLowerCase();
+      const host = (c.req.header('x-forwarded-host') && isProxied(c) ? c.req.header('x-forwarded-host') : hostHeader)?.toLowerCase();
+      const codespaceOrigin = Boolean(opts.codespace) && isProxied(c) && originUrl.protocol === 'http:' && originHost === hostHeader && isLoopbackHost(hostname(hostHeader));
+      if (originHost !== host && !codespaceOrigin) return c.json({ error: 'Cross-origin request refused' }, 403);
     }
     await next();
   };

@@ -8,7 +8,8 @@ import { ZodError } from 'zod';
 import { JobRunner, type JobRecord } from './agents/jobs';
 import { Analytics } from './analytics';
 import { AuditLog, auditRequests, DeviceNames, runAs } from './audit';
-import { Auth, loadSessionSecret } from './auth';
+import { Auth, hashPassword, loadSessionSecret } from './auth';
+import { codespaceRefusal, codespaceRequested, newDemoLogin, type DemoLogin } from './codespace';
 import { categoriseInvestmentRows, refreshPlaces } from './enrich';
 import type { Config } from './config';
 import type { AppContext } from './context';
@@ -66,6 +67,15 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
   // request to start an empty one: refuse rather than quietly create and commit a blank dataset.
   if (config.production && !config.initData && !existsSync(path.join(config.dataDir, 'meta.json'))) {
     throw new Error(`No data directory at ${config.dataDir}. Check FINANCE_DATA_DIR, or set FINANCE_INIT_DATA=1 to create a new one.`);
+  }
+  // The demo in a codespace makes its own throwaway login (codespace.ts). Refused over real data
+  // before anything else, so nothing (a migration, start-up's tidying) has touched it.
+  let demoLogin: DemoLogin | undefined;
+  if (codespaceRequested(env)) {
+    const tracked = (await GitCommitter.create(config.dataDir, () => false)).tracked;
+    const why = codespaceRefusal({ dataDir: config.dataDir, exists: existsSync(path.join(config.dataDir, 'meta.json')), tracked, env });
+    if (why) throw new Error(why);
+    demoLogin = newDemoLogin();
   }
   // Who did what, beside git's history: open first, so start-up's own changes are in it too.
   const audit = AuditLog.open(path.join(config.workDir, 'audit'));
@@ -138,8 +148,8 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
   }
   const oidc = oidcSettings ? new OidcClient(oidcSettings) : undefined;
   const auth = new Auth({
-    username: env.FINANCE_USERNAME,
-    passwordHash: env.FINANCE_PASSWORD_HASH,
+    username: demoLogin?.username ?? env.FINANCE_USERNAME,
+    passwordHash: demoLogin ? await hashPassword(demoLogin.password) : env.FINANCE_PASSWORD_HASH,
     oidcIdentity: oidcSettings ? [oidcSettings.issuer, oidcSettings.clientId, ...oidcSettings.allowedEmails].join(' ') : undefined,
     secret: await loadSessionSecret(env, config.workDir),
   });
@@ -185,7 +195,7 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
   const ask = new AskService(store, analytics, config, sessions, audit);
   await ask.init();
 
-  const ctx: AppContext = { config, store, analytics, imports, proposals, git, auth, oidc, inbox, jobs: runner, runner, tokens, audit, sessions, ask, devices, version: opts.version };
+  const ctx: AppContext = { config, store, analytics, imports, proposals, git, auth, oidc, inbox, jobs: runner, runner, tokens, audit, sessions, ask, devices, demoLogin, version: opts.version };
   const app = new Hono();
   const secOpts = { allowedHosts: config.allowedHosts, production: config.production };
 
@@ -193,7 +203,7 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
   app.use('*', hostGuard(secOpts));
   // Before the guards, so what they refuse is recorded too.
   app.use('/api/*', auditRequests(audit, { auth, tokens, devices }));
-  app.use('/api/*', csrfGuard());
+  app.use('/api/*', csrfGuard({ codespace: Boolean(demoLogin) }));
   app.use('/api/*', authGate(auth, tokens));
   // With OIDC, opening any page signed out goes straight to the provider. (The SPA does the same for
   // the pages Vite serves in development.) /login stays reachable: it explains failed sign-ins.

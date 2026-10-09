@@ -16,6 +16,7 @@ import type { AskService } from './ask';
 import type { SessionLog } from './sessions';
 import { StoreError, type Store } from './store';
 import type { AgentTokens } from './tokens';
+import type { DemoLogin } from './codespace';
 
 /** What routes need from the agent job runner (src/server/agents/jobs.ts). */
 export interface JobQueue {
@@ -51,6 +52,8 @@ export interface AppContext {
   ask?: AskService | undefined;
   /** Names the tailnet device behind an address, when on. */
   devices?: DeviceNames | undefined;
+  /** The demo's throwaway login in a codespace (codespace.ts), shown on the sign-in form. */
+  demoLogin?: DemoLogin | undefined;
   version: string;
 }
 

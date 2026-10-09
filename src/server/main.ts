@@ -46,7 +46,8 @@ const server = serve({ fetch: app.fetch.bind(app), hostname: config.host, port: 
   console.log(`finance ${version}${commit ? ` (${commit})` : ''} listening on ${url}`);
   console.log(`  data:   ${config.dataDir}${ctx.git.enabled ? ' (git auto-commit on)' : ' (not committed to git)'}`);
   console.log(`  inbox:  ${config.inboxDir}`);
-  console.log(`  login:  ${loginMethod ? `required (user ${process.env.FINANCE_USERNAME}, ${loginMethod})` : 'not configured: only direct local access is allowed'}`);
+  if (ctx.demoLogin) console.log(`  login:  demo codespace (user ${ctx.demoLogin.username}, a throwaway password shown on the sign-in page)`);
+  else console.log(`  login:  ${loginMethod ? `required (user ${process.env.FINANCE_USERNAME}, ${loginMethod})` : 'not configured: only direct local access is allowed'}`);
   if (config.allowedHosts.length) console.log(`  hosts:  ${config.allowedHosts.join(', ')}`);
   if (ctx.store.issues.length) console.log(`  ⚠ ${ctx.store.issues.length} data issue(s); see Settings → Data health`);
   void ctx.git.status().then((g) => {
