@@ -4,6 +4,10 @@
   "private": true,
   "description": "Private, local-first UK personal finance tracker: ingest statements and screenshots into git-versioned structured data.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jameshaworthcs/countinghouse.git"
+  },
   "type": "module",
   "engines": {
     "node": ">=22.18"
