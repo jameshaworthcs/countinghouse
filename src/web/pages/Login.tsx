@@ -119,7 +119,7 @@ function PasswordLogin({ target, signedOut, demoLogin }: { target: string; signe
         {demoLogin && (
           <Callout
             tone="accent"
-            title="Demo"
+            title="Demo login"
             action={
               <Button
                 size="sm"
@@ -132,7 +132,12 @@ function PasswordLogin({ target, signedOut, demoLogin }: { target: string; signe
               </Button>
             }
           >
-            Username <code className="font-mono text-ink">{demoLogin.username}</code>, password <code className="font-mono break-all text-ink">{demoLogin.password}</code>
+            <div>
+              Username <code className="font-mono text-ink select-all">{demoLogin.username}</code>
+            </div>
+            <div>
+              Password <code className="font-mono whitespace-nowrap text-ink select-all">{demoLogin.password}</code>
+            </div>
           </Callout>
         )}
         <Field label="Username">
