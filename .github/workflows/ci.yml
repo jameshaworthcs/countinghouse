@@ -12,7 +12,8 @@ permissions:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest moves to a new release on GitHub's schedule; change this on purpose.
+    runs-on: ubuntu-24.04
     env:
       # What this push or pull request adds: from its base, when git has it.
       BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
