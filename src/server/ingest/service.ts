@@ -40,7 +40,7 @@ import { commitDraft } from './commit';
 import { linkTransfers } from '../enrich';
 import { BUILTIN_CSV_PROFILES } from './csv-profiles';
 import { candidateOf, classifyDuplicates, recheckDraft } from './dedup';
-import { compareReading } from './reread';
+import { compareReading, newPrinted } from './reread';
 import { CSV_ENGINE_VERSION, findProfile, parseWithProfile, readCsvRows, suggestMapping, withCardSigns } from './csv';
 import { HOLDINGS_CSV_VERSION, parseHoldingsCsv } from './holdings-csv';
 import { PENSION_CSV_VERSION, parseContributionsCsv, parseFundTradesCsv } from './pension-csv';
@@ -797,6 +797,8 @@ export class ImportService extends EventEmitter {
       const read = await this.readDocument(ctx, kind === 'xlsx' ? 'sheet' : kind, bytes, file, { startedBy }, abort.signal, `reread-${record.id}`, undefined, 'reread');
       const draft = read.verified?.draft ?? this.draftOf(ctx, read.result);
       const { sections, notes } = compareReading(this.store, record, draft);
+      // What it prints that the import does not keep: a reader from before "read everything" kept none.
+      const printed = newPrinted(record, read.result.extraction.printed);
       await this.saveReread({
         ...reread,
         status: 'done',
@@ -807,6 +809,7 @@ export class ImportService extends EventEmitter {
         engineVersion: read.engineVersion,
         costUsd: Math.round(((read.result.costUsd ?? 0) + (read.verified?.otherCostUsd ?? 0)) * 1000) / 1000,
         sections,
+        ...(printed.length ? { printed } : {}),
         notes: [...notes, ...read.result.warnings, ...(read.verified?.verification.disagreements.length ? [`The two readings disagreed: ${read.verified.verification.disagreements.join('; ')}`] : [])],
       });
     } catch (err) {
@@ -817,7 +820,8 @@ export class ImportService extends EventEmitter {
   /**
    * Apply one difference a re-reading found, as you chose: a changed row is corrected (what was
    * recorded is kept in its corrections), a row read now is added, a balance is set to the new
-   * reading. Never a deletion: a row missing from the new reading is yours to look at.
+   * reading, and the values it prints that the import did not keep are kept with it (`printed`).
+   * Never a deletion: a row missing from the new reading is yours to look at.
    */
   async applyReread(importId: string, key: string): Promise<Reread> {
     const reread = this.rereads.get(importId);
@@ -826,6 +830,17 @@ export class ImportService extends EventEmitter {
     if (!record) throw new StoreError('Unknown import', 404);
     const note = reread.layout ? `Read again with ${reread.layout}` : `Read again with ${reread.engineVersion ?? 'the current reader'}${reread.model ? ` (${shortModel(reread.model)})` : ''}`;
     const at = nowISO();
+    if (key === 'printed' && reread.printed?.length && !reread.printedApplied) {
+      // Only what is still not kept: the same reading applied twice, or another applied meanwhile.
+      const printed = newPrinted(record, reread.printed);
+      if (printed.length) {
+        const added = { at, engineVersion: reread.engineVersion ?? 'the current reader', ...(reread.model ? { model: reread.model } : {}), ...(reread.inference ? { inference: reread.inference } : {}), printed };
+        await this.store.saveImport({ ...record, readAgain: [...(record.readAgain ?? []), added] }, `import: ${importId} printed values kept from reading it again`);
+      }
+      reread.printedApplied = true;
+      await this.saveReread(reread);
+      return reread;
+    }
     for (const section of reread.sections) {
       if (key === `balance:${section.accountId}` && section.balance?.read && section.balance.changed && !section.balance.applied) {
         const b = section.balance;
@@ -871,7 +886,7 @@ export class ImportService extends EventEmitter {
           `transaction: added from ${record.document.fileName} read again`,
         );
       } else {
-        throw new StoreError('Only a changed row, a row read now, or a changed balance can be applied.', 409);
+        throw new StoreError('Only a changed row, a row read now, a changed balance or the printed values can be applied.', 409);
       }
       row.applied = true;
       await this.saveReread(reread);

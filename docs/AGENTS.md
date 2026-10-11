@@ -413,7 +413,8 @@ Other behaviour:
 - **Naming imports has its own switch.** Settings → Agents → "Name imports with the agent" is off by
   default, and while it is off no one can start `label-imports`, you included. On, it starts by
   itself without "Let agents start jobs by themselves" (within the background budget), and Import →
-  History offers to name the imports from before, up to 40 a job. History and an import's page
+  History offers to name the imports from before, up to 40 a job. An unnamed import's own page
+  offers to name that one alone (the same job, with its `importIds`). History and an import's page
   show the name, with the file name beside it; you can rename an import or take its name away
   there (`PUT /api/imports/:id/label`, which no token can reach).
   - **An import is named once.** A run never replaces a name, Claude's or yours; to have Claude name

@@ -7,7 +7,7 @@ import type { RereadRow, RereadSection } from '../../shared/api';
 import { diffDays } from '../../shared/dates';
 import { descriptionKey } from '../../shared/merchants';
 import { toMinor } from '../../shared/money';
-import type { Draft, ImportRecord, Transaction } from '../../shared/schema';
+import type { Draft, ImportRecord, PrintedValue, Transaction } from '../../shared/schema';
 import type { Store } from '../store';
 import { classifyDuplicates, similarity } from './dedup';
 
@@ -118,4 +118,21 @@ export function compareReading(store: Store, record: ImportRecord, draft: Draft,
     if (recorded.length) sections.push({ accountId: id, accountName: store.account(id)?.name ?? id, rows: recorded.map((t) => ({ key: `m-${t.id}`, kind: 'missing' as const, stored: pick(t) })), balance: null });
   }
   return { sections, notes };
+}
+
+/** A printed value as compared: its label and value, whatever the case, spacing or trailing colon. */
+const printedKey = (p: PrintedValue) => [p.label, p.value].map((x) => x.toLowerCase().replace(/\s+/g, ' ').replace(/[\s:]+$/, '').trim()).join('|');
+
+/**
+ * The values a new reading found printed that the import does not keep yet: not in what it was read
+ * with, nor in what an earlier re-reading added. The heading they are under does not tell two apart.
+ */
+export function newPrinted(record: ImportRecord, printed: PrintedValue[]): PrintedValue[] {
+  const kept = new Set([...(record.extraction.raw?.printed ?? []), ...(record.readAgain ?? []).flatMap((r) => r.printed)].map(printedKey));
+  return printed.filter((p) => {
+    const key = printedKey(p);
+    if (kept.has(key)) return false;
+    kept.add(key);
+    return true;
+  });
 }

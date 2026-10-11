@@ -10,7 +10,7 @@ import { loadConfig } from '../src/server/config';
 import { sha256 } from '../src/server/fsutil';
 import { documentId } from '../src/server/ids';
 import { parseWithProfile, readCsvRows, suggestMapping } from '../src/server/ingest/csv';
-import { compareRows } from '../src/server/ingest/reread';
+import { compareRows, newPrinted } from '../src/server/ingest/reread';
 import { ImportService } from '../src/server/ingest/service';
 import { WorkArea } from '../src/server/ingest/workarea';
 import { Store } from '../src/server/store';
@@ -58,6 +58,38 @@ describe('comparing a new reading with what was recorded', () => {
       ['added', null, null],
     ]);
     expect(compareRows([{ date: '2026-09-22', amount: -48.15, description: 'ATM' }], [statement], 'imp_a')).toEqual([expect.objectContaining({ kind: 'added', maybe: { id: 'tx_9', date: '2026-09-20', amount: -48.15, description: 'Cash withdrawal, Bank, Faro' } })]);
+  });
+});
+
+describe('values a new reading found printed', () => {
+  const record = (printed: { section?: string; label: string; value: string }[], readAgain?: ImportRecord['readAgain']): ImportRecord => ({
+    id: 'imp_20260920_120000_0002',
+    status: 'committed',
+    createdAt: stamp,
+    updatedAt: stamp,
+    origin: 'upload',
+    document: { id: 'doc_0000000000000002', sha256: '0'.repeat(64), fileName: 'notice.pdf', mediaType: 'application/pdf', size: 1 },
+    extraction: { warnings: [], raw: ExtractionSchema.parse({ documentType: 'other', printed }) },
+    ...(readAgain ? { readAgain } : {}),
+  });
+
+  it('are those the import does not keep: not in its reading, nor in what an earlier re-reading added', () => {
+    const rec = record([{ label: 'Company number', value: '00000001' }], [{ at: stamp, engineVersion: 'extract-15', printed: [{ label: 'Held at', value: '1 Example Street' }] }]);
+    const read = [
+      // Kept already, however it is written now, or under whatever heading.
+      { label: 'Company Number:', value: '00000001' },
+      { section: 'Meeting', label: 'held at', value: '1  Example Street' },
+      { label: 'Directors present', value: 'Jo Bloggs' },
+      // Read twice now: once.
+      { section: 'Payment', label: 'Directors present', value: 'Jo Bloggs' },
+      { label: 'Directors present', value: 'Sam Example' },
+    ];
+    expect(newPrinted(rec, read)).toEqual([
+      { label: 'Directors present', value: 'Jo Bloggs' },
+      { label: 'Directors present', value: 'Sam Example' },
+    ]);
+    // A reader from before "read everything" kept none: everything is new.
+    expect(newPrinted(record([]), read.slice(0, 1))).toEqual(read.slice(0, 1));
   });
 });
 
@@ -148,6 +180,26 @@ describe('reading a stored document again', () => {
     await svc.forgetReread(id);
     await start();
     expect(svc.getReread(id)).toBeUndefined();
+  });
+
+  it('the values it prints that the import did not keep are kept with it only when you choose, as that reading’s', async () => {
+    const id = await committed();
+    const printed = [
+      { label: 'Sort code', value: '00-00-00' },
+      { section: 'Interest', label: 'Rate', value: '1.5% AER' },
+    ];
+    await work.saveReread({ importId: id, status: 'done', startedAt: '2026-09-29T10:00:00+01:00', finishedAt: '2026-09-29T10:01:00+01:00', engine: 'inference', model: 'local-model', engineVersion: 'extract-16+local-1', sections: [], printed, notes: [] });
+    await start();
+    // Nothing is kept until you apply it.
+    expect((await store.readImport(id))!.readAgain).toBeUndefined();
+    const after = await svc.applyReread(id, 'printed');
+    expect(after.printedApplied).toBe(true);
+    const rec = (await store.readImport(id))!;
+    expect(rec.readAgain).toEqual([expect.objectContaining({ engineVersion: 'extract-16+local-1', model: 'local-model', printed })]);
+    // What it was read with stays as it was.
+    expect(rec.extraction.engineVersion).toBe('extract-6');
+    expect(rec.extraction.raw!.printed).toEqual([]);
+    await expect(svc.applyReread(id, 'printed')).rejects.toThrow('Nothing to apply there.');
   });
 
   it('a CSV is parsed again on this machine with the layout that fits it now, whatever the setting', async () => {

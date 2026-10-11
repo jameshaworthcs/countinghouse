@@ -467,6 +467,11 @@ number. Its pay, tax, NI, pension and student loan for the period are also tax f
   name, `{text, provenance, at}`. `text` is 1 to 120 characters. Claude gives it (`provenance.setBy:
   agent`, with the `label-imports` job's model, prompt version and job id), or you do (`owner`),
   and yours is never replaced. `document.fileName` stays what the file was called.
+- `readAgain` (optional, committed imports): what later readings of the document added to it, as
+  you chose ([INGESTION.md](INGESTION.md), "Reading a stored document again"), `[{at,
+  engineVersion, model?, inference?, printed}]`. `printed` is the values it prints, `{section?,
+  label, value}` as in `extraction.raw.printed`, that the import did not keep yet. `extraction`
+  stays what the import was read with.
 - `result`: `{accountIds, accountsCreated, transactionsAdded, transactionsSkipped, balancesAdded, holdingsAdded, figuresAdded, sections}`.
   `sections` maps each draft section to the account it was committed to; with the sections'
   statement periods it gives each account's **coverage** (the days it has data for).

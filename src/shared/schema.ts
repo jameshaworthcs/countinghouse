@@ -1458,6 +1458,10 @@ export const ExtractedScheduleSchema = z.object({
 });
 export type ExtractedSchedule = z.infer<typeof ExtractedScheduleSchema>;
 
+/** A labelled value a document prints, as printed (extract-14, "read everything"). */
+export const PrintedValueSchema = z.object({ section: z.string().max(120).optional(), label: z.string().min(1).max(200), value: z.string().min(1).max(500) });
+export type PrintedValue = z.infer<typeof PrintedValueSchema>;
+
 export const ExtractionSchema = z.object({
   documentType: z.enum(EXTRACTION_DOC_TYPES).default('other'),
   institutionName: z.string().nullable().default(null),
@@ -1473,7 +1477,7 @@ export const ExtractionSchema = z.object({
    * Every other labelled value the document prints, as printed (extract-14, "read everything"):
    * kept with the import so nothing on a document is lost, though nothing reads it yet.
    */
-  printed: z.array(z.object({ section: z.string().max(120).optional(), label: z.string().min(1).max(200), value: z.string().min(1).max(500) })).max(400).default([]),
+  printed: z.array(PrintedValueSchema).max(400).default([]),
   /** Schedules of payments it gives (extract-15): recorded as agreements. */
   schedules: z.array(ExtractedScheduleSchema).default([]),
   notes: z.array(z.string()).default([]),
@@ -1885,6 +1889,22 @@ export const ImportRecordSchema = z.object({
       alternative: ExtractionSchema.optional(),
     })
     .default({ warnings: [] }),
+  /**
+   * What later readings of the committed document added to it, as you chose (docs/INGESTION.md,
+   * "Reading a stored document again"): the values it prints that `extraction.raw` does not keep,
+   * each reading with its reader. `extraction` itself stays what the import was read with.
+   */
+  readAgain: z
+    .array(
+      z.object({
+        at: TimestampSchema,
+        engineVersion: z.string(),
+        model: z.string().optional(),
+        inference: InferenceProvenanceSchema.optional(),
+        printed: z.array(PrintedValueSchema).max(400),
+      }),
+    )
+    .optional(),
   draft: DraftSchema.optional(),
   result: z
     .object({

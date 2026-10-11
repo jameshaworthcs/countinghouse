@@ -2485,3 +2485,18 @@ the data exists, is untracked and is a demo directory, and unless no login of it
 can never apply to real data or show a real credential. Considered instead: VS Code's port
 forwarding to the visitor's own localhost (no guard change, but no one-click page), and loosening
 the Origin check for everyone (it would have weakened the live site for a demo).
+
+## 2026-10-11: Reading a document again keeps what it prints, and one import can be named
+
+Reading a stored document again compared only rows and balances, so a notice with neither (a
+dividend voucher, a letter) gained nothing from it, and the new reading's `printed` values were
+thrown away with it. A re-reading now lists the values it prints that the import does not keep, and
+applying them adds them to the import's new `readAgain` (additive, no migration) with the reader
+that found them. The import's `extraction` is left as it was read: it is the record of that reading,
+so writing a later one into it would hide which reader saw what. Values are matched on label and
+value only: a heading read differently does not make a value new. Applied all together rather than
+one at a time, because nothing reads them yet and one by one would only add clicks.
+
+An unnamed import's page also offers to name that one with the agent: History's button names the
+newest unnamed first, so an older import could take several runs to reach. It is the same
+`label-imports` job, under the same switch, given that import's id.

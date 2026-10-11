@@ -9,6 +9,7 @@ import { api, useApi, useApiMutation } from '../lib/api';
 import { useAppData } from '../lib/data';
 import { cn, formatDate, money } from '../lib/format';
 import { Badge, Button, Callout, Card, StatusBadge, tableClasses } from './ui';
+import { PrintedList } from './PrintedValues';
 import { SessionsLink } from './SessionsLink';
 
 const KIND: Record<RereadRow['kind'], { label: string; tone: 'good' | 'warn' | 'info' | 'pending' }> = {
@@ -65,7 +66,7 @@ export function ReadAgainCard({ rec, currentVersion }: { rec: ImportRecord; curr
           <div className="text-[12.5px] text-ink-2">
             Read {formatDate(r.finishedAt!.slice(0, 10))} with {r.layout ?? r.engineVersion}
             {r.model ? ` (${r.model.replace(/^claude-/, '')})` : ''}
-            {r.costUsd ? `, $${r.costUsd.toFixed(2)}` : ''}. {differences.length ? `${differences.length} difference${differences.length === 1 ? '' : 's'}.` : 'Everything it read is as recorded.'}
+            {r.costUsd ? `, $${r.costUsd.toFixed(2)}` : ''}. {differences.length ? `${differences.length} difference${differences.length === 1 ? '' : 's'}.` : r.printed?.length ? 'Nothing recorded reads differently.' : 'Everything it read is as recorded.'}
             {r.engine === 'inference' || r.engine === 'claude-cli' || r.engine === 'claude-api' ? (
               <>
                 {' '}
@@ -143,6 +144,28 @@ export function ReadAgainCard({ rec, currentVersion }: { rec: ImportRecord; curr
               )}
             </div>
           ))}
+          {r.printed?.length ? (
+            <div className="flex flex-col gap-2 rounded-lg border border-line px-3 py-2 text-[12.5px]">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span>
+                  {r.printed.length} value{r.printed.length === 1 ? '' : 's'} it prints {r.printedApplied ? 'that the import did not keep: kept with it now, as this reading’s' : 'that the import does not keep: keep them with it, as this reading’s, so nothing on the document is lost'}
+                </span>
+                {r.printedApplied ? (
+                  <Badge tone="muted">Kept</Badge>
+                ) : (
+                  <Button size="sm" loading={apply.isPending && apply.variables === 'printed'} onClick={() => apply.mutate('printed')}>
+                    Keep them
+                  </Button>
+                )}
+              </div>
+              <details>
+                <summary className="cursor-pointer text-ink-2">Show them</summary>
+                <div className="mt-2">
+                  <PrintedList printed={r.printed} />
+                </div>
+              </details>
+            </div>
+          ) : null}
           {apply.error && <Callout tone="bad">{apply.error.message}</Callout>}
           <div>
             <Button size="sm" onClick={() => forget.mutate(undefined)}>

@@ -25,6 +25,7 @@ import type {
   Institution,
   Profile,
   Person,
+  PrintedValue,
   Proposal,
   ProposedChange,
   Rule,
@@ -1361,6 +1362,12 @@ export interface Reread {
   layout?: string;
   costUsd?: number;
   sections: RereadSection[];
+  /**
+   * The values the document prints that this reading found and the import does not keep yet (in
+   * its reading or an earlier re-reading's): kept with the import only when you choose.
+   */
+  printed?: PrintedValue[];
+  printedApplied?: boolean;
   notes: string[];
   error?: string;
 }

@@ -937,6 +937,11 @@ out.
   - **recorded, not read now**.
 
   The balance is compared too.
+- **So are the values it prints** (`printed`, since `extract-14`): those the import does not keep
+  yet, in what it was read with or what an earlier re-reading added, are listed. Two are the same
+  value when their label and value are, whatever the case, spacing, trailing colon or heading. A
+  document read before "read everything" keeps none, so a re-reading adds every one: a notice with
+  no rows or balance still gains what it says.
 - **Nothing changes until you apply a difference**, one at a time. The actions don't delete: a row
   missing from the new reading is yours to look at. Each is recorded as the new reading's:
   - a row read differently is corrected, and its `corrections` keep what was recorded, noting the
@@ -945,7 +950,10 @@ out.
     unless you set it; the category, unless you or a transfer link set it; and a transfer link, when
     the row is not yours to categorise;
   - a row read now is added, with the import's provenance;
-  - a balance takes the new reading, and its note keeps the old figure.
+  - a balance takes the new reading, and its note keeps the old figure;
+  - the printed values are kept with the import, together, in its `readAgain` with the reader that
+    found them ([DATA_FORMAT.md](DATA_FORMAT.md)). Its `extraction` stays what it was read with. The
+    import's page shows them under what it prints, saying which reading added them.
 - The comparison waits in the work area (`rereads/`), never in `data/`, until you put it away.
 
 ## Measuring extraction

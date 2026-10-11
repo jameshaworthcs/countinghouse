@@ -1,4 +1,4 @@
-import { Archive, ArrowLeft, CircleCheck, Copy, CopyCheck, ExternalLink, Info, ListChecks, LoaderCircle, Maximize2, Minimize2, Pencil, RefreshCw, Trash2, TriangleAlert } from 'lucide-react';
+import { Archive, ArrowLeft, CircleCheck, Copy, CopyCheck, ExternalLink, Info, ListChecks, LoaderCircle, Maximize2, Minimize2, Pencil, RefreshCw, Sparkles, Trash2, TriangleAlert } from 'lucide-react';
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { ACCOUNT_TYPE_META, slugify } from '../../shared/accounts';
@@ -18,6 +18,7 @@ import { cn, fileSize, money, plural } from '../lib/format';
 import { nextSelection, type Anchor } from '../lib/selection';
 import { useShiftHold } from '../lib/useSelection';
 import { importStatus } from './Import';
+import { PrintedValues } from '../components/PrintedValues';
 import { ReadAgainCard } from '../components/ReadAgain';
 import { limitName, RatesList } from '../components/Terms';
 import { SessionsLink } from '../components/SessionsLink';
@@ -865,38 +866,6 @@ function PayslipEditor({ draft, onChange }: { draft: Draft; onChange: (d: Draft)
   );
 }
 
-/**
- * Every other labelled value the document prints (extract-12, "read everything"): kept with the
- * import, by the heading it is under, though nothing reads it yet.
- */
-function PrintedValues({ printed }: { printed: { section?: string | undefined; label: string; value: string }[] }) {
-  if (!printed.length) return null;
-  const sections = [...new Set(printed.map((p) => p.section ?? ''))];
-  return (
-    <details className="rounded-xl border border-line bg-panel">
-      <summary className="cursor-pointer px-5 py-3 text-[13px] font-medium text-ink-2">Everything else it prints ({printed.length})</summary>
-      <div className="flex flex-col gap-3 border-t border-line px-5 py-3">
-        <p className="text-[12.5px] text-ink-3">Kept with the import as printed, so nothing on the document is lost.</p>
-        {sections.map((section) => (
-          <div key={section}>
-            {section && <div className="mb-1 text-[12px] font-medium text-ink-3">{section}</div>}
-            <dl className="grid grid-cols-1 gap-x-6 gap-y-0.5 text-[13px] sm:grid-cols-2">
-              {printed
-                .filter((p) => (p.section ?? '') === section)
-                .map((p, i) => (
-                  <div key={i} className="flex justify-between gap-3">
-                    <dt className="min-w-0 text-ink-2">{p.label}</dt>
-                    <dd className="text-right [overflow-wrap:anywhere]">{p.value}</dd>
-                  </div>
-                ))}
-            </dl>
-          </div>
-        ))}
-      </div>
-    </details>
-  );
-}
-
 /** One HMRC record in a line: what it is, its date, what it says, and its amount when it has one. */
 function describeHmrc(r: ExtractedHmrc): { what: string; date: string; detail: string; amount?: number } {
   const code = (c: string, cumulative: boolean) => `${c}${cumulative ? '' : ' week 1/month 1'}`;
@@ -1377,15 +1346,23 @@ function MappingEditor({ rec, onApplied }: { rec: Rec; onApplied?: (r: ImportRec
 
 /**
  * A committed import's name, to find it by in History, with its file name under it. You can give
- * your own (Claude never replaces it) or take it away.
+ * your own (Claude never replaces it) or take it away, or, with naming imports on, have the agent
+ * name this one now (the `label-imports` job, for this import alone).
  */
 function ImportName({ rec }: { rec: Rec }) {
   const toast = useToast();
+  const { data } = useAppData();
   const [editing, setEditing] = useState<string | undefined>();
   const save = useApiMutation((text: string | null) => api(`/imports/${rec.id}/label`, { method: 'PUT', body: { text } }), {
     onSuccess: (_r, text) => {
       setEditing(undefined);
       toast({ tone: 'good', text: text ? 'Name saved' : 'Name taken away' });
+    },
+  });
+  // The page asks for the import every few seconds: the name shows once the job gives it.
+  const name = useApiMutation(() => api<{ existing?: true }>('/jobs', { method: 'POST', body: { kind: 'label-imports', params: { importIds: [rec.id] } } }), {
+    onSuccess: (job) => {
+      if (!job.existing) toast({ tone: 'good', text: 'The agent is naming it' });
     },
   });
   const label = rec.label;
@@ -1415,7 +1392,13 @@ function ImportName({ rec }: { rec: Rec }) {
         <IconButton label="Rename" className="size-8 shrink-0" onClick={() => setEditing(label?.text ?? '')}>
           <Pencil className="size-3.5" />
         </IconButton>
+        {!label && data.settings.agents.labelImports && (
+          <Button size="sm" variant="ghost" className="shrink-0" icon={<Sparkles className="size-3.5" />} loading={name.isPending} disabled={name.isSuccess} onClick={() => name.mutate(undefined)} title="The agent names it from what was read from it: its kind, provider, accounts and dates">
+            {name.isSuccess ? 'Naming…' : 'Name it with the agent'}
+          </Button>
+        )}
       </div>
+      {name.error && <div className="mt-0.5 text-[12.5px] text-bad-ink">{name.error.message}</div>}
       {label && (
         <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[12.5px] text-ink-3">
           <span className="truncate">{rec.document.fileName}</span>
@@ -1788,7 +1771,7 @@ export default function Review() {
                     setDraft(d);
                   }}
                 />
-                <PrintedValues printed={rec.extraction.raw?.printed ?? []} />
+                <PrintedValues printed={rec.extraction.raw?.printed ?? []} later={rec.readAgain} />
                 {draft.ocrText && (
                   <details className="rounded-xl border border-line bg-panel p-4">
                     <summary className="cursor-pointer text-[13px] font-medium text-ink-2">Recognised text (offline OCR)</summary>
