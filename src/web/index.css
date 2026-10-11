@@ -164,6 +164,15 @@
   textarea {
     font: inherit;
   }
+  /*
+    Options inherit the select's ink, but some browsers (Chrome on Linux and Windows) draw the
+    open list on their own light background whatever the colour scheme: give it the panel.
+  */
+  option,
+  optgroup {
+    background-color: var(--panel);
+    color: var(--ink);
+  }
 }
 
 /* Numbers that line up in columns use tabular figures; big standalone figures do not. */
