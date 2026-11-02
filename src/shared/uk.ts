@@ -216,9 +216,10 @@ export const TAX_YEAR_PARAMS: ParamsRow[] = [
   // Budget 2025: dividend ordinary and upper rates +2pp from April 2026 (additional unchanged).
   // State Pension up 4.8% with earnings (the triple lock).
   { from: 2026, dividendTaxRates: { basic: 0.1075, higher: 0.3575, additional: 0.3935 }, statePensionFullWeekly: 241.3 },
-  // Autumn Budget 2025: cash-ISA limit £12,000 for under-65s from 6 April 2027 (overall stays
-  // £20,000); savings income tax rates +2pp from April 2027.
-  { from: 2027, cashIsaLimitUnder65: 12_000, savingsTaxRates: { basic: 0.22, higher: 0.42, additional: 0.47 } },
+  // Savings income tax rates from 6 April 2027: Budget 2026 set 24%, 44%, 49% (Budget 2025 had set
+  // 22%, 42%, 47%). Budget 2025's £12,000 under-65 cash-ISA limit from 2027/28 was dropped in
+  // Budget 2026: the cash limit stays the full £20,000, so there is no separate cash cap.
+  { from: 2027, savingsTaxRates: { basic: 0.24, higher: 0.44, additional: 0.49 } },
 ];
 
 const paramsCache = new Map<number, TaxYearParams>();
@@ -254,7 +255,8 @@ export function birthdayAt(dateOfBirth: ISODate, years: number): ISODate {
 }
 
 /**
- * Cash-ISA limit for a tax year. Under-65s are capped from 2027/28; the full allowance applies from
+ * Cash-ISA limit for a tax year: the full allowance unless a year sets `cashIsaLimitUnder65` (none
+ * does now; Budget 2025's 2027/28 cap was dropped). Where one is set, the full allowance applies from
  * the start of the tax year in which you turn 65. Unknown DOB: assume the cap applies.
  */
 export function cashIsaLimit(ty: TaxYear, dateOfBirth?: ISODate): number {
@@ -373,6 +375,22 @@ export function fscsDepositLimit(onDate: ISODate): number {
   return limit;
 }
 
+/**
+ * LISA withdrawal charge on a first home over the price cap, from the date it took effect (Budget
+ * 2026: 20% from 29 October 2026). Before the first row, such a withdrawal paid the ordinary charge.
+ */
+export const LISA_OVER_CAP_CHARGES: { from: ISODate; rate: number }[] = [{ from: '2026-10-29', rate: 0.2 }];
+
+/**
+ * The charge on a LISA withdrawal on `onDate`: `overCap` for buying a first home above the price cap
+ * (the account otherwise qualifying), else the ordinary unauthorised-withdrawal charge.
+ */
+export function lisaWithdrawalChargeOn(onDate: ISODate, overCap = false): number {
+  let rate = taxYearParams(taxYearOf(onDate)).lisaWithdrawalCharge;
+  if (overCap) for (const row of LISA_OVER_CAP_CHARGES) if (onDate >= row.from) rate = row.rate;
+  return rate;
+}
+
 /** Days until the end of the tax year containing `date` (0 on 5 April). */
 export function daysLeftInTaxYear(date: ISODate): number {
   const ty = taxYearOf(date);
@@ -488,14 +506,11 @@ export function statePensionFullYearly(ty: TaxYear): number {
 export const RULE_NOTES: { from: ISODate; text: string }[] = [
   { from: '2025-12-01', text: 'FSCS deposit protection rose from £85,000 to £120,000 per person per banking licence.' },
   {
-    from: '2027-04-06',
-    text: 'Cash ISA subscriptions capped at £12,000 a year for under-65s (overall ISA allowance stays £20,000). Transfers from stocks & shares ISAs into cash ISAs are no longer allowed, and interest on cash held in stocks & shares ISAs is charged at 22%.',
+    from: '2026-10-28',
+    text: 'A First Time Buyer ISA is to replace the Lifetime ISA for new savers from April 2029 (Budget 2026): a 25% bonus on the balance, up to £20,000, paid on withdrawal for a first home up to £450,000. Existing LISAs continue under the current rules.',
   },
-  { from: '2027-04-06', text: 'Tax on savings and property income rises by 2 percentage points (22%, 42%, 47%).' },
+  { from: '2026-10-29', text: 'The Lifetime ISA withdrawal charge on a first home over the £450,000 price cap falls from 25% to 20%. Other unauthorised withdrawals still pay 25%.' },
+  { from: '2027-04-06', text: 'Tax on savings and property income rises by 4 percentage points (24%, 44%, 49%).' },
   { from: '2028-04-06', text: 'Normal minimum pension age rises from 55 to 57.' },
-  {
-    from: '2026-06-29',
-    text: 'A First Time Buyer ISA is to be offered in place of the Lifetime ISA once available (no date yet; consultation closed 18 August 2026). Existing LISAs continue under the current rules indefinitely.',
-  },
   { from: '2029-04-06', text: 'Salary-sacrificed pension contributions above £2,000 a year become subject to National Insurance.' },
 ];

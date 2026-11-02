@@ -817,7 +817,8 @@ schedules and the names the merchant list knows are not guesses.
   - plus bank payments to it on dates its own statements do not cover (allowing 10 days to
     arrive).
 - The LISA counts within the £20,000.
-- The cash-ISA cap applies from 2027/28 for under-65s (UK tables).
+- A separate cash-ISA cap applies only in a year whose UK table sets one (none does: Budget 2026
+  dropped the 2027/28 under-65 cap).
 
 **LISA:**
 
@@ -1119,7 +1120,9 @@ A goal is a target funded by accounts you choose (`data/goals.json`). There are 
 - *s* = 1, except for a Lifetime ISA;
 - a LISA counts in full only for a home deposit. The home must be within the LISA price cap
   (£450,000, `uk.ts`), and the LISA at least 12 months old by the target date (from its opening, or
-  its first data). The same holds from age 60. Otherwise *s* = 1 − the withdrawal charge (0.75).
+  its first data). The same holds from age 60. A first home over the cap (the LISA a year old)
+  counts at *s* = 1 − the over-cap charge on the target date (0.80 from 29 October 2026, 0.75
+  before). Otherwise *s* = 1 − the withdrawal charge (0.75).
 
 **Money coming in** *C* each month:
 

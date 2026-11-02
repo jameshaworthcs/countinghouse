@@ -2531,3 +2531,22 @@ ingest/draft.ts) that is all an account holds adds to that account's score ("hol
 fund"), and accounts tied at the top are not a match: the section is left to choose, naming each
 (`AccountMatch.tied`, ingest/match.ts). One fund's own page is never a whole list, so a fund two
 accounts hold asks.
+
+## 2026-11-02: No cash-ISA cap from 2027/28; savings rates 24%, 44%, 49%
+
+Budget 2026 dropped Budget 2025's £12,000 under-65 cash-ISA limit from April 2027 and raised the
+2027/28 savings income tax rates to 24%, 44% and 49% (from 22%, 42%, 47%). The 2027 row of the UK
+tables no longer sets `cashIsaLimitUnder65`, so the cash limit is the whole ISA allowance and the
+Tax year page shows no separate cash meter. The field and its age-65 logic stay, unused, in case a
+cap returns. The rule note on the transfer ban and the 22% charge on cash in stocks & shares ISAs is
+removed with the cap they supported (UK_RULES.md, "Cash ISAs from April 2027").
+
+## 2026-11-02: LISA over-cap charge 20% from 29 October 2026; First Time Buyer ISA dated
+
+Budget 2026 cut the LISA withdrawal charge on a first home over the £450,000 cap to 20% from 29
+October 2026, leaving 25% for every other unauthorised withdrawal. The date falls inside a tax
+year, so it is a dated table (`LISA_OVER_CAP_CHARGES`, like the FSCS limits) rather than a tax-year
+row. Goals count a LISA for an over-cap home at 1 − that charge on the target date, once the LISA is
+a year old; a LISA under a year old still pays 25%, since its withdrawal is unauthorised anyway.
+The penalty-adjusted value stays the 25% case. The First Time Buyer ISA note now gives its April 2029
+launch; it is not modelled, since nothing can be opened before then.

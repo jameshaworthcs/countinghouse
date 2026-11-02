@@ -6,7 +6,7 @@ import { CategoryIndex } from '../../shared/categories';
 import { addMonths, diffDays, eachMonth, formatMonth, maxDate, minDate, today, type ISODate } from '../../shared/dates';
 import { formatMoney, toMinor } from '../../shared/money';
 import type { Account, Goal } from '../../shared/schema';
-import { ageOn, taxYearOf, taxYearParams } from '../../shared/uk';
+import { ageOn, lisaWithdrawalChargeOn, taxYearOf, taxYearParams } from '../../shared/uk';
 import type { Store } from '../store';
 import type { BalanceEngine } from './balances';
 import { computeBaseline, DAYS_PER_MONTH, standardPeriods, type Baseline } from './baseline';
@@ -44,7 +44,9 @@ export function monthlyInflow(store: Store, account: Account, b: Baseline): { mo
 
 /**
  * How much of a Lifetime ISA a goal can count. The 25% withdrawal charge applies unless the money
- * buys a first home (a home within the price cap, the LISA at least a year old) or you are 60.
+ * buys a first home (a home within the price cap, the LISA at least a year old) or you are 60. A
+ * first home over the cap pays the lower over-cap charge (20% from 29 October 2026), judged on the
+ * target date.
  */
 export function lisaShare(store: Store, goal: Goal, account: Account, on: ISODate): { share: number; note?: string } {
   if (account.type !== 'lisa') return { share: 1 };
@@ -53,12 +55,14 @@ export function lisaShare(store: Store, goal: Goal, account: Account, on: ISODat
   const dob = store.profile.dateOfBirth;
   if (dob && ageOn(dob, on) >= 60) return { share: 1, note: 'Free to take out at 60 or over' };
   if (goal.kind !== 'home-deposit') return { share: penalised, note: `Counted at ${Math.round(penalised * 100)}%: taking it out for anything but a first home before 60 costs the ${Math.round(ty.lisaWithdrawalCharge * 100)}% charge` };
-  if (goal.propertyPrice !== undefined && goal.propertyPrice > ty.lisaPropertyPriceCap) {
-    return { share: penalised, note: `Counted at ${Math.round(penalised * 100)}%: a home over ${formatMoney(ty.lisaPropertyPriceCap, { decimals: 0 })} is not a qualifying purchase, so the charge applies` };
-  }
   const first = minDate(account.openedOn, store.transactions(account.id)[0]?.date, store.balances(account.id)[0]?.date);
   const yearOld = first ? addMonths(first, 12) : null;
   if (yearOld && goal.targetDate && goal.targetDate < yearOld) return { share: penalised, note: `Counted at ${Math.round(penalised * 100)}%: it will not be a year old (from ${first}) by ${goal.targetDate}` };
+  if (goal.propertyPrice !== undefined && goal.propertyPrice > ty.lisaPropertyPriceCap) {
+    const charge = lisaWithdrawalChargeOn(maxDate(goal.targetDate, on) ?? on, true);
+    const share = Math.round((1 - charge) * 100) / 100;
+    return { share, note: `Counted at ${Math.round(share * 100)}%: a first home over ${formatMoney(ty.lisaPropertyPriceCap, { decimals: 0 })} pays the ${Math.round(charge * 100)}% over-cap charge` };
+  }
   return { share: 1, note: goal.propertyPrice === undefined ? `Counted in full for a first home up to ${formatMoney(ty.lisaPropertyPriceCap, { decimals: 0 })}` : 'Counted in full: a first home within the price cap' };
 }
 

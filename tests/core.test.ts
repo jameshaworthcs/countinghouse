@@ -7,6 +7,7 @@ import {
   cashIsaLimit,
   fscsDepositLimit,
   lisaPenaltyAdjustedValue,
+  lisaWithdrawalChargeOn,
   parseTaxYear,
   pensionAccessDate,
   pensionAnnualAllowance,
@@ -104,15 +105,15 @@ describe('UK rules', () => {
     expect(taxYearParams(2026).dividendAllowance).toBe(500);
     expect(taxYearParams(2026).cgtAnnualExemptAmount).toBe(3_000);
     expect(taxYearParams(2026).dividendTaxRates.basic).toBe(0.1075);
-    expect(taxYearParams(2027).savingsTaxRates.basic).toBe(0.22);
+    expect(taxYearParams(2027).savingsTaxRates.basic).toBe(0.24);
   });
 
-  it('caps cash ISAs for under-65s from 2027/28', () => {
+  it('keeps the full cash-ISA limit for all ages from 2027/28 (Budget 2026 dropped the cap)', () => {
     expect(cashIsaLimit(taxYear(2026), '1990-01-01')).toBe(20_000);
-    expect(cashIsaLimit(taxYear(2027), '1990-01-01')).toBe(12_000);
-    expect(cashIsaLimit(taxYear(2027))).toBe(12_000);
-    // Turns 65 during 2027/28 (on 1 Jan 2028): full allowance from the start of that tax year.
-    expect(cashIsaLimit(taxYear(2027), '1963-01-01')).toBe(20_000);
+    expect(cashIsaLimit(taxYear(2027), '1990-01-01')).toBe(20_000);
+    expect(cashIsaLimit(taxYear(2027))).toBe(20_000);
+    expect(cashIsaLimit(taxYear(2028), '1963-01-01')).toBe(20_000);
+    expect(taxYearParams(2027).cashIsaLimitUnder65).toBeNull();
   });
 
   it('tapers the pension annual allowance', () => {
@@ -130,6 +131,9 @@ describe('UK rules', () => {
     expect(fscsDepositLimit('2025-11-30')).toBe(85_000);
     expect(fscsDepositLimit('2025-12-01')).toBe(120_000);
     expect(lisaPenaltyAdjustedValue(10_000, taxYear(2026))).toBe(7_500);
+    expect(lisaWithdrawalChargeOn('2026-10-28', true)).toBe(0.25);
+    expect(lisaWithdrawalChargeOn('2026-10-29', true)).toBe(0.2);
+    expect(lisaWithdrawalChargeOn('2026-10-29')).toBe(0.25);
     expect(ageOn('1990-09-29', '2026-09-28')).toBe(35);
   });
 });

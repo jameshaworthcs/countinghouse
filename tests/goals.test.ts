@@ -99,8 +99,14 @@ describe('a Lifetime ISA in a goal', () => {
   it('counts at 75% otherwise: another goal, a home over the cap, or too soon', () => {
     expect(share({ kind: 'savings' })).toMatchObject({ share: 0.75 });
     expect(share({ kind: 'emergency-fund' }).note).toMatch(/costs the 25% charge/);
-    expect(share({ kind: 'home-deposit', propertyPrice: 500_000, targetDate: '2028-06-01' }).note).toMatch(/over £450,000 is not a qualifying purchase/);
     expect(share({ kind: 'home-deposit', targetDate: '2026-12-01' }).note).toMatch(/will not be a year old \(from 2026-01-10\) by 2026-12-01/);
+    // Over the cap and too young: the ordinary charge, not the over-cap one.
+    expect(share({ kind: 'home-deposit', propertyPrice: 500_000, targetDate: '2026-12-01' })).toMatchObject({ share: 0.75 });
+  });
+
+  it('counts a first home over the cap at 80% from 29 October 2026', () => {
+    expect(share({ kind: 'home-deposit', propertyPrice: 500_000, targetDate: '2028-06-01' })).toMatchObject({ share: 0.8 });
+    expect(share({ kind: 'home-deposit', propertyPrice: 500_000, targetDate: '2028-06-01' }).note).toMatch(/first home over £450,000 pays the 20% over-cap charge/);
   });
 
   it('is free at 60', async () => {

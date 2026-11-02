@@ -361,7 +361,7 @@ describe('UK rules', () => {
     expect(p.hicbc).toEqual({ threshold: 60_000, fullAt: 80_000 });
     expect(p.cgtReportingProceeds).toBe(50_000);
     expect(p.lumpSumAndDeathBenefitAllowance).toBe(1_073_100);
-    expect(taxYearParams(taxYear(2027)).savingsTaxRates).toEqual({ basic: 0.22, higher: 0.42, additional: 0.47 });
+    expect(taxYearParams(taxYear(2027)).savingsTaxRates).toEqual({ basic: 0.24, higher: 0.44, additional: 0.49 });
     expect(taxYearParams(taxYear(2025)).statePensionFullWeekly).toBe(230.25);
     expect(grossUpReliefAtSource(80, taxYear(2026))).toBe(100);
   });

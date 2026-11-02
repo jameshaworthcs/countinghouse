@@ -101,7 +101,7 @@ export const ACCOUNT_TYPE_META: Record<AccountType, AccountTypeMeta> = {
     taxFreeInterest: true,
     defaultInNetWorth: true,
     expectsTransactions: true,
-    description: 'Tax-free savings. Counts toward the £20,000 ISA allowance (cash capped at £12,000 for under-65s from April 2027).',
+    description: 'Tax-free savings. Counts toward the £20,000 ISA allowance.',
   },
   stocks_isa: {
     label: 'Stocks & Shares ISA',

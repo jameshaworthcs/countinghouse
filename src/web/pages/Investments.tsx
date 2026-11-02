@@ -355,7 +355,7 @@ export default function Investments() {
                 ]}
               />
             ))}
-            <Callout tone="neutral">A First Time Buyer ISA is to be offered in place of the LISA once available (no date yet). Existing LISAs carry on under today’s rules.</Callout>
+            <Callout tone="neutral">A First Time Buyer ISA is to replace the LISA for new savers from April 2029. Existing LISAs carry on under today’s rules.</Callout>
           </Card>
         ) : (
           <Card title="Pension access">

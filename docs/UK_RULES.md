@@ -16,7 +16,6 @@ HMRC, the FSCS and the Bank of England on 29 September 2026 (sources at the end)
 | 2020/21 | | | | £9,000 | | £200k / £240k / £4k | | | £12,300 |
 | 2023/24 | | | | | £60,000 | £200k / £260k / £10k | £10,000 | £1,000 | £6,000 |
 | 2024/25 | | | | | | | | £500 | £3,000 |
-| 2027/28 | £20,000 | **£12,000** | £4,000 | | | | | | |
 
 Other parameters:
 
@@ -40,8 +39,8 @@ Other parameters:
   - 8.75%, 33.75% and 39.35% to 2025/26;
   - from 2026/27, 10.75% basic, 35.75% higher and 39.35% additional (unchanged).
   - The dividend allowance is £500.
-- **Savings income tax rates:** from 2027/28, 22% basic, 42% higher, 47% additional (property
-  income likewise).
+- **Savings income tax rates:** from 2027/28, 24% basic, 44% higher, 49% additional (property
+  income likewise). Budget 2025 had set 22%, 42% and 47%; Budget 2026 raised them two points more.
 - **Relief at source:** a net pension contribution is grossed up at the basic rate, 20% (£80 →
   £100).
 - **High Income Child Benefit Charge:**
@@ -79,16 +78,19 @@ Used only to estimate the deductions on pay that is owed and not yet paid ([FORM
   otherwise it is cumulative over the tax year. Bands are pro rata to the months counted. A `C`
   (Welsh) code uses these rates; an `S` (Scottish) code is not worked out.
 
-### ISA reform, April 2027 (Autumn Budget 2025)
+### Cash ISAs from April 2027 (cut dropped in Budget 2026)
 
-- The overall ISA allowance stays £20,000, but at most **£12,000 a year may go into cash ISAs** for
-  savers under 65.
-- The full £20,000 cash limit applies **from the start of the tax year in which you turn 65**.
-- Transfers from stocks & shares or IF ISAs into cash ISAs are no longer allowed (except for
-  over-65s).
-- Interest on cash held inside stocks & shares ISAs is charged at a flat 22%.
-- The app applies the cash cap using your date of birth. If no date of birth is set, the cap is
-  assumed to apply.
+- Autumn Budget 2025 announced a **£12,000** cash-ISA limit for savers under 65 from 2027/28, with
+  anti-circumvention rules to support it: no transfers from stocks & shares or IF ISAs into cash
+  ISAs, and a 22% charge on interest on cash held inside stocks & shares ISAs.
+- Budget 2026 (28 October 2026) dropped the cut: "the government will retain the cash ISA limit at
+  £20,000 for all savers over 18 years old from April 2027". The whole ISA allowance can still go
+  into cash, so the app sets no separate cash cap for any year.
+- The anti-circumvention rules existed only to support the lower cash limit. Budget 2026's overview
+  does not restate them, and the app does not model them.
+- `cashIsaLimitUnder65` stays in the tables (null in every year) in case a cap returns; the app
+  would apply it using your date of birth, with the full limit from the start of the tax year in
+  which you turn 65.
 
 ### State Pension
 
@@ -131,13 +133,18 @@ Used only to estimate the deductions on pay that is owed and not yet paid ([FORM
   - for a first home up to £450,000;
   - from age 60;
   - on terminal illness.
+- From **29 October 2026** a first home **over** the £450,000 cap pays a 20% charge instead of 25%
+  (Budget 2026; `LISA_OVER_CAP_CHARGES` in `uk.ts`). Every other unauthorised withdrawal still pays
+  25%.
 - The charge applies to the whole withdrawal, so you get back 75% of the value. That loses the
-  bonus plus 6.25% of your own money; the app shows this "penalty-adjusted value".
-- **Proposed:** a First Time Buyer ISA, to be offered in place of the LISA once available.
-  - HM Treasury consulted in June 2026; responses closed 18 August 2026.
-  - No start date has been set ("as soon as practically possible").
-  - Until then LISAs can still be opened, and existing holders can keep saving under the current
-    rules indefinitely.
+  bonus plus 6.25% of your own money; the app shows this "penalty-adjusted value" (the 25% case).
+- **First Time Buyer ISA** (Budget 2026): it replaces the LISA for new savers, launching **April
+  2029** once primary and secondary legislation are in place.
+  - A 25% government bonus on the final balance, up to £20,000, paid on withdrawal for a first home
+    worth up to £450,000.
+  - Existing LISA holders can keep saving into and using their accounts under the current rules.
+  - HM Treasury consulted on it from June to 18 August 2026.
+  - The app does not model it yet: nothing can be opened before 2029.
   - The new bonus is to be paid on subscriptions at purchase. Limits, bonus and price cap are to
     be announced at a future fiscal event.
 
@@ -215,6 +222,10 @@ Checked 1 October 2026:
 
 - GOV.UK, [Rates and thresholds for employers 2026 to 2027](https://www.gov.uk/guidance/rates-and-thresholds-for-employers-2026-to-2027) (Class 1 NI thresholds and rates, emergency tax code)
 - GOV.UK, [Tax on dividends: how to report tax on dividends](https://www.gov.uk/tax-on-dividends/how-to-report-tax-on-dividends) (up to £10,000 through your tax code by 5 October; over £10,000 a return, registering by 5 October; 2026/27 dividend rates 10.75%, 35.75%, 39.35%)
+
+Checked 2 November 2026:
+
+- GOV.UK, [Budget 2026: overview of tax legislation and rates](https://www.gov.uk/government/publications/budget-2026-overview-of-tax-legislation-and-rates-ootlar/budget-2026-overview-of-tax-legislation-and-rates-ootlar) (cash ISA limit kept at £20,000, savings and property rates 24%, 44%, 49% from 2027/28, LISA over-cap charge 20% from 29 October 2026, First Time Buyer ISA from April 2029) and its [Annex A: rates and allowances](https://www.gov.uk/government/publications/budget-2026-overview-of-tax-legislation-and-rates-ootlar/annex-a-rates-and-allowances)
 
 Checked 29 September 2026:
 
