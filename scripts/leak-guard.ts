@@ -8,7 +8,7 @@
 //   npm run leak-guard -- --pre-push <remote>      the commits git is about to push (reads the pre-push input)
 //   npm run leak-guard -- --tree [<rev>]           every file at a revision (HEAD by default)
 //   npm run leak-guard -- --worktree               every file as it is on disk, tracked or not (not ignored ones)
-//   npm run leak-guard -- --history                every file version and message reachable from any ref
+//   npm run leak-guard -- --history                every file version and message on a branch, tag or remote
 //   npm run leak-guard -- --stdin --path <p>       stdin, as the content of <p>
 //   npm run leak-guard -- --claude-hook            a Claude Code PreToolUse hook (Write, Edit, NotebookEdit)
 //   npm run leak-guard -- --deep                   postcode and address candidates from data/imports, for the extras file
@@ -138,6 +138,13 @@ function dataOnlyStaged(ctx: Context): boolean {
   return staged.length > 0 && staged.every(isPrivatePath);
 }
 
+/**
+ * GitHub's own public addresses, on commits it makes for you: a pull request merged on the website
+ * (committed by GitHub) and Dependabot's updates. They are not a person's, so they are not someone
+ * else's identity either.
+ */
+const GITHUB_IDENTITIES = new Set(['noreply@github.com', '49699333+dependabot[bot]@users.noreply.github.com']);
+
 async function scanCommits(ctx: Context, shas: string[]): Promise<Finding[]> {
   const out: Finding[] = [];
   const email = tryGit(ctx.root, ['config', 'user.email'])?.trim();
@@ -151,7 +158,7 @@ async function scanCommits(ctx: Context, shas: string[]): Promise<Finding[]> {
       ['author', info.authorEmail],
       ['committer', info.committerEmail],
     ] as const) {
-      if (email && address.toLowerCase() !== email.toLowerCase()) out.push({ path: `commit ${short}`, line: 0, category: 'identity', rule: `${role}-email`, masked: `${mask(address)} is not the configured identity` });
+      if (email && address.toLowerCase() !== email.toLowerCase() && !GITHUB_IDENTITIES.has(address.toLowerCase())) out.push({ path: `commit ${short}`, line: 0, category: 'identity', rule: `${role}-email`, masked: `${mask(address)} is not the configured identity` });
     }
     out.push(...(await scanAdded(ctx, files, blocks, (p) => `${p} @${short}`)));
   }
@@ -224,7 +231,7 @@ async function scanHistory(ctx: Context): Promise<Finding[]> {
       ['author', info.authorEmail],
       ['committer', info.committerEmail],
     ] as const) {
-      if (email && address.toLowerCase() !== email.toLowerCase()) out.push({ path: `commit ${short}`, line: 0, category: 'identity', rule: `${role}-email`, masked: `${mask(address)} is not the configured identity` });
+      if (email && address.toLowerCase() !== email.toLowerCase() && !GITHUB_IDENTITIES.has(address.toLowerCase())) out.push({ path: `commit ${short}`, line: 0, category: 'identity', rule: `${role}-email`, masked: `${mask(address)} is not the configured identity` });
     }
   }
   return out;

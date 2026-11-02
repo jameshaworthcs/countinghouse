@@ -54,7 +54,7 @@ logs and Claude transcripts stay clean.
    - IBANs that pass the mod-97 check, except documented examples;
    - a sort code followed by an 8-digit account number within 20 characters;
    - email addresses outside `example.com`/`.org`/`.net`, `*.test`, `*.invalid`, `*.example`,
-     `*.localhost` and `users.noreply.github.com`;
+     `*.localhost`, `users.noreply.github.com` and GitHub's own `noreply@github.com`;
    - addresses on a tailnet: CGNAT IPv4 (`100.64.0.0/10`) and Tailscale's IPv6 range (a prefix or
      a range on its own is documentation, not an address);
    - UK postcodes;
@@ -75,11 +75,11 @@ only within 24 characters after "ending", "last 4", `**`, `xx`, `•`, "account"
 |---|---|
 | `--staged` | Added lines and new files in the index (the pre-commit hook) |
 | `--commit-msg <file>` | A commit message (the commit-msg hook) |
-| `--range <a>..<b>` | Each commit's message, its author's and committer's email (they must be yours), the lines it adds and its new files |
+| `--range <a>..<b>` | Each commit's message, its author's and committer's email (they must be yours, or GitHub's own on commits it makes: a merge on the website, Dependabot's updates), the lines it adds and its new files |
 | `--pre-push <remote>` | The same, for what git is about to push (the pre-push hook; for a new branch, every commit on no remote) |
 | `--tree [<rev>]` | Every file at a revision |
 | `--worktree` | Every file as it is on disk, tracked or new (ignored files are left out) |
-| `--history` | Every file version and every message reachable from any ref; `--json` adds each finding's line key (sha256 of the line) |
+| `--history` | Every file version and every message reachable from a branch, a tag or a remote: what can be published. Other refs (a stash, a tool's checkpoints) stay on the machine, and the pre-push hook checks anything leaving it. `--json` adds each finding's line key (sha256 of the line) |
 | `--stdin --path <p>` | Standard input, as the content of `<p>` |
 | `--claude-hook` | A Claude Code PreToolUse call (Write, Edit, NotebookEdit) |
 | `--deep` | Postcode and address candidates from the readings, for the extras file |

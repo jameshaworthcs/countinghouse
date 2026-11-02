@@ -184,11 +184,17 @@ export function treeFiles(root: string, rev: string): TreeFile[] {
   return out;
 }
 
-/** Every (blob, path) any commit reachable from any ref introduced, and every commit with the paths it touched. */
+/**
+ * What can be published: branches, tags and what remotes have. Other refs (a stash, a tool's own
+ * checkpoints) stay on this machine, and the pre-push hook checks anything that would leave it.
+ */
+const PUBLISHABLE = ['--branches', '--tags', '--remotes'];
+
+/** Every (blob, path) any commit reachable from a publishable ref introduced, and every commit with the paths it touched. */
 export function historyIndex(root: string): { blobs: Map<string, Set<string>>; commits: Map<string, string[]> } {
   const blobs = new Map<string, Set<string>>();
   const commits = new Map<string, string[]>();
-  const tokens = git(root, ['log', '--all', '-m', '--no-renames', '--raw', '--no-abbrev', '--format=%x01%H', '-z']).split('\0');
+  const tokens = git(root, ['log', ...PUBLISHABLE, '-m', '--no-renames', '--raw', '--no-abbrev', '--format=%x01%H', '-z']).split('\0');
   let commit: string[] | undefined;
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i]!.replace(/^\n/, '');
@@ -208,6 +214,6 @@ export function historyIndex(root: string): { blobs: Map<string, Set<string>>; c
     }
   }
   // Commits with no changes of their own (an empty commit, a merge seen only through -m) still have messages.
-  for (const sha of git(root, ['rev-list', '--all']).split('\n').filter(Boolean)) if (!commits.has(sha)) commits.set(sha, []);
+  for (const sha of git(root, ['rev-list', ...PUBLISHABLE]).split('\n').filter(Boolean)) if (!commits.has(sha)) commits.set(sha, []);
   return { blobs, commits };
 }

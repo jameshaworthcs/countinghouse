@@ -2511,3 +2511,12 @@ shown unticked with a note, like pending and cancelled rows, matched on their wo
 description or type (`isReinvested`, shared/review.ts). The reader's prompt is unchanged: the rule
 sits in drafting, so no `promptVersion` bump and no re-reading. Equalisation alone is not matched:
 on income units it is paid out with the first distribution.
+
+## 2026-11-02: The leak guard's history scan covers what can be published, and takes GitHub's own identities
+
+`--history` read every ref, so a tool's local checkpoint refs (commits never pushed) and GitHub's
+own addresses on the merges it makes on the website and on Dependabot's updates came back on every
+monthly run as findings that were neither data nor anyone's identity. The scan now covers branches,
+tags and remotes (what can be published; the pre-push hook checks anything else before it leaves),
+and the identity check takes exactly two of GitHub's addresses: `noreply@github.com` and
+Dependabot's. Any other address that is not yours is still a finding.

@@ -45,6 +45,9 @@ const POSTCODE_EXAMPLES = new Set(['M1 1AE', 'B33 8TH', 'W1A 0AX', 'CR2 6XH', 'D
 /** Tailscale's own fixed addresses, documented publicly. */
 const CGNAT_EXAMPLES = new Set(['100.100.100.100', '100.64.0.0', '100.64.0.1']);
 
+/** GitHub's own address on the commits it makes (a merge on the website): no one's personal address. */
+const GITHUB_NOREPLY = 'noreply@github.com';
+
 /** Email domains kept for examples (RFC 2606 and 6761) and GitHub's no-reply addresses. */
 function allowedEmailDomain(domain: string): boolean {
   const d = domain.toLowerCase();
@@ -129,7 +132,7 @@ export function scanPatterns(text: string): PatternHit[] {
     hits.push({ rule: 'sort-code-account', index: m.index, value: m[0] });
   }
   for (const m of text.matchAll(EMAIL)) {
-    if (allowedEmailDomain(m[1]!)) continue;
+    if (allowedEmailDomain(m[1]!) || m[0].toLowerCase() === GITHUB_NOREPLY) continue;
     hits.push({ rule: 'email', index: m.index, value: m[0] });
   }
   for (const m of text.matchAll(CGNAT)) {

@@ -276,6 +276,9 @@ describe('built-in patterns', () => {
   it('finds emails outside example domains, tailnet addresses and postcodes', () => {
     expect(found(['olly', 'mail.co.uk'].join('@'))).toEqual(['email']);
     expect(found('dev@example.com x@y.test')).toEqual([]);
+    // GitHub's own address on its merges, but not anyone else's at github.com.
+    expect(found('noreply@github.com')).toEqual([]);
+    expect(found(['someone', 'github.com'].join('@'))).toEqual(['email']);
     expect(found(['100', '88', '1', '2'].join('.'))).toEqual(['tailnet-address']);
     expect(found(['100', '100', '100', '100'].join('.'))).toEqual([]);
     expect(found(['fd7a', '115c', 'a1e0', '', '8a', '1'].join(':'))).toEqual(['tailnet-address']);
@@ -460,6 +463,39 @@ describe('git modes and hooks', () => {
       expect(r.out).not.toMatch(/CREDITS\.md|\.leakguard-allow/);
       expectMasked(r.all);
     }
+  });
+
+  it('takes GitHub’s own identities, but no one else’s', () => {
+    const { repo, git } = newRepo('identity-repo');
+    const base = git('rev-parse', 'HEAD').trim();
+    const as = (name: string, email: string, msg: string) =>
+      execFileSync('git', ['commit', '-q', '--allow-empty', '-m', msg], { cwd: repo, env: { ...env(), GIT_AUTHOR_NAME: name, GIT_AUTHOR_EMAIL: email, GIT_COMMITTER_NAME: 'GitHub', GIT_COMMITTER_EMAIL: 'noreply@github.com' } });
+    as('dependabot[bot]', '49699333+dependabot[bot]@users.noreply.github.com', 'build(deps): bump example');
+    as('Dev', 'dev@example.com', 'Merge pull request #1 from example/branch');
+    const clean = run(['--range', `${base}..HEAD`, '--data', dataDir], { cwd: repo });
+    expect(clean.out).not.toMatch(/identity/);
+    as('Someone', 'someone@example.org', 'chore: from someone else');
+    const other = run(['--range', `${base}..HEAD`, '--data', dataDir], { cwd: repo });
+    expect(other.code).toBe(1);
+    expect(other.out.match(/\[identity\/author-email\]/g)).toHaveLength(1);
+  });
+
+  it('scans in a history only what can be published, not refs that stay on the machine', () => {
+    const { repo, git } = newRepo('refs-repo');
+    git('checkout', '-q', '-b', 'side');
+    writeFileSync(path.join(repo, 'f.ts'), `export const w = '${PAYEE}';\n`);
+    git('add', 'f.ts');
+    git('commit', '-q', '-m', 'chore: f');
+    const sha = git('rev-parse', 'HEAD').trim();
+    git('checkout', '-q', 'main');
+    git('branch', '-q', '-D', 'side');
+    git('update-ref', 'refs/checkpoints/one', sha);
+    expect(run(['--history', '--data', dataDir], { cwd: repo }).code).toBe(0);
+    git('tag', 'v1', sha);
+    const tagged = run(['--history', '--data', dataDir], { cwd: repo });
+    expect(tagged.code).toBe(1);
+    expect(tagged.out).toMatch(/f\.ts @\w+:1 \[denylist\//);
+    expectMasked(tagged.all);
   });
 
   it('checks what a push would publish', () => {
