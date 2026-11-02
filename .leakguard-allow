@@ -55,3 +55,12 @@ eval/**:SW2 5SG
 
 # GitHub's public support address, in Dependabot's sign-off on its security updates.
 support@github.com
+
+# The Windows-1252 code page, as the bank exports' text encoding is named (and an OFX header's
+# CHARSET): only where it names the encoding, so the number is still found everywhere else.
+docs/INGESTION.md:1252
+scripts/fixture-anonymise.ts:1252
+src/server/ingest/detect.ts:1252
+tests/parsers.test.ts:1252
+tests/fixtures/statement.ofx:1252
+commit?23d29f7ebb?(message):1252
