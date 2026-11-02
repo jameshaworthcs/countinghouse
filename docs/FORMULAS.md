@@ -1016,6 +1016,8 @@ known. It is marked when the value is an estimate.
   amount, in whichever order the rows fit. Statements list rows oldest first and apps newest
   first; the order with fewer breaks is used.
 - Pending rows are excluded: statement and export balances are of settled transactions.
+- Income a fund keeps (an accumulation distribution, equalisation on accumulation units) is
+  excluded too: it buys more of the fund and never reaches the cash a running balance follows.
 - **An investment account's activity list** (`cashLedger`): the running balances and opening
   balance are the uninvested cash, so the closing balance checked is the closing cash. No value is
   recorded from it.
@@ -1031,12 +1033,13 @@ A warning holds an import back from bulk commit:
 | Future | a row is dated after the upload day |
 | Balance date | a settled row is dated after the balance recorded with it (no statement period); on a screenshot, after the day it was taken |
 | Card signs | on a credit card, a payment to the card (its usual wordings, or just "Payment") is money out, or, with ≥ 3 settled rows, most are money in. Fewer rows with no payment to the card can't tell. The same rule picks the signs of a CSV layout that names no bank, for a card: [INGESTION.md](INGESTION.md) |
-| Unsure | the reader marked a row as uncertain |
+| Unsure | the reader marked a row as uncertain (not a cancelled row, nor a reinvested one left unticked) |
 | Holdings | the holdings and cash come to more than the value shown, or less when the list is not marked as part of the account's holdings; ±max(£1, 0.1%) |
 | Holdings, part of the list (information) | a screen lists only some holdings, or one fund's own page: they join that day's other holdings |
 | Cash (information) | the balances are an investment account's cash, not its value |
 | Repeated (information) | two rows share a date, amount and description |
 | Pending (information) | pending rows are left out unless ticked |
+| Reinvested (information) | rows of income a fund keeps are left out unless ticked |
 
 Warnings from reading the document (rows dropped as unreadable) also hold an import back.
 

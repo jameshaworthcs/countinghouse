@@ -2500,3 +2500,14 @@ one at a time, because nothing reads them yet and one by one would only add clic
 An unnamed import's page also offers to name that one with the agent: History's button names the
 newest unnamed first, so an older import could take several runs to reach. It is the same
 `label-imports` job, under the same switch, given that import's id.
+
+## 2026-11-02: Income a fund keeps is left out of an import
+
+A platform's transactions list (as against its cash activity list) shows each accumulation
+distribution, and the equalisation on accumulation units, as an unsigned amount. Drafted as money
+in, they would add cash the account never had: the valuation carries an investment account's cash
+by every row on it (FORMULAS.md §13), while the fund's value holds the income already. They are now
+shown unticked with a note, like pending and cancelled rows, matched on their wording in the
+description or type (`isReinvested`, shared/review.ts). The reader's prompt is unchanged: the rule
+sits in drafting, so no `promptVersion` bump and no re-reading. Equalisation alone is not matched:
+on income units it is paid out with the first distribution.

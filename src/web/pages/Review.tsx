@@ -5,7 +5,7 @@ import { ACCOUNT_TYPE_META, slugify } from '../../shared/accounts';
 import type { DraftLinkView, ImportView, NothingNewView } from '../../shared/api';
 import { formatDate, formatMonth } from '../../shared/dates';
 import { describeDetail, describeDifference, fieldsInWords } from '../../shared/detail';
-import { sectionChecks, type ReviewCheck } from '../../shared/review';
+import { isReinvested, sectionChecks, type ReviewCheck } from '../../shared/review';
 import { headlineApplies, RATE_NAMES } from '../../shared/terms';
 import { FIGURE_KINDS, type CsvProfile, type Draft, type DraftJob, type DraftSection, type DraftTransaction, type Employment, type ExtractedHmrc, type Figure, type ImportRecord, type PayslipLine, type PayslipYtdKey, type Settings as SettingsT } from '../../shared/schema';
 import { CLAUDE_MODELS, INFERENCE_ALIASES, isInferenceAlias, resolveTask } from '../../shared/tasks';
@@ -318,6 +318,11 @@ function TxRow({ t, currency, flags, onChange, onTick, linking }: { t: DraftTran
           )}
           <LinkLine importId={linking.importId} row={t} view={linking.views?.[t.key]} onChanged={linking.onChanged} />
           {t.pending && <div className="mt-0.5"><Badge tone="muted">Pending</Badge></div>}
+          {isReinvested(t) && (
+            <div className="mt-0.5" title="On accumulation units the income buys more of the fund: the fund’s value holds it already, and the account’s cash never sees it.">
+              <Badge tone="muted">Reinvested inside the fund</Badge>
+            </div>
+          )}
           {t.insideAccount && (
             <div className="mt-0.5" title="The account’s statements count this Space in its balance and list no move to or from it, so recording it would be money in or out they never saw.">
               <Badge tone="muted">Move {t.amount < 0 ? 'to' : 'from'} your Space “{t.insideAccount}”: inside the account</Badge>

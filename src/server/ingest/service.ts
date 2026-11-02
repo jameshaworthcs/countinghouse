@@ -9,7 +9,7 @@ import { CategoryIndex } from '../../shared/categories';
 import { findInstitution } from '../../shared/institutions';
 import { today } from '../../shared/dates';
 import { formatMoney, toMinor } from '../../shared/money';
-import { sectionChecks } from '../../shared/review';
+import { isReinvested, sectionChecks } from '../../shared/review';
 import {
   CsvProfileSchema,
   DraftSchema,
@@ -1400,7 +1400,7 @@ export class ImportService extends EventEmitter {
       transactions: section.transactions.map((t, i) => {
         const d = dups[i]!;
         const { duplicateOf: _was, adds: _adds, ...rest } = t;
-        return { ...rest, status: d.status, include: d.status === 'new' && !t.pending && !t.insideAccount, ...(d.duplicateOf ? { duplicateOf: d.duplicateOf } : {}) };
+        return { ...rest, status: d.status, include: d.status === 'new' && !t.pending && !t.insideAccount && !isReinvested(t), ...(d.duplicateOf ? { duplicateOf: d.duplicateOf } : {}) };
       }),
       ...(section.extraCopies ? { extraCopies: target.mode === 'existing' ? section.extraCopies.filter((c) => !c.accountId || c.accountId === target.accountId) : [] } : {}),
     };

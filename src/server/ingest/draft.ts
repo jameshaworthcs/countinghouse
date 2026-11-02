@@ -35,7 +35,7 @@ import { earnedReplaced, inferPayroll } from '../analytics/earned';
 import type { Store } from '../store';
 import { classifyDuplicates, storedTwice } from './dedup';
 import { saysNothing } from '../../shared/merchants';
-import { isCancelled } from '../../shared/review';
+import { isCancelled, isReinvested } from '../../shared/review';
 import { dateFromFileName } from './images';
 import { fitsAccount, identifies, matchAccount, onlyKind, proposeAccount, sameHolding } from './match';
 import { asAgreement, draftAgreements, isStudentFinance, paymentLabel, STUDENT_FINANCE, studentLoanAccount } from './schedules';
@@ -389,8 +389,8 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
         key: `s${si}-t${ti}`,
         // Pending rows are shown but not recorded: the settled row arrives with the next statement.
         // Nor a cancelled one, which never moved money. A move to or from one of the account's
-        // Spaces is not money in or out.
-        include: dup.status === 'new' && !t.pending && !space && !isCancelled(t),
+        // Spaces is not money in or out, nor income a fund keeps (shared/review.ts, isReinvested).
+        include: dup.status === 'new' && !t.pending && !space && !isCancelled(t) && !isReinvested(t),
         status: dup.status,
         date: t.date,
         amount: t.amount,

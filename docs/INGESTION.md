@@ -725,6 +725,13 @@ read again.
   are shown but not included: no money moved. An app lists a card check or a cancelled fare that
   way. The review notes them ("cancelled: left out"); they don't count as rows the reader was
   unsure of, so they don't hold an import back from "Commit all ready".
+- **Income a fund keeps** (`isReinvested`: an "Accumulation Distribution", or "Equalisation Acc
+  Units", in its description or type) is shown but not included. A platform lists it among an
+  investment account's transactions, but on accumulation units it buys more of the fund: the fund's
+  value holds it already and the cash never sees it, so recording it would count it twice. The
+  review notes them ("reinvested inside a fund: left out"); left out, an unsure sign on one doesn't
+  hold the import back. Income paid out as cash (a distribution on income units, interest) is
+  recorded as before.
 - **Figures** are matched to an account by last 4 digits only when exactly one account has them.
   A pension provider's own document (a pension statement or an export) uploaded to one of your
   pension accounts, and naming no other account, gives its contribution and relief figures that

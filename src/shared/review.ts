@@ -63,6 +63,15 @@ const rowsWord = (n: number) => (n === 1 ? '1 row' : `${n} rows`);
  */
 export const isCancelled = (t: { uncertain?: string | null | undefined }) => Boolean(t.uncertain && /\b(cancell?ed|declined)\b/i.test(t.uncertain));
 
+/**
+ * Income a fund keeps (an accumulation distribution, the equalisation on accumulation units): a
+ * platform lists it among the account's transactions, but it buys more of the fund rather than
+ * reaching the cash, so the fund's value holds it already. Drafting leaves it out, like a pending
+ * row; recorded, it would count as cash the account never had.
+ */
+export const isReinvested = (t: { description: string; type?: string | null | undefined; detail?: { type?: string | undefined } | undefined }) =>
+  [t.description, t.type ?? t.detail?.type ?? ''].some((s) => /\baccumulation distribution\b|\bequali[sz]ation acc(?:umulation)?\b/i.test(s));
+
 export function sectionChecks(section: DraftSection, ctx: CheckContext): ReviewCheck[] {
   const out: ReviewCheck[] = [];
   const rows = section.transactions;
@@ -80,8 +89,9 @@ export function sectionChecks(section: DraftSection, ctx: CheckContext): ReviewC
       rows: [...early, ...late].map((t) => t.key),
     });
   }
-  // Statements and exports total their settled rows; pending ones are shown separately.
-  const settled = rows.filter((t) => !t.pending);
+  // Statements and exports total their settled rows; pending ones are shown separately. Income a
+  // fund keeps never reaches the cash a running balance follows.
+  const settled = rows.filter((t) => !t.pending && !isReinvested(t));
 
   // Opening balance + rows = closing balance, and running balances follow the amounts. On an
   // investment account's activity list they are the cash, so the closing cash is what they reach.
@@ -201,9 +211,13 @@ export function sectionChecks(section: DraftSection, ctx: CheckContext): ReviewC
     out.push({ id: 'repeated', status: 'info', title: `${rowsWord(repeated.length)} appear more than once`, detail: 'They may be genuine, or one row read twice where the parts of a long screenshot overlap. Check each against the original.', rows: repeated });
   }
 
-  const unsure = rows.filter((t) => t.uncertain && !isCancelled(t));
+  const unsure = rows.filter((t) => t.uncertain && !isCancelled(t) && !(isReinvested(t) && !t.include));
   if (unsure.length) {
     out.push({ id: 'uncertain', status: 'warn', title: `${rowsWord(unsure.length)} the reader was unsure of`, detail: unsure.map((t) => `${formatDate(t.date)} ${t.description}: ${t.uncertain}`).join('; '), rows: unsure.map((t) => t.key) });
+  }
+  const reinvested = rows.filter((t) => isReinvested(t));
+  if (reinvested.length) {
+    out.push({ id: 'reinvested', status: 'info', title: `${rowsWord(reinvested.length)} reinvested inside a fund: left out`, detail: `${reinvested.map((t) => `${formatDate(t.date)} ${t.description}`).join('; ')}. On accumulation units the income buys more of the fund, so the fund's value holds it already and the cash never sees it. Tick one only if it was paid out as cash.`, rows: reinvested.map((t) => t.key) });
   }
   const cancelled = rows.filter((t) => isCancelled(t));
   if (cancelled.length) {
