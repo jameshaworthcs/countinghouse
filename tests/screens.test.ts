@@ -144,6 +144,25 @@ describe('screens that show part of an account’s holdings', () => {
     expect(draftOf(detail).sections[0]!.target).toEqual({ mode: 'existing', accountId: 'lisa' });
   });
 
+  it('two accounts holding the fund: an export goes to the one holding only what it lists, a fund page asks', async () => {
+    const world = 'Example World Equity ETF GBP';
+    await store.setAccounts([...store.accounts, acct('isa', 'stocks_isa', { name: 'Example ISA', institutionId: 'aj-bell' }), acct('sipp', 'sipp', { name: 'Example SIPP', institutionId: 'aj-bell' })]);
+    const snap = (id: string, accountId: string, holdings: { name: string; value: number }[]) => ({ id, accountId, date: '2026-09-28', holdings: holdings.map((h) => ({ ...h, currency: 'GBP' })), totalValue: holdings.reduce((s, h) => s + h.value, 0), source: {}, createdAt: stamp });
+    await store.addHoldings([snap('hld_00000000000000a1', 'isa', [{ name: world, value: 4000 }, { name: 'Example UK Index Fund', value: 2500 }]), snap('hld_00000000000000a2', 'sipp', [{ name: world, value: 3100 }])], 't');
+    const exportOf = (names: string[]) => draftOf({ documentType: 'csv_export', institutionName: 'AJ Bell', accounts: [{ institutionName: 'AJ Bell', closingBalance: 3200, holdings: names.map((name) => ({ name, value: 3200 / names.length })) }] });
+    // The one fund the SIPP holds, and nothing else: the SIPP, though the ISA holds it too.
+    const one = exportOf([world]).sections[0]!;
+    expect(one.target).toEqual({ mode: 'existing', accountId: 'sipp' });
+    expect(one.matchReason).toMatch(/holds only this fund/);
+    // Both of the ISA's funds: the ISA.
+    expect(exportOf([world, 'Example UK Index Fund']).sections[0]!.target).toEqual({ mode: 'existing', accountId: 'isa' });
+    // One fund's own page is not the whole list: both accounts fit it equally, so you choose.
+    const page = draftOf({ documentType: 'holding_detail_screenshot', institutionName: 'AJ Bell', accounts: [{ institutionName: 'AJ Bell', holdings: [{ name: world, units: 30, value: 3200 }] }] });
+    expect(page.sections[0]!.target).toEqual({ mode: 'skip' });
+    expect(page.sections[0]!.matchReason).toMatch(/^Could be your Example ISA .* or your Example SIPP .*equally well: choose it$/);
+    expect(draftIsClean(page).reasons).toContain('an account to choose or a section left out');
+  });
+
   it('an overview listing only its first holding is part of the list, not a misread', () => {
     const d = draftOf({ documentType: 'account_overview_screenshot', accounts: [{ accountName: 'Lifetime ISA', accountType: 'lisa', closingBalance: 15930.4, cashBalance: 1251.55, holdings: [{ name: 'Legal & General Global', value: 5874.62 }] }] });
     const s = d.sections[0]!;

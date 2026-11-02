@@ -108,6 +108,8 @@ const PENSION_KINDS = new Set<string>(['pension_contribution_employee', 'pension
 /** Documents a pension provider makes, whose figures are about the account they come from (not a payslip or P60). */
 const PROVIDER_DOCUMENTS = new Set<Extraction['documentType']>(['pension_statement', 'csv_export']);
 
+/** Documents whose list of holdings is the account's whole holdings: an export, a statement. */
+const WHOLE_HOLDINGS = new Set<Extraction['documentType']>(['csv_export', 'investment_statement', 'pension_statement']);
 const TRANSFER_CATEGORIES = new Set(['transfer', 'credit-card-payment', 'savings-transfer', 'investment-transfer', 'contribution', 'withdrawal']);
 
 /** Documents that list each payment: none of their rows restates others. */
@@ -203,7 +205,7 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
     };
     if (typeFromRows) notes.push('The screen does not name the account, but its Lifetime ISA bonus rows say it is a Lifetime ISA.');
     const hint = extraction.accounts.length === 1 ? ctx.hintAccountId : undefined;
-    const match = force ? { accountId: force, score: 100, reason: reason ?? 'Matched by the account it carries on from' } : matchAccount({ ...detected, holdings: acc.holdings.map((h) => h.name) }, store.accounts, store.institutions, hint, held);
+    const match = force ? { accountId: force, score: 100, reason: reason ?? 'Matched by the account it carries on from' } : matchAccount({ ...detected, holdings: acc.holdings.map((h) => h.name), holdingsComplete: !holdingDetail && WHOLE_HOLDINGS.has(extraction.documentType) }, store.accounts, store.institutions, hint, held);
     let existing: Account | undefined = match.accountId && match.score >= 50 ? store.account(match.accountId) : undefined;
     // A scrolled screen seldom names its account; one taken beside it on the same phone and uploaded
     // with it usually does. Only when this screen has no confident match of its own, shows one
@@ -221,12 +223,14 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
     // Funds can point at an account that holds them, but a list of funds alone does not say which
     // account (or kind of account) a new one would be.
     const anonymous = !existing && !hint && !identifies(detected);
+    // Two of your accounts that match it equally well (both hold the fund it shows): ask which.
+    const tied = Boolean(!existing && !hint && match.tied?.length);
     // A screen that says only the kind of account (a scrolled list of a LISA's rows) is one of your
     // accounts of that kind, not a new one: ask which, and suggest it when you have only one.
     const sameKind = !existing && !hint && !anonymous && onlyKind(detected) ? store.accounts.filter((a) => a.status !== 'closed' && fitsAccount(detected, a, store.institutions)) : [];
     const target: DraftSection['target'] = existing
       ? { mode: 'existing', accountId: existing.id }
-      : anonymous || sameKind.length
+      : anonymous || tied || sameKind.length
         ? { mode: 'skip' }
         : { mode: 'new', account: proposeAccount(detected, store.accounts, fallbackType) };
     const targetType: AccountType = existing?.type ?? (target.mode === 'new' ? target.account.type : detected.accountType ?? fallbackType);
@@ -487,6 +491,8 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
           ? match.reason
           : anonymous
             ? 'Nothing on this screen says which account it is: choose it'
+            : tied
+              ? match.reason
             : sameKind.length === 1
               ? `Nothing on this screen names the account, only that it is ${ACCOUNT_TYPE_META[sameKind[0]!.type].label}. It looks like your ${sameKind[0]!.name}: choose it`
               : sameKind.length

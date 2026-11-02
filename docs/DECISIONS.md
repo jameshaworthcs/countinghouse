@@ -2520,3 +2520,14 @@ monthly run as findings that were neither data nor anyone's identity. The scan n
 tags and remotes (what can be published; the pre-push hook checks anything else before it leaves),
 and the identity check takes exactly two of GitHub's addresses: `noreply@github.com` and
 Dependabot's. Any other address that is not yours is still a finding.
+
+## 2026-11-02: A tie between accounts asks, and a whole list prefers the account it is all of
+
+Two holdings exports uploaded together, one from an ISA and one from a SIPP holding a single fund
+the ISA also holds, both went to the ISA: each account scored the same (provider, holds this fund)
+and the first in the list won. The SIPP's export, committed there, would have recorded the ISA as
+worth the SIPP's one fund. Now a whole list (an export or a statement, `WHOLE_HOLDINGS` in
+ingest/draft.ts) that is all an account holds adds to that account's score ("holds only this
+fund"), and accounts tied at the top are not a match: the section is left to choose, naming each
+(`AccountMatch.tied`, ingest/match.ts). One fund's own page is never a whole list, so a fund two
+accounts hold asks.

@@ -428,6 +428,11 @@ read again.
   - A screen naming only the provider (a scrolled app screen) matches your only open account
     there.
   - A fund's own page matches the account whose latest holdings include that fund.
+  - A whole holdings list (an export or a statement) that is all one account holds matches that
+    account more strongly than one holding those funds among others: your ISA and your SIPP can
+    hold the same fund.
+  - Two accounts that match equally well (both hold the one fund a page shows) are a question, not
+    a match: the section names both and waits for you to choose.
   - A screen with no confident match of its own can take its account from a **screenshot taken
     with it** (below).
   - With nothing on the screen to say which account it is, no new account is proposed: the

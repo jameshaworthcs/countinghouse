@@ -13,6 +13,8 @@ export interface Detected {
   currency?: string | undefined;
   /** Names of the holdings the document lists. */
   holdings?: string[] | undefined;
+  /** The list is the account's whole holdings (an export or a statement), not one fund's page or a scrolled screen. */
+  holdingsComplete?: boolean | undefined;
 }
 
 /**
@@ -66,6 +68,8 @@ export interface AccountMatch {
   accountId?: string;
   score: number;
   reason: string;
+  /** Accounts that match equally well: nothing on the document tells them apart, so you choose. */
+  tied?: string[];
 }
 
 function words(s: string | undefined): Set<string> {
@@ -75,6 +79,8 @@ function words(s: string | undefined): Set<string> {
 export function matchAccount(detected: Detected, accounts: Account[], institutions: Institution[], hintAccountId?: string, held?: Map<string, Pick<Holding, 'name' | 'isin' | 'ticker'>[]>): AccountMatch {
   const inst = findInstitution(detected.institutionName) ?? findInstitution(detected.accountName);
   let best: AccountMatch = { score: 0, reason: 'No existing account looked like this one' };
+  // Accounts scoring the same as the best, with their reasons: a tie is not a match.
+  let level: { account: Account; reasons: string[] }[] = [];
   // Apps rarely show their own name on screen: being your only account of a type is evidence too.
   const ofType = detected.accountType ? accounts.filter((a) => a.status !== 'closed' && a.type === detected.accountType).length : 0;
   // A scrolled screen may name only the provider: being your only open account there is evidence.
@@ -147,9 +153,20 @@ export function matchAccount(detected: Detected, accounts: Account[], institutio
     const has = held?.get(a.id) ?? [];
     if (funds.length && has.length && funds.every((name) => has.some((h) => sameHolding({ name }, h)))) {
       score += 50;
-      reasons.push(funds.length === 1 ? 'holds this fund' : 'holds these funds');
+      // A whole list (an export, a statement) that is all the account holds is that account, more
+      // than one holding these funds among others: two of your accounts can hold the same fund.
+      const only = Boolean(detected.holdingsComplete) && has.every((h) => funds.some((name) => sameHolding({ name }, h)));
+      if (only) score += 15;
+      reasons.push(`holds ${only ? 'only ' : ''}${funds.length === 1 ? 'this fund' : 'these funds'}`);
     }
-    if (score > best.score) best = { accountId: a.id, score, reason: `Matched by ${reasons.join(', ')}` };
+    if (score > best.score) {
+      best = { accountId: a.id, score, reason: `Matched by ${reasons.join(', ')}` };
+      level = [{ account: a, reasons }];
+    } else if (score === best.score && best.accountId) level.push({ account: a, reasons });
+  }
+  if (best.accountId && best.score >= 50 && level.length > 1) {
+    const names = level.map((l) => `your ${l.account.name} (${l.reasons.join(', ')})`);
+    return { score: best.score, reason: `Could be ${names.slice(0, -1).join(', ')} or ${names.at(-1)}, which match it equally well: choose it`, tied: level.map((l) => l.account.id) };
   }
   if (best.accountId && best.score >= 50) return best;
   return { score: best.score, reason: best.score > 0 ? `Weak match (${best.reason}); please confirm` : best.reason, ...(best.score >= 30 && best.accountId ? { accountId: best.accountId } : {}) };
