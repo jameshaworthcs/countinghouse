@@ -99,6 +99,18 @@ describe('estate value classification', () => {
     expect(engine.balanceOn('sipp', '2024-10-10')!.value).toBe(0);
     expect(engine.balanceOn('sipp', '2024-11-10')!.value).toBe(4_000);
   });
+
+  it('never grows an account from its start to below nothing, when gains taken out exceed what went in', async () => {
+    // Opened with 1,000; 1,100 taken out in October (sales at a gain); worth 50 at the first valuation.
+    await store.setAccounts([...store.accounts, { ...acct('gia', 'gia'), openedOn: '2025-07-01' }]);
+    await store.addTransactions([tx('gia', '2025-07-01', 1_000, 'Deposit', { category: 'contribution' }), tx('gia', '2025-10-01', -1_100, 'Withdrawal', { category: 'withdrawal' })], 'test');
+    await store.addBalances([bal('gia', '2026-04-05', 50)], 'test');
+    const engine = new BalanceEngine(store);
+    expect(engine.balanceOn('gia', '2025-07-01')!.value).toBeGreaterThan(0);
+    // Paid in −100 by now, plus some of the 150 growth: below nothing before the clamp.
+    expect(engine.balanceOn('gia', '2025-10-02')!.value).toBe(0);
+    expect(engine.balanceOn('gia', '2026-04-05')!.value).toBe(50);
+  });
 });
 
 describe('investment returns', () => {

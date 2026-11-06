@@ -541,9 +541,11 @@ export class BalanceEngine {
           const growthAtA2 = a2.minor - sumTo(d.flows, a2.date);
           const span = Math.max(1, diffDays(firstFlow, a2.date));
           const frac = Math.min(1, Math.max(0, diffDays(firstFlow, date) / span));
-          minor = contributed + Math.round(growthAtA2 * frac);
+          // Never below nothing: money taken out (gains included) can come to more than went in.
+          const grown = contributed + Math.round(growthAtA2 * frac);
+          minor = ACCOUNT_TYPE_META[account.type].liability ? grown : Math.max(0, grown);
         } else if (d.flows.dates.length) {
-          minor = contributed;
+          minor = ACCOUNT_TYPE_META[account.type].liability ? contributed : Math.max(0, contributed);
         } else return null;
       }
     }

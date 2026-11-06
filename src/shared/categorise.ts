@@ -148,6 +148,13 @@ export const DIVIDEND_WORDING = /DIVIDEND|DISTRIBUTION|^DIV\b/i;
 /** The pattern, its category and direction, and where the row names the investment (group 1), used as the payee. */
 type WrapperRule = [pattern: RegExp, category: string, direction?: 'in' | 'out', names?: RegExp];
 
+/**
+ * A platform's own reward (Trading 212's "Deposit · Free Shares Promotion", a referral or sign-up
+ * bonus): growth, not money you paid in, so it uses no ISA allowance. Its type says "Deposit", so
+ * the wording is read first.
+ */
+const PLATFORM_REWARD = /FREE SHARES?\b|\bPROMOTION\b|\bREFERRAL\b|(WELCOME|SIGN[- ]?UP) BONUS|\bCASHBACK\b/i;
+
 /** Flows inside ISA / pension / investment accounts, recognised from the provider's wording. */
 const WRAPPER_RULES: WrapperRule[] = [
   // A settlement date marks a trade, whatever the fund is called (interactive investor:
@@ -452,6 +459,7 @@ export class Categoriser {
     // of another flow.
     if (isWrapper) {
       const dir = input.amount >= 0 ? 'in' : 'out';
+      if (dir === 'in' && PLATFORM_REWARD.test(input.description)) return { payee: fallbackPayee, category: 'investment-income', categorisedBy: 'builtin' };
       for (const text of input.type ? [input.type, input.description] : [input.description]) {
         for (const [re, category, direction, names] of WRAPPER_RULES) {
           if (direction && direction !== dir) continue;

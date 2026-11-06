@@ -124,6 +124,10 @@ describe('merchants and categorisation', () => {
     expect(isa('GROSS INTEREST', 0.8)).toMatchObject({ category: 'investment-income', payee: 'Gross Interest' });
     expect(isa('Monthly Subscription', 500).category).toBe('contribution');
     expect(isa('DIVERSIFIED GROWTH FUND', 10).category).toBeUndefined();
+    // A platform's reward is growth, not a contribution; a deposit is still a contribution.
+    expect(c.categorise({ accountId: 'ii-isa', description: 'Deposit · Free Shares Promotion', type: 'Deposit', amount: 20 }).category).toBe('investment-income');
+    expect(isa('Deposit · Referral bonus', 10).category).toBe('investment-income');
+    expect(isa('Deposit · Transaction ID: abc-123', 100).category).toBe('contribution');
     // Outside an investment account neither wording means anything.
     expect(c.categorise({ accountId: 'current', description: 'Div 250 VANGUARD FUNDS PLC', amount: 45.5 }).category).not.toBe('investment-income');
   });

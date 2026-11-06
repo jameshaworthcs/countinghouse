@@ -572,7 +572,12 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
   const figures: DraftFigure[] = extraction.figures.map((f, fi) => {
     // Matched by last 4 digits only when exactly one account has them.
     const byLast4 = f.accountLast4 ? store.accounts.filter((a) => a.last4 === f.accountLast4) : [];
-    const account = byLast4.length === 1 ? byLast4[0] : !f.accountLast4 && PENSION_KINDS.has(f.kind) ? pensionHint : undefined;
+    // Else the one account of the document's own with those digits, a new one included: an annual
+    // statement that sets its account up gives that account's figures.
+    const inDocument = f.accountLast4 && byLast4.length !== 1 ? sections.filter((x) => x.detected.last4 === f.accountLast4) : [];
+    const ownTarget = inDocument.length === 1 ? inDocument[0]!.target : undefined;
+    const ownId = ownTarget?.mode === 'existing' ? ownTarget.accountId : ownTarget?.mode === 'new' ? ownTarget.account.id : undefined;
+    const account = byLast4.length === 1 ? byLast4[0] : ownId ? { id: ownId } : !f.accountLast4 && PENSION_KINDS.has(f.kind) ? pensionHint : undefined;
     const dup = store.figures.find(
       (x) =>
         x.kind === f.kind &&

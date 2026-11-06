@@ -381,6 +381,11 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
     }
   }
   const jobOf = (key: string | undefined) => (key ? jobIds.get(key) : undefined);
+  // A figure of an account this import sets up names it by the id the draft proposed.
+  const newAccountId = (id: string) => {
+    const section = draft.sections.find((x) => x.target.mode === 'new' && x.target.account.id === id);
+    return (section ? resolved.get(section.key)?.id : undefined) ?? id;
+  };
   const figures: Figure[] = draft.figures
     .filter((f) => f.include)
     .map((f) => ({
@@ -395,7 +400,7 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
       ...(f.periodEnd ? { periodEnd: f.periodEnd } : {}),
       ...(f.taxYear ? { taxYear: f.taxYear } : {}),
       ...(draft.documentDate ? { date: draft.documentDate } : {}),
-      ...(f.accountId ? { accountId: f.accountId } : {}),
+      ...(f.accountId ? { accountId: newAccountId(f.accountId) } : {}),
       ...(f.payer ? { payer: f.payer } : {}),
       ...(f.payerReference ? { payerReference: f.payerReference } : {}),
       ...(f.taxCode ? { taxCode: f.taxCode } : {}),

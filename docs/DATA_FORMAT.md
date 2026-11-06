@@ -589,7 +589,8 @@ A monthly spending budget, yours to set (Spending → Budgets). How it is measur
   - `set`: `{category?, payee?, tags?, counterpartyAccountId?}`.
   - `priority` (lower runs first), `enabled`.
 - **CSV profile**: `headerSignature` (normalised header names), column mapping, `dateOrder`,
-  `amountSign`, `filter`, `splitBy`, `negativeWhen`, `positiveWhen`. Same shape as the built-in bank profiles in
+  `timeZone?` (`"UTC"`: the date column's date-times are UTC, read as the UK day and time),
+  `amountSign`, `filter`, `splitBy`, `negativeWhen`, `positiveWhen`, `skipDescriptions`. Same shape as the built-in bank profiles in
   `src/server/ingest/csv-profiles.ts`.
 
 ## Assumptions, research, insights and context

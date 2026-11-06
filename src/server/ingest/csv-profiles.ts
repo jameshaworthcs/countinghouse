@@ -12,6 +12,10 @@ const P = (p: Omit<CsvProfile, 'builtin' | 'dateOrder' | 'amountSign'> & Partial
   ...p,
 });
 
+const T212_COLUMNS = { type: 'Action', description: ['Action', 'Name', 'Notes'], amount: 'Total', currency: 'Currency (Total)', id: 'ID' };
+const T212_MONEY_OUT = { column: 'Action', values: ['Market buy', 'Limit buy', 'Stop buy', 'Stop limit buy', 'Withdrawal', 'Currency conversion fee', 'Card debit'] };
+const T212_NO_CASH = ['Stock split open', 'Stock split close'];
+
 export const BUILTIN_CSV_PROFILES: CsvProfile[] = [
   P({
     id: 'monzo',
@@ -229,23 +233,31 @@ export const BUILTIN_CSV_PROFILES: CsvProfile[] = [
     headerSignature: ['date', 'id', 'amount', 'description'],
     columns: { date: 'date', description: ['description'], amount: 'amount', id: 'id' },
   }),
+  // Trading 212 (Invest and Stocks ISA export alike, so no account type: the account is the one you
+  // upload it to, or the only Trading 212 one). "Total" is the cash moved, fees and tax included.
+  // A stock split's close and open rows each carry the holding's value but move no cash.
   P({
     id: 'trading-212',
     name: 'Trading 212',
     institutionId: 'trading-212',
-    accountType: 'stocks_isa',
     dateOrder: 'YMD',
     headerSignature: ['action', 'time', 'isin', 'ticker', 'name', 'total'],
-    columns: {
-      date: 'Time',
-      time: 'Time',
-      type: 'Action',
-      description: ['Action', 'Name', 'Notes'],
-      amount: 'Total',
-      currency: 'Currency (Total)',
-      id: 'ID',
-    },
-    negativeWhen: { column: 'Action', values: ['Market buy', 'Limit buy', 'Stop buy', 'Stop limit buy', 'Withdrawal', 'Currency conversion fee', 'Card debit'] },
+    columns: { ...T212_COLUMNS, date: 'Time', time: 'Time' },
+    negativeWhen: T212_MONEY_OUT,
+    skipDescriptions: T212_NO_CASH,
+  }),
+  // Its current layout: times in UTC ("Time (UTC)"), notes, withholding tax, stamp duty and
+  // conversion fee columns; withdrawals already negative.
+  P({
+    id: 'trading-212-utc',
+    name: 'Trading 212',
+    institutionId: 'trading-212',
+    dateOrder: 'YMD',
+    timeZone: 'UTC',
+    headerSignature: ['action', 'time (utc)', 'isin', 'ticker', 'name', 'total'],
+    columns: { ...T212_COLUMNS, date: 'Time (UTC)', time: 'Time (UTC)' },
+    negativeWhen: T212_MONEY_OUT,
+    skipDescriptions: T212_NO_CASH,
   }),
   P({
     id: 'hsbc',

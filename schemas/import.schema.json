@@ -318,6 +318,10 @@
                 "auto"
               ]
             },
+            "timeZone": {
+              "type": "string",
+              "const": "UTC"
+            },
             "columns": {
               "type": "object",
               "properties": {

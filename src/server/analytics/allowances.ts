@@ -6,6 +6,7 @@ import { DIVIDEND_WORDING } from '../../shared/categorise';
 import type { AllowanceLine, AllowancesResponse, ConfirmedNilView, MissingDaysView, TaxBandEstimate } from '../../shared/api';
 import { settledThrough } from '../../shared/coverage';
 import { addDays, diffDays, formatDate, formatSpan, maxDate, minDate, today, type ISODate } from '../../shared/dates';
+import { findInstitution } from '../../shared/institutions';
 import { fromMinor, toMinor } from '../../shared/money';
 import type { Account, Figure, Transaction } from '../../shared/schema';
 import {
@@ -202,6 +203,24 @@ function sumCategory(store: Store, accounts: Account[], ty: TaxYear, category: s
   return { minor, lines };
 }
 
+/**
+ * The account a provider's statement figure speaks for: its own, else the one general investment
+ * account at the provider that issued it (an annual tax pack names the provider, not always the
+ * account). None when that is not one account.
+ */
+export function statementAccountOf(store: Pick<Store, 'accounts'>, f: Pick<Figure, 'accountId' | 'payer'>): string | undefined {
+  if (f.accountId) return f.accountId;
+  const inst = findInstitution(f.payer);
+  const gias = inst ? store.accounts.filter((a) => a.type === 'gia' && a.institutionId === inst.id) : [];
+  return gias.length === 1 ? gias[0]!.id : undefined;
+}
+
+/** A figure for a span of days (a year's statement), not one payment. */
+const forPeriod = (f: Pick<Figure, 'periodStart' | 'periodEnd'>) => Boolean(f.periodStart && f.periodEnd && f.periodStart < f.periodEnd);
+
+/** Interest in a general investment account: income in it worded as interest, not as a dividend. */
+const giaInterest = (t: Transaction) => t.category === 'investment-income' && t.amount > 0 && /INTEREST/i.test(t.description) && !DIVIDEND_WORDING.test(t.description);
+
 /** Days either side of a dividend's payment date that the credit paying it may fall on. */
 export const DIVIDEND_MATCH_DAYS = 10;
 
@@ -224,6 +243,16 @@ export function dividendsOf(store: Store, ty: TaxYear): { minor: number; lines: 
   const lines: AllowanceLine[] = [];
   let minor = 0;
   for (const f of vouchers) {
+    // A statement of an account's dividends for a period (a platform's annual tax pack) stands for
+    // that account's dividend credits in it.
+    const statementOf = forPeriod(f) ? statementAccountOf(store, f) : undefined;
+    if (statementOf) {
+      const held = credits.filter((t) => !used.has(t.id) && t.accountId === statementOf && t.date >= f.periodStart! && t.date <= f.periodEnd!);
+      for (const t of held) used.add(t.id);
+      minor += toMinor(f.amount);
+      lines.push({ accountId: statementOf, label: `${store.account(statementOf)?.name ?? f.payer ?? f.label} (statement, ${formatSpan(f.periodStart!, f.periodEnd!)})`, amount: f.amount, source: 'figure', date: f.periodEnd!, ...(held.length ? { transactionIds: held.map((t) => t.id) } : {}) });
+      continue;
+    }
     const day = f.periodEnd ?? f.date;
     const paid = day && f.payer
       ? credits
@@ -659,21 +688,39 @@ export function allowances(store: Store, label?: string, now: ISODate = today(),
   // Savings interest vs PSA (interest outside ISAs and pensions).
   const taxable = store.accounts.filter((a) => !ACCOUNT_TYPE_META[a.type].taxFreeInterest);
   const interest = sumCategory(store, taxable, ty, 'interest');
+  // Interest a general investment account pays on its cash (or for lending its shares) is savings
+  // interest too: its rows are the account's income, worded as interest.
+  for (const a of store.accounts.filter((x) => x.type === 'gia')) {
+    const hits = store.transactions(a.id).filter((t) => inYear(t, ty) && giaInterest(t));
+    const m = hits.reduce((x, t) => x + toMinor(t.amount), 0);
+    if (!m || interest.lines.some((l) => l.accountId === a.id)) continue;
+    interest.minor += m;
+    interest.lines.push({ accountId: a.id, label: a.name, amount: fromMinor(m), source: 'transactions', transactionIds: hits.map((t) => t.id) });
+  }
   const interestFigures = store.figures.filter((f) => f.taxYear === ty.label && f.kind === 'interest_paid');
   let interestMinor = interest.minor;
   const interestLines = [...interest.lines];
+  // An account's interest statements (one for its cash, one for lending its shares) together stand
+  // for its interest rows in the year.
+  const statementAccount = new Map(interestFigures.map((f) => [f, statementAccountOf(store, f)] as const));
+  for (const id of new Set([...statementAccount.values()].filter((x): x is string => Boolean(x)))) {
+    const covered = interestLines.findIndex((l) => l.accountId === id && l.source === 'transactions');
+    if (covered < 0) continue;
+    interestMinor -= toMinor(interestLines[covered]!.amount);
+    interestLines.splice(covered, 1);
+  }
   for (const f of interestFigures) {
-    const covered = f.accountId ? interestLines.findIndex((l) => l.accountId === f.accountId) : -1;
-    if (covered >= 0) {
-      interestMinor += toMinor(f.amount) - toMinor(interestLines[covered]!.amount);
-      interestLines[covered] = { accountId: f.accountId!, label: `${store.account(f.accountId!)?.name ?? f.payer ?? 'Interest'} (interest statement)`, amount: f.amount, source: 'figure' };
-    } else {
-      interestMinor += toMinor(f.amount);
-      interestLines.push({ label: `${f.payer ?? f.label} (interest statement)`, amount: f.amount, source: 'figure', ...(f.accountId ? { accountId: f.accountId } : {}) });
-    }
+    const id = statementAccount.get(f);
+    const several = id ? interestFigures.filter((x) => statementAccount.get(x) === id).length > 1 : false;
+    interestMinor += toMinor(f.amount);
+    interestLines.push(
+      id
+        ? { accountId: id, label: `${store.account(id)?.name ?? f.payer ?? 'Interest'} (interest statement${several ? `: ${f.label}` : ''})`, amount: f.amount, source: 'figure' }
+        : { label: `${f.payer ?? f.label} (interest statement)`, amount: f.amount, source: 'figure' },
+    );
   }
   // Interest statements for the year are complete; otherwise the accounts' data must cover it.
-  const interestNeedDays = interestAccounts(store).filter((a) => !interestFigures.some((f) => f.accountId === a.id));
+  const interestNeedDays = interestAccounts(store).filter((a) => !interestFigures.some((f) => statementAccount.get(f) === a.id));
   const interestMissing = missingIn(interestNeedDays);
   const interestConfirmed = confirmedIn(interestNeedDays);
   // Dividends outside ISAs and pensions, each counted once: a voucher and the credit that paid it are one.

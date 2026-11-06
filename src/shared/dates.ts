@@ -26,6 +26,25 @@ export function fromUTC(d: Date): ISODate {
   return `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
+/**
+ * A UTC timestamp ("2026-07-01 23:30:00", "2026-07-01T23:30:00+00:00", "…Z") as the UK calendar
+ * date and time it fell on (Europe/London: BST in summer). Null when it has no time of day.
+ */
+export function ukDateTimeOfUtc(input: string | null | undefined): { date: ISODate; time: string } | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})[T\s](\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?\s*(Z|[+-]\d{2}:?\d{2})?$/i.exec((input ?? '').trim());
+  if (!m) return null;
+  const offset = m[7] && m[7].toUpperCase() !== 'Z' ? m[7] : '';
+  const offMinutes = offset ? (offset[0] === '-' ? -1 : 1) * (Number(offset.slice(1, 3)) * 60 + Number(offset.slice(-2))) : 0;
+  const ms = Date.UTC(+m[1]!, +m[2]! - 1, +m[3]!, +m[4]!, +m[5]!, m[6] ? +m[6] : 0) - offMinutes * 60_000;
+  if (!Number.isFinite(ms)) return null;
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' })
+      .formatToParts(new Date(ms))
+      .map((p) => [p.type, p.value]),
+  );
+  return { date: `${parts.year}-${parts.month}-${parts.day}`, time: m[6] ? `${parts.hour}:${parts.minute}:${parts.second}` : `${parts.hour}:${parts.minute}` };
+}
+
 /** Build an ISO date from parts (month 1-12). Returns null when the date does not exist. */
 export function makeDate(year: number, month: number, day: number): ISODate | null {
   if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return null;

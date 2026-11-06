@@ -27,7 +27,7 @@ let n = 0;
 const account = (id: string, type: Account['type'], name = id, extra: Partial<Account> = {}): Account => ({ id, name, type, currency: 'GBP', status: 'open', aliases: [], includeInNetWorth: true, createdAt: stamp, updatedAt: stamp, ...extra });
 const credit = (accountId: string, date: string, amount: number, description: string, category?: string): Transaction => ({ id: transactionId(accountId, date, amount, description, n++), accountId, date, amount, currency: 'GBP', description, ...(category ? { category, categorisedBy: 'user' as const } : {}), source: {} });
 
-type FigureIn = { kind: string; label?: string; amount: number; taxYear?: string; periodStart?: string; periodEnd?: string; payer?: string; payerReference?: string };
+type FigureIn = { kind: string; label?: string; amount: number; taxYear?: string; periodStart?: string; periodEnd?: string; payer?: string; payerReference?: string; accountLast4?: string };
 
 /** Read, draft and commit one document the way an upload is: its type decides what its figures are. */
 async function importDocument(documentType: string, figures: FigureIn[], extra: { accounts?: unknown[]; hintAccountId?: string; documentDate?: string } = {}) {
@@ -164,6 +164,46 @@ describe('dividends counted once', () => {
     ]);
     const hint = selfAssessment(store, '2026/27').mayNeedToFile.find((m) => m.reason === 'Dividends over the dividend allowance')!;
     expect(hint.detail).toMatch(/by 5 Oct 2027/);
+  });
+});
+
+describe('a platform’s annual statement', () => {
+  it('names the account it sets up, and stands for that account’s dividend and interest rows in the year', async () => {
+    // The statement sets up the account (ending 4321) and gives its year's figures.
+    const year = { taxYear: '2025/26', periodStart: '2025-04-06', periodEnd: '2026-04-05', payer: 'Trading 212', accountLast4: '4321' };
+    const imported = await importDocument(
+      'annual_summary',
+      [
+        { kind: 'dividends_paid', label: 'Gross dividends', amount: 30, ...year },
+        { kind: 'interest_paid', label: 'Interest on cash', amount: 8, ...year },
+        { kind: 'interest_paid', label: 'Share lending interest', amount: 0.5, ...year },
+      ],
+      { accounts: [{ institutionName: 'Trading 212', accountName: 'Example Share Dealing', accountType: 'gia', last4: '4321', currency: 'GBP', closingBalance: 100, balanceDate: '2026-04-05' }] },
+    );
+    const gia = store.accounts.find((a) => a.type === 'gia')!;
+    expect(imported.status).toBe('committed');
+    expect(store.figures.map((f) => f.accountId)).toEqual([gia.id, gia.id, gia.id]);
+    // The account's own rows for the same year (net of tax withheld), and one after it.
+    await store.addTransactions(
+      [
+        credit(gia.id, '2025-06-01', 12, 'Dividend (Dividend) · Example Widgets Inc', 'investment-income'),
+        credit(gia.id, '2025-09-01', 13, 'Dividend (Dividend) · Example Widgets Inc', 'investment-income'),
+        credit(gia.id, '2025-10-01', 7, 'Interest on cash', 'investment-income'),
+        credit(gia.id, '2025-10-02', 0.4, 'Lending interest · Share lending interest', 'investment-income'),
+        credit(gia.id, '2026-05-01', 2, 'Interest on cash', 'investment-income'),
+      ],
+      'test: platform rows',
+    );
+    const y = allowances(store, '2025/26', '2026-10-01');
+    expect(y.dividends.amount).toBe(30);
+    expect(y.dividends.lines.map((l) => [l.amount, l.source])).toEqual([[30, 'figure']]);
+    expect(y.savings.lines.filter((l) => l.accountId === gia.id).map((l) => [l.label, l.amount, l.source])).toEqual([
+      ['Trading 212 Example Share Dealing (interest statement: Interest on cash)', 8, 'figure'],
+      ['Trading 212 Example Share Dealing (interest statement: Share lending interest)', 0.5, 'figure'],
+    ]);
+    // With no statement yet, the rows count as interest.
+    const next = allowances(store, '2026/27', '2026-10-01');
+    expect(next.savings.lines.filter((l) => l.accountId === gia.id).map((l) => [l.amount, l.source])).toEqual([[2, 'transactions']]);
   });
 });
 

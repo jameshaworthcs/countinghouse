@@ -169,6 +169,30 @@ describe('CSV bank formats', () => {
     expect(acc!.transactions[1]!.description).toBe('Market buy · Vanguard FTSE All-World');
   });
 
+  it('Trading 212 (UTC layout): UK dates, cash moved, no stock-split rows, no account type', () => {
+    const { match, result } = parseCsvFixture('trading212-utc.csv');
+    expect(match.profile.id).toBe('trading-212-utc');
+    const [acc] = result.extraction.accounts;
+    expect(acc!.accountType).toBeNull();
+    expect(acc!.institutionName).toBe('Trading 212');
+    expect(acc!.transactions.map((t) => [t.date, t.time, t.amount])).toEqual([
+      // 23:30 UTC on 1 July is 00:30 on 2 July in BST.
+      ['2026-07-02', '00:30:00', 250],
+      ['2026-07-02', '10:00:00', -50.25],
+      ['2026-07-02', '15:30:00', -32.05],
+      ['2026-07-03', '01:20:00', 0.12],
+      ['2026-07-15', '13:00:00', 0.34],
+      ['2026-07-16', '02:00:00', 0.01],
+      ['2026-07-21', '16:00:00', 35.15],
+      ['2026-07-22', '11:00:00', -100],
+      // GMT in winter: the UK time is the UTC time.
+      ['2027-01-10', '12:00:00', 0.02],
+    ]);
+    expect(acc!.transactions[1]!.description).toBe('Market buy · Example Holdings plc');
+    expect(acc!.transactions[4]!.sourceId).toBeNull();
+    expect(result.skipped).toBe(2);
+  });
+
   it('Chase UK: the description column, not the type column beside it', () => {
     const { match, result } = parseCsvFixture('chase.csv');
     expect(match.profile.id).toBe('chase');

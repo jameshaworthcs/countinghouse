@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addMonths, diffDays, eachMonth, parseFlexibleDate, relativeDays } from '../src/shared/dates';
+import { addMonths, diffDays, eachMonth, parseFlexibleDate, relativeDays, ukDateTimeOfUtc } from '../src/shared/dates';
 import { formatMoney, parseAmount, sumMoney, toMinor } from '../src/shared/money';
 import { reconcile } from '../src/shared/reconcile';
 import {
@@ -76,6 +76,15 @@ describe('dates', () => {
 
   it('fills a missing year when asked', () => {
     expect(parseFlexibleDate('26 Sep', 'DMY', { defaultYear: 2025 })).toBe('2025-09-26');
+  });
+
+  it('reads a UTC timestamp as the UK date and time', () => {
+    expect(ukDateTimeOfUtc('2026-07-01 23:30:00+00:00')).toEqual({ date: '2026-07-02', time: '00:30:00' });
+    expect(ukDateTimeOfUtc('2026-07-01T22:59Z')).toEqual({ date: '2026-07-01', time: '23:59' });
+    expect(ukDateTimeOfUtc('2026-12-31 23:30:00')).toEqual({ date: '2026-12-31', time: '23:30:00' });
+    expect(ukDateTimeOfUtc('2026-03-29 01:00:00+00:00')).toEqual({ date: '2026-03-29', time: '02:00:00' });
+    expect(ukDateTimeOfUtc('2026-07-02 01:00:00+02:00')).toEqual({ date: '2026-07-02', time: '00:00:00' });
+    expect(ukDateTimeOfUtc('2026-07-01')).toBeNull();
   });
 
   it('clamps month arithmetic', () => {

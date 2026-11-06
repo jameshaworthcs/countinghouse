@@ -1053,6 +1053,8 @@ export const CsvProfileSchema = z.object({
   /** For header-less files: the column names to assign, in order. */
   headerless: z.array(z.string()).optional(),
   dateOrder: z.enum(['DMY', 'MDY', 'YMD', 'auto']).default('DMY'),
+  /** "UTC": the date column holds UTC date-times, read as the UK date and time they fell on. */
+  timeZone: z.literal('UTC').optional(),
   columns: z.object({
     date: z.string(),
     description: z.array(z.string()).min(1),

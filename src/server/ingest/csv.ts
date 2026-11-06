@@ -3,7 +3,7 @@
 // anything from it without re-importing.
 
 import Papa from 'papaparse';
-import { parseFlexibleDate, type ISODate } from '../../shared/dates';
+import { parseFlexibleDate, ukDateTimeOfUtc, type ISODate } from '../../shared/dates';
 import { catalogInstitution } from '../../shared/institutions';
 import { parseAmount, roundMoney } from '../../shared/money';
 import { cardSigns } from '../../shared/review';
@@ -153,7 +153,9 @@ export function parseWithProfile(rows: string[][], match: ProfileMatch): CsvPars
         return;
       }
     }
-    const date = parseFlexibleDate(col(profile.columns.date, row), profile.dateOrder);
+    // A UTC export is dated by the UK day: 23:30 UTC on 1 July is 00:30 on 2 July in BST.
+    const uk = profile.timeZone === 'UTC' ? ukDateTimeOfUtc(col(profile.columns.date, row)) : null;
+    const date = uk?.date ?? parseFlexibleDate(col(profile.columns.date, row), profile.dateOrder);
     if (!date) {
       skipped++;
       if (row.filter(Boolean).length > 1) warnings.push(`Row ${lineNo + 1}: no readable date ("${col(profile.columns.date, row) ?? ''}"), skipped`);
@@ -222,7 +224,7 @@ export function parseWithProfile(rows: string[][], match: ProfileMatch): CsvPars
       originalAmount: localCurrency && localCurrency !== currency && localAmount !== null ? localAmount : null,
       originalCurrency: localCurrency && localCurrency !== currency && /^[A-Z]{3}$/.test(localCurrency) ? localCurrency : null,
       transactionDate: parseFlexibleDate(col(profile.columns.transactionDate, row), profile.dateOrder),
-      time: timeOf(col(profile.columns.time, row)) ?? null,
+      time: (uk && profile.columns.time === profile.columns.date ? uk.time : timeOf(col(profile.columns.time, row))) ?? null,
       sourceId: col(profile.columns.id, row)?.replace(/^'+|'+$/g, '') || null,
       type: col(profile.columns.type, row) || null,
       reference: col(profile.columns.reference, row) || null,

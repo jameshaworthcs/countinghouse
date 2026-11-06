@@ -2550,3 +2550,20 @@ row. Goals count a LISA for an over-cap home at 1 − that charge on the target 
 a year old; a LISA under a year old still pays 25%, since its withdrawal is unauthorised anyway.
 The penalty-adjusted value stays the 25% case. The First Time Buyer ISA note now gives its April 2029
 launch; it is not modelled, since nothing can be opened before then.
+
+## 2026-11-06: Trading 212's current export, and a platform's annual statement counted once
+
+Trading 212's export now has "Time (UTC)" and more columns, so no profile matched it and it fell to
+column mapping. A second built-in profile reads it (`trading-212-utc`); profiles can say their
+times are UTC (`timeZone`), read as the UK day. Neither Trading 212 profile sets an account type
+any more: the old one said Stocks ISA, which pointed an Invest export at an ISA. Stock-split rows
+are dropped in both (each carried the holding's value as if cash had moved), and a "Free Shares
+Promotion" deposit, or any platform reward, is investment income rather than a contribution: it is
+not money paid in, and uses no ISA allowance.
+
+An annual statement that sets its account up now gives that account its figures (they matched by
+last 4 digits only against accounts that already existed). A platform's yearly dividend total
+stands for that account's dividend rows in the year, as an interest certificate already did for
+interest, so the two are not added; a GIA's interest rows count as savings interest, and several
+interest statements for one account are added together rather than each replacing the last. A
+value grown from the account's first flow is never below nothing, as rolled-back values were not.

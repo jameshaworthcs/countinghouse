@@ -439,7 +439,8 @@ years), both paths grow at the median:
     I(t) ÷ I(d₁);
   - within 45 days, rolled back by the flows since;
   - further back, when the flows go back to the account's start (§12, **Paid in**):
-    contributions + (growth at the first valuation) × elapsed fraction since the first flow;
+    contributions + (growth at the first valuation) × elapsed fraction since the first flow, never
+    below nothing (gains taken out can come to more than went in);
   - otherwise rolled back by the flows since, as if nothing grew. The data starts part-way
     through the account's life, so it was not empty when the first flow arrived: an ISA export
     that opens with cash in hand and funds already held;
@@ -883,8 +884,12 @@ employer's form set up to pay into a pension account of yours, checked against t
 
 **Personal Savings Allowance:**
 
-- Interest on taxable accounts: `interest` rows, replaced per account by interest-certificate
-  figures.
+- Interest on taxable accounts: `interest` rows, and in a general investment account its
+  investment income worded as interest and not as a dividend ("Interest on cash", "Share lending
+  interest"). Replaced per account by that account's interest-certificate figures, all of them
+  together (a platform gives one for its cash and one for lending shares). A figure is an account's
+  when it names it, else when its payer is a provider with exactly one general investment account
+  of yours (`statementAccountOf`).
 - Compared against the allowance for your tax band, which is worked out, not set (below).
 - A minimum while a ledger account outside ISAs (not a debt) without an interest certificate for
   the year has days of it missing (§3, **Missing days**). The ISA and LISA figures follow the same
@@ -972,7 +977,9 @@ within 120 days of it.
 `dividends` credit (or, in a general investment account, investment income worded as a dividend:
 `DIVIDEND_WORDING`, "dividend", "distribution", or interactive investor's "Div 250 …") is a
 voucher's when it is the same amount to the penny, within 10 days of the payment date
-(`DIVIDEND_MATCH_DAYS`), and names the company. Credits no voucher accounts for count as they are,
+(`DIVIDEND_MATCH_DAYS`), and names the company. A dividend figure for a span of days (a platform's
+annual tax pack) whose account is known (as for interest, below) stands instead for every dividend
+credit of that account in its span. Credits no voucher accounts for count as they are,
 and so does a voucher whose payment is not in your data.
 
 ## 12. Paid in, growth and money-weighted return (`analytics/investments.ts`)

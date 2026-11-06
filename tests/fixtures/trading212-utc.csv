@@ -1,0 +1,12 @@
+Action,Time (UTC),ISIN,Ticker,Name,Notes,ID,No. of shares,Price / share,Currency (Price / share),Exchange rate,Result,Currency (Result),Total,Currency (Total),Withholding tax,Currency (Withholding tax),Stamp duty reserve tax,Currency (Stamp duty reserve tax),Currency conversion fee,Currency (Currency conversion fee)
+Deposit,2026-07-01 23:30:00+00:00,,,,Transaction ID: aaaa-1111,dep-1,,,,,,,250.00,GBP,,,,,,
+Market buy,2026-07-02 09:00:00+00:00,GB00EXAMPLE1,EXA,Example Holdings plc,,EOF100,10.0000000000,500.0000000000,GBX,100.00000000,,,50.25,GBP,,,0.25,GBP,,
+Market buy,2026-07-02 14:30:00+00:00,US00EXAMPLE2,EXUS,Example Widgets Inc,,EOF101,1.0000000000,40.0000000000,USD,1.25000000,,,32.05,GBP,,,,,0.05,GBP
+Interest on cash,2026-07-03 00:20:00+00:00,,,,Interest on cash,int-1,,,,,,,0.12,GBP,,,,,,
+Dividend (Dividend),2026-07-15 12:00:00+00:00,US00EXAMPLE2,EXUS,Example Widgets Inc,,,1.0000000000,0.500000,USD,0.80000000,,,0.34,GBP,0.08,USD,,,,
+Lending interest,2026-07-16 01:00:00+00:00,,,,Share lending interest,len-1,,,,,,,0.01,GBP,,,,,,
+Stock split close,2026-07-20 06:00:00+00:00,US00EXAMPLE2,EXUS,Example Widgets Inc,,EOF101,1.0000000000,40.0000000000,USD,1.25000000,0.00,GBP,32.00,GBP,,,,,,
+Stock split open,2026-07-20 06:00:00+00:00,US00EXAMPLE2,EXUS,Example Widgets Inc,,EOF101,4.0000000000,10.0000000000,USD,1.25000000,,,32.00,GBP,,,,,,
+Market sell,2026-07-21 15:00:00+00:00,US00EXAMPLE2,EXUS,Example Widgets Inc,,EOF102,4.0000000000,11.0000000000,USD,1.25000000,3.15,GBP,35.15,GBP,,,,,0.05,GBP
+Withdrawal,2026-07-22 10:00:00+00:00,,,,Sent to Bank Account 00-00-00 12345678,wd-1,,,,,,,-100.00,GBP,,,,,,
+Dividend adjustment,2027-01-10 12:00:00+00:00,,,,US dividends withholding tax adjustment,adj-1,,,,,,,0.02,GBP,,,,,,
