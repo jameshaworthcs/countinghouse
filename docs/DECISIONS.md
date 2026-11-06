@@ -2567,3 +2567,20 @@ stands for that account's dividend rows in the year, as an interest certificate 
 interest, so the two are not added; a GIA's interest rows count as savings interest, and several
 interest statements for one account are added together rather than each replacing the last. A
 value grown from the account's first flow is never below nothing, as rolled-back values were not.
+
+## 2026-11-06: One payment from an app and an export, the same day, is the same payment
+
+- **Owner:** an export's rows already recorded from the bank's app screen were matched only as
+  possible duplicates, holding the import back.
+- **Found:** the app and the export word a payment differently ("To Example Lettings" and
+  "Example Lettings - REF"), time it a minute or more apart, and the app shows no balance after it,
+  so no certain rule held and the fuzzy step only offered it. The time that differed also counted
+  as a conflict, so the balance after it was not filled in by itself.
+- **Done** (INGESTION.md, "Duplicates", step 3c): the same day, the same amount with pence from £20
+  and like words, when that day and amount is on one row each side, is the same payment. Two of
+  them on either side, a round sum, a small one, unlike words, another day, balances after both that
+  differ or other bank ids still leave it to you, as the 2026-10-03 entry decided for payments days
+  apart.
+- **Also:** interest that names its bank ("Interest earned on Example Saver") was categorised as a
+  transfer to another account at that bank. The bank's name alone no longer makes an interest row a
+  transfer; an alias or account number still does.

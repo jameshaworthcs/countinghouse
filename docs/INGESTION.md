@@ -578,6 +578,11 @@ read again.
      may be the record's own or when it was made (`transactionDate`, `transactionTime`), so an app
      that lists a payment by when the card was used finds it once it has been filled in (below). A
      midnight on every row of an export is not a time;
+  3c. same date + amount with pence (from £20) + like words, where that day and amount is on only
+     one row each side, the document's and the record's: an export and an app's screen of one
+     payment, each worded and timed its own way ("To Example Lettings" at 01:06, "Example Lettings
+     - REF" at 01:07). Balances after both that differ, or different bank ids, still say two
+     payments; two rows of that day and amount on either side leave it to step 4;
   4. same amount within ±3 days (of when it cleared, or when it was made), flagged as a *possible* duplicate for you to decide, when the
      descriptions are similar. Described differently, only from £20 (`DIFFERENT_WORDS_FROM`), and
      then on the same day or for an amount with pence. Sources date a payment differently (made, or
@@ -659,7 +664,9 @@ read again.
 - **Your own accounts in a description.** A row names one of your accounts by:
   - **its number:** a long number ending in its last digits (a sort code and account number, a
     card number in a direct debit's reference, "EAV1234567"), which names that one account;
-  - otherwise its aliases, or its bank's name.
+  - otherwise its aliases, or its bank's name. Not by the bank's name alone when the row is
+    interest (its type, or the word in it): "Interest earned on Example Saver" names the bank
+    paying it, not another of your accounts there.
 
   Money to or from you by name ("TO SAM TAYLOR", "FROM S TAYLOR"), from the name in your
   profile, is money moving between your accounts: a transfer, not spending or income, even when it

@@ -12,6 +12,9 @@
 //   3b. Same date, amount and time to the minute (both known) → duplicate, as a multiset. The date
 //      and time may be the record's own or the day it was made: an app lists a payment by when the
 //      card was used, and a record filled in from it keeps that too (shared/detail.ts).
+//   3c. Same date, amount with pence (from £20) and like words, the only row of that day and
+//      amount on each side → duplicate: an app's screen and an export of one payment, worded and
+//      timed differently.
 //   4. Same amount within ±3 days → possible duplicate, for you to decide (typical when the same
 //      period arrives from two sources, e.g. a CSV and a screenshot), when the descriptions are
 //      similar. Described differently, only from £20 (`DIFFERENT_WORDS_FROM`), and then on the same
@@ -177,6 +180,25 @@ export function classifyDuplicates(incoming: DedupCandidate[], existing: Transac
       used.add(t.id);
       results[i] = { status: 'duplicate', duplicateOf: t.id, reason: 'Same date, amount and time' };
     }
+  });
+
+  // 3c. The same day, the same amount with pence (from £20) and like words, where each side has only
+  // that one row of that day and amount: a statement or export and an app's screen of one payment,
+  // each worded and timed its own way ("To Example Lettings" at 01:06, "Example Lettings - REF" at
+  // 01:07). Two such payments on one day would be two rows on at least one side, and are left to step 4.
+  const dayAmount = (date: string, amount: number) => `${date}|${toMinor(amount)}`;
+  const incomingOn = new Map<string, number>();
+  incoming.forEach((c, i) => {
+    if (results[i]!.status === 'new') incomingOn.set(dayAmount(c.date, c.amount), (incomingOn.get(dayAmount(c.date, c.amount)) ?? 0) + 1);
+  });
+  incoming.forEach((c, i) => {
+    if (results[i]!.status !== 'new' || toMinor(c.amount) % 100 === 0 || Math.abs(toMinor(c.amount)) < DIFFERENT_WORDS_FROM * 100) return;
+    if (incomingOn.get(dayAmount(c.date, c.amount)) !== 1) return;
+    const same = existing.filter((x) => !used.has(x.id) && x.date === c.date && toMinor(x.amount) === toMinor(c.amount));
+    const t = same.length === 1 ? same[0]! : undefined;
+    if (!t || conflictingIds(c, t) || otherBalance(c, t) || saysNothing(t.description) || saysNothing(c.description) || similarity(t.description, c.description) < 0.4) return;
+    used.add(t.id);
+    results[i] = { status: 'duplicate', duplicateOf: t.id, reason: 'Same date and amount, alike in words, and the only one of that day and amount' };
   });
 
   // 4. Fuzzy: same amount, nearby date; similar text, the same day, or an amount with pence.

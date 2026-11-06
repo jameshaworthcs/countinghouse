@@ -187,6 +187,16 @@ describe('money that is neither spending nor income', () => {
   });
 });
 
+describe('interest that names its bank', () => {
+  it('is interest, not a transfer to another account at that bank', () => {
+    const c = new Categoriser([], cats, [acct('saver', 'savings', { institutionId: 'chase' }), acct('current', 'current', { institutionId: 'chase' }), acct('card', 'credit_card', { institutionId: 'chase' })], []);
+    expect(c.categorise({ accountId: 'saver', description: 'Interest earned on Chase Saver', amount: 12.34, type: 'Interest' })).toMatchObject({ category: 'interest', categorisedBy: 'builtin' });
+    expect(c.categorise({ accountId: 'saver', description: 'Interest earned on Chase Saver', amount: 12.34 }).category).toBe('interest');
+    // Money to another account there is still a transfer.
+    expect(c.categorise({ accountId: 'saver', description: 'Transfer to Chase', amount: -100 }).categorisedBy).toBe('transfer');
+  });
+});
+
 describe('pay under the name the bank gives a job', () => {
   const employers = [{ payees: ['Acme Widgets'], least: 1500, most: 1700, first: '2026-04-30', last: '2026-08-29' }];
   const c = new Categoriser([], cats, [acct('current', 'current')], [], { employers });

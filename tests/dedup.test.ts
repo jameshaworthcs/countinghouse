@@ -91,6 +91,45 @@ describe('the same payment from another source', () => {
   });
 });
 
+describe('one payment from an app and an export, worded and timed differently', () => {
+  // An app's screen recorded these; the bank's export lists them the same day with its own words,
+  // a time a minute or more apart and a balance after each.
+  const app = [
+    tx('tx_rent', '2026-10-27', -812.34, 'To Example Lettings', { time: '01:06' }),
+    tx('tx_interest', '2026-11-01', 31.27, 'Interest earned on Example Saver', { time: '01:27' }),
+  ];
+
+  it('is the same payment when it is the only one of that day and amount on each side, alike in words', () => {
+    const res = classifyDuplicates(
+      [
+        { date: '2026-10-27', amount: -812.34, description: 'Example Lettings - REF123', time: '01:07', balanceAfter: 4000.12 },
+        { date: '2026-11-01', amount: 31.27, description: 'Interest earned', time: '01:49', balanceAfter: 4031.39 },
+      ],
+      app,
+    );
+    expect(res.map((r) => [r.status, r.duplicateOf])).toEqual([
+      ['duplicate', 'tx_rent'],
+      ['duplicate', 'tx_interest'],
+    ]);
+  });
+
+  it('is still yours to check when either side has two of that day and amount, or the words, pence or size differ', () => {
+    const status = (c: Parameters<typeof classifyDuplicates>[0], stored = app) => classifyDuplicates(c, stored).map((r) => r.status);
+    const rent = { date: '2026-10-27', amount: -812.34, description: 'Example Lettings - REF123' };
+    // Two in the document, one recorded: which is which is yours to say.
+    expect(status([rent, { ...rent, description: 'Example Lettings - REF124' }])).toEqual(['possible_duplicate', 'new']);
+    // One in the document, two recorded.
+    expect(status([rent], [...app, tx('tx_rent2', '2026-10-27', -812.34, 'To Example Lettings Ltd')])[0]).toBe('possible_duplicate');
+    // Another day, unlike words, whole pounds or under £20: not by this rule.
+    expect(status([{ ...rent, date: '2026-10-28' }])[0]).toBe('possible_duplicate');
+    expect(status([{ ...rent, description: 'Corner Garage' }])[0]).toBe('possible_duplicate');
+    expect(status([{ date: '2026-10-27', amount: -800, description: 'Example Lettings' }], [tx('tx_round', '2026-10-27', -800, 'To Example Lettings')])[0]).toBe('possible_duplicate');
+    expect(status([{ date: '2026-10-27', amount: -12.34, description: 'Example Cafe Ltd' }], [tx('tx_small', '2026-10-27', -12.34, 'Example Cafe')])[0]).toBe('possible_duplicate');
+    // Balances after both that differ: two payments.
+    expect(status([{ ...rent, balanceAfter: 1 }], [tx('tx_bal', '2026-10-27', -812.34, 'To Example Lettings', { balanceAfter: 2 })])[0]).toBe('new');
+  });
+});
+
 describe('recorded twice', () => {
   const pdf = tx('tx_pdf', '2026-08-12', -45.67, 'To Credit Card', { balanceAfter: 954.33, transferGroup: 'tg_0000000000000001', source: { importId: 'imp_20260829_100000_pdf1' } });
   const csv = tx('tx_csv', '2026-08-12', -45.67, 'Transfer', { balanceAfter: 954.33, source: { importId: 'imp_20260830_100000_csv1' } });

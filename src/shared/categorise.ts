@@ -392,7 +392,10 @@ export class Categoriser {
     const text = normaliseDescription(description);
     const transferish = TRANSFER_WORDS.test(text);
     const byAlias = others.filter((m) => m.aliases.some((re) => re.test(text)));
-    const byBank = others.filter((m) => !byAlias.includes(m) && useInstitutions && (!m.ambiguous || transferish) && m.institution.some((re) => re.test(text)));
+    // Interest names the bank paying or charging it ("Interest earned on Example Saver"), not
+    // another account there: only an alias or number makes it a transfer.
+    const interest = /\binterest\b/i.test(type ?? '') || /\bINTEREST\b/i.test(text);
+    const byBank = others.filter((m) => !byAlias.includes(m) && useInstitutions && !interest && (!m.ambiguous || transferish) && m.institution.some((re) => re.test(text)));
     return [...openOnTheDay(byAlias.map((m) => m.account), date), ...aliveOn(byBank.map((m) => m.account), date)];
   }
 
