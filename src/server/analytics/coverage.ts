@@ -208,6 +208,8 @@ export interface CoverageGap {
   openingUnknown?: boolean;
   /** A valued account (an ISA, a pension): its balances cannot show what was paid in or out. */
   valuations?: boolean;
+  /** From its opening date to the day before its first data (`CoverageGapView.beforeData`). */
+  beforeData?: boolean;
 }
 
 export interface JointCoverage {
@@ -284,15 +286,22 @@ export class Coverage {
    * Each stretch from `from` to `to` that an account should have data for and that nothing covers,
    * by the one rule (`missingDays`), with what its balances say (docs/FORMULAS.md §3). The accounts
    * are the transaction accounts in the estate, with data or an opening date, and `also`: accounts a
-   * tax figure rests on (their interest, subscriptions or contributions), valued ones included.
+   * tax figure rests on (their interest, subscriptions or contributions), valued ones included. Every
+   * other account in the estate gives the days from its opening to its first data, which the estate
+   * leaves it out of (`beforeData`).
    */
   gaps(engine: BalanceEngine, from: ISODate, to: ISODate = today(), also: readonly Account[] = []): CoverageGap[] {
     const out: CoverageGap[] = [];
-    const listed = this.store.accounts.filter(
-      (a) => also.some((x) => x.id === a.id) || (isTransactionAccount(a) && a.includeInNetWorth && (this.byAccount.get(a.id)!.source !== 'none' || a.openedOn !== undefined)),
-    );
+    const full = (a: Account) => also.some((x) => x.id === a.id) || (isTransactionAccount(a) && a.includeInNetWorth && (this.byAccount.get(a.id)!.source !== 'none' || a.openedOn !== undefined));
+    const opening = (a: Account) => {
+      const first = engine.firstDataDate(a.id);
+      return a.includeInNetWorth && a.openedOn !== undefined && first !== null && a.openedOn < first ? addDays(first, -1) : null;
+    };
+    const listed = this.store.accounts.filter((a) => full(a) || opening(a));
     for (const a of listed) {
-      for (const g of missingDays(this.store, a, from, to)) {
+      const beforeData = opening(a);
+      const stretches = full(a) ? missingDays(this.store, a, from, to) : missingDays(this.store, a, from, minDate(to, beforeData)!);
+      for (const g of stretches) {
         const rows = this.store.transactions(a.id).filter((t) => t.date >= g.from && t.date <= g.to).length;
         out.push({
           accountId: a.id,
@@ -305,6 +314,7 @@ export class Coverage {
           ...(g.noData ? { noData: true } : {}),
           ...(g.openingUnknown ? { openingUnknown: true } : {}),
           ...(!isTransactionAccount(a) ? { valuations: true } : {}),
+          ...(beforeData && g.to <= beforeData ? { beforeData: true } : {}),
         });
       }
     }

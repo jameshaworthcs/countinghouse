@@ -34,9 +34,11 @@ interface Props {
   endLabels?: boolean;
   /** Index where projected values start; draws a "today" rule. */
   splitIndex?: number;
-  /** Index before which the data is incomplete; that stretch is washed out and labelled. */
-  partialBefore?: number;
-  partialLabel?: string;
+  /**
+   * Stretches of indexes (inclusive) where the data is incomplete: each is washed out to the known
+   * points either side, and labelled where the label fits. One covering every date is not drawn.
+   */
+  partial?: { from: number; to: number; label: string }[];
   ariaLabel: string;
 }
 
@@ -51,7 +53,7 @@ function tickLabel(t: Date, spanDays: number): string {
   return spanDays > 540 ? `${MONTHS[m]} ${String(y).slice(2)}` : MONTHS[m]!;
 }
 
-export function TimeChart({ dates, series, height = 260, format = (v) => money(v), axisFormat = (v) => compact(v), endLabels = false, splitIndex, partialBefore, partialLabel = 'Incomplete', ariaLabel }: Props) {
+export function TimeChart({ dates, series, height = 260, format = (v) => money(v), axisFormat = (v) => compact(v), endLabels = false, splitIndex, partial = [], ariaLabel }: Props) {
   const [wrapRef, width] = useWidth<HTMLDivElement>();
   const [hover, setHover] = useState<number | null>(null);
   const times = useMemo(() => dates.map(toTime), [dates]);
@@ -263,16 +265,29 @@ export function TimeChart({ dates, series, height = 260, format = (v) => money(v
                 </g>
               );
             })}
-          {partialBefore !== undefined && partialBefore > 0 && partialBefore < dates.length && (
-            // Over the marks, so what is known still shows through, muted.
-            <g>
-              <rect x={0} y={0} width={xi(partialBefore)} height={innerH} fill="var(--panel)" fillOpacity={0.6} />
-              <line x1={xi(partialBefore)} x2={xi(partialBefore)} y1={0} y2={innerH} stroke="var(--axis)" strokeWidth={1} strokeDasharray="3 3" />
-              <text x={6} y={12} style={{ fill: 'var(--ink-3)', fontSize: 11.5 }}>
-                {partialLabel}
-              </text>
-            </g>
-          )}
+          {partial
+            .filter((p) => p.from <= p.to && !(p.from <= 0 && p.to >= dates.length - 1))
+            .map((p) => {
+              // Over the marks, so what is known still shows through, muted.
+              const x0 = p.from > 0 ? xi(p.from - 1) : 0;
+              const x1 = p.to < dates.length - 1 ? xi(p.to + 1) : innerW;
+              // A stretch from the start keeps its label, as it always had room to run on into the known days.
+              const fits = p.from <= 0 || x1 - x0 >= p.label.length * 6 + 12;
+              return (
+                <g key={`${p.from}-${p.to}`}>
+                  <rect x={x0} y={0} width={x1 - x0} height={innerH} fill="var(--panel)" fillOpacity={0.6}>
+                    <title>{p.label}</title>
+                  </rect>
+                  {p.from > 0 && <line x1={x0} x2={x0} y1={0} y2={innerH} stroke="var(--axis)" strokeWidth={1} strokeDasharray="3 3" />}
+                  {p.to < dates.length - 1 && <line x1={x1} x2={x1} y1={0} y2={innerH} stroke="var(--axis)" strokeWidth={1} strokeDasharray="3 3" />}
+                  {fits && (
+                    <text x={x0 + 6} y={12} style={{ fill: 'var(--ink-3)', fontSize: 11.5 }}>
+                      {p.label}
+                    </text>
+                  )}
+                </g>
+              );
+            })}
           {endsOk &&
             ends.map((e) => (
               <g key={e.s.id} transform={`translate(${xi(e.idx) + 8},${e.py})`}>

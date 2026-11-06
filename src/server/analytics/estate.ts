@@ -92,18 +92,42 @@ export function estateKnownOn(store: Store, engine: BalanceEngine, date: ISODate
 }
 
 /**
- * The date from which the estate is fully known every day: before it, some account that was already
- * open has no data yet and the total leaves it out. An account whose data starts on or before its
- * opening day never holds it back.
+ * The days each included account leaves out of the estate: from its opening date (or, with none,
+ * from always: it may have been open before) up to the day before its first data. An account whose
+ * data starts on or before its opening day leaves nothing out, nor one with no data at all; nor
+ * one you confirmed nothing is missing from since it opened (the engine knows it from then).
  */
-export function completeFromDate(store: Store, engine: BalanceEngine): ISODate | null {
-  let complete: ISODate | null = null;
+export function unknownStretches(store: Store, engine: BalanceEngine): { account: Account; from: ISODate | null; to: ISODate }[] {
+  const out: { account: Account; from: ISODate | null; to: ISODate }[] = [];
   for (const a of includedAccounts(store)) {
     const first = engine.firstDataDate(a.id);
     if (!first || (a.openedOn !== undefined && a.openedOn >= first)) continue;
-    if (!complete || first > complete) complete = first;
+    out.push({ account: a, from: a.openedOn ?? null, to: addDays(first, -1) });
   }
-  return complete;
+  return out;
+}
+
+/**
+ * The stretches of [from, to] on which the estate is not fully known (`estateKnownOn` is false), with
+ * the accounts it leaves out on each, split wherever that set changes.
+ */
+export function incompleteStretches(store: Store, engine: BalanceEngine, from: ISODate, to: ISODate): EstateSeriesResponse['incomplete'] {
+  const clipped = unknownStretches(store, engine)
+    .map((u) => ({ ...u, from: u.from && u.from > from ? u.from : from, to: u.to < to ? u.to : to }))
+    .filter((u) => u.from <= u.to);
+  // Every day a stretch starts or ends after, the set of accounts left out may change.
+  const cuts = [...new Set(clipped.flatMap((u) => [u.from, addDays(u.to, 1)]))].filter((d) => d <= to).sort();
+  const out: EstateSeriesResponse['incomplete'] = [];
+  for (let i = 0; i < cuts.length; i++) {
+    const start = cuts[i]!;
+    const end = i + 1 < cuts.length ? addDays(cuts[i + 1]!, -1) : to;
+    const left = clipped.filter((u) => u.from <= start && start <= u.to).map((u) => ({ id: u.account.id, name: u.account.name }));
+    if (!left.length) continue;
+    const prev = out[out.length - 1];
+    if (prev && addDays(prev.to, 1) === start && prev.accounts.map((x) => x.id).join() === left.map((x) => x.id).join()) prev.to = end;
+    else out.push({ from: start, to: end, accounts: left });
+  }
+  return out;
 }
 
 export function estateSeries(store: Store, engine: BalanceEngine, from: ISODate, to: ISODate, grouping: 'wrapper' | 'access'): EstateSeriesResponse {
@@ -124,8 +148,8 @@ export function estateSeries(store: Store, engine: BalanceEngine, from: ISODate,
     const src = grouping === 'wrapper' ? e.wrapper : e.access;
     for (const k of keys) groupValues.get(k)!.push((src as Map<string, number>).get(k) ?? 0);
   }
-  // Before every account's first data, the total leaves out the accounts not known yet.
-  const completeFrom = completeFromDate(store, engine);
+  // Before an account's first data, from when it opened, the total leaves it out.
+  const incomplete = incompleteStretches(store, engine, from, to);
   return {
     grouping,
     dates,
@@ -133,7 +157,7 @@ export function estateSeries(store: Store, engine: BalanceEngine, from: ISODate,
     assets,
     liabilities,
     estimated,
-    completeFrom: completeFrom && completeFrom > from ? completeFrom : null,
+    incomplete,
     groups: keys
       .map((k) => ({ id: k, label: labels[k]!, values: groupValues.get(k)! }))
       .filter((g) => g.values.some((v) => v !== 0)),

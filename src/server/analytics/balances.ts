@@ -16,6 +16,10 @@
 // Before the first valuation, value is estimated: rolled back from it as the prices moved, or, with
 // no prices, from contributions plus growth accrued linearly when the data goes back to the
 // account's start, else rolled back by the money that arrived since.
+//
+// An account you confirmed nothing is missing from, from its opening date up to its first data, is
+// known from its opening: its balance there is rolled back from its first data with nothing in
+// between (`confirmedFromOpening`, docs/FORMULAS.md §9).
 
 import { ACCOUNT_TYPE_META, balanceModeOf } from '../../shared/accounts';
 import { EXTERNAL_FLOW_CATEGORIES } from '../../shared/categories';
@@ -28,7 +32,21 @@ import type { Store } from '../store';
 import { covers, holdingsPath, indexNear, PriceBook, type HoldingsPath, type PriceIndex } from './prices';
 
 /** What the engine reads: a store, or a store as a proposal would leave it; holdings and prices when it has them. */
-export type BalanceSource = Pick<Store, 'accounts' | 'transactions' | 'balances' | 'settings'> & Partial<Pick<Store, 'holdings' | 'instruments' | 'research' | 'figures'>>;
+export type BalanceSource = Pick<Store, 'accounts' | 'transactions' | 'balances' | 'settings'> & Partial<Pick<Store, 'holdings' | 'instruments' | 'research' | 'figures' | 'coverageConfirmations'>>;
+
+/**
+ * Whether stretches you confirmed nothing is missing from cover every day from `from` to `to`
+ * (together, touching or overlapping).
+ */
+export function confirmedThrough(stretches: readonly { from: ISODate; to: ISODate }[], from: ISODate, to: ISODate): boolean {
+  let cursor = from;
+  for (const s of [...stretches].sort((a, b) => (a.from < b.from ? -1 : a.from > b.from ? 1 : 0))) {
+    if (s.from > cursor) break;
+    if (s.to >= cursor) cursor = addDays(s.to, 1);
+    if (cursor > to) return true;
+  }
+  return cursor > to;
+}
 
 interface Anchor {
   date: ISODate;
@@ -416,7 +434,12 @@ export class BalanceEngine {
       const lastSnapshot = real.length ? real[real.length - 1]!.date : null;
       const firstFlow = flows[0]?.date ?? null;
       const candidatesFirst = mode === 'ledger' ? [firstTx, firstAnchor] : [firstAnchor, firstFlow];
-      const firstDate = candidatesFirst.filter(Boolean).sort()[0] ?? null;
+      const firstData = candidatesFirst.filter(Boolean).sort()[0] ?? null;
+      // Opened before its data starts, and you confirmed nothing is missing in between: it is known
+      // from its opening, as its first data rolled back over days nothing happened on.
+      const confirmed = (store.coverageConfirmations ?? []).filter((c) => c.accountId === account.id);
+      const confirmedFromOpening = Boolean(firstData && account.openedOn && account.openedOn < firstData && confirmedThrough(confirmed, account.openedOn, addDays(firstData, -1)));
+      const firstDate = confirmedFromOpening ? account.openedOn! : firstData;
       const lastDate = [lastTx, lastSnapshot].filter(Boolean).sort().reverse()[0] ?? null;
       this.data.set(account.id, {
         account,

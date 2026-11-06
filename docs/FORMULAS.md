@@ -97,7 +97,10 @@ does not include:
   any day to 31 January 2027), or the coverage grid's first month if that is earlier. It lists
   every transaction account in the estate that has data or an opening date, and the valued
   accounts a tax figure rests on (ISAs, the LISA, pensions), whose balances cannot show what moved,
-  so their days are never "adds up". Days before the grid's months are listed apart.
+  so their days are never "adds up". Days before the grid's months are listed apart. Every other
+  account in the estate lists the days from its opening to its first data (`beforeData`), which
+  the estate leaves it out of: confirming them counts it from its opening (§9, "Known from its
+  opening").
 
 **Balance evidence** (`BalanceEngine.evidence`, shown with each stretch no document covers, in
 Settings → Data health). For the days from *f* to *t*, with the anchors usable for gaps (§9):
@@ -446,6 +449,13 @@ years), both paths grow at the median:
     that opens with cash in hand and funds already held;
   - a rolled-back value is never below nothing.
 
+**Known from its opening** (`confirmedFromOpening`, ledger and valued accounts alike): an account
+opened (`openedOn`) before its first data, with stretches you confirmed nothing is missing from
+(`coverage.json`, §3) covering every day from its opening to the day before its first data, has
+data from its opening. Its balance on those days is rolled back from its first data as above, with
+nothing between: a new account whose first balance is £0 held £0 from its opening. Before its
+opening it adds nothing. A confirmation short of its first data changes nothing.
+
 **Approximate figures** (a balance you gave roughly, `approximate: true`):
 
 - used only when dated after all of the account's real data (its last transaction and last real
@@ -523,6 +533,7 @@ out; an "other asset" is valued yearly, so it asks for a newer one after 400 day
 
 **Known on D** (`estateKnownOn`): every included account with data has data on or before D, or
 opened after D (`openedOn`), so it held nothing then. Accounts with no data at all don't count.
+An account known from its opening (above) has data from then.
 
 **Changes on the Overview** (past 30 days, since the tax year began, past year):
 
@@ -532,11 +543,15 @@ opened after D (`openedOn`), so it held nothing then. Accounts with no data at a
     growth.
   - An approximate figure given today leaves every change empty until older data arrives.
 
-**Complete from** (`completeFromDate`, the estate chart): the latest first-data date among
-accounts that were already open before their data starts.
+**Incomplete stretches** (`incompleteStretches`, the estate chart): the days the estate is not
+known on, each with the accounts it leaves out. An included account with data leaves out the days
+from its opening date (or, with none, from always: it may have been open before) to the day before
+its first data; one whose data starts on or before its opening leaves out nothing. The stretches
+split wherever the set of accounts left out changes. An account opened after the rest only
+leaves out its own days, never the history before it.
 
-- The chart marks the stretch before it as partial, with no total line there: the areas show what
-  is known.
+- The chart marks each stretch's sampled dates as partial ("No data yet for …"), with no total line
+  there: the areas show what is known.
 - It draws a history from two sampled dates on which some account has data; otherwise it says
   there is not enough history yet.
 - The headline says how much of today's value comes from estimated balances, and from how many

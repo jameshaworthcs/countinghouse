@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router';
 import type { CoverageGapView, CoverageResponse, DataHealthResponse } from '../../shared/api';
 import { confirmableTo, settledStretches, settledThrough } from '../../shared/coverage';
-import { diffDays, formatDate, formatSpan, today } from '../../shared/dates';
+import { addDays, diffDays, formatDate, formatSpan, today } from '../../shared/dates';
 import type { BalanceEvidence } from '../../shared/schema';
 import { api, useApiMutation } from '../lib/api';
 import { cn, formatMonth, money, plural } from '../lib/format';
@@ -129,6 +129,12 @@ function EvidenceText({ e, to }: { e: BalanceEvidence; to: string }) {
 function StretchText({ g }: { g: CoverageGapView }) {
   if (g.noData) return <span>No data at all for this account: import its statements, or confirm nothing is missing if it was not used.</span>;
   if (g.openingUnknown) return <span>Before its data starts, and it has no opening date: set the date on its page if it opened later, or import statements from {formatDate(g.from)}.</span>;
+  if (g.beforeData)
+    return (
+      <span>
+        Open before its data starts on {formatDate(addDays(g.to, 1))}, so the estate leaves it out until then. If nothing went in or out before that, confirm it, and it counts from its opening date.
+      </span>
+    );
   if (g.valuations) return <span>It is valued, so its balances cannot show what was paid in or out: import a statement or export for these days, or confirm nothing was.</span>;
   return <EvidenceText e={g.evidence} to={g.evidence.through ?? g.to} />;
 }

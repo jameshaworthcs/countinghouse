@@ -28,23 +28,37 @@ function rangeFrom(r: Range): string | undefined {
   return undefined;
 }
 
+/** The sampled dates each incomplete stretch takes in, as index ranges, with who it leaves out. */
+function partialStretches(d: EstateSeriesResponse): { from: number; to: number; label: string }[] {
+  return d.incomplete.flatMap((s) => {
+    const from = d.dates.findIndex((x) => x >= s.from);
+    const after = d.dates.findIndex((x) => x > s.to);
+    const to = (after < 0 ? d.dates.length : after) - 1;
+    if (from < 0 || to < from) return [];
+    const names = s.accounts.map((a) => a.name);
+    const who = names.length > 2 ? `${names.slice(0, 2).join(', ')} and ${names.length - 2} more` : names.join(' and ');
+    return [{ from, to, label: `No data yet for ${who}` }];
+  });
+}
+
 function EstateChart() {
   const [range, setRange] = useState<Range>('1y');
   const [grouping, setGrouping] = useState<'wrapper' | 'access'>('wrapper');
   const q = useApi<EstateSeriesResponse>(['estate', range, grouping], `/estate${qs({ from: rangeFrom(range), grouping })}`);
   const d = q.data;
   const color = grouping === 'wrapper' ? wrapperColor : accessColor;
-  // Before every account has data the total leaves some out: that stretch is marked partial and has
-  // no total line, only what is known.
-  const firstComplete = d?.completeFrom ? d.dates.findIndex((x) => x >= d.completeFrom!) : 0;
-  const partialBefore = d && firstComplete < 0 ? d.dates.length : firstComplete;
-  const totalLine = d ? d.dates.length - partialBefore >= 2 : false;
+  // Where an account was open but has no data yet the total leaves it out: those stretches are
+  // marked partial and have no total line, only what is known.
+  const partial = d ? partialStretches(d) : [];
+  const incomplete = (i: number) => partial.some((p) => p.from <= i && i <= p.to);
+  const known = d ? d.dates.filter((_, i) => !incomplete(i)).length : 0;
+  const totalLine = known >= 2;
   // A history needs at least two days on which some account has data.
   const history = d ? d.dates.filter((_, i) => d.groups.some((g) => g.values[i] !== 0)).length >= 2 : false;
   const series: TimeSeries[] = d
     ? [
         ...d.groups.map((g) => ({ id: g.id, label: g.label, color: color(g.id), values: g.values, kind: 'area' as const, stack: true })),
-        { id: 'total', label: 'Estate value', color: 'var(--ink-2)', values: d.total.map((v, i) => (i < partialBefore ? null : v)), kind: 'line' as const },
+        { id: 'total', label: 'Estate value', color: 'var(--ink-2)', values: d.total.map((v, i) => (incomplete(i) ? null : v)), kind: 'line' as const },
       ]
     : [];
   const requested = rangeFrom(range);
@@ -78,14 +92,14 @@ function EstateChart() {
         d
           ? {
               columns: ['Date', ...d.groups.map((g) => g.label), 'Estate value'],
-              rows: d.dates.map((date, i) => [formatDate(date), ...d.groups.map((g) => money(g.values[i])), i < partialBefore ? `${money(d.total[i])} (incomplete)` : money(d.total[i])]).reverse(),
+              rows: d.dates.map((date, i) => [formatDate(date), ...d.groups.map((g) => money(g.values[i])), incomplete(i) ? `${money(d.total[i])} (incomplete)` : money(d.total[i])]).reverse(),
             }
           : undefined
       }
     >
       {d ? (
         history ? (
-          <TimeChart dates={d.dates} series={series} height={280} partialBefore={partialBefore} partialLabel={d.completeFrom ? `Not every account has data before ${formatDate(d.completeFrom, { year: false })}` : undefined} ariaLabel="Estate value over time" />
+          <TimeChart dates={d.dates} series={series} height={280} partial={partial} ariaLabel="Estate value over time" />
         ) : (
           <div className="py-12 text-center text-sm text-ink-3">Not enough history yet. Older statements or balances will draw it.</div>
         )

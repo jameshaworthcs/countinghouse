@@ -111,8 +111,12 @@ export interface EstateSeriesResponse {
   groups: { id: string; label: string; values: number[] }[];
   /** Dates where at least one included account's value was estimated. */
   estimated: boolean[];
-  /** From this date every included account has data; before it the total is incomplete. */
-  completeFrom: string | null;
+  /**
+   * Stretches of [first date, last date] in which some included account was open (or may have
+   * been: it has no opening date) but has no data yet, so the total leaves it out
+   * (`incompleteStretches`, docs/FORMULAS.md §9). Sorted, not overlapping.
+   */
+  incomplete: { from: string; to: string; accounts: { id: string; name: string }[] }[];
 }
 
 export interface CategoryAmount {
@@ -635,6 +639,11 @@ export interface CoverageGapView {
   openingUnknown?: boolean;
   /** A valued account (an ISA, a pension): its balances cannot show what was paid in or out. */
   valuations?: boolean;
+  /**
+   * From its opening date to the day before its first data: the estate leaves it out until then.
+   * Confirming nothing is missing counts it from its opening.
+   */
+  beforeData?: boolean;
 }
 
 /**

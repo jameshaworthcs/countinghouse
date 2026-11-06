@@ -2584,3 +2584,19 @@ value grown from the account's first flow is never below nothing, as rolled-back
 - **Also:** interest that names its bank ("Interest earned on Example Saver") was categorised as a
   transfer to another account at that bank. The bank's name alone no longer makes an interest row a
   transfer; an alias or account number still does.
+
+## 2026-11-06: An account opened before its data leaves out only its own days
+
+- **Owner:** a new investment account, opened the day before its first valuation (£0, no rows),
+  greyed out the whole estate chart before that valuation, and there was no way to say nothing had
+  happened in it yet while keeping its opening date.
+- **Found:** the chart marked everything before one "complete from" date, the latest first data of
+  any account opened before its data. That fits accounts with no opening date, whose earlier days
+  may be missing, but not one that opened later, which leaves out only its days from its opening.
+  Data health listed only ledger accounts and the valued ones a tax figure rests on, so a GIA's
+  opening days could not be confirmed.
+- **Done** (FORMULAS.md §9, "Known from its opening" and "Incomplete stretches"; §3): the estate
+  series gives each stretch the estate is not known on, with the accounts it leaves out, and the
+  chart washes out only those. Data health lists every estate account's days from its opening to
+  its first data; confirming nothing is missing there makes the balance engine count the account
+  from its opening, its first data rolled back over those days.
