@@ -82,6 +82,10 @@ export function useLiveUpdates(): void {
         void qc.invalidateQueries({ queryKey: id ? ['ask', id] : ['ask'], exact: Boolean(id) });
         void qc.invalidateQueries({ queryKey: ['ask'], exact: true });
       });
+      // The optional live feed took a reading, or failed to: only what shows it refreshes.
+      es.addEventListener('feed', () => {
+        void qc.invalidateQueries({ queryKey: ['feeds'] });
+      });
       // An agent proposed a fix, or took one back.
       es.addEventListener('proposal', () => {
         void qc.invalidateQueries({ queryKey: ['proposals'] });

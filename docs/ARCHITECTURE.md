@@ -30,6 +30,8 @@ Hono server  (Node 24, tsx; 127.0.0.1:4750 live, 4760 in development)
    │    └─ commitDraft → Store (+ document archived, import record written)
    │    └─ read a stored document again → compare with what was recorded → apply what you choose
    ├─ InboxWatcher: inbox/ → ImportService
+   ├─ LiveFeedService (feeds/, optional) ─► Trading 212's API ─► work area feeds/<feed>/<yyyy-mm>.jsonl
+   │    (only with its key in .env; read-only; 'feed' events; never a Store write)
    └─ Analytics (cached per store version)
         BalanceEngine · Coverage · estate · cashflow · spending (+ computed signals) · recurring · budgets · goals · pay
         · earned pay (timesheets → payslips → bank, owed pay pending beside the estate)
@@ -497,6 +499,32 @@ The estate value on a date is the sum of included accounts, converted to GBP (ma
 Groups are assigned by the sign of the balance, so an overdrawn current account counts as a debt
 and a card in credit counts as cash.
 
+## Live feeds
+
+Optional, and off unless its key is set in `.env` (docs/SELF_HOSTING.md, "Trading 212 live feed").
+`src/server/feeds/` reads one Invest or Stocks ISA account at Trading 212 through its public
+API: the account summary (value, cash, cost, gain) and the open positions, two requests a reading.
+
+- **Readings are not data.** Each is appended to the work area (`feeds/trading-212/<yyyy-mm>.jsonl`)
+  and held in memory as the latest. It is not a Store write: no figure, commit, audit entry or
+  analytics cache changes, and the browser is told by a `feed` event that refreshes only what shows
+  the feed (`GET /api/feeds`).
+- **Cadence.** Every `watchedSeconds` (15) while a page is visible: the browser posts
+  `/api/feeds/trading-212/watch` every 30 seconds while it is (not audited: it changes nothing), and
+  one that finds the latest reading older than that reads at once. Otherwise every
+  `backgroundMinutes` (15) on weekdays 07:00–22:00 UK time and every `quietMinutes` (180) at other
+  times. `POST /api/feeds/trading-212/refresh` reads now, unless a reading was tried in the last
+  5 seconds.
+- **Limits and failures.** The client keeps each path to its documented rate (summary 1 per 5s,
+  positions 1 per 1s) and waits for `x-ratelimit-reset` when one runs out. Failures back off up to
+  an hour; the audit log records when the feed starts working and when it fails.
+- **Linking.** A reading belongs to the account `FINANCE_T212_ACCOUNT` names (an account id, or
+  Trading 212's account number, of which only the last 4 digits are kept), else the open
+  `trading-212` account whose last 4 digits match the account number Trading 212 gives (only those
+  4 digits are kept).
+- **Shown** on the linked account's page ("Live from Trading 212", labelled as not yet recorded)
+  and in Settings → Live feeds, which also says when it is not set up.
+
 ## Web app
 
 - React 19, React Router, TanStack Query with `keepPreviousData` (refetches never flash
@@ -579,6 +607,9 @@ and a card in credit counts as cash.
   - No token can commit, dismiss or discard an import, change source facts or settings, or manage
     tokens. A request with a token ignores any cookie.
   - Every use, refused ones included, is logged in the work area.
+- **Outbound calls.** Only Claude (the engine chosen), the OIDC provider when configured, the local
+  model service when configured, and, when its key is set, Trading 212's API for the optional live
+  feed (read-only; only the key goes there, and it is never logged).
 - **Audit log.** Every change, sign-in and refused request, with who and from where (see "Audit
   log" above).
 - **Claude CLI extraction** runs with `--tools Read`, `--restricted` (file tools confined to the

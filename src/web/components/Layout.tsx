@@ -4,6 +4,7 @@ import { NavLink, Outlet, useLocation } from 'react-router';
 import type { ImportListResponse } from '../../shared/api';
 import { api, useApi } from '../lib/api';
 import { useAppData, useLiveUpdates } from '../lib/data';
+import { useFeedWatch } from './LiveFeed';
 import { cn } from '../lib/format';
 import { usePrefs } from '../lib/prefs';
 import { scrollToTop } from '../lib/scroll';
@@ -84,6 +85,8 @@ function NavList({ reviewCount, running, onNavigate }: { reviewCount: number; ru
 
 export function Layout() {
   useLiveUpdates();
+  // The optional Trading 212 feed reads often while the app is open (LiveFeed.tsx).
+  useFeedWatch();
   const { data } = useAppData();
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);

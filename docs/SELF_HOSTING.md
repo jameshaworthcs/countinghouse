@@ -226,6 +226,46 @@ own (`src/server/inference.ts`): `INFERENCE_BASE_URL` and `INFERENCE_API_KEY` in
 (and the code checkout's, for `npm run eval`). Nothing sent to it should leave your machines.
 Without them, that work waits, and Settings → Models says why.
 
+## Trading 212 live feed (optional)
+
+Counting House runs the same without it. Set up, it reads the value, cash and holdings of one
+Invest or Stocks ISA account at Trading 212 from Trading 212's public API (`src/server/feeds/`), so
+that account's page shows what it is worth now rather than at its last statement.
+
+1. **Make a key** in the Trading 212 app: Settings → API → Generate API key. Tick only the
+   permissions for reading account data and the portfolio (no orders, no pies), and limit it to
+   your server's public IP address. You get a key and a secret.
+2. **Put them in the live `.env`** and restart the service:
+
+   ```bash
+   FINANCE_T212_API_KEY=…
+   FINANCE_T212_API_SECRET=…
+   ```
+
+   Put them on the live server only, not a development checkout: Trading 212's rate limits are per
+   account, so two servers reading one account share them. To try it first, set
+   `FINANCE_T212_ENV=demo` with a key made in Trading 212's practice mode.
+3. **Link the account.** Readings belong to the open account at institution `trading-212` whose last
+   4 digits match the account number Trading 212 gives. `FINANCE_T212_ACCOUNT` names it outright:
+   the app's account id, or Trading 212's account number, of which only the last 4 digits are kept
+   (one key reads one account). Settings → Live feeds says which, or why none.
+
+How it reads:
+
+- Every 15 seconds while a page of the app is open and visible (the browser says so every 30
+  seconds; opening the app takes a reading at once if the latest is older than that), every 15
+  minutes on weekdays from 07:00 to 22:00 UK time, and every 3 hours otherwise. The
+  `FINANCE_T212_*_SECONDS`/`_MINUTES` settings in `.env.example` change these. A reading is two
+  requests (the account summary, 1 allowed per 5 seconds, and the positions, 1 per second).
+- Failures back off up to an hour; a refused key waits an hour; a rate limit waits for its reset.
+  Settings → Live feeds shows the last error, and the audit log records when the feed starts
+  working or fails.
+- Readings are appended to the work area (`feeds/trading-212/<yyyy-mm>.jsonl`, in the backup with
+  the rest of it), never to `data/`: they make no commit and change no figure. A reading is about
+  0.5 KB plus 0.2 KB a holding.
+- Only the key goes to Trading 212, as HTTP Basic auth; it is never logged. Only the last 4 digits
+  of the account number are kept.
+
 ## Operations
 
 - **Logs:** `journalctl -u finance -f`.

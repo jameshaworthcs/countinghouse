@@ -37,6 +37,8 @@ import { systemRoutes } from './routes/system';
 import { modelRoutes } from './routes/models';
 import { askRoutes } from './routes/ask';
 import { AskService } from './ask';
+import { LiveFeedService } from './feeds/service';
+import { feedRoutes } from './routes/feeds';
 import { tokenRoutes } from './routes/tokens';
 import { AgentTokens } from './tokens';
 import { authGate, csrfGuard, hostGuard, isPageRequest, securityHeaders } from './security';
@@ -195,7 +197,16 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
   const ask = new AskService(store, analytics, config, sessions, audit);
   await ask.init();
 
-  const ctx: AppContext = { config, store, analytics, imports, proposals, git, auth, oidc, inbox, jobs: runner, runner, tokens, audit, sessions, ask, devices, demoLogin, version: opts.version };
+  // Optional: live readings of a Trading 212 account (feeds/), only when its key is set in .env.
+  // A serving instance takes them by itself; tests and scripts only when asked.
+  const feedActor: AuditActor = { type: 'app', task: 'trading-212 feed' };
+  const feeds = new LiveFeedService(() => store.accounts, config.workDir, config.trading212, {
+    autoRun: config.watch && opts.inbox !== false,
+    onStateChange: ({ ok, message }) => audit.record({ category: 'app', action: ok ? 'feed.ok' : 'feed.failed', outcome: ok ? 'ok' : 'failed', actor: feedActor, summary: message }),
+  });
+  await feeds.init();
+
+  const ctx: AppContext = { config, store, analytics, imports, proposals, git, auth, oidc, inbox, jobs: runner, runner, tokens, audit, sessions, ask, feeds, devices, demoLogin, version: opts.version };
   const app = new Hono();
   const secOpts = { allowedHosts: config.allowedHosts, production: config.production };
 
@@ -224,6 +235,7 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
   app.route('/api/audit', auditRoutes(ctx));
   app.route('/api/sessions', sessionRoutes(ctx));
   app.route('/api/ask', askRoutes(ctx));
+  app.route('/api/feeds', feedRoutes(ctx));
   app.route('/api/documents', documentRoutes(ctx));
   app.route('/api', dataRoutes(ctx));
   app.route('/api', recordRoutes(ctx));
@@ -274,6 +286,7 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
     ctx,
     async close() {
       runner.stop();
+      feeds.stop();
       ask.stop();
       sessions.stop();
       proposals.stop();

@@ -3,6 +3,7 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { t212ConfigFromEnv, type T212Config } from './feeds/trading212';
 
 export const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -30,6 +31,11 @@ export interface Config {
    * sent to it never leave the owner's machines. Unset, tasks set to it wait (src/shared/tasks.ts).
    */
   inference?: { baseUrl: string; apiKey: string; waitUpToMs?: number };
+  /**
+   * Optional: Trading 212's API (FINANCE_T212_API_KEY, FINANCE_T212_API_SECRET), for live readings of
+   * an Invest or Stocks ISA account's value and holdings (src/server/feeds/). Unset, the feed is off.
+   */
+  trading212?: T212Config;
   /** Watch the inbox folder and the data directory for changes. */
   watch: boolean;
   /** Branch that data auto-commits must land on; commits are held (and reported) on any other. */
@@ -107,5 +113,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, root = PROJECT_
     const wait = Number(env.INFERENCE_WAIT_MINUTES);
     config.inference = { baseUrl: env.INFERENCE_BASE_URL.replace(/\/+$/, ''), apiKey: env.INFERENCE_API_KEY, ...(wait > 0 ? { waitUpToMs: wait * 60_000 } : {}) };
   }
+  const t212 = t212ConfigFromEnv(env);
+  if (t212) config.trading212 = t212;
   return config;
 }

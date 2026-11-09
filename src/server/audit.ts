@@ -415,8 +415,8 @@ export class DeviceNames {
 // ─── Requests ────────────────────────────────────────────────────────────────────────────────────
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
-/** POSTs that only look: previews and checks change nothing. */
-const LOOK_ONLY = [/^\/api\/rules\/preview$/, /^\/api\/categorise\/preview$/, /^\/api\/proposals\/[^/]+\/check$/];
+/** POSTs that only look: previews and checks change nothing (a live feed's "the app is open", sent every 30s, neither). */
+const LOOK_ONLY = [/^\/api\/rules\/preview$/, /^\/api\/categorise\/preview$/, /^\/api\/proposals\/[^/]+\/check$/, /^\/api\/feeds\/[^/]+\/watch$/];
 /** Bodies that hold a document's contents (an import's draft): kept as their shape, never their text. */
 const SHAPE_ONLY = [/^\/api\/imports\/[^/]+\/draft$/];
 /** Signing in and out are recorded as what they are, by the auth routes. */

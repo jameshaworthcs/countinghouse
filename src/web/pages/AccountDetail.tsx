@@ -17,6 +17,7 @@ import { FilePickerButton } from '../components/Upload';
 import { api, qs, useApi, useApiMutation } from '../lib/api';
 import { cn, formatDate, money, pct, timeAgo } from '../lib/format';
 import { Sorted } from '../lib/sort';
+import { LiveAccountValue } from '../components/LiveFeed';
 
 type Tab = 'transactions' | 'balances' | 'holdings' | 'documents';
 
@@ -196,6 +197,7 @@ export default function AccountDetail() {
         )}
       </div>
 
+      <LiveAccountValue accountId={account.id} currency={account.currency} />
       <LinkedAccounts links={q.data.links} />
       <InsightsPanel page="accounts" accountId={id} title="Agent notes on this account" className="mb-5" />
       {gaps.length > 0 && (

@@ -13,6 +13,7 @@ import type { ImportService } from './ingest/service';
 import type { OidcClient } from './oidc';
 import type { ProposalService } from './proposals';
 import type { AskService } from './ask';
+import type { LiveFeedService } from './feeds/service';
 import type { SessionLog } from './sessions';
 import { StoreError, type Store } from './store';
 import type { AgentTokens } from './tokens';
@@ -50,6 +51,8 @@ export interface AppContext {
   sessions: SessionLog;
   /** Ask's conversations (ask.ts). */
   ask?: AskService | undefined;
+  /** Optional live readings from a provider's API (feeds/); off unless its key is set. */
+  feeds: LiveFeedService;
   /** Names the tailnet device behind an address, when on. */
   devices?: DeviceNames | undefined;
   /** The demo's throwaway login in a codespace (codespace.ts), shown on the sign-in form. */

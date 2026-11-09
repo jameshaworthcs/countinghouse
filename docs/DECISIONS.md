@@ -2600,3 +2600,21 @@ value grown from the account's first flow is never below nothing, as rolled-back
   chart washes out only those. Data health lists every estate account's days from its opening to
   its first data; confirming nothing is missing there makes the balance engine count the account
   from its opening, its first data rolled back over those days.
+
+## 2026-11-09: An optional live feed from Trading 212's API
+
+- **Owner:** an Invest account's value should be almost live while the app is open, and still
+  frequent otherwise, without exporting a CSV by hand. Approved calling Trading 212's API, the one
+  third-party service besides Claude and the sign-in provider, and only when its key is set.
+- **Done** (ARCHITECTURE.md, "Live feeds"; SELF_HOSTING.md, "Trading 212 live feed"): the first
+  step. The account summary and positions are read every 15 seconds while a page is open, every 15
+  minutes in market hours, and every 3 hours otherwise, into the work area only. The account's page
+  shows the latest reading, labelled as not yet recorded; Settings → Live feeds shows its state, or
+  that it is optional and not set up. Nothing about it is needed to run the app.
+- **Next, decided with the owner:** about one reading an hour in market hours, plus the close,
+  recorded as valuations (with `at`) and the day's holdings, committed without review, as a stated
+  exception to "imports are drafts": they come from the provider's API, not a reading of a
+  document. Readings that look wrong (nothing, a jump with no money moved) are held back. A year of
+  that is about 23 MB of git history (simulated). The Overview's total then counts today's live
+  reading, labelled with its time, falling back to the recorded value when it is stale.
+

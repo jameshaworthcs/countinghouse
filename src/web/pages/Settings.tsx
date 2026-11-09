@@ -16,8 +16,9 @@ import { bandLabel, cn, money, timeAgo } from '../lib/format';
 import { Sorted } from '../lib/sort';
 import { SessionsLink } from '../components/SessionsLink';
 import { ModelsCard } from '../components/ModelsCard';
+import { LiveFeedsSettings } from '../components/LiveFeed';
 
-type Section = 'profile' | 'extraction' | 'categories' | 'rules' | 'tax-documents' | 'data' | 'access' | 'audit' | 'health';
+type Section = 'profile' | 'extraction' | 'categories' | 'rules' | 'tax-documents' | 'data' | 'feeds' | 'access' | 'audit' | 'health';
 
 /** The tax band is computed, not set: show this year's and where it comes from. */
 function TaxBandLine() {
@@ -1458,6 +1459,7 @@ export default function Settings() {
     { value: 'rules', label: 'Rules' },
     { value: 'tax-documents', label: 'Tax documents' },
     { value: 'data', label: 'Data & git' },
+    { value: 'feeds', label: 'Live feeds' },
     { value: 'access', label: 'Agent access' },
     { value: 'audit', label: 'Audit log' },
     { value: 'health', label: 'Data health' },
@@ -1472,6 +1474,7 @@ export default function Settings() {
       {section === 'rules' && <RulesEditor />}
       {section === 'tax-documents' && <TaxDocuments />}
       {section === 'data' && <DataAndGit />}
+      {section === 'feeds' && <LiveFeedsSettings />}
       {section === 'access' && <AgentAccess />}
       {section === 'audit' && <AuditLog />}
       {section === 'health' && <Health />}

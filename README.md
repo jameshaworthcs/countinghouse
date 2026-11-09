@@ -94,6 +94,9 @@ Nothing leaves your machine except:
   transactions or personal details ever go into one. Agents that read your figures get no web
   access.
 - **Sign-in,** if you use an OpenID Connect provider: only the protocol goes there, never your data.
+- **Trading 212,** only if you set up its optional live feed (an API key in `.env`): the app asks
+  Trading 212 for your account's value and holdings. Only the key goes there; nothing of yours is
+  sent ([docs/SELF_HOSTING.md](docs/SELF_HOSTING.md), "Trading 212 live feed").
 
 There are no analytics, no CDNs and no fonts from the web.
 
