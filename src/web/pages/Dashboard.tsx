@@ -1,3 +1,4 @@
+import { LiveAt } from '../components/LiveFeed';
 import { ArrowRight, CircleAlert, Info, ListChecks, TriangleAlert, Upload } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
@@ -347,6 +348,11 @@ export default function Dashboard() {
               <div className="mt-1.5 text-[12.5px] text-ink-3">
                 Everything you hold, minus <Money value={Math.abs(s.estate.liabilities)} decimals={0} /> you owe
               </div>
+              {s.live?.map((l) => (
+                <div key={l.accountId} className="mt-1 text-[12.5px] text-ink-3">
+                  Includes {l.name} live from {l.feed}, <LiveAt at={l.at} />
+                </div>
+              ))}
               {estimates.length > 0 && (
                 <div className="mt-1 text-[12.5px] text-ink-3">
                   Includes estimates for {estimates.length} account{estimates.length > 1 ? 's' : ''}: <Money value={estimates.reduce((sum, a) => sum + (a.balanceGBP ?? 0), 0)} decimals={0} />

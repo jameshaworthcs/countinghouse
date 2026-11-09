@@ -20,6 +20,7 @@ import { accountSummary, estateKnownOn, estateOn, estateSeries, firstDataDate } 
 import { dataHealth } from './health';
 import { closedHolding, handovers } from './handover';
 import { investments } from './investments';
+import type { LiveOverride } from '../feeds/live';
 import { captureList } from './capture';
 import { termsAlerts } from './terms';
 import { monthlyChecklist } from './monthly';
@@ -28,6 +29,9 @@ import { projections, type ProjectionOptions } from './projections';
 import { detectRecurring } from './recurring';
 import { selfAssessment } from './selfassessment';
 import { monthToDate as monthToDateSpending, spending } from './spending';
+
+/** A cache key part for a live reading: its account, moment and figures. */
+const liveKey = (live: LiveOverride | undefined) => (live ? `${live.accountId}@${live.at}:${live.value}:${live.contributions ?? ''}` : '');
 
 export class Analytics {
   private cache = new Map<string, { version: number; value: unknown }>();
@@ -55,8 +59,9 @@ export class Analytics {
     return this.cached(`coverage:${today()}`, () => this.coverageIndex.summary());
   }
 
-  accountSummaries() {
-    return this.cached(`accounts:${today()}`, () => this.store.accounts.map((a) => accountSummary(this.store, this.engine, a)));
+  /** Every account today; `live`, an account's live reading standing for today (feeds/live.ts). */
+  accountSummaries(live?: LiveOverride) {
+    return this.cached(`accounts:${today()}:${liveKey(live)}`, () => this.store.accounts.map((a) => accountSummary(this.store, this.engine, a, today(), live)));
   }
 
   estateSeries(from?: string, to?: string, grouping: 'wrapper' | 'access' = 'wrapper') {
@@ -120,8 +125,9 @@ export class Analytics {
     return this.cached(`sa:${taxYear ?? ''}:${today()}`, () => selfAssessment(this.store, taxYear, this.engine));
   }
 
-  investments() {
-    return this.cached(`inv:${today()}`, () => investments(this.store, this.engine));
+  /** Investments today; with `live`, an account's live reading stands for its value (pages only: agents get the recorded values). */
+  investments(live?: LiveOverride) {
+    return this.cached(`inv:${today()}:${liveKey(live)}`, () => investments(this.store, this.engine, live));
   }
 
   monthly() {
@@ -154,12 +160,13 @@ export class Analytics {
     });
   }
 
-  summary(importCounts: Record<string, number>): SummaryResponse {
+  summary(importCounts: Record<string, number>, live?: LiveOverride): SummaryResponse {
     const now = today();
-    return this.cached(`summary:${now}:${JSON.stringify(importCounts)}`, () => {
+    return this.cached(`summary:${now}:${JSON.stringify(importCounts)}:${liveKey(live)}`, () => {
       const engine = this.engine;
-      const e = estateOn(this.store, engine, now);
-      const accounts = this.accountSummaries();
+      // Today's estate counts an account's live reading when it stands for today (FORMULAS.md §9).
+      const e = estateOn(this.store, engine, now, live);
+      const accounts = this.accountSummaries(live);
       const ty = taxYearOf(now);
       // A change is only measured from a day the estate is fully known: comparing with an estate
       // that left some accounts out would show their arrival as growth.
@@ -291,9 +298,11 @@ export class Analytics {
         const al = this.allowances();
         if (al.isa.remaining > 0) alerts.push({ id: 'tye', level: 'info', title: `${daysLeft} days left in ${ty.label}`, detail: `${formatMoney(al.isa.remaining, { decimals: 0 })} of ISA allowance unused.`, action: { label: 'Tax year', href: '/tax' } });
       }
+      const liveAccount = live ? this.store.account(live.accountId) : undefined;
       return {
         asOf: now,
         estate: { value: e.total, assets: e.assets, liabilities: e.liabilities },
+        ...(live && liveAccount?.includeInNetWorth ? { live: [{ accountId: live.accountId, name: liveAccount.name, feed: live.feed, at: live.at }] } : {}),
         deltas,
         groups: WRAPPER_GROUPS.map((id) => ({ id, label: WRAPPER_GROUP_LABELS[id], value: e.wrapper.get(id) ?? 0 })).filter((g) => g.value !== 0),
         access: ACCESS_GROUPS.map((id) => ({ id, label: ACCESS_GROUP_LABELS[id], value: e.access.get(id) ?? 0 })).filter((g) => g.value !== 0),

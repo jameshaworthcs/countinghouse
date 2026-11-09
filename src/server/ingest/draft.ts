@@ -101,6 +101,7 @@ const DATE_SOURCE_WORDS: Record<DateSource, string> = {
   'file-modified': 'from the file’s date',
   upload: 'the upload day',
   manual: 'as you set it',
+  feed: 'when the live feed read it',
 };
 
 /** Pension contributions and relief, as a provider's document states them. */

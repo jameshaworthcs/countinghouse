@@ -69,11 +69,27 @@ export interface AccountSummary {
   transactionCount: number;
   /** Balance at the last 13 month-ends, oldest first (GBP). */
   sparkline: (number | null)[];
+  /**
+   * The balance is a live feed's reading, standing for today's value (docs/FORMULAS.md §9, "Live
+   * readings"): when it was read, and the recorded value it stands in for.
+   */
+  live?: LiveFigure;
+}
+
+/** A live feed's reading standing for an account's value today, beside the recorded one. */
+export interface LiveFigure {
+  at: string;
+  feed: string;
+  /** The recorded value it stands in for, and the day of the account's latest data. */
+  recorded: number | null;
+  recordedAsOf: string | null;
 }
 
 export interface SummaryResponse {
   asOf: string;
   estate: { value: number; assets: number; liabilities: number };
+  /** Accounts whose value today is a live feed's reading (docs/FORMULAS.md §9, "Live readings"). */
+  live?: { accountId: string; name: string; feed: string; at: string }[];
   deltas: { id: string; label: string; since: string; change: number | null; pct: number | null }[];
   groups: { id: WrapperGroup; label: string; value: number }[];
   access: { id: AccessGroup; label: string; value: number }[];
@@ -515,6 +531,8 @@ export interface InvestmentAccountSummary {
   asOf: string | null;
   /** Total paid in: as the provider reports it, or summed from contributions that go back to the start. */
   contributions: number | null;
+  /** The value is a live feed's reading (docs/FORMULAS.md §9, "Live readings"). */
+  live?: LiveFigure;
   contributionsSource: 'provider' | 'transactions' | null;
   growth: number | null;
   growthPct: number | null;

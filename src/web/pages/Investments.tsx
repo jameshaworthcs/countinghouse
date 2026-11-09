@@ -1,3 +1,4 @@
+import { LiveAt } from '../components/LiveFeed';
 import { useState } from 'react';
 import { Link } from 'react-router';
 import type { InvestmentsResponse } from '../../shared/api';
@@ -165,7 +166,7 @@ export default function Investments() {
                         <Money value={a.charges.drag} decimals={0} />
                         <div className="text-[11.5px] text-ink-3">over {a.charges.horizonYears} years</div>
                       </td>
-                      <td className={cn(tableClasses.td, 'text-ink-3')}>{a.asOf ? formatDate(a.asOf) : '—'}</td>
+                      <td className={cn(tableClasses.td, 'text-ink-3')}>{a.live ? <>live, <LiveAt at={a.live.at} /></> : a.asOf ? formatDate(a.asOf) : '—'}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -200,8 +200,9 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
   // Optional: live readings of a Trading 212 account (feeds/), only when its key is set in .env.
   // A serving instance takes them by itself; tests and scripts only when asked.
   const feedActor: AuditActor = { type: 'app', task: 'trading-212 feed' };
-  const feeds = new LiveFeedService(() => store.accounts, config.workDir, config.trading212, {
+  const feeds = new LiveFeedService(store, config.workDir, config.trading212, {
     autoRun: config.watch && opts.inbox !== false,
+    asActor: (fn) => runAs(feedActor, fn),
     onStateChange: ({ ok, message }) => audit.record({ category: 'app', action: ok ? 'feed.ok' : 'feed.failed', outcome: ok ? 'ok' : 'failed', actor: feedActor, summary: message }),
   });
   await feeds.init();

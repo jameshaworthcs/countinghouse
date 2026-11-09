@@ -318,7 +318,7 @@ export function dataRoutes(ctx: AppContext): Hono {
 
   // ─── Accounts ────────────────────────────────────────────────────────────────────────────────
 
-  app.get('/accounts', (c) => c.json(ctx.analytics.accountSummaries()));
+  app.get('/accounts', (c) => c.json(ctx.analytics.accountSummaries(ctx.feeds.liveOverride())));
 
   app.post('/accounts', async (c) => {
     const body = await readJson(c, NewAccountBody);
@@ -378,11 +378,14 @@ export function dataRoutes(ctx: AppContext): Hono {
     const carriesOnFrom = handoverOf(store, engine, account) ?? undefined;
     const successor = store.accounts.find((a) => a.continues?.accountId === account.id);
     const carriedOnAs = successor ? (handoverOf(store, engine, successor) ?? undefined) : undefined;
-    const paid = balanceModeOf(account) === 'market' ? paidIn(store, engine, account) : null;
+    // Today's value and paid in count a live reading that stands for today (FORMULAS.md §9, "Live readings").
+    const live = ctx.feeds.liveOverride();
+    const mine = live?.accountId === account.id ? live : undefined;
+    const paid = balanceModeOf(account) === 'market' ? (mine?.contributions !== undefined ? { amount: mine.contributions, source: 'provider' as const, asOf: today() } : paidIn(store, engine, account)) : null;
     const body: AccountDetailResponse = {
       account,
       ...(carriesOnFrom || carriedOnAs ? { links: { ...(carriesOnFrom ? { carriesOnFrom } : {}), ...(carriedOnAs ? { carriedOnAs } : {}) } } : {}),
-      summary: accountSummary(store, engine, account),
+      summary: accountSummary(store, engine, account, today(), live),
       balances: store.balances(account.id),
       holdings: store.holdings(account.id),
       series,

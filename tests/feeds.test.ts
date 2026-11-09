@@ -10,7 +10,7 @@ import { createApp } from '../src/server/app';
 import { loadConfig } from '../src/server/config';
 import { inMarketHours, LiveFeedService, MIN_REFRESH_GAP_MS, WATCH_HOLD_MS } from '../src/server/feeds/service';
 import { last4Of, t212ConfigFromEnv, toReading, Trading212Client, type T212Config } from '../src/server/feeds/trading212';
-import { AccountSchema, type Account } from '../src/shared/schema';
+import { AccountSchema, BalanceSnapshotSchema, HoldingsSnapshotSchema, type Account, type BalanceSnapshot, type HoldingsSnapshot, type Transaction } from '../src/shared/schema';
 
 const KEY = 'example-key-0001';
 const SECRET = 'example-secret-0001';
@@ -32,8 +32,19 @@ function json(body: unknown, status = 200, headers: Record<string, string> = {})
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } });
 }
 
+/** Cash movements: two deposits (one a promotion your import files as income), a withdrawal, interest and a transfer in. */
+const CASH = [
+  { type: 'DEPOSIT', amount: 1000, currency: 'GBP', reference: 'ref-0001', dateTime: '2027-01-05T10:00:00.000Z' },
+  { type: 'DEPOSIT', amount: 100, currency: 'GBP', reference: 'ref-0002', dateTime: '2027-01-06T10:00:00.000Z' },
+  { type: 'WITHDRAW', amount: -50, currency: 'GBP', reference: 'ref-0003', dateTime: '2027-02-01T10:00:00.000Z' },
+  { type: 'INTEREST_ON_FREE_CASH', amount: 0.42, currency: 'GBP', reference: 'ref-0004', dateTime: '2027-02-02T10:00:00.000Z' },
+  { type: 'TRANSFER', amount: 200, currency: 'GBP', reference: 'ref-0005', dateTime: '2027-02-03T10:00:00.000Z' },
+];
+
+const answerT212 = (p: string) => (p.endsWith('/summary') ? json(SUMMARY) : p.endsWith('/transactions') ? json({ items: CASH, nextPagePath: null }) : json(POSITIONS));
+
 /** A fake Trading 212: answers by path, and remembers every request. */
-function fakeT212(answer: (path: string) => Response = (p) => (p.endsWith('/summary') ? json(SUMMARY) : json(POSITIONS))) {
+function fakeT212(answer: (path: string) => Response = answerT212) {
   const calls: { url: string; auth: string | null }[] = [];
   const fetchFn = ((url: string, init?: RequestInit) => {
     calls.push({ url, auth: new Headers(init?.headers).get('authorization') });
@@ -43,6 +54,28 @@ function fakeT212(answer: (path: string) => Response = (p) => (p.endsWith('/summ
 }
 
 const CFG: T212Config = { apiKey: KEY, apiSecret: SECRET, environment: 'live', watchedSeconds: 15, backgroundMinutes: 15, quietMinutes: 180 };
+
+/** What the feed needs of a store, in memory. */
+function memStore(accountsOf: () => Account[], txs: Transaction[] = []) {
+  const balances: BalanceSnapshot[] = [];
+  let holdings: HoldingsSnapshot[] = [];
+  return {
+    get accounts() {
+      return accountsOf();
+    },
+    transactions: (id: string) => txs.filter((t) => t.accountId === id),
+    balances: (id: string) => balances.filter((b) => b.accountId === id),
+    holdings: (id: string) => holdings.filter((h) => h.accountId === id),
+    addBalances: (snaps: BalanceSnapshot[]) => {
+      balances.push(...snaps.map((b) => BalanceSnapshotSchema.parse(b)));
+      return Promise.resolve(snaps.length);
+    },
+    addHoldings: (snaps: HoldingsSnapshot[], _m: string, replaces: string[] = []) => {
+      holdings = [...holdings.filter((h) => !replaces.includes(h.id)), ...snaps.map((h) => HoldingsSnapshotSchema.parse(h))];
+      return Promise.resolve(snaps.length);
+    },
+  };
+}
 
 const account = (a: Partial<Account> & { id: string }): Account => AccountSchema.parse({ name: a.id, type: 'gia', createdAt: '2027-01-01T00:00:00Z', updatedAt: '2027-01-01T00:00:00Z', ...a });
 
@@ -149,9 +182,9 @@ describe('the live feed', () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  const service = (t = fakeT212(), cfg: T212Config | null = CFG) => {
+  const service = (t = fakeT212(), cfg: T212Config | null = CFG, store = memStore(() => accounts)) => {
     const client = cfg ? new Trading212Client(cfg, { fetch: t.fetch, now: () => now }) : undefined;
-    return new LiveFeedService(() => accounts, dir, cfg ?? undefined, { ...(client ? { client } : {}), now: () => now });
+    return new LiveFeedService(store, dir, cfg ?? undefined, { ...(client ? { client } : {}), now: () => now, wait: () => Promise.resolve() });
   };
 
   it('is off with no key: nothing is asked and the status says it is not set up', async () => {
@@ -170,12 +203,13 @@ describe('the live feed', () => {
     feed.on('reading', (r) => seen.push(r));
     await feed.init();
     await feed.refresh();
-    const files = await readdir(path.join(dir, 'feeds', 'trading-212'));
+    const files = (await readdir(path.join(dir, 'feeds', 'trading-212'))).filter((f) => f.endsWith('.jsonl'));
     expect(files).toHaveLength(1);
     expect(files[0]).toMatch(/^2027-03\.jsonl$/);
     const lines = (await readFile(path.join(dir, 'feeds', 'trading-212', files[0]!), 'utf8')).trim().split('\n');
     expect(lines).toHaveLength(1);
-    expect(JSON.parse(lines[0]!)).toMatchObject({ feed: 'trading-212', accountId: 'example-invest', totalValue: 1234.57 });
+    // Paid in: the deposits, the withdrawal and the transfer, not the interest.
+    expect(JSON.parse(lines[0]!)).toMatchObject({ feed: 'trading-212', accountId: 'example-invest', totalValue: 1234.57, contributions: 1250, check: { ok: true } });
     expect(seen).toHaveLength(1);
     const s = feed.status();
     expect(s).toMatchObject({ configured: true, environment: 'live', accountId: 'example-invest', accountName: 'example-invest', failures: 0 });
@@ -213,15 +247,15 @@ describe('the live feed', () => {
     feed.watch();
     await new Promise((r) => setImmediate(r));
     await feed.refresh(); // waits for the one under way, or is too soon
-    expect(t.calls).toHaveLength(2); // summary + positions
+    expect(t.calls).toHaveLength(3); // summary, positions, and the cash movements (read once an hour)
     expect(feed.status().watched).toBe(true);
     now += 3_000;
     feed.watch();
     await feed.refresh();
-    expect(t.calls).toHaveLength(2);
+    expect(t.calls).toHaveLength(3);
     now += MIN_REFRESH_GAP_MS + 3_000; // past the refresh gap and the summary's limit
     await feed.refresh();
-    expect(t.calls).toHaveLength(4);
+    expect(t.calls).toHaveLength(5);
     now += WATCH_HOLD_MS;
     expect(feed.status().watched).toBe(false);
   });
@@ -231,7 +265,7 @@ describe('the live feed', () => {
     const t = fakeT212((p) => answer(p));
     const changes: boolean[] = [];
     const client = new Trading212Client(CFG, { fetch: t.fetch, now: () => now });
-    const feed = new LiveFeedService(() => accounts, dir, CFG, { client, now: () => now, onStateChange: (c) => changes.push(c.ok) });
+    const feed = new LiveFeedService(memStore(() => accounts), dir, CFG, { client, now: () => now, onStateChange: (c) => changes.push(c.ok) });
     await feed.refresh();
     expect(feed.status().failures).toBe(1);
     expect(feed.status().lastError).toMatch(/answered 500/);
@@ -239,7 +273,7 @@ describe('the live feed', () => {
     await feed.refresh();
     expect(t.calls).toHaveLength(1);
     now += 15 * 60_000;
-    answer = (p) => (p.endsWith('/summary') ? json(SUMMARY) : json(POSITIONS));
+    answer = answerT212;
     await feed.refresh();
     expect(feed.status()).toMatchObject({ failures: 0 });
     expect(feed.status().lastError).toBeUndefined();
@@ -249,6 +283,32 @@ describe('the live feed', () => {
     answer = () => json({}, 429, { 'x-ratelimit-reset': String(Math.floor(now / 1000) + 30) });
     await feed.refresh();
     expect(feed.status().failures).toBe(0);
+  });
+
+  it('records a reading when due, stands the latest good one for today, and never a held-back one', async () => {
+    let summary = SUMMARY;
+    const t = fakeT212((p) => (p.endsWith('/summary') ? json(summary) : answerT212(p)));
+    const store = memStore(() => accounts);
+    const client = new Trading212Client(CFG, { fetch: t.fetch, now: () => now });
+    const feed = new LiveFeedService(store, dir, CFG, { client, now: () => now, record: true, wait: () => Promise.resolve() });
+    await feed.refresh();
+    expect(store.balances('example-invest').map((b) => [b.kind, b.balance, b.contributions])).toEqual([['feed', 1234.57, 1250]]);
+    expect(store.holdings('example-invest')).toHaveLength(1);
+    expect(feed.status().lastRecorded).toMatchObject({ why: 'first of the day' });
+    expect(feed.liveOverride()).toMatchObject({ accountId: 'example-invest', value: 1234.57, contributions: 1250 });
+    // A jump nothing explains is held back: not recorded, not shown, and said.
+    now += 20 * 60_000;
+    summary = { ...SUMMARY, totalValue: 9000 };
+    await feed.refresh();
+    expect(store.balances('example-invest')).toHaveLength(1);
+    expect(feed.status().heldBack?.reason).toMatch(/moved/);
+    expect(feed.status().latest?.totalValue).toBe(1234.57);
+    expect(feed.liveOverride()?.value).toBe(1234.57);
+    // The next reading agreeing with it confirms it.
+    now += 20 * 60_000;
+    await feed.refresh();
+    expect(feed.status().heldBack).toBeUndefined();
+    expect(feed.liveOverride()?.value).toBe(9000);
   });
 
   it('picks up the latest reading and today’s from the work area after a restart', async () => {

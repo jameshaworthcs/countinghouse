@@ -36,6 +36,14 @@ export interface FeedReading {
   cash: { free: number; inPies: number; reserved: number };
   investments: { value: number; cost: number; unrealisedGain: number; realisedGain: number };
   holdings: FeedHolding[];
+  /**
+   * Money paid in to date, net of withdrawals, from the provider's list of cash movements (its
+   * deposits, withdrawals and transfers; a deposit your imports file as income, such as a
+   * promotion, left out). Absent until that list has been read in full.
+   */
+  contributions?: number;
+  /** The checks a reading passes before it counts (docs/FORMULAS.md §9, "Live readings"). */
+  check?: { ok: boolean; reason?: string };
 }
 
 /** A feed's state, for Settings and the pages that show its latest reading (GET /api/feeds). */
@@ -61,6 +69,16 @@ export interface FeedStatus {
   watched: boolean;
   nextAt?: string;
   intervals: { watchedSeconds: number; backgroundMinutes: number; quietMinutes: number };
+  /** The latest reading held back by the checks, and why. */
+  heldBack?: { at: string; reason: string };
+  /** The latest reading recorded as a valuation, and why it was due (when recorded since the app started). */
+  lastRecorded?: { at: string; why?: string };
+  /** Why the latest attempt to record a reading failed. */
+  recordError?: string;
+  /** The provider's cash movements as last read: how many, and when. */
+  cashMovements?: { count: number; readAt: string; complete: boolean };
+  /** Why the latest attempt to read the cash movements failed (the readings go on without it). */
+  cashError?: string;
 }
 
 export interface FeedsResponse {

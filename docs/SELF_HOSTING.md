@@ -228,13 +228,15 @@ Without them, that work waits, and Settings → Models says why.
 
 ## Trading 212 live feed (optional)
 
-Counting House runs the same without it. Set up, it reads the value, cash and holdings of one
-Invest or Stocks ISA account at Trading 212 from Trading 212's public API (`src/server/feeds/`), so
-that account's page shows what it is worth now rather than at its last statement.
+Counting House runs the same without it. Set up, it reads the value, cash, holdings and money paid
+in of one Invest or Stocks ISA account at Trading 212 from Trading 212's public API
+(`src/server/feeds/`): today's estate value and the account's value are then what Trading 212 says
+now, and about one reading an hour is recorded as a valuation.
 
 1. **Make a key** in the Trading 212 app: Settings → API → Generate API key. Tick only the
-   permissions for reading account data and the portfolio (no orders, no pies), and limit it to
-   your server's public IP address. You get a key and a secret.
+   permissions for reading account data, the portfolio and the history (no orders, no pies), and
+   limit it to your server's public IP address. You get a key and a secret. Without the history
+   permission the feed still reads the value, but not what was paid in.
 2. **Put them in the live `.env`** and restart the service:
 
    ```bash
@@ -256,13 +258,24 @@ How it reads:
   seconds; opening the app takes a reading at once if the latest is older than that), every 15
   minutes on weekdays from 07:00 to 22:00 UK time, and every 3 hours otherwise. The
   `FINANCE_T212_*_SECONDS`/`_MINUTES` settings in `.env.example` change these. A reading is two
-  requests (the account summary, 1 allowed per 5 seconds, and the positions, 1 per second).
+  requests (the account summary, 1 allowed per 5 seconds, and the positions, 1 per second); the cash
+  movements are read in full once, then their newest page at most hourly.
+- Every reading is appended to the work area (`feeds/trading-212/<yyyy-mm>.jsonl`, with the cash
+  movements in `cash-movements.json`; in the backup with the rest of it). A reading is about 0.5 KB
+  plus 0.2 KB a holding.
+- **What it writes to your data.** About one reading an hour in market hours, plus the close after
+  21:00 UK time, is recorded as a valuation with the time it was read, and as the day's holdings,
+  and committed straight away: the one thing written to `data/` without your review. A reading
+  that looks wrong (a value of nothing, investments with no holdings, a jump no money paid in
+  explains) is held back, and Settings → Live feeds says so. A year of hourly valuations is about
+  2.5 MB of files and 20–25 MB of git history (packed). Delete any of them like any other balance.
+- **Today's figures.** The latest reading that passed its checks, read in the last hour, is the
+  account's value today: in the estate value on the Overview ("Includes … live"), on the account's
+  page (with the recorded value beside it), in Accounts and on Investments. Past days, charts,
+  agents and Ask use the recorded values.
 - Failures back off up to an hour; a refused key waits an hour; a rate limit waits for its reset.
   Settings → Live feeds shows the last error, and the audit log records when the feed starts
   working or fails.
-- Readings are appended to the work area (`feeds/trading-212/<yyyy-mm>.jsonl`, in the backup with
-  the rest of it), never to `data/`: they make no commit and change no figure. A reading is about
-  0.5 KB plus 0.2 KB a holding.
 - Only the key goes to Trading 212, as HTTP Basic auth; it is never logged. Only the last 4 digits
   of the account number are kept.
 

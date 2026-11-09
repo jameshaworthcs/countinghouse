@@ -82,9 +82,10 @@ export function useLiveUpdates(): void {
         void qc.invalidateQueries({ queryKey: id ? ['ask', id] : ['ask'], exact: Boolean(id) });
         void qc.invalidateQueries({ queryKey: ['ask'], exact: true });
       });
-      // The optional live feed took a reading, or failed to: only what shows it refreshes.
+      // The optional live feed took a reading, or failed to: what shows it, and today's figures
+      // that count it (the Overview, Accounts, an account's page, Investments), refresh.
       es.addEventListener('feed', () => {
-        void qc.invalidateQueries({ queryKey: ['feeds'] });
+        for (const key of ['feeds', 'summary', 'accounts', 'account', 'investments']) void qc.invalidateQueries({ queryKey: [key] });
       });
       // An agent proposed a fix, or took one back.
       es.addEventListener('proposal', () => {

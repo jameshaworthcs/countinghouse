@@ -3,6 +3,7 @@
 
 import { RefreshCw } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import type { LiveFigure } from '../../shared/api';
 import type { FeedsResponse, FeedStatus } from '../../shared/feeds';
 import { formatDate } from '../../shared/dates';
 import { sumMoney } from '../../shared/money';
@@ -67,19 +68,46 @@ function RefreshButton({ size = 'sm' }: { size?: 'sm' | 'md' }) {
   );
 }
 
-/** On the linked account's page: what Trading 212 says it is worth now. Shown only when the feed is on and linked to it. */
-export function LiveAccountValue({ accountId, currency }: { accountId: string; currency: string }) {
+/** "read 20:40:04 (8s ago)": when a live reading was taken, ticking. */
+export function LiveAt({ at }: { at: string }) {
+  const ago = useAgo(at);
+  return (
+    <span>
+      read {timeOf(at)} ({ago})
+    </span>
+  );
+}
+
+/** Under an account's value when it is a live reading: when it was read, and the recorded value it stands in for. */
+export function LiveSub({ live, currency }: { live: LiveFigure; currency: string }) {
+  return (
+    <span>
+      live from {live.feed}, <LiveAt at={live.at} />
+      {live.recorded !== null && (
+        <>
+          {' '}
+          · recorded <Money value={live.recorded} currency={currency} />
+          {live.recordedAsOf ? ` (${formatDate(live.recordedAsOf)})` : ''}
+        </>
+      )}
+    </span>
+  );
+}
+
+/** On the linked account's page: the latest reading's detail, and whether it counts. Shown only when the feed is on and linked to it. */
+export function LiveAccountValue({ accountId, live }: { accountId: string; live: boolean }) {
   const feed = useTrading212();
   const latest = feed?.latest;
   const ago = useAgo(latest?.at);
   if (!feed?.configured || feed.accountId !== accountId || !latest) return null;
+  const cash = sumMoney([latest.cash.free, latest.cash.inPies, latest.cash.reserved]);
   return (
     <Callout
-      tone={feed.lastError ? 'warn' : 'neutral'}
+      tone={feed.lastError || feed.heldBack ? 'warn' : 'neutral'}
       className="mb-5"
       title={
         <span className="inline-flex flex-wrap items-center gap-2">
-          Live from Trading 212: <Money value={latest.totalValue} currency={latest.currency || currency} />
+          Trading 212 live
           <span className="font-normal text-ink-3">
             read {timeOf(latest.at)} ({ago})
           </span>
@@ -88,8 +116,16 @@ export function LiveAccountValue({ accountId, currency }: { accountId: string; c
       }
       action={<RefreshButton />}
     >
-      Invested <span className="sensitive">{money(latest.investments.value)}</span> · cash <span className="sensitive">{money(sumMoney([latest.cash.free, latest.cash.inPies, latest.cash.reserved]))}</span> · gain{' '}
-      <span className="sensitive">{money(latest.investments.unrealisedGain, { sign: true })}</span>. Kept in the work area, not yet recorded as a valuation.
+      Invested <span className="sensitive">{money(latest.investments.value)}</span> · cash <span className="sensitive">{money(cash)}</span> · unrealised gain <span className="sensitive">{money(latest.investments.unrealisedGain, { sign: true })}</span>
+      {latest.contributions !== undefined && (
+        <>
+          {' '}
+          · paid in <span className="sensitive">{money(latest.contributions)}</span>
+        </>
+      )}
+      .{' '}
+      {live ? 'The value above is this reading; about one an hour is recorded as a valuation.' : 'The value above is the recorded one: this reading is over an hour old, or older than the latest recorded.'}
+      {feed.heldBack && <> A reading at {timeOf(feed.heldBack.at)} was held back: {feed.heldBack.reason}.</>}
       {feed.lastError && <> Last try failed: {feed.lastError}</>}
     </Callout>
   );
@@ -101,6 +137,7 @@ export function LiveFeedsSettings() {
   const ago = useAgo(feed?.latest?.at);
   if (!feed) return null;
   const minutes = (m: number) => (m % 60 === 0 ? `${m / 60} h` : `${m} min`);
+  const cash = feed.cashMovements;
   return (
     <div className="flex flex-col gap-5">
       <Card
@@ -109,12 +146,12 @@ export function LiveFeedsSettings() {
             Trading 212 <Badge tone="muted">optional</Badge>
           </span>
         }
-        description="Reads an Invest or Stocks ISA account’s value and holdings from Trading 212’s own API: every few seconds while the app is open, less often otherwise. Readings stay in the work area; nothing is recorded in your data. Only your API key goes to Trading 212; nothing of yours is sent."
+        description="Reads an Invest or Stocks ISA account’s value, holdings and money paid in from Trading 212’s own API: every few seconds while the app is open, less often otherwise. Today’s figures count the latest reading; about one an hour, and the close, are recorded as valuations and committed. Only your API key goes to Trading 212; nothing of yours is sent."
         actions={feed.configured ? <RefreshButton size="md" /> : undefined}
       >
         {!feed.configured ? (
           <Callout tone="neutral" title="Not set up">
-            The app works the same without it. To turn it on, make an API key in Trading 212 (Settings → API, with only the account data and portfolio permissions, and limited to this server’s IP address), then set <code>FINANCE_T212_API_KEY</code> and <code>FINANCE_T212_API_SECRET</code> in the server’s <code>.env</code> and restart it. See docs/SELF_HOSTING.md, “Trading 212 live feed”.
+            The app works the same without it. To turn it on, make an API key in Trading 212 (Settings → API, with only the permissions to read account data, the portfolio and the history, and limited to this server’s IP address), then set <code>FINANCE_T212_API_KEY</code> and <code>FINANCE_T212_API_SECRET</code> in the server’s <code>.env</code> and restart it. See docs/SELF_HOSTING.md, “Trading 212 live feed”.
           </Callout>
         ) : (
           <>
@@ -128,11 +165,23 @@ export function LiveFeedsSettings() {
                 {feed.linkProblem}
               </Callout>
             )}
+            {feed.heldBack && (
+              <Callout tone="warn" className="mb-3" title={`The reading at ${timeOf(feed.heldBack.at)} was held back`}>
+                {feed.heldBack.reason}. It is not shown or recorded; the next reading that agrees with it confirms it.
+              </Callout>
+            )}
+            {feed.recordError && (
+              <Callout tone="bad" className="mb-3" title="Recording a reading failed">
+                {feed.recordError}
+              </Callout>
+            )}
             <KeyValue
               items={[
                 ['Service', feed.environment === 'demo' ? 'Practice money (demo.trading212.com)' : 'Real money (live.trading212.com)'],
                 ['Account', feed.accountName ? `${feed.accountName}${feed.latest?.accountLast4 ? ` (•••• ${feed.latest.accountLast4})` : ''}` : '—'],
                 ['Latest reading', feed.latest ? <span><Money value={feed.latest.totalValue} currency={feed.latest.currency} /> at {timeOf(feed.latest.at)} on {formatDate(feed.latest.at.slice(0, 10))} ({ago})</span> : 'none yet'],
+                ['Paid in', feed.latest?.contributions !== undefined ? <span><Money value={feed.latest.contributions} /> net, from {cash?.count ?? 0} cash movements read {cash ? `at ${timeOf(cash.readAt)}` : ''}</span> : feed.cashError ? `Not known: ${feed.cashError}` : 'Not known yet'],
+                ['Last recorded', feed.lastRecorded ? `${timeOf(feed.lastRecorded.at)} on ${formatDate(feed.lastRecorded.at.slice(0, 10))}${feed.lastRecorded.why ? ` (${feed.lastRecorded.why})` : ''}` : 'none yet'],
                 ['Now', !feed.running ? 'Not reading by itself (this instance does not serve the app)' : feed.watched ? `The app is open: reading every ${feed.intervals.watchedSeconds}s` : `Reading every ${minutes(feed.intervals.backgroundMinutes)} in market hours, every ${minutes(feed.intervals.quietMinutes)} otherwise`],
                 ['Next reading', feed.nextAt ? `${timeOf(feed.nextAt)}${feed.failures ? ` (after ${feed.failures} failure${feed.failures === 1 ? '' : 's'} in a row)` : ''}` : '—'],
               ]}

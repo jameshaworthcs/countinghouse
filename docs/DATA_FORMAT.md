@@ -134,8 +134,8 @@ A balance or valuation at the end of `date`, or at `at` on it when that is known
 | Field | Notes |
 |---|---|
 | `id`, `accountId`, `date`, `balance`, `currency` | |
-| `kind` | `statement` `screenshot` `export` `manual` |
-| `dateSource` | `document` `exif` `filename` `file-modified` `upload` `manual`: how the date was known |
+| `kind` | `statement` `screenshot` `export` `manual` `feed` (a live feed's reading, recorded: [FORMULAS.md](FORMULAS.md) §9, "Live readings") |
+| `dateSource` | `document` `exif` `filename` `file-modified` `upload` `manual` `feed`: how the date was known |
 | `availableBalance` | optional |
 | `contributions`, `gain`, `cash` | provider-reported total paid in, growth and uninvested cash (optional) |
 | `bonusToDate` | LISA government bonus received (optional) |
@@ -145,7 +145,12 @@ A balance or valuation at the end of `date`, or at `at` on it when that is known
 | `approximate` | `true` for a rough figure you gave: it stands in only for what is newer than the account's real data (optional) |
 | `at` | when on `date` it was seen, when known (optional): a screenshot's capture time, or when you gave a balance for that same day. Without it a statement's, an export's or your own balance is the day's close, and a screenshot's some time that day. Of two on one day, the later stands for it (FORMULAS.md §9) |
 | `enteredBy` | `"user"`: you typed or changed this figure yourself, while reviewing an import or by editing it. It weighs as your own balance whatever document it came with (optional) |
-| `note`, `attributes`, `source`, `createdAt` | |
+| `note`, `attributes`, `source`, `createdAt` | `source.feed` (`trading-212`) for a live feed's reading, which has no document |
+
+A live feed (optional; ARCHITECTURE.md, "Live feeds") records about one reading an hour in market
+hours, and the close, as `kind: "feed"` balances with `at`, `cash` and `contributions`, and the
+day's holdings snapshot with `source.feed`, committed without review. Every reading, recorded or
+not, is kept in the work area (`feeds/<feed>/<yyyy-mm>.jsonl`), never here.
 
 A balance keeps the account's money, not its terms: the credit limit and rates its document gives
 are in `terms.jsonl` (since format 7).

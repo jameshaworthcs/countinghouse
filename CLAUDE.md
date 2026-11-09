@@ -68,15 +68,17 @@ and [docs/DATA_FORMAT.md](docs/DATA_FORMAT.md) before touching data or schemas.
   optional fields don't need one. Never require re-importing documents; backfill from `raw` or the
   stored extraction instead.
 - **Review before commit.** Imports are drafts until the owner commits them. Don't add paths that
-  write extracted data straight to `data/`.
+  write extracted data straight to `data/`. The one exception the owner approved (2026-11-09): the
+  optional live feed records about one reading an hour as a valuation and holdings
+  (`src/server/feeds/record.ts`), never a reading that fails its checks.
 - **Privacy.**
   - Nothing may call third-party services except Claude, the engine the owner chose (CLI or API),
     for extraction and agent jobs, and the identity provider the owner configures for sign-in
     (OIDC). Only the OIDC protocol goes there, never financial data.
   - The one exception the owner approved (2026-11-09): the optional Trading 212 live feed
-    (`src/server/feeds/`), only when its key is set in `.env`. It only reads (an account's summary
-    and positions); the key is all that goes there, and it is never logged. The app must run the
-    same without it.
+    (`src/server/feeds/`), only when its key is set in `.env`. It only reads (an account's summary,
+    positions and cash movements); the key is all that goes there, and it is never logged. The app
+    must run the same without it.
   - The local model service (`inference`, `INFERENCE_BASE_URL`, on a machine of the owner's,
     reached over their private network) is not a third party: personal data may go to it, and nothing sent to it
     leaves the machine. It has no web access or tools. Its key (`INFERENCE_API_KEY`) is in `.env`

@@ -50,7 +50,8 @@
             "filename",
             "file-modified",
             "upload",
-            "manual"
+            "manual",
+            "feed"
           ]
         },
         "capturedAt": {

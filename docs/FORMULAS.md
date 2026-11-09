@@ -557,6 +557,42 @@ leaves out its own days, never the history before it.
 - The headline says how much of today's value comes from estimated balances, and from how many
   accounts.
 
+**Live readings** (`src/server/feeds/`; optional, only with a feed's key set). A live feed reads an
+account's whole value (investments and cash), its holdings and what was paid in, from the
+provider's API: every 15 seconds while the app is open, every 15 minutes in market hours, every 3
+hours otherwise. Each reading is kept in the work area, with its checks.
+
+- **Checks** (`checkReading`, `RECORD_RULES`). A reading counts unless:
+  - its value is nothing when the last good one's was not;
+  - it gives investments (over £1) but no holdings;
+  - its value moved from the last good reading by more than max(£100, 10% of that value), beyond
+    the change in paid in between (the cash movements are read again once first, in case money
+    arrived) — unless the reading held back before it said the same, within max(£1, 1%): two
+    readings agreeing make the move real.
+
+  A reading held back is not shown, recorded or counted, and Settings → Live feeds says why.
+- **Recorded** (`dueToRecord`, `recordIfDue`). A reading that counts is written to `data/` as a
+  valuation (`kind: "feed"`, `at` the moment it was read, its cash and paid in) with its holdings
+  as the day's snapshot, and committed without review:
+  - the first of its day, unless its value and paid in are as the last recorded (a weekend);
+  - the first from 21:00 UK time on a weekday, as the close;
+  - in market hours (weekdays 07:00–22:00 UK time), when the last recorded is ≥ 55 minutes old.
+
+  The holdings replace the feed's own snapshot of that day; a day with a document's snapshot keeps
+  it, and gets none from the feed. Of the day's valuations, the latest stands for the day, as for
+  any balance seen at a time (above).
+- **Standing for today** (`liveOverride`). Today's value of the account is the latest reading that
+  counts, in place of what its recorded data says, when:
+  - it was read today, at most 60 minutes ago (`LIVE_FRESH_MS`);
+  - it is linked to an open account in pounds, as the reading is;
+  - no balance recorded today is later than it, and none is a close (a balance with no time).
+
+  Then the estate value today (and its groups, and the Overview's changes, which compare with the
+  recorded past), the account's value on its page and in Accounts, its sparkline's last point, and
+  its value, paid in (when the reading has one) and growth on Investments use it, each labelled
+  with the moment it was read and the recorded value it stands in for. Past days, charts, agents'
+  digests and Ask keep the recorded values. Otherwise everything is as recorded.
+
 **Stale accounts:** an open account whose latest data is more than `settings.staleAfterDays` old
 (default 35), or `YEARLY_STALE_AFTER_DAYS` = 400 for accounts updated once a year (pensions with
 an annual statement): a year plus a month for the statement to arrive
@@ -1013,6 +1049,15 @@ and so does a voucher whose payment is not in your data.
   - or a total paid in that a document states (a valuation's or a provider's summary) is what the
     flows up to its day add up to, to the penny;
 - otherwise not known: a few months of statements are not everything paid in.
+
+A live feed's paid in (§9, "Live readings"; `feeds/cash.ts`) is the provider's list of cash
+movements: Σ deposits + withdrawals + transfers, signed as the provider gives them (money in
+positive), in the account's currency; interest, fees and other kinds are not paid in. A movement
+your imports file under a category that is not an external flow (a promotion's deposit filed as
+investment income) is left out: the import's row carries the provider's reference as its `ID`. It
+is recorded on each valuation the feed records (the "total paid in on the latest valuation"
+above), and a reading standing for today uses its own. Until the list has been read in full there
+is none.
 
 **Growth** = value − (paid in + a LISA bonus the provider reports separately), only with both
 known. It is marked when the value is an estimate.

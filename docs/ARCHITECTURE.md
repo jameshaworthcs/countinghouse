@@ -31,7 +31,8 @@ Hono server  (Node 24, tsx; 127.0.0.1:4750 live, 4760 in development)
    │    └─ read a stored document again → compare with what was recorded → apply what you choose
    ├─ InboxWatcher: inbox/ → ImportService
    ├─ LiveFeedService (feeds/, optional) ─► Trading 212's API ─► work area feeds/<feed>/<yyyy-mm>.jsonl
-   │    (only with its key in .env; read-only; 'feed' events; never a Store write)
+   │    (only with its key in .env; read-only; 'feed' events; about hourly a reading → Store as a valuation;
+   │     the latest stands for today's value: feeds/live.ts)
    └─ Analytics (cached per store version)
         BalanceEngine · Coverage · estate · cashflow · spending (+ computed signals) · recurring · budgets · goals · pay
         · earned pay (timesheets → payslips → bank, owed pay pending beside the estate)
@@ -503,12 +504,24 @@ and a card in credit counts as cash.
 
 Optional, and off unless its key is set in `.env` (docs/SELF_HOSTING.md, "Trading 212 live feed").
 `src/server/feeds/` reads one Invest or Stocks ISA account at Trading 212 through its public
-API: the account summary (value, cash, cost, gain) and the open positions, two requests a reading.
+API: the account summary (value, cash, cost, gain) and the open positions, two requests a reading,
+and the list of cash movements, read in full once and then at most hourly (`cash.ts`). The
+figures are in [FORMULAS.md](FORMULAS.md) §9, "Live readings", and §12, "Paid in".
 
-- **Readings are not data.** Each is appended to the work area (`feeds/trading-212/<yyyy-mm>.jsonl`)
-  and held in memory as the latest. It is not a Store write: no figure, commit, audit entry or
-  analytics cache changes, and the browser is told by a `feed` event that refreshes only what shows
-  the feed (`GET /api/feeds`).
+- **Every reading** is appended to the work area (`feeds/trading-212/<yyyy-mm>.jsonl`) with the
+  checks it passed or failed (`record.ts`, `checkReading`). That is not a Store write: the browser
+  is told by a `feed` event, which refreshes the feed's state and today's figures
+  (`GET /api/feeds`, the Overview, Accounts, the account's page, Investments).
+- **About one an hour in market hours, and the close,** are recorded (`record.ts`): a valuation
+  (`kind: "feed"`, with `at`) and the day's holdings, through the Store as the feed
+  (`{ type: 'app', task: 'trading-212 feed' }` in the audit log), and auto-committed like any other
+  change. This is the one path that writes to `data/` without your review (docs/DECISIONS.md,
+  2026-11-09): it is the provider's own figures, not a reading of a document, and a reading that
+  fails the checks is never written.
+- **Today's value.** `feeds/live.ts` says when the latest reading that counts stands for its
+  account's value today. The routes for the Overview, Accounts, an account and Investments pass it
+  to `Analytics` (`summary`, `accountSummaries`, `investments`, `accountSummary`), whose caches key
+  on it; nothing else does, so agents' digests and Ask see the recorded values.
 - **Cadence.** Every `watchedSeconds` (15) while a page is visible: the browser posts
   `/api/feeds/trading-212/watch` every 30 seconds while it is (not audited: it changes nothing), and
   one that finds the latest reading older than that reads at once. Otherwise every
@@ -516,14 +529,16 @@ API: the account summary (value, cash, cost, gain) and the open positions, two r
   times. `POST /api/feeds/trading-212/refresh` reads now, unless a reading was tried in the last
   5 seconds.
 - **Limits and failures.** The client keeps each path to its documented rate (summary 1 per 5s,
-  positions 1 per 1s) and waits for `x-ratelimit-reset` when one runs out. Failures back off up to
-  an hour; the audit log records when the feed starts working and when it fails.
+  positions 1 per 1s, cash movements 20 a minute) and waits for `x-ratelimit-reset` when one runs
+  out. Failures back off up to an hour; the audit log records when the feed starts working and when
+  it fails.
 - **Linking.** A reading belongs to the account `FINANCE_T212_ACCOUNT` names (an account id, or
   Trading 212's account number, of which only the last 4 digits are kept), else the open
   `trading-212` account whose last 4 digits match the account number Trading 212 gives (only those
   4 digits are kept).
-- **Shown** on the linked account's page ("Live from Trading 212", labelled as not yet recorded)
-  and in Settings → Live feeds, which also says when it is not set up.
+- **Shown** as the account's value (labelled live, with the recorded value beside it), in the
+  Overview's estate value ("Includes … live"), in Accounts and Investments, and in Settings → Live
+  feeds, which also says when it is not set up.
 
 ## Web app
 

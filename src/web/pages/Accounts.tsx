@@ -1,3 +1,4 @@
+import { LiveAt } from '../components/LiveFeed';
 import { Plus, ShieldAlert, TriangleAlert } from 'lucide-react';
 import { useState } from 'react';
 import { Link } from 'react-router';
@@ -48,6 +49,11 @@ function Row({ a }: { a: AccountSummary }) {
         )}
         {a.currency !== 'GBP' && a.balanceGBP !== null && <div className="text-[11.5px] text-ink-3">{money(a.balanceGBP)}</div>}
         {a.estimated && <div className="text-[11.5px] text-ink-3">estimated</div>}
+        {a.live && (
+          <div className="text-[11.5px] text-ink-3">
+            live, <LiveAt at={a.live.at} />
+          </div>
+        )}
       </div>
     </Link>
   );

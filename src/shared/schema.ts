@@ -7,6 +7,7 @@
 //   - dates: "YYYY-MM-DD"; timestamps: ISO 8601 with offset
 //   - ids: account/institution/category ids are slugs; records use prefixed hashes (tx_, bal_, …)
 
+import { FEED_IDS } from './feeds';
 import { z } from 'zod';
 import { isISODate } from './dates';
 import { isMoney } from './money';
@@ -167,6 +168,8 @@ export const SourceRefSchema = z.object({
   documentId: z.string().optional(),
   /** Row / line index within the source document, when known. */
   row: z.number().int().nonnegative().optional(),
+  /** A live feed's reading, recorded (src/server/feeds/): the provider's API, not a document. */
+  feed: z.enum(FEED_IDS).optional(),
 });
 
 export const ForeignAmountSchema = z.object({ amount: MoneySchema, currency: CurrencySchema });
@@ -315,7 +318,7 @@ export type Transaction = z.infer<typeof TransactionSchema>;
 
 // ─── Balances & holdings ─────────────────────────────────────────────────────────────────────────
 
-export const DATE_SOURCES = ['document', 'exif', 'filename', 'file-modified', 'upload', 'manual'] as const;
+export const DATE_SOURCES = ['document', 'exif', 'filename', 'file-modified', 'upload', 'manual', 'feed'] as const;
 export type DateSource = (typeof DATE_SOURCES)[number];
 
 export const BalanceSnapshotSchema = z.object({
@@ -326,7 +329,8 @@ export const BalanceSnapshotSchema = z.object({
   /** Balance or valuation. Negative for money owed. */
   balance: MoneySchema,
   currency: CurrencySchema,
-  kind: z.enum(['statement', 'screenshot', 'export', 'manual']).default('manual'),
+  /** `feed`: a live feed's reading, recorded with the moment it was read (`at`). */
+  kind: z.enum(['statement', 'screenshot', 'export', 'manual', 'feed']).default('manual'),
   availableBalance: MoneySchema.optional(),
   /** Total net contributions to date, as reported by the provider. */
   contributions: MoneySchema.optional(),

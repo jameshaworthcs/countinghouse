@@ -2618,3 +2618,25 @@ value grown from the account's first flow is never below nothing, as rolled-back
   that is about 23 MB of git history (simulated). The Overview's total then counts today's live
   reading, labelled with its time, falling back to the recorded value when it is stale.
 
+## 2026-11-09: The live feed records hourly, and counts in today's figures
+
+- **Owner:** today's estate value should count the live reading (it is the provider's own figure),
+  the account's page should lead with it, and the feed should record readings without review,
+  with their times, so that several in a day show as they happened.
+- **Done** (FORMULAS.md §9, "Live readings", and §12, "Paid in"; ARCHITECTURE.md, "Live feeds"):
+  - Readings are checked: a value of nothing, investments with no holdings, or a move of more than
+    max(£100, 10%) that money paid in does not explain is held back until a second reading agrees.
+  - About one an hour in market hours, the first of a day and the close (from 21:00 UK time) are
+    recorded as `kind: "feed"` valuations with `at`, and the day's holdings, and auto-committed: the
+    stated exception to "imports are drafts" (CLAUDE.md), since they are not a reading of a
+    document. A day with a document's holdings keeps them.
+  - The latest good reading, read today within the hour and newer than anything recorded today,
+    is the account's value today: in the estate value, its groups and the Overview's changes, the
+    account's page (the recorded value beside it), Accounts and Investments. Past days, charts,
+    agents and Ask keep the recorded values, so what they say can be rebuilt from `data/`.
+  - Paid in comes from the provider's cash movements (deposits, withdrawals, transfers), less any
+    your imports file as something else by the provider's reference (a promotion filed as income).
+    The deposits since the last export no longer show as growth.
+- **Format:** balances gain `kind: "feed"` and `dateSource: "feed"`, and sources `feed`, all
+  additive: no migration.
+

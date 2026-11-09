@@ -8,6 +8,7 @@ import { diffDays, formatDate, today } from '../../shared/dates';
 import { fromMinor, roundMoney, subMoney, toMinor } from '../../shared/money';
 import type { Account, HmrcRecord } from '../../shared/schema';
 import { ageOn, birthdayAt, lisaPenaltyAdjustedValue, pensionAccessDate, statePensionDate, statePensionFullYearly, taxYearOf, taxYearParams } from '../../shared/uk';
+import type { LiveOverride } from '../feeds/live';
 import type { Store } from '../store';
 import { providerPaidIn, type BalanceEngine } from './balances';
 import { computeBaseline, standardPeriods } from './baseline';
@@ -69,7 +70,8 @@ function isInvestmentAccount(a: Account): boolean {
   return balanceModeOf(a) === 'market' || Boolean(meta.isa) || Boolean(meta.pension);
 }
 
-export function investments(store: Store, engine: BalanceEngine): InvestmentsResponse {
+/** Investments today. `live` is an account's value from a live reading that stands for today (feeds/live.ts). */
+export function investments(store: Store, engine: BalanceEngine, live?: LiveOverride): InvestmentsResponse {
   const now = today();
   const dob = store.profile.dateOfBirth;
   const resolver = makeResolver(store, now);
@@ -102,6 +104,7 @@ export function investments(store: Store, engine: BalanceEngine): InvestmentsRes
   for (const a of store.accounts.filter((x) => x.status === 'open' && isInvestmentAccount(x))) {
     const meta = ACCOUNT_TYPE_META[a.type];
     const latest = engine.latest(a.id, now);
+    const mine = live && live.accountId === a.id ? live : undefined;
     // Approximate figures stand in for the value only: they are not history, and they give the
     // total paid in only when you entered one with them.
     const all = store.balances(a.id);
@@ -110,10 +113,11 @@ export function investments(store: Store, engine: BalanceEngine): InvestmentsRes
     // External flows, each dated from when the value holds it (balances.ts, insideValuations).
     const flowsTx = engine.flowsOf(a.id);
     const fromStart = engine.fromStart(a.id);
-    const paid = paidIn(store, engine, a);
+    // A live reading's paid in, from the provider's cash movements, is the newest the provider says.
+    const paid = mine?.contributions !== undefined ? { amount: mine.contributions, source: 'provider' as const, asOf: now } : paidIn(store, engine, a);
     const contributions = paid?.amount ?? null;
     const contributionsSource: InvestmentAccountSummary['contributionsSource'] = paid?.source ?? null;
-    const value = latest?.gbp ?? null;
+    const value = mine ? mine.value : (latest?.gbp ?? null);
     // LISA providers usually report your contributions and the government bonus separately; the
     // bonus is not investment growth.
     const bonusSeparate = a.type === 'lisa' && contributionsSource === 'provider' && lastSnap?.bonusToDate !== undefined ? lastSnap.bonusToDate : 0;
@@ -124,7 +128,7 @@ export function investments(store: Store, engine: BalanceEngine): InvestmentsRes
     // value is only an estimate.
     const firstSnap = snaps[0];
     const lastReal = snaps[snaps.length - 1];
-    const end = value !== null && !latest?.estimated ? { date: now, amount: value } : lastReal && lastReal !== firstSnap ? { date: lastReal.date, amount: lastReal.balance } : null;
+    const end = value !== null && (mine || !latest?.estimated) ? { date: now, amount: value } : lastReal && lastReal !== firstSnap ? { date: lastReal.date, amount: lastReal.balance } : null;
     const cashFlows = firstSnap && end ? [{ date: firstSnap.date, amount: -firstSnap.balance }, ...flowsTx.filter((t) => t.date > firstSnap.date && t.date <= end.date).map((t) => ({ date: t.date, amount: -t.amount }))] : [];
     const irr = end && firstSnap && firstSnap.balance > 0 ? xirr([...cashFlows, end]) : null;
 
@@ -156,10 +160,11 @@ export function investments(store: Store, engine: BalanceEngine): InvestmentsRes
       type: a.type,
       typeLabel: meta.label,
       value,
-      estimated: latest?.estimated ?? false,
-      asOf: engine.lastDataDate(a.id),
+      estimated: mine ? false : (latest?.estimated ?? false),
+      asOf: mine ? now : engine.lastDataDate(a.id),
       contributions,
       contributionsSource,
+      ...(mine ? { live: { at: mine.at, feed: mine.feed, recorded: latest?.gbp ?? null, recordedAsOf: engine.lastDataDate(a.id) } } : {}),
       growth,
       growthPct: growth !== null && invested ? growth / invested : null,
       xirr: irr,

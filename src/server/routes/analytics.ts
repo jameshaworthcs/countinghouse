@@ -7,7 +7,8 @@ export function analyticsRoutes(ctx: AppContext): Hono {
   const app = new Hono();
   const a = ctx.analytics;
 
-  app.get('/summary', (c) => c.json(a.summary(ctx.imports.counts())));
+  // Today's figures count a live feed's reading that stands for today (FORMULAS.md §9, "Live readings").
+  app.get('/summary', (c) => c.json(a.summary(ctx.imports.counts(), ctx.feeds.liveOverride())));
 
   app.get('/estate', (c) => {
     const grouping = c.req.query('grouping') === 'access' ? 'access' : 'wrapper';
@@ -63,7 +64,7 @@ export function analyticsRoutes(ctx: AppContext): Hono {
     });
   });
 
-  app.get('/investments', (c) => c.json(a.investments()));
+  app.get('/investments', (c) => c.json(a.investments(ctx.feeds.liveOverride())));
   app.get('/monthly', (c) => c.json(a.monthly()));
   /** A month's figures (docs/FORMULAS.md §18): YYYY-MM, not after this month. */
   app.get('/month/:month', (c) => {

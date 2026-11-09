@@ -15,6 +15,7 @@ import { addDays, addMonths, diffDays, endOfMonth, today, type ISODate } from '.
 import { fromMinor, toMinor } from '../../shared/money';
 import type { Account } from '../../shared/schema';
 import type { Store } from '../store';
+import type { LiveOverride } from '../feeds/live';
 import { lastUpdated, type BalanceEngine } from './balances';
 
 /** Sampling dates for a chart over [from, to]: daily, weekly or month-ends depending on span. */
@@ -39,14 +40,18 @@ export function includedAccounts(store: Store): Account[] {
   return store.accounts.filter((a) => a.includeInNetWorth);
 }
 
-export function estateOn(store: Store, engine: BalanceEngine, date: ISODate) {
+/**
+ * The estate on a date. `live` is today's value of accounts with a live reading that stands for it
+ * (feeds/live.ts), in place of what the engine says.
+ */
+export function estateOn(store: Store, engine: BalanceEngine, date: ISODate, live?: LiveOverride) {
   let assets = 0;
   let liabilities = 0;
   let estimated = false;
   const wrapper = new Map<WrapperGroup, number>();
   const access = new Map<AccessGroup, number>();
   for (const a of includedAccounts(store)) {
-    const p = engine.balanceOn(a.id, date);
+    const p = live && live.accountId === a.id ? { gbp: live.value, estimated: false } : engine.balanceOn(a.id, date);
     if (!p || p.gbp === null) continue;
     const minor = toMinor(p.gbp);
     if (p.estimated) estimated = true;
@@ -164,10 +169,13 @@ export function estateSeries(store: Store, engine: BalanceEngine, from: ISODate,
   };
 }
 
-export function accountSummary(store: Store, engine: BalanceEngine, account: Account, on: ISODate = today()): AccountSummary {
+export function accountSummary(store: Store, engine: BalanceEngine, account: Account, on: ISODate = today(), live?: LiveOverride): AccountSummary {
   const meta = ACCOUNT_TYPE_META[account.type];
-  const latest = engine.latest(account.id, on);
-  const asOf = lastUpdated(store, engine, account.id);
+  const recorded = engine.latest(account.id, on);
+  const mine = live && live.accountId === account.id ? live : undefined;
+  const latest = mine ? { value: mine.value, gbp: mine.value, estimated: false } : recorded;
+  const recordedAsOf = lastUpdated(store, engine, account.id);
+  const asOf = mine ? on : recordedAsOf;
   const staleDays = asOf ? diffDays(asOf, on) : null;
   const info = engine.info(account.id);
   const monthEnds: ISODate[] = [];
@@ -195,7 +203,8 @@ export function accountSummary(store: Store, engine: BalanceEngine, account: Acc
     lastSnapshot: info?.lastSnapshot ?? null,
     lastTransaction: info?.lastTransaction ?? null,
     transactionCount: store.transactions(account.id).length,
-    sparkline: engine.series(account.id, monthEnds),
+    sparkline: mine ? [...engine.series(account.id, monthEnds).slice(0, -1), mine.value] : engine.series(account.id, monthEnds),
+    ...(mine ? { live: { at: mine.at, feed: mine.feed, recorded: recorded?.value ?? null, recordedAsOf } } : {}),
     ...(account.institutionId ? { institutionId: account.institutionId } : {}),
     ...(inst ? { institutionName: inst.name } : {}),
   };

@@ -17,7 +17,7 @@ import { FilePickerButton } from '../components/Upload';
 import { api, qs, useApi, useApiMutation } from '../lib/api';
 import { cn, formatDate, money, pct, timeAgo } from '../lib/format';
 import { Sorted } from '../lib/sort';
-import { LiveAccountValue } from '../components/LiveFeed';
+import { LiveAccountValue, LiveSub } from '../components/LiveFeed';
 
 type Tab = 'transactions' | 'balances' | 'holdings' | 'documents';
 
@@ -183,7 +183,11 @@ export default function AccountDetail() {
         }
       />
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Stat label={market ? 'Value' : 'Balance'} value={<Money value={summary.balance} currency={account.currency} />} sub={summary.asOf ? `as of ${formatDate(summary.asOf)}${summary.estimated ? ' (estimated)' : ''}` : summary.balance !== null ? 'estimated: no statement data yet' : 'no data yet'} />
+        <Stat
+          label={market ? 'Value' : 'Balance'}
+          value={<Money value={summary.balance} currency={account.currency} />}
+          sub={summary.live ? <LiveSub live={summary.live} currency={account.currency} /> : summary.asOf ? `as of ${formatDate(summary.asOf)}${summary.estimated ? ' (estimated)' : ''}` : summary.balance !== null ? 'estimated: no statement data yet' : 'no data yet'}
+        />
         <Stat label="Last updated" value={summary.asOf ? timeAgo(summary.asOf) : '—'} sub={summary.stale ? <span className="inline-flex items-center gap-1 text-warn-ink"><TriangleAlert className="size-3.5" /> needs new data</span> : 'up to date'} />
         {market && paidIn ? (
           <Stat label="Paid in" value={<Money value={paidIn.amount} />} sub={summary.balance !== null ? <span>growth {money(summary.balance - paidIn.amount - (lastBal?.bonusToDate ?? 0))} ({pct((summary.balance - paidIn.amount - (lastBal?.bonusToDate ?? 0)) / Math.max(1, paidIn.amount + (lastBal?.bonusToDate ?? 0)))})</span> : undefined} />
@@ -197,7 +201,7 @@ export default function AccountDetail() {
         )}
       </div>
 
-      <LiveAccountValue accountId={account.id} currency={account.currency} />
+      <LiveAccountValue accountId={account.id} live={Boolean(summary.live)} />
       <LinkedAccounts links={q.data.links} />
       <InsightsPanel page="accounts" accountId={id} title="Agent notes on this account" className="mb-5" />
       {gaps.length > 0 && (
@@ -289,7 +293,7 @@ export default function AccountDetail() {
       {tab === 'balances' && (
         <Card padded={false}>
           <div className="overflow-x-auto">
-            <Sorted rows={[...balances].reverse()} columns={{ date: { value: (b) => b.date, first: 'desc' }, balance: { value: (b) => b.balance }, paidIn: { value: (b) => b.contributions }, source: { value: (b) => b.kind } }}>
+            <Sorted rows={[...balances].reverse()} columns={{ date: { value: (b) => `${b.date} ${b.at && b.at.slice(0, 10) === b.date ? b.at.slice(11, 19) : '24'}`, first: 'desc' }, balance: { value: (b) => b.balance }, paidIn: { value: (b) => b.contributions }, source: { value: (b) => b.kind } }}>
               {({ rows, sortProps }) => (
                 <table className={tableClasses.table}>
                   <thead>
@@ -310,10 +314,10 @@ export default function AccountDetail() {
                         </td>
                         {market && <td className={cn(tableClasses.td, tableClasses.num)}>{b.contributions !== undefined ? <Money value={b.contributions} /> : '—'}</td>}
                         <td className={cn(tableClasses.td, 'text-ink-3')}>
-                          {b.approximate ? <Badge tone="muted">approximate</Badge> : b.kind}
+                          {b.approximate ? <Badge tone="muted">approximate</Badge> : b.kind === 'feed' ? 'Trading 212 feed' : b.kind}
                           {b.enteredBy === 'user' && b.kind !== 'manual' ? ' · entered by you' : ''}
                           {b.at && b.at.slice(0, 10) === b.date ? ` · at ${b.at.slice(11, 16)}` : ''}
-                          {b.dateSource && b.dateSource !== 'document' && b.dateSource !== 'manual' ? ` · date from ${b.dateSource}` : ''}
+                          {b.dateSource && b.dateSource !== 'document' && b.dateSource !== 'manual' && b.dateSource !== 'feed' ? ` · date from ${b.dateSource}` : ''}
                           {b.note && <div className="text-[12px]">{b.note}</div>}
                           {b.source.importId && (
                             <Link to={`/import/${b.source.importId}`} className="ml-2 text-accent hover:underline">

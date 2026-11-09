@@ -33,7 +33,11 @@ export interface T212Config {
 const MIN_GAP_MS: Record<string, number> = {
   '/api/v0/equity/account/summary': 5_000,
   '/api/v0/equity/positions': 1_000,
+  '/api/v0/equity/history/transactions': 3_000,
 };
+
+/** A request's path without its query: the rate limits are per path. */
+const pathOf = (p: string) => p.split('?')[0]!;
 
 const num = z.number().finite();
 
@@ -52,6 +56,17 @@ const PositionSchema = z.object({
   walletImpact: z.object({ currentValue: num, totalCost: num.default(0), unrealizedProfitLoss: num.default(0), fxImpact: num.nullable().optional() }),
 });
 
+/** One movement of cash in or out of the account (GET /equity/history/transactions). */
+const CashMovementSchema = z.object({
+  type: z.string().min(1),
+  amount: num,
+  currency: z.string().min(3).max(3),
+  reference: z.string().min(1),
+  dateTime: z.string().min(10),
+});
+const CashMovementsPageSchema = z.object({ items: z.array(CashMovementSchema), nextPagePath: z.string().nullable().optional() });
+
+export type T212CashMovement = z.infer<typeof CashMovementSchema>;
 export type T212Summary = z.infer<typeof SummarySchema>;
 export type T212Position = z.infer<typeof PositionSchema>;
 
@@ -112,7 +127,18 @@ export class Trading212Client {
     return body.map((p) => PositionSchema.parse(p));
   }
 
-  private async get(path: string): Promise<unknown> {
+  /**
+   * One page of the account's cash movements, newest first: the first page, or the one `next` (a
+   * previous page's `nextPagePath`) points to.
+   */
+  async cashMovements(next?: string): Promise<{ items: T212CashMovement[]; next: string | null }> {
+    const path = next && next.startsWith('/api/v0/equity/history/transactions') ? next : '/api/v0/equity/history/transactions?limit=50';
+    const page = CashMovementsPageSchema.parse(await this.get(path));
+    return { items: page.items, next: page.nextPagePath ?? null };
+  }
+
+  private async get(fullPath: string): Promise<unknown> {
+    const path = pathOf(fullPath);
     const now = this.now();
     const ready = this.readyAt(path);
     if (ready > now) throw new T212Error(`Waiting for Trading 212's rate limit (${Math.ceil((ready - now) / 1000)}s).`, 429, ready);
@@ -120,7 +146,7 @@ export class Trading212Client {
     const auth = Buffer.from(`${this.cfg.apiKey}:${this.cfg.apiSecret}`).toString('base64');
     let res: Response;
     try {
-      res = await this.doFetch(`${this.baseUrl}${path}`, { headers: { authorization: `Basic ${auth}`, accept: 'application/json' }, signal: AbortSignal.timeout(this.timeoutMs) });
+      res = await this.doFetch(`${this.baseUrl}${fullPath}`, { headers: { authorization: `Basic ${auth}`, accept: 'application/json' }, signal: AbortSignal.timeout(this.timeoutMs) });
     } catch (err) {
       const e = err as Error;
       throw new T212Error(e.name === 'TimeoutError' ? `Trading 212 did not answer within ${this.timeoutMs / 1000}s.` : `Could not reach Trading 212 (${e.message}).`);
@@ -134,7 +160,7 @@ export class Trading212Client {
       throw new T212Error('Trading 212 says too many requests: waiting for its rate limit to reset.', 429, until);
     }
     if (res.status === 401) throw new T212Error('Trading 212 refused the API key: check FINANCE_T212_API_KEY and FINANCE_T212_API_SECRET, and that the key has not been revoked.', 401);
-    if (res.status === 403) throw new T212Error('Trading 212 refused the request: give the key the “Account data” and “Portfolio” permissions, and check its IP restriction allows this server.', 403);
+    if (res.status === 403) throw new T212Error('Trading 212 refused the request: give the key the permissions to read account data, the portfolio and the history, and check its IP restriction allows this server.', 403);
     if (!res.ok) throw new T212Error(`Trading 212 answered ${res.status}${res.statusText ? ` ${res.statusText}` : ''}.`, res.status);
     try {
       return await res.json();
