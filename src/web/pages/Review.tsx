@@ -647,7 +647,11 @@ function SectionEditor({ section, index, total, latest, periodFromRows, onChange
                           </span>
                         }
                       />
-                      <div className="ml-6 text-[12px] text-ink-3">{c.sameBalance ? 'Both copies show the same balance after them: the same payment.' : 'It is recorded more times than this document shows it: check it is not a second payment before taking it away.'}</div>
+                      <div className="ml-6 text-[12px] text-ink-3">{c.sameBalance
+                          ? 'Both copies show the same balance after them: the same payment.'
+                          : c.nearby
+                            ? 'Recorded again a few days away, under the same name. This statement lists every payment of its period, adds up, and shows it once: the same payment.'
+                            : 'It is recorded more times than this document shows it: check it is not a second payment before taking it away.'}</div>
                     </li>
                   ))}
                 </ul>

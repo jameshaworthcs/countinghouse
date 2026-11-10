@@ -2,7 +2,7 @@
 // does it look like what such a document says? Pure, so the server's "ready to commit" follows the
 // same rules as the review page (docs/FORMULAS.md §13).
 
-import { formatDate } from './dates';
+import { diffDays, formatDate } from './dates';
 import { formatMoney, fromMinor, toMinor } from './money';
 import { reconcile } from './reconcile';
 import type { AccountType, DraftSection } from './schema';
@@ -62,6 +62,25 @@ const rowsWord = (n: number) => (n === 1 ? '1 row' : `${n} rows`);
  * moved. The reader says so in `uncertain`; drafting leaves it out, like a pending row.
  */
 export const isCancelled = (t: { uncertain?: string | null | undefined }) => Boolean(t.uncertain && /\b(cancell?ed|declined)\b/i.test(t.uncertain));
+
+/** How far after its posting day a payment may be printed as made, and still be read as printed. */
+export const MADE_AFTER_POSTED_DAYS = 7;
+
+/**
+ * A row the reader was unsure of only because the document prints the day it was made after the
+ * day it was posted ("transaction date (Mar 9) is later than process date (Mar 7) as printed"): a
+ * card statement does this when a merchant dates a charge ahead. Both dates are recorded as printed,
+ * the posting day is the row's date, and the made-on day is a detail, so nothing is in doubt. Only
+ * when the row itself shows it (made on, a few days after posted) and the reader's words say nothing
+ * else: any mention of something hidden, unclear or another field leaves it for you to check.
+ */
+export function isMadeAfterPosted(t: { date: string; uncertain?: string | null | undefined; detail?: { transactionDate?: string | undefined } | undefined }): boolean {
+  const made = t.detail?.transactionDate;
+  if (!t.uncertain || !made || made <= t.date || diffDays(t.date, made) > MADE_AFTER_POSTED_DAYS) return false;
+  const words = t.uncertain.trim();
+  if (/[;]|\b(amount|sign|hidden|cut|unclear|illegible|partly|partially|blurr\w*|guess\w*|not shown|missing|cropped|faint|description|payee|year)\b/i.test(words)) return false;
+  return /^(the\s+)?transaction date\b[^.]*\b(later|after)\b[^.]*\b(process(ing|ed)?|post(ing|ed)?)(\s+date)?\b[^.]*\.?$/i.test(words);
+}
 
 /**
  * Income a fund keeps (an accumulation distribution, the equalisation on accumulation units): a
@@ -211,7 +230,11 @@ export function sectionChecks(section: DraftSection, ctx: CheckContext): ReviewC
     out.push({ id: 'repeated', status: 'info', title: `${rowsWord(repeated.length)} appear more than once`, detail: 'They may be genuine, or one row read twice where the parts of a long screenshot overlap. Check each against the original.', rows: repeated });
   }
 
-  const unsure = rows.filter((t) => t.uncertain && !isCancelled(t) && !(isReinvested(t) && !t.include));
+  const madeAfter = rows.filter((t) => isMadeAfterPosted(t));
+  if (madeAfter.length) {
+    out.push({ id: 'made-after-posted', status: 'info', title: `${rowsWord(madeAfter.length)} printed as made after the day ${madeAfter.length === 1 ? 'it was' : 'they were'} posted`, detail: `${madeAfter.map((t) => `${formatDate(t.date)} ${t.description}: made ${formatDate(t.detail!.transactionDate!)}`).join('; ')}. Recorded as printed: the row is dated the day it was posted, with the day it was made as a detail.`, rows: madeAfter.map((t) => t.key) });
+  }
+  const unsure = rows.filter((t) => t.uncertain && !isCancelled(t) && !(isReinvested(t) && !t.include) && !isMadeAfterPosted(t));
   if (unsure.length) {
     out.push({ id: 'uncertain', status: 'warn', title: `${rowsWord(unsure.length)} the reader was unsure of`, detail: unsure.map((t) => `${formatDate(t.date)} ${t.description}: ${t.uncertain}`).join('; '), rows: unsure.map((t) => t.key) });
   }

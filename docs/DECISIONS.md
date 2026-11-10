@@ -2640,3 +2640,32 @@ value grown from the account's first flow is never below nothing, as rolled-back
 - **Format:** balances gain `kind: "feed"` and `dateSource: "feed"`, and sources `feed`, all
   additive: no migration.
 
+
+## 2026-11-10: Statements understood well enough to commit without a look
+
+- **Owner:** three statements waited for review that the app should have understood: a card
+  statement with seven rows already recorded marked only as possible duplicates, a bank statement
+  whose balances "didn't add up", and a statement of a quiet stretch read as "nothing extracted".
+  None of the fixes may stop the app asking where a look is really needed.
+- **Found:**
+  - The duplicate check used the day a stored row was made, never the incoming row's. A card
+    statement posts a row on the day it was processed (months later for an adjustment), so a
+    payment recorded from the app was "new" and would have been counted twice, or only possible.
+  - A statement that adds the merchant's town or trade to a name ("… TOWN GOODS") stayed possible
+    under £20, although step 2 already matches identical names at any amount.
+  - Some banks print the opening balance as the balance at the end of the first day.
+  - A draft dropped a statement section with no rows and no balance, so a period in which nothing
+    moved could not be recorded or covered.
+  - "Recorded twice" found only copies on the same day, and judged days the document does not
+    show (a June record against an October statement).
+  - The reader marked a row unsure only because the made-on date is printed after the posted one.
+- **Done** (INGESTION.md, "Duplicates" and "Recorded twice"; FORMULAS.md §3 and §13): either day
+  of each side counts in the duplicate steps; step 3d matches a name with words added on the same
+  day when each side has only that row of that day and amount; the opening balance is the one
+  before the first day's rows when the printed one does not add up, that one does, and the
+  running balance shows the printed figure; a statement with printed totals of nothing keeps its
+  period; a statement that accounts for its whole period finds a copy up to 7 days away (same
+  name, another import's, not near the period's end), ticked, and the same-day judgement is made
+  only for days the document shows; a row unsure only of a made-on date 1–7 days after posting is
+  information, not a warning. Each needs two pieces of evidence that agree, and anything short of
+  them is still a warning or a possible duplicate.

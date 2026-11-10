@@ -1687,6 +1687,11 @@ export const DraftSectionSchema = z.object({
         fromFile: z.string().optional(),
         /** Both copies show the same balance after them: the same payment, for certain. */
         sameBalance: z.boolean(),
+        /**
+         * Dated a few days from the copy that stays, inside the period of a statement that adds up
+         * and shows the payment once: the same payment, for certain (ingest/dedup.ts, `storedTwice`).
+         */
+        nearby: z.boolean().optional(),
         remove: z.boolean(),
       }),
     )

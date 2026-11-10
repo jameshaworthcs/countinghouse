@@ -59,8 +59,11 @@ account it is, is the union of intervals:
 
 - each committed import's statement period for the account (`periodStart`–`periodEnd`), or the
   span of its rows (a statement with an opening balance and no rows: its closing day). A draft
-  keeps a period only with rows or an opening balance: a page that gives neither (a loan's balance
-  with a "since 6 April" summary) has none, so it covers no days;
+  keeps a period only with rows, an opening balance, or (a statement, not a picture of one, with no
+  rows) printed totals of nothing in and nothing out ("You have no transactions to display"): a
+  page that gives none of these (a loan's balance with a "since 6 April" summary) has none, so it
+  covers no days. A statement period in which nothing moved is kept with no balance when none is
+  printed, and covers its days;
   - a document that does not print its period (an export, a screenshot of a list) covers from its
     first row to its last, widened to the range you gave while reviewing it (`coversFrom`,
     `coversTo`). A range inside its rows never narrows it;
@@ -1080,6 +1083,11 @@ known. It is marked when the value is an estimate.
 ## 13. Reconciliation and review checks (`shared/reconcile.ts`, `shared/review.ts`)
 
 - **Opening and closing balance:** opening + Σ settled rows = closing.
+  - **An opening balance printed at the end of the first day** (`openingBeforeFirstDay`): some
+    banks print "Balance on 01 October" after that day's rows. When the printed opening does not
+    add up, opening − Σ the first day's settled rows does, and the running balance at the end of
+    that day (its first or last row) equals the printed opening, the draft opens on
+    opening − Σ first day, with a note. Otherwise it stays as printed and the check warns.
 - **Running balances:** each row's running balance = the previous row's running balance + its
   amount, in whichever order the rows fit. Statements list rows oldest first and apps newest
   first; the order with fewer breaks is used.
@@ -1101,7 +1109,8 @@ A warning holds an import back from bulk commit:
 | Future | a row is dated after the upload day |
 | Balance date | a settled row is dated after the balance recorded with it (no statement period); on a screenshot, after the day it was taken |
 | Card signs | on a credit card, a payment to the card (its usual wordings, or just "Payment") is money out, or, with ≥ 3 settled rows, most are money in. Fewer rows with no payment to the card can't tell. The same rule picks the signs of a CSV layout that names no bank, for a card: [INGESTION.md](INGESTION.md) |
-| Unsure | the reader marked a row as uncertain (not a cancelled row, nor a reinvested one left unticked) |
+| Unsure | the reader marked a row as uncertain (not a cancelled row, nor a reinvested one left unticked, nor one only printed as made after it was posted) |
+| Made after posted (information) | the reader was unsure of a row only because it is printed as made 1–7 days (`MADE_AFTER_POSTED_DAYS`) after the day it was posted (`isMadeAfterPosted`): the row shows that made-on date, and the reader's words say nothing else (no `;`, nothing hidden, unclear or about another field). Recorded as printed |
 | Holdings | the holdings and cash come to more than the value shown, or less when the list is not marked as part of the account's holdings; ±max(£1, 0.1%) |
 | Holdings, part of the list (information) | a screen lists only some holdings, or one fund's own page: they join that day's other holdings |
 | Cash (information) | the balances are an investment account's cash, not its value |

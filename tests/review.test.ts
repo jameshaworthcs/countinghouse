@@ -78,4 +78,22 @@ describe('review checks', () => {
   it('has nothing to say about a clean export with no balances', () => {
     expect(sectionChecks(section([row('2026-09-01', -3, 'A'), row('2026-09-02', -4, 'B')]), ctx)).toEqual([]);
   });
+
+  it('a row printed as made after the day it was posted is understood, not left as unsure', () => {
+    const made = (uncertain: string, transactionDate = '2026-03-09') => row('2026-03-07', -42.17, 'EXAMPLE NETWORK', { uncertain, detail: { transactionDate } });
+    const checks = sectionChecks(section([made('transaction date (Mar 9) is later than process date (Mar 7) as printed')]), { latest: '2026-11-10' });
+    expect(byId(checks, 'uncertain')).toBeUndefined();
+    expect(byId(checks, 'made-after-posted')).toMatchObject({ status: 'info' });
+    // Anything else in doubt, no such date on the row, or a gap too wide to be a merchant's dating: still unsure.
+    for (const r of [
+      made('transaction date later than process date; amount partly hidden'),
+      made('transaction date (Mar 9) is later than process date, amount unclear'),
+      made('transaction date is later than process date as printed', '2026-04-20'),
+      made('transaction date is later than process date as printed', '2026-03-05'),
+      row('2026-03-07', -42.17, 'EXAMPLE NETWORK', { uncertain: 'transaction date is later than process date as printed' }),
+      made('year not shown'),
+    ]) {
+      expect(byId(sectionChecks(section([r]), { latest: '2026-11-10' }), 'uncertain')).toMatchObject({ status: 'warn' });
+    }
+  });
 });

@@ -6,7 +6,7 @@ import { findInstitution } from '../../shared/institutions';
 import { isWrapperAccount, transferLegCategory, type Categoriser } from '../../shared/categorise';
 import { AGREEMENT_RECEIPT_DAYS } from '../../shared/agreements';
 import { addDays, dateOf, diffDays, formatDate, today } from '../../shared/dates';
-import { formatMoney, toMinor } from '../../shared/money';
+import { formatMoney, fromMinor, toMinor } from '../../shared/money';
 import { spaceMove } from '../../shared/spaces';
 import { categoriserFor } from '../categoriser';
 import { addsAnything, detailToAdd, fillIn, seenInEntry } from '../../shared/detail';
@@ -114,6 +114,46 @@ const WHOLE_HOLDINGS = new Set<Extraction['documentType']>(['csv_export', 'inves
 const TRANSFER_CATEGORIES = new Set(['transfer', 'credit-card-payment', 'savings-transfer', 'investment-transfer', 'contribution', 'withdrawal']);
 
 /** Documents that list each payment: none of their rows restates others. */
+/** Statements: a period's full account of what moved, with its printed totals. */
+const STATEMENTS = new Set<Extraction['documentType']>(['bank_statement', 'credit_card_statement', 'savings_statement']);
+
+/**
+ * The balance a statement opens on, when its "opening" line is the balance at the end of its first
+ * day (some banks print "Balance on 01 October" after that day's rows). Only when the printed figure
+ * does not add up, the figure before the first day's rows does, and a running balance at the end of
+ * that day shows the printed figure: the two together say what it is. Formulas: docs/FORMULAS.md §13.
+ */
+export function openingBeforeFirstDay(acc: Pick<ExtractedAccount, 'openingBalance' | 'periodStart' | 'transactions'>, closing: number | undefined): number | undefined {
+  if (acc.openingBalance === null || closing === undefined || !acc.periodStart) return undefined;
+  const settled = acc.transactions.filter((t) => !t.pending && !isReinvested(t));
+  const sum = settled.reduce((m, t) => m + toMinor(t.amount), 0);
+  const opening = toMinor(acc.openingBalance);
+  if (opening + sum === toMinor(closing)) return undefined;
+  const firstDay = settled.filter((t) => t.date === acc.periodStart);
+  const dayNet = firstDay.reduce((m, t) => m + toMinor(t.amount), 0);
+  if (!firstDay.length || dayNet === 0 || opening - dayNet + sum !== toMinor(closing)) return undefined;
+  // Oldest first, the day ends on its last row; newest first, on its first.
+  const ends = [firstDay[0]!, firstDay[firstDay.length - 1]!];
+  if (!ends.some((t) => t.balanceAfter !== null && toMinor(t.balanceAfter) === opening)) return undefined;
+  return fromMinor(opening - dayNet);
+}
+
+/**
+ * The period of a statement that accounts for every payment in it: a statement (not a picture of
+ * one) with a printed period, whose settled rows take its opening balance to its closing one and
+ * come to its printed money in and money out.
+ */
+function completeStatement(extraction: Pick<Extraction, 'documentType'>, mediaType: string, acc: Pick<ExtractedAccount, 'periodStart' | 'periodEnd' | 'transactions' | 'statedMoneyIn' | 'statedMoneyOut'>, opening: number | undefined, closing: number | undefined): { from: string; to: string } | undefined {
+  if (!STATEMENTS.has(extraction.documentType) || mediaType.startsWith('image/') || !acc.periodStart || !acc.periodEnd || opening === undefined || closing === undefined) return undefined;
+  if (acc.statedMoneyIn === null || acc.statedMoneyOut === null) return undefined;
+  const settled = acc.transactions.filter((t) => !t.pending && !isReinvested(t));
+  const moneyIn = settled.reduce((m, t) => m + Math.max(0, toMinor(t.amount)), 0);
+  const moneyOut = settled.reduce((m, t) => m + Math.max(0, -toMinor(t.amount)), 0);
+  if (toMinor(opening) + moneyIn - moneyOut !== toMinor(closing)) return undefined;
+  if (moneyIn !== toMinor(Math.abs(acc.statedMoneyIn)) || moneyOut !== toMinor(Math.abs(acc.statedMoneyOut))) return undefined;
+  return { from: acc.periodStart, to: acc.periodEnd };
+}
+
 const TRANSACTION_LISTS = new Set<Extraction['documentType']>(['bank_statement', 'credit_card_statement', 'savings_statement', 'investment_statement', 'pension_statement', 'account_overview_screenshot', 'transactions_screenshot', 'csv_export']);
 
 /**
@@ -321,7 +361,15 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
     // Transactions.
     const existingForAccount = existing ? store.transactions(existing.id) : [];
     const recordedById = new Map(existingForAccount.map((t) => [t.id, t]));
-    const candidates = acc.transactions.map((t) => ({ date: t.date, amount: t.amount, description: t.description, sourceId: t.sourceId ?? undefined, balanceAfter: t.balanceAfter ?? undefined, time: t.time && /^\d{2}:\d{2}(:\d{2})?$/.test(t.time) ? t.time : undefined }));
+    const candidates = acc.transactions.map((t) => ({
+      date: t.date,
+      amount: t.amount,
+      description: t.description,
+      sourceId: t.sourceId ?? undefined,
+      balanceAfter: t.balanceAfter ?? undefined,
+      time: t.time && /^\d{2}:\d{2}(:\d{2})?$/.test(t.time) ? t.time : undefined,
+      transactionDate: t.transactionDate && t.transactionDate !== t.date ? t.transactionDate : undefined,
+    }));
     const ownDups = classifyDuplicates(
       candidates,
       existingForAccount,
@@ -468,11 +516,17 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
     if (market && balance !== undefined && cash === undefined && holdings.length && !holdingDetail && Math.abs(holdings.reduce((sum, h) => sum + toMinor(h.value), 0) - toMinor(balance)) <= 100)
       notes.push('The value shown is the holdings alone, with no cash. It is recorded as shown; the account’s value that day adds the cash the app knows from its other documents.');
 
-    // Payments recorded twice that this document shows once: offered to be taken away on commit.
+    const opening = openingBeforeFirstDay(acc, balance);
+    if (opening !== undefined) notes.push(`${detected.accountName ?? 'Account'}: the statement's opening balance (${formatMoney(acc.openingBalance!)}) is the balance at the end of ${formatDate(acc.periodStart!)}, after that day's rows. It opened on ${formatMoney(opening)}, which adds up to the closing balance.`);
+    // Payments recorded twice that this document shows once: offered to be taken away on commit. A
+    // statement that accounts for every payment in its period (dedup.ts, `storedTwice`) finds copies
+    // a few days apart too.
+    const complete = completeStatement(extraction, ctx.document.mediaType, acc, opening ?? acc.openingBalance ?? undefined, balance);
     const extraCopies = existing
       ? storedTwice(transactions, existingForAccount, {
           withReceipts: new Set(store.receipts.map((r) => r.transactionId)),
           fileOf: (t) => store.imports.find((i) => i.id === t.source.importId)?.fileName,
+          ...(complete ? { statement: complete } : {}),
         })
       : [];
     // Screenshots of wrapper accounts rarely show a list of flows; statements do.
@@ -480,7 +534,11 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
     // A period counts as covered (FORMULAS.md §3), so it must come with what happened in it: rows, or
     // an opening balance for a statement with none. A page with neither (a loan's balance with a
     // "since 6 April" summary) only gives a balance, and its dates say nothing is missing.
-    const periodShown = acc.transactions.length > 0 || acc.openingBalance !== null;
+    // A statement with no rows whose printed totals are nothing in and nothing out shows what
+    // happened in its period too: nothing. Not a screenshot, which may show only part of a list.
+    const nothingMoved = acc.transactions.length === 0 && acc.statedMoneyIn === 0 && acc.statedMoneyOut === 0 && STATEMENTS.has(extraction.documentType) && !ctx.document.mediaType.startsWith('image/');
+    const periodShown = acc.transactions.length > 0 || acc.openingBalance !== null || nothingMoved;
+    if (nothingMoved && acc.periodStart && acc.periodEnd) notes.push(`${detected.accountName ?? 'An account'}: no payments in or out from ${formatDate(acc.periodStart)} to ${formatDate(acc.periodEnd)}, as the statement's totals show. Those days are counted as covered; no balance is printed, so none is recorded.`);
     if (!periodShown && acc.periodStart && acc.periodEnd) notes.push(`${detected.accountName ?? 'An account'}: no rows or opening balance for ${formatDate(acc.periodStart)} to ${formatDate(acc.periodEnd)}, so those days are not counted as covered.`);
     const section: DraftSection = {
       key: `s${si}`,
@@ -516,7 +574,7 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
       readBalance: balance ?? null,
       ...(acc.periodStart && periodShown ? { periodStart: acc.periodStart } : {}),
       ...(acc.periodEnd && periodShown ? { periodEnd: acc.periodEnd } : {}),
-      ...(acc.openingBalance !== null ? { openingBalance: acc.openingBalance } : {}),
+      ...(opening !== undefined ? { openingBalance: opening } : acc.openingBalance !== null ? { openingBalance: acc.openingBalance } : {}),
       ...(acc.availableBalance !== null ? { availableBalance: acc.availableBalance } : {}),
       ...(acc.creditLimit !== null ? { creditLimit: acc.creditLimit } : {}),
       ...(acc.terms ? { terms: acc.terms } : {}),
@@ -647,7 +705,15 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
 
   // An account the document only mentions (the account on an interest certificate, say) has
   // nothing to import: leave it out rather than offer to create it.
-  const importable = sections.filter((s) => s.transactions.length || s.holdings.length || s.balance !== undefined || [s.contributions, s.bonusToDate, s.taxYearContributions, s.taxYearInterest, s.cash, s.annualIncome].some((v) => v !== undefined));
+  // A statement period in which nothing moved is kept: it covers those days.
+  const importable = sections.filter(
+    (s) =>
+      s.transactions.length ||
+      s.holdings.length ||
+      s.balance !== undefined ||
+      [s.contributions, s.bonusToDate, s.taxYearContributions, s.taxYearInterest, s.cash, s.annualIncome].some((v) => v !== undefined) ||
+      (STATEMENTS.has(extraction.documentType) && !s.transactions.length && s.periodStart !== undefined && s.periodEnd !== undefined && s.statedTotals?.moneyIn === 0 && s.statedTotals?.moneyOut === 0),
+  );
   // HMRC's records, each ticked unless the same record is stored already.
   const hmrc = extraction.hmrc.map((record, hi) => {
     const id = hmrcId(record);

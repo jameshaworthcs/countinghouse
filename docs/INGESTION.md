@@ -564,10 +564,13 @@ read again.
       and category, to confirm or change, with "always" making a rule.
     Your choices go in one write (`POST /api/categorise/decisions`): the categories as yours, the
     person, and the rule, applied to what it matches.
-- **Duplicates** (`dedup.ts`) are checked in this order:
+- **Duplicates** (`dedup.ts`) are checked in this order. A row's date is the day it was posted,
+  or the day it was made (`transactionDate`) where its source gives both, on either side: a card
+  statement posts a payment on the day it was processed, months later for an adjustment, and an
+  app lists it on the day the card was used.
   1. same bank id;
   2. same date + amount + simplified description, matched as a multiset (two identical coffees
-     stay two);
+     stay two): on the posted day first, then on either day of each side;
   2b. same amount + simplified description with the same date printed in both ("S Date
      16/06/26"), up to 10 days apart, matched as a multiset: ii's export posts a trade on the day it
      was made and its statement on the day it settled;
@@ -583,6 +586,11 @@ read again.
      payment, each worded and timed its own way ("To Example Lettings" at 01:06, "Example Lettings
      - REF" at 01:07). Balances after both that differ, or different bank ids, still say two
      payments; two rows of that day and amount on either side leave it to step 4;
+  3d. same date + amount, at any amount, where one description is the other's words with more
+     after them, whole words ("EXAMPLE GROCER TOWN" and "EXAMPLE GROCER TOWN GOODS": a card
+     statement adds the merchant's town or trade), and that day and amount is on only one row each
+     side. It is step 2 with words added: two identical payments on one day would be two rows on at
+     least one side, and are left to step 4, as are different balances or bank ids;
   4. same amount within ±3 days (of when it cleared, or when it was made), flagged as a *possible* duplicate for you to decide, when the
      descriptions are similar. Described differently, only from £20 (`DIFFERENT_WORDS_FROM`), and
      then on the same day or for an amount with pence. Sources date a payment differently (made, or
@@ -650,8 +658,18 @@ read again.
   document listing both is two payments: a spend, its refund and the spend again). When both copies
   show the same balance after them it is certain, and the copy comes ticked; when the document just
   shows that date and amount fewer times than they are recorded, and no balances say otherwise, it
-  is offered unticked for you to judge. Only copies on the same day are found: a payment recorded
-  on the day it was made and again on the day it cleared is yours to spot.
+  is offered unticked for you to judge, and only for a day the document shows (inside its period,
+  or between its first and last rows): a statement row made months before it was posted matches a
+  record on a day the statement does not list, and says nothing of that day.
+  - **A few days apart** (`nearby`). A statement (not a picture of one) that accounts for its
+    whole period (its settled rows take the opening balance to the closing one and come to its
+    printed money in and money out) also finds a copy dated up to 7 days (`NEARBY_COPY_DAYS`) from
+    the row it matched: the same amount, the same name (one the other's words with more after
+    them), another import's, dated inside the period at least 3 days before it ends, and the
+    statement shows that amount fewer times around that day than it is recorded. Only the
+    unmatched copy is offered, ticked: a screenshot whose date heading scrolled out of view dates
+    its rows by the heading above. Any other gap, or a statement that does not add up, is yours to
+    spot.
   - The copy offered has nothing of yours on it (a category, payee, note, tag or split you set, a
     correction, a receipt, details another document filled in, a transfer link): the one the document did not match, unless only the
     other is clean. When both have something of yours, nothing is offered.

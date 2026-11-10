@@ -124,9 +124,55 @@ describe('one payment from an app and an export, worded and timed differently', 
     expect(status([{ ...rent, date: '2026-10-28' }])[0]).toBe('possible_duplicate');
     expect(status([{ ...rent, description: 'Corner Garage' }])[0]).toBe('possible_duplicate');
     expect(status([{ date: '2026-10-27', amount: -800, description: 'Example Lettings' }], [tx('tx_round', '2026-10-27', -800, 'To Example Lettings')])[0]).toBe('possible_duplicate');
-    expect(status([{ date: '2026-10-27', amount: -12.34, description: 'Example Cafe Ltd' }], [tx('tx_small', '2026-10-27', -12.34, 'Example Cafe')])[0]).toBe('possible_duplicate');
+    expect(status([{ date: '2026-10-27', amount: -12.34, description: 'Cafe at Example Ltd' }], [tx('tx_small', '2026-10-27', -12.34, 'Example Cafe')])[0]).toBe('possible_duplicate');
     // Balances after both that differ: two payments.
     expect(status([{ ...rent, balanceAfter: 1 }], [tx('tx_bal', '2026-10-27', -812.34, 'To Example Lettings', { balanceAfter: 2 })])[0]).toBe('new');
+  });
+});
+
+describe('a card statement and an app, each dating and naming a payment its own way', () => {
+  // The app listed these on the day the card was used, with the merchant's name; the statement
+  // posts them on the day they were processed, gives the day they were made, and adds the town.
+  const app = [
+    tx('tx_shop', '2026-10-07', -127.44, 'EXAMPLE STORE*XY98ZT'),
+    tx('tx_grocer', '2026-10-03', -13.26, "EXAMPLE GROCER'S TOWN"),
+    tx('tx_adjust', '2026-06-12', -150, 'DEBIT ADJUSTMENT'),
+    tx('tx_bonus', '2026-09-28', 5, 'EXAMPLE FOOD'),
+  ];
+
+  it('is the same payment on the day it was made, and when the statement adds words to the name', () => {
+    const res = classifyDuplicates(
+      [
+        { date: '2026-10-08', transactionDate: '2026-10-07', amount: -127.44, description: 'EXAMPLE STORE*XY98ZT EXAMPLE.CO.UK' },
+        { date: '2026-10-03', amount: -13.26, description: "EXAMPLE GROCER'S TOWN GOODS" },
+        // Posted months after it was made: the same row by its made-on day.
+        { date: '2026-09-30', transactionDate: '2026-06-12', amount: -150, description: 'DEBIT ADJUSTMENT' },
+        { date: '2026-09-28', amount: 5, description: 'EXAMPLE FOOD ExampleFoodBenefit' },
+      ],
+      app,
+    );
+    expect(res.map((r) => [r.status, r.duplicateOf])).toEqual([
+      ['duplicate', 'tx_shop'],
+      ['duplicate', 'tx_grocer'],
+      ['duplicate', 'tx_adjust'],
+      ['duplicate', 'tx_bonus'],
+    ]);
+  });
+
+  it('is still yours to check with two of that day and amount on either side, another name, or no made-on day', () => {
+    const status = (c: Parameters<typeof classifyDuplicates>[0], stored = app) => classifyDuplicates(c, stored).map((r) => r.status);
+    const grocer = { date: '2026-10-03', amount: -13.26, description: "EXAMPLE GROCER'S TOWN GOODS" };
+    // Two in the document: which is which is yours to say.
+    expect(status([grocer, { ...grocer, description: "EXAMPLE GROCER'S TOWN FOOD" }])).toEqual(['possible_duplicate', 'new']);
+    // Two recorded that day.
+    expect(status([grocer], [...app, tx('tx_grocer2', '2026-10-03', -13.26, "EXAMPLE GROCER'S")])[0]).toBe('possible_duplicate');
+    // Words added in front, or another name: not by this rule.
+    expect(status([{ ...grocer, description: "SUPERSTORE EXAMPLE GROCER'S TOWN" }])[0]).toBe('possible_duplicate');
+    expect(status([{ ...grocer, description: 'CORNER CAFE' }])[0]).toBe('new');
+    // No day it was made: months apart is another payment.
+    expect(status([{ date: '2026-09-30', amount: -150, description: 'DEBIT ADJUSTMENT' }])[0]).toBe('new');
+    // Balances after both that differ: two payments.
+    expect(status([{ ...grocer, balanceAfter: 1 }], [tx('tx_bal', '2026-10-03', -13.26, "EXAMPLE GROCER'S TOWN", { balanceAfter: 2 })])[0]).toBe('new');
   });
 });
 
@@ -154,6 +200,48 @@ describe('recorded twice', () => {
     expect(storedTwice([{ date: '2026-09-01', amount: -3.5, status: 'duplicate', duplicateOf: 'tx_a' }, { date: '2026-09-01', amount: -3.5, status: 'new' }], [a, b])).toEqual([]);
     // A category you chose on one, a note on the other.
     expect(storedTwice([{ date: '2026-09-01', amount: -3.5, status: 'duplicate', duplicateOf: 'tx_a' }], [{ ...a, category: 'coffee', categorisedBy: 'user' }, { ...b, notes: 'with Sam' }])).toEqual([]);
+  });
+
+  it('a day the document does not show says nothing about how often it is recorded', () => {
+    // A statement row made months before it was posted matches a record on a day the statement does not list.
+    const adjust = tx('tx_adjust', '2026-06-12', -150, 'DEBIT ADJUSTMENT');
+    const sub = tx('tx_sub', '2026-06-12', -150, 'EXAMPLE SUBSCRIPTION', { source: { importId: 'imp_20260902_120000_bbbb' } });
+    const rows = [
+      { date: '2026-09-30', amount: -150, status: 'duplicate' as const, duplicateOf: 'tx_adjust' },
+      { date: '2026-10-20', amount: -9.99, status: 'new' as const },
+    ];
+    expect(storedTwice(rows, [adjust, sub])).toEqual([]);
+    expect(storedTwice(rows, [adjust, sub], { statement: { from: '2026-09-25', to: '2026-10-24' } })).toEqual([]);
+  });
+
+  describe('a few days apart, found by a statement that accounts for its whole period', () => {
+    // A screenshot dated a row by the heading above it, its own having scrolled out of view.
+    const kept = tx('tx_kept', '2026-10-10', -6.35, 'EXAMPLE GROCER 0123');
+    const copy = tx('tx_copy', '2026-10-14', -6.35, 'EXAMPLE GROCER 0123', { source: { importId: 'imp_20261015_120000_cccc' } });
+    const rows = [
+      { date: '2026-10-10', amount: -6.35, status: 'duplicate' as const, duplicateOf: 'tx_kept' },
+      { date: '2026-10-20', amount: -20, status: 'new' as const },
+    ];
+    const statement = { from: '2026-09-25', to: '2026-10-24' };
+
+    it('offers the unmatched copy, ticked', () => {
+      expect(storedTwice(rows, [kept, copy], { statement })).toEqual([{ transactionId: 'tx_copy', keepId: 'tx_kept', accountId: 'current', date: '2026-10-14', amount: -6.35, description: 'EXAMPLE GROCER 0123', sameBalance: false, nearby: true, remove: true }]);
+    });
+
+    it('offers nothing without such a statement, or when anything says it may be another payment', () => {
+      expect(storedTwice(rows, [kept, copy])).toEqual([]);
+      // The statement shows it twice.
+      expect(storedTwice([...rows, { date: '2026-10-14', amount: -6.35, status: 'new' as const }], [kept, copy], { statement })).toEqual([]);
+      // Another name, more than a week apart, one import's both, or something of yours on it.
+      expect(storedTwice(rows, [kept, { ...copy, description: 'CORNER CAFE' }], { statement })).toEqual([]);
+      expect(storedTwice(rows, [kept, { ...copy, date: '2026-10-18' }], { statement })).toEqual([]);
+      expect(storedTwice(rows, [kept, { ...copy, source: kept.source }], { statement })).toEqual([]);
+      expect(storedTwice(rows, [kept, { ...copy, notes: 'a second shop' }], { statement })).toEqual([]);
+      // Too near the end of the period to be sure the statement would show it.
+      expect(storedTwice(rows, [kept, { ...copy, date: '2026-10-22' }], { statement: { from: '2026-09-25', to: '2026-10-24' } })).toEqual([]);
+      // Balances after them that differ.
+      expect(storedTwice(rows, [{ ...kept, balanceAfter: 10 }, { ...copy, balanceAfter: 20 }], { statement })).toEqual([]);
+    });
   });
 });
 

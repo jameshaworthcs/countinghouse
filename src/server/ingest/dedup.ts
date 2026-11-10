@@ -1,5 +1,9 @@
 // Duplicate detection for incoming transactions against what is already stored for the account.
 //
+// A row's day is the day it was posted, or the day it was made (`transactionDate`) when its source
+// gives both: a card statement posts a payment on the day it was processed, an app lists it on the
+// day the card was used. Where a step below says "same date", either day of each side will do.
+//
 //   1. Same bank transaction id (sourceId) → duplicate.
 //   2. Same date, amount and simplified description → duplicate, as a multiset: two identical £3
 //      coffees on one day stay two transactions if the new file also has two.
@@ -15,6 +19,9 @@
 //   3c. Same date, amount with pence (from £20) and like words, the only row of that day and
 //      amount on each side → duplicate: an app's screen and an export of one payment, worded and
 //      timed differently.
+//   3d. Same date and amount, one description the other's words with more after them ("EXAMPLE GROCER
+//      TOWN" and "EXAMPLE GROCER TOWN GOODS": a statement adds the merchant's town or trade), the only
+//      row of that day and amount on each side → duplicate, at any amount.
 //   4. Same amount within ±3 days → possible duplicate, for you to decide (typical when the same
 //      period arrives from two sources, e.g. a CSV and a screenshot), when the descriptions are
 //      similar. Described differently, only from £20 (`DIFFERENT_WORDS_FROM`), and then on the same
@@ -25,7 +32,7 @@
 //      stored rows add up to (two or three, within ±3 days, the same way, from £100) → possible
 //      duplicate: a deposit made in two payments, confirmed by letter as one.
 
-import { diffDays } from '../../shared/dates';
+import { addDays, diffDays } from '../../shared/dates';
 import { descriptionKey, saysNothing } from '../../shared/merchants';
 import { formatMoney, toMinor } from '../../shared/money';
 import type { Draft, DraftTransaction, ExtraCopy, Transaction } from '../../shared/schema';
@@ -38,6 +45,8 @@ export interface DedupCandidate {
   balanceAfter?: number | undefined;
   /** HH:MM[:SS], of `date`. */
   time?: string | undefined;
+  /** The day the payment was made, when its source posts it on another (`date`). */
+  transactionDate?: string | undefined;
 }
 
 /** A draft row as dedup sees it: its bank id and time are in its detail. */
@@ -48,7 +57,26 @@ export const candidateOf = (t: Pick<DraftTransaction, 'date' | 'amount' | 'descr
   sourceId: t.detail?.sourceId,
   balanceAfter: t.balanceAfter,
   time: t.detail?.time,
+  transactionDate: t.detail?.transactionDate,
 });
+
+/** The days a row can be placed on: the day it was posted, and the day it was made when known. */
+const daysOf = (x: { date: string; transactionDate?: string | undefined }): string[] => (x.transactionDate && x.transactionDate !== x.date ? [x.date, x.transactionDate] : [x.date]);
+/** Do two rows share a day, of either kind? */
+export const shareDay = (a: { date: string; transactionDate?: string | undefined }, b: { date: string; transactionDate?: string | undefined }): boolean => daysOf(a).some((d) => daysOf(b).includes(d));
+
+/**
+ * One description is the other's words with more after them, whole words only ("EXAMPLE GROCER 0123" and
+ * "EXAMPLE GROCER 0123 EXAMPLE TOWN"): a source that adds the merchant's town or trade to the name
+ * another prints. The shorter must say something (`saysNothing` names no one, so matches anything).
+ */
+export function extendsWords(a: string, b: string): boolean {
+  const ka = descriptionKey(a);
+  const kb = descriptionKey(b);
+  if (!ka || !kb || saysNothing(a) || saysNothing(b)) return false;
+  const [short, long] = ka.length <= kb.length ? [ka, kb] : [kb, ka];
+  return long === short || long.startsWith(`${short} `);
+}
 
 /** Below this, the same amount described differently is taken as another payment (everyday prices repeat). */
 export const DIFFERENT_WORDS_FROM = 20;
@@ -128,7 +156,8 @@ export function classifyDuplicates(incoming: DedupCandidate[], existing: Transac
     }
   });
 
-  // 2. Exact date + amount + description, as a multiset.
+  // 2. Exact date + amount + description, as a multiset: on the posted day first, then on either
+  // day of each side (a statement's processed day, an app's day the card was used).
   const key = (date: string, amount: number, desc: string) => `${date}|${toMinor(amount)}|${descriptionKey(desc)}`;
   const buckets = new Map<string, Transaction[]>();
   for (const t of existing) {
@@ -144,6 +173,16 @@ export function classifyDuplicates(incoming: DedupCandidate[], existing: Transac
       const t = bucket.splice(idx, 1)[0]!;
       used.add(t.id);
       results[i] = { status: 'duplicate', duplicateOf: t.id, reason: 'Same date, amount and description' };
+    }
+  });
+  incoming.forEach((c, i) => {
+    if (results[i]!.status !== 'new') return;
+    const k = descriptionKey(c.description);
+    if (!k) return;
+    const t = existing.find((x) => !used.has(x.id) && !conflictingIds(c, x) && !otherBalance(c, x) && toMinor(x.amount) === toMinor(c.amount) && descriptionKey(x.description) === k && shareDay(c, x));
+    if (t) {
+      used.add(t.id);
+      results[i] = { status: 'duplicate', duplicateOf: t.id, reason: 'Same amount and description, on the day it was made' };
     }
   });
 
@@ -186,19 +225,29 @@ export function classifyDuplicates(incoming: DedupCandidate[], existing: Transac
   // that one row of that day and amount: a statement or export and an app's screen of one payment,
   // each worded and timed its own way ("To Example Lettings" at 01:06, "Example Lettings - REF" at
   // 01:07). Two such payments on one day would be two rows on at least one side, and are left to step 4.
-  const dayAmount = (date: string, amount: number) => `${date}|${toMinor(amount)}`;
-  const incomingOn = new Map<string, number>();
-  incoming.forEach((c, i) => {
-    if (results[i]!.status === 'new') incomingOn.set(dayAmount(c.date, c.amount), (incomingOn.get(dayAmount(c.date, c.amount)) ?? 0) + 1);
-  });
+  const incomingAlike = (c: DedupCandidate) => incoming.filter((x, j) => results[j]!.status === 'new' && toMinor(x.amount) === toMinor(c.amount) && shareDay(x, c)).length;
+  const storedAlike = (c: DedupCandidate) => existing.filter((x) => !used.has(x.id) && toMinor(x.amount) === toMinor(c.amount) && shareDay(c, x));
   incoming.forEach((c, i) => {
     if (results[i]!.status !== 'new' || toMinor(c.amount) % 100 === 0 || Math.abs(toMinor(c.amount)) < DIFFERENT_WORDS_FROM * 100) return;
-    if (incomingOn.get(dayAmount(c.date, c.amount)) !== 1) return;
-    const same = existing.filter((x) => !used.has(x.id) && x.date === c.date && toMinor(x.amount) === toMinor(c.amount));
+    if (incomingAlike(c) !== 1) return;
+    const same = storedAlike(c);
     const t = same.length === 1 ? same[0]! : undefined;
     if (!t || conflictingIds(c, t) || otherBalance(c, t) || saysNothing(t.description) || saysNothing(c.description) || similarity(t.description, c.description) < 0.4) return;
     used.add(t.id);
     results[i] = { status: 'duplicate', duplicateOf: t.id, reason: 'Same date and amount, alike in words, and the only one of that day and amount' };
+  });
+
+  // 3d. The same day and amount, at any amount, where one description is the other's words with more
+  // after them (a statement adds the merchant's town or trade: "EXAMPLE GROCER TOWN GOODS"), and each
+  // side has only that one row of that day and amount. Two coffees at one shop on one day would be
+  // two rows on at least one side, and are left to step 4.
+  incoming.forEach((c, i) => {
+    if (results[i]!.status !== 'new' || incomingAlike(c) !== 1) return;
+    const same = storedAlike(c);
+    const t = same.length === 1 ? same[0]! : undefined;
+    if (!t || conflictingIds(c, t) || otherBalance(c, t) || !extendsWords(t.description, c.description)) return;
+    used.add(t.id);
+    results[i] = { status: 'duplicate', duplicateOf: t.id, reason: 'Same date and amount, the same name with more words, and the only one of that day and amount' };
   });
 
   // 4. Fuzzy: same amount, nearby date; similar text, the same day, or an amount with pence.
@@ -216,7 +265,7 @@ export function classifyDuplicates(incoming: DedupCandidate[], existing: Transac
     for (const t of byAmount.get(toMinor(c.amount)) ?? []) {
       if (used.has(t.id) || conflictingIds(c, t) || otherBalance(c, t)) continue;
       // From either of the record's days: when it cleared, or when it was made.
-      const days = Math.min(Math.abs(diffDays(t.date, c.date)), t.transactionDate ? Math.abs(diffDays(t.transactionDate, c.date)) : Infinity);
+      const days = Math.min(...daysOf(t).flatMap((d) => daysOf(c).map((e) => Math.abs(diffDays(d, e)))));
       if (days > fuzzyDays) continue;
       // A row that names no one is like any description: the same money, named elsewhere.
       const sim = saysNothing(t.description) || saysNothing(c.description) ? 0.5 : similarity(t.description, c.description);
@@ -263,18 +312,34 @@ export function hasYourChanges(t: Transaction, withReceipts: Set<string>): boole
   return t.categorisedBy === 'user' || t.payeeSetBy === 'user' || Boolean(t.notes || t.tags?.length || t.splits?.length || t.corrections?.length || t.seenIn?.length || t.transferGroup) || withReceipts.has(t.id);
 }
 
+/** How far from the copy a statement matched another copy of it may be dated (`storedTwice`, nearby). */
+export const NEARBY_COPY_DAYS = 7;
+
 /**
  * Payments the account has recorded twice that this document shows once (docs/INGESTION.md,
  * "Recorded twice"). A recorded row the document matches has a second copy when another recorded row
  * has the same date and amount, nothing on the document matches it, another import recorded it (one
  * document listing both means two payments: a spend, its refund and the spend again), and either:
  * - both show the same balance after them: the same payment, for certain (ticked to be taken away);
- * - or the document shows that date and amount fewer times than they are recorded, and no balances
- *   say otherwise (for you to judge).
+ * - or the document shows that date and amount fewer times than they are recorded, it shows that
+ *   day (inside its period, or its first and last rows), and no balances say otherwise (for you to
+ *   judge).
  * The copy offered is one with nothing of yours on it: the one the document did not match, unless
  * only the other is clean. When both have something of yours, nothing is offered.
+ *
+ * `statement`: the document is a statement of every payment from `from` to `to`, and its rows add up
+ * (opening balance to closing, and to its printed totals). Then a copy dated up to
+ * `NEARBY_COPY_DAYS` from the one it matched is found too (`nearby`, ticked): the same amount, the
+ * same name (one the other's words with more after them), another import's, dated inside the
+ * period at least 3 days before it ends (so the statement would show it), with the statement showing
+ * that amount fewer times around it than it is recorded. A screenshot whose date heading scrolled out
+ * of view dates its rows by the heading above. Only the unmatched copy is offered.
  */
-export function storedTwice(rows: Pick<DraftTransaction, 'date' | 'amount' | 'status' | 'duplicateOf'>[], stored: Transaction[], opts: { withReceipts?: Set<string>; fileOf?: (t: Transaction) => string | undefined } = {}): ExtraCopy[] {
+export function storedTwice(
+  rows: Pick<DraftTransaction, 'date' | 'amount' | 'status' | 'duplicateOf'>[],
+  stored: Transaction[],
+  opts: { withReceipts?: Set<string>; fileOf?: (t: Transaction) => string | undefined; statement?: { from: string; to: string } } = {},
+): ExtraCopy[] {
   const withReceipts = opts.withReceipts ?? new Set<string>();
   const dayKey = (x: { date: string; amount: number }) => `${x.date}|${toMinor(x.amount)}`;
   const claimed = new Set(rows.flatMap((r) => (r.status !== 'new' && r.duplicateOf ? [r.duplicateOf] : [])));
@@ -283,6 +348,11 @@ export function storedTwice(rows: Pick<DraftTransaction, 'date' | 'amount' | 'st
   const recorded = new Map<string, Transaction[]>();
   for (const t of stored) (recorded.get(dayKey(t)) ?? recorded.set(dayKey(t), []).get(dayKey(t))!).push(t);
   const byId = new Map(stored.map((t) => [t.id, t]));
+  // The days the document shows in full: its period, else from its first row to its last. Showing a
+  // day's payment fewer times than it is recorded says something only of a day it shows (a statement
+  // row made months before it was posted matches a record on a day the statement does not list).
+  const posted = rows.map((r) => r.date).sort();
+  const shows = (day: string) => (opts.statement ? day >= opts.statement.from && day <= opts.statement.to : posted.length > 0 && day >= posted[0]! && day <= posted[posted.length - 1]!);
   const offered = new Set<string>();
   const out: ExtraCopy[] = [];
   for (const id of claimed) {
@@ -294,7 +364,7 @@ export function storedTwice(rows: Pick<DraftTransaction, 'date' | 'amount' | 'st
       if (twin.id === matched.id || claimed.has(twin.id) || offered.has(twin.id)) continue;
       if (twin.source.importId && twin.source.importId === matched.source.importId) continue;
       const sameBalance = matched.balanceAfter !== undefined && twin.balanceAfter !== undefined && toMinor(matched.balanceAfter) === toMinor(twin.balanceAfter);
-      const extra = same.length - out.filter((c) => dayKey(c) === k).length > (shown.get(k) ?? 0);
+      const extra = shows(matched.date) && same.length - out.filter((c) => dayKey(c) === k).length > (shown.get(k) ?? 0);
       if (!sameBalance && (!extra || otherBalance(matched, twin))) continue;
       const [gone, kept] = !hasYourChanges(twin, withReceipts) ? [twin, matched] : !hasYourChanges(matched, withReceipts) ? [matched, twin] : [undefined, undefined];
       if (!gone || !kept) continue;
@@ -302,6 +372,24 @@ export function storedTwice(rows: Pick<DraftTransaction, 'date' | 'amount' | 'st
       offered.add(kept.id);
       const fromFile = opts.fileOf?.(gone);
       out.push({ transactionId: gone.id, keepId: kept.id, accountId: gone.accountId, date: gone.date, amount: gone.amount, description: gone.description, ...(fromFile ? { fromFile } : {}), sameBalance, remove: sameBalance });
+      break;
+    }
+    const period = opts.statement;
+    if (!period || offered.has(matched.id)) continue;
+    const near = (x: { date: string }, day: string) => Math.abs(diffDays(x.date, day)) <= NEARBY_COPY_DAYS;
+    for (const twin of stored) {
+      if (twin.id === matched.id || twin.date === matched.date || claimed.has(twin.id) || offered.has(twin.id) || !near(twin, matched.date)) continue;
+      if (toMinor(twin.amount) !== toMinor(matched.amount) || twin.date < period.from || twin.date > addDays(period.to, -3)) continue;
+      if (!twin.source.importId || twin.source.importId === matched.source.importId || otherBalance(matched, twin) || !extendsWords(twin.description, matched.description)) continue;
+      if (hasYourChanges(twin, withReceipts)) continue;
+      const amount = toMinor(twin.amount);
+      const shownNear = rows.filter((r) => toMinor(r.amount) === amount && near(r, twin.date)).length;
+      const recordedNear = stored.filter((t) => toMinor(t.amount) === amount && near(t, twin.date)).length;
+      if (shownNear >= recordedNear) continue;
+      offered.add(twin.id);
+      offered.add(matched.id);
+      const fromFile = opts.fileOf?.(twin);
+      out.push({ transactionId: twin.id, keepId: matched.id, accountId: twin.accountId, date: twin.date, amount: twin.amount, description: twin.description, ...(fromFile ? { fromFile } : {}), sameBalance: false, nearby: true, remove: true });
       break;
     }
   }

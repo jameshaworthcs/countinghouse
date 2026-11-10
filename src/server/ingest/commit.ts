@@ -7,6 +7,7 @@ import { fullerName } from '../../shared/funds';
 import { catalogInstitution, findInstitution } from '../../shared/institutions';
 import { tidyPlace } from '../../shared/places';
 import { formatMoney, fromMinor, toMinor } from '../../shared/money';
+import { diffDays } from '../../shared/dates';
 import { taxYearOf } from '../../shared/uk';
 import { detailToAdd, fillIn, seenInEntry, stillAdds } from '../../shared/detail';
 import { sameTerms, termsOfReading } from '../../shared/terms';
@@ -20,7 +21,7 @@ import { balanceId, figureId, hmrcId, holdingsId, payslipId, termsId, transactio
 import { categoriserFor } from '../categoriser';
 import { linkTransfers, rederive, salaryByPayroll } from '../enrich';
 import { StoreError, type Store } from '../store';
-import { hasYourChanges } from './dedup';
+import { hasYourChanges, NEARBY_COPY_DAYS } from './dedup';
 import { sameHolding } from './match';
 import { mergeSchedule, recordedAs } from './schedules';
 
@@ -221,7 +222,7 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
 
   // 2b. Copies of payments recorded twice that the document shows once, ticked to be taken away
   // (the draft's `extraCopies`). Each is checked again: both copies still there, in this account, on
-  // the same day for the same amount, and nothing of yours on the one going. Not when rows of this
+  // the same day (or within `NEARBY_COPY_DAYS` for a nearby copy a statement found) for the same amount, and nothing of yours on the one going. Not when rows of this
   // import match both (it shows the payment twice), or a row matched to either is ticked in (you
   // counted it as a different payment).
   const removals: Transaction[] = [];
@@ -237,7 +238,8 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
         const gone = store.transaction(c.transactionId);
         const kept = store.transaction(c.keepId);
         if (!gone || !kept || gone.id === kept.id || removals.some((t) => t.id === gone.id)) continue;
-        if (gone.accountId !== account.id || kept.accountId !== account.id || gone.date !== kept.date || toMinor(gone.amount) !== toMinor(kept.amount)) continue;
+        const sameDay = gone.date === kept.date || (c.nearby === true && Math.abs(diffDays(gone.date, kept.date)) <= NEARBY_COPY_DAYS);
+        if (gone.accountId !== account.id || kept.accountId !== account.id || !sameDay || toMinor(gone.amount) !== toMinor(kept.amount)) continue;
         if (hasYourChanges(gone, withReceipts) || (matched.has(gone.id) && matched.has(kept.id)) || counted.has(gone.id) || counted.has(kept.id)) continue;
         removals.push(gone);
       }
