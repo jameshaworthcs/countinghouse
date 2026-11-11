@@ -103,12 +103,13 @@ function placeOf(a: Account | undefined): Place | undefined {
   return 'other';
 }
 
-const WHERE_LABELS: Record<MonthWhereItem['id'], string> = {
+const WHERE_LABELS: Record<MonthWhereItem['id'] | 'unknownBack', string> = {
   cash: 'Kept in current accounts and savings',
   cards: 'Paid off credit cards',
   invested: 'Put into ISAs, pensions and investments',
   loans: 'Paid off loans',
   unknown: 'Sent to accounts the app doesn’t know',
+  unknownBack: 'Came back from accounts the app doesn’t know',
   unexplained: 'Not placed (moving between accounts at the month’s end, or rows the app can’t place)',
 };
 
@@ -496,6 +497,7 @@ export class MonthContext {
         .map(([id, v]) => ({ id, name: name(id), amount: fromMinor(v) }))
         .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
     const sum = (m: Map<string, number>) => [...m.values()].reduce((s, v) => s + v, 0);
+    const unknownNet = [...unknown.values()].reduce((s, e) => s + e.minor, 0);
     const items: MonthWhereItem[] = [
       { id: 'cash', label: WHERE_LABELS.cash, amount: fromMinor(sum(byAccount.cash)), parts: parts(byAccount.cash) },
       { id: 'cards', label: WHERE_LABELS.cards, amount: fromMinor(sum(byAccount.cards)), parts: parts(byAccount.cards) },
@@ -503,8 +505,9 @@ export class MonthContext {
       { id: 'loans', label: WHERE_LABELS.loans, amount: fromMinor(borrowed - toLoans + loanFlows), parts: [] },
       {
         id: 'unknown',
-        label: WHERE_LABELS.unknown,
-        amount: fromMinor([...unknown.values()].reduce((s, e) => s + e.minor, 0)),
+        // Net money back from them (a withdrawal from an exchange) reads as such, not as "sent".
+        label: unknownNet < 0 ? WHERE_LABELS.unknownBack : WHERE_LABELS.unknown,
+        amount: fromMinor(unknownNet),
         parts: [...unknown.entries()].filter(([, e]) => e.minor !== 0).map(([id, e]) => ({ id, name: e.name, amount: fromMinor(e.minor), count: e.count })).sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount)),
       },
     ];

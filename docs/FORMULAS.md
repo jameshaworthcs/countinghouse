@@ -1437,6 +1437,8 @@ From the rows in the month on your cash accounts (current, savings, Premium Bond
   maintenance instalment (borrowed and moved from the loan) each come to nothing.
 - **Sent to accounts the app doesn't know**: each part of a row that is not income or spending and
   has no other side among your accounts, by payee (your own Revolut, a transfer to yourself).
+  When more came back from them than went (a withdrawal from an exchange), the net is negative
+  and the line reads **Came back from accounts the app doesn't know**.
 - **Not placed**: what is left: a transfer between your accounts whose other side falls in the next
   month, or a row the app cannot place. Shown so the items always add up.
 

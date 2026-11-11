@@ -186,10 +186,24 @@ describe('a month’s figures', () => {
     );
     const w = new Analytics(store).month('2026-08').whereItWent;
     const item = (id: string) => w.items.find((i) => i.id === id);
-    expect(item('unknown')).toMatchObject({ amount: 250, parts: [{ name: 'Example Broker', amount: 250, count: 1 }] });
+    expect(item('unknown')).toMatchObject({ label: 'Sent to accounts the app doesn’t know', amount: 250, parts: [{ name: 'Example Broker', amount: 250, count: 1 }] });
     expect(item('invested')).toMatchObject({ amount: 300, parts: [{ id: 'isa', amount: 300 }] });
     expect(item('cards')!.amount).toBe(20);
     expect(item('unexplained')).toBeUndefined();
+    expect(w.items.reduce((s, i) => s + toMinor(i.amount), 0)).toBe(toMinor(w.total));
+  });
+
+  it('where it went says money came back from accounts the app doesn’t know when more came in than went', async () => {
+    await months();
+    await store.addTransactions(
+      [
+        tx('bank', '2026-08-03', 400, 'EXAMPLE EXCHANGE WITHDRAWAL', { category: 'investment-transfer', categorisedBy: 'user' }),
+        tx('bank', '2026-08-10', -150, 'TO EXAMPLE EXCHANGE', { category: 'investment-transfer', categorisedBy: 'user' }),
+      ],
+      't',
+    );
+    const w = new Analytics(store).month('2026-08').whereItWent;
+    expect(w.items.find((i) => i.id === 'unknown')).toMatchObject({ label: 'Came back from accounts the app doesn’t know', amount: -250 });
     expect(w.items.reduce((s, i) => s + toMinor(i.amount), 0)).toBe(toMinor(w.total));
   });
 
