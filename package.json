@@ -64,7 +64,7 @@
     "sharp": "^0.35.5",
     "tailwind-merge": "^3.7.0",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
-    "zod": "^4.6.5"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@commitlint/cli": "^21.2.3",
@@ -86,7 +86,7 @@
     "globals": "^17.12.0",
     "jose": "^6.2.12",
     "prettier": "^3.9.9",
-    "puppeteer-core": "^25.12.0",
+    "puppeteer-core": "^25.16.0",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.23.15",
     "typescript": "^5.9.3",
