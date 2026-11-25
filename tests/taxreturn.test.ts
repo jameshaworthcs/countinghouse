@@ -10,6 +10,7 @@ import { taxReturn } from '../src/server/analytics/taxreturn';
 import { createApp, type App } from '../src/server/app';
 import { loadConfig } from '../src/server/config';
 import { figureId, transactionId } from '../src/server/ids';
+import { ProposalService } from '../src/server/proposals';
 import { Store } from '../src/server/store';
 import { requiredScope } from '../src/server/tokens';
 import type { Account, Employment, Figure, ReturnEntry, Transaction } from '../src/shared/schema';
@@ -228,6 +229,26 @@ describe('a 2025/26 return from the records', () => {
     expect(boxOf('TR3:4')).toMatchObject({ state: 'check', value: 3216.55 });
     expect(boxOf('TR3:4')!.check).toMatch(/not split by country/);
     expect(boxOf('SA106:USA:B')).toBeUndefined();
+  });
+
+  it('an agent proposes answers; they apply in order (a box opened by an earlier one), never over yours', async () => {
+    const proposals = new ProposalService(store, path.join(dir, 'proposals'));
+    await set({ 'q:property': false });
+    const change = (entry: string, value: ReturnEntry['value']) => ({ kind: 'set_return_entry' as const, taxYear: '2025/26', entry, value, why: 'From the owner’s answers.' });
+    const view = await proposals.create(
+      { title: 'Answers for the 2025/26 return', summary: 'A test.', changes: [change('SA102:job-maple:6', true), change('SA102:job-maple:7', true), change('SA102:job-maple:7.2', '87654321'), change('SA102:job-maple:2', null), change('q:partnership', false)] },
+      { setBy: 'agent', model: 'test-model' },
+    );
+    expect(view.changes.map((c) => c.returnEntry?.value)).toEqual(['Yes', 'Yes', '87654321', 'None', 'No']);
+    // Your answer stands: proposing another fails, the same one is already so.
+    await expect(proposals.create({ title: 'x', summary: 'x', changes: [change('q:property', true)] }, { setBy: 'agent' })).rejects.toThrow(/do not fit/);
+    // A box that needs a value refuses a nil.
+    await expect(proposals.create({ title: 'x', summary: 'x', changes: [change('SA102:job-oak:6', null)] }, { setBy: 'agent' })).rejects.toThrow(/do not fit/);
+    await proposals.apply(view.proposal.id);
+    expect(boxOf('SA102:job-maple:7.2')).toMatchObject({ state: 'yours', value: '87654321' });
+    expect(boxOf('SA102:job-maple:2')).toMatchObject({ state: 'nil' });
+    expect(store.taxReturn('2025/26')!.entries['q:partnership']).toMatchObject({ value: false, note: 'Proposed: From the owner’s answers.' });
+    expect(store.taxReturn('2025/26')!.entries['q:property']).toMatchObject({ value: false });
   });
 
   it('a year before the forms here has no return box by box; a year after them uses the latest forms, saying so', () => {

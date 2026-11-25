@@ -1005,6 +1005,8 @@ export interface ProposalChangeView {
   category?: { group?: string; was?: { name: string; group?: string } };
   /** A rule removed: the payments it categorised that change without it, with what each becomes (`after`). */
   removes?: { count: number; examples: ProposalRuleExample[] };
+  /** A return's box or question set: what it is, and the value as you would enter it. */
+  returnEntry?: { what: string; value: string };
 }
 
 /** A payment a proposed rule would categorise (or a removed one stop categorising), with the category it has now, and after a removal. */

@@ -23,11 +23,12 @@ import { agreementPattern, isScheduledPayment } from '../shared/agreements';
 import { CategoryIndex } from '../shared/categories';
 import { Categoriser, isWrapperAccount, linkedPayee, transferLegCategory } from '../shared/categorise';
 import { addDays, diffDays, formatDate, today } from '../shared/dates';
-import { formatMoney, fromMinor, toMinor } from '../shared/money';
+import { formatMoney, fromMinor, isMoney, toMinor } from '../shared/money';
 import { sameTerms, type TermsContent } from '../shared/terms';
-import { AccountSchema, AgreementSchema, BalanceSnapshotSchema, CompanySchema, EmploymentSchema, ProposalSchema, TermsSchema, type Account, type Agreement, type BalanceSnapshot, type Category, type Company, type Terms, type Employment, type PensionArrangement, type Proposal, type ProposalInput, type ProposalStatus, type ProposedChange, type Provenance, type Rule, type Transaction } from '../shared/schema';
+import { AccountSchema, AgreementSchema, BalanceSnapshotSchema, CompanySchema, EmploymentSchema, ProposalSchema, TermsSchema, type Account, type Agreement, type BalanceSnapshot, type Category, type Company, type Terms, type Employment, type PensionArrangement, type Proposal, type ProposalInput, type ProposalStatus, type ProposedChange, type Provenance, type ReturnEntry, type Rule, type Transaction } from '../shared/schema';
 import { paidToText } from './analytics/agreements';
 import { BalanceEngine, type BalanceSource } from './analytics/balances';
+import { taxReturn } from './analytics/taxreturn';
 import { runAs } from './audit';
 import { categoriseInputOf, categoriserFor, ruleCatches } from './categoriser';
 import { nextPayee } from './enrich';
@@ -79,6 +80,8 @@ interface ChangeResult {
   category?: { group?: string; was?: { name: string; group?: string } };
   /** A rule removed: the payments it categorised that change without it. */
   removes?: { count: number; examples: ProposalRuleExample[] };
+  /** A return's box or question set: what it is, and the value as you would enter it. */
+  returnEntry?: { what: string; value: string };
 }
 
 interface Outcome {
@@ -110,6 +113,8 @@ interface Outcome {
   /** Your categories as they will be, when a change adds or changes one; those it changes, as they are now. */
   categories?: Category[];
   categoriesBefore: Map<string, Category>;
+  /** Each tax year's return entries as the changes leave them, when a change sets one. */
+  returns: Map<string, Record<string, ReturnEntry>>;
 }
 
 /** Rows a rule's change shows of those it would categorise. */
@@ -159,7 +164,7 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
   const accountName = (id: string) => store.account(id)?.name ?? id;
   let categoriserMemo: Categoriser | undefined;
   const categoriser = () => (categoriserMemo ??= categoriserFor(store));
-  const out: Outcome = { results: new Map(), patches: new Map(), removed: new Map(), accounts: new Map(), touchedRows: new Map(), touchedAccounts: new Map(), moves: new Map(), companies: new Map(), jobs: new Map(), balances: [], agreements: new Map(), terms: new Map(), termsRemoved: new Map(), rules: [], removedRules: new Map(), categoriesBefore: new Map() };
+  const out: Outcome = { results: new Map(), patches: new Map(), removed: new Map(), accounts: new Map(), touchedRows: new Map(), touchedAccounts: new Map(), moves: new Map(), companies: new Map(), jobs: new Map(), balances: [], agreements: new Map(), terms: new Map(), termsRemoved: new Map(), rules: [], removedRules: new Map(), categoriesBefore: new Map(), returns: new Map() };
   /** Change a category, or add one (`was` undefined), in the list the next changes see. */
   const putCategory = (next: Category, was: Category | undefined) => {
     const original = was ? store.categories.find((x) => x.id === was.id) : undefined;
@@ -492,6 +497,40 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
         out.companies.set(c.company.id, CompanySchema.parse({ ...c.company, valuations: [{ ...c.valuation, balanceId: balance.id }], accountId: acc.id, createdBy: 'agent', createdAt: stamp, updatedAt: stamp }));
         return {};
       }
+      case 'set_return_entry': {
+        const entries = out.returns.get(c.taxYear) ?? { ...(store.taxReturn(c.taxYear)?.entries ?? {}) };
+        const now = entries[c.entry];
+        if (now) return JSON.stringify(now.value) === JSON.stringify(c.value) ? { alreadySo: true } : { problem: `You answered it already (${String(now.value)}): change it on the Self Assessment page.` };
+        // Checked against the return as the changes before it leave it: a box can open on an earlier answer.
+        const view = taxReturn(store, c.taxYear, undefined, today(), entries);
+        if (!view) return { problem: `There are no forms for ${c.taxYear} here.` };
+        const question = view.questions.find((q) => q.key === c.entry);
+        const box = view.pages.flatMap((pg) => pg.boxes.map((b) => ({ b, pg }))).find((x) => x.b.key === c.entry);
+        let what: string;
+        let shown: string;
+        if (question) {
+          const ok = question.choices ? typeof c.value === 'string' && question.choices.some((ch) => ch.value === c.value) : typeof c.value === 'boolean';
+          if (!ok) return { problem: `“${question.text}” takes ${question.choices ? 'one of its choices' : 'yes or no'}.` };
+          what = question.text;
+          shown = question.choices ? (question.choices.find((ch) => ch.value === c.value)?.label ?? String(c.value)) : c.value ? 'Yes' : 'No';
+        } else if (box) {
+          const b = box.b;
+          if (!b.editable) return { problem: `${box.pg.form} ${box.pg.page} box ${b.box} comes from the records and other answers.` };
+          const v = c.value;
+          const ok =
+            (v === null && !b.nilRefused) ||
+            (b.kind === 'money' && typeof v === 'number' && isMoney(v)) ||
+            ((b.kind === 'yesno' || b.kind === 'x') && typeof v === 'boolean') ||
+            ((b.kind === 'number' || b.kind === 'percent') && typeof v === 'number' && v >= 0) ||
+            ((b.kind === 'text' || b.kind === 'date') && typeof v === 'string' && v.trim().length > 0);
+          if (!ok) return { problem: `Not a value ${box.pg.form} ${box.pg.page} box ${b.box} takes.` };
+          what = `${box.pg.form} ${box.pg.page}${box.pg.instance ? ` (${box.pg.instance})` : ''} box ${b.box}: ${b.label.replace(/ [–-] .*$/, '')}`;
+          shown = v === null ? 'None' : typeof v === 'boolean' ? (b.kind === 'x' ? 'X' : v ? 'Yes' : 'No') : b.kind === 'money' && typeof v === 'number' ? formatMoney(v) : b.kind === 'percent' ? `${String(v)}%` : String(v);
+        } else return { problem: `The ${c.taxYear} return has no ${c.entry} (it may need an earlier answer first).` };
+        entries[c.entry] = { value: typeof c.value === 'string' ? c.value.trim() : c.value, note: `Proposed: ${c.why}`.slice(0, 300), updatedAt: nowISO() };
+        out.returns.set(c.taxYear, entries);
+        return { returnEntry: { what, value: shown } };
+      }
       case 'add_rule': {
         const cat = cats.get(c.rule.category);
         if (!cat) return { problem: `There is no category "${c.rule.category}".` };
@@ -671,6 +710,7 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
 
 /** Applying would leave the data as it is: every change is already so, or they undo each other. */
 function changesNothing(store: Store, o: Outcome): boolean {
+  if (o.returns.size) return false;
   if (o.removed.size || o.companies.size || o.balances.length || o.jobs.size || o.agreements.size || o.terms.size || o.termsRemoved.size || o.rules.length || o.removedRules.size || o.categories) return false;
   if ([...o.moves.values()].some((m) => m.to !== m.balance.accountId)) return false;
   for (const [id, patch] of o.patches) {
@@ -721,6 +761,7 @@ function namedRows(c: ProposedChange): string[] {
     case 'remove_rule':
     case 'add_category':
     case 'change_category':
+    case 'set_return_entry':
       return [];
   }
 }
@@ -901,6 +942,9 @@ export class ProposalService extends EventEmitter {
       if (termsGone.length) await this.store.removeRecords('terms', termsGone, message);
       if (outcome.terms.size) await this.store.upsertRecords('terms', [...outcome.terms.values()], message);
       if (outcome.balances.length) await this.store.addBalances(outcome.balances, message);
+      for (const [taxYear, entries] of outcome.returns) {
+        await this.store.setReturns([...this.store.returns.filter((r) => r.taxYear !== taxYear), { id: taxYear.replace('/', '-'), taxYear, entries, updatedAt: nowISO() }], message);
+      }
       if (outcome.moves.size) await this.store.moveBalances([...outcome.moves.values()].map((m) => ({ id: m.balance.id, accountId: m.to })), message);
       const balances = [...outcome.moves.values()].map((m) => m.balance);
       const termsBefore = [...outcome.termsRemoved.values()];

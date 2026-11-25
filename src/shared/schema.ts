@@ -2098,6 +2098,18 @@ const changeUnion = <K extends z.ZodType<string | undefined>>(key: K) =>
       valuation: CompanyValuationSchema.omit({ balanceId: true }),
       account: z.object({ id: SlugSchema, name: z.string().min(1).max(120) }),
     }),
+    /**
+     * Answer a question or fill a box on a tax year's Self Assessment return (returns.json), from what
+     * the records show or what you told an agent. Never over an answer of yours.
+     */
+    z.object({
+      key,
+      kind: z.literal('set_return_entry'),
+      why: ChangeWhySchema,
+      taxYear: z.string().regex(/^\d{4}\/\d{2}$/),
+      entry: z.string().min(1).max(120),
+      value: z.union([z.number(), z.string().max(300), z.boolean(), z.null()]),
+    }),
   ]);
 
 export const ProposedChangeSchema = changeUnion(ChangeKeySchema);

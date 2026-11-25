@@ -231,7 +231,8 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
       { "kind": "add_company", "company": { "id": "example-ltd", "name": "Example Ltd", "number": "01234567", "holdings": [{ "shareClass": "A ordinary", "shares": 4, "totalShares": 120, "certificate": "12" }] }, "valuation": { "asOf": "2025-12-31", "method": "net-assets", "netAssets": 100000, "value": 3333.33, "note": "…" }, "account": { "id": "example-ltd-shares", "name": "Example Ltd shares" }, "why": "…" },
       { "kind": "add_agreement", "agreement": { "id": "example-hall-2025-26", "name": "Example Hall room, 2025/26", "counterparty": "Example University", "names": ["EXAMPLE UNI"], "category": "rent", "from": "2025-09-13", "until": "2026-06-20", "total": 6720, "payments": [{ "due": "2025-10-31", "amount": 2240, "label": "Instalment 1" }], "details": [{ "label": "Let length", "value": "40 weeks" }], "source": { "importId": "imp_…" } }, "why": "…" },
       { "kind": "set_terms", "account": "example-card", "asOf": "2026-08-14", "importId": "imp_…", "terms": { "limit": 3000, "rates": [{ "applies": "purchases", "rate": 0, "until": "2027-03-31", "balance": 87.4, "label": "Promotional purchases" }, { "applies": "purchases", "rate": 24.9, "basis": "simple", "variable": true }], "minimumPayment": 5, "paymentDue": "2026-09-08" }, "why": "…" },
-      { "kind": "remove_terms", "account": "example-fixed", "asOf": "2025-01-31", "importId": "imp_…", "why": "…" }
+      { "kind": "remove_terms", "account": "example-fixed", "asOf": "2025-01-31", "importId": "imp_…", "why": "…" },
+      { "kind": "set_return_entry", "taxYear": "2025/26", "entry": "SA102:job-example-job:6", "value": false, "why": "…" }
     ]
   }
   ```
@@ -262,6 +263,10 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
   - A pension arrangement (`add_pension_arrangement`) is for a job and a pension account you pay
     into (not a State or defined-benefit pension), does not start in the future, and is not there
     already.
+  - A return answer (`set_return_entry`) is a question or an editable box the year's return has, as
+    the changes before it leave the return (a director's Yes opens the close company boxes), with a
+    value of its kind; a box that needs a figure takes no nil. One the owner set already is theirs:
+    the same value is already so, another does not fit.
   - A company added (`add_company`) is new: no company with its id or number, and no account with
     the id its account would take. Its valuation is not in the future. A book value's `why` names
     the documents its figures come from (the share certificate, the accounts, the confirmation

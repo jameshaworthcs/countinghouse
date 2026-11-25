@@ -554,6 +554,8 @@ lives in the work area (`<work>/proposals/`), never here.
   - `add_company {company, valuation, account}`: shares you hold in a company, from its documents:
     the company (`companies.json`), a new "other asset" account `{id, name}`, and its valuation
     recorded as that account's balance.
+  - `set_return_entry {taxYear, entry, value}`: an answer or a box's figure on a tax year's Self
+    Assessment return (`returns.json`), with the reason as its note; never over an entry of yours.
   - `add_agreement {agreement}`: an agreement, from its document (`agreements.json`). The payments
     already recorded that it schedules take its category, except one you, a rule of yours or a
     transfer link categorised.

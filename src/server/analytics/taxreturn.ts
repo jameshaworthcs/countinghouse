@@ -97,13 +97,17 @@ interface BoxOpts {
   nil?: 'refused' | 'none' | 'zero';
 }
 
-export function taxReturn(store: Store, label?: string, engine?: BalanceEngine, now: ISODate = today()): TaxReturnView | null {
+/**
+ * The year's return. `entriesOverride` stands in for what returns.json holds (a proposal checking its
+ * answers as the ones before it leave the return).
+ */
+export function taxReturn(store: Store, label?: string, engine?: BalanceEngine, now: ISODate = today(), entriesOverride?: Record<string, ReturnEntry>): TaxReturnView | null {
   const ty = (label ? parseTaxYear(label) : null) ?? makeTaxYear(Number(now.slice(0, 4)) - 1);
   const found = saFormsFor(ty.label);
   if (!found) return null;
   const forms = found.forms;
   const params = taxYearParams(ty);
-  const entries = store.taxReturn(ty.label)?.entries ?? {};
+  const entries = entriesOverride ?? store.taxReturn(ty.label)?.entries ?? {};
   const entry = (key: string): ReturnEntry | undefined => entries[key];
   const answer = (key: string): Value | undefined => entry(key)?.value;
   const allow = allowances(store, ty.label, now, engine);
@@ -521,7 +525,7 @@ export function taxReturn(store: Store, label?: string, engine?: BalanceEngine, 
   });
 
   // ─── The calculation, from the boxes ────────────────────────────────────────────────────────
-  const poa = poaMade(store, ty);
+  const poa = poaMade(store, ty, entries);
   const employment = sa102Inputs.reduce((s, j) => s + toMinor(j.income), 0);
   const paye = sa102Inputs.reduce((s, j) => s + toMinor(j.tax), 0) + toMinor(tr3Values['12'] ?? 0) + toMinor(tr3Values['14'] ?? 0) + toMinor(tr3Values['19'] ?? 0);
   const taxedInterest = num(answer('TR3:1') ?? null);
@@ -863,8 +867,8 @@ function inCodeHint(store: Store, ty: TaxYear): string {
  * Payments on account already made for the year: yours (`owed:poa-made`), else none when the year
  * before had no return (HMRC sets them only from a return); otherwise unknown (null).
  */
-function poaMade(store: Store, ty: TaxYear): { amount: number | null; why: string } {
-  const yours = store.taxReturn(ty.label)?.entries['owed:poa-made'];
+function poaMade(store: Store, ty: TaxYear, entries: Record<string, ReturnEntry> = store.taxReturn(ty.label)?.entries ?? {}): { amount: number | null; why: string } {
+  const yours = entries['owed:poa-made'];
   if (yours) return { amount: typeof yours.value === 'number' ? yours.value : 0, why: 'Your figure' };
   const before = ownerStatusOf(store, makeTaxYear(ty.startYear - 1).label);
   if (before.status === 'not-needed' || before.status === 'told-hmrc') return { amount: 0, why: `None: there was no ${makeTaxYear(ty.startYear - 1).label} return to set them` };

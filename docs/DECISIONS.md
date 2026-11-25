@@ -2800,6 +2800,8 @@ value grown from the account's first flow is never below nothing, as rolled-back
   Allowance used the wrong test; SA110 boxes 7 and 9 were combined; the 20% test rounded; an
   overpaid balance was not set against January's instalment; the student loan used the income tax
   base; platform dividends that could not be split fell silently into UK dividends.
+- **Agents propose answers** (`set_return_entry`): from the records or what the owner told them,
+  applied in order so an earlier answer can open a box, never over one of the owner's.
 - **Considered:** a second estimate beside the boxes (two figures to reconcile; the boxes are what
   HMRC calculates from); filling foreign dividends in TR 3 box 6 always (not allowed once total
   dividends pass £500, and loses the relief); treating a payment from HMRC as an in-year refund

@@ -37,6 +37,7 @@ export const CHANGE_LABELS: Record<ProposedChangeKind, { title: string; count: (
   add_agreement: { title: 'Add an agreement to pay', count: (n) => plural(n, 'agreement'), icon: <Handshake className="size-4" aria-hidden /> },
   set_terms: { title: 'Set an account’s terms', count: (n) => `${plural(n, 'account')}’ terms`, icon: <Percent className="size-4" aria-hidden /> },
   remove_terms: { title: 'Take away terms read into the wrong account', count: (n) => `${plural(n, 'set')} of terms taken away`, icon: <Percent className="size-4" aria-hidden /> },
+  set_return_entry: { title: 'Answer on your Self Assessment return', count: (n) => plural(n, 'return answer'), icon: <FileText className="size-4" aria-hidden /> },
 };
 
 /** "5 transfers linked, 2 transfer links undone, 1 category" */
@@ -625,6 +626,17 @@ export function ChangeBody({ change, view }: { change: ProposedChange; view: Pro
               .
             </div>
           )}
+        </div>
+      );
+    }
+    case 'set_return_entry': {
+      const r = view.changes.find((x) => x.change.key === change.key)?.returnEntry;
+      return (
+        <div className="grid gap-0.5 rounded-lg border border-line bg-panel px-3 py-2 text-[13px]">
+          <div className="text-ink-2">
+            {change.taxYear} return · {r?.what ?? change.entry}
+          </div>
+          <div className="font-medium text-ink">{r?.value ?? (change.value === null ? 'None' : String(change.value))}</div>
         </div>
       );
     }
