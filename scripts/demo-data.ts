@@ -17,6 +17,7 @@ import { balanceId, documentId, figureId, hmrcId, holdingsId, payslipId, termsId
 import { GOVUK_ENGINE_VERSION, readGovUkPage } from '../src/server/ingest/govuk';
 import { PAYSLIP_ENGINE_VERSION, readUkPayslip } from '../src/server/ingest/payslips';
 import { ImportService } from '../src/server/ingest/service';
+import { applyReviewActions } from '../src/server/actions';
 import { applyRecords, researchIdOf, setOwnerAssumption } from '../src/server/records';
 import { WorkArea } from '../src/server/ingest/workarea';
 import { Store } from '../src/server/store';
@@ -670,20 +671,19 @@ async function demoIntelligence(store: Store) {
           kind: 'month-review',
           pages: ['overview'],
           subject: { month },
-          title: `${month}: a steady month, with takeaways creeping up (demo)`,
+          title: 'A steady month: about a third saved, takeaways creeping up (demo)',
           body: 'The month\nSpending was close to your recent average and you saved about a third of your income (synthetic demo insight).\n\nWorth\nThe ISA and pensions grew with markets; the estate rose by a little over 1%.',
           keyPoints: [
             { text: 'You saved about a third of your income, close to your usual (synthetic demo insight).', evidence: [{ type: 'computed', metric: 'focus.net.amount', label: 'left over' }] },
             ...(takeaways.length ? [{ text: `${takeaways.length} takeaways, more than in a typical month (demo).`, evidence: [{ type: 'transactions' as const, ids: takeaways.map((t) => t.id).slice(0, 20), label: 'takeaways' }] }] : []),
-            { text: 'The estate rose by a little over 1%, mostly market growth in the ISA (demo).' },
           ],
           sections: [
-            { id: 'month', heading: 'The month', body: 'Pay came in on the usual day. Rent and bills went out as they do every month, and the rest of spending was close to typical (demo).' },
-            { id: 'typical', heading: 'Against typical', body: '- Takeaways were above their usual range.\n- Groceries were a little under their median (demo).' },
-            { id: 'worth', heading: 'Worth', body: 'The ISA grew with markets; what you put in was the usual monthly amount (demo).' },
+            { id: 'month', heading: 'Why the month looked like this', body: 'Pay came in on the usual day; rent and bills went out as every month, and the rest of spending was close to typical (demo).' },
+            { id: 'typical', heading: 'What moved', body: '- Takeaways: above their usual range, mostly on Fridays.\n- Groceries: a little under their median (demo).' },
+            { id: 'worth', heading: 'Worth', body: 'Up a little over 1%: the usual payment into the ISA, and the rest the market (demo).' },
             { id: 'coming', heading: 'Coming up', body: 'The council tax instalment and the annual car insurance are due next month (demo).' },
           ],
-          caveats: ['The pension is valued from a screenshot at the start of the month (demo).'],
+          actionKeys: ['cat-takeaway-fridays', 'tax-isa-headroom'],
           watch: ['Whether takeaways come back under their usual range (demo)'],
           followUp: [{ watch: 'Whether the car insurance renewal comes in under last year’s (demo)', outcome: 'happened', note: 'It was a little cheaper (demo).' }],
           evidence: [{ type: 'computed', metric: 'focus.net.amount', label: 'saved this month' }],
@@ -697,6 +697,19 @@ async function demoIntelligence(store: Store) {
       { type: 'insight', record: { kind: 'projection', pages: ['projections'], subject: {}, title: 'The 2028 deposit looks on track (demo)', body: 'At the recent pace, the LISA and savings together reach a 30% deposit on a £450,000 home by mid-2028, with the bonus included (synthetic demo insight).', evidence: [{ type: 'context', id: planId, label: 'your plan' }, { type: 'account', id: 'lifetime-isa', label: 'LISA' }], confidence: 'low' } },
     ],
   });
+  // What the review asked of you: two open actions (actions.json).
+  await applyReviewActions(
+    store,
+    month,
+    {
+      actions: [
+        { key: 'cat-takeaway-fridays', what: 'Set a takeaway budget you would be happy with', why: 'Takeaways were above their usual range last month, mostly on Fridays (demo).', kind: 'money', where: 'budgets' },
+        { key: 'tax-isa-headroom', what: 'Decide what to do with this year’s ISA room', why: 'Much of the allowance is unused, and the tax year ends on 5 April (demo).', kind: 'tax', where: 'tax', by: `${taxYearOf(END).startYear + 1}-04-05` },
+      ],
+      drops: [],
+    },
+    demo,
+  );
   const stampNote = nowISO();
   await store.upsertRecords('notes', [{ id: 'note_00000000000000d1', text: 'We are buying a flat in 2028 and I want six months of spending as an emergency fund (demo).', status: 'applied', proposals: [], createdAt: stampNote, updatedAt: stampNote }], 'demo: note');
 

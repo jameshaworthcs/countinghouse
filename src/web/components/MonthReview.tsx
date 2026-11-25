@@ -4,17 +4,17 @@
 // the few points that mattered, its parts, what it rests on, the fixes it proposed, and how the
 // review before's lines to watch turned out.
 
-import { Bot, Calculator, CalendarClock, Check, CircleHelp, ListChecks, ThumbsDown, ThumbsUp, TriangleAlert, X } from 'lucide-react';
-import { useState } from 'react';
+import { ArrowRight, Bot, Calculator, CalendarClock, Check, CircleHelp, ListChecks, ThumbsDown, ThumbsUp, TriangleAlert, Undo2, X } from 'lucide-react';
+import { useState, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router';
-import type { CoverageResponse, MonthCategory, MonthLine, MonthSummary } from '../../shared/api';
+import type { ActionsResponse, ActionView, CoverageResponse, MonthCategory, MonthLine, MonthSummary } from '../../shared/api';
 import { formatDate, formatMonth } from '../../shared/dates';
 import type { Insight } from '../../shared/schema';
 import { api, useApi, useApiMutation } from '../lib/api';
 import { cn, money, pct, plural } from '../lib/format';
 import { MiniBars } from './charts/bars';
 import { EvidenceChips, EvidenceLinks } from './Intel';
-import { Badge, Button, Card, Dialog, EmptyState, Loading, Money, Segmented, Select, Textarea, tableClasses, useToast } from './ui';
+import { Badge, Button, Card, Dialog, EmptyState, Input, Loading, Money, Segmented, Select, StatusBadge, Textarea, tableClasses, useToast } from './ui';
 
 interface MonthJob {
   id: string;
@@ -91,9 +91,10 @@ export function MonthReviewCard() {
       {!month ? (
         <EmptyState title="No complete month yet">A month shows here once every account has data for nearly all of its days.</EmptyState>
       ) : (
+        // On a phone the review comes first: its verdict and actions, then the figures.
         <div className="grid border-t border-line lg:grid-cols-[1fr_1fr]">
-          <div className="min-w-0 border-b border-line px-5 py-4 lg:border-r lg:border-b-0">{summary.data ? <Figures s={summary.data} /> : <Loading />}</div>
-          <div className="min-w-0 px-5 py-4">
+          <div className="order-2 min-w-0 px-5 py-4 lg:order-1 lg:border-r lg:border-line">{summary.data ? <Figures s={summary.data} /> : <Loading />}</div>
+          <div className="order-1 min-w-0 border-b border-line px-5 py-4 lg:order-2 lg:border-b-0">
             <Review month={month} review={review} pending={thisPending} latest={month === latest} catchUp={jobs.data?.catchUpMonths ?? []} queued={pending.length} />
           </div>
         </div>
@@ -313,10 +314,13 @@ function Figure({ label, value, sub, sign }: { label: string; value: number; sub
 }
 
 /** A month's review as written: headline, key points, parts, limits, fixes proposed, lines to watch, and your feedback. */
-export function ReviewView({ review, compact = false }: { review: Insight; compact?: boolean }) {
+export function ReviewView({ review, compact = false, actions }: { review: Insight; compact?: boolean; actions?: ReactNode }) {
+  // A short review (the current prompt's) shows all its parts; a long one, its first.
+  const short = (review.sections ?? []).reduce((n, x) => n + x.body.length, 0) <= 1600;
   return (
     <div className="flex flex-col gap-3">
       <div className="text-[15px] leading-snug font-semibold text-ink">{review.title}</div>
+      {actions}
       {review.keyPoints && review.keyPoints.length > 0 ? (
         <ol className="flex flex-col gap-2">
           {review.keyPoints.map((k, i) => (
@@ -358,7 +362,7 @@ export function ReviewView({ review, compact = false }: { review: Insight; compa
       {!compact && review.sections && review.sections.length > 0 && (
         <div className="flex flex-col divide-y divide-line rounded-md border border-line">
           {review.sections.map((x, i) => (
-            <details key={x.id} open={i === 0} className="group px-3 py-2">
+            <details key={x.id} open={short || i === 0} className="group px-3 py-2">
               <summary className="cursor-pointer text-[12.5px] font-semibold text-ink">{x.heading}</summary>
               <p className="mt-1 text-[13px] whitespace-pre-line text-ink-2">{x.body}</p>
             </details>
@@ -473,7 +477,8 @@ function Review({ month, review, pending, latest, catchUp, queued }: { month: st
         <Bot className="size-3.5" aria-hidden /> Claude’s review: inferred, not calculated
       </div>
       {pending && <Badge tone="accent">{pending.status === 'running' ? 'Writing this review now' : 'This review is queued'}</Badge>}
-      {review ? <ReviewView review={review} /> : <p className="text-[13px] text-ink-3">No review of {formatMonth(month)} yet.</p>}
+      {review ? <ReviewView review={review} actions={<ReviewActions month={month} latest={latest} review={review} />} /> : <p className="text-[13px] text-ink-3">No review of {formatMonth(month)} yet.</p>}
+      {!review && latest && <ReviewActions month={month} latest review={undefined} />}
       <div className="flex flex-wrap gap-2 border-t border-line pt-3">
         {latest && (
           <Button size="sm" variant={review ? 'secondary' : 'primary'} disabled={Boolean(pending)} loading={write.isPending} onClick={() => write.mutate(undefined)}>
@@ -507,5 +512,142 @@ function Review({ month, review, pending, latest, catchUp, queued }: { month: st
         </p>
       </Dialog>
     </div>
+  );
+}
+
+const ACTION_KIND: Record<ActionView['kind'], string> = { money: 'Money', tax: 'Tax', data: 'Data' };
+
+/**
+ * What the reviews asked of you (actions.json). Beside the latest month: everything still open, from
+ * whichever review asked it, with Done and Not relevant, which are yours alone. Beside an earlier
+ * month: what its review asked, and where each stands now.
+ */
+function ReviewActions({ month, latest, review }: { month: string; latest: boolean; review: Insight | undefined }) {
+  const actions = useApi<ActionsResponse>(['actions'], '/actions');
+  if (!actions.data) return null;
+  const all = [...actions.data.open, ...actions.data.recent];
+  if (!latest) {
+    const asked = (review?.actionKeys ?? []).map((k) => all.find((a) => a.key === k)).filter((a): a is ActionView => Boolean(a));
+    if (!asked.length) return null;
+    return (
+      <div className="flex flex-col gap-1">
+        <div className="text-[12px] font-medium text-ink">It asked you to</div>
+        <ul className="flex flex-col gap-1 text-[12.5px] text-ink-2">
+          {asked.map((a) => (
+            <li key={a.key} className="flex items-baseline gap-2">
+              <ActionStateBadge a={a} />
+              <span>{a.what}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
+  const { open, recent } = actions.data;
+  if (!open.length && !recent.length) return null;
+  return (
+    <section aria-label="What to do" className="flex flex-col gap-2 rounded-md border border-line bg-panel-2/40 p-3">
+      <div className="flex items-center gap-1.5 text-[12.5px] font-semibold text-ink">
+        <ListChecks className="size-3.5 text-ink-3" aria-hidden /> What to do
+        <span className="font-normal text-ink-3">· from Claude’s reviews, inferred</span>
+      </div>
+      {open.length ? (
+        <ul className="flex flex-col divide-y divide-line">
+          {open.map((a) => (
+            <ActionRow key={a.key} a={a} month={month} />
+          ))}
+        </ul>
+      ) : (
+        <p className="text-[12.5px] text-ink-3">Nothing open.</p>
+      )}
+      {recent.length > 0 && (
+        <details className="text-[12px]">
+          <summary className="cursor-pointer text-ink-3">Decided or closed lately ({recent.length})</summary>
+          <ul className="mt-1 flex flex-col gap-1">
+            {recent.map((a) => (
+              <RecentRow key={a.key} a={a} />
+            ))}
+          </ul>
+        </details>
+      )}
+    </section>
+  );
+}
+
+function ActionStateBadge({ a }: { a: ActionView }) {
+  switch (a.state) {
+    case 'overdue':
+      return <StatusBadge status="bad">{a.by ? `Was due ${formatDate(a.by, { year: false })}` : 'Overdue'}</StatusBadge>;
+    case 'due-soon':
+      return <StatusBadge status="warn">{`Due ${formatDate(a.by!, { year: false })}`}</StatusBadge>;
+    case 'stale':
+      return <Badge tone="muted">Still relevant?</Badge>;
+    case 'done':
+      return <Badge tone="neutral" icon={<Check className="size-3" aria-hidden />}>Done</Badge>;
+    case 'not-relevant':
+      return <Badge tone="muted">Not relevant</Badge>;
+    case 'closed':
+      return <Badge tone="muted">No longer applies</Badge>;
+    case 'expired':
+      return <Badge tone="muted">Lapsed</Badge>;
+    default:
+      return a.by ? <Badge tone="neutral">{`By ${formatDate(a.by, { year: false })}`}</Badge> : null;
+  }
+}
+
+function ActionRow({ a, month }: { a: ActionView; month: string }) {
+  const [why, setWhy] = useState<string | null>(null);
+  const decide = useApiMutation((v: { status: 'done' | 'not-relevant'; note?: string }) => api(`/actions/${a.key}`, { method: 'PATCH', body: v }));
+  return (
+    <li className="flex flex-col gap-1 py-2 first:pt-0 last:pb-0">
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+        <Badge tone="muted">{ACTION_KIND[a.kind]}</Badge>
+        <span className="text-[13px] font-medium text-ink">{a.what}</span>
+        <ActionStateBadge a={a} />
+      </div>
+      <p className="text-[12.5px] text-ink-2">{a.why}</p>
+      <div className="flex flex-wrap items-center gap-2 text-[12px] text-ink-3">
+        {a.lastMonth < month && <span>From {formatMonth(a.lastMonth)}’s review</span>}
+        {a.href && (
+          <Link to={a.href} className="inline-flex items-center gap-0.5 text-accent hover:underline">
+            Go there <ArrowRight className="size-3" aria-hidden />
+          </Link>
+        )}
+        <span className="ml-auto flex gap-1.5">
+          <Button size="sm" loading={decide.isPending && decide.variables?.status === 'done'} onClick={() => decide.mutate({ status: 'done' })}>
+            Done
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setWhy((v) => (v === null ? '' : null))}>
+            Not relevant
+          </Button>
+        </span>
+      </div>
+      {why !== null && (
+        <div className="flex flex-wrap gap-1.5">
+          <Input value={why} onChange={(e) => setWhy(e.target.value)} maxLength={300} placeholder="Why not? Optional: the next review reads it" aria-label={`Why “${a.what}” is not relevant`} className="min-w-0 flex-1" />
+          <Button size="sm" variant="primary" loading={decide.isPending} onClick={() => decide.mutate({ status: 'not-relevant', ...(why.trim() ? { note: why.trim() } : {}) })}>
+            Save
+          </Button>
+        </div>
+      )}
+      {decide.error && <p className="text-[12px] text-bad-ink">{decide.error.message}</p>}
+    </li>
+  );
+}
+
+function RecentRow({ a }: { a: ActionView }) {
+  const reopen = useApiMutation(() => api(`/actions/${a.key}`, { method: 'PATCH', body: { status: 'open' } }));
+  return (
+    <li className="flex items-baseline gap-2 text-ink-2">
+      <ActionStateBadge a={a} />
+      <span className="min-w-0 flex-1">
+        {a.what}
+        {a.decision?.note && <span className="text-ink-3"> · “{a.decision.note}”</span>}
+        {a.closed && <span className="text-ink-3"> · {a.closed.reason}</span>}
+      </span>
+      <button type="button" className="inline-flex shrink-0 items-center gap-1 text-accent hover:underline" onClick={() => reopen.mutate(undefined)}>
+        <Undo2 className="size-3" aria-hidden /> Reopen
+      </button>
+    </li>
   );
 }

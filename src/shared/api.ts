@@ -1,6 +1,7 @@
 // Response shapes of the HTTP API, shared by the server and the web app.
 
 import type { AccessGroup, WrapperGroup } from './accounts';
+import type { ActionState } from './actions';
 import type { PersonSuggestion } from './people';
 import type {
   InferenceProvenance,
@@ -32,6 +33,7 @@ import type {
   Settings,
   Transaction,
   SaStatus,
+  ReviewAction,
 } from './schema';
 import type { TaxBand } from './uk';
 
@@ -1623,7 +1625,6 @@ export interface MonthRegularChange {
   from?: number;
 }
 
-/** A month's figures, worked out by fixed rules (docs/FORMULAS.md §18). */
 /**
  * A month's change in worth, four ways that add up to it to the penny (FORMULAS.md §18, "Worth
  * split"). `market` counts only values at market that are the month's (`marketAccounts`); one resting
@@ -1652,6 +1653,19 @@ export interface MonthRunway {
   months: number | null;
 }
 
+/** An action a month in review asked of you, as it stands today (GET /api/actions; docs/DATA_FORMAT.md, actions.json). */
+export interface ActionView extends ReviewAction {
+  state: ActionState;
+  href?: string;
+}
+
+/** Your actions: those on your list, most pressing first, and those decided or closed in the last 90 days. */
+export interface ActionsResponse {
+  open: ActionView[];
+  recent: ActionView[];
+}
+
+/** A month's figures, worked out by fixed rules (docs/FORMULAS.md §18). */
 export interface MonthSummary {
   month: string;
   from: string;

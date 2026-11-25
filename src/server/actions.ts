@@ -4,7 +4,8 @@
 // the same month, an action only the earlier run asked, and you did not decide, goes. Whether an
 // action is done or not relevant is yours alone (PATCH /api/actions/:key, your session only).
 
-import { ACTION_PAGES, ACTIVE_STATES, actionState, type ActionState } from '../shared/actions';
+import { ACTION_PAGES, ACTIVE_STATES, actionState } from '../shared/actions';
+import type { ActionsResponse, ActionView } from '../shared/api';
 import type { ISODate } from '../shared/dates';
 import { ReviewActionSchema, type Provenance, type ReviewAction } from '../shared/schema';
 import { nowISO } from './fsutil';
@@ -66,13 +67,8 @@ export async function applyReviewActions(store: Store, month: string, input: { a
   return { written, closed, removed };
 }
 
-export interface ActionView extends ReviewAction {
-  state: ActionState;
-  href?: string;
-}
-
 /** Your actions as they stand today: those on your list first, most pressing first, then those decided or closed in the last 90 days. */
-export function actionsView(store: Store, today: ISODate): { open: ActionView[]; recent: ActionView[] } {
+export function actionsView(store: Store, today: ISODate): ActionsResponse {
   const views = store.actions.map((a): ActionView => ({ ...a, state: actionState(a, today), ...(a.where ? { href: ACTION_PAGES[a.where] } : {}) }));
   const rank: Record<string, number> = { overdue: 0, 'due-soon': 1, open: 2, stale: 3 };
   const open = views.filter((v) => ACTIVE_STATES.has(v.state)).sort((a, b) => rank[a.state]! - rank[b.state]! || (a.by ?? '9999').localeCompare(b.by ?? '9999') || b.updatedAt.localeCompare(a.updatedAt));
