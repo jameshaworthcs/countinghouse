@@ -681,8 +681,51 @@ describe('the month in review, version 7: what it reads, asks of you, and is che
     expect(text).toMatch(/by 2020-01-01 is not a date/);
     expect(text).toMatch(/"plan-decided-already" is one the owner decided/);
     expect(text).toMatch(/"acct-saver-idle" is used twice/);
-    expect(text).toMatch(/neither asked again in actions nor in dropActions: cat-groceries-creeping/);
+    expect(text).toMatch(/neither asked again in actions nor dropped with a reason: cat-groceries-creeping/);
     expect(await check(out({ dropActions: [{ key: 'cat-groceries-creeping', reason: 'Groceries back to £120' }] }))).toEqual([]);
+  });
+
+  it('checks a date that is not one, a key too long, one asked and dropped, and an action repeating a Self Assessment alert', async () => {
+    await months();
+    await seed();
+    await writeDigest('2026-08');
+    const { readFile: read, writeFile: write } = await import('node:fs/promises');
+    const digest = JSON.parse(await read(path.join(dir, 'digest.json'), 'utf8')) as { asOfToday: { alertsShown: { id: string }[] } };
+    digest.asOfToday.alertsShown = [{ id: 'sa-register-2025-26' }];
+    await write(path.join(dir, 'digest.json'), JSON.stringify(digest));
+    const problems = await JOB_DEFS['monthly-review'].check!(
+      ctx({ month: '2026-08' }),
+      out({
+        actions: [action('plan-x', { by: '2099-11-31' }), action(`plan-${'long-'.repeat(17)}key`), action('tax-2025-26-dividends', { what: 'Tell HMRC about your dividends' })],
+        dropActions: [{ key: 'cat-groceries-creeping', reason: 'Back to normal' }],
+      }),
+    );
+    const text = problems.join('\n');
+    expect(text).toMatch(/by 2099-11-31 is not a date/);
+    expect(text).toMatch(/at most 80 characters/);
+    expect(text).toMatch(/repeats a Self Assessment alert/);
+    const both = await JOB_DEFS['monthly-review'].check!(ctx({ month: '2026-08' }), out({ actions: [action('cat-groceries-creeping')], dropActions: [{ key: 'cat-groceries-creeping', reason: 'x' }] }));
+    expect(both.join('\n')).toMatch(/both asked again and dropped/);
+  });
+
+  it('keeps a quiet month with no parts, its key points its text; writes nothing when there is no review to keep', async () => {
+    await months();
+    await writeDigest('2026-08');
+    await JOB_DEFS['monthly-review'].apply(ctx({ month: '2026-08' }), out({ review: { ...out().review, sections: [] }, actions: [action('plan-quiet')] }), provenance);
+    const review = store.insights.find((i) => i.kind === 'month-review' && i.status === 'active')!;
+    expect(review.body).toBe('Pay of £2,000 came in.');
+    expect(store.actions.map((a) => a.key)).toEqual(['plan-quiet']);
+    const r = await JOB_DEFS['monthly-review'].apply(ctx({ month: '2026-08' }), out({ review: { ...out().review, title: ' ' }, actions: [action('plan-lost')] }), provenance);
+    expect(r.summary).toMatch(/Nothing kept/);
+    expect(store.actions.some((a) => a.key === 'plan-lost')).toBe(false);
+  });
+
+  it('passes the review before with its limits, and an alert with its detail', async () => {
+    await months();
+    await store.upsertRecords('insights', [insight({ subject: { month: '2026-07' }, caveats: ['Typical rests on four months.'] })], 'i');
+    const d = buildMonthDigest(store, new Analytics(store), { month: '2026-08' });
+    expect(d.previousReview!.caveats).toEqual(['Typical rests on four months.']);
+    for (const a of d.asOfToday!.alertsShown) expect(a).toHaveProperty('detail');
   });
 
   it('a figure in whole pounds may round either way; a figure in an action is checked too', async () => {
@@ -692,6 +735,9 @@ describe('the month in review, version 7: what it reads, asks of you, and is che
     // Groceries were £155.50: £155 and £156 both pass; £158 does not.
     expect(await check(out({ review: { ...out().review, title: 'Groceries £155, or £156 rounded up' } }))).toEqual([]);
     expect(await check(out({ review: { ...out().review, title: 'Groceries £7,777' } }))).toEqual(['£7,777']);
+    await writeDigest('2026-08');
+    const latest = await JOB_DEFS['monthly-review'].check!(ctx({ month: '2026-08' }), out({ actions: [action('plan-figure', { why: 'It would save £6,666 a year.' })] }));
+    expect(latest).toContain('£6,666');
   });
 
   it('writes what it asks to actions.json for the latest month, leaving out what breaks a rule; written later, nothing', async () => {

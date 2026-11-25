@@ -766,14 +766,16 @@ written later for an earlier month never does.
 | `where` | page? | `overview`, `accounts`, `transactions`, `spending`, `categorise`, `budgets`, `investments`, `projections`, `tax`, `tax-pay`, `tax-self-assessment`, `import`, `assumptions` |
 | `kind` | `money` \| `tax` \| `data` | |
 | `evidence` | array | As an insight's |
-| `firstMonth`, `lastMonth` | `YYYY-MM` | The review that first asked it, and the latest that asked it again |
+| `months` | `YYYY-MM`[] | The months whose reviews asked it, oldest first |
+| `firstMonth`, `lastMonth` | `YYYY-MM` | The first and the latest of them |
 | `closed` | `{month, reason}`? | A later review found it no longer applies |
 | `decision` | `{status: done \| not-relevant, at, note?}`? | Yours alone; agents cannot set it, and a rerun keeps it |
 | `provenance`, `createdAt`, `updatedAt` | | |
 
-A review asking an action again keeps its first month and your decision, and opens it again if a
-review had closed it. A rerun of the same month removes an action only its earlier run asked, unless
-you decided it. On the page, an action is due soon from 14 days before its date, overdue after it,
+A review asking an action again adds its month, and opens it again if a review had closed it; one
+you decided it never changes. A rerun of a month first takes back what its earlier run did (its
+month, a close it made; an action only that run asked goes, unless you decided it). A review of a
+month before one whose review wrote actions writes none. On the page, an action is due soon from 14 days before its date, overdue after it,
 and gone 30 days after it; one with no date that no review has asked again for 60 days asks whether
 it still matters, and is gone after 90 (`src/shared/actions.ts`).
 

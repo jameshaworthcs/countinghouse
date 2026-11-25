@@ -73,7 +73,7 @@ async function main(): Promise<number> {
     if (dryRun) {
       const dir = path.join(scratch, 'dry');
       await mkdir(dir, { recursive: true });
-      const prompt = await JOB_DEFS['monthly-review'].prepare({ store, analytics, params: { month, ...(catchUp ? { catchUp: true } : {}) }, scratch: dir });
+      const prompt = await JOB_DEFS['monthly-review'].prepare({ store, analytics, params: { month, ...(catchUp ? { catchUp: true } : { asLatest: true }) }, scratch: dir });
       console.log(`\n${prompt}\n\n(dry run: nothing sent to Claude)`);
       return 0;
     }
@@ -85,7 +85,7 @@ async function main(): Promise<number> {
     const runner = new JobRunner(store, analytics, { ...config, workDir }, { autoRun: false, proposals });
     await runner.init();
     const started = Date.now();
-    const job = runner.enqueue({ kind: 'monthly-review', params: { month, ...(catchUp ? { catchUp: true } : {}) }, trigger: 'owner' });
+    const job = runner.enqueue({ kind: 'monthly-review', params: { month, ...(catchUp ? { catchUp: true } : { asLatest: true }) }, trigger: 'owner' });
     if (!job) throw new Error('The job was not queued.');
     let now = runner.get(job.id)!;
     while (now.status === 'queued' || now.status === 'running') {

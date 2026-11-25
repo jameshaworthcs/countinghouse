@@ -2644,7 +2644,9 @@ export const ReviewActionSchema = z.object({
   where: z.enum(ACTION_PAGE_IDS).optional(),
   kind: z.enum(ACTION_KINDS),
   evidence: z.array(InsightEvidenceSchema).max(6).default([]),
-  /** The month whose review first asked it, and the latest that asked it again. */
+  /** The months whose reviews asked it, oldest first; a rerun of a month takes its month back out. */
+  months: z.array(z.string().regex(/^\d{4}-\d{2}$/)).min(1),
+  /** The first and the latest of them. */
   firstMonth: z.string().regex(/^\d{4}-\d{2}$/),
   lastMonth: z.string().regex(/^\d{4}-\d{2}$/),
   /** A later review found it no longer applies. */

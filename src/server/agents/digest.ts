@@ -8,7 +8,8 @@ import { nameKey } from '../../shared/categorise';
 import { cleanPayee } from '../../shared/merchants';
 import { toMinor, fromMinor } from '../../shared/money';
 import { addDays, addMonths, eachMonth, endOfMonth, startOfMonth, today, type ISODate } from '../../shared/dates';
-import { ACTIVE_STATES, actionState } from '../../shared/actions';
+import { actionState } from '../../shared/actions';
+import { actionsFor } from '../actions';
 import { ageOn, taxYear, taxYearOf } from '../../shared/uk';
 import type { Analytics } from '../analytics';
 import { agreementsView } from '../analytics/agreements';
@@ -231,6 +232,7 @@ export function buildMonthDigest(store: Store, analytics: Analytics, opts: Month
         // Its parts in full (its body is cut at 4,000 characters); a review older than parts, its body.
         sections: previous.sections?.length ? previous.sections.map((x) => ({ heading: x.heading, body: x.body })) : null,
         body: previous.sections?.length ? null : previous.body,
+        caveats: previous.caveats ?? [],
         watch: previous.watch ?? [],
         followUp: previous.followUp ?? [],
         status: previous.status,
@@ -364,7 +366,7 @@ function todayDigest(store: Store, analytics: Analytics, now: ISODate, since: IS
     owedPay: owedPayDigest(store, analytics),
     goals: goalsDigest(store, analytics),
     // What the Overview's alerts already say (computed): the review never asks the same again.
-    alertsShown: summary.alerts.map((a) => ({ id: a.id, level: a.level, title: a.title })),
+    alertsShown: summary.alerts.map((a) => ({ id: a.id, level: a.level, title: a.title, detail: a.detail ?? null })),
     selfAssessment: priorSelfAssessment(analytics, now),
     taxCodesSince: store.hmrc.flatMap((r) => (r.type === 'tax-code' && r.date > since ? [{ id: r.id, employmentId: r.employmentId ?? null, employer: r.employer ?? null, date: r.date, code: r.code, cumulative: r.cumulative, taxYear: r.taxYear }] : [])),
   };
@@ -389,18 +391,15 @@ function priorSelfAssessment(analytics: Analytics, now: ISODate) {
 }
 
 /**
- * What earlier reviews asked of you (actions.json): those still open from months before this one, to
- * carry under the same key or drop with a reason, and those you decided, never to ask again.
+ * What earlier reviews asked of you (actions.json): those still open before this month's review (an
+ * earlier run of it taken back), to ask again under the same key or drop with a reason, and every one
+ * you decided, never to ask again.
  */
 function actionsDigest(store: Store, month: string, now: ISODate) {
-  const yearAgo = addDays(now, -365);
+  const { open, decided } = actionsFor(store.actions, month, now);
   return {
-    open: store.actions
-      .filter((a) => a.firstMonth < month && ACTIVE_STATES.has(actionState(a, now)))
-      .map((a) => ({ key: a.key, what: a.what, why: a.why, by: a.by ?? null, where: a.where ?? null, kind: a.kind, firstMonth: a.firstMonth, lastMonth: a.lastMonth, state: actionState(a, now) })),
-    decided: store.actions
-      .filter((a) => a.decision && a.decision.at.slice(0, 10) >= yearAgo)
-      .map((a) => ({ key: a.key, what: a.what, status: a.decision!.status, note: a.decision!.note ?? null, on: a.decision!.at.slice(0, 10) })),
+    open: open.map((a) => ({ key: a.key, what: a.what, why: a.why, by: a.by ?? null, where: a.where ?? null, kind: a.kind, firstMonth: a.firstMonth, lastMonth: a.lastMonth, state: actionState(a, now) })),
+    decided: decided.map((a) => ({ key: a.key, what: a.what, status: a.decision!.status, note: a.decision!.note ?? null, on: a.decision!.at.slice(0, 10) })),
   };
 }
 

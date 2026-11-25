@@ -6,7 +6,8 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { actionsView, applyReviewActions, decideAction, type ActionInput } from '../src/server/actions';
+import { actionsFor, actionsView, applyReviewActions, decideAction, laterReviewWrote, type ActionInput } from '../src/server/actions';
+import { diffById } from '../src/server/auditdiff';
 import { Store } from '../src/server/store';
 import { requiredScope } from '../src/server/tokens';
 import { actionState } from '../src/shared/actions';
@@ -30,9 +31,11 @@ describe('a review’s actions', () => {
     await applyReviewActions(store, '2026-08', { actions: [act('payee-example-gym-unused'), act('acct-saver-idle-cash')], drops: [] }, provenance);
     await decideAction(store, 'acct-saver-idle-cash', 'not-relevant', 'Kept for a deposit');
     const r = await applyReviewActions(store, '2026-09', { actions: [act('payee-example-gym-unused', { what: 'Cancel the gym', by: '2026-10-31' }), act('acct-saver-idle-cash')], drops: [] }, provenance);
-    expect(r.written.sort()).toEqual(['acct-saver-idle-cash', 'payee-example-gym-unused']);
+    // The one you decided is yours: a review asking it again changes nothing.
+    expect(r.written).toEqual(['payee-example-gym-unused']);
+    expect(store.actions.find((a) => a.key === 'acct-saver-idle-cash')).toMatchObject({ what: 'Do acct-saver-idle-cash', months: ['2026-08'] });
     const gym = store.actions.find((a) => a.key === 'payee-example-gym-unused')!;
-    expect(gym).toMatchObject({ firstMonth: '2026-08', lastMonth: '2026-09', what: 'Cancel the gym', by: '2026-10-31' });
+    expect(gym).toMatchObject({ months: ['2026-08', '2026-09'], firstMonth: '2026-08', lastMonth: '2026-09', what: 'Cancel the gym', by: '2026-10-31' });
     expect(store.actions.find((a) => a.key === 'acct-saver-idle-cash')!.decision).toMatchObject({ status: 'not-relevant', note: 'Kept for a deposit' });
     await applyReviewActions(store, '2026-10', { actions: [], drops: [{ key: 'payee-example-gym-unused', reason: 'No gym payment since September' }] }, provenance);
     expect(store.actions.find((a) => a.key === 'payee-example-gym-unused')!.closed).toEqual({ month: '2026-10', reason: 'No gym payment since September' });
@@ -46,6 +49,35 @@ describe('a review’s actions', () => {
     const r = await applyReviewActions(store, '2026-09', { actions: [act('plan-carried')], drops: [] }, provenance);
     expect(r.removed).toEqual(['plan-first-run-only']);
     expect(store.actions.map((a) => a.key).sort()).toEqual(['plan-carried', 'plan-decided']);
+  });
+
+  it('a rerun of a month takes back what its earlier run did: the month it added, a close it made', async () => {
+    await applyReviewActions(store, '2026-08', { actions: [act('plan-carried'), act('plan-dropped')], drops: [] }, provenance);
+    await applyReviewActions(store, '2026-09', { actions: [act('plan-carried', { what: 'Said in the first run' })], drops: [{ key: 'plan-dropped', reason: 'Done already' }] }, provenance);
+    expect(store.actions.find((a) => a.key === 'plan-dropped')!.closed).toMatchObject({ month: '2026-09' });
+    // Before September's rerun, both are open again, as August left them.
+    const before = actionsFor(store.actions, '2026-09', '2026-10-01');
+    expect(before.open.map((a) => [a.key, a.lastMonth]).sort()).toEqual([
+      ['plan-carried', '2026-08'],
+      ['plan-dropped', '2026-08'],
+    ]);
+    // The rerun drops the one the first run carried, and leaves out the other: open as August left it.
+    await applyReviewActions(store, '2026-09', { actions: [], drops: [{ key: 'plan-carried', reason: 'No longer applies' }] }, provenance);
+    expect(store.actions.find((a) => a.key === 'plan-carried')).toMatchObject({ months: ['2026-08'], closed: { month: '2026-09' } });
+    expect(store.actions.find((a) => a.key === 'plan-dropped')!.closed).toBeUndefined();
+  });
+
+  it('a month before one whose review wrote actions writes none', async () => {
+    await applyReviewActions(store, '2026-09', { actions: [act('plan-a')], drops: [] }, provenance);
+    expect(laterReviewWrote(store.actions, '2026-08')).toBe(true);
+    const r = await applyReviewActions(store, '2026-08', { actions: [act('plan-b')], drops: [{ key: 'plan-a', reason: 'x' }] }, provenance);
+    expect(r).toEqual({ written: [], closed: [], removed: [] });
+    expect(store.actions.map((a) => a.key)).toEqual(['plan-a']);
+  });
+
+  it('records each change in the audit log by key', () => {
+    const one = { key: 'plan-a', what: 'A' };
+    expect(diffById([one, { key: 'plan-b', what: 'B' }], [{ ...one, what: 'A again' }, { key: 'plan-b', what: 'B' }]).items).toMatchObject([{ id: 'plan-a', op: 'changed' }]);
   });
 
   it('a decision can be undone, and a closed action asked again is open again', async () => {
@@ -80,7 +112,7 @@ describe('a review’s actions', () => {
   });
 
   it('keys follow the grammar', () => {
-    const base = { what: 'x', why: 'y', kind: 'money', firstMonth: '2026-09', lastMonth: '2026-09', provenance, createdAt: '2026-09-01T00:00:00+00:00', updatedAt: '2026-09-01T00:00:00+00:00' };
+    const base = { what: 'x', why: 'y', kind: 'money', months: ['2026-09'], firstMonth: '2026-09', lastMonth: '2026-09', provenance, createdAt: '2026-09-01T00:00:00+00:00', updatedAt: '2026-09-01T00:00:00+00:00' };
     expect(ReviewActionSchema.safeParse({ ...base, key: 'acct-chase-saver-idle-cash' }).success).toBe(true);
     expect(ReviewActionSchema.safeParse({ ...base, key: 'register-self-assessment' }).success).toBe(false);
     expect(ReviewActionSchema.safeParse({ ...base, key: 'plan-Bad_Key' }).success).toBe(false);

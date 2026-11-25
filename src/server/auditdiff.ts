@@ -48,12 +48,14 @@ export function recordLabel(r: unknown): string | undefined {
   return label ? (label.length > MAX_TEXT ? `${label.slice(0, MAX_TEXT)}…` : label) : undefined;
 }
 
-type WithId = { id: string };
+type WithId = { id?: string; key?: string };
+/** A record's id, or its `key` for records keyed so (actions.json). */
+const recordId = (r: WithId): string => r.id ?? r.key ?? '';
 
-/** Lists before and after, matched by id. */
+/** Lists before and after, matched by id (or `key`, for records keyed so: actions.json). */
 export function diffById(before: readonly unknown[], after: readonly unknown[]): ChangeDiff {
-  const was = new Map((before as WithId[]).map((r) => [r.id, r]));
-  const now = new Map((after as WithId[]).map((r) => [r.id, r]));
+  const was = new Map((before as WithId[]).map((r) => [recordId(r), r]));
+  const now = new Map((after as WithId[]).map((r) => [recordId(r), r]));
   const diff: ChangeDiff = {};
   const items: NonNullable<ChangeDiff['items']> = [];
   let added = 0;
@@ -86,7 +88,7 @@ export function diffById(before: readonly unknown[], after: readonly unknown[]):
 /** Records added (or removed) outright. */
 export function listed(op: 'added' | 'removed', records: readonly unknown[]): ChangeDiff {
   if (!records.length) return {};
-  return { [op]: records.length, items: (records as WithId[]).slice(0, MAX_ITEMS).map((r) => ({ id: r.id, op, ...label(r) })) };
+  return { [op]: records.length, items: (records as WithId[]).slice(0, MAX_ITEMS).map((r) => ({ id: recordId(r), op, ...label(r) })) };
 }
 
 /** Changes to records one at a time (before, after), as they are made. */
@@ -98,12 +100,12 @@ export class DiffCollector {
     const fields = diffFields(before, after);
     if (!Object.keys(fields).length) return;
     this.diff.changed = (this.diff.changed ?? 0) + 1;
-    if (this.items.length < MAX_ITEMS) this.items.push({ id: after.id, op: 'changed', ...label(after), fields });
+    if (this.items.length < MAX_ITEMS) this.items.push({ id: recordId(after), op: 'changed', ...label(after), fields });
   }
 
   op(op: 'added' | 'removed', r: WithId): void {
     this.diff[op] = (this.diff[op] ?? 0) + 1;
-    if (this.items.length < MAX_ITEMS) this.items.push({ id: r.id, op, ...label(r) });
+    if (this.items.length < MAX_ITEMS) this.items.push({ id: recordId(r), op, ...label(r) });
   }
 
   result(): ChangeDiff {
