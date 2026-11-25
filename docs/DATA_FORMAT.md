@@ -21,7 +21,7 @@ point at them with `"$schema"` so editors validate as you type.
 ```
 data/
   meta.json            format + version + base currency
-  profile.json         you: date of birth, region, salary, retirement age (the tax band is computed), and `employers`: how many months after the work a payroll with no job yet pays a timesheet (`[{name, payLagMonths}]`, optional; a job keeps its own)
+  profile.json         you: date of birth, region, salary, retirement age (the tax band is computed), and `employers`: how many months after the work a payroll with no job yet pays a timesheet (`[{name, payLagMonths}]`, optional; a job keeps its own); and `selfAssessment` (optional): `{sendsReturns?, years?: {"2025/26": {status: not-needed | told-hmrc | registered | filed | paid, updatedAt, note?}}}`, what you told the app on Tax → Self Assessment prep (FORMULAS.md §11, "Self Assessment alerts")
   settings.json        models per task (`models.tasks`: the engine, model, thinking or effort, and Claude fallback for each task in src/shared/tasks.ts), Ask (`ask.maxToolCalls`: tool calls for one question, 8 by default; optional), extraction (reading receipts or stored documents again, both off by default; reading everything), agents (off by default; with the background budget, and `labelImports`: names for imports, off by default), git behaviour, stale threshold, FX rates
   institutions.json    { institutions: [...] }   banks, platforms, providers (+ FSCS group)
   accounts.json        { accounts: [...] }

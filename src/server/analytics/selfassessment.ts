@@ -2,11 +2,11 @@
 // shows where each one came from, and flags gaps. It is an aid for filling the return yourself, not
 // tax advice; every figure must be checked against your own records before you submit.
 
-import type { MissingDaysView, SaEmployment, SaItem, SaPaymentLink, SaSection, SaSource, SelfAssessmentResponse } from '../../shared/api';
-import { diffDays, formatDate, formatSpan, today } from '../../shared/dates';
+import type { Alert, MissingDaysView, SaEmployment, SaItem, SaPaymentLink, SaSection, SaSource, SelfAssessmentResponse } from '../../shared/api';
+import { diffDays, formatDate, formatSpan, today, type ISODate } from '../../shared/dates';
 import { formatMoney, fromMinor, toMinor } from '../../shared/money';
-import type { Figure, FigureKind, HmrcRecord } from '../../shared/schema';
-import { parseTaxYear, saDeadlines, taxYearOf, taxYearParams, untaxedIncomeNoticeBy, type TaxYear } from '../../shared/uk';
+import type { Figure, FigureKind, HmrcRecord, SaStatus } from '../../shared/schema';
+import { parseTaxYear, saDeadlines, taxYearOf, taxYearParams, untaxedIncomeNoticeBy, type SaDeadline, type TaxYear } from '../../shared/uk';
 import type { Store } from '../store';
 import { allowances, giftAid, pensionTotals, reliefAtSource } from './allowances';
 import type { BalanceEngine } from './balances';
@@ -270,7 +270,7 @@ export function selfAssessment(store: Store, label?: string, engine?: BalanceEng
       ],
       sources: side.slice(0, 50).map((t) => ({ type: 'transaction' as const, id: t.id, date: t.date, label: t.payee ?? t.description, amount: t.amount })),
     });
-    if (sideTotal > params.tradingAllowance) mayNeedToFile.push({ reason: `Self-employment income over £${params.tradingAllowance.toLocaleString('en-GB')}`, detail: `${formatMoney(sideTotal)} of side income this tax year. Sole traders earning more than this must send a return.` });
+    if (sideTotal > params.tradingAllowance) mayNeedToFile.push({ reason: `Self-employment income over £${params.tradingAllowance.toLocaleString('en-GB')}`, detail: `${formatMoney(sideTotal)} of side income this tax year. Sole traders earning more than this must send a return.`, requiresNotice: true });
   }
   const giaSales = store.accounts
     .filter((a) => a.type === 'gia' || a.type === 'crypto')
@@ -296,6 +296,7 @@ export function selfAssessment(store: Store, label?: string, engine?: BalanceEng
     mayNeedToFile.push({
       reason: 'Interest above your Personal Savings Allowance',
       detail: 'HMRC usually collects the tax through your tax code or sends a tax calculation (simple assessment). You can also declare it on a return.',
+      requiresNotice: false,
     });
   }
   if (allow.dividends.amount > allow.dividends.allowance) {
@@ -304,17 +305,18 @@ export function selfAssessment(store: Store, label?: string, engine?: BalanceEng
     const threshold = formatMoney(params.dividendsReturnThreshold, { decimals: 0 });
     mayNeedToFile.push(
       allow.dividends.amount > params.dividendsReturnThreshold
-        ? { reason: `Dividends over ${threshold}`, detail: `${formatMoney(allow.dividends.amount)} of dividends this tax year: above ${threshold} you must send a Self Assessment return. If you do not usually send one, register by ${noticeBy}.` }
+        ? { reason: `Dividends over ${threshold}`, detail: `${formatMoney(allow.dividends.amount)} of dividends this tax year: above ${threshold} you must send a Self Assessment return. If you do not usually send one, register by ${noticeBy}.`, requiresNotice: true }
         : {
             reason: 'Dividends over the dividend allowance',
             detail: `${formatMoney(allow.dividends.amount)} of dividends, over the ${formatMoney(allow.dividends.allowance, { decimals: 0 })} allowance. If you send a return, they go on it. If not, HMRC must hear of them by ${noticeBy}: ask it to collect the tax through your tax code, or call its helpline.`,
+            requiresNotice: true,
           },
     );
   }
   if (rasPersonalGross > 0 && (band === 'higher' || band === 'additional')) {
-    mayNeedToFile.push({ reason: 'Higher-rate relief on pension contributions', detail: 'Claim the extra relief on relief-at-source contributions via your return (or by contacting HMRC).' });
+    mayNeedToFile.push({ reason: 'Higher-rate relief on pension contributions', detail: 'Claim the extra relief on relief-at-source contributions via your return (or by contacting HMRC).', requiresNotice: false });
   }
-  if (childBenefit.length) mayNeedToFile.push({ reason: 'Child Benefit received', detail: `You may owe the High Income Child Benefit Charge if your or your partner's income is over £${params.hicbc.threshold.toLocaleString('en-GB')}.` });
+  if (childBenefit.length) mayNeedToFile.push({ reason: 'Child Benefit received', detail: `You may owe the High Income Child Benefit Charge if your or your partner's income is over £${params.hicbc.threshold.toLocaleString('en-GB')}.`, requiresNotice: false });
   checklist.push({
     id: 'band',
     done: allow.taxBand.basis === 'documents',
@@ -387,6 +389,7 @@ export function selfAssessment(store: Store, label?: string, engine?: BalanceEng
     .at(-1);
 
   const now = today();
+  const owner = ownerStatusOf(store, ty.label);
   return {
     taxYear: {
       label: ty.label,
@@ -398,10 +401,88 @@ export function selfAssessment(store: Store, label?: string, engine?: BalanceEng
     disclaimer: SA_DISCLAIMER,
     sections,
     employments,
-    deadlines: saDeadlines(ty).map((d) => ({ ...d, passed: d.date < now })),
+    deadlines: saDeadlines(ty).map((d) => ({ ...d, passed: d.date < now, done: deadlineDone(d.kind, owner) })),
+    ownerStatus: owner,
     ...(settlement ? { settlement } : {}),
     ...(niYear ? { ni: { status: niYear.status, ...(niYear.voluntaryCost !== undefined ? { voluntaryCost: niYear.voluntaryCost } : {}), ...(niYear.payBy ? { payBy: niYear.payBy } : {}), ...(niYear.text ? { text: niYear.text } : {}), asOf: niYear.asOf } } : {}),
     checklist,
     mayNeedToFile,
   };
+}
+
+// ─── What you told the app, and the alerts it drives (FORMULAS.md §11, "Self Assessment alerts") ──
+
+type OwnerStatus = SelfAssessmentResponse['ownerStatus'];
+
+/** What you told the app about a tax year's Self Assessment (profile.selfAssessment). */
+export function ownerStatusOf(store: Store, label: string): OwnerStatus {
+  const sa = store.profile.selfAssessment;
+  const year = sa?.years?.[label];
+  return { sendsReturns: sa?.sendsReturns === true, ...(year ? { status: year.status, updatedAt: year.updatedAt, ...(year.note ? { note: year.note } : {}) } : {}) };
+}
+
+/** Statuses that leave nothing more to do for the year. */
+const SETTLED: ReadonlySet<SaStatus> = new Set(['not-needed', 'told-hmrc', 'paid']);
+
+/**
+ * Whether what you told the app means a deadline is done: telling HMRC is done once you send returns
+ * every year or set any status; sending the return once it is sent (or not needed); paying once paid.
+ */
+export function deadlineDone(kind: SaDeadline['kind'], owner: OwnerStatus): boolean {
+  const s = owner.status;
+  if (s && SETTLED.has(s)) return true;
+  if (kind === 'register') return owner.sendsReturns || s !== undefined;
+  if (kind === 'paper' || kind === 'online-through-code' || kind === 'online') return s === 'filed';
+  return false;
+}
+
+/** An alert shows from this many days before its deadline. */
+const ALERT_LEAD_DAYS = 60;
+/** …and is a warning from this many days before it, and after it. */
+const ALERT_WARN_DAYS = 14;
+
+/**
+ * The Overview's alerts for a tax year's Self Assessment, from its computed position and what you told
+ * the app: tell HMRC (or register) by the notice date when something in your data needs it; else, when
+ * you send returns, send the return and pay by 31 January. One alert at most; none once done.
+ */
+export function selfAssessmentAlerts(sa: SelfAssessmentResponse, now: ISODate): Alert[] {
+  const owner = sa.ownerStatus;
+  if (owner.status && SETTLED.has(owner.status)) return [];
+  const label = sa.taxYear.label;
+  const slug = label.replace('/', '-');
+  const deadline = (kind: SaDeadline['kind']) => sa.deadlines.find((d) => d.kind === kind);
+  const action = { label: 'Self Assessment', href: '/tax/self-assessment' };
+  const check = 'Check the figures yourself; GOV.UK is the authority. Once it is done, say so on the Self Assessment page.';
+  const level = (days: number): Alert['level'] => (days <= ALERT_WARN_DAYS ? 'warning' : 'info');
+
+  const register = deadline('register');
+  const needs = sa.mayNeedToFile.filter((m) => m.requiresNotice);
+  if (register && !register.done && needs.length) {
+    const days = diffDays(now, register.date);
+    if (days > ALERT_LEAD_DAYS) return [];
+    return [
+      {
+        id: `sa-register-${slug}`,
+        level: level(days),
+        title: days < 0 ? `${label} income HMRC needed to hear of by ${formatDate(register.date)}` : `Tell HMRC about your ${label} income by ${formatDate(register.date)}`,
+        detail: `${needs.map((m) => m.detail).join(' ')} ${check}`,
+        action,
+      },
+    ];
+  }
+  const sending = owner.sendsReturns || owner.status === 'registered' || owner.status === 'filed';
+  const next = owner.status === 'filed' ? deadline('pay') : deadline('online');
+  if (!sending || !next || next.done) return [];
+  const days = diffDays(now, next.date);
+  if (days > ALERT_LEAD_DAYS) return [];
+  return [
+    {
+      id: `sa-${owner.status === 'filed' ? 'pay' : 'file'}-${slug}`,
+      level: level(days),
+      title: owner.status === 'filed' ? `Pay your ${label} Self Assessment tax by ${formatDate(next.date)}` : `Send your ${label} return and pay by ${formatDate(next.date)}`,
+      detail: check,
+      action,
+    },
+  ];
 }

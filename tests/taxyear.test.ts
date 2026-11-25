@@ -8,10 +8,11 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BalanceEngine } from '../src/server/analytics/balances';
 import { investments } from '../src/server/analytics/investments';
-import { selfAssessment } from '../src/server/analytics/selfassessment';
+import { selfAssessment, selfAssessmentAlerts } from '../src/server/analytics/selfassessment';
 import { figureId, hmrcId, transactionId } from '../src/server/ids';
 import { Store } from '../src/server/store';
-import type { Employment, ExtractedHmrc, Figure, HmrcRecord } from '../src/shared/schema';
+import { requiredScope } from '../src/server/tokens';
+import type { Employment, ExtractedHmrc, Figure, HmrcRecord, Profile } from '../src/shared/schema';
 import { saDeadlines, taxYear } from '../src/shared/uk';
 
 const stamp = '2026-01-01T00:00:00+00:00';
@@ -85,5 +86,68 @@ describe('the tax year in full', () => {
       ['2025/26', 'full', null],
       ['2023/24', 'not-full', 612],
     ]);
+  });
+});
+
+describe('Self Assessment: what you told the app, and the alerts it drives', () => {
+  let dir: string;
+  let store: Store;
+  const acct = { id: 'bank', name: 'Example Bank', type: 'current' as const, currency: 'GBP', status: 'open' as const, aliases: [], includeInNetWorth: true, createdAt: stamp, updatedAt: stamp };
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), 'finance-sa-status-'));
+    store = await Store.open(path.join(dir, 'data'));
+    await store.setAccounts([acct]);
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
+  });
+  const dividend = (amount: number) => store.addTransactions([{ id: transactionId('bank', '2025-09-12', amount, 'EXAMPLE TRADING LTD DIVIDEND', 0), accountId: 'bank', date: '2025-09-12', amount, currency: 'GBP', description: 'EXAMPLE TRADING LTD DIVIDEND', category: 'dividends', categorisedBy: 'user', source: {} }], 't');
+  const tell = (selfAssessment: NonNullable<Profile['selfAssessment']>) => store.setProfile({ ...store.profile, selfAssessment });
+  const alertsOn = (date: string) => selfAssessmentAlerts(selfAssessment(store, '2025/26'), date);
+
+  it('dividends over the allowance need HMRC telling by 5 October: from 60 days before, a warning from 14, and after it until you say', async () => {
+    await dividend(700);
+    const sa = selfAssessment(store, '2025/26');
+    expect(sa.mayNeedToFile.find((m) => m.reason.startsWith('Dividends'))).toMatchObject({ requiresNotice: true });
+    expect(sa.ownerStatus).toEqual({ sendsReturns: false });
+    expect(alertsOn('2026-07-01')).toEqual([]);
+    expect(alertsOn('2026-09-01')).toMatchObject([{ id: 'sa-register-2025-26', level: 'info', action: { href: '/tax/self-assessment' } }]);
+    expect(alertsOn('2026-09-25')).toMatchObject([{ level: 'warning' }]);
+    const late = alertsOn('2026-11-25');
+    expect(late).toMatchObject([{ id: 'sa-register-2025-26', level: 'warning' }]);
+    expect(late[0]!.title).toContain('needed to hear of');
+    expect(late[0]!.detail).toContain('GOV.UK is the authority');
+  });
+
+  it('goes quiet once you say HMRC was told, nothing was needed, or the tax is paid', async () => {
+    await dividend(700);
+    for (const status of ['told-hmrc', 'not-needed', 'paid'] as const) {
+      await tell({ years: { '2025/26': { status, updatedAt: stamp } } });
+      expect(alertsOn('2026-09-25')).toEqual([]);
+      expect(selfAssessment(store, '2025/26').deadlines.every((d) => d.done)).toBe(true);
+    }
+  });
+
+  it('when you send returns: send it and pay by 31 January; once sent, pay', async () => {
+    await dividend(700);
+    await tell({ sendsReturns: true });
+    expect(selfAssessment(store, '2025/26').deadlines.find((d) => d.kind === 'register')!.done).toBe(true);
+    expect(alertsOn('2026-09-25')).toEqual([]);
+    expect(alertsOn('2027-01-10')).toMatchObject([{ id: 'sa-file-2025-26', level: 'info' }]);
+    expect(alertsOn('2027-01-20')).toMatchObject([{ id: 'sa-file-2025-26', level: 'warning' }]);
+    await tell({ sendsReturns: true, years: { '2025/26': { status: 'filed', updatedAt: stamp } } });
+    expect(alertsOn('2027-01-20')).toMatchObject([{ id: 'sa-pay-2025-26' }]);
+  });
+
+  it('a hint HMRC usually sorts out itself (interest over the savings allowance) raises no alert', async () => {
+    await store.addTransactions([{ id: transactionId('bank', '2025-12-31', 3000, 'INTEREST', 0), accountId: 'bank', date: '2025-12-31', amount: 3000, currency: 'GBP', description: 'INTEREST', category: 'interest', categorisedBy: 'user', source: {} }], 't');
+    const sa = selfAssessment(store, '2025/26');
+    expect(sa.mayNeedToFile.length).toBeGreaterThan(0);
+    expect(sa.mayNeedToFile.every((m) => !m.requiresNotice)).toBe(true);
+    expect(alertsOn('2026-09-25')).toEqual([]);
+  });
+
+  it('is set by your session alone: no agent token may', () => {
+    expect(requiredScope('PUT', '/api/self-assessment/status')).toBeNull();
   });
 });

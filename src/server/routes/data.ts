@@ -28,6 +28,7 @@ import {
   MoneySchema,
   PensionDetailsSchema,
   ProfileSchema,
+  SA_STATUSES,
   RuleSchema,
   SettingsSchema,
   SlugSchema,
@@ -1156,6 +1157,22 @@ export function dataRoutes(ctx: AppContext): Hono {
   app.put('/profile', async (c) => {
     await store.setProfile(await readJson(c, ProfileSchema));
     return c.json(store.profile);
+  });
+
+  // Where a tax year's Self Assessment stands, and whether you send a return every year: set on Tax →
+  // Self Assessment prep, it quiets that year's alerts (FORMULAS.md §11). Your session only: no token may.
+  app.put('/self-assessment/status', async (c) => {
+    const body = await readJson(
+      c,
+      z.object({ taxYear: z.string().regex(/^\d{4}\/\d{2}$/), status: z.enum(SA_STATUSES).nullable().optional(), note: z.string().max(300).optional(), sendsReturns: z.boolean().optional() }),
+    );
+    const current = store.profile.selfAssessment ?? {};
+    const years = { ...(current.years ?? {}) };
+    if (body.status === null) delete years[body.taxYear];
+    else if (body.status) years[body.taxYear] = { status: body.status, updatedAt: nowISO(), ...(body.note?.trim() ? { note: body.note.trim() } : {}) };
+    const next = { ...current, ...(body.sendsReturns !== undefined ? { sendsReturns: body.sendsReturns } : {}), years };
+    await store.setProfile({ ...store.profile, selfAssessment: next });
+    return c.json(store.profile.selfAssessment ?? {});
   });
 
   app.get('/settings', (c) => c.json(store.settings));

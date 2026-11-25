@@ -3,11 +3,12 @@ import { Fragment, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import type { AllowanceLine, AllowancesResponse, ConfirmedNilView, MissingDaysView, PayResponse, SaItem, SelfAssessmentResponse, TaxBandEstimate } from '../../shared/api';
 import { formatDate, formatSpan } from '../../shared/dates';
+import type { SaStatus } from '../../shared/schema';
 import { Meter } from '../components/charts/bars';
 import { InsightsPanel } from '../components/Intel';
 import { PayView } from '../components/Pay';
-import { Badge, Button, Callout, Card, KeyValue, Loading, Money, PageHeader, Select, StatusBadge, Tabs, tableClasses } from '../components/ui';
-import { qs, useApi } from '../lib/api';
+import { Badge, Button, Callout, Card, Checkbox, Input, KeyValue, Loading, Money, PageHeader, Select, StatusBadge, Tabs, tableClasses, useToast } from '../components/ui';
+import { api, qs, useApi, useApiMutation } from '../lib/api';
 import { useAppData } from '../lib/data';
 import { bandLabel, cn, money } from '../lib/format';
 
@@ -300,11 +301,54 @@ function SaDeadlines({ sa }: { sa: SelfAssessmentResponse }) {
             <span className="w-28 shrink-0 tabular">{formatDate(d.date)}</span>
             <span>
               {d.what}
-              {d.passed && ' (passed)'}
+              {d.done ? ' (done, as you told the app)' : d.passed && ' (passed)'}
             </span>
           </li>
         ))}
       </ul>
+    </Card>
+  );
+}
+
+const SA_STATUS_LABELS: Record<SaStatus, string> = {
+  'not-needed': 'Nothing to do for this year',
+  'told-hmrc': 'HMRC told; the tax comes through my tax code',
+  registered: 'Registered; the return is still to send',
+  filed: 'Return sent; the tax is still to pay',
+  paid: 'Return sent and the tax paid',
+};
+
+/** Where this year's return stands, as you tell the app: it quiets the Overview's Self Assessment alerts. */
+function SaStatusCard({ sa }: { sa: SelfAssessmentResponse }) {
+  const toast = useToast();
+  const owner = sa.ownerStatus;
+  const [status, setStatus] = useState<SaStatus | ''>(owner.status ?? '');
+  const [note, setNote] = useState(owner.note ?? '');
+  const save = useApiMutation((v: { status?: SaStatus | null; note?: string; sendsReturns?: boolean }) => api('/self-assessment/status', { method: 'PUT', body: { taxYear: sa.taxYear.label, ...v } }), {
+    onSuccess: () => toast({ tone: 'good', text: 'Saved' }),
+  });
+  const changed = status !== (owner.status ?? '') || note.trim() !== (owner.note ?? '');
+  return (
+    <Card title={`Where your ${sa.taxYear.label} return stands`} description="What you tell the app here. The Overview reminds you of this year’s deadlines until they are done by it.">
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-end gap-2">
+          <Select value={status} onChange={(e) => setStatus(e.target.value as SaStatus | '')} aria-label={`Where your ${sa.taxYear.label} return stands`} className="w-80 max-w-full">
+            <option value="">Not said</option>
+            {(Object.keys(SA_STATUS_LABELS) as SaStatus[]).map((s) => (
+              <option key={s} value={s}>
+                {SA_STATUS_LABELS[s]}
+              </option>
+            ))}
+          </Select>
+          <Input value={note} onChange={(e) => setNote(e.target.value)} maxLength={300} placeholder="A note, if you like" aria-label="Note" className="w-64 max-w-full" />
+          <Button size="sm" variant="primary" disabled={!changed} loading={save.isPending} onClick={() => save.mutate({ status: status || null, note })}>
+            Save
+          </Button>
+        </div>
+        <Checkbox checked={owner.sendsReturns} onChange={(v) => save.mutate({ sendsReturns: v })} label="I send a Self Assessment return every year" />
+        {owner.updatedAt && <p className="text-[12px] text-ink-3">Last set {formatDate(owner.updatedAt.slice(0, 10))}.</p>}
+        {save.error && <p className="text-[12px] text-bad-ink">{save.error.message}</p>}
+      </div>
     </Card>
   );
 }
@@ -462,6 +506,7 @@ function SelfAssessment({ sa, taxYear }: { sa: SelfAssessmentResponse; taxYear: 
         </div>
       </div>
 
+      <SaStatusCard key={sa.taxYear.label} sa={sa} />
       <SaDeadlines sa={sa} />
       <Settlement sa={sa} />
       {sa.ni && (

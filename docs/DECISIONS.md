@@ -2692,3 +2692,17 @@ value grown from the account's first flow is never below nothing, as rolled-back
   reader to guess the bank from the look of the app (a guess, against "never from the look of the
   app"). The day a new account opened is not inferred: nothing on such a screen says it.
 
+## 2026-11-25: Self Assessment deadlines are computed alerts; a month's worth is split
+
+- **Owner:** the month in review must be easy to digest and act on before the next one runs.
+  Reading the reviews so far, the most important thing in them (a 5 October deadline to tell HMRC
+  about dividends) sat in the last section, collapsed, two months running.
+- **Done:** a deadline the app can work out is no longer left for Claude to notice. Tax → Self
+  Assessment prep records where each year's return stands and whether you send one every year
+  (`profile.selfAssessment`, additive); the Overview alerts you to tell HMRC, send the return and
+  pay until that says they are done (FORMULAS.md §11). A month's figures gain the worth split and
+  cash cover (§18), so a review explains a change in worth from computed parts rather than doing
+  the arithmetic itself, and a payment with someone you saved goes by the name you gave them.
+- **Considered:** a note in "About you" for the status (free text, a fragile switch for an alert);
+  dismissing alerts one by one (the next import would bring it back, and nothing would say why).
+

@@ -4,7 +4,7 @@ import { ACCESS_GROUP_LABELS, ACCESS_GROUPS, WRAPPER_GROUP_LABELS, WRAPPER_GROUP
 import type { Alert, SummaryResponse } from '../../shared/api';
 import { addDays, addYears, formatDate, minDate, monthKey, today } from '../../shared/dates';
 import { formatMoney } from '../../shared/money';
-import { daysLeftInTaxYear, oldestOpenTaxYear, saCorrectBy, taxYearOf } from '../../shared/uk';
+import { daysLeftInTaxYear, oldestOpenTaxYear, saCorrectBy, taxYear, taxYearOf } from '../../shared/uk';
 import type { Store } from '../store';
 import { allowances, taxFigureAccounts } from './allowances';
 import { BalanceEngine } from './balances';
@@ -27,7 +27,7 @@ import { monthlyChecklist } from './monthly';
 import { MonthContext } from './month';
 import { projections, type ProjectionOptions } from './projections';
 import { detectRecurring } from './recurring';
-import { selfAssessment } from './selfassessment';
+import { selfAssessment, selfAssessmentAlerts } from './selfassessment';
 import { monthToDate as monthToDateSpending, spending } from './spending';
 
 /** A cache key part for a live reading: its account, moment and figures. */
@@ -298,6 +298,8 @@ export class Analytics {
         const al = this.allowances();
         if (al.isa.remaining > 0) alerts.push({ id: 'tye', level: 'info', title: `${daysLeft} days left in ${ty.label}`, detail: `${formatMoney(al.isa.remaining, { decimals: 0 })} of ISA allowance unused.`, action: { label: 'Tax year', href: '/tax' } });
       }
+      // Self Assessment for the two tax years before this one: tell HMRC, send the return, pay (FORMULAS.md §11).
+      for (const back of [1, 2]) alerts.push(...selfAssessmentAlerts(this.selfAssessment(taxYear(ty.startYear - back).label), now));
       const liveAccount = live ? this.store.account(live.accountId) : undefined;
       return {
         asOf: now,

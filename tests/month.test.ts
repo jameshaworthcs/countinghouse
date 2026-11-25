@@ -471,3 +471,109 @@ describe('GET /api/month/:month', () => {
     }
   });
 });
+
+describe('the month’s worth, split; cash cover; who a payment was with', () => {
+  it('left over, money from outside, the market and the rest add up to the change: here the rest is what the loan lent', async () => {
+    await months();
+    const m = new Analytics(store).month('2026-08');
+    const s = m.worth.split;
+    expect(s.saved).toBe(m.net.amount);
+    // The ISA rests on December's valuation: not the month's market.
+    expect(s).toMatchObject({ fromOutside: 0, market: 0, marketAccounts: [] });
+    expect(toMinor(s.saved) + toMinor(s.fromOutside) + toMinor(s.market) + toMinor(s.other)).toBe(toMinor(m.worth.change));
+    // The tuition (spent on the loan, which the estate leaves out) and the maintenance instalment.
+    expect(s.other).toBe(m.moneyIn.borrowed);
+  });
+
+  it('a value at market moves by what was paid in, money from outside, and the market', async () => {
+    await months();
+    await store.setAccounts([...store.accounts, acct('pension', 'sipp')]);
+    const value = (accountId: string, date: string, balance: number) => ({ id: balanceId(accountId, date, balance, 'statement'), accountId, date, balance, currency: 'GBP', kind: 'statement' as const, source: {}, createdAt: stamp });
+    await store.addBalances([value('isa', '2026-07-31', 10_000), value('isa', '2026-08-31', 10_700), value('pension', '2026-07-31', 5_000), value('pension', '2026-08-31', 5_350)], 'b');
+    await store.addTransactions(
+      [
+        tx('bank', '2026-08-05', -500, 'TO ISA', { category: 'investment-transfer', categorisedBy: 'transfer', transferGroup: 'tg_isa', counterpartyAccountId: 'isa' }),
+        tx('isa', '2026-08-05', 500, 'SUBSCRIPTION', { category: 'contribution', categorisedBy: 'transfer', transferGroup: 'tg_isa', counterpartyAccountId: 'bank' }),
+        tx('pension', '2026-08-28', 300, 'EMPLOYER CONTRIBUTION', { category: 'employer-contribution', categorisedBy: 'user' }),
+      ],
+      't',
+    );
+    const m = new Analytics(store).month('2026-08');
+    const s = m.worth.split;
+    expect(s.fromOutside).toBe(300);
+    // ISA: 700 up, 500 of it paid in. Pension: 350 up, 300 of it the employer's.
+    expect(s.market).toBe(250);
+    expect(s.marketAccounts.sort()).toEqual(['isa', 'pension']);
+    expect(toMinor(s.saved) + toMinor(s.fromOutside) + toMinor(s.market) + toMinor(s.other)).toBe(toMinor(m.worth.change));
+    expect(s.other).toBe(m.moneyIn.borrowed);
+  });
+
+  it('counts what your other accounts sent an account at market when it has no row of its own for it', async () => {
+    await months();
+    const value = (date: string, balance: number) => ({ id: balanceId('isa', date, balance, 'statement'), accountId: 'isa', date, balance, currency: 'GBP', kind: 'statement' as const, source: {}, createdAt: stamp });
+    await store.addBalances([value('2026-06-30', 9_000), value('2026-07-31', 10_000), value('2026-08-31', 10_700)], 'b');
+    await store.addTransactions(
+      [
+        // July's statement has the ISA's own row; August's subscription is only on the bank's side.
+        tx('bank', '2026-07-05', -800, 'TO ISA', { category: 'investment-transfer', categorisedBy: 'transfer', transferGroup: 'tg_jul', counterpartyAccountId: 'isa' }),
+        tx('isa', '2026-07-05', 800, 'SUBSCRIPTION', { category: 'contribution', categorisedBy: 'transfer', transferGroup: 'tg_jul', counterpartyAccountId: 'bank' }),
+        tx('bank', '2026-08-05', -500, 'TO ISA', { category: 'investment-transfer', categorisedBy: 'transfer', transferGroup: 'tg_aug', counterpartyAccountId: 'isa' }),
+      ],
+      't',
+    );
+    const a = new Analytics(store);
+    expect(a.month('2026-07').worth.split.market).toBe(200);
+    expect(a.month('2026-08').worth.split.market).toBe(200);
+  });
+
+  it('with only cash accounts and transfers between them, the change is all left over', async () => {
+    const categories = [undefined, 'groceries', 'salary', 'interest', 'refunds', 'gifts-received'];
+    await fc.assert(
+      fc.asyncProperty(
+        fc.array(fc.record({ day: fc.integer({ min: 1, max: 30 }), pence: fc.integer({ min: -90_000, max: 90_000 }).filter((p) => p !== 0), category: fc.constantFrom(...categories), account: fc.constantFrom('bank', 'saver') }), { maxLength: 30 }),
+        fc.array(fc.record({ day: fc.integer({ min: 1, max: 30 }), pence: fc.integer({ min: 1, max: 50_000 }) }), { maxLength: 5 }),
+        async (rows, transfers) => {
+          const local = await Store.open(path.join(dir, `w${seq++}`));
+          await local.setCategories(defaultCategories());
+          await local.setAccounts([acct('bank', 'current'), acct('saver', 'savings')]);
+          const day = (d: number) => `2026-06-${String(d).padStart(2, '0')}`;
+          await local.addTransactions(
+            [
+              tx('bank', '2026-05-01', 1000, 'OPENING', { category: 'salary', categorisedBy: 'user' }),
+              tx('saver', '2026-05-01', 1000, 'OPENING', { category: 'salary', categorisedBy: 'user' }),
+              ...rows.map((r) => tx(r.account, day(r.day), r.pence / 100, 'A SHOP', r.category ? { category: r.category, categorisedBy: 'user' } : {})),
+              ...transfers.flatMap((t, i) => [
+                tx('bank', day(t.day), -t.pence / 100, 'TO SAVER', { category: 'savings-transfer', categorisedBy: 'transfer', transferGroup: `tg_${i}`, counterpartyAccountId: 'saver' }),
+                tx('saver', day(t.day), t.pence / 100, 'FROM BANK', { category: 'savings-transfer', categorisedBy: 'transfer', transferGroup: `tg_${i}`, counterpartyAccountId: 'bank' }),
+              ]),
+            ],
+            't',
+          );
+          const m = new Analytics(local).month('2026-06');
+          expect(m.worth.split).toMatchObject({ fromOutside: 0, market: 0, other: 0 });
+          expect(toMinor(m.worth.split.saved)).toBe(toMinor(m.worth.change));
+        },
+      ),
+      { numRuns: 25 },
+    );
+  });
+
+  it('cash cover is the cash you could reach at the month’s end over typical spending, to one place', async () => {
+    await months();
+    const m = new Analytics(store).month('2026-08');
+    expect(m.runway.typicalSpending).toBe(1055.5);
+    expect(m.runway.months).toBe(Math.round((m.runway.accessibleCash / 1055.5) * 10) / 10);
+    expect(new Analytics(store).month('2026-01').runway).toMatchObject({ typicalSpending: null, months: null });
+  });
+
+  it('a payment with someone you saved goes by the name you gave them; anyone else by their name tidied', async () => {
+    await months();
+    await store.setPeople([{ id: 'sam', name: 'Samantha Taylor', names: ['SAM TAYLOR'], usually: {}, createdAt: stamp, updatedAt: stamp }]);
+    const digest = buildMonthDigest(store, new Analytics(store), { month: '2026-08', catchUp: true });
+    const { moneyIn, moneyBack } = digest.focus.transactions;
+    const people = [...moneyIn, ...moneyBack].map((t) => t.person).filter(Boolean);
+    expect(people).toContain('Samantha Taylor');
+    expect(people).toContain('Alex Reed');
+    expect(people).not.toContain('SAM TAYLOR');
+  });
+});

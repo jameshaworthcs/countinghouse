@@ -1111,6 +1111,13 @@ export type CsvProfile = z.infer<typeof CsvProfileSchema>;
 
 // ─── Profile & settings ──────────────────────────────────────────────────────────────────────────
 
+/**
+ * Where a tax year's Self Assessment stands, as you told the app: nothing to do; HMRC told and the tax
+ * collected through your tax code; registered, with a return to send; the return sent; sent and paid.
+ */
+export const SA_STATUSES = ['not-needed', 'told-hmrc', 'registered', 'filed', 'paid'] as const;
+export type SaStatus = (typeof SA_STATUSES)[number];
+
 export const ProfileSchema = z.object({
   name: z.string().optional(),
   /** Drives LISA age limits, cash-ISA cap exemption at 65 and pension access age. */
@@ -1130,6 +1137,22 @@ export const ProfileSchema = z.object({
   employers: z
     .array(z.object({ name: z.string().min(1).max(200), payLagMonths: z.number().int().min(0).max(3).optional() }))
     .max(50)
+    .optional(),
+  /**
+   * What you have told the app about Self Assessment (Tax → Self Assessment prep): whether you send a
+   * return every year, and where each tax year's stands. The Self Assessment alerts go quiet once a
+   * year's deadlines are done by it (FORMULAS.md §11, "Self Assessment alerts").
+   */
+  selfAssessment: z
+    .object({
+      sendsReturns: z.boolean().optional(),
+      years: z
+        .record(
+          z.string().regex(/^\d{4}\/\d{2}$/),
+          z.object({ status: z.enum(SA_STATUSES), updatedAt: TimestampSchema, note: z.string().max(300).optional() }),
+        )
+        .optional(),
+    })
     .optional(),
   // Returns, inflation and other modelling parameters are assumption records (assumptions.jsonl),
   // not profile fields. Format v1's `assumedRealReturn` was moved there by the v2 migration.

@@ -31,6 +31,7 @@ import type {
   Rule,
   Settings,
   Transaction,
+  SaStatus,
 } from './schema';
 import type { TaxBand } from './uk';
 
@@ -501,8 +502,13 @@ export interface SelfAssessmentResponse {
   sections: SaSection[];
   /** One SA102 page per job, from the one source that counts for each (FORMULAS §11). */
   employments: SaEmployment[];
-  /** The year's return deadlines (UK rules: `saDeadlines`), each with whether it has passed. */
-  deadlines: { date: string; kind: string; what: string; passed: boolean }[];
+  /**
+   * The year's return deadlines (UK rules: `saDeadlines`), each with whether it has passed and
+   * whether what you told the app (`ownerStatus`) means it is done.
+   */
+  deadlines: { date: string; kind: string; what: string; passed: boolean; done: boolean }[];
+  /** What you told the app about this year's Self Assessment (profile.selfAssessment). */
+  ownerStatus: { sendsReturns: boolean; status?: SaStatus; updatedAt?: string; note?: string };
   /** HMRC's working out of the year (its settlement record), with the bank payments that settled it. */
   settlement?: {
     outcome: 'underpaid' | 'overpaid' | 'settled';
@@ -517,7 +523,8 @@ export interface SelfAssessmentResponse {
   /** The year on your National Insurance record, as HMRC's page last showed it. */
   ni?: { status: 'full' | 'not-full' | 'not-available' | 'other'; voluntaryCost?: number; payBy?: string; text?: string; asOf: string };
   checklist: { id: string; done: boolean; label: string; detail?: string }[];
-  mayNeedToFile: { reason: string; detail: string }[];
+  /** Hints that you may need to file. `requiresNotice`: HMRC must be told by the year's notice date (dividends over the allowance, side income over the trading allowance), not a hint it usually sorts out itself. */
+  mayNeedToFile: { reason: string; detail: string; requiresNotice: boolean }[];
 }
 
 export interface InvestmentAccountSummary {
@@ -1617,6 +1624,34 @@ export interface MonthRegularChange {
 }
 
 /** A month's figures, worked out by fixed rules (docs/FORMULAS.md §18). */
+/**
+ * A month's change in worth, four ways that add up to it to the penny (FORMULAS.md §18, "Worth
+ * split"). `market` counts only values at market that are the month's (`marketAccounts`); one resting
+ * on a valuation from another time falls in `other`, with borrowing, money to or from accounts the app
+ * does not hold, and transfers whose other side is in another month.
+ */
+export interface MonthWorthSplit {
+  /** Income less spending: the month's left over. */
+  saved: number;
+  /** Employer pension payments, tax relief and government bonuses paid into your accounts. */
+  fromOutside: number;
+  /** What values at market moved by, less what was paid in or taken out. */
+  market: number;
+  /** What the other three do not explain. */
+  other: number;
+  /** A market value was estimated from published prices or is otherwise rough. */
+  marketEstimated: boolean;
+  marketAccounts: string[];
+}
+
+/** Cash you could reach at once at the month's end, against typical spending (FORMULAS.md §18, "Cash cover"). */
+export interface MonthRunway {
+  accessibleCash: number;
+  /** The median spending of the complete months among the 12 before; none without one. */
+  typicalSpending: number | null;
+  months: number | null;
+}
+
 export interface MonthSummary {
   month: string;
   from: string;
@@ -1642,7 +1677,11 @@ export interface MonthSummary {
     estimated: boolean;
     groups: { id: WrapperGroup; label: string; start: number; end: number }[];
     accounts: MonthAccountValue[];
+    /** The change split into left over, money from outside, market movement and the rest (§18). */
+    split: MonthWorthSplit;
   };
+  /** Months of typical spending the cash you could reach at the month's end would cover (§18). */
+  runway: MonthRunway;
   quality: {
     uncategorisedSpending: number;
     uncategorisedSpendingShare: number | null;

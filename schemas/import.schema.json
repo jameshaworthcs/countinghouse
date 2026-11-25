@@ -5304,6 +5304,9 @@
                     "sameBalance": {
                       "type": "boolean"
                     },
+                    "nearby": {
+                      "type": "boolean"
+                    },
                     "remove": {
                       "type": "boolean"
                     }

@@ -1019,6 +1019,24 @@ page: its pay, tax and student loan from the one source that counts for each (ab
 reference, and the days it started or ended when they fall in the year (yours, else HMRC's). It is
 the year's figure when that source is final. The totals above are the sum of these pages.
 
+**Self Assessment alerts** (`selfAssessmentAlerts`, the Overview's alerts). For each of the two
+tax years before this one, from the year's position and what you told the app on Tax → Self
+Assessment prep (`profile.selfAssessment`: whether you send a return every year, and the year's
+status: nothing to do, HMRC told with the tax through your tax code, registered, return sent, or
+sent and paid):
+
+- A deadline is **done** when nothing is left to do for the year (nothing to do, HMRC told, paid);
+  telling HMRC (the `register` deadline) also once you send returns every year or set any status;
+  sending the return once it is sent.
+- **Tell HMRC:** when a reason to file needs HMRC told by the year's notice date (`requiresNotice`:
+  dividends over the dividend allowance, side income over the trading allowance; not interest over
+  the savings allowance, higher-rate relief or Child Benefit, which HMRC usually sorts out or you
+  claim later) and that deadline is not done: an alert from 60 days before 5 October, a warning
+  from 14 days before, and after it until you say what happened.
+- Otherwise, **send the return and pay** (once sent: **pay**) by 31 January, when you send returns
+  or the year is registered or sent: from 60 days before, a warning from 14 days before.
+- One alert a year at most, linking to the Self Assessment page, which carries the disclaimer.
+
 **HMRC's working out of a year** (a `settlement` record, the latest for the year): the outcome,
 the amount and when it was worked out, what is outstanding, and each payment the page lists. A
 payment is matched to the money out of your bank that made it: the same amount to the penny, within
@@ -1453,6 +1471,28 @@ that published prices did not shape, resting on a valuation more than 31 days be
 end (`valuationDays`), worked back from a later one, or shared out between two by days, is marked
 `oldValuation`: its change is not the month's. One shaped by prices (`basis.prices`) is the month's,
 estimated.
+
+**Worth split** (`worth.split`): the change in worth, four ways that add up to it to the penny:
+
+- **Left over** (`saved`): income less spending (above).
+- **From outside** (`fromOutside`): employer pension payments, tax relief and government bonuses
+  (`employer-contribution`, `tax-relief`, `government-bonus`) paid into your accounts in the month.
+- **Market** (`market`): for each value at market that is the month's (a value at both ends, not
+  `oldValuation`): its change less its external flows in the month (§12: what was paid in or taken
+  out, in pounds at its rate) and less what came from outside. What your other accounts sent it, by
+  their rows naming it, counts too when it has no row of its own for that transfer (an account valued
+  from screenshots, or one whose statements stop short of the month).
+- **The rest** (`other`): the change less the three. It holds borrowing (a loan the estate leaves
+  out lent or paid for something), money to or from accounts the app doesn't hold, a transfer whose
+  other side falls in another month, and the change in a value resting on a valuation from another
+  time. With only cash accounts, and transfers between them, it is nothing.
+
+**Cash cover** (`runway`): the cash you could reach at once at the month's end (the estate's "now"
+access group, §9) over typical spending (the median of the complete months among the 12 before),
+to one decimal place; none without such a month.
+
+**Who a payment was with** (`personOf`, for the review): the name you saved the person by (§10),
+else the name the bank gives, out of capitals.
 
 **Quality:**
 

@@ -8,16 +8,17 @@
 // payments due in the 60 days after it, which their documents gave.
 
 import { ACCOUNT_TYPE_META, balanceModeOf, WRAPPER_GROUP_LABELS, WRAPPER_GROUPS, type WrapperGroup } from '../../shared/accounts';
-import type { MonthAccountValue, MonthCategory, MonthCompared, MonthLine, MonthPayment, MonthRegularChange, MonthSummary, MonthWhereItem, MonthWhereItWent } from '../../shared/api';
+import type { MonthAccountValue, MonthCategory, MonthCompared, MonthLine, MonthPayment, MonthRegularChange, MonthRunway, MonthSummary, MonthWhereItem, MonthWhereItWent, MonthWorthSplit } from '../../shared/api';
 import { CategoryIndex } from '../../shared/categories';
 import { isCashWithdrawal, nameKey } from '../../shared/categorise';
 import { addDays, addMonths, diffDays, endOfMonth, eachMonth, type ISODate } from '../../shared/dates';
 import { cleanPayee } from '../../shared/merchants';
 import { fromMinor, toMinor } from '../../shared/money';
+import { tidyName } from '../../shared/people';
 import type { Account, Transaction } from '../../shared/schema';
 import type { Store } from '../store';
 import { agreementsView } from './agreements';
-import type { BalanceEngine } from './balances';
+import { fxRate, type BalanceEngine } from './balances';
 import { categoryLines, classifyFlow, flows, type FlowTx } from './cashflow';
 import type { Coverage } from './coverage';
 import { estateOn } from './estate';
@@ -66,6 +67,17 @@ const LOAN_CHARGES = new Set(['interest-charges', 'bank-fees']);
 const MOVED_TO: Record<string, string> = { savings: 'savings', isa: 'ISAs', lisa: 'the Lifetime ISA', pensions: 'pensions', investments: 'investments', cards: 'credit cards', loans: 'loans', unknown: 'accounts the app doesn’t know' };
 
 /** Where money moved to another account of yours lands, by that account's type (undefined: another current account). */
+/** Money into your accounts from outside that is neither income nor your own: an employer's pension payment, tax relief, a LISA bonus. */
+const FROM_OUTSIDE = new Set(['employer-contribution', 'tax-relief', 'government-bonus']);
+
+/**
+ * How many months the cash you could reach at once would cover at your typical spending (FORMULAS.md
+ * §18, "Cash cover"), to one decimal place; none without a typical month.
+ */
+export function runwayOf(accessible: number, typical: number | undefined): MonthRunway {
+  return { accessibleCash: accessible, typicalSpending: typical ?? null, months: typical !== undefined && typical > 0 ? Math.round((accessible / typical) * 10) / 10 : null };
+}
+
 function movedGroup(a: Account | undefined): string | undefined {
   if (!a) return 'unknown';
   if (a.type === 'credit_card') return 'cards';
@@ -121,6 +133,8 @@ export class MonthContext {
   private readonly scheduled = new Set<string>();
   private readonly payeeDates = new Map<string, ISODate[]>();
   private readonly parties: ReturnType<typeof personParties>;
+  /** The people you saved, by id: a payment with one of them goes by the name you gave. */
+  private readonly people: Map<string, string>;
   /** Cash and cheques paid in, by transaction id. */
   private readonly cash: ReturnType<typeof paidInto>;
   private readonly linesCache = new Map<string, MonthLines>();
@@ -144,6 +158,7 @@ export class MonthContext {
     }
     for (const list of this.payeeDates.values()) list.sort();
     this.parties = personParties(store);
+    this.people = new Map(store.people.map((p) => [p.id, p.name]));
     this.cash = paidInto(store);
   }
 
@@ -389,7 +404,10 @@ export class MonthContext {
       )
       .sort((a, b) => a.date.localeCompare(b.date));
 
+    const worthChange = fromMinor(toMinor(end.total) - toMinor(start.total));
+    const split = this.worthSplit(from, to, lines.net, worthChange, accounts);
     const spendingCompared = this.compared(month, (l) => l.spendingTotal);
+    const runway: MonthRunway = runwayOf(end.access.get('now') ?? 0, spendingCompared?.median);
     const netCompared = this.compared(month, (l) => l.net);
     const groups = WRAPPER_GROUPS.map((g: WrapperGroup) => ({ id: g, label: WRAPPER_GROUP_LABELS[g], start: start.wrapper.get(g) ?? 0, end: end.wrapper.get(g) ?? 0 })).filter((g) => g.start !== 0 || g.end !== 0);
     return {
@@ -409,7 +427,8 @@ export class MonthContext {
       },
       net: { amount: fromMinor(lines.net), ...(netCompared ? { compared: netCompared } : {}) },
       moved: [...moved.entries()].filter(([, v]) => v !== 0).map(([id, minor]) => ({ id, label: MOVED_TO[id] ?? id, amount: fromMinor(minor) })).sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount)),
-      worth: { start: start.total, end: end.total, change: fromMinor(toMinor(end.total) - toMinor(start.total)), estimated: start.estimated || end.estimated, groups, accounts },
+      worth: { start: start.total, end: end.total, change: worthChange, estimated: start.estimated || end.estimated, groups, accounts, split },
+      runway,
       quality: {
         uncategorisedSpending: fromMinor(uncatSpend),
         uncategorisedSpendingShare: share(uncatSpend, lines.spendingTotal),
@@ -434,9 +453,11 @@ export class MonthContext {
     };
   }
 
-  /** Who a payment with a person is with, when it is one. */
+  /** Who a payment with a person is with, when it is one: the name you saved them by, else the bank's name tidied. */
   personOf(txId: string): string | undefined {
-    return this.parties.get(txId)?.name;
+    const party = this.parties.get(txId);
+    if (!party) return undefined;
+    return (party.personId ? this.people.get(party.personId) : undefined) ?? tidyName(party.name);
   }
 
   /**
@@ -446,6 +467,63 @@ export class MonthContext {
    * part of one that is not income or spending moved money somewhere. What no row places is shown,
    * so the items always add up.
    */
+  /**
+   * The month's change in worth, split four ways (FORMULAS.md §18, "Worth split"): left over
+   * (income less spending), money from outside (employer contributions, tax relief, government
+   * bonuses), market movement on values at market that are the month's, and the rest. The rest is
+   * whatever the first three do not explain, so the four add up to the change to the penny.
+   */
+  private worthSplit(from: ISODate, to: ISODate, netMinor: number, change: number, accounts: MonthAccountValue[]): MonthWorthSplit {
+    const inMonth = (d: string) => d >= from && d <= to;
+    let outside = 0;
+    let market = 0;
+    let estimated = false;
+    const counted: string[] = [];
+    for (const v of accounts) {
+      const a = this.accounts.get(v.accountId);
+      if (!a) continue;
+      if (balanceModeOf(a) !== 'market') {
+        for (const t of this.store.transactions(a.id)) if (inMonth(t.date) && t.category && FROM_OUTSIDE.has(t.category)) outside += toMinor(t.amount);
+        continue;
+      }
+      // A value resting on a valuation from another time says nothing of the month's market.
+      if (v.start === null || v.end === null || v.oldValuation) continue;
+      const fx = fxRate(a.currency, this.store.settings);
+      if (fx === null) continue;
+      let own = 0;
+      let fromOutside = 0;
+      const rows = this.store.transactions(a.id);
+      const category = new Map(rows.map((t) => [t.id, t.category]));
+      for (const f of this.engine.flowsOf(a.id)) {
+        if (!inMonth(f.date)) continue;
+        const minor = Math.round(toMinor(f.amount) * fx);
+        const c = category.get(f.id);
+        if (c && FROM_OUTSIDE.has(c)) fromOutside += minor;
+        else own += minor;
+      }
+      // What your other accounts sent it, by their rows naming it, when it has no row of its own for
+      // the same transfer (an account valued from screenshots, or one whose statements stop short).
+      const groups = new Set(rows.flatMap((t) => (t.transferGroup ? [t.transferGroup] : [])));
+      for (const t of this.store.transactions()) {
+        if (t.counterpartyAccountId !== a.id || t.accountId === a.id || !inMonth(t.date)) continue;
+        if (t.transferGroup && groups.has(t.transferGroup)) continue;
+        own -= toMinor(t.amount);
+      }
+      outside += fromOutside;
+      market += toMinor(v.end) - toMinor(v.start) - own - fromOutside;
+      if (v.estimated || v.basis?.prices) estimated = true;
+      counted.push(a.id);
+    }
+    return {
+      saved: fromMinor(netMinor),
+      fromOutside: fromMinor(outside),
+      market: fromMinor(market),
+      other: fromMinor(toMinor(change) - netMinor - outside - market),
+      marketEstimated: estimated,
+      marketAccounts: counted,
+    };
+  }
+
   whereItWent(month: string): MonthWhereItWent {
     const { store, cats } = this;
     const from = `${month}-01`;
