@@ -86,3 +86,25 @@ describe('a review’s actions', () => {
     expect(ReviewActionSchema.safeParse({ ...base, key: 'plan-Bad_Key' }).success).toBe(false);
   });
 });
+
+describe('the gates a month in review must pass (scripts/review-eval.ts)', () => {
+  it('pass a short, plain review in whole pounds, and name what fails in one that is not', async () => {
+    const { reviewGates } = await import('../src/server/agents/review-gates');
+    const base = { id: 'inf_0000000000000001', kind: 'month-review' as const, pages: ['overview' as const], subject: { month: '2026-10' }, body: 'b', evidence: [{ type: 'computed' as const, metric: 'm' }], confidence: 'medium' as const, provenance, status: 'active' as const, createdAt: '2026-11-01T00:00:00+00:00' };
+    const opts = { actions: [], month: '2026-10', catchUp: false, alerts: [], openBefore: [], decidedBefore: [], cardsClean: ['card'] };
+    const good = reviewGates({ ...base, title: 'A quiet month: £600 left over and £400 into the ISA', keyPoints: [{ text: 'Pay of £2,000 came in as usual.' }], sections: [{ id: 'month', heading: 'Why', body: 'Rent and bills as usual.' }] }, opts);
+    expect(good.filter((g) => !g.ok)).toEqual([]);
+    const bad = reviewGates(
+      {
+        ...base,
+        title: 'October: £1,812.43 down with £947.00 at Example Shop and £208.19 for a trip, while £4,000.00 went into ISAs and more',
+        keyPoints: [{ text: 'Nothing was scheduled. EXAMPLE LETTINGS LTD took £900.12.' }],
+        sections: [],
+        watch: ['Whether the card is paid in full by its direct debit'],
+        unchecked: ['£7,777'],
+      },
+      { ...opts, openBefore: ['plan-left-open'] },
+    );
+    expect(bad.filter((g) => !g.ok).map((g) => g.id).sort()).toEqual(['names', 'open-carried', 'plain-words', 'title', 'unchecked', 'whole-pounds', 'no-routine-watch'].sort());
+  });
+});
