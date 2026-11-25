@@ -2669,3 +2669,26 @@ value grown from the account's first flow is never below nothing, as rolled-back
   only for days the document shows; a row unsure only of a made-on date 1–7 days after posting is
   information, not a warning. Each needs two pieces of evidence that agree, and anything short of
   them is still a warning or a possible duplicate.
+
+## 2026-11-25: A new account on a bank's list of accounts is at that bank
+
+- **Owner:** a screenshot of a bank's list of accounts, showing a new saver beside a current
+  account already recorded, should commit as it is, with nothing to change on the review page.
+- **Found:** the screen names no bank, so the new account was proposed with no provider (no FSCS
+  group, an id of only its kind and number), and named as printed, in capitals.
+- **Done** (INGESTION.md, "From extraction to draft"): an account that names no provider and has
+  no confident match of its own takes the provider of the accounts beside it, when they all say
+  the same one, for matching and for a new account (`providerBeside`); a new account's name is its
+  provider's brand and its own name out of capitals (`accountNameCase`, `brandOf`).
+- **Reviewed** (a second model, before deploying): a provider an account shows by its name or
+  kind now counts as its own; only accounts with something to record count as evidence, and one
+  of yours with no provider recorded stops it; an account is never matched to one another section
+  already is; a kind-only screen offers only accounts there; a provider you added keeps its id.
+- **Not changed:** two sections of one screen that each match the same account confidently on
+  their own (a second current account with no number, when you have one current account) still
+  do; that predates this and is left for the review page.
+- **Considered:** reading the bank from its sort code (a table of sort codes would be one more
+  list to keep up, and screenshots seldom show one beside a product the app names); asking the
+  reader to guess the bank from the look of the app (a guess, against "never from the look of the
+  app"). The day a new account opened is not inferred: nothing on such a screen says it.
+

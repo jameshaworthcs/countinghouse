@@ -37,7 +37,7 @@ import { classifyDuplicates, storedTwice } from './dedup';
 import { saysNothing } from '../../shared/merchants';
 import { isCancelled, isReinvested } from '../../shared/review';
 import { dateFromFileName } from './images';
-import { fitsAccount, identifies, matchAccount, onlyKind, proposeAccount, sameHolding } from './match';
+import { fitsAccount, identifies, matchAccount, onlyKind, proposeAccount, providerBeside, providerShown, sameHolding, type AccountMatch, type Detected } from './match';
 import { asAgreement, draftAgreements, isStudentFinance, paymentLabel, STUDENT_FINANCE, studentLoanAccount } from './schedules';
 
 export { fitsAccount } from './match';
@@ -225,7 +225,8 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
   const entries = splitAtLinks(store, extraction.accounts, (acc) => matchAccount({ institutionName: providerOf(acc, extraction), accountName: acc.accountName ?? undefined, accountType: acc.accountType ?? undefined, last4: acc.last4 ?? undefined, currency: acc.currency ?? undefined }, store.accounts, store.institutions, extraction.accounts.length === 1 ? ctx.hintAccountId : undefined, held));
   for (const e of entries) if (e.note) notes.push(e.note);
 
-  const sections: DraftSection[] = entries.map(({ acc, force, reason }, si) => {
+  // Each account as the document shows it, and the account of yours it matches by what it shows.
+  const seen = entries.map(({ acc, force, reason }) => {
     // A screen about one holding: its value, gain and amount invested are the holding's, not the
     // account's, and the name at the top is the fund's (or the app's nickname for it).
     const holdingDetail =
@@ -236,17 +237,43 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
     const typeFromRows: AccountType | undefined = !acc.accountType && acc.transactions.some((t) => LISA_ROW.test(t.description)) ? 'lisa' : undefined;
     const named = acc.institutionName ?? extraction.institutionName ?? undefined;
     const provider0 = providerOf(acc, extraction);
-    if (named && !provider0) notes.push(`The only provider it names, ${named}, is the manager of a fund it shows, which does not say where the account is held.`);
-    const detected = {
+    const detected: Detected = {
       institutionName: provider0,
       accountName: holdingDetail ? undefined : (acc.accountName ?? undefined),
       accountType: acc.accountType ?? typeFromRows,
       last4: acc.last4 ?? undefined,
       currency: acc.currency ?? undefined,
     };
-    if (typeFromRows) notes.push('The screen does not name the account, but its Lifetime ISA bonus rows say it is a Lifetime ISA.');
     const hint = extraction.accounts.length === 1 ? ctx.hintAccountId : undefined;
-    const match = force ? { accountId: force, score: 100, reason: reason ?? 'Matched by the account it carries on from' } : matchAccount({ ...detected, holdings: acc.holdings.map((h) => h.name), holdingsComplete: !holdingDetail && WHOLE_HOLDINGS.has(extraction.documentType) }, store.accounts, store.institutions, hint, held);
+    const matchAs = (d: Detected, among: Account[] = store.accounts) => matchAccount({ ...d, holdings: acc.holdings.map((h) => h.name), holdingsComplete: !holdingDetail && WHOLE_HOLDINGS.has(extraction.documentType) }, among, store.institutions, hint, held);
+    const match: AccountMatch = force ? { accountId: force, score: 100, reason: reason ?? 'Matched by the account it carries on from' } : matchAs(detected);
+    // Something to record: an account it only mentions (a certificate's nominated account) says nothing of the screen.
+    const carries = acc.closingBalance !== null || acc.transactions.length > 0 || acc.holdings.length > 0 || [acc.contributionsToDate, acc.governmentBonusToDate, acc.taxYearContributions, acc.taxYearInterest, acc.cashBalance, acc.annualIncome].some((v) => v !== null);
+    return { acc, holdingDetail, typeFromRows, named, provider0, detected, shown: providerShown(detected), carries, hint, matchAs, match };
+  });
+  // One bank's screen of its accounts seldom prints the bank's name: the accounts beside one that
+  // names no provider say it (providerBeside).
+  const confident = (x: (typeof seen)[number]) => (x.match.score >= 50 && !x.match.tied ? x.match.accountId : undefined);
+  const beside = providerBeside(store, seen.filter((x) => x.carries).map((x) => ({ provider: x.shown, accountId: confident(x) })));
+
+  const sections: DraftSection[] = seen.map(({ acc, holdingDetail, typeFromRows, named, provider0, detected, shown, hint, matchAs, match: own }, si) => {
+    if (named && !provider0) notes.push(`The only provider it names, ${named}, is the manager of a fund it shows, which does not say where the account is held.`);
+    if (typeFromRows) notes.push('The screen does not name the account, but its Lifetime ISA bonus rows say it is a Lifetime ISA.');
+    // Matched and named as it would be had the screen printed the provider of the accounts beside it:
+    // only an account that says something of itself, and never as an account another of them is.
+    const byBeside = beside && !shown && own.score < 50 && !own.tied && identifies(detected) ? beside : undefined;
+    const seenAs: Detected = byBeside ? { ...detected, institutionName: byBeside.name } : detected;
+    const taken = new Set(seen.flatMap((x, j) => (j !== si && confident(x) ? [confident(x)!] : [])));
+    const match = byBeside ? matchAs(seenAs, store.accounts.filter((a) => !taken.has(a.id))) : own;
+    if (byBeside) {
+      const yours = byBeside.accounts;
+      const them = yours.length
+        ? `your ${yours.length === 1 ? yours[0] : `${yours.slice(0, -1).join(', ')} and ${yours.at(-1)}`} beside it ${yours.length === 1 ? 'is' : 'are'} there`
+        : byBeside.count === 1
+          ? 'the account beside it names it'
+          : 'the accounts beside it name it';
+      notes.push(`${detected.accountName ?? 'An account'} does not name its provider, but ${them}: it is taken to be at ${byBeside.name} too.`);
+    }
     let existing: Account | undefined = match.accountId && match.score >= 50 ? store.account(match.accountId) : undefined;
     // A scrolled screen seldom names its account; one taken beside it on the same phone and uploaded
     // with it usually does. Only when this screen has no confident match of its own, shows one
@@ -257,7 +284,7 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
       existing = batchAccount;
       batchMatch = { accountId: batchAccount!.id, importId: ctx.batch!.importId };
     }
-    const provider = findInstitution(detected.institutionName);
+    const provider = findInstitution(seenAs.institutionName) ?? (byBeside ? store.institution(byBeside.id) : undefined);
     const investing = provider?.kind === 'investment_platform' || provider?.kind === 'pension_provider';
     const fallbackType: AccountType = acc.holdings.length || investing ? 'stocks_isa' : 'current';
     // With nothing on the screen saying which account it is, a new account would be a guess: ask.
@@ -268,12 +295,12 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
     const tied = Boolean(!existing && !hint && match.tied?.length);
     // A screen that says only the kind of account (a scrolled list of a LISA's rows) is one of your
     // accounts of that kind, not a new one: ask which, and suggest it when you have only one.
-    const sameKind = !existing && !hint && !anonymous && onlyKind(detected) ? store.accounts.filter((a) => a.status !== 'closed' && fitsAccount(detected, a, store.institutions)) : [];
+    const sameKind = !existing && !hint && !anonymous && onlyKind(detected) ? store.accounts.filter((a) => a.status !== 'closed' && fitsAccount(seenAs, a, store.institutions)) : [];
     const target: DraftSection['target'] = existing
       ? { mode: 'existing', accountId: existing.id }
       : anonymous || tied || sameKind.length
         ? { mode: 'skip' }
-        : { mode: 'new', account: proposeAccount(detected, store.accounts, fallbackType) };
+        : { mode: 'new', account: proposeAccount(seenAs, store.accounts, fallbackType, store.institutions) };
     const targetType: AccountType = existing?.type ?? (target.mode === 'new' ? target.account.type : detected.accountType ?? fallbackType);
     const targetId = existing?.id ?? (target.mode === 'new' ? target.account.id : '');
     const currency = acc.currency ?? existing?.currency ?? 'GBP';
@@ -558,7 +585,9 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
                 ? `Nothing on this screen names the account, only that it is ${ACCOUNT_TYPE_META[sameKind[0]!.type].label}, and you have ${sameKind.length}: choose it`
                 : match.accountId
                   ? `${match.reason}`
-                  : 'New account',
+                  : byBeside
+                    ? `New account at ${byBeside.name}, like the ${byBeside.count === 1 ? 'account' : 'accounts'} beside it`
+                    : 'New account',
       ...(sameKind.length === 1 ? { suggestedAccountId: sameKind[0]!.id } : {}),
       currency,
       recordBalance: balance !== undefined,

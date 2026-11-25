@@ -16,6 +16,7 @@ import { WorkArea } from '../src/server/ingest/workarea';
 import { captureDate } from '../src/server/ingest/images';
 import { extractionJsonSchema, PROMPT_VERSION, SYSTEM_PROMPT } from '../src/server/ingest/prompt';
 import { assessReading } from '../src/server/ingest/verify';
+import { accountNameCase, brandOf, proposeAccount } from '../src/server/ingest/match';
 import { Store } from '../src/server/store';
 import { sectionChecks } from '../src/shared/review';
 import { ExtractionSchema, type Account, type DocumentRef, type Extraction, type ImportRecord } from '../src/shared/schema';
@@ -576,5 +577,129 @@ describe('nothing new: understood, and adds nothing', () => {
     expect(svc.getPending(copy)!.draft!.sections[0]!.target.mode).toBe('new');
     await svc.dismiss(copy);
     expect(store.accounts.map((a) => a.id)).toEqual(['bonds', 'current']);
+  });
+});
+
+describe('a screen of one provider’s accounts that names no provider', () => {
+  // A bank's "Banking & savings" list: product names and numbers, no bank name.
+  const listScreen = (accounts: Record<string, unknown>[]) => ExtractionSchema.parse({ documentType: 'account_overview_screenshot', accounts });
+  const saver = { accountName: 'EXAMPLE SAVER', accountType: 'savings', last4: '3307', currency: 'GBP', closingBalance: 1250 };
+  const current = { accountName: 'EXAMPLE CURRENT ACCOUNT', accountType: 'current', last4: '4821', currency: 'GBP', closingBalance: 640.5 };
+
+  beforeEach(async () => {
+    await store.setInstitutions([{ id: 'santander', name: 'Santander UK', kind: 'bank', fscsGroup: 'santander-uk' }]);
+    await store.setAccounts([acct('bonds', 'premium_bonds', { name: 'Premium Bonds', institutionId: 'ns-and-i' }), acct('current', 'current', { name: 'Santander current account', last4: '4821', institutionId: 'santander' })]);
+  });
+
+  it('a new account on it is at the provider of the account of yours beside it, named as a page would name it', () => {
+    const draft = buildDraft(listScreen([saver, current]), { store, document: doc({ capturedOn: '2026-11-02', capturedOnSource: 'filename' }), uploadedOn: '2026-11-02' });
+    const [s0, s1] = draft.sections;
+    expect(s1!.target).toEqual({ mode: 'existing', accountId: 'current' });
+    expect(s0!.target).toEqual({ mode: 'new', account: { id: 'santander-savings-3307', name: 'Santander Example Saver', type: 'savings', currency: 'GBP', institutionId: 'santander', institutionName: 'Santander UK', last4: '3307' } });
+    expect(s0!.matchReason).toBe('New account at Santander UK, like the account beside it');
+    // What the screen showed stays as it showed it.
+    expect(s0!.detected.institutionName).toBeUndefined();
+    expect(draft.notes).toContain('EXAMPLE SAVER does not name its provider, but your Santander current account beside it is there: it is taken to be at Santander UK too.');
+    expect(draftIsClean(draft).reasons).toEqual(['creates a new account']);
+  });
+
+  it('matches an account of yours at that provider as if the screen had named it', async () => {
+    await store.setAccounts([...store.accounts, acct('santander-saver', 'savings', { name: 'Santander saver', institutionId: 'santander' })]);
+    const draft = buildDraft(listScreen([{ ...saver, last4: null }, current]), { store, document: doc({ capturedOn: '2026-11-02', capturedOnSource: 'filename' }), uploadedOn: '2026-11-02' });
+    expect(draft.sections[0]!.target).toEqual({ mode: 'existing', accountId: 'santander-saver' });
+  });
+
+  it('says nothing when the accounts beside it are at two providers, or when it names its own', async () => {
+    await store.setAccounts([...store.accounts, acct('other-current', 'current', { name: 'Chase current account', last4: '5150', institutionId: 'chase' })]);
+    const two = buildDraft(listScreen([saver, current, { ...current, accountName: 'CURRENT', last4: '5150' }]), { store, document: doc({ capturedOn: '2026-11-02' }), uploadedOn: '2026-11-02' });
+    expect(two.sections[0]!.target).toMatchObject({ mode: 'new', account: { id: 'savings-3307', name: 'Example Saver' } });
+    expect(two.sections[0]!.target.mode === 'new' && two.sections[0]!.target.account.institutionId).toBeUndefined();
+    const own = buildDraft(listScreen([{ ...saver, institutionName: 'Chase' }, current]), { store, document: doc({ capturedOn: '2026-11-02' }), uploadedOn: '2026-11-02' });
+    expect(own.sections[0]!.target).toMatchObject({ mode: 'new', account: { institutionId: 'chase', name: 'Chase Example Saver' } });
+  });
+
+  it('an account that shows its own provider keeps it, and counts against the others', async () => {
+    // Premium Bonds are NS&I's; a card whose name names its provider is that provider's.
+    await store.setAccounts([acct('current', 'current', { name: 'Santander current account', last4: '4821', institutionId: 'santander' })]);
+    const bonds = buildDraft(listScreen([{ accountName: 'Premium Bonds', accountType: 'premium_bonds', closingBalance: 500 }, current]), { store, document: doc({ capturedOn: '2026-11-02' }), uploadedOn: '2026-11-02' });
+    expect(bonds.sections[0]!.target).toMatchObject({ mode: 'new', account: { institutionId: 'ns-and-i', name: 'NS&I Premium Bonds' } });
+    const card = { accountName: 'MONZO FLEX', accountType: 'credit_card', last4: '7710', closingBalance: -120 };
+    const three = buildDraft(listScreen([saver, card, current]), { store, document: doc({ capturedOn: '2026-11-02' }), uploadedOn: '2026-11-02' });
+    expect(three.sections[1]!.target).toMatchObject({ mode: 'new', account: { institutionId: 'monzo', name: 'Monzo Flex' } });
+    expect(three.sections[0]!.target).toMatchObject({ mode: 'new', account: { id: 'savings-3307' } });
+    expect(three.sections[0]!.target.mode === 'new' && three.sections[0]!.target.account.institutionId).toBeUndefined();
+  });
+
+  it('is never the account another section on it already is', async () => {
+    // A second current account with no number beside the one recorded: not that one again, though
+    // the provider beside it would otherwise make it a match.
+    await store.setAccounts([...store.accounts, acct('other-current', 'current', { name: 'Chase current account', last4: '5150', institutionId: 'chase' })]);
+    const second = buildDraft(listScreen([{ accountName: 'STUDENT CURRENT ACCOUNT', accountType: 'current', closingBalance: 200 }, current]), { store, document: doc({ capturedOn: '2026-11-02' }), uploadedOn: '2026-11-02' });
+    expect(second.sections[0]!.target).toMatchObject({ mode: 'new', account: { institutionId: 'santander', name: 'Santander Student Current Account' } });
+  });
+
+  it('a balance with nothing to say which account it is still waits for you to choose', () => {
+    const bare = buildDraft(listScreen([{ closingBalance: 75 }, current]), { store, document: doc({ capturedOn: '2026-11-02' }), uploadedOn: '2026-11-02' });
+    expect(bare.sections[0]!.target).toEqual({ mode: 'skip' });
+    expect(bare.notes.some((n) => n.includes('taken to be at'))).toBe(false);
+  });
+
+  it('a screen that shows only the kind of account offers none of yours at another provider', async () => {
+    await store.setAccounts([...store.accounts, acct('chase-saver', 'savings', { name: 'Chase saver', institutionId: 'chase' })]);
+    const draft = buildDraft(listScreen([{ accountType: 'savings', closingBalance: 1250 }, current]), { store, document: doc({ capturedOn: '2026-11-02' }), uploadedOn: '2026-11-02' });
+    expect(draft.sections[0]!.suggestedAccountId).toBeUndefined();
+    expect(draft.sections[0]!.target).toMatchObject({ mode: 'new', account: { institutionId: 'santander' } });
+  });
+
+  it('keeps a provider of yours the catalogue does not know', async () => {
+    await store.setInstitutions([...store.institutions, { id: 'sample-bs', name: 'Sample Building Society', kind: 'building_society' }]);
+    await store.setAccounts([acct('bs-current', 'current', { name: 'Sample BS current', last4: '4821', institutionId: 'sample-bs' })]);
+    const draft = buildDraft(listScreen([saver, current]), { store, document: doc({ capturedOn: '2026-11-02' }), uploadedOn: '2026-11-02' });
+    expect(draft.sections[0]!.target).toMatchObject({ mode: 'new', account: { id: 'sample-bs-savings-3307', institutionId: 'sample-bs', name: 'Sample Building Society Example Saver' } });
+  });
+
+  it('learns nothing from an account of yours with no provider recorded, or one the document only mentions', async () => {
+    await store.setAccounts([...store.accounts, acct('loose', 'current', { name: 'Old current account', last4: '5150' })]);
+    const unknown = buildDraft(listScreen([saver, current, { ...current, accountName: 'CURRENT', last4: '5150' }]), { store, document: doc({ capturedOn: '2026-11-02' }), uploadedOn: '2026-11-02' });
+    expect(unknown.sections[0]!.target.mode === 'new' && unknown.sections[0]!.target.account.institutionId).toBeUndefined();
+    const mentioned = buildDraft(listScreen([saver, { ...current, closingBalance: null }]), { store, document: doc({ capturedOn: '2026-11-02' }), uploadedOn: '2026-11-02' });
+    expect(mentioned.sections).toHaveLength(1);
+    expect(mentioned.sections[0]!.target.mode === 'new' && mentioned.sections[0]!.target.account.institutionId).toBeUndefined();
+  });
+
+  it('says so when the account beside it names the provider', () => {
+    const draft = buildDraft(listScreen([saver, { ...current, last4: '9090', institutionName: 'Santander' }]), { store, document: doc({ capturedOn: '2026-11-02' }), uploadedOn: '2026-11-02' });
+    expect(draft.notes).toContain('EXAMPLE SAVER does not name its provider, but the account beside it names it: it is taken to be at Santander UK too.');
+    expect(draft.sections[0]!.matchReason).toBe('New account at Santander UK, like the account beside it');
+  });
+
+  it('a screen of one account names no provider for it', () => {
+    const draft = buildDraft(listScreen([saver]), { store, document: doc({ capturedOn: '2026-11-02' }), uploadedOn: '2026-11-02' });
+    expect(draft.sections[0]!.target).toMatchObject({ mode: 'new', account: { id: 'savings-3307', name: 'Example Saver' } });
+  });
+});
+
+describe('a new account’s name', () => {
+  it('writes a name printed in capitals as a name, keeping abbreviations and numbers', () => {
+    expect(accountNameCase('EDGE SAVER')).toBe('Edge Saver');
+    expect(accountNameCase('CASH ISA')).toBe('Cash ISA');
+    expect(accountNameCase('INSTANT ACCESS ISSUE 7')).toBe('Instant Access Issue 7');
+    expect(accountNameCase('E-SAVER (LIMITED)')).toBe('E-Saver (Limited)');
+    expect(accountNameCase('HSBC ADVANCE')).toBe('HSBC Advance');
+    expect(accountNameCase('NS&I DIRECT ISA')).toBe('NS&I Direct ISA');
+    expect(accountNameCase('Flexible Saver')).toBe('Flexible Saver');
+    expect(accountNameCase('E-ISA')).toBe('E-ISA');
+    expect(accountNameCase('ISA/GIA')).toBe('ISA/GIA');
+    expect(accountNameCase('30-DAY NOTICE')).toBe('30-Day Notice');
+    expect(accountNameCase('2-YEAR FIXED RATE')).toBe('2-Year Fixed Rate');
+    expect(accountNameCase("CHILDREN'S SAVER")).toBe("Children's Saver");
+    expect(accountNameCase('AJ BELL DODL')).toBe('AJ Bell Dodl');
+  });
+
+  it('goes by the provider’s brand', () => {
+    expect(brandOf('Santander UK')).toBe('Santander');
+    expect(brandOf('Aqua (NewDay)')).toBe('Aqua');
+    expect(brandOf('Lloyds Bank')).toBe('Lloyds Bank');
+    expect(proposeAccount({ institutionName: 'HSBC UK', accountName: 'ONLINE BONUS SAVER', accountType: 'savings', last4: '9001' }, [])).toMatchObject({ id: 'hsbc-savings-9001', name: 'HSBC Online Bonus Saver', institutionId: 'hsbc' });
   });
 });

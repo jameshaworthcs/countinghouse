@@ -172,18 +172,88 @@ export function matchAccount(detected: Detected, accounts: Account[], institutio
   return { score: best.score, reason: best.score > 0 ? `Weak match (${best.reason}); please confirm` : best.reason, ...(best.score >= 30 && best.accountId ? { accountId: best.accountId } : {}) };
 }
 
+/**
+ * The provider a section shows of itself: one it names, one its account's name names ("MONZO FLEX"),
+ * or the only issuer of its kind (Premium Bonds are NS&I's).
+ */
+export function providerShown(detected: Detected): string | undefined {
+  const issuer = detected.accountType ? ACCOUNT_TYPE_META[detected.accountType].issuer : undefined;
+  return detected.institutionName ?? findInstitution(detected.accountName)?.name ?? (issuer ? catalogInstitution(issuer)?.name : undefined);
+}
+
+/**
+ * The provider of the accounts on a document, for one that names none of its own. One bank's screen
+ * of its accounts ("Banking & savings") seldom prints the bank's name; the accounts on it you
+ * already have, or that show a provider (`providerShown`), say which. Only when they all say the
+ * same provider: a screen with accounts at two providers (an app that shows other banks' accounts)
+ * says nothing, and an account of yours with no provider recorded could be anyone's. `accounts`
+ * names your accounts that said it, and `count` how many sections did, for the review page.
+ */
+export function providerBeside(store: { account(id: string): Account | undefined; institutions: Institution[] }, sections: { provider?: string | undefined; accountId?: string | undefined }[]): { id: string; name: string; accounts: string[]; count: number } | undefined {
+  const ids = new Set<string>();
+  const accounts: string[] = [];
+  let count = 0;
+  for (const s of sections) {
+    if (s.provider) {
+      const own = store.institutions.find((i) => i.name.toLowerCase() === s.provider!.toLowerCase());
+      ids.add(findInstitution(s.provider)?.id ?? own?.id ?? `named:${s.provider.toLowerCase()}`);
+      count++;
+      continue;
+    }
+    const account = s.accountId ? store.account(s.accountId) : undefined;
+    if (!account) continue;
+    ids.add(account.institutionId ?? `unknown:${account.id}`);
+    count++;
+    if (!accounts.includes(account.name)) accounts.push(account.name);
+  }
+  if (ids.size !== 1) return undefined;
+  const id = [...ids][0]!;
+  const name = store.institutions.find((i) => i.id === id)?.name ?? catalogInstitution(id)?.name;
+  return name ? { id, name, accounts, count } : undefined;
+}
+
+// Words an account's name keeps in capitals when written out of a screen's capitals ("CASH ISA").
+const KEEP_CAPITALS = new Set(['isa', 'isas', 'lisa', 'jisa', 'sipp', 'ssas', 'gia', 'etf', 'aer', 'apr', 'uk', 'us', 'eu', 'gbp', 'usd', 'eur', 'saye', 'vct', 'eis', 'oeic', 'nhs', 'aj', 'uss']);
+
+/**
+ * An account's name as a page shows it: one printed in capitals ("EDGE SAVER") written as a name
+ * ("Edge Saver"), keeping abbreviations ("CASH ISA" is "Cash ISA", "E-ISA"), numbers ("30-Day")
+ * and words with no vowel ("HSBC"). A name in mixed case is left as printed.
+ */
+export function accountNameCase(name: string): string {
+  if (/[a-z]/.test(name) || !/[A-Z]/.test(name)) return name;
+  // Each word, and each part of one joined by a hyphen, slash or bracket, on its own.
+  return name
+    .split(/([\s\-/()]+)/)
+    .map((part) => {
+      const bare = part.toLowerCase().replace(/[^a-z]/g, '');
+      if (!bare || KEEP_CAPITALS.has(bare) || /\d|&/.test(part) || !/[aeiouy]/.test(bare)) return part;
+      return part.charAt(0) + part.slice(1).toLowerCase();
+    })
+    .join('');
+}
+
+/** The name a provider goes by in an account's name: "Santander UK" is "Santander", "Aqua (NewDay)" is "Aqua". */
+export function brandOf(provider: string): string {
+  return provider.replace(/\s*\([^)]*\)\s*$/, '').replace(/\s+UK$/i, '').trim() || provider;
+}
+
 /** A sensible new-account proposal for something we could not match. */
-export function proposeAccount(detected: Detected, accounts: Account[], fallbackType: AccountType = 'current'): NewAccountInput {
+export function proposeAccount(detected: Detected, accounts: Account[], fallbackType: AccountType = 'current', institutions: readonly Pick<Institution, 'id' | 'name'>[] = []): NewAccountInput {
   const type = detected.accountType ?? fallbackType;
   // Only NS&I issues Premium Bonds: the provider follows from the kind.
   const issuer = ACCOUNT_TYPE_META[type].issuer;
-  const inst = findInstitution(detected.institutionName) ?? findInstitution(detected.accountName) ?? (issuer ? catalogInstitution(issuer) : undefined);
+  // A provider of yours the catalogue does not know (a building society you added) is still that one.
+  const yours = detected.institutionName ? institutions.find((i) => i.name.toLowerCase() === detected.institutionName!.toLowerCase()) : undefined;
+  const inst: Pick<Institution, 'id' | 'name'> | undefined = findInstitution(detected.institutionName) ?? yours ?? findInstitution(detected.accountName) ?? (issuer ? catalogInstitution(issuer) : undefined);
   const label = ACCOUNT_TYPE_META[type].label;
   const instName = inst?.name ?? detected.institutionName ?? undefined;
+  const brand = instName ? brandOf(instName) : undefined;
+  const accountName = detected.accountName ? accountNameCase(detected.accountName) : undefined;
   const name =
-    detected.accountName && instName && !detected.accountName.toLowerCase().includes(instName.toLowerCase().split(' ')[0]!)
-      ? `${instName} ${detected.accountName}`
-      : (detected.accountName ?? (instName ? `${instName} ${label}` : label));
+    accountName && brand && !accountName.toLowerCase().includes(brand.toLowerCase().split(' ')[0]!)
+      ? `${brand} ${accountName}`
+      : (accountName ?? (brand ? `${brand} ${label}` : label));
   const id = slugify(
     [inst?.id ?? instName, ACCOUNT_TYPE_META[type].shortLabel, detected.last4].filter(Boolean).join(' '),
     accounts.map((a) => a.id),

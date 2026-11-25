@@ -427,6 +427,18 @@ read again.
     offers your only account of that kind in one click.
   - A screen naming only the provider (a scrolled app screen) matches your only open account
     there.
+  - **A provider taken from the accounts beside it.** One bank's list of its accounts ("Banking
+    & savings") seldom prints the bank's name. An account on it that shows no provider of its own
+    (none named, none in its name as in "MONZO FLEX", and not a kind only one provider issues),
+    says something of itself (a name, number or kind) and has no confident match of its own is
+    matched, and if new proposed, as if the screen had named the provider of the other accounts on
+    it: those you already have there, and those that show one.
+    - Only accounts with something to record count; one the document only mentions does not.
+    - Only when they all say the same provider. A screen with accounts at two providers says
+      nothing, nor does one with an account of yours whose provider is not recorded.
+    - It is never matched to an account another section on the screen already is.
+    - A screen that shows only the kind of account offers only your accounts of that kind there.
+    - What the screen showed is kept as it showed it, and a note says where the provider came from.
   - A fund's own page matches the account whose latest holdings include that fund.
   - A whole holdings list (an export or a statement) that is all one account holds matches that
     account more strongly than one holding those funds among others: your ISA and your SIPP can
@@ -743,6 +755,12 @@ read again.
   closed: it is created closed and counts for nothing after that day. Both dates can be changed on
   the account's page (Edit); a closing date closes the account, and clearing it opens it again. A
   new account made on the review page gets its id from its bank's and its own name.
+- **A new account's name** is its provider's brand ("Santander UK" is "Santander") and the name the
+  document gives it, written as a page would write it: one printed in capitals ("EDGE SAVER") is
+  "Edge Saver", keeping abbreviations ("Cash ISA", "E-ISA"), numbers ("30-Day Notice") and words
+  with no vowel ("HSBC"). Its id is the provider's, its kind and its last digits
+  (`santander-savings-1234`). A provider you added that the catalogue does not know is kept as
+  that provider, not made again.
 - **Liabilities.** A credit-card balance printed as a positive "amount owed" is stored as
   negative, with a note.
 - **Review checks** (`shared/review.ts`, [FORMULAS.md §13](FORMULAS.md)) run on each account:
