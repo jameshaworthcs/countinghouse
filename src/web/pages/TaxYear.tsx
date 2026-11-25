@@ -1,6 +1,6 @@
 import { ChevronRight, CircleCheck, CircleDashed, Download, FileWarning, Printer, TriangleAlert } from 'lucide-react';
 import { Fragment, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import type { AllowanceLine, AllowancesResponse, ConfirmedNilView, MissingDaysView, PayResponse, SaItem, SelfAssessmentResponse, TaxBandEstimate } from '../../shared/api';
 import { formatDate, formatSpan } from '../../shared/dates';
 import type { SaStatus } from '../../shared/schema';
@@ -292,12 +292,12 @@ function statusBadge(item: SaItem) {
 
 /** The year's return deadlines: the next one first in weight, those passed muted. */
 function SaDeadlines({ sa }: { sa: SelfAssessmentResponse }) {
-  const next = sa.deadlines.find((d) => !d.passed);
+  const next = sa.deadlines.find((d) => !d.passed && !d.done);
   return (
     <Card title={`Deadlines for the ${sa.taxYear.label} return`} description="From GOV.UK’s Self Assessment deadlines. Registering late gives you a later filing date, but the tax is still due on 31 January.">
       <ul className="flex flex-col gap-1.5 text-[13px]">
         {sa.deadlines.map((d, i) => (
-          <li key={i} className={cn('flex gap-3', d.passed ? 'text-ink-3' : d === next ? 'font-medium text-ink' : 'text-ink-2')}>
+          <li key={i} className={cn('flex gap-3', d.passed || d.done ? 'text-ink-3' : d === next ? 'font-medium text-ink' : 'text-ink-2')}>
             <span className="w-28 shrink-0 tabular">{formatDate(d.date)}</span>
             <span>
               {d.what}
@@ -315,7 +315,7 @@ const SA_STATUS_LABELS: Record<SaStatus, string> = {
   'told-hmrc': 'HMRC told; the tax comes through my tax code',
   registered: 'Registered; the return is still to send',
   filed: 'Return sent; the tax is still to pay',
-  paid: 'Return sent and the tax paid',
+  paid: 'Return sent and settled (paid, nothing due, or through my tax code)',
 };
 
 /** Where this year's return stands, as you tell the app: it quiets the Overview's Self Assessment alerts. */
@@ -327,12 +327,19 @@ function SaStatusCard({ sa }: { sa: SelfAssessmentResponse }) {
   const save = useApiMutation((v: { status?: SaStatus | null; note?: string; sendsReturns?: boolean }) => api('/self-assessment/status', { method: 'PUT', body: { taxYear: sa.taxYear.label, ...v } }), {
     onSuccess: () => toast({ tone: 'good', text: 'Saved' }),
   });
-  const changed = status !== (owner.status ?? '') || note.trim() !== (owner.note ?? '');
+  // A note belongs to a status: with none, there is nothing to note.
+  const changed = status !== (owner.status ?? '') || (status !== '' && note.trim() !== (owner.note ?? ''));
   return (
     <Card title={`Where your ${sa.taxYear.label} return stands`} description="What you tell the app here. The Overview reminds you of this year’s deadlines until they are done by it.">
       <div className="flex flex-col gap-3">
         <div className="flex flex-wrap items-end gap-2">
-          <Select value={status} onChange={(e) => setStatus(e.target.value as SaStatus | '')} aria-label={`Where your ${sa.taxYear.label} return stands`} className="w-80 max-w-full">
+          <Select
+            value={status}
+            onChange={(e) => {
+              const v = e.target.value as SaStatus | '';
+              setStatus(v);
+              if (!v) setNote('');
+            }} aria-label={`Where your ${sa.taxYear.label} return stands`} className="w-80 max-w-full">
             <option value="">Not said</option>
             {(Object.keys(SA_STATUS_LABELS) as SaStatus[]).map((s) => (
               <option key={s} value={s}>
@@ -340,7 +347,7 @@ function SaStatusCard({ sa }: { sa: SelfAssessmentResponse }) {
               </option>
             ))}
           </Select>
-          <Input value={note} onChange={(e) => setNote(e.target.value)} maxLength={300} placeholder="A note, if you like" aria-label="Note" className="w-64 max-w-full" />
+          <Input value={note} onChange={(e) => setNote(e.target.value)} maxLength={300} placeholder="A note, if you like" aria-label="Note" className="w-64 max-w-full" disabled={!status} />
           <Button size="sm" variant="primary" disabled={!changed} loading={save.isPending} onClick={() => save.mutate({ status: status || null, note })}>
             Save
           </Button>
@@ -582,7 +589,9 @@ export default function TaxYear() {
   const { tab = 'allowances' } = useParams();
   const navigate = useNavigate();
   const years = useApi<string[]>(['tax-years'], '/tax-years');
-  const [year, setYear] = useState<string>('');
+  // An alert can open a given year (?year=2024/25).
+  const [search] = useSearchParams();
+  const [year, setYear] = useState<string>(search.get('year') ?? '');
   // Self Assessment is filed for a finished tax year, so default to the last completed one there.
   const defaultYear = tab === 'self-assessment' ? (years.data?.[1] ?? years.data?.[0]) : years.data?.[0];
   const ty = year || defaultYear || '';

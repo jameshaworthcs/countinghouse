@@ -111,7 +111,7 @@ describe('Self Assessment: what you told the app, and the alerts it drives', () 
     expect(sa.mayNeedToFile.find((m) => m.reason.startsWith('Dividends'))).toMatchObject({ requiresNotice: true });
     expect(sa.ownerStatus).toEqual({ sendsReturns: false });
     expect(alertsOn('2026-07-01')).toEqual([]);
-    expect(alertsOn('2026-09-01')).toMatchObject([{ id: 'sa-register-2025-26', level: 'info', action: { href: '/tax/self-assessment' } }]);
+    expect(alertsOn('2026-09-01')).toMatchObject([{ id: 'sa-register-2025-26', level: 'info', action: { href: '/tax/self-assessment?year=2025%2F26' } }]);
     expect(alertsOn('2026-09-25')).toMatchObject([{ level: 'warning' }]);
     const late = alertsOn('2026-11-25');
     expect(late).toMatchObject([{ id: 'sa-register-2025-26', level: 'warning' }]);
@@ -124,7 +124,9 @@ describe('Self Assessment: what you told the app, and the alerts it drives', () 
     for (const status of ['told-hmrc', 'not-needed', 'paid'] as const) {
       await tell({ years: { '2025/26': { status, updatedAt: stamp } } });
       expect(alertsOn('2026-09-25')).toEqual([]);
-      expect(selfAssessment(store, '2025/26').deadlines.every((d) => d.done)).toBe(true);
+      // Every deadline of the year's own return is done; July's payment on account only when there is no return.
+      const left = selfAssessment(store, '2025/26').deadlines.filter((d) => !d.done).map((d) => d.kind);
+      expect(left).toEqual(status === 'paid' ? ['second-payment-on-account'] : []);
     }
   });
 
@@ -137,6 +139,24 @@ describe('Self Assessment: what you told the app, and the alerts it drives', () 
     expect(alertsOn('2027-01-20')).toMatchObject([{ id: 'sa-file-2025-26', level: 'warning' }]);
     await tell({ sendsReturns: true, years: { '2025/26': { status: 'filed', updatedAt: stamp } } });
     expect(alertsOn('2027-01-20')).toMatchObject([{ id: 'sa-pay-2025-26' }]);
+  });
+
+  it('opens the page at its year; past 31 January it says the return was due; paying does not do July’s payment on account', async () => {
+    await dividend(700);
+    await tell({ sendsReturns: true });
+    expect(alertsOn('2027-01-10')[0]!.action!.href).toBe('/tax/self-assessment?year=2025%2F26');
+    expect(alertsOn('2027-02-15')[0]!.title).toBe('Your 2025/26 return and tax were due on 31 Jan 2027');
+    await tell({ sendsReturns: true, years: { '2025/26': { status: 'paid', updatedAt: stamp } } });
+    const july = selfAssessment(store, '2025/26').deadlines.find((d) => d.kind === 'second-payment-on-account')!;
+    expect(july.done).toBe(false);
+    expect(alertsOn('2027-07-20')).toEqual([]);
+  });
+
+  it('sending returns every year raises nothing for a year with nothing in your data', async () => {
+    await tell({ sendsReturns: true });
+    expect(alertsOn('2027-01-20')).toEqual([]);
+    await tell({ sendsReturns: true, years: { '2025/26': { status: 'registered', updatedAt: stamp } } });
+    expect(alertsOn('2027-01-20')).toMatchObject([{ id: 'sa-file-2025-26' }]);
   });
 
   it('a hint HMRC usually sorts out itself (interest over the savings allowance) raises no alert', async () => {

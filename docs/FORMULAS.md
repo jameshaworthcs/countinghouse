@@ -1025,17 +1025,24 @@ Assessment prep (`profile.selfAssessment`: whether you send a return every year,
 status: nothing to do, HMRC told with the tax through your tax code, registered, return sent, or
 sent and paid):
 
-- A deadline is **done** when nothing is left to do for the year (nothing to do, HMRC told, paid);
-  telling HMRC (the `register` deadline) also once you send returns every year or set any status;
-  sending the return once it is sent.
+- A deadline is **done** when nothing is left to do for the year (nothing to do, HMRC told, sent and
+  settled); telling HMRC (the `register` deadline) also once you send returns every year or set any
+  status; sending the return once it is sent. The July payment on account is the next year's, worked
+  out from the return, so only a year with no return (nothing to do, HMRC told) has it done; it is
+  never alerted, since the app cannot tell whether you make payments on account.
 - **Tell HMRC:** when a reason to file needs HMRC told by the year's notice date (`requiresNotice`:
   dividends over the dividend allowance, side income over the trading allowance; not interest over
-  the savings allowance, higher-rate relief or Child Benefit, which HMRC usually sorts out or you
-  claim later) and that deadline is not done: an alert from 60 days before 5 October, a warning
+  the savings allowance, which HMRC usually collects through your tax code or a tax calculation, nor
+  higher-rate relief, which you can claim for four years; nor Child Benefit, whose charge needs
+  telling HMRC by 5 October if it applies but turns on a partner's income the app does not know, so
+  it stays a hint) and that deadline is not done: an alert from 60 days before 5 October, a warning
   from 14 days before, and after it until you say what happened.
 - Otherwise, **send the return and pay** (once sent: **pay**) by 31 January, when you send returns
-  or the year is registered or sent: from 60 days before, a warning from 14 days before.
-- One alert a year at most, linking to the Self Assessment page, which carries the disclaimer.
+  or the year is registered or sent: from 60 days before, a warning from 14 days before, and after
+  it, worded as past, until you say. Sending returns every year raises nothing for a year with
+  nothing in your data (no pay, no reason to file) unless you set that year's status.
+- One alert a year at most, opening the Self Assessment page at that year, which carries the
+  disclaimer.
 
 **HMRC's working out of a year** (a `settlement` record, the latest for the year): the outcome,
 the amount and when it was worked out, what is outstanding, and each payment the page lists. A
@@ -1477,11 +1484,17 @@ estimated.
 - **Left over** (`saved`): income less spending (above).
 - **From outside** (`fromOutside`): employer pension payments, tax relief and government bonuses
   (`employer-contribution`, `tax-relief`, `government-bonus`) paid into your accounts in the month.
-- **Market** (`market`): for each value at market that is the month's (a value at both ends, not
-  `oldValuation`): its change less its external flows in the month (§12: what was paid in or taken
-  out, in pounds at its rate) and less what came from outside. What your other accounts sent it, by
-  their rows naming it, counts too when it has no row of its own for that transfer (an account valued
-  from screenshots, or one whose statements stop short of the month).
+- **From outside** counts whatever a value rests on: an employer's payment into a pension valued a
+  year ago is still money from outside.
+- **Market** (`market`): for each value at market whose two ends rest on valuations of their own (at
+  the end, one inside the month; at the start, one at most 31 days before it; neither worked back
+  from a later one nor shared out between two; or a value from the holdings' prices on the day): its
+  change less its external flows in the month (§12: what was paid in or taken out, in pounds at its
+  rate) and less what came from outside. What your other accounts sent it between the two valuations,
+  by their rows naming it, counts too, when the row is a transfer (not income or spending) and the
+  account has no row of its own for it (linked, or the same amount within 10 days): an account valued
+  from screenshots, or one whose statements stop short of the month. The engine moves a value on by
+  its own rows, never by these, so they count between its valuations, not by the calendar.
 - **The rest** (`other`): the change less the three. It holds borrowing (a loan the estate leaves
   out lent or paid for something), money to or from accounts the app doesn't hold, a transfer whose
   other side falls in another month, and the change in a value resting on a valuation from another

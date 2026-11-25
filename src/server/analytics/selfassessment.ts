@@ -430,6 +430,9 @@ const SETTLED: ReadonlySet<SaStatus> = new Set(['not-needed', 'told-hmrc', 'paid
  */
 export function deadlineDone(kind: SaDeadline['kind'], owner: OwnerStatus): boolean {
   const s = owner.status;
+  // The July payment on account is the next year's, worked out from this return: paying this year's
+  // tax does not do it; only a year with no return has none.
+  if (kind === 'second-payment-on-account') return s === 'not-needed' || s === 'told-hmrc';
   if (s && SETTLED.has(s)) return true;
   if (kind === 'register') return owner.sendsReturns || s !== undefined;
   if (kind === 'paper' || kind === 'online-through-code' || kind === 'online') return s === 'filed';
@@ -452,7 +455,7 @@ export function selfAssessmentAlerts(sa: SelfAssessmentResponse, now: ISODate): 
   const label = sa.taxYear.label;
   const slug = label.replace('/', '-');
   const deadline = (kind: SaDeadline['kind']) => sa.deadlines.find((d) => d.kind === kind);
-  const action = { label: 'Self Assessment', href: '/tax/self-assessment' };
+  const action = { label: 'Self Assessment', href: `/tax/self-assessment?year=${encodeURIComponent(label)}` };
   const check = 'Check the figures yourself; GOV.UK is the authority. Once it is done, say so on the Self Assessment page.';
   const level = (days: number): Alert['level'] => (days <= ALERT_WARN_DAYS ? 'warning' : 'info');
 
@@ -472,15 +475,25 @@ export function selfAssessmentAlerts(sa: SelfAssessmentResponse, now: ISODate): 
     ];
   }
   const sending = owner.sendsReturns || owner.status === 'registered' || owner.status === 'filed';
+  // Sending returns every year says nothing of a year with nothing in your data, unless you set its status.
+  if (!owner.status && !sa.employments.length && !sa.mayNeedToFile.length) return [];
   const next = owner.status === 'filed' ? deadline('pay') : deadline('online');
   if (!sending || !next || next.done) return [];
   const days = diffDays(now, next.date);
   if (days > ALERT_LEAD_DAYS) return [];
+  const due = formatDate(next.date);
   return [
     {
       id: `sa-${owner.status === 'filed' ? 'pay' : 'file'}-${slug}`,
       level: level(days),
-      title: owner.status === 'filed' ? `Pay your ${label} Self Assessment tax by ${formatDate(next.date)}` : `Send your ${label} return and pay by ${formatDate(next.date)}`,
+      title:
+        owner.status === 'filed'
+          ? days < 0
+            ? `Your ${label} Self Assessment tax was due on ${due}`
+            : `Pay your ${label} Self Assessment tax by ${due}`
+          : days < 0
+            ? `Your ${label} return and tax were due on ${due}`
+            : `Send your ${label} return and pay by ${due}`,
       detail: check,
       action,
     },

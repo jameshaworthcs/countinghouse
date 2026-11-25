@@ -530,6 +530,43 @@ describe('the month’s worth, split; cash cover; who a payment was with', () =>
     expect(a.month('2026-08').worth.split.market).toBe(200);
   });
 
+  it('the market only from valuations of its own: none inside the month, or a transfer after the last one, is not the market', async () => {
+    await months();
+    const value = (date: string, balance: number) => ({ id: balanceId('isa', date, balance, 'statement'), accountId: 'isa', date, balance, currency: 'GBP', kind: 'statement' as const, source: {}, createdAt: stamp });
+    // A valuation at July's end and none in August: August's market is not known.
+    await store.addBalances([value('2026-07-31', 10_000)], 'b');
+    await store.addTransactions([tx('bank', '2026-08-05', -500, 'TO ISA', { category: 'investment-transfer', categorisedBy: 'transfer', counterpartyAccountId: 'isa' })], 't');
+    expect(new Analytics(store).month('2026-08').worth.split).toMatchObject({ market: 0, marketAccounts: [] });
+    // A valuation on 10 August, and £500 more sent on the 25th, after it: the market is the £150 between the valuations.
+    await store.addBalances([value('2026-08-10', 10_650)], 'b');
+    await store.addTransactions([tx('bank', '2026-08-25', -500, 'TO ISA', { category: 'investment-transfer', categorisedBy: 'transfer', counterpartyAccountId: 'isa' })], 't');
+    expect(new Analytics(store).month('2026-08').worth.split).toMatchObject({ market: 150, marketAccounts: ['isa'] });
+  });
+
+  it('a transfer on both sides with no link counts once; a payment naming the account that is spending is not paid in', async () => {
+    await months();
+    const value = (date: string, balance: number) => ({ id: balanceId('isa', date, balance, 'statement'), accountId: 'isa', date, balance, currency: 'GBP', kind: 'statement' as const, source: {}, createdAt: stamp });
+    await store.addBalances([value('2026-07-31', 10_000), value('2026-08-31', 10_700)], 'b');
+    await store.addTransactions(
+      [
+        tx('bank', '2026-08-05', -500, 'TO ISA', { category: 'investment-transfer', categorisedBy: 'transfer', counterpartyAccountId: 'isa' }),
+        tx('isa', '2026-08-11', 500, 'SUBSCRIPTION', { category: 'contribution', categorisedBy: 'builtin' }),
+        tx('bank', '2026-08-12', -11.99, 'EXAMPLE INVEST FEE', { category: 'groceries', categorisedBy: 'user', counterpartyAccountId: 'isa' }),
+      ],
+      't',
+    );
+    expect(new Analytics(store).month('2026-08').worth.split.market).toBe(200);
+  });
+
+  it('money from outside counts into a value resting on a valuation from another time', async () => {
+    await months();
+    await store.setAccounts([...store.accounts, acct('pension', 'sipp')]);
+    await store.addBalances([{ id: balanceId('pension', '2026-01-31', 5_000, 'statement'), accountId: 'pension', date: '2026-01-31', balance: 5_000, currency: 'GBP', kind: 'statement', source: {}, createdAt: stamp }], 'b');
+    await store.addTransactions([tx('pension', '2026-08-28', 300, 'EMPLOYER CONTRIBUTION', { category: 'employer-contribution', categorisedBy: 'user' })], 't');
+    const s = new Analytics(store).month('2026-08').worth.split;
+    expect(s).toMatchObject({ fromOutside: 300, marketAccounts: [] });
+  });
+
   it('with only cash accounts and transfers between them, the change is all left over', async () => {
     const categories = [undefined, 'groceries', 'salary', 'interest', 'refunds', 'gifts-received'];
     await fc.assert(

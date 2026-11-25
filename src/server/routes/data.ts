@@ -64,6 +64,7 @@ import { accountSummary } from '../analytics/estate';
 import { paidIn } from '../analytics/investments';
 import { handoverOf } from '../analytics/handover';
 import { categoriseQueue, payeeRuleMatch } from '../analytics/queue';
+import { parseTaxYear } from '../../shared/uk';
 
 const NewAccountBody = z.object({
   name: z.string().min(1).max(120),
@@ -1164,7 +1165,12 @@ export function dataRoutes(ctx: AppContext): Hono {
   app.put('/self-assessment/status', async (c) => {
     const body = await readJson(
       c,
-      z.object({ taxYear: z.string().regex(/^\d{4}\/\d{2}$/), status: z.enum(SA_STATUSES).nullable().optional(), note: z.string().max(300).optional(), sendsReturns: z.boolean().optional() }),
+      z.object({
+        taxYear: z.string().refine((y) => parseTaxYear(y)?.label === y, 'A tax year such as 2025/26'),
+        status: z.enum(SA_STATUSES).nullable().optional(),
+        note: z.string().max(300).optional(),
+        sendsReturns: z.boolean().optional(),
+      }),
     );
     const current = store.profile.selfAssessment ?? {};
     const years = { ...(current.years ?? {}) };

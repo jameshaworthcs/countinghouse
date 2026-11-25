@@ -66,7 +66,9 @@ const LOAN_CHARGES = new Set(['interest-charges', 'bank-fees']);
 /** Where money moved, as a sentence names it ("moved to savings £300, to the Lifetime ISA £333"). */
 const MOVED_TO: Record<string, string> = { savings: 'savings', isa: 'ISAs', lisa: 'the Lifetime ISA', pensions: 'pensions', investments: 'investments', cards: 'credit cards', loans: 'loans', unknown: 'accounts the app doesn’t know' };
 
-/** Where money moved to another account of yours lands, by that account's type (undefined: another current account). */
+/** What a value at market rests on (balances.ts). */
+type Basis = NonNullable<ReturnType<BalanceEngine['balanceOn']>>['basis'];
+
 /** Money into your accounts from outside that is neither income nor your own: an employer's pension payment, tax relief, a LISA bonus. */
 const FROM_OUTSIDE = new Set(['employer-contribution', 'tax-relief', 'government-bonus']);
 
@@ -78,6 +80,7 @@ export function runwayOf(accessible: number, typical: number | undefined): Month
   return { accessibleCash: accessible, typicalSpending: typical ?? null, months: typical !== undefined && typical > 0 ? Math.round((accessible / typical) * 10) / 10 : null };
 }
 
+/** Where money moved to another account of yours lands, by that account's type (undefined: another current account). */
 function movedGroup(a: Account | undefined): string | undefined {
   if (!a) return 'unknown';
   if (a.type === 'credit_card') return 'cards';
@@ -461,20 +464,26 @@ export class MonthContext {
   }
 
   /**
-   * Where the month's money went (§18, "Where it went"): left over plus borrowed comes to the change
-   * in your current accounts, savings and cards, plus what moved into investments, onto loans and to
-   * accounts the app doesn't know. Worked out from the rows on your cash accounts and cards: each
-   * part of one that is not income or spending moved money somewhere. What no row places is shown,
-   * so the items always add up.
-   */
-  /**
    * The month's change in worth, split four ways (FORMULAS.md §18, "Worth split"): left over
    * (income less spending), money from outside (employer contributions, tax relief, government
    * bonuses), market movement on values at market that are the month's, and the rest. The rest is
    * whatever the first three do not explain, so the four add up to the change to the penny.
    */
   private worthSplit(from: ISODate, to: ISODate, netMinor: number, change: number, accounts: MonthAccountValue[]): MonthWorthSplit {
+    const settings = this.store.settings;
+    const startDay = addDays(from, -1);
     const inMonth = (d: string) => d >= from && d <= to;
+    // The month's market only when both ends rest on a valuation of their own: at the end, one inside
+    // the month; at the start, one at most `valuationDays` before it; neither worked back from a later
+    // one nor shared out between two. A value from the holdings' prices on the day counts.
+    const fresh = (b: Basis | undefined, end: boolean) => {
+      if (!b) return false;
+      if (b.prices) return true;
+      if (b.after || b.to !== undefined) return false;
+      return end ? inMonth(b.date) : diffDays(b.date, startDay) <= MONTH_RULES.valuationDays;
+    };
+    const byCounterparty = new Map<string, Transaction[]>();
+    for (const t of this.store.transactions()) if (t.counterpartyAccountId && t.counterpartyAccountId !== t.accountId) (byCounterparty.get(t.counterpartyAccountId) ?? byCounterparty.set(t.counterpartyAccountId, []).get(t.counterpartyAccountId)!).push(t);
     let outside = 0;
     let market = 0;
     let estimated = false;
@@ -482,36 +491,46 @@ export class MonthContext {
     for (const v of accounts) {
       const a = this.accounts.get(v.accountId);
       if (!a) continue;
+      const fx = fxRate(a.currency, settings);
+      if (fx === null) continue;
+      const gbp = (amount: number) => Math.round(toMinor(amount) * fx);
       if (balanceModeOf(a) !== 'market') {
-        for (const t of this.store.transactions(a.id)) if (inMonth(t.date) && t.category && FROM_OUTSIDE.has(t.category)) outside += toMinor(t.amount);
+        for (const t of this.store.transactions(a.id)) if (inMonth(t.date) && t.category && FROM_OUTSIDE.has(t.category)) outside += gbp(t.amount);
         continue;
       }
-      // A value resting on a valuation from another time says nothing of the month's market.
-      if (v.start === null || v.end === null || v.oldValuation) continue;
-      const fx = fxRate(a.currency, this.store.settings);
-      if (fx === null) continue;
+      const rows = this.store.transactions(a.id);
+      const byId = new Map(rows.map((t) => [t.id, t]));
+      const all = this.engine.flowsOf(a.id);
       let own = 0;
       let fromOutside = 0;
-      const rows = this.store.transactions(a.id);
-      const category = new Map(rows.map((t) => [t.id, t.category]));
-      for (const f of this.engine.flowsOf(a.id)) {
+      for (const f of all) {
         if (!inMonth(f.date)) continue;
-        const minor = Math.round(toMinor(f.amount) * fx);
-        const c = category.get(f.id);
-        if (c && FROM_OUTSIDE.has(c)) fromOutside += minor;
-        else own += minor;
+        const c = byId.get(f.id)?.category;
+        if (c && FROM_OUTSIDE.has(c)) fromOutside += gbp(f.amount);
+        else own += gbp(f.amount);
       }
-      // What your other accounts sent it, by their rows naming it, when it has no row of its own for
-      // the same transfer (an account valued from screenshots, or one whose statements stop short).
-      const groups = new Set(rows.flatMap((t) => (t.transferGroup ? [t.transferGroup] : [])));
-      for (const t of this.store.transactions()) {
-        if (t.counterpartyAccountId !== a.id || t.accountId === a.id || !inMonth(t.date)) continue;
-        if (t.transferGroup && groups.has(t.transferGroup)) continue;
-        own -= toMinor(t.amount);
-      }
+      // Money from outside counts whatever the value rests on.
       outside += fromOutside;
+      const s = this.engine.balanceOn(a.id, startDay);
+      const e = this.engine.balanceOn(a.id, to);
+      if (v.start === null || v.end === null || !s?.basis || !e?.basis || !fresh(s.basis, false) || !fresh(e.basis, true)) continue;
+      // What your other accounts sent it, by their rows naming it: a transfer, not income or spending,
+      // with no row of its own for it (linked, or the same amount within 10 days), between the two
+      // valuations (the engine moves a value on by its own rows, never by these).
+      const groups = new Set(rows.flatMap((t) => (t.transferGroup ? [t.transferGroup] : [])));
+      const unlinked = all.filter((f) => !byId.get(f.id)?.transferGroup);
+      for (const t of byCounterparty.get(a.id) ?? []) {
+        if (t.date <= s.basis.date || t.date > e.basis.date) continue;
+        if (t.transferGroup && groups.has(t.transferGroup)) continue;
+        const source = this.accounts.get(t.accountId);
+        if (classifyFlow(t, this.cats, source) !== 'excluded') continue;
+        if (unlinked.some((f) => toMinor(f.amount) === -toMinor(t.amount) && Math.abs(diffDays(f.date, t.date)) <= 10)) continue;
+        const sourceFx = source ? fxRate(source.currency, settings) : null;
+        if (sourceFx === null) continue;
+        own -= Math.round(toMinor(t.amount) * sourceFx);
+      }
       market += toMinor(v.end) - toMinor(v.start) - own - fromOutside;
-      if (v.estimated || v.basis?.prices) estimated = true;
+      if (s.estimated || e.estimated || s.basis.prices || e.basis.prices) estimated = true;
       counted.push(a.id);
     }
     return {
@@ -524,6 +543,13 @@ export class MonthContext {
     };
   }
 
+  /**
+   * Where the month's money went (§18, "Where it went"): left over plus borrowed comes to the change
+   * in your current accounts, savings and cards, plus what moved into investments, onto loans and to
+   * accounts the app doesn't know. Worked out from the rows on your cash accounts and cards: each
+   * part of one that is not income or spending moved money somewhere. What no row places is shown,
+   * so the items always add up.
+   */
   whereItWent(month: string): MonthWhereItWent {
     const { store, cats } = this;
     const from = `${month}-01`;
