@@ -426,3 +426,24 @@ describe('a period the document gives no rows for', () => {
     expect(draft.sections[0]).toMatchObject({ periodStart: '2026-08-01', periodEnd: '2026-08-31' });
   });
 });
+
+describe('a page of tax codes that does not say whether each is cumulative', () => {
+  it('keeps every code: cumulative unless marked week 1 / month 1, the mark taken off', () => {
+    const { extraction, warnings } = normaliseExtraction({
+      documentType: 'tax_document',
+      hmrc: [
+        { type: 'tax-code', employer: 'QUILLON SYSTEMS LTD', date: '2025-08-17', code: '1T', cumulative: null, taxYear: '2025/26' },
+        { type: 'tax-code', employer: 'ALDER CAFE LTD', date: '2025-04-06', code: 'BR', cumulative: null, taxYear: '2025/26' },
+        { type: 'tax-code', employer: 'BIRCH LTD', date: '2025-04-06', code: '1257L M1', cumulative: null, taxYear: '2025/26' },
+        { type: 'tax-code', employer: 'CEDAR LTD', date: '2025-04-06', code: '1257L', cumulative: false, taxYear: '2025/26' },
+      ],
+    });
+    expect(warnings.filter((w) => w.startsWith('HMRC record'))).toEqual([]);
+    expect(extraction.hmrc.map((r) => (r.type === 'tax-code' ? [r.code, r.cumulative] : null))).toEqual([
+      ['1T', true],
+      ['BR', true],
+      ['1257L', false],
+      ['1257L', false],
+    ]);
+  });
+});

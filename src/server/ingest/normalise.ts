@@ -131,6 +131,13 @@ function readEverything(fixed: Record<string, unknown>, original: Record<string,
       if (typeof kept.payeReference === 'string') kept.payeReference = payeReference(kept.payeReference);
       if (typeof kept.payrollNumber === 'string' && isNiNumber(kept.payrollNumber)) delete kept.payrollNumber;
       for (const k of ['qualifyingYears', 'yearsNeeded', 'assumesYears']) if (typeof kept[k] === 'number') kept[k] = Math.round(kept[k]);
+      // A tax code's page often does not say whether it is cumulative: a code is, unless it is marked
+      // week 1 / month 1 (W1, M1, X), which is then taken off the code.
+      if (raw.type === 'tax-code' && typeof kept.cumulative !== 'boolean' && typeof kept.code === 'string') {
+        const basis = /^(.*?)\s*(?:W1\/M1|W1|M1|X|NONCUM)$/i.exec(kept.code.trim());
+        if (basis?.[1]) kept.code = basis[1];
+        kept.cumulative = !basis?.[1];
+      }
       const record = ExtractedHmrcSchema.safeParse({ type: raw.type, ...kept });
       if (record.success) return [record.data];
       warnings.push(`HMRC record ${i + 1} (${String(raw.type)}) could not be kept: ${formatZodError(record.error)}`);
