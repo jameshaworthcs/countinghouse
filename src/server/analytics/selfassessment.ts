@@ -12,6 +12,7 @@ import { allowances, giftAid, pensionTotals, reliefAtSource } from './allowances
 import type { BalanceEngine } from './balances';
 import { employerYears, type PaySource } from './sources';
 import { jobStartedOn } from './pay';
+import { taxReturn } from './taxreturn';
 
 export const SA_DISCLAIMER =
   'This page gathers figures from your own data to help you fill in your Self Assessment return. It is not tax advice and it can be incomplete or wrong: bank data shows net pay, may miss interest paid into accounts you have not imported, and cannot know which donations were Gift Aided. Check every figure against your P60, P11D, bank interest statements, pension and dividend statements before you submit. You are responsible for your return.';
@@ -407,6 +408,7 @@ export function selfAssessment(store: Store, label?: string, engine?: BalanceEng
     ...(niYear ? { ni: { status: niYear.status, ...(niYear.voluntaryCost !== undefined ? { voluntaryCost: niYear.voluntaryCost } : {}), ...(niYear.payBy ? { payBy: niYear.payBy } : {}), ...(niYear.text ? { text: niYear.text } : {}), asOf: niYear.asOf } } : {}),
     checklist,
     mayNeedToFile,
+    taxReturn: taxReturn(store, ty.label, engine, now),
   };
 }
 

@@ -526,8 +526,114 @@ export interface SelfAssessmentResponse {
   /** The year on your National Insurance record, as HMRC's page last showed it. */
   ni?: { status: 'full' | 'not-full' | 'not-available' | 'other'; voluntaryCost?: number; payBy?: string; text?: string; asOf: string };
   checklist: { id: string; done: boolean; label: string; detail?: string }[];
+  /** The year's return box by box, for a year with forms in the catalogue (2025/26 on). */
+  taxReturn: TaxReturnView | null;
   /** Hints that you may need to file. `requiresNotice`: HMRC must be told by the year's notice date (dividends over the allowance, side income over the trading allowance), not a hint it usually sorts out itself. */
   mayNeedToFile: { reason: string; detail: string; requiresNotice: boolean }[];
+}
+
+/** Where one figure on the return came from: a document's figure, a transaction, an account, HMRC's record. */
+export interface ReturnTrace {
+  label: string;
+  amount?: number;
+  date?: string;
+  ref?: { type: 'figure' | 'transaction' | 'account' | 'hmrc' | 'payslip'; id: string; accountId?: string };
+}
+
+/**
+ * One box on the return (docs/FORMULAS.md §20). `state`: from the records; your figure; a nil (the
+ * records show none, or you confirmed none); missing (needed, not known); to check (the records' figure
+ * may be incomplete); blank (does not apply).
+ */
+export interface ReturnBoxView {
+  /** Its key in returns.json ("TR3:2", "SA102:job-oak:2"). */
+  key: string;
+  box: string;
+  /** The printed page, where it differs from its page's ("F 3"). */
+  page?: string;
+  /** The form's wording, verbatim. */
+  label: string;
+  kind: import('./saforms').SaBoxKind;
+  round?: 'down' | 'up' | 'pence';
+  value: number | string | boolean | null;
+  /** As you type it in online: pounds and pence (HMRC's calculation rounds income down itself), "X", "Yes" or "No". */
+  entered: string;
+  /** On the paper form, where it differs: whole pounds, income rounded down, expenses and tax paid up. */
+  paper?: string;
+  /** What the records give, when your figure replaces it. */
+  fromRecords?: number | string | boolean | null;
+  state: 'records' | 'yours' | 'nil' | 'missing' | 'check' | 'blank';
+  basis: string;
+  check?: string;
+  trace: ReturnTrace[];
+  notes: string[];
+  editable: boolean;
+  /** A nil is no answer here: the form needs a figure, a name or a Yes or No. */
+  nilRefused?: boolean;
+  /** Shown even when blank: a Yes/No the form says you must answer. */
+  always?: boolean;
+}
+
+export interface ReturnPageView {
+  id: string;
+  form: 'SA100' | 'SA102' | 'SA106' | 'SA108' | 'SA110';
+  page: string;
+  title: string;
+  /** Whose page, for one of several (the employer). */
+  instance?: string;
+  keyPrefix: string;
+  boxes: ReturnBoxView[];
+}
+
+/** A question the return turns on: answered by you, inferred from your records, or still open. */
+export interface ReturnQuestion {
+  key: string;
+  text: string;
+  help?: string;
+  /** For a question that is not yes or no. */
+  choices?: { value: string; label: string }[];
+  answer: number | string | boolean | null;
+  state: 'answered' | 'inferred' | 'unanswered';
+  inferred?: { answer: number | string | boolean | null; why: string };
+  note?: string;
+  /** What Counting House does when the answer is yes: works it out, takes your figures, or does not cover it. */
+  coverage: 'covered' | 'figures' | 'not-covered';
+  notCovered?: string;
+}
+
+export interface ReturnCheck {
+  label: string;
+  ok: boolean;
+  detail: string;
+}
+
+/** A tax year's return, box by box, with the liability worked out from it (docs/FORMULAS.md §20). */
+export interface TaxReturnView {
+  taxYear: { label: string; start: string; end: string; finished: boolean };
+  /** The forms the boxes are from: the year's own, or the latest before it. */
+  forms: { taxYear: string; edition: string; own: boolean };
+  questions: ReturnQuestion[];
+  pages: ReturnPageView[];
+  calculation: import('./taxcalc').TaxCalcResult;
+  owed: {
+    liability: number;
+    deductedAtSource: number;
+    /** The year's balance once tax taken off (and payments on account made) are counted: negative is a refund. */
+    balance: number;
+    paymentsOnAccountMade: number;
+    paymentsOnAccountWhy: string;
+    withoutCoding: { dueJanuary: number; dueJuly: number; poa: import('./taxcalc').TaxCalcResult['paymentsOnAccount'] };
+    /** Paying the balance through next year's tax code, when it is under the limit: nothing in January for it, and no payments on account. */
+    withCoding: { coded: number; dueJanuary: number; dueJuly: number; by: string } | null;
+    codingOutLimit: number;
+    januaryDue: string;
+    julyDue: string;
+    ownerStatus: SaStatus | null;
+  };
+  /** Ready to check and enter: nothing missing, unanswered, to check, or outside what Counting House prepares. */
+  readiness: { ready: boolean; blockers: { key: string; kind: 'question' | 'missing' | 'check' | 'not-covered'; text: string }[] };
+  /** The return against the rest of the app. */
+  checks: ReturnCheck[];
 }
 
 export interface InvestmentAccountSummary {

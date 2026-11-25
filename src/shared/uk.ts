@@ -116,6 +116,28 @@ export interface TaxYearParams {
    * not modelled (2022/23 and 2023/24 changed rates part-way through).
    */
   employeeNi: { primaryThresholdMonthly: number; upperEarningsLimitMonthly: number; mainRate: number; upperRate: number } | null;
+  /**
+   * Scottish income tax on non-savings income (pay, pensions, profits): each band's rate and the
+   * taxable income (after the personal allowance) it runs to, the last open-ended. Null for years not
+   * modelled. Savings and dividends use the UK bands everywhere.
+   */
+  scottishBands: { name: string; rate: number; upTo: number | null }[] | null;
+  /** Marriage Allowance: the part of the personal allowance a spouse or civil partner can transfer. */
+  marriageAllowance: number;
+  /**
+   * Income-contingent student loan repayments through Self Assessment: 9% (6% for a Postgraduate
+   * Loan) of income over each plan's yearly threshold. Unearned income counts in full once it is over
+   * `unearnedIncomeLimit`. Null for years not modelled.
+   */
+  studentLoan: { plan1: number; plan2: number; plan4: number; plan5: number | null; postgraduate: number; rate: number; postgraduateRate: number; unearnedIncomeLimit: number } | null;
+  /** Class 4 National Insurance on self-employed profits (null: years not modelled). */
+  class4: { lowerProfitsLimit: number; upperProfitsLimit: number; mainRate: number; upperRate: number } | null;
+  /**
+   * Capital gains tax on gains (other than residential property and carried interest) within the
+   * basic rate band income leaves, and above it. Null for 2024/25, whose rates changed on 30 October
+   * 2024 (disposals before it at 10% and 20%, after it at 18% and 24%): not worked out here.
+   */
+  cgtRates: { lower: number; higher: number } | null;
 }
 
 type ParamsRow = { from: number } & Partial<TaxYearParams>;
@@ -162,6 +184,11 @@ export const TAX_YEAR_PARAMS: ParamsRow[] = [
     dividendsReturnThreshold: 10_000,
     statePensionFullWeekly: 155.65,
     employeeNi: null,
+    scottishBands: null,
+    marriageAllowance: 1_100,
+    studentLoan: null,
+    class4: null,
+    cgtRates: { lower: 0.1, higher: 0.2 },
   },
   {
     from: 2017,
@@ -211,11 +238,47 @@ export const TAX_YEAR_PARAMS: ParamsRow[] = [
     statePensionFullWeekly: 221.2,
     // Employee NI 8% from 6 April 2024; thresholds frozen (gov.uk "Rates and thresholds for employers").
     employeeNi: { primaryThresholdMonthly: 1_048, upperEarningsLimitMonthly: 4_189, mainRate: 0.08, upperRate: 0.02 },
+    marriageAllowance: 1_260,
+    // Scottish rates 2024/25 (Scottish Government; gov.uk "Scottish Income Tax"): taxable income bands.
+    scottishBands: [
+      { name: 'starter', rate: 0.19, upTo: 2_306 },
+      { name: 'basic', rate: 0.2, upTo: 13_991 },
+      { name: 'intermediate', rate: 0.21, upTo: 31_092 },
+      { name: 'higher', rate: 0.42, upTo: 62_430 },
+      { name: 'advanced', rate: 0.45, upTo: 125_140 },
+      { name: 'top', rate: 0.48, upTo: null },
+    ],
+    studentLoan: { plan1: 24_990, plan2: 27_295, plan4: 31_395, plan5: null, postgraduate: 21_000, rate: 0.09, postgraduateRate: 0.06, unearnedIncomeLimit: 2_000 },
+    // Class 4 main rate 6% from 6 April 2024; Class 2 no longer compulsory.
+    class4: { lowerProfitsLimit: 12_570, upperProfitsLimit: 50_270, mainRate: 0.06, upperRate: 0.02 },
+    cgtRates: null,
   },
-  { from: 2025, statePensionFullWeekly: 230.25 },
+  {
+    from: 2025,
+    statePensionFullWeekly: 230.25,
+    scottishBands: [
+      { name: 'starter', rate: 0.19, upTo: 2_827 },
+      { name: 'basic', rate: 0.2, upTo: 14_921 },
+      { name: 'intermediate', rate: 0.21, upTo: 31_092 },
+      { name: 'higher', rate: 0.42, upTo: 62_430 },
+      { name: 'advanced', rate: 0.45, upTo: 125_140 },
+      { name: 'top', rate: 0.48, upTo: null },
+    ],
+    // Plan 5 repayments can first be due from April 2026, so none through the 2025/26 return.
+    studentLoan: { plan1: 26_065, plan2: 28_470, plan4: 32_745, plan5: null, postgraduate: 21_000, rate: 0.09, postgraduateRate: 0.06, unearnedIncomeLimit: 2_000 },
+    // From 6 April 2025 the 18% and 24% rates apply to all gains (Autumn Budget 2024).
+    cgtRates: { lower: 0.18, higher: 0.24 },
+  },
   // Budget 2025: dividend ordinary and upper rates +2pp from April 2026 (additional unchanged).
   // State Pension up 4.8% with earnings (the triple lock).
-  { from: 2026, dividendTaxRates: { basic: 0.1075, higher: 0.3575, additional: 0.3935 }, statePensionFullWeekly: 241.3 },
+  {
+    from: 2026,
+    dividendTaxRates: { basic: 0.1075, higher: 0.3575, additional: 0.3935 },
+    statePensionFullWeekly: 241.3,
+    // Student loan thresholds 2026/27 (GOV.UK, rates and thresholds for employers 2026 to 2027); Plan 5
+    // repayments can be due from April 2026.
+    studentLoan: { plan1: 26_900, plan2: 29_385, plan4: 33_795, plan5: 25_000, postgraduate: 21_000, rate: 0.09, postgraduateRate: 0.06, unearnedIncomeLimit: 2_000 },
+  },
   // Savings income tax rates from 6 April 2027: Budget 2026 set 24%, 44%, 49% (Budget 2025 had set
   // 22%, 42%, 47%). Budget 2025's £12,000 under-65 cash-ISA limit from 2027/28 was dropped in
   // Budget 2026: the cash limit stays the full £20,000, so there is no separate cash cap.
@@ -476,6 +539,13 @@ export function saDeadlines(ty: TaxYear): SaDeadline[] {
     { date: `${y + 2}-07-31`, kind: 'second-payment-on-account', what: 'The second payment on account, if you make them' },
   ];
 }
+
+/** Payments on account are due only when the income tax and Class 4 left after tax taken off is at least this (TMA 1970 s.59A; HMRC's c13.11)… */
+export const paymentsOnAccountThreshold = 1000;
+/** …and tax taken off covers no more than this share of the year's (HMRC's c13.13: the rest at least 20%). */
+export const paymentsOnAccountAtSourceShare = 0.8;
+/** Relief-at-source pension contributions get relief up to the higher of this and relevant UK earnings (FA 2004 s.190). */
+export const reliefAtSourceMinimum = 3600;
 
 /** A Self Assessment bill under this can be collected through your tax code (GOV.UK, "Pay your Self Assessment tax bill: through your tax code"). */
 export const codingOutLimit = 3000;

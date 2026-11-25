@@ -174,10 +174,44 @@ Used only to estimate the deductions on pay that is owed and not yet paid ([FORM
 
 ## Self Assessment
 
-The Self Assessment prep page maps your data to SA100/SA102/SA103/SA108 sections. Box numbers
-change between years, so the page names sections, not boxes. Check-if-you-need-to-file hints are
+For 2025/26 on, the Self Assessment prep page is the return box by box (FORMULAS.md §20), on the
+forms of `src/shared/saforms.ts`: the 2026 editions of the SA100, SA102, SA106, SA108 and SA110, for
+2025–26. Box numbers and wording change between years, so each year's forms are a catalogue of
+their own, worded as the form prints them, never as the notes do. HMRC's notes have errors the
+forms do not: the SA150 notes say box 5 for small foreign dividends (the form: box 6), print last
+year's split capital gains rates in their rough guide, and show an SA102 box 8.1 the form does not
+have; the SA110 notes give the 2024/25 Plan 4 threshold (£31,395) where HMRC's calculation uses
+£32,745. Earlier years keep the section-by-section prep. Check-if-you-need-to-file hints are
 only hints; see [gov.uk/check-if-you-need-tax-return](https://www.gov.uk/check-if-you-need-tax-return).
 **Everything on that page must be checked by you against your own documents before you submit.**
+
+**New on the 2025–26 return** (the Income Tax (Additional Information) Regulations, SI 2025/84):
+SA102 box 6 (director) and box 7 (close company) must be answered Yes or No; a director of a close
+company gives its name, registration number, the dividends received from it (0 if none; they are
+in TR 3 box 4 too) and the highest percentage shareholding in the year (boxes 7.1–7.4).
+Self-employment pages gain start and end date questions. TR 3 box 6 takes foreign dividends only up
+to £500 and only when total dividends are within it; above that they go on the Foreign page, where
+Foreign Tax Credit Relief is claimed.
+
+**The calculation** (`src/shared/taxcalc.ts`, the year's rows in `uk.ts`): HMRC's online
+calculation specification for 2025–26 ("Calculate Tax and NIC", v1.5.1a, and its payments on
+account stage) sets the rounding: income boxes down to whole pounds, each band's tax down to the
+penny, the High Income Child Benefit Charge and student loan down to whole pounds, the odd penny of
+payments on account on the second. 2025/26 figures:
+
+- Scottish bands (taxable income): starter 19% to £2,827, basic 20% to £14,921, intermediate 21% to
+  £31,092, higher 42% to £62,430, advanced 45% to £125,140, top 48%. The Personal Savings Allowance
+  turns on the UK limits for everyone.
+- Marriage Allowance £1,260 (a 20% reducer for the one receiving it).
+- Student loans through Self Assessment: Plan 1 £26,065, Plan 2 £28,470, Plan 4 £32,745 at 9%;
+  Postgraduate Loan £21,000 at 6%; unearned income counts in full once over £2,000. No Plan 5
+  repayments are due through the 2025/26 return (they start from April 2026).
+- Class 4 NI: 6% on profits from £12,570 to £50,270, 2% above.
+- Capital gains tax: 18% and 24% on all gains from 6 April 2025 (`cgtRates`); 2024/25's rates
+  changed on 30 October 2024, so its tax is not worked out here.
+- Payments on account: none if the income tax and Class 4 left after tax taken off is under
+  £1,000, or under 20% of the year's; capital gains tax and student loans never count. A balance
+  under £3,000 coded out leaves none.
 
 **Deadlines for a tax year's return** (`saDeadlines` in `src/shared/uk.ts`), the year ending on 5
 April:
@@ -210,6 +244,14 @@ Overpayment relief can be claimed for 4 years after the year ends; the app does 
 - Within the dividend allowance there is nothing to report.
 
 ## Sources
+
+Checked 25 November 2026 (the 2025–26 return):
+
+- HMRC, [SA100 Tax Return 2026](https://assets.publishing.service.gov.uk/media/69c14d07cfa346b9d4704a8d/SA100-2026.pdf), the SA150 notes, [SA102 Employment 2026 and its notes](https://www.gov.uk/government/publications/self-assessment-employment-sa102), [SA106 Foreign 2026 notes](https://assets.publishing.service.gov.uk/media/69bbd6144c478213a823ce14/SA106_Notes_2026.pdf), [SA108 Capital Gains 2026 notes](https://assets.publishing.service.gov.uk/media/6a02e5df4fb0713aa63ea77c/SA108-Notes-2026.pdf), [SA110 Tax calculation summary 2026](https://assets.publishing.service.gov.uk/media/69c4fc1123fcbcd838a6f6e8/SA110-2026.pdf) and [its notes](https://assets.publishing.service.gov.uk/media/69c4fc274a06660f0854422a/SA110-Notes-2026.pdf)
+- HMRC, [Calculate Tax and NIC, MTR v1.5.1a](https://assets.publishing.service.gov.uk/media/69c26e8dcfa346b9d4704b3f/Calculate_Tax_and_NIC_MTR_version_1.5.1a.odt) and [Payments on Account, stage 13](https://assets.publishing.service.gov.uk/media/699315137149b335a315b487/Payments_on_Account__Stage_13__Tax_and_NIC_calculation_version_1.0.0a.odt) (the online calculation, 2025–26)
+- HMRC, [HS263 Relief for foreign tax paid 2026](https://www.gov.uk/government/publications/calculating-foreign-tax-credit-relief-on-income-hs263-self-assessment-helpsheet/relief-for-foreign-tax-paid-2026-hs263)
+- GOV.UK, [Scottish Income Tax 2025 to 2026](https://www.gov.uk/scottish-income-tax/2025-to-2026-tax-year), [Previous annual repayment thresholds](https://www.gov.uk/guidance/previous-annual-repayment-thresholds), [Tell HMRC about a student loan in your tax return](https://www.gov.uk/guidance/tell-hmrc-about-a-student-loan-in-your-tax-return), [Rates and allowances: National Insurance contributions](https://www.gov.uk/government/publications/rates-and-allowances-national-insurance-contributions/rates-and-allowances-national-insurance-contributions), [Capital Gains Tax rates and allowances](https://www.gov.uk/guidance/capital-gains-tax-rates-and-allowances), [Adjusted net income](https://www.gov.uk/guidance/adjusted-net-income)
+- legislation.gov.uk, [ITA 2007 s.25](https://www.legislation.gov.uk/ukpga/2007/3/section/25) (allowances set where they save most tax), [TMA 1970 s.59A](https://www.legislation.gov.uk/ukpga/1970/9/section/59A) (payments on account)
 
 Checked 3 October 2026:
 

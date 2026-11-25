@@ -56,8 +56,25 @@ export function analyticsRoutes(ctx: AppContext): Hono {
     const sa = a.selfAssessment(c.req.query('taxYear'));
     if (c.req.query('format') !== 'csv') return c.json(sa);
     const esc = csvCell;
-    const lines = ['section,item,where,amount,status,basis,notes'];
-    for (const s of sa.sections) for (const i of s.items) lines.push([s.title, i.label, i.where, i.amount?.toFixed(2) ?? '', i.status, i.basis, i.notes.join(' ')].map(esc).join(','));
+    const r = sa.taxReturn;
+    const lines: string[] = [];
+    if (r) {
+      // The return box by box: what to enter online, on paper, and where it came from.
+      lines.push('form,page,for,box,wording,enter online,on paper,state,basis');
+      for (const p of r.pages) for (const b of p.boxes) if (b.state !== 'blank' || b.always) lines.push([p.form, p.page, p.instance ?? '', b.box, b.label, b.entered, b.paper ?? b.entered, b.state, b.basis].map(esc).join(','));
+      const c = r.calculation;
+      lines.push('', 'step,amount,rate,tax');
+      lines.push(['Total income', c.totalIncome, '', ''].map(String).map(esc).join(','));
+      lines.push(['Personal allowance', -c.personalAllowance, '', ''].map(String).map(esc).join(','));
+      for (const l of [...c.lines, ...c.reducers, ...c.class4Lines, ...(c.capitalGains?.lines ?? []), ...(c.studentLoan?.lines ?? [])]) lines.push([l.label, l.amount, l.rate ?? '', l.tax ?? ''].map(String).map(esc).join(','));
+      lines.push(['Total tax for the year', '', '', c.totalLiability].map(String).map(esc).join(','));
+      lines.push(['Tax taken off at source', '', '', -c.deductedAtSource].map(String).map(esc).join(','));
+      lines.push(['Left to pay for the year', '', '', c.balancing].map(String).map(esc).join(','));
+      if (!r.readiness.ready) lines.push('', esc(`Not ready: ${r.readiness.blockers.map((b) => b.text).join('; ')}`));
+    } else {
+      lines.push('section,item,where,amount,status,basis,notes');
+      for (const s of sa.sections) for (const i of s.items) lines.push([s.title, i.label, i.where, i.amount?.toFixed(2) ?? '', i.status, i.basis, i.notes.join(' ')].map(esc).join(','));
+    }
     lines.push('', esc(sa.disclaimer));
     return new Response(lines.join('\n') + '\n', {
       headers: { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="self-assessment-${sa.taxYear.label.replace('/', '-')}.csv"` },

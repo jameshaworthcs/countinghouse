@@ -1582,3 +1582,116 @@ and money in are §14's, through `flows`; every sum is in integer pence.
 - **A figure the app computed:** one whose every number is, to the penny, a number in the result of
   the step it names (any step when it names none). An answer with any other figure has its
   confidence set to low, and says so.
+
+## 20. A Self Assessment return, box by box (`analytics/taxreturn.ts`, `shared/taxcalc.ts`)
+
+For a tax year whose forms are in the catalogue (`shared/saforms.ts`: the 2025–26 forms; a later
+year uses the latest forms, saying so), Tax → Self Assessment prep is the return itself: each box
+with HMRC's wording, the figure to enter, where it came from, and the tax worked out from the boxes.
+Earlier years keep the section-by-section prep (§11).
+
+**Each box** is, in order:
+
+1. your entry (`returns.json`, keyed `TR3:2`, `SA102:job-oak:2`, `q:gift-aid`): a value, or a nil
+   you confirmed (null);
+2. else the records' figure: the same working as the rest of the app (pay and tax by job from the
+   one source that counts, §11; interest and dividends as on Tax → Allowances), with a trace of
+   every figure, transaction or HMRC record it adds up, and **to check** where the records may be
+   short (a figure so far, days no document covers);
+3. else **missing** when the box is needed (pay, tax for a job, a director's Yes or No, the close
+   company boxes), or blank when it does not apply.
+
+A nil the records show for certain (no student loan due) is a nil; a gap is never one. Where the
+form needs a figure or an answer (pay, a director's Yes or No, the close company's name, number and
+shareholding), a nil is refused and the box stays missing; a nil for the close company's dividends
+is entered as 0, and for a PAYE reference as "None". Online the figure is pounds and pence; on paper the form's rounding: income
+down, expenses and tax paid up, whole pounds.
+
+**Questions** decide which boxes apply: answered by you, suggested from the records (shown as a
+suggestion, with why), or open. A Yes that opens boxes needs their figures (pensions or benefits,
+other income, Gift Aid, Child Benefit, the coding notice amounts) before the return is ready, and
+the jobs listed must be confirmed as all of them. A Yes to something Counting House does not prepare (self-employment,
+property, partnerships, trusts, residence, the Additional information pages, crypto, a directorship
+with no pay, foreign income other than platform dividends, the less common boxes, the Capital Gains
+page's computations and special rates) is shown as outside its coverage.
+
+**Pages**:
+
+- TR 2's page questions follow from the answers and the pages (Q5 Foreign when the foreign
+  dividends need the Foreign page; Q7 when proceeds are over £50,000, gains over the annual exempt
+  amount, or a loss is to be claimed).
+- SA102, one per job: pay, tax, PAYE reference, name; box 6 (director) must be answered for every
+  job; for a director of a close company, boxes 7.1–7.4 from the company in the records: its name
+  and number, its dividends to you in the year (0 when none: the form says to enter it; they are
+  in TR 3 box 4 too), and your shares as a share of all its shares (check: the form wants it by
+  nominal value, at its highest in the year).
+- TR 3: box 2, interest outside ISAs and pensions; box 4, UK dividends.
+- **Foreign dividends on a platform**: each payment carrying an ISIN is split: GB ISINs are UK
+  dividends (box 4); the rest go by country, the dividend being the credit plus the withholding tax
+  it records (converted at the payment's own exchange rate). Used only when the payments add up to
+  the platform's statement for the year within 5p (or, with no statement, every dividend payment
+  carries an ISIN and they make up the account's dividends); otherwise they stay in box 4, marked to
+  check. With all dividends within £500 they go in TR 3 boxes 6 and 7 (after the foreign tax, which
+  is then not credited); above that on the Foreign page (SA106), one row per country, claiming
+  Foreign Tax Credit Relief where tax was taken off (column F = column B; without the claim, B less
+  C). Column C over 15% of B is marked to check (most treaties credit no more). Column F and box 6
+  follow the final B, C and E.
+- TR 4 box 1 (relief at source, gross), box 5 (Gift Aid, when you say you gave under it).
+- TR 5: the student loan box when repayments were due before 6 April; Plan 5 has none for 2025/26.
+- TR 6 box 1 (tax refunded in the year): asked, never assumed from a payment from HMRC, since a
+  refund in the summer is usually the year before's.
+- SA110 boxes 7–9 (underpaid tax in a tax code), when you say so.
+
+**The calculation** (`computeTax`) reads the boxes as HMRC's online calculation does (HMRC's
+"Calculate Tax and NIC" specification, 2025–26):
+
+- income rounded down to whole pounds in HMRC's groups: each job's pay and tips, its benefits, its
+  expenses rounded up (and no more than its pay and benefits); pensions and benefits together; other
+  income net of its expenses; interest and dividends box by box; gains down and losses up; Gift Aid
+  net up, grossed up, up again; tax taken off in pounds and pence;
+- non-savings income, then savings, then dividends; the personal allowance less £1 for every £2 of
+  adjusted net income over £100,000 (adjusted net income: total income less gross relief-at-source
+  contributions and Gift Aid), set against non-savings income first and then split between savings
+  and dividends in whichever way leaves the least tax, using all of it (searched across all three
+  kinds, at the points where a rate changes: moving some off pay can keep interest within the
+  savings allowance);
+- the starting rate for savings (£5,000 less taxable non-savings income), the Personal Savings
+  Allowance (£1,000; £500 once taxable income is over the basic rate limit, nil over the higher
+  rate limit, for Scottish taxpayers too) and the dividend allowance, each at 0% but using up the
+  band;
+- bands widened by gross relief-at-source contributions (counted up to the higher of £3,600 and
+  relevant earnings) and Gift Aid (a Scottish taxpayer's every band but the starter); each band's
+  tax to the penny, rounded down;
+- reducers: Marriage Allowance received (20% of it), and a transfer, apply only while no income is
+  taxed above the basic rate (a Scottish taxpayer: above the intermediate rate), interest within the
+  savings allowance apart, and no dividend allowance sits above the basic rate limit; then Foreign
+  Tax Credit Relief source by source (HS263): each the lower of its foreign tax and the UK tax on it,
+  taken off the top of what is still counted (income tax after reducers, with the HICBC), in the
+  order that gives most;
+- the charge for Gift Aid's basic rate tax that income tax and capital gains tax do not cover;
+- the High Income Child Benefit Charge: whole percentage points of adjusted net income over
+  £60,000 (one per £200) times 1% of the benefit in whole pounds, at most the benefit, rounded down;
+- Class 4 NI; capital gains tax (the year's losses, the annual exempt amount, then losses brought
+  forward down to it; 18% within the basic rate band taxable income leaves, 24% above); student loan
+  (9% of earned income, plus all unearned income once it is over £2,000, less gross relief-at-source
+  contributions, over the plan's threshold, whole pounds down, less what employers took off). The
+loan's earned income is its own: pay, tips and P11D boxes 12 and 16 less payrolled benefits (box
+1.1), less expenses, with pensions; Jobseeker's Allowance and other income count as unearned.
+
+**What is left to pay**: the liability, plus earlier years' tax the code collected (SA110 box 7),
+less tax taken off at source (PAYE less any outstanding debt it collected, box 9, at most the
+PAYE), less this year's tax already in next year's code (box 8), plus any tax HMRC refunded in the
+year, less payments on account made (none when the year before had no return; otherwise yours). Payments on account for the next year are
+half each of the income tax and Class 4 left after tax taken off (not capital gains tax or student
+loans), the odd penny on the second, unless that is under £1,000 or under 20% of the year's income
+tax and Class 4 (compared exactly). January's cash is the balance plus the first instalment, an
+overpaid balance set against it. A balance over nil and under £3,000 can be collected through the
+tax code after next when there is pay or a pension through PAYE, the return goes online by 30
+December and TR 6 box 2 is blank: then it leaves the January payment and the instalments' base (HMRC
+still decides whether the code can take it). The page shows both ways.
+
+**Checks**: the return's pay against Tax → Pay, its interest and dividends against Tax →
+Allowances, its tax band against Allowances' estimate, its tax on pay against HMRC's record of your
+payments, and its balance against HMRC's working out of the year, each where there is one.
+
+**Ready** when nothing is missing, to check, open, or outside what Counting House prepares.

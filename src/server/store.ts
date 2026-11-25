@@ -25,6 +25,7 @@ import {
   AgreementSchema,
   CoverageConfirmationSchema,
   PersonSchema,
+  TaxReturnSchema,
   HmrcRecordSchema,
   PayslipRecordSchema,
   TermsSchema,
@@ -58,6 +59,7 @@ import {
   type Agreement,
   type CoverageConfirmation,
   type Person,
+  type TaxReturn,
   type HmrcRecord,
   type PayslipRecord,
   type Terms,
@@ -162,6 +164,7 @@ const ARRAY_FILES = {
   agreements: { file: 'agreements.json', key: 'agreements', schema: AgreementSchema },
   coverage: { file: 'coverage.json', key: 'confirmations', schema: CoverageConfirmationSchema },
   people: { file: 'people.json', key: 'people', schema: PersonSchema },
+  returns: { file: 'returns.json', key: 'returns', schema: TaxReturnSchema },
 } as const;
 
 /** Single-file JSONL collections: one record per line. */
@@ -199,6 +202,8 @@ interface State {
   coverage: CoverageConfirmation[];
   /** People you send money to or get money from (people.json). */
   people: Person[];
+  /** What you told the app for each tax year's Self Assessment return (returns.json). */
+  returns: TaxReturn[];
   /** Append-only: every version of every assumption, in file order. */
   assumptions: Assumption[];
   /** Append-only: every research record, in file order. */
@@ -238,6 +243,7 @@ function emptyState(): State {
     agreements: [],
     coverage: [],
     people: [],
+    returns: [],
     assumptions: [],
     research: [],
     insights: [],
@@ -332,6 +338,7 @@ export class Store extends EventEmitter {
       ['agreements.json', { $schema: '../schemas/agreements.schema.json', agreements: [] }],
       ['coverage.json', { $schema: '../schemas/coverage.schema.json', confirmations: [] }],
       ['people.json', { $schema: '../schemas/people.schema.json', people: [] }],
+      ['returns.json', { $schema: '../schemas/returns.schema.json', returns: [] }],
     ];
     for (const [rel, value] of writes) await this.writeJson(rel, value);
     for (const def of Object.values(JSONL_FILES)) await atomicWrite(this.abs(def.file), '');
@@ -655,6 +662,13 @@ export class Store extends EventEmitter {
   get people(): Person[] {
     return this.state.people;
   }
+  get returns(): TaxReturn[] {
+    return this.state.returns;
+  }
+  /** What you told the app for a tax year's return ("2025/26"), if anything. */
+  taxReturn(taxYear: string): TaxReturn | undefined {
+    return this.state.returns.find((r) => r.taxYear === taxYear);
+  }
 
   get coverageConfirmations(): CoverageConfirmation[] {
     return this.state.coverage;
@@ -861,6 +875,9 @@ export class Store extends EventEmitter {
   }
   setPeople(list: Person[], message = 'people: update'): Promise<void> {
     return this.setArray('people', list, message);
+  }
+  setReturns(list: TaxReturn[], message = 'returns: update'): Promise<void> {
+    return this.setArray('returns', list, message);
   }
 
   setCoverageConfirmations(list: CoverageConfirmation[], message = 'coverage: update'): Promise<void> {

@@ -48,6 +48,7 @@ data/
   agreements.json      { agreements: [...] }     agreements: an offer's, contract's or award's schedule of payments, and what its document says
   coverage.json        { confirmations: [...] }  stretches you confirmed nothing is missing from, which count as covered
   people.json          { people: [...] }         people you send money to or get money from: the names their payments carry, and how money with them usually goes
+  returns.json         { returns: [...] }        what you told the app for each tax year's Self Assessment return: answers and box figures
   transactions/<account-id>/<yyyy>.jsonl    one transaction per line, by posting date
   balances/<account-id>.jsonl               balance / valuation snapshots
   holdings/<account-id>.jsonl               holdings snapshots
@@ -390,6 +391,21 @@ You save someone when you confirm their payments on the To categorise page
 (`POST /api/categorise/decisions` with `person`), and forget them there
 (`DELETE /api/people/:id`); their payments keep the categories you gave them. No agent token can.
 The migration to format 9 writes an empty one.
+
+## returns.json
+
+What you told the app for a tax year's Self Assessment return, one record per year (Tax → Self
+Assessment prep; FORMULAS.md §20). Optional: a missing file is no answers.
+
+| Field | Type | |
+|---|---|---|
+| `id` | `"2025-26"` | the tax year as a slug |
+| `taxYear` | `"2025/26"` | |
+| `entries` | `{ [key]: { value, note?, updatedAt } }` | your answer to a question (`q:gift-aid`: true or false, or a choice such as `q:student-loan`: `not-started`) or your figure for a box (`TR3:2`, `SA102:<job>:2`, `SA106:USA:C`), or `owed:poa-made`; `value` null is a nil you confirmed |
+| `updatedAt` | timestamp | |
+
+An entry wins over the records' figure for its box, as a category you set does. Keys are checked
+against the year's return when set: only a box or question it has, with a value of its kind.
 
 ## payslips.jsonl
 

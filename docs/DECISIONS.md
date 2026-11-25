@@ -2775,3 +2775,34 @@ value grown from the account's first flow is never below nothing, as rolled-back
 - **Considered:** a fixed lag from payment to bonus (HMRC's timing varies from a few weeks to about
   seven); counting bonuses by the date they arrive (the old rule: a year could show more bonus than
   it earned and the next less); giving the review only "still to come" (it also needs what arrived).
+
+## 2026-11-25: Self Assessment is the return itself, box by box, with the tax worked out from it
+
+- **Owner:** open a tax year, see what the app knows, supply what is missing, understand the
+  liability and what is still owed, and get a return that can be checked and entered quickly,
+  with the right year's wording; research with Claude (lead) and GPT (independent check).
+- **Done:** for 2025/26 on, Tax → Self Assessment prep shows the return page by page on the 2026
+  editions of the forms (`saforms.ts`), each box with the figure to type online (pounds and pence)
+  and on paper, where it came from, and a state (records, yours, a nil, missing, to check);
+  questions decide which pages apply and say what is outside the app's coverage; answers and
+  figures are kept in `returns.json` (new file, no migration: a missing file is no answers). The
+  liability is worked out from the boxes (`taxcalc.ts`) as HMRC's online calculation specification
+  does, with payments on account and the coding-out choice, and checked against the rest of the
+  app. New year-dated parameters in `uk.ts`: Scottish bands, Marriage Allowance, student loan
+  thresholds, Class 4, capital gains rates.
+- **Verified:** sixteen 2025/26 scenarios worked out independently (GPT, from HMRC sources) match to
+  the penny, cash dates included; HMRC's own worked examples (with three of HMRC's printing errors
+  corrected); property tests for the allowance's split and the sums. An independent review (GPT)
+  of the first version found real defects, each fixed against HMRC's specification and kept as a
+  regression test: a return could be "ready" with required answers set to none or a Yes with no
+  figures; Foreign Tax Credit Relief was pooled; the Gift Aid shortfall charge and the cap on
+  relief-at-source contributions were missing; the allowance search left pay fixed; Marriage
+  Allowance used the wrong test; SA110 boxes 7 and 9 were combined; the 20% test rounded; an
+  overpaid balance was not set against January's instalment; the student loan used the income tax
+  base; platform dividends that could not be split fell silently into UK dividends.
+- **Considered:** a second estimate beside the boxes (two figures to reconcile; the boxes are what
+  HMRC calculates from); filling foreign dividends in TR 3 box 6 always (not allowed once total
+  dividends pass £500, and loses the relief); treating a payment from HMRC as an in-year refund
+  (a summer refund is usually the year before's, and it raised the balance by its whole amount);
+  working out share matching for the Capital Gains page (left to the platform's figures and the
+  owner, and flagged when the page is needed).

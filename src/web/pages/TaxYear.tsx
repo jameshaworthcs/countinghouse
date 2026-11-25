@@ -7,6 +7,7 @@ import type { SaStatus } from '../../shared/schema';
 import { Meter } from '../components/charts/bars';
 import { InsightsPanel } from '../components/Intel';
 import { PayView } from '../components/Pay';
+import { TaxReturn } from '../components/TaxReturn';
 import { Badge, Button, Callout, Card, Checkbox, Input, KeyValue, Loading, Money, PageHeader, Select, StatusBadge, Tabs, tableClasses, useToast } from '../components/ui';
 import { api, qs, useApi, useApiMutation } from '../lib/api';
 import { useAppData } from '../lib/data';
@@ -514,6 +515,7 @@ function SelfAssessment({ sa, taxYear }: { sa: SelfAssessmentResponse; taxYear: 
         </div>
       </div>
 
+      {sa.taxReturn && <TaxReturn r={sa.taxReturn} />}
       <SaStatusCard key={sa.taxYear.label} sa={sa} />
       <SaDeadlines sa={sa} />
       <Settlement sa={sa} />
@@ -532,7 +534,7 @@ function SelfAssessment({ sa, taxYear }: { sa: SelfAssessmentResponse; taxYear: 
         </Callout>
       )}
 
-      {sa.mayNeedToFile.length > 0 && (
+      {!sa.taxReturn && sa.mayNeedToFile.length > 0 && (
         <Card title="Why you might need to file" description="Hints only; check gov.uk/check-if-you-need-tax-return">
           <ul className="flex flex-col gap-2 text-[13px]">
             {sa.mayNeedToFile.map((m) => (
@@ -547,7 +549,7 @@ function SelfAssessment({ sa, taxYear }: { sa: SelfAssessmentResponse; taxYear: 
         </Card>
       )}
 
-      {sa.sections.map((section) => {
+      {!sa.taxReturn && sa.sections.map((section) => {
         const items = section.items.filter((i) => showNA || i.status !== 'not-applicable');
         if (!items.length) return null;
         // Each job's own page follows the employment totals.
@@ -560,13 +562,13 @@ function SelfAssessment({ sa, taxYear }: { sa: SelfAssessmentResponse; taxYear: 
           );
         return <SaSectionCard key={section.id} section={section} items={items} />;
       })}
-      <div className="no-print">
+      {!sa.taxReturn && <div className="no-print">
         <Button size="sm" variant="ghost" onClick={() => setShowNA((v) => !v)}>
           {showNA ? 'Hide' : 'Show'} items that don’t apply
         </Button>
-      </div>
+      </div>}
 
-      <Card title="Before you file">
+      {!sa.taxReturn && <Card title="Before you file">
         <ul className="flex flex-col gap-2 text-[13px]">
           {sa.checklist.map((c) => (
             <li key={c.id} className="flex gap-2">
@@ -581,7 +583,7 @@ function SelfAssessment({ sa, taxYear }: { sa: SelfAssessmentResponse; taxYear: 
         <p className="mt-4 text-[12.5px] text-ink-3">
           Add figures by hand (for example from a P60 you have on paper) in Settings → Tax documents, or upload the document on the <Link to="/import" className="text-accent hover:underline">Import</Link> page.
         </p>
-      </Card>
+      </Card>}
     </div>
   );
 }

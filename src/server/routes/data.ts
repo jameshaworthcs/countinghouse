@@ -10,7 +10,7 @@ import { CategoryIndex } from '../../shared/categories';
 import { today } from '../../shared/dates';
 import { catalogInstitution, findInstitution, INSTITUTION_CATALOG } from '../../shared/institutions';
 import { cleanPayee, descriptionKey } from '../../shared/merchants';
-import { fromMinor, toMinor } from '../../shared/money';
+import { fromMinor, isMoney, toMinor } from '../../shared/money';
 import { compareValues, parseSortParam, type SortValue } from '../../shared/sort';
 import {
   AccountTypeSchema,
@@ -65,6 +65,7 @@ import { paidIn } from '../analytics/investments';
 import { handoverOf } from '../analytics/handover';
 import { categoriseQueue, payeeRuleMatch } from '../analytics/queue';
 import { parseTaxYear } from '../../shared/uk';
+import { taxReturn } from '../analytics/taxreturn';
 
 const NewAccountBody = z.object({
   name: z.string().min(1).max(120),
@@ -1179,6 +1180,59 @@ export function dataRoutes(ctx: AppContext): Hono {
     const next = { ...current, ...(body.sendsReturns !== undefined ? { sendsReturns: body.sendsReturns } : {}), years };
     await store.setProfile({ ...store.profile, selfAssessment: next });
     return c.json(store.profile.selfAssessment ?? {});
+  });
+
+  // Your answer or figure for one box or question on a tax year's return (Tax → Self Assessment;
+  // FORMULAS.md §20): a value (null for a nil you confirm), or `clear` to go back to the records. Only
+  // keys the year's return has, each with a value of its kind. Your session only: no token may.
+  app.put('/self-assessment/entry', async (c) => {
+    const body = await readJson(
+      c,
+      z.object({
+        taxYear: z.string().refine((y) => parseTaxYear(y)?.label === y, 'A tax year such as 2025/26'),
+        key: z.string().min(1).max(120),
+        value: z.union([z.number(), z.string().max(300), z.boolean(), z.null()]).optional(),
+        note: z.string().max(300).optional(),
+        clear: z.boolean().optional(),
+      }),
+    );
+    const view = taxReturn(store, body.taxYear);
+    if (!view) throw new StoreError(`There are no forms for ${body.taxYear} here.`, 400);
+    const boxes = view.pages.flatMap((p) => p.boxes);
+    const target = boxes.find((b) => b.key === body.key);
+    const question = view.questions.find((q) => q.key === body.key);
+    if (!body.clear) {
+      if (body.value === undefined) throw new StoreError('Give a value, or clear the entry.', 400);
+      if (question) {
+        const ok = question.choices ? typeof body.value === 'string' && question.choices.some((ch) => ch.value === body.value) : typeof body.value === 'boolean';
+        if (!ok) throw new StoreError(question.choices ? `One of: ${question.choices.map((ch) => ch.value).join(', ')}.` : 'Yes or no.', 400);
+      } else if (body.key === 'owed:poa-made') {
+        if (typeof body.value !== 'number' || body.value < 0) throw new StoreError('An amount in pounds.', 400);
+      } else if (target) {
+        if (!target.editable) throw new StoreError('That box comes from your records and the answers above; change those instead.', 400);
+        const v = body.value;
+        if (v === null && target.nilRefused) throw new StoreError(`Box ${target.box} needs ${target.kind === 'yesno' ? 'a Yes or No' : 'a value'}: the form does not take none.`, 400);
+        const year = parseTaxYear(body.taxYear)!;
+        if (target.kind === 'date' && typeof v === 'string' && (v < year.start || v > year.end)) throw new StoreError(`A date in the ${body.taxYear} tax year (${year.start} to ${year.end}).`, 400);
+        const ok =
+          v === null ||
+          (target.kind === 'money' && typeof v === 'number' && isMoney(v) && (v >= 0 || target.label.includes('tax taken off'))) ||
+          ((target.kind === 'yesno' || target.kind === 'x') && typeof v === 'boolean') ||
+          (target.kind === 'number' && typeof v === 'number' && Number.isInteger(v) && v >= 0) ||
+          (target.kind === 'percent' && typeof v === 'number' && v >= 0 && v <= 100) ||
+          (target.kind === 'date' && typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)) ||
+          (target.kind === 'text' && typeof v === 'string' && v.trim().length > 0);
+        if (!ok) throw new StoreError(`Not a value box ${target.box} takes (${target.kind}).`, 400);
+      } else throw new StoreError(`No box or question ${body.key} on the ${body.taxYear} return.`, 400);
+    }
+    const id = body.taxYear.replace('/', '-');
+    const current = store.taxReturn(body.taxYear) ?? { id, taxYear: body.taxYear, entries: {}, updatedAt: nowISO() };
+    const entries = { ...current.entries };
+    if (body.clear) delete entries[body.key];
+    else entries[body.key] = { value: typeof body.value === 'string' ? body.value.trim() : body.value!, ...(body.note?.trim() ? { note: body.note.trim() } : {}), updatedAt: nowISO() };
+    const next = { ...current, entries, updatedAt: nowISO() };
+    await store.setReturns([...store.returns.filter((r) => r.taxYear !== body.taxYear), next], `return ${body.taxYear}: ${body.clear ? 'clear' : 'set'} ${body.key}`);
+    return c.json({ ok: true });
   });
 
   app.get('/settings', (c) => c.json(store.settings));

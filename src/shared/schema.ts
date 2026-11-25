@@ -1160,6 +1160,28 @@ export const ProfileSchema = z.object({
 });
 export type Profile = z.infer<typeof ProfileSchema>;
 
+/**
+ * What you told the app for one tax year's Self Assessment return (returns.json, docs/DATA_FORMAT.md):
+ * your answers to its questions and your figures for its boxes, each by its key ("TR3:2",
+ * "SA102:job-oak:2", "q:self-employment"). Your entry wins over what the records give, as a category
+ * you set does (FORMULAS.md §20). A null value is a nil you confirmed: a genuine zero, not a gap.
+ */
+export const ReturnEntrySchema = z.object({
+  value: z.union([z.number(), z.string().max(300), z.boolean(), z.null()]),
+  note: z.string().max(300).optional(),
+  updatedAt: TimestampSchema,
+});
+export type ReturnEntry = z.infer<typeof ReturnEntrySchema>;
+
+export const TaxReturnSchema = z.object({
+  /** The tax year as a slug ("2025-26"). */
+  id: z.string().regex(/^\d{4}-\d{2}$/),
+  taxYear: z.string().regex(/^\d{4}\/\d{2}$/),
+  entries: z.record(z.string().min(1).max(120), ReturnEntrySchema).default({}),
+  updatedAt: TimestampSchema,
+});
+export type TaxReturn = z.infer<typeof TaxReturnSchema>;
+
 export const EXTRACTION_ENGINES = ['auto', 'inference', 'claude-cli', 'claude-api', 'ocr'] as const;
 export type ExtractionEnginePreference = (typeof EXTRACTION_ENGINES)[number];
 
@@ -2669,6 +2691,8 @@ export const AgreementsFileSchema = z.object({ agreements: z.array(AgreementSche
 export const CoverageFileSchema = z.object({ confirmations: z.array(CoverageConfirmationSchema) });
 /** people.json: the people you send money to or get money from. */
 export const PeopleFileSchema = z.object({ people: z.array(PersonSchema) });
+/** returns.json: what you told the app for each tax year's Self Assessment return. */
+export const ReturnsFileSchema = z.object({ returns: z.array(TaxReturnSchema) });
 export const InstitutionsFileSchema = z.object({ institutions: z.array(InstitutionSchema) });
 export const CategoriesFileSchema = z.object({ categories: z.array(CategorySchema) });
 export const RulesFileSchema = z.object({ rules: z.array(RuleSchema) });
