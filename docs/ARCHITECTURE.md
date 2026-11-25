@@ -572,9 +572,14 @@ figures are in [FORMULAS.md](FORMULAS.md) §9, "Live readings", and §12, "Paid 
 - Clicking the sidebar link of the page you're on keeps its address (filters, sort) and scrolls it
   back to the top, as does any inner list marked `data-scroll-top`.
 - Pages: Overview, Accounts (+ detail), Transactions (virtualised), Spending (+ To categorise), Projections,
-  Investments & pensions, Tax year (Allowances, Self Assessment prep), Assumptions & research,
+  Investments & pensions, Tax year (Allowances, Pay, Self Assessment prep), Assumptions & research,
   Import (+ Review), Agent sessions (+ one session; the sidebar says how many are running),
   Settings, Login.
+- Tax year → Pay opens a payslip in a wide panel (`PayslipPanel.tsx`, `?payslip=` in the address,
+  so Back closes it): the document it was read from (`/api/documents/:id`, in a frame the CSP's
+  `frame-src 'self'` allows) beside its lines, totals and year to date as read, and what reached the
+  bank. ← and → step through the employer's payslips. Below 1024px the reading comes first and the
+  document opens under a button or in a tab of its own (PDFs in a frame are poor on phones).
 - Lists you choose rows from (Transactions, an import's rows) share one set of rules
   (`src/web/lib/selection.ts`):
   - a click or Ctrl/⌘-click ticks one row;

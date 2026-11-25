@@ -113,9 +113,18 @@ function owedFor(store: Store, job: Employment, periodEnd: string | null): PayPe
   return told ? { markedAt: told.createdAt, contextId: told.id } : undefined;
 }
 
+/** The document a pay period was read from, when it is kept: the payslip's, else its figures' import. */
+function documentOf(store: Store, p: PayPeriod): PayMonth['document'] {
+  const src = p.payslip?.source.importId || p.payslip?.source.documentId ? p.payslip.source : p.figures[0]!.source;
+  if (!src.importId && !src.documentId) return undefined;
+  const imp = store.imports.find((i) => (src.importId ? i.id === src.importId : i.documentId === src.documentId));
+  return imp?.documentPath ? { id: imp.documentId, fileName: imp.fileName, mediaType: imp.mediaType, importId: imp.id } : undefined;
+}
+
 /** What a month shows of its payslip in full: its code and NI letter, the net it prints, and the employer's costs. */
-function payslipDetail(store: Store, p: PayPeriod, ty: TaxYear): Pick<PayMonth, 'netPrinted' | 'payslipId' | 'taxCode' | 'niLetter' | 'employerCosts'> {
+function payslipDetail(store: Store, p: PayPeriod, ty: TaxYear): Pick<PayMonth, 'netPrinted' | 'payslipId' | 'taxCode' | 'niLetter' | 'employerCosts' | 'document'> {
   const slip = p.payslip;
+  const document = documentOf(store, p);
   const code = slip?.taxCode ? `${slip.taxCode}${slip.cumulative === false ? ' M1' : ''}` : p.figures.find((f) => f.taxCode)?.taxCode;
   const list = slip?.employmentId ? jobPayslips(store, slip.employmentId, ty) : [];
   const at = slip ? list.findIndex((x) => x.id === slip.id) : -1;
@@ -126,6 +135,7 @@ function payslipDetail(store: Store, p: PayPeriod, ty: TaxYear): Pick<PayMonth, 
     ...(code ? { taxCode: code } : {}),
     ...(slip?.niLetter ? { niLetter: slip.niLetter } : {}),
     ...(Object.keys(costs).length ? { employerCosts: costs } : {}),
+    ...(document ? { document } : {}),
   };
 }
 

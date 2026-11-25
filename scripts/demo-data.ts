@@ -200,7 +200,9 @@ async function main() {
     // A dividend from the company, with its voucher (below).
     if (!SPARSE && m === `${thisYear.startYear}-06-01`) tx('current-account', `${thisYear.startYear}-06-15`, 480, 'EXAMPLE STUDIO LTD DIVIDEND', { payee: 'Example Studio Ltd', category: 'dividends' });
     const marked = marking.find((x) => x.month === m);
-    if (marked) {
+    // The last marking payslip arrives as an upload instead (below): its PDF is kept with it.
+    if (marked && marked === marking.at(-1)) tx('current-account', `${addMonths(m, 1).slice(0, 7)}-25`, roundMoney(marked.gross - roundMoney(marked.gross * 0.2)), 'EXAMPLE MARKING LTD SALARY 773104', { payee: 'Example Marking Ltd' });
+    else if (marked) {
       const payDate = `${addMonths(m, 1).slice(0, 7)}-25`;
       const tax = roundMoney(marked.gross * 0.2);
       payslip('EXAMPLE MARKING LTD', 'example-marking', m, payDate, [['gross_pay', marked.gross], ['tax_deducted', tax], ['national_insurance', 0]]);
@@ -584,9 +586,17 @@ async function main() {
   const work = new WorkArea(WORK);
   const prizes = await demoPrizeHistory(work);
   const page = marking.length ? await demoHmrcPage(work, marking) : null;
-  const slipPage = marking.length ? await demoPayslip(work, marking) : null;
+  // The last marking payslip, uploaded and committed, so the Pay tab has its PDF to show; the next
+  // one waits for review.
+  const last = marking.at(-1);
+  const keptSlip = last ? await demoPayslip(work, marking.slice(0, -1), { month: last.month, gross: last.gross, id: 'd3a3', time: '072500' }) : null;
+  const slipPage = marking.length ? await demoPayslip(work, marking, { month: addMonths(marking.at(-1)!.month, 1), gross: 780, id: 'd3a2', time: '073000' }) : null;
   const svc = new ImportService(store, config, work);
   await svc.init();
+  if (keptSlip) {
+    await svc.refreshDraft(keptSlip);
+    await svc.commit(keptSlip);
+  }
   await svc.refreshDraft(prizes);
   if (page) await svc.refreshDraft(page);
   if (slipPage) await svc.refreshDraft(slipPage);
@@ -801,16 +811,17 @@ async function demoHmrcPage(work: WorkArea, marking: { month: string; gross: num
 }
 
 /**
- * The marking job's next payslip, saved as a PDF and waiting for review: read on this machine from
- * its text, in full (ingest/payslips.ts), as an upload of it would be.
+ * A marking payslip for `month`, saved as a PDF and waiting for review: read on this machine from its
+ * text, in full (ingest/payslips.ts), as an upload of it would be. `before` are the months paid
+ * earlier, for its year to date.
  */
-async function demoPayslip(work: WorkArea, marking: { month: string; gross: number }[]): Promise<string> {
-  const month = addMonths(marking.at(-1)!.month, 1);
+async function demoPayslip(work: WorkArea, before: { month: string; gross: number }[], slip: { month: string; gross: number; id: string; time: string }): Promise<string> {
+  const { month, gross } = slip;
   const payDate = `${addMonths(month, 1).slice(0, 7)}-25`;
   const [mon, year] = [formatMonth(month).split(' ')[0]!, month.slice(0, 4)];
-  const paid = marking.filter((x) => taxYearOf(`${addMonths(x.month, 1).slice(0, 7)}-25`).label === taxYearOf(payDate).label).reduce((x, y) => x + y.gross, 0);
+  const paid = before.filter((x) => taxYearOf(`${addMonths(x.month, 1).slice(0, 7)}-25`).label === taxYearOf(payDate).label).reduce((x, y) => x + y.gross, 0);
   const money = (n: number) => n.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const [gross, tax] = [780, 156];
+  const tax = roundMoney(gross * 0.2);
   const lines = [
     'EMPLOYER',
     'EXAMPLE MARKING LTD',
@@ -838,7 +849,7 @@ async function demoPayslip(work: WorkArea, marking: { month: string; gross: numb
     'SMP 0.00',
     'Pension Employee 0.00',
     'Pension Employer 0.00',
-    `Marking fees 26.00 30.00 ${money(gross)} Income Tax ${money(tax)}`,
+    `Marking fees 25.00 ${money(gross / 25)} ${money(gross)} Income Tax ${money(tax)}`,
     'National Insurance 0.00',
     'TOTAL',
     'HOURS',
@@ -862,7 +873,7 @@ async function demoPayslip(work: WorkArea, marking: { month: string; gross: numb
   const sha = sha256(bytes);
   const stamp = nowISO();
   const record: ImportRecord = {
-    id: `imp_${END.replace(/-/g, '')}_073000_d3a2`,
+    id: `imp_${END.replace(/-/g, '')}_${slip.time}_${slip.id}`,
     status: 'review',
     createdAt: stamp,
     updatedAt: stamp,

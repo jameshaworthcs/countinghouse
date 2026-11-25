@@ -1,7 +1,8 @@
 // Tax year → Pay: each employer's payslips month by month, what reached the bank, and pay seen with no
 // payslip (docs/FORMULAS.md §17).
 
-import { Link } from 'react-router';
+import { useCallback } from 'react';
+import { Link, useSearchParams } from 'react-router';
 import type { EarnedPayroll, EarnedPeriod, ExpectedPay, PayEmployer, PayMonth, PayResponse } from '../../shared/api';
 import { formatMonth } from '../../shared/dates';
 import type { Profile } from '../../shared/schema';
@@ -9,19 +10,8 @@ import { api, useApiMutation } from '../lib/api';
 import { useAppData } from '../lib/data';
 import { cn, formatDate, money } from '../lib/format';
 import { useSort } from '../lib/sort';
+import { OpenPayslip, PayslipPanel, QUIET, STATUS } from './PayslipPanel';
 import { Badge, Callout, Card, EmptyState, Money, Select, SortHeader, StatusBadge, tableClasses } from './ui';
-
-const STATUS: Record<PayMonth['status'], { tone: 'good' | 'warn' | 'bad' | 'info' | 'pending'; label: string } | null> = {
-  paid: { tone: 'good', label: 'Paid' },
-  differs: { tone: 'warn', label: 'Differs' },
-  'not-seen': { tone: 'warn', label: 'Not seen' },
-  owed: { tone: 'pending', label: 'Owed' },
-  due: { tone: 'pending', label: 'Due' },
-  nothing: null,
-  'no-payslip': null,
-};
-/** Rows with nothing to check: a muted label instead of a status. */
-const QUIET: Partial<Record<PayMonth['status'], string>> = { nothing: 'Nothing due', 'no-payslip': 'From the bank' };
 
 const cell = (v: number | null) => (v === null ? <span className="text-ink-3">—</span> : <Money value={v} className="tabular" />);
 
@@ -160,7 +150,7 @@ function LinkSelect({ timesheet, payroll, choices }: { timesheet: { payer: strin
 }
 
 /** Timesheet work this payroll pays: each period, the payslip that paid it, and what is owed. */
-function EarnedSection({ w, choices }: { w: EarnedPayroll; choices: string[] }) {
+function EarnedSection({ w, choices, months, onOpen }: { w: EarnedPayroll; choices: string[]; months: PayMonth[]; onOpen: (key: string) => void }) {
   const sheets = [...new Map(w.periods.map((p) => [`${p.payer}|${p.role ?? ''}`, { payer: p.payer, ...(p.role ? { role: p.role } : {}) }])).values()];
   return (
     <div className="border-t border-line">
@@ -205,7 +195,17 @@ function EarnedSection({ w, choices }: { w: EarnedPayroll; choices: string[] }) 
                     <td className={cn(tableClasses.td, 'whitespace-nowrap')}>
                       {p.payslip ? (
                         <>
-                          {p.payslip.periodEnd ? `${formatMonth(p.payslip.periodEnd)} payslip` : 'A payslip'}
+                          {(() => {
+                            const label = p.payslip.periodEnd ? `${formatMonth(p.payslip.periodEnd)} payslip` : 'A payslip';
+                            const slip = months.find((m) => m.figureIds.some((id) => p.payslip!.figureIds.includes(id)));
+                            return slip ? (
+                              <OpenPayslip m={slip} onOpen={onOpen}>
+                                {label}
+                              </OpenPayslip>
+                            ) : (
+                              label
+                            );
+                          })()}
                           {p.payslip.periods > 1 && <div className="text-[11.5px] text-ink-3">with {p.payslip.periods - 1} other month{p.payslip.periods > 2 ? 's' : ''}</div>}
                         </>
                       ) : p.expected?.month ? (
@@ -292,7 +292,7 @@ function OwedToggle({ employmentId, m }: { employmentId: string; m: PayMonth }) 
   );
 }
 
-function EmployerCard({ e, choices }: { e: PayEmployer; choices: string[] }) {
+function EmployerCard({ e, choices, onOpen }: { e: PayEmployer; choices: string[]; onOpen: (key: string) => void }) {
   const payslips = e.months.filter((m) => m.status !== 'no-payslip').length;
   const t = e.totals;
   const { rows, sortProps } = useSort(e.months, {
@@ -338,7 +338,15 @@ function EmployerCard({ e, choices }: { e: PayEmployer; choices: string[] }) {
               return (
                 <tr key={`${m.periodEnd ?? m.payDate}-${i}`}>
                   <td className={cn(tableClasses.td, 'whitespace-nowrap')}>
-                    {m.periodEnd ? formatMonth(m.periodEnd) : <span className="text-ink-3">No payslip</span>}
+                    {m.figureIds.length > 0 ? (
+                      <OpenPayslip m={m} onOpen={onOpen}>
+                        {m.periodEnd ? formatMonth(m.periodEnd) : formatDate(m.payDate!)}
+                      </OpenPayslip>
+                    ) : m.periodEnd ? (
+                      formatMonth(m.periodEnd)
+                    ) : (
+                      <span className="text-ink-3">No payslip</span>
+                    )}
                     {m.payDate && <div className="text-[11.5px] text-ink-3">{m.paidIn ? `arrived ${formatDate(m.paidIn.date)}` : `pay date ${formatDate(m.payDate)}`}</div>}
                     {m.hmrc && (
                       <div className="text-[11.5px] text-ink-3" title="What the employer reported to HMRC for this pay date">
@@ -394,7 +402,7 @@ function EmployerCard({ e, choices }: { e: PayEmployer; choices: string[] }) {
         </table>
       </div>
       )}
-      {e.earned && <EarnedSection w={e.earned} choices={choices} />}
+      {e.earned && <EarnedSection w={e.earned} choices={choices} months={e.months} onOpen={onOpen} />}
       {(e.months.some((m) => m.note || m.check) || e.document || e.gaps?.length) && (
         <div className="flex flex-col gap-1 border-t border-line px-5 py-3 text-[12.5px] text-ink-2">
           {e.document && (
@@ -431,6 +439,22 @@ function EmployerCard({ e, choices }: { e: PayEmployer; choices: string[] }) {
 }
 
 export function PayView({ pay }: { pay: PayResponse }) {
+  // The payslip open in the panel, in the address: Back closes it; stepping to another replaces it.
+  const [search, setSearch] = useSearchParams();
+  const open = search.get('payslip');
+  const onOpen = useCallback(
+    (key: string | null, step?: boolean) =>
+      setSearch(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (key) next.set('payslip', key);
+          else next.delete('payslip');
+          return next;
+        },
+        { replace: Boolean(step) || !key, preventScrollReset: true },
+      ),
+    [setSearch],
+  );
   if (!pay.employers.length) {
     return (
       <Card className="mt-5">
@@ -447,8 +471,9 @@ export function PayView({ pay }: { pay: PayResponse }) {
         </Callout>
       )}
       {pay.employers.map((e) => (
-        <EmployerCard key={e.key} e={e} choices={pay.employers.filter((x) => x.months.some((m) => m.status !== 'no-payslip')).map((x) => x.payer)} />
+        <EmployerCard key={e.key} e={e} choices={pay.employers.filter((x) => x.months.some((m) => m.status !== 'no-payslip')).map((x) => x.payer)} onOpen={onOpen} />
       ))}
+      <PayslipPanel pay={pay} open={open} onOpen={onOpen} />
       <p className="text-[12.5px] text-ink-3">{pay.notes.join(' ')}</p>
     </div>
   );

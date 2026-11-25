@@ -207,6 +207,10 @@ describe('payslips uploaded', () => {
     await store.addTransactions([{ id: transactionId('current', '2026-10-05', 1761.32, 'LARCHWOOD DATA LTD SALARY', 0), accountId: 'current', date: '2026-10-05', amount: 1761.32, currency: 'GBP', description: 'LARCHWOOD DATA LTD SALARY', category: 'salary', source: {} }], 'test: pay');
     const e = pay(store, new Coverage(store), '2026/27', '2026-10-06').employers.find((x) => x.employmentId === 'larchwood-data')!;
     expect(e.months[0]).toMatchObject({ status: 'paid', expectedNet: 1761.32, netPrinted: true, taxCode: '1257L M1', niLetter: 'A', employerCosts: { ni: 200.1 }, payslipId: store.payslips[0]!.id });
+    // The document it was read from, to show beside it: served by id, never by path.
+    expect(e.months[0]!.document).toEqual({ id: rec.document.id, fileName: 'payslip-sep.pdf', mediaType: 'application/pdf', importId: rec.id });
+    const served = await req(`/api/documents/${rec.document.id}`);
+    expect([served.status, served.headers.get('content-type')]).toEqual([200, 'application/pdf']);
     // Its year to date has two months before it that no payslip imported shows.
     expect(e.gaps).toEqual([{ before: '2026-10-05', amount: 4300 }]);
 

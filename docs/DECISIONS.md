@@ -2745,3 +2745,19 @@ value grown from the account's first flow is never below nothing, as rolled-back
 - **Considered:** matching an advance by the job's name only (the group company that sends it is
   often none of the job's names); following an advance taken back over several payslips (no case
   yet, and an exact amount is what makes the pairing safe).
+
+## 2026-11-25: A payslip opens beside its document on the Pay tab
+
+- **Owner:** see the payslips from Tax year → Pay; of the ways offered, the document beside what was
+  read from it.
+- **Done:** a month with a payslip opens a wide panel: the original (PDF or picture, served by id) on
+  the left, its lines, totals, year to date, what reached the bank and any advance on the right, with
+  ← and → between the employer's payslips and the open payslip in the address. A payslip with only
+  figures shows them and says its lines were not kept; one with no file kept says so. Below 1024px
+  the reading comes first and the document opens under it or in a new tab. The timesheet table's
+  "Paid on" opens the same panel. The demo's last marking payslip is now uploaded and committed, so
+  the panel has a document to show in the screenshots.
+- **Considered:** a row that expands in place (no room for the document); a page per payslip (it
+  leaves the table, and stepping through months is what the panel's arrows do); the year to date's
+  £0 lines in full (they hid the ones that matter: pay, tax and NI are always shown, the rest when
+  not £0).

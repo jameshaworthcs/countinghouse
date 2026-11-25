@@ -479,22 +479,31 @@ export function Dialog({ open, onOpenChange, title, description, children, foote
   );
 }
 
-export function Drawer({ open, onOpenChange, title, children }: { open: boolean; onOpenChange: (o: boolean) => void; title: ReactNode; children: ReactNode }) {
+/**
+ * A panel from the right. `wide` takes most of a large screen (a document beside what was read from
+ * it) and all of a small one; `flush` leaves the body's padding and scrolling to its children.
+ */
+export function Drawer({ open, onOpenChange, title, description, actions, wide, flush, children }: { open: boolean; onOpenChange: (o: boolean) => void; title: ReactNode; description?: ReactNode; actions?: ReactNode; wide?: boolean; flush?: boolean; children: ReactNode }) {
   return (
     <RDialog.Root open={open} onOpenChange={onOpenChange}>
       <RDialog.Portal>
         <RDialog.Overlay className="fixed inset-0 z-40 bg-black/30" />
-        <RDialog.Content className="fixed inset-y-0 right-0 z-50 flex w-full max-w-xl flex-col border-l border-line bg-panel shadow-xl">
+        <RDialog.Content className={cn('fixed inset-y-0 right-0 z-50 flex w-full flex-col border-l border-line bg-panel shadow-xl', wide ? 'lg:max-w-[min(1360px,calc(100vw-48px))]' : 'max-w-xl')}>
           <div className="flex items-center justify-between gap-3 border-b border-line px-5 py-3.5">
-            <RDialog.Title className="truncate text-base font-semibold text-ink">{title}</RDialog.Title>
-            <RDialog.Description className="sr-only">Details</RDialog.Description>
-            <RDialog.Close asChild>
-              <IconButton label="Close">
-                <X className="size-4" />
-              </IconButton>
-            </RDialog.Close>
+            <div className="min-w-0">
+              <RDialog.Title className="truncate text-base font-semibold text-ink">{title}</RDialog.Title>
+              {description ? <RDialog.Description className="truncate text-[12.5px] text-ink-3">{description}</RDialog.Description> : <RDialog.Description className="sr-only">Details</RDialog.Description>}
+            </div>
+            <div className="flex shrink-0 items-center gap-1">
+              {actions}
+              <RDialog.Close asChild>
+                <IconButton label="Close">
+                  <X className="size-4" />
+                </IconButton>
+              </RDialog.Close>
+            </div>
           </div>
-          <div className="flex-1 overflow-y-auto px-5 py-4">{children}</div>
+          <div className={cn('min-h-0 flex-1', flush ? 'overflow-hidden' : 'overflow-y-auto px-5 py-4')}>{children}</div>
         </RDialog.Content>
       </RDialog.Portal>
     </RDialog.Root>

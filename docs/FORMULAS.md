@@ -1338,7 +1338,8 @@ pay", below).
   - **What the employer paid on top** in a period (its NI and pension): as printed, else the year
     to date's whole value on the year's first payslip (with no pay before it), else its rise from
     the payslip before, when nothing is missing between them.
-  - Each month shows the tax code and NI category letter its payslip prints.
+  - Each month shows the tax code and NI category letter its payslip prints, and the document it
+    was read from when that is kept (the payslip's import, else its figures'), to open beside it.
 - **Owed pay** (`owedPayslips`): periods of this tax year and the last that you said are owed (either way),
   with no pay yet, count in the Overview's owed line (their *after these* and gross) beside
   timesheet work not yet paid. They are never the next payment expected: that is the timesheet

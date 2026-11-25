@@ -1124,6 +1124,8 @@ export interface PayMonth {
   niLetter?: string;
   /** What the employer paid on top this period: printed, else worked out from the year to date. */
   employerCosts?: { ni?: number; pension?: number };
+  /** The document the payslip was read from, when it is kept: served by id at /api/documents/:id. */
+  document?: { id: string; fileName: string; mediaType: string; importId: string };
   /** The payment into your bank matched to it. */
   paidIn: { amount: number; date: string; transactionId: string; accountId: string } | null;
   /** What the payslip's other deductions come to: expected net less what arrived. */

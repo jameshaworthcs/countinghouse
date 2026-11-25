@@ -206,6 +206,18 @@ async function main() {
     await shoot('settings-audit-entry', '/settings#audit', { ...(mobile ? { width: 390, height: 1400, mobile: true } : { width: 1440, height: 1400 }), theme: dark ? 'dark' : 'light', act: openEntry });
     console.log('✓ settings-audit-entry');
   }
+  // Tax year → Pay with a payslip open: its PDF beside what was read from it (the reading first on a phone).
+  const openPayslip = async (page: Page) => {
+    const kept = (await page.$('main button[title^="See the payslip beside"]')) ?? (await page.$('main button[title^="See what was read"]'));
+    if (!kept) throw new Error('tax-pay-payslip: no payslip to open');
+    await kept.click();
+    await page.waitForSelector('[role="dialog"]', { timeout: 5_000 });
+    await new Promise((r) => setTimeout(r, 1200));
+  };
+  if (!only || 'tax-pay-payslip'.includes(only)) {
+    await shoot('tax-pay-payslip', '/tax/pay', { ...(mobile ? { width: 390, height: 844, mobile: true } : { width: 1440, height: 900 }), theme: dark ? 'dark' : 'light', act: openPayslip });
+    console.log('✓ tax-pay-payslip');
+  }
   // What re-applying categorisation would change, before anything is written, with the first
   // group's payments open to choose for.
   const openReapply = async (page: Page) => {
