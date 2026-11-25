@@ -1,0 +1,542 @@
+{
+  "$id": "actions.schema.json",
+  "title": "actions",
+  "description": "Schema for data/actions.json. Generated from src/shared/schema.ts by `npm run schemas`; do not edit.",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "maxLength": 80,
+            "pattern": "^(acct|job|payee|tax|cat|plan)-[a-z0-9]+(?:-[a-z0-9]+)*$"
+          },
+          "what": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "why": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "by": {
+            "type": "string",
+            "description": "Calendar date, YYYY-MM-DD"
+          },
+          "where": {
+            "type": "string",
+            "enum": [
+              "overview",
+              "accounts",
+              "transactions",
+              "spending",
+              "categorise",
+              "budgets",
+              "investments",
+              "projections",
+              "tax",
+              "tax-pay",
+              "tax-self-assessment",
+              "import",
+              "assumptions"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "money",
+              "tax",
+              "data"
+            ]
+          },
+          "evidence": {
+            "default": [],
+            "maxItems": 6,
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "transactions"
+                    },
+                    "ids": {
+                      "minItems": 1,
+                      "maxItems": 200,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "pattern": "^tx_[0-9a-f]{16}$"
+                      }
+                    },
+                    "label": {
+                      "type": "string",
+                      "maxLength": 200
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "ids"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "balance"
+                    },
+                    "id": {
+                      "type": "string",
+                      "pattern": "^bal_[0-9a-f]{16}$"
+                    },
+                    "label": {
+                      "type": "string",
+                      "maxLength": 200
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "id"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "holdings"
+                    },
+                    "id": {
+                      "type": "string",
+                      "pattern": "^hld_[0-9a-f]{16}$"
+                    },
+                    "label": {
+                      "type": "string",
+                      "maxLength": 200
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "id"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "figure"
+                    },
+                    "id": {
+                      "type": "string",
+                      "pattern": "^fig_[0-9a-f]{16}$"
+                    },
+                    "label": {
+                      "type": "string",
+                      "maxLength": 200
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "id"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "research"
+                    },
+                    "id": {
+                      "type": "string",
+                      "pattern": "^res_[0-9a-f]{16}$"
+                    },
+                    "label": {
+                      "type": "string",
+                      "maxLength": 200
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "id"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "assumption"
+                    },
+                    "id": {
+                      "type": "string",
+                      "pattern": "^asm_[0-9a-f]{16}$"
+                    },
+                    "label": {
+                      "type": "string",
+                      "maxLength": 200
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "id"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "context"
+                    },
+                    "id": {
+                      "type": "string",
+                      "pattern": "^ctx_[0-9a-f]{16}$"
+                    },
+                    "label": {
+                      "type": "string",
+                      "maxLength": 200
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "id"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "account"
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                      "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+                    },
+                    "label": {
+                      "type": "string",
+                      "maxLength": 200
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "id"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "payslip"
+                    },
+                    "id": {
+                      "type": "string",
+                      "pattern": "^pay_[0-9a-f]{16}$"
+                    },
+                    "label": {
+                      "type": "string",
+                      "maxLength": 200
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "id"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "hmrc"
+                    },
+                    "id": {
+                      "type": "string",
+                      "pattern": "^hmrc_[0-9a-f]{16}$"
+                    },
+                    "label": {
+                      "type": "string",
+                      "maxLength": 200
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "id"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "agreement"
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                      "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+                    },
+                    "label": {
+                      "type": "string",
+                      "maxLength": 200
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "id"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "company"
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                      "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+                    },
+                    "label": {
+                      "type": "string",
+                      "maxLength": 200
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "id"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "employment"
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                      "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+                    },
+                    "label": {
+                      "type": "string",
+                      "maxLength": 200
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "id"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "computed"
+                    },
+                    "metric": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 120
+                    },
+                    "value": {
+                      "type": "number"
+                    },
+                    "label": {
+                      "type": "string",
+                      "maxLength": 200
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "metric"
+                  ]
+                }
+              ]
+            }
+          },
+          "firstMonth": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}$"
+          },
+          "lastMonth": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}$"
+          },
+          "closed": {
+            "type": "object",
+            "properties": {
+              "month": {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}$"
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 300
+              }
+            },
+            "required": [
+              "month",
+              "reason"
+            ]
+          },
+          "decision": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "done",
+                  "not-relevant"
+                ]
+              },
+              "at": {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                "description": "ISO 8601 timestamp"
+              },
+              "note": {
+                "type": "string",
+                "maxLength": 300
+              }
+            },
+            "required": [
+              "status",
+              "at"
+            ]
+          },
+          "provenance": {
+            "type": "object",
+            "properties": {
+              "setBy": {
+                "type": "string",
+                "enum": [
+                  "owner",
+                  "agent",
+                  "system"
+                ]
+              },
+              "model": {
+                "type": "string"
+              },
+              "engine": {
+                "type": "string",
+                "enum": [
+                  "inference",
+                  "claude-cli",
+                  "claude-api"
+                ]
+              },
+              "inference": {
+                "type": "object",
+                "properties": {
+                  "requestId": {
+                    "type": "string"
+                  },
+                  "alias": {
+                    "type": "string"
+                  },
+                  "modelId": {
+                    "type": "string"
+                  },
+                  "modelSha256": {
+                    "type": "string"
+                  },
+                  "systemFingerprint": {
+                    "type": "string"
+                  },
+                  "seed": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "thinking": {
+                    "type": "boolean"
+                  },
+                  "schemaValid": {
+                    "type": "boolean"
+                  },
+                  "queueMs": {
+                    "type": "number",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "requestId",
+                  "alias"
+                ]
+              },
+              "promptVersion": {
+                "type": "string"
+              },
+              "jobId": {
+                "type": "string"
+              },
+              "session": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "setBy"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "description": "ISO 8601 timestamp"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "description": "ISO 8601 timestamp"
+          }
+        },
+        "required": [
+          "key",
+          "what",
+          "why",
+          "kind",
+          "firstMonth",
+          "lastMonth",
+          "provenance",
+          "createdAt",
+          "updatedAt"
+        ]
+      }
+    },
+    "$schema": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "actions"
+  ]
+}

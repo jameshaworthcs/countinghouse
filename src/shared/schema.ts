@@ -9,6 +9,7 @@
 
 import { FEED_IDS } from './feeds';
 import { z } from 'zod';
+import { ACTION_KEY, ACTION_PAGE_IDS } from './actions';
 import { isISODate } from './dates';
 import { isMoney } from './money';
 import { TASK_KINDS, TaskChoiceSchema } from './tasks';
@@ -2619,6 +2620,41 @@ export const CaptureItemSchema = z.object({
 });
 export type CaptureItem = z.infer<typeof CaptureItemSchema>;
 
+// ─── What a month in review asks you to do (actions.json) ────────────────────────────────────────
+
+export const ACTION_KINDS = ['money', 'tax', 'data'] as const;
+
+/**
+ * An action a month in review asked of you (docs/AGENTS.md, "monthly-review"; docs/DATA_FORMAT.md):
+ * keyed so the next review carries it under the same key. A review writes what it says; whether it
+ * is done or does not apply is yours alone (`decision`), kept across reruns. A later review closes
+ * one it finds no longer applies (`closed`), never one you decided.
+ */
+export const ReviewActionSchema = z.object({
+  key: z.string().regex(ACTION_KEY).max(80),
+  /** What to do, in a few words. */
+  what: z.string().min(1).max(160),
+  /** Why it matters, with the figure that shows it. */
+  why: z.string().min(1).max(300),
+  /** The date it must be done by, when there is one. */
+  by: ISODateSchema.optional(),
+  /** The page to do it on. */
+  where: z.enum(ACTION_PAGE_IDS).optional(),
+  kind: z.enum(ACTION_KINDS),
+  evidence: z.array(InsightEvidenceSchema).max(6).default([]),
+  /** The month whose review first asked it, and the latest that asked it again. */
+  firstMonth: z.string().regex(/^\d{4}-\d{2}$/),
+  lastMonth: z.string().regex(/^\d{4}-\d{2}$/),
+  /** A later review found it no longer applies. */
+  closed: z.object({ month: z.string().regex(/^\d{4}-\d{2}$/), reason: z.string().min(1).max(300) }).optional(),
+  /** Yours: done, or not relevant, with a note the next review reads. */
+  decision: z.object({ status: z.enum(['done', 'not-relevant']), at: TimestampSchema, note: z.string().max(300).optional() }).optional(),
+  provenance: ProvenanceSchema,
+  createdAt: TimestampSchema,
+  updatedAt: TimestampSchema,
+});
+export type ReviewAction = z.infer<typeof ReviewActionSchema>;
+
 // ─── On-disk file envelopes ──────────────────────────────────────────────────────────────────────
 
 export const AccountsFileSchema = z.object({ accounts: z.array(AccountSchema) });
@@ -2635,4 +2671,6 @@ export const RulesFileSchema = z.object({ rules: z.array(RuleSchema) });
 export const GoalsFileSchema = z.object({ goals: z.array(GoalSchema) });
 export const BudgetsFileSchema = z.object({ budgets: z.array(BudgetSchema) });
 export const CaptureFileSchema = z.object({ items: z.array(CaptureItemSchema) });
+/** actions.json: what the months in review asked of you. */
+export const ActionsFileSchema = z.object({ actions: z.array(ReviewActionSchema) });
 export const CsvProfilesFileSchema = z.object({ profiles: z.array(CsvProfileSchema) });

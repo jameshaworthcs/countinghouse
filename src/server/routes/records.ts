@@ -8,6 +8,7 @@ import { today } from '../../shared/dates';
 import { AllocationSchema, ASSET_CLASSES, AssumptionScopeSchema, CONTEXT_KINDS, INSIGHT_PAGES, INSTRUMENT_TYPES, SlugSchema, type ContextRecord, type Note } from '../../shared/schema';
 import { readJson, type AppContext } from '../context';
 import { nowISO, randomHex, shortHash } from '../fsutil';
+import { actionsView, decideAction } from '../actions';
 import { applyRecords, RecordBatchSchema, setOwnerAssumption } from '../records';
 import { StoreError } from '../store';
 
@@ -167,6 +168,16 @@ export function recordRoutes(ctx: AppContext): Hono {
     const body = await readJson(c, z.object({ useful: z.boolean(), note: z.string().max(500).optional() }));
     await store.upsertRecords('insights', [{ ...i, feedback: { useful: body.useful, ...(body.note ? { note: body.note } : {}), at: nowISO() } }], `insight: feedback on ${i.title}`);
     return c.json({ ok: true });
+  });
+
+  // ─── What the months in review asked of you (actions.json) ────────────────────────────────────
+
+  app.get('/actions', (c) => c.json(actionsView(store, today())));
+
+  // Done, not relevant, or open again: yours alone, so no token may (tokens.ts lists no route here).
+  app.patch('/actions/:key', async (c) => {
+    const body = await readJson(c, z.object({ status: z.enum(['open', 'done', 'not-relevant']), note: z.string().max(300).optional() }));
+    return c.json(await decideAction(store, c.req.param('key'), body.status, body.note));
   });
 
   // ─── Owner context and notes ─────────────────────────────────────────────────────────────────

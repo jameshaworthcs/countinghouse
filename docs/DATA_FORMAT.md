@@ -30,6 +30,7 @@ data/
   goals.json           { goals: [...] }
   budgets.json         { budgets: [...] }            monthly spending budgets
   capture.json         { items: [...] }          what to collect from each provider (the capture list)
+  actions.json         { actions: [...] }        what the months in review asked you to do (optional)
   csv-profiles.json    { profiles: [...] }       your saved CSV column mappings
   instruments.json     { instruments: [...] }    funds, ETFs and shares you hold
   assumptions.jsonl    every version of every modelling assumption (append-only)
@@ -750,6 +751,31 @@ while anything is left.
   (`payslip`) figures, and `payer` to one employer's.
 
 An ask without a check is ticked by you (`doneAt`). Agents cannot set `doneAt` or `skippedAt`.
+
+## actions.json
+
+What the months in review asked you to do ([AGENTS.md](AGENTS.md), "monthly-review"). Optional: a
+data directory without it has none. Only the review of the latest month writes it, by key; a review
+written later for an earlier month never does.
+
+| Field | Type | Notes |
+|---|---|---|
+| `key` | string | `acct-`, `job-`, `payee-`, `tax-`, `cat-` or `plan-`, then words: `acct-` names an account by id, `job-` a job, `cat-` a category, `tax-` a tax year ("tax-2026-27-isa") |
+| `what`, `why` | string | What to do; why it matters, with the figure that shows it |
+| `by` | date? | When it must be done by |
+| `where` | page? | `overview`, `accounts`, `transactions`, `spending`, `categorise`, `budgets`, `investments`, `projections`, `tax`, `tax-pay`, `tax-self-assessment`, `import`, `assumptions` |
+| `kind` | `money` \| `tax` \| `data` | |
+| `evidence` | array | As an insight's |
+| `firstMonth`, `lastMonth` | `YYYY-MM` | The review that first asked it, and the latest that asked it again |
+| `closed` | `{month, reason}`? | A later review found it no longer applies |
+| `decision` | `{status: done \| not-relevant, at, note?}`? | Yours alone; agents cannot set it, and a rerun keeps it |
+| `provenance`, `createdAt`, `updatedAt` | | |
+
+A review asking an action again keeps its first month and your decision, and opens it again if a
+review had closed it. A rerun of the same month removes an action only its earlier run asked, unless
+you decided it. On the page, an action is due soon from 14 days before its date, overdue after it,
+and gone 30 days after it; one with no date that no review has asked again for 60 days asks whether
+it still matters, and is gone after 90 (`src/shared/actions.ts`).
 
 ## Versions
 

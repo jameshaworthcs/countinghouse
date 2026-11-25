@@ -31,6 +31,7 @@ import {
   CsvProfileSchema,
   FigureSchema,
   CaptureItemSchema,
+  ReviewActionSchema,
   GoalSchema,
   BudgetSchema,
   HoldingsSnapshotSchema,
@@ -63,6 +64,7 @@ import {
   type CsvProfile,
   type Figure,
   type CaptureItem,
+  type ReviewAction,
   type Goal,
   type Budget,
   type HoldingsSnapshot,
@@ -152,6 +154,7 @@ const ARRAY_FILES = {
   goals: { file: 'goals.json', key: 'goals', schema: GoalSchema },
   budgets: { file: 'budgets.json', key: 'budgets', schema: BudgetSchema },
   capture: { file: 'capture.json', key: 'items', schema: CaptureItemSchema },
+  actions: { file: 'actions.json', key: 'actions', schema: ReviewActionSchema },
   csvProfiles: { file: 'csv-profiles.json', key: 'profiles', schema: CsvProfileSchema },
   instruments: { file: 'instruments.json', key: 'instruments', schema: InstrumentSchema },
   employments: { file: 'employments.json', key: 'employments', schema: EmploymentSchema },
@@ -185,6 +188,8 @@ interface State {
   goals: Goal[];
   budgets: Budget[];
   capture: CaptureItem[];
+  /** What the months in review asked of you (actions.json). */
+  actions: ReviewAction[];
   csvProfiles: CsvProfile[];
   instruments: Instrument[];
   employments: Employment[];
@@ -225,6 +230,7 @@ function emptyState(): State {
     goals: [],
     budgets: [],
     capture: [],
+    actions: [],
     csvProfiles: [],
     instruments: [],
     employments: [],
@@ -623,6 +629,11 @@ export class Store extends EventEmitter {
   get capture(): CaptureItem[] {
     return this.state.capture;
   }
+
+  /** What the months in review asked of you (docs/DATA_FORMAT.md, actions.json). */
+  get actions(): ReviewAction[] {
+    return this.state.actions;
+  }
   get csvProfiles(): CsvProfile[] {
     return this.state.csvProfiles;
   }
@@ -815,6 +826,10 @@ export class Store extends EventEmitter {
   }
   setCapture(list: CaptureItem[], message = 'capture list: update'): Promise<void> {
     return this.setArray('capture', list, message);
+  }
+
+  setActions(list: ReviewAction[], message = 'actions: update'): Promise<void> {
+    return this.setArray('actions', list, message);
   }
   setCsvProfiles(list: CsvProfile[], message = 'csv profiles: update'): Promise<void> {
     return this.setArray('csvProfiles', list, message);
