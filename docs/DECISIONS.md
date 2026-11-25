@@ -2729,3 +2729,19 @@ value grown from the account's first flow is never below nothing, as rolled-back
   action a later month dropped); Claude's notes inside the computed table (they would blur what is
   computed and what is inferred); a year table on the Reviews page (left for later).
 
+
+## 2026-11-25: A salary advance a payslip takes back is that payslip's pay
+
+- **Owner:** check that pending payslips are handled perfectly, then fix what was not.
+- **Found:** a payroll sent part of a month's pay early, under another company of its group, and
+  the next payslip took it back as a deduction, printing the net that was left. The Pay tab paired
+  the payslip with that net and listed the advance as pay with no payslip under an employer of its
+  own name. The year's *into your bank* came short by the advance, and the tax band would have
+  counted it again as salary received from no known employer.
+- **Done** (FORMULAS.md §17, "Pay advanced"): a payslip read in full with a salary-advance
+  deduction (`ADVANCE_LINE`) is paired with a salary credit of exactly that amount from 62 days
+  before its period to its pay date, from the job first, else any name. It shows beside the net's
+  credit, counts in the year's *into your bank*, and is explained pay for the tax band.
+- **Considered:** matching an advance by the job's name only (the group company that sends it is
+  often none of the job's names); following an advance taken back over several payslips (no case
+  yet, and an exact amount is what makes the pairing safe).

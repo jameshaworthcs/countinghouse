@@ -496,7 +496,7 @@ export function unexplainedSalary(store: Store, ty: TaxYear, employers: { payer:
   const keys = [...new Set(employers.flatMap((e) => [e.payer, ...(e.names ?? [])]).map((n) => payerKey(n).slice(0, 8)))].filter((k) => k.length >= 4);
   // Pay the Pay tab pairs with a payslip, or puts under an employer with payslips, is that employer's.
   const { periods, others } = pairPay(store, ty);
-  const explained = new Set([...periods.flatMap((p) => (p.credit ? [p.credit.id] : [])), ...others.flatMap((o) => (o.employer ? [o.t.id] : []))]);
+  const explained = new Set([...periods.flatMap((p) => [...(p.credit ? [p.credit.id] : []), ...(p.advances ?? []).map((a) => a.t.id)]), ...others.flatMap((o) => (o.employer ? [o.t.id] : []))]);
   return store.transactions().filter((t) => inYear(t, ty) && t.category === 'salary' && t.amount > 0 && !explained.has(t.id) && !keys.some((k) => payerKey(`${t.description} ${t.payee ?? ''}`).includes(k)));
 }
 

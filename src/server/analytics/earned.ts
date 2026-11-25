@@ -263,6 +263,7 @@ export function earnedPay(store: Store, now: ISODate = today()): EarnedPayroll[]
         status: s ? 'paid' : group?.status ?? 'owed',
         ...(s ? { payslip: { periodEnd: s.periodEnd, payDate: s.payDate, gross: s.gross!, periods: paid.get(s)!.length, figureIds: s.figures.map((x) => x.id) } } : {}),
         ...(s?.credit ? { paidIn: { amount: s.credit.amount, date: s.credit.date, transactionId: s.credit.id, accountId: s.credit.accountId } } : {}),
+        ...(s?.advances ? { advanced: s.advances.map(({ label, t }) => ({ label, amount: t.amount, date: t.date, transactionId: t.id, accountId: t.accountId })) } : {}),
         ...(group ? { expected: { month: group.month, payDate: group.payDate } } : {}),
         ...(skipped.length ? { note: `Not on the ${skipped.map((m) => formatMonth(m)).join(' or ')} payslip, which paid nothing` } : {}),
       };

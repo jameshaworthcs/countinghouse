@@ -34,6 +34,20 @@ const EARNED_STATUS: Record<EarnedPeriod['status'], { tone: 'good' | 'warn' | 'i
 
 const months = (ends: string[]) => ends.map((d) => formatMonth(d)).join(' and ');
 
+/** Pay that came early as an advance the payslip takes back: each payment, under what reached the bank on the day. */
+function Advanced({ list }: { list: PayMonth['advanced'] }) {
+  if (!list?.length) return null;
+  return (
+    <>
+      {list.map((a) => (
+        <Link key={a.transactionId} to={`/transactions?accounts=${a.accountId}&period=custom&from=${a.date}&to=${a.date}`} className="block text-[11.5px] text-ink-3 hover:underline" title={`Paid early; the payslip takes it back (${a.label})`}>
+          + {money(a.amount)} advance, {formatDate(a.date)}
+        </Link>
+      ))}
+    </>
+  );
+}
+
 /** Owed pay expected on one payslip: when, and what the payroll should take from it (an estimate). */
 function ExpectedNote({ x }: { x: ExpectedPay }) {
   const est = x.estimate;
@@ -209,6 +223,7 @@ function EarnedSection({ w, choices }: { w: EarnedPayroll; choices: string[] }) 
                       ) : (
                         <span className="text-ink-3">—</span>
                       )}
+                      <Advanced list={p.advanced} />
                     </td>
                     <td className={cn(tableClasses.td, 'whitespace-nowrap')} title={p.note}>
                       <StatusBadge status={s.tone}>{s.label}</StatusBadge>
@@ -350,6 +365,7 @@ function EmployerCard({ e, choices }: { e: PayEmployer; choices: string[] }) {
                     ) : (
                       <span className="text-ink-3">—</span>
                     )}
+                    <Advanced list={m.advanced} />
                   </td>
                   <td className={cn(tableClasses.td, 'whitespace-nowrap')} title={m.note}>
                     {s ? <StatusBadge status={s.tone}>{s.label}</StatusBadge> : <Badge tone="muted">{m.status === 'no-payslip' && !m.paidIn && m.hmrc ? 'HMRC’s record' : QUIET[m.status]}</Badge>}

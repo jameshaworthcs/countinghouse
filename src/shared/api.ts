@@ -1128,6 +1128,8 @@ export interface PayMonth {
   paidIn: { amount: number; date: string; transactionId: string; accountId: string } | null;
   /** What the payslip's other deductions come to: expected net less what arrived. */
   otherDeductions: number | null;
+  /** Pay sent early that the payslip takes back (a salary advance): its deduction line as printed and the payment (FORMULAS §17). */
+  advanced?: { label: string; amount: number; date: string; transactionId: string; accountId: string }[];
   /**
    * nothing: a payslip with nothing to pay in (£0, or deductions as much as the pay); owed: not in
    * the bank, and you said it is owed to you (it will be paid).
@@ -1165,6 +1167,8 @@ export interface EarnedPeriod {
   status: 'paid' | 'arrived' | 'owed' | 'late';
   payslip?: { periodEnd: string | null; payDate: string | null; gross: number; periods: number; figureIds: string[] };
   paidIn?: { amount: number; date: string; transactionId: string; accountId: string };
+  /** The payslip's pay that came early, as an advance it takes back. */
+  advanced?: { label: string; amount: number; date: string; transactionId: string; accountId: string }[];
   expected?: { month: string | null; payDate: string | null };
   note?: string;
 }

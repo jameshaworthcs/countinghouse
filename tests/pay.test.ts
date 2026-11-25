@@ -7,10 +7,10 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { payByEmployer, unexplainedSalary } from '../src/server/analytics/allowances';
 import { Coverage } from '../src/server/analytics/coverage';
-import { fromEmployer, pay } from '../src/server/analytics/pay';
-import { figureId, transactionId } from '../src/server/ids';
+import { ADVANCE_LINE, fromEmployer, pay } from '../src/server/analytics/pay';
+import { figureId, payslipId, transactionId } from '../src/server/ids';
 import { Store } from '../src/server/store';
-import type { Account, Figure, Transaction } from '../src/shared/schema';
+import type { Account, Figure, PayslipRecord, Transaction } from '../src/shared/schema';
 import { taxYearOf } from '../src/shared/uk';
 
 const stamp = '2026-01-01T00:00:00+00:00';
@@ -122,5 +122,76 @@ describe('an employer the bank calls something else', () => {
     expect(q().document).toMatchObject({ title: 'Your figures for the year', final: true, gross: 3700, tax: 400, ni: 200, note: 'The payslips add up to it. Its pay is theirs less the £300.00 of pension taken before tax.' });
     await store.addFigures([p60('tax_deducted', 187.3, '-more')], 'test: more tax on the P60');
     expect(q().document!.note).toBe('The payslips’ tax comes to £187.30 less than its tax: some payslips are missing.');
+  });
+});
+
+describe('a salary advance a payslip takes back', () => {
+  // Hollin Ridge sent £600 early, under its group's name, and the November payslip takes it back: the
+  // net it prints is what is left. Payroll number 77120045.
+  const job = 'hollin-ridge';
+  const slip = (month: string, end: string, gross: number, deductions: { label: string; amount: number }[], net: number): { figures: Figure[]; record: PayslipRecord } => {
+    const payDate = `${month}-${end}`;
+    const amounts: [Figure['kind'], number][] = [
+      ['gross_pay', gross],
+      ['tax_deducted', 200],
+      ['national_insurance', 80],
+      ['pension_contribution_employee', 100],
+    ];
+    const totals = { payments: gross, deductions: deductions.reduce((s, d) => s + d.amount, 0), net };
+    return {
+      figures: amounts.map(([kind, amount]) => ({ id: figureId(kind, amount, month, 'Hollin Ridge Analytics Ltd', kind, String(n++)), kind, label: kind, amount, currency: 'GBP', taxYear: '2026/27', periodStart: `${month}-01`, periodEnd: payDate, date: payDate, payer: 'Hollin Ridge Analytics Ltd', employmentId: job, source: {}, createdAt: stamp })),
+      record: { id: payslipId({ employer: 'Hollin Ridge Analytics Ltd', payrollNumber: '77120045', payDate, periodEnd: payDate, totals }), employer: 'Hollin Ridge Analytics Ltd', otherNames: [], payrollNumber: '77120045', payDate, periodStart: `${month}-01`, periodEnd: payDate, frequency: 'monthly', payments: [{ label: 'Salary', amount: gross }], deductions, totals, employerCosts: {}, yearToDate: {}, employmentId: job, taxYear: '2026/27', source: {}, createdAt: stamp },
+    };
+  };
+  const usual = [
+    { label: 'Tax paid', amount: 200 },
+    { label: 'Employee NIC', amount: 80 },
+    { label: 'Pension Deduction', amount: 100 },
+  ];
+  beforeEach(async () => {
+    await store.setEmployments([{ id: job, employer: 'Hollin Ridge Analytics Ltd', aliases: [], payrollNumbers: ['77120045'], owed: [], pensionArrangements: [], createdBy: 'owner', createdAt: stamp, updatedAt: stamp }]);
+    const oct = slip('2026-10', '31', 2000, usual, 1620);
+    const nov = slip('2026-11', '30', 2000, [...usual, { label: 'Salary Advance Deductio', amount: 600 }], 1020);
+    await store.addFigures([...oct.figures, ...nov.figures], 'test: Hollin Ridge payslips');
+    await store.upsertRecords('payslips', [oct.record, nov.record], 'test: Hollin Ridge payslips in full');
+    await store.addTransactions(
+      [
+        credit('2026-10-24', 1620, 'Hollin Ridge', 'BANK GIRO CREDIT REF HOLLIN RIDGE, 77120045'),
+        credit('2026-10-28', 600, 'Hollin Group Services', 'TRANSFER FROM HOLLIN GROUP SERVICES LTD'),
+        credit('2026-11-27', 1020, 'Hollin Ridge', 'BANK GIRO CREDIT REF HOLLIN RIDGE, 77120045'),
+      ],
+      'test: Hollin Ridge pay',
+    );
+  });
+  const hollin = () => pay(store, new Coverage(store), '2026/27', '2026-11-28').employers.find((e) => e.employmentId === job)!;
+
+  it('knows a salary advance line from other advances', () => {
+    for (const label of ['Salary Advance Deductio', 'Salary advance recovery', 'Pay Adv', 'Advance of salary', 'Advance']) expect(ADVANCE_LINE.test(label)).toBe(true);
+    for (const label of ['Season Ticket Advance', 'Advance season ticket', 'Cycle scheme', 'Advance loan repayment', 'Tax paid']) expect(ADVANCE_LINE.test(label)).toBe(false);
+  });
+
+  it('pairs the advance with the payslip that takes it back, whatever name the bank gives it, and counts it as its pay', () => {
+    const e = hollin();
+    expect(e.months.map((m) => [m.periodEnd, m.status, m.expectedNet, m.paidIn?.amount ?? null, m.advanced?.map((a) => [a.amount, a.date]) ?? null])).toEqual([
+      ['2026-10-31', 'paid', 1620, 1620, null],
+      ['2026-11-30', 'paid', 1020, 1020, [[600, '2026-10-28']]],
+    ]);
+    expect(e.months[1]!.note).toBe('Part of its pay came early: £600.00 on 28 Oct 2026, the advance it takes back');
+    // Into the bank for the year: both nets and the advance, which is gross less tax, NI and pension.
+    expect(e.totals).toMatchObject({ gross: 4000, tax: 400, ni: 160, pension: 200, paidIn: 3240 });
+    const all = pay(store, new Coverage(store), '2026/27', '2026-11-28').employers;
+    expect(all.some((x) => x.months.some((m) => m.paidIn?.amount === 600))).toBe(false);
+  });
+
+  it('the tax band does not count the advance again as salary received', () => {
+    const ty = taxYearOf('2026-06-01');
+    expect(unexplainedSalary(store, ty, payByEmployer(store, ty)).map((t) => t.amount)).not.toContain(600);
+  });
+
+  it('an advance of another amount, or after the pay date, is not the one taken back', async () => {
+    const [advance] = store.transactions().filter((t) => t.amount === 600);
+    await store.deleteTransactions([advance!.id], 'test: no advance');
+    await store.addTransactions([credit('2026-10-28', 650, 'Hollin Group Services', 'TRANSFER FROM HOLLIN GROUP SERVICES LTD'), credit('2026-12-02', 600, 'Hollin Group Services', 'TRANSFER FROM HOLLIN GROUP SERVICES LTD')], 'test: other advances');
+    expect(hollin().months[1]!.advanced).toBeUndefined();
   });
 });

@@ -1280,14 +1280,26 @@ pay", below).
      number there (5 characters or more, not inside a longer number). First one within £1 of
      *after these*, so no payslip takes another's own payment. Then pay brought forward (before
      Christmas, say): exactly *after these*, to the penny, earlier in the pay period than those
-     days, the nearest the pay date. Then the closest to *after these*;
+     days, the nearest the pay date. Then, before the closest to *after these*, **pay advanced**
+     (below). Then the closest to *after these*;
   2. else one of exactly *after these*, to the penny, whatever name the bank gives it (an
      employer's payroll often pays under a group company's name), the nearest the pay date;
   3. pay you said is owed, arriving late: a credit from the job of exactly *after these*, after
      the period's days, for the oldest owed period first. A credit naming the period's month is
      taken first.
+- **Pay advanced.** A payslip read in full whose deductions take back a salary advance (a line
+  like "Salary Advance Deduction" or "Advance of pay", `ADVANCE_LINE`; an advance of a season
+  ticket, a bike or a loan is not pay) was partly paid early. For each such line, the advance is a
+  salary credit not yet used of exactly the line's amount, to the penny, from 62 days before the
+  pay period's start (`ADVANCE_DAYS`) to its pay date: one from the job first, else whatever name
+  the bank gives it (an advance is often sent by another company of the group), the latest. It is
+  that payslip's pay: shown beside the credit that paid its net, counted in the year's *into your
+  bank*, and never pay with no payslip (nor, for the tax band, salary received: §11). Its net is
+  still the one the payslip prints, so the status is the net credit's. An advance taken back over
+  several payslips is not followed.
 - **Status**, first that applies:
-  1. **nothing due**: *after these* is £0 or less (a £0 payslip); no payment is looked for;
+  1. **nothing due**: *after these* is £0 or less (a £0 payslip, or one an advance paid in full); no
+     payment is looked for;
   2. **paid**: the credit is within £1 of *after these*. Pay you said was owed that came after
      the period's days says it arrived late;
   3. **differs**: it is not. The difference is other deductions the reader did not list (a cycle
@@ -1331,7 +1343,7 @@ pay", below).
   with no pay yet, count in the Overview's owed line (their *after these* and gross) beside
   timesheet work not yet paid. They are never the next payment expected: that is the timesheet
   work's.
-- **Year so far** adds up each column. Beside it is the employer's document for the year (§11, "One
+- **Year so far** adds up each column; *into your bank* adds each month's advances to its credit. Beside it is the employer's document for the year (§11, "One
   source per employer and year"): its P60 or another figure for the whole year, else the latest one
   to a date (a P45, an HMRC page). Its pay, tax and NI are shown, and whether the payslips paid by
   its date (with 10 days for a pay date to move) add up to it:

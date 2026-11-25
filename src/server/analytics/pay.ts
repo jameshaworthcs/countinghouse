@@ -22,6 +22,13 @@ export { isPayslipFigure, payerKey };
 export const PAY_MATCH_DAYS = 10;
 /** A payment within this of the payslip's net is the net (pennies of rounding aside). */
 export const PAY_TOLERANCE_POUNDS = 1;
+/**
+ * A payslip deduction that takes back pay sent to you early: a salary advance ("Salary Advance
+ * Deduction", "Advance of pay"). An advance of a season ticket, a bike or a loan is not pay.
+ */
+export const ADVANCE_LINE = /\b(?:salary|pay|wages?)\s+adv|\badvanced?\s+(?:of\s+)?(?:salary|pay|wages?)\b|^\s*advance\b(?!.*\b(?:season|ticket|loan|cycle|bike)\b)/i;
+/** How long before a payslip's period the salary advance it takes back is looked for, in days. */
+export const ADVANCE_DAYS = 62;
 
 const DEDUCTIONS = ['tax_deducted', 'national_insurance', 'pension_contribution_employee', 'student_loan_deducted'] as const;
 
@@ -70,6 +77,8 @@ export interface PayPeriod {
   from: ISODate;
   to: ISODate;
   credit?: Transaction;
+  /** Pay sent early that the payslip takes back (a salary advance): its deduction line and the credit. */
+  advances?: { label: string; t: Transaction }[];
   /** You said its pay is owed to you: on the Pay tab, or by telling the app it had not arrived (`contextId`). */
   owed?: { markedAt: string; note?: string; contextId?: string };
   /** HMRC's record of this payment, when its pay and tax are the payslip's to the penny. */
@@ -219,6 +228,23 @@ export function pairPay(store: Store, ty: TaxYear): { periods: PayPeriod[]; othe
     if (p.credit || nothingDue(p) || p.expectedNet === null || !start) continue;
     const day = p.payDate ?? p.periodEnd!;
     pair(p, salary.filter((t) => !used.has(t.id) && t.date >= start && t.date < p.from && fromJob(t, p) && toMinor(t.amount) === toMinor(p.expectedNet!)).sort((a, b) => Math.abs(diffDays(a.date, day)) - Math.abs(diffDays(b.date, day)))[0]);
+  }
+  // Pay advanced: a payslip read in full that takes back a salary advance was partly paid early. The
+  // advance is a salary credit of exactly that deduction, to the penny, from ADVANCE_DAYS before the
+  // period to its pay date: one from the job first, else whatever name the bank gives it; the latest.
+  for (const p of periods) {
+    const lines = p.payslip?.deductions.filter((d) => d.amount > 0 && ADVANCE_LINE.test(d.label)) ?? [];
+    if (!lines.length) continue;
+    const start = p.figures[0]!.periodStart ?? p.periodEnd ?? p.payDate!;
+    const end = maxDate(p.payDate, p.periodEnd) ?? start;
+    for (const d of lines) {
+      const t = salary
+        .filter((x) => !used.has(x.id) && x.date >= addDays(start, -ADVANCE_DAYS) && x.date <= end && toMinor(x.amount) === toMinor(d.amount))
+        .sort((a, b) => Number(fromJob(b, p)) - Number(fromJob(a, p)) || b.date.localeCompare(a.date))[0];
+      if (!t) continue;
+      (p.advances ??= []).push({ label: d.label, t });
+      used.add(t.id);
+    }
   }
   fromTheJob(false);
   // 2. A payment of exactly that pay, to the penny, whatever name the bank gives the employer.
@@ -394,7 +420,7 @@ export function pay(store: Store, coverage: Coverage, taxYear?: string, now: ISO
     let note: string | undefined;
     if (nothingDue(p)) {
       status = 'nothing';
-      note = `Nothing to pay into your bank: ${p.gross === 0 ? 'no pay this month' : 'the deductions are as much as the pay'}`;
+      note = `Nothing to pay into your bank: ${p.gross === 0 ? 'no pay this month' : p.advances ? 'it came early, as an advance' : 'the deductions are as much as the pay'}`;
     } else if (credit) {
       const diff = p.expectedNet !== null ? toMinor(credit.amount) - toMinor(p.expectedNet) : 0;
       status = p.expectedNet === null || Math.abs(diff) <= PAY_TOLERANCE_POUNDS * 100 ? 'paid' : 'differs';
@@ -422,6 +448,11 @@ export function pay(store: Store, coverage: Coverage, taxYear?: string, now: ISO
       });
       note = known ? `No payment from ${p.payer || 'this employer'} is in your bank data between ${p.from} and ${end}` : `Your bank data does not cover ${p.from} to ${end} yet`;
     }
+    // Pay sent early that this payslip takes back: part of its pay, already in the bank.
+    if (p.advances && !nothingDue(p)) {
+      const early = `Part of its pay came early: ${p.advances.map(({ t }) => `${formatMoney(t.amount)} on ${formatDate(t.date)}`).join(' and ')}, the advance it takes back`;
+      note = note ? `${early}; ${note}` : early;
+    }
     employer(p.key, p.payer).months.push({
       periodStart: p.figures[0]!.periodStart ?? null,
       periodEnd: p.periodEnd,
@@ -434,6 +465,7 @@ export function pay(store: Store, coverage: Coverage, taxYear?: string, now: ISO
       expectedNet: p.expectedNet,
       paidIn: credit ? { amount: credit.amount, date: credit.date, transactionId: credit.id, accountId: credit.accountId } : null,
       otherDeductions: credit && p.expectedNet !== null ? fromMinor(toMinor(p.expectedNet) - toMinor(credit.amount)) : null,
+      ...(p.advances ? { advanced: p.advances.map(({ label, t }) => ({ label, amount: t.amount, date: t.date, transactionId: t.id, accountId: t.accountId })) } : {}),
       status,
       ...(note ? { note } : {}),
       figureIds: p.figures.map((f) => f.id),
@@ -504,7 +536,7 @@ export function pay(store: Store, coverage: Coverage, taxYear?: string, now: ISO
       const vals = e.months.map(pick).filter((v): v is number => v !== null);
       return vals.length ? fromMinor(vals.reduce((s, v) => s + toMinor(v), 0)) : null;
     };
-    e.totals = { gross: total((m) => m.gross), tax: total((m) => m.tax), ni: total((m) => m.ni), pension: total((m) => m.pension), studentLoan: total((m) => m.studentLoan), paidIn: total((m) => m.paidIn?.amount ?? null) ?? 0 };
+    e.totals = { gross: total((m) => m.gross), tax: total((m) => m.tax), ni: total((m) => m.ni), pension: total((m) => m.pension), studentLoan: total((m) => m.studentLoan), paidIn: total((m) => (m.paidIn || m.advanced ? fromMinor(toMinor(m.paidIn?.amount ?? 0) + (m.advanced ?? []).reduce((s, a) => s + toMinor(a.amount), 0)) : null)) ?? 0 };
     if (e.employmentId) {
       taxChecks(store, e, e.employmentId);
       // Pay the year to date shows on no imported payslip.
@@ -531,7 +563,7 @@ export function pay(store: Store, coverage: Coverage, taxYear?: string, now: ISO
   const notes: string[] = [];
   if (earned.length) notes.push('Timesheet work is matched to the payslip whose gross is exactly a run of its unpaid months, oldest first. What is owed is expected with the next payslip after the usual delay; its tax and NI are estimates from the payroll’s last payslip and the UK rates.');
   if (!periods.length) notes.push('No payslips for this tax year: import them to see gross pay, tax and NI month by month. Pay into your bank is shown on its own.');
-  notes.push('Pay is matched to a payment into your bank within 10 days of the pay date: from the same job (by name or payroll number), or of exactly the pay after the deductions read. Pay the job brought forward (before Christmas, say) is matched earlier in its pay period when it is exactly that pay. Net pay is what the payslip prints when it was read in full; otherwise it is the pay less the deductions read, and any not read (a cycle scheme, say) show as the difference.');
+  notes.push('Pay is matched to a payment into your bank within 10 days of the pay date: from the same job (by name or payroll number), or of exactly the pay after the deductions read. Pay the job brought forward (before Christmas, say) is matched earlier in its pay period when it is exactly that pay. A salary advance a payslip takes back is matched to the payment of exactly that amount before it, and counts as that payslip’s pay. Net pay is what the payslip prints when it was read in full; otherwise it is the pay less the deductions read, and any not read (a cycle scheme, say) show as the difference.');
   if (employers.some((e) => e.months.some((m) => m.check))) notes.push(`The tax a pay date would have on HMRC’s code is worked out from the taxable pay HMRC’s record shows, on the code HMRC issued at least ${CODE_NOTICE_DAYS} days before it (a payroll cannot use a code it has not been sent).`);
   return { taxYear: { label: ty.label, start: ty.start, end: ty.end }, employers, notes };
 }
