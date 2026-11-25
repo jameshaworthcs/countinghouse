@@ -207,8 +207,9 @@ function Allowances({ a }: { a: AllowancesResponse }) {
           <KeyValue
             className="mt-3"
             items={[
-              ['Bonus received this year', <Money value={a.lisa.bonusReceived} />],
-              ['Bonus due on contributions', <Money value={a.lisa.bonusExpected} />],
+              ['Bonus earned on this year’s payments', <Money value={a.lisa.bonusEarned} />],
+              ['Bonus received for them', <Money value={a.lisa.bonusReceived} />],
+              ['Bonus still to come', <Money value={a.lisa.bonusStillDue} />],
             ]}
           />
           <Lines lines={a.lisa.lines} />

@@ -396,8 +396,11 @@ async function main() {
   market('sipp', 38_500, (m) => (['03', '09'].includes(m.slice(5, 7)) ? { own: 2_000, relief: 500 } : { own: 0 }), 3);
   // The LISA screenshot shows the allowance used this tax year.
   const lisaLast = snapshots.filter((s) => s.accountId === 'lifetime-isa').at(-1)!;
-  lisaLast.taxYearContributions = roundMoney(333.33 * 6);
-  lisaLast.taxYear = '2026/27';
+  const lisaYear = taxYearOf(lisaLast.date);
+  lisaLast.taxYearContributions = txs
+    .filter((t) => t.accountId === 'lifetime-isa' && t.category === 'contribution' && t.date >= lisaYear.start && t.date <= lisaLast.date)
+    .reduce((sum: number, t) => roundMoney(sum + t.amount), 0);
+  lisaLast.taxYear = lisaYear.label;
   holdings.push({
     id: holdingsId('stocks-isa', addDays(END, -2), isaValue),
     accountId: 'stocks-isa',

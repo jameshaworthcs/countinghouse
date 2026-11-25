@@ -522,6 +522,6 @@ describe('store, balances and analytics', () => {
     expect(a.isa.used).toBe(10_000);
     expect(a.isa.remaining).toBe(10_000);
     expect(a.isa.cashUsed).toBe(3000);
-    expect(a.lisa).toMatchObject({ contributed: 2000, remaining: 2000, bonusExpected: 500 });
+    expect(a.lisa).toMatchObject({ contributed: 2000, remaining: 2000, bonusEarned: 500, bonusReceived: 0, bonusStillDue: 500 });
   });
 });

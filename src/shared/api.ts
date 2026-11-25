@@ -401,7 +401,8 @@ export interface AllowancesResponse {
    * `missing`: the same days, account by account.
    */
   isa: { allowance: number; used: number; remaining: number; cashLimit: number; cashUsed: number; lines: AllowanceLine[]; notes: string[]; incomplete: string | null; missing: MissingDaysView[]; confirmedNil: ConfirmedNilView[] };
-  lisa: { allowance: number; contributed: number; remaining: number; bonusReceived: number; bonusExpected: number; lines: AllowanceLine[]; notes: string[]; incomplete: string | null; missing: MissingDaysView[]; confirmedNil: ConfirmedNilView[] } | null;
+  /** `bonusEarned`: what the year's payments earn; `bonusReceived`: what came for them, wherever dated; `bonusStillDue`: the rest (FORMULAS.md §11, "LISA bonus"). */
+  lisa: { allowance: number; contributed: number; remaining: number; bonusEarned: number; bonusReceived: number; bonusStillDue: number; lines: AllowanceLine[]; notes: string[]; incomplete: string | null; missing: MissingDaysView[]; confirmedNil: ConfirmedNilView[] } | null;
   pension: {
     annualAllowance: number;
     personal: number;

@@ -2761,3 +2761,17 @@ value grown from the account's first flow is never below nothing, as rolled-back
   leaves the table, and stepping through months is what the panel's arrows do); the year to date's
   £0 lines in full (they hid the ones that matter: pay, tax and NI are always shown, the rest when
   not £0).
+
+## 2026-11-25: A Lifetime ISA's bonus counts for the year of its payment, and what is still to come is said
+
+- **Owner:** a month in review said the year's whole bonus was due when three quarters of it had
+  arrived; fix the figures behind it.
+- **Done:** each payment earns 25% of it within its year's allowance, and each bonus pays the oldest
+  earned amount dated on or before it (FORMULAS.md §11, "LISA bonus"), so a March payment's April
+  bonus counts for March's year. The allowances give the bonus earned, received for the year's
+  payments and still to come (`bonusEarned`, `bonusReceived`, `bonusStillDue`; `bonusExpected` is
+  gone); the Tax year page and the Overview show all three. The digests carry them, the analyst's
+  prompt says only the last is still to come (`monthly-review-8`, `insights-after-import-6`).
+- **Considered:** a fixed lag from payment to bonus (HMRC's timing varies from a few weeks to about
+  seven); counting bonuses by the date they arrive (the old rule: a year could show more bonus than
+  it earned and the next less); giving the review only "still to come" (it also needs what arrived).

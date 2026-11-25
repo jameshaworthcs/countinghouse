@@ -183,7 +183,7 @@ function TaxPanel() {
     >
       <div className="flex flex-col gap-4">
         <Meter label="ISA allowance" used={a.isa.used} limit={a.isa.allowance} atLeast={a.isa.incomplete !== null} />
-        {a.lisa && <Meter label="Lifetime ISA" used={a.lisa.contributed} limit={a.lisa.allowance} atLeast={a.lisa.incomplete !== null} sub={<>Bonus <Money value={a.lisa.bonusExpected} decimals={0} /></>} />}
+        {a.lisa && <Meter label="Lifetime ISA" used={a.lisa.contributed} limit={a.lisa.allowance} atLeast={a.lisa.incomplete !== null} sub={a.lisa.bonusStillDue > 0 ? <>Bonus <Money value={a.lisa.bonusReceived} decimals={0} /> of <Money value={a.lisa.bonusEarned} decimals={0} />, <Money value={a.lisa.bonusStillDue} decimals={0} /> to come</> : <>Bonus <Money value={a.lisa.bonusReceived} decimals={0} /> received</>} />}
         <Meter label="Pension annual allowance" used={a.pension.total} limit={a.pension.annualAllowance} atLeast={a.pension.incomplete !== null} sub="Incl. employer and tax relief" />
         <Meter label="Savings interest vs allowance" used={a.savings.interest} limit={a.savings.allowance} atLeast={a.savings.incomplete !== null} overLabel="Taxable" sub={`Tax band: ${bandLabel({ band: a.savings.band, basis: a.savings.bandBasis })}`} />
       </div>

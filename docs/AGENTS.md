@@ -378,7 +378,7 @@ like extraction:
 | `research-provider` | a provider's name and the kinds of account held there | WebSearch, WebFetch | `provider.rates`, `provider.fees` | only when you ask (or with "Research by itself" on: when a provider is new or stale) |
 | `refresh-assumptions` | the asset classes held (no amounts) | WebSearch, WebFetch | `economy.indicator`, `market.outlook`, assumptions with `basedOn` | only when you ask (or with "Research by itself" on: when assumptions are on fallbacks or past review, at most weekly) |
 | `insights-after-import` | the digest, focused on the new imports | Read (the digest only) | insights | 2 minutes after imports stop arriving |
-| `monthly-review` | the month digest (version 6): the month's figures and what its title rests on, the 12 months to it, the year's payees, trips, cards and trends, every review before, documents as of the month's end, and, for the latest month only, today's figures, the alerts shown and earlier reviews' actions; and a file of the 24 months' payments to the month's end | Read, Grep, Glob (its scratch directory only) | a month in review (a title saying how it went, key points, parts, new limits) with lines to watch and how the last ones turned out; proposals to fix data it found wrong; for the latest month, up to 3 actions (actions.json) and up to 3 notes for other pages; replacing every note an earlier review of the month wrote | once a month's data is complete for every account; earlier months only when you ask |
+| `monthly-review` | the month digest (version 7): the month's figures and what its title rests on, the 12 months to it, the year's payees, trips, cards and trends, every review before, documents as of the month's end, and, for the latest month only, today's figures, the alerts shown and earlier reviews' actions; and a file of the 24 months' payments to the month's end | Read, Grep, Glob (its scratch directory only) | a month in review (a title saying how it went, key points, parts, new limits) with lines to watch and how the last ones turned out; proposals to fix data it found wrong; for the latest month, up to 3 actions (actions.json) and up to 3 notes for other pages; replacing every note an earlier review of the month wrote | once a month's data is complete for every account; earlier months only when you ask |
 | `interpret-note` | the owner's note, account and instrument names | none | proposals on the note | when a note is added |
 | `label-imports` | each committed import's file name, kind, provider, accounts (name, type, period) and dates, a payslip's employer, the tax figures' kinds and years; never amounts, account numbers, references or rows | none | a name on each import (`label`) that has none | only with "Name imports with the agent" on (off by default): a minute after imports stop being committed or filed; History offers the ones from before |
 | receipt reading (not a job; `receipt-2`) | one receipt file, the payment's amount, date and payee, the category names | Read (the receipt only) on Claude; none locally (the receipt goes in as images) | a reading on the receipt: proposed split lines | when a receipt is attached, only with "Read receipts" on (off by default); on the local model (the default), it reads in the background |
@@ -392,9 +392,13 @@ Other behaviour:
 - **The local model costs nothing:** a job it ran has no `costUsd` and does not count against the
   background budget. Its records keep `provenance.engine: "inference"` and the service's own record
   (`provenance.inference`).
-- **Insights after imports** (`insights-after-import-5`) are told where schedules of payments are
+- **Insights after imports** (`insights-after-import-6`) are told where schedules of payments are
   (`digest.agreements`, with each one's direction): money in that one pays you is borrowing or that
   agreement's payment, not income.
+- **A Lifetime ISA's bonus in a digest** (`taxYear.lisa`, both jobs): `bonusEarned` (what the
+  year's payments earn), `bonusReceived` (what has arrived for them, wherever dated) and
+  `bonusStillDue` (the rest; FORMULAS.md §11, "LISA bonus"). The analyst's prompt says only the last
+  is still to come.
 - **Holdings create instruments.** Funds listed on statements become instrument records
   (`setBy: system`, identifiers exactly as printed), so research can follow. They are recorded at
   each commit that records holdings and when the app starts, whether or not agents are on: a fact
@@ -450,8 +454,8 @@ Other behaviour:
   | `monthly-review` | 46–73 s (`monthly-review-5`) | $0.28–0.39 |
   | `interpret-note` | 15 s | $0.07 |
   | `label-imports` | 2 s (one import) to 16 s (twelve) | $0.007 to $0.08 |
-- **The month in review** (`monthly-review-7`; FORMULAS.md §18; the Overview's month card and the Reviews page). Written to be read once a month, often on a phone: about 300 words, whole pounds, people by the names you saved, none of the app's own words, and the title saying how the month went and whether that is a problem.
-  - **Its digest** (`buildMonthDigest`, version 6):
+- **The month in review** (`monthly-review-8`; FORMULAS.md §18; the Overview's month card and the Reviews page). Written to be read once a month, often on a phone: about 300 words, whole pounds, people by the names you saved, none of the app's own words, and the title saying how the month went and whether that is a problem.
+  - **Its digest** (`buildMonthDigest`, version 7):
     - `focus` is the month's figures exactly as the Overview's month card shows them (`GET /api/month/:month`): where the money went, adding up, spending by category group and category against typical with each of the 12 months, the worth split and cash cover; with the month's payments to cite, each with the person it was with (by the name you saved them by).
     - `verdictInputs`: what the title rests on, computed: spending against its median and range (and how many months typical rests on), left over, borrowing, the change in worth and its split, cash cover.
     - `focus.quality` says what is still yours to confirm (payments with people, cash and cheques paid in) and how much rests on a category the bank or the reader guessed (each payment's `categorisedBy` says which).

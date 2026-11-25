@@ -878,7 +878,23 @@ schedules and the names the merchant list knows are not guesses.
 **LISA:**
 
 - Contributions against £4,000.
-- Expected bonus = 25% × min(contributions, £4,000).
+- **LISA bonus** (`lisaBonusByYear`), account by account. HMRC pays it some weeks after each
+  payment, so the bonus on a March payment can arrive in April: a bonus counts for the year of the
+  payments it is for, not the year it is dated in.
+  - Each payment counted above (the LISA's `contribution` rows and payments to it only the paying
+    account records) earns 25% of it, to the penny, oldest first, within its year's £4,000.
+  - Each `government-bonus` row, oldest first, pays the oldest earned amount dated on or before it,
+    and may split across payments (and years). What no payment before it earned counts for the year
+    it is dated in.
+  - **Bonus earned** (`bonusEarned`) = the year's payments' earned amounts added up, at most £1,000.
+    When a provider's "paid in this tax year" is the year's figure and the rows do not add up to it,
+    25% × min(that figure, £4,000) instead.
+  - **Bonus received** (`bonusReceived`) = the bonus rows' parts matched to the year's payments,
+    plus those dated in the year that no earlier payment earned.
+  - **Bonus still to come** (`bonusStillDue`) = what the year's payments earned that no bonus paid
+    (at most the bonus earned); with a provider's figure instead, max(0, earned − received).
+  - Notes say which bonuses arrived after the year's 5 April, and which bonuses dated in the year
+    were for another year's payments.
 
 **Pension annual allowance** (`pensionTotals`), scheme by scheme, then added up:
 

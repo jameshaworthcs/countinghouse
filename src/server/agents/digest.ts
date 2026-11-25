@@ -126,7 +126,7 @@ export function buildDigest(store: Store, analytics: Analytics, opts: DigestOpti
       label: allow.taxYear.label,
       daysLeft: allow.taxYear.daysLeft,
       isa: { allowance: allow.isa.allowance, used: allow.isa.used, remaining: allow.isa.remaining, cashLimit: allow.isa.cashLimit, cashUsed: allow.isa.cashUsed },
-      lisa: allow.lisa ? { contributed: allow.lisa.contributed, remaining: allow.lisa.remaining, bonusExpected: allow.lisa.bonusExpected } : null,
+      lisa: allow.lisa ? { contributed: allow.lisa.contributed, remaining: allow.lisa.remaining, bonusEarned: allow.lisa.bonusEarned, bonusReceived: allow.lisa.bonusReceived, bonusStillDue: allow.lisa.bonusStillDue } : null,
       pension: { annualAllowance: allow.pension.annualAllowance, used: allow.pension.total, remaining: allow.pension.remaining, carryForward: allow.pension.carryForward },
       savingsInterest: { interest: allow.savings.interest, allowance: allow.savings.allowance, band: allow.savings.band },
       dividends: { amount: allow.dividends.amount, allowance: allow.dividends.allowance },
@@ -160,7 +160,7 @@ export interface MonthDigestOptions {
 }
 
 /**
- * The month in review's digest (version 6, docs/AGENTS.md): the month's figures as the app works them
+ * The month in review's digest (version 7, docs/AGENTS.md): the month's figures as the app works them
  * out (`focus`, the same as the Overview's month card: where the money went, spending by category
  * against typical), the 12 months up to it (`history`), the year's payees (`payeesYear`) and trips
  * (`trips`), the review of the month before in full (`previousReview`, its parts) and every one before
@@ -356,7 +356,7 @@ function todayDigest(store: Store, analytics: Analytics, now: ISODate, since: IS
       label: allow.taxYear.label,
       daysLeft: allow.taxYear.daysLeft,
       isa: { allowance: allow.isa.allowance, used: allow.isa.used, remaining: allow.isa.remaining },
-      lisa: allow.lisa ? { contributed: allow.lisa.contributed, remaining: allow.lisa.remaining, bonusExpected: allow.lisa.bonusExpected } : null,
+      lisa: allow.lisa ? { contributed: allow.lisa.contributed, remaining: allow.lisa.remaining, bonusEarned: allow.lisa.bonusEarned, bonusReceived: allow.lisa.bonusReceived, bonusStillDue: allow.lisa.bonusStillDue } : null,
       pension: { annualAllowance: allow.pension.annualAllowance, used: allow.pension.total, remaining: allow.pension.remaining },
       savingsInterest: { interest: allow.savings.interest, allowance: allow.savings.allowance },
       dividends: { amount: allow.dividends.amount, allowance: allow.dividends.allowance },

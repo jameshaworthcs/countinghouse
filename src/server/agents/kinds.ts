@@ -97,6 +97,7 @@ const ANALYSIS_SYSTEM = `You are the analyst of a private UK personal-finance ap
 - Every insight cites evidence: ids that appear in the digest (transaction ids, account ids, context ids; a payslip's payslipId as "payslip", an HMRC record's id or recordId as "hmrc", an agreement's, company's or job's id as "agreement", "company" or "employment") or "computed" metrics named after digest fields with their values.
 - Things dated after the period under review (a tax code issued since, pay owed now) are what has happened since: say so when you mention them.
 - UK context: tax years run 6 April to 5 April; ISA, LISA and pension allowances; the Personal Savings Allowance.
+- A Lifetime ISA's bonus (taxYear.lisa): bonusEarned is what the year's payments earn, bonusReceived what has arrived for them, and bonusStillDue the rest. Only bonusStillDue is still to come.
 - Not regulated advice: say what the data shows and what may be worth considering. Never recommend specific products or providers.
 - Respect coverage: where completeData is false or an account's data is missing, say so or avoid the conclusion.
 - A balance or value marked estimated is a rough figure (often one the owner gave), not a statement figure: draw nothing from its precision. A null figure is not known; never read it as zero.
@@ -590,7 +591,7 @@ const refreshAssumptions: JobKindDef = {
 
 const insightsAfterImport: JobKindDef = {
   kind: 'insights-after-import',
-  promptVersion: 'insights-after-import-5',
+  promptVersion: 'insights-after-import-6',
   privacy: 'personal',
   tools: ['Read'],
   label: ({ params }) => `Insights from ${(params.importIds as string[] | undefined)?.length ?? 0} new import(s)`,
@@ -813,7 +814,7 @@ function writtenLater(ctx: Pick<JobContext, 'store' | 'analytics' | 'params'>): 
 
 const monthlyReview: JobKindDef = {
   kind: 'monthly-review',
-  promptVersion: 'monthly-review-7',
+  promptVersion: 'monthly-review-8',
   privacy: 'personal',
   tools: ['Read', 'Grep', 'Glob'],
   label: ({ params }) => `Month in review: ${String(params.month)}${params.catchUp === true ? ' (written later)' : ''}`,

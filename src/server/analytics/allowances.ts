@@ -7,7 +7,7 @@ import type { AllowanceLine, AllowancesResponse, ConfirmedNilView, MissingDaysVi
 import { settledThrough } from '../../shared/coverage';
 import { addDays, diffDays, formatDate, formatSpan, maxDate, minDate, today, type ISODate } from '../../shared/dates';
 import { findInstitution } from '../../shared/institutions';
-import { fromMinor, toMinor } from '../../shared/money';
+import { formatMoney, fromMinor, toMinor } from '../../shared/money';
 import type { Account, Figure, Transaction } from '../../shared/schema';
 import {
   ageOn,
@@ -21,6 +21,7 @@ import {
   taxYear as makeTaxYear,
   taxYearOf,
   taxYearParams,
+  taxYearsBetween,
   type TaxYear,
 } from '../../shared/uk';
 import type { Store } from '../store';
@@ -145,14 +146,16 @@ interface RowFilter {
 const passes = (t: Transaction, f: RowFilter) => !f.skip?.has(t.id) && (!f.after || t.date > f.after);
 
 /** Money into a wrapper account in the tax year that counts as a new subscription/contribution. */
-export function wrapperContributions(store: Store, account: Account, ty: TaxYear, filter: RowFilter = {}): { minor: number; lines: AllowanceLine[] } {
+export function wrapperContributions(store: Store, account: Account, ty: TaxYear, filter: RowFilter = {}): { minor: number; lines: AllowanceLine[]; rows: ContributionRow[] } {
   let minor = 0;
   const ids: string[] = [];
+  const rows: ContributionRow[] = [];
   const own = store.transactions(account.id).filter((t) => inYear(t, ty) && passes(t, filter));
   for (const t of own) {
     if (t.amount > 0 && t.category === 'contribution') {
       minor += toMinor(t.amount);
       ids.push(t.id);
+      rows.push({ id: t.id, date: t.date, minor: toMinor(t.amount) });
     }
   }
   if (account.flexibleIsa) {
@@ -176,11 +179,89 @@ export function wrapperContributions(store: Store, account: Account, ty: TaxYear
   for (const t of oneSided) {
     minor += -toMinor(t.amount);
     ids.push(t.id);
+    rows.push({ id: t.id, date: t.date, minor: -toMinor(t.amount) });
   }
   const lines: AllowanceLine[] = minor
     ? [{ accountId: account.id, label: account.name, amount: fromMinor(minor), source: 'transactions', transactionIds: ids }]
     : [];
-  return { minor, lines };
+  return { minor, lines, rows };
+}
+
+/** One payment counted as a subscription: its row (in the wrapper, or the paying account's) and amount in pence. */
+export interface ContributionRow {
+  id: string;
+  date: ISODate;
+  minor: number;
+}
+
+/** A Lifetime ISA's bonus for one tax year's payments (docs/FORMULAS.md §11, "LISA bonus"), in pence. */
+export interface LisaBonusYear {
+  /** The bonus rate on each of the year's payments, within the year's allowance; null when the rows are not the year's whole figure. */
+  earned: number | null;
+  /** Bonuses matched to the year's payments, wherever they are dated, and those dated in it that no earlier payment earned. */
+  received: number;
+  /** What the year's payments earned that no bonus has paid yet. */
+  owed: number;
+  bonuses: { id: string; date: ISODate; minor: number }[];
+}
+
+/**
+ * A Lifetime ISA's bonuses matched to the payments they are for (docs/FORMULAS.md §11, "LISA bonus").
+ * HMRC pays a bonus weeks after the payment it is for, so one can fall in the next tax year. Each
+ * payment earns the bonus rate on it (to the penny, within its year's allowance, oldest first); each
+ * bonus pays the oldest earned amount dated on or before it. What no payment before it earned counts
+ * for the year it is dated in.
+ */
+export function lisaBonusByYear(store: Store, account: Account, upTo: ISODate): Map<string, LisaBonusYear> {
+  const rows = store.transactions(account.id);
+  const out = new Map<string, LisaBonusYear>();
+  const year = (label: string) => out.get(label) ?? out.set(label, { earned: 0, received: 0, owed: 0, bonuses: [] }).get(label)!;
+  // From its first row, or the first payment to it another account records.
+  const dates = [...rows.map((t) => t.date), ...store.transactions().filter((t) => t.counterpartyAccountId === account.id).map((t) => t.date)];
+  if (!dates.length) return out;
+  const items: { date: ISODate; year: string; owed: number }[] = [];
+  const sorted = dates.sort();
+  for (const ty of taxYearsBetween(sorted[0]!, sorted.at(-1)! > upTo ? sorted.at(-1)! : upTo)) {
+    const params = taxYearParams(ty);
+    const paid = wrapperContributions(store, account, ty).rows.sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
+    let room = toMinor(params.lisaAllowance);
+    let earned = 0;
+    for (const r of paid) {
+      const counted = Math.min(room, r.minor);
+      room -= counted;
+      const owed = Math.round(counted * params.lisaBonusRate);
+      earned += owed;
+      if (owed > 0) items.push({ date: r.date, year: ty.label, owed });
+    }
+    // A provider's "paid in this tax year" is the year's figure when it has one; the rows earn the
+    // bonus only when they add up to what was counted.
+    const counted = providerFigure(store, account.id, ty);
+    const rowsMinor = paid.reduce((s, r) => s + r.minor, 0);
+    if (paid.length || counted !== null) year(ty.label).earned = counted === null || counted === rowsMinor ? earned : null;
+  }
+  const bonuses = rows.filter((t) => t.category === 'government-bonus' && t.amount > 0).sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
+  let next = 0;
+  for (const b of bonuses) {
+    let left = toMinor(b.amount);
+    const share = new Map<string, number>();
+    for (let i = next; left > 0 && i < items.length && items[i]!.date <= b.date; i++) {
+      const it = items[i]!;
+      const pay = Math.min(left, it.owed);
+      it.owed -= pay;
+      left -= pay;
+      share.set(it.year, (share.get(it.year) ?? 0) + pay);
+      if (it.owed === 0 && i === next) next++;
+    }
+    while (next < items.length && items[next]!.owed === 0) next++;
+    if (left > 0) share.set(taxYearOf(b.date).label, (share.get(taxYearOf(b.date).label) ?? 0) + left);
+    for (const [label, minor] of share) {
+      const y = year(label);
+      y.received += minor;
+      y.bonuses.push({ id: b.id, date: b.date, minor });
+    }
+  }
+  for (const it of items) if (it.owed) year(it.year).owed += it.owed;
+  return out;
 }
 
 function providerFigure(store: Store, accountId: string, ty: TaxYear): number | null {
@@ -630,21 +711,54 @@ export function allowances(store: Store, label?: string, now: ISODate = today(),
   const lisaAccounts = isaAccounts.filter((a) => a.type === 'lisa');
   let lisa: AllowancesResponse['lisa'] = null;
   if (lisaAccounts.length) {
-    const bonus = sumCategory(store, lisaAccounts, ty, 'government-bonus');
+    // The bonus is the year's payments', wherever it is dated (FORMULAS.md §11, "LISA bonus").
+    type Part = { date: ISODate; minor: number };
+    const money = (parts: Part[]) => formatMoney(fromMinor(parts.reduce((s, b) => s + b.minor, 0)));
+    const dates = (parts: Part[]) => parts.map((b) => formatDate(b.date, { year: true })).join(', ');
+    let received = 0;
+    let earnedRows: number | null = 0;
+    let owed = 0;
+    const bonusLines: AllowanceLine[] = [];
     const notes: string[] = [];
+    for (const a of lisaAccounts) {
+      const years = lisaBonusByYear(store, a, now);
+      const y = years.get(ty.label);
+      if (!y) {
+        // No rows for the year: the rate on its figure, if any.
+        earnedRows = null;
+        continue;
+      }
+      received += y.received;
+      owed += y.owed;
+      earnedRows = earnedRows === null || y.earned === null ? null : earnedRows + y.earned;
+      if (y.received) bonusLines.push({ accountId: a.id, label: `${a.name}: bonus received`, amount: fromMinor(y.received), source: 'transactions', transactionIds: [...new Set(y.bonuses.map((b) => b.id))] });
+      const later = y.bonuses.filter((b) => b.date > ty.end);
+      if (later.length) notes.push(`${money(later)} of the bonus on this year's payments arrived after 5 April (${dates(later)}).`);
+      // Bonuses dated in this year that were for another year's payments.
+      for (const [label, other] of years) {
+        if (label === ty.label) continue;
+        const here = other.bonuses.filter((b) => inYear(b, ty));
+        if (here.length) notes.push(`${money(here)} of bonus received this year (${dates(here)}) is for ${label}'s payments.`);
+      }
+    }
     if (dob) {
       const age = ageOn(dob, ty.start);
       if (age >= 50) notes.push('You are 50 or over, so LISA contributions and bonuses have stopped.');
     } else notes.push('Add your date of birth in Settings to check LISA age limits.');
-    notes.push(`The ${Math.round(params.lisaBonusRate * 100)}% bonus is paid monthly by HMRC on contributions up to £${params.lisaAllowance.toLocaleString('en-GB')} a year.`);
+    notes.push(`The ${Math.round(params.lisaBonusRate * 100)}% bonus is paid monthly by HMRC on contributions up to £${params.lisaAllowance.toLocaleString('en-GB')} a year, some weeks after each payment.`);
     const allowance = toMinor(params.lisaAllowance);
+    const cap = Math.round(allowance * params.lisaBonusRate);
+    // Each payment's bonus to the penny when the rows are the year's figure; else the rate on the figure.
+    const earned = Math.min(cap, earnedRows ?? Math.round(Math.min(lisaUsed, allowance) * params.lisaBonusRate));
     lisa = {
       allowance: params.lisaAllowance,
       contributed: fromMinor(lisaUsed),
       remaining: fromMinor(Math.max(0, allowance - lisaUsed)),
-      bonusReceived: fromMinor(bonus.minor),
-      bonusExpected: fromMinor(Math.round(Math.min(lisaUsed, allowance) * params.lisaBonusRate)),
-      lines: [...lisaLines, ...bonus.lines.map((l) => ({ ...l, label: `${l.label}: bonus received` }))],
+      bonusEarned: fromMinor(earned),
+      bonusReceived: fromMinor(received),
+      // What the payments earned that no bonus paid, when the rows are the year's figure.
+      bonusStillDue: fromMinor(earnedRows !== null ? Math.min(owed, earned) : Math.max(0, earned - received)),
+      lines: [...lisaLines, ...bonusLines],
       notes,
       incomplete: missingNote('contributions', lisaMissing),
       missing: lisaMissing,
