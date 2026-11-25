@@ -2461,6 +2461,8 @@ export const InsightSchema = z.object({
   unchecked: z.array(z.string().max(40)).max(20).optional(),
   /** Proposals it made to fix the data, for you to apply or dismiss. */
   proposals: z.array(z.string().regex(/^prop_\d{8}_\d{6}_[0-9a-f]{4}$/)).max(5).optional(),
+  /** The actions a month in review asked of you, by key (actions.json holds them, and what you decided). */
+  actionKeys: z.array(z.string().max(80)).max(3).optional(),
   /** Your reaction: kept with the insight so later jobs learn from it. */
   feedback: z.object({ useful: z.boolean(), note: z.string().max(500).optional(), at: TimestampSchema }).optional(),
   createdAt: TimestampSchema,

@@ -8,7 +8,8 @@ import { nameKey } from '../../shared/categorise';
 import { cleanPayee } from '../../shared/merchants';
 import { toMinor, fromMinor } from '../../shared/money';
 import { addDays, addMonths, eachMonth, endOfMonth, startOfMonth, today, type ISODate } from '../../shared/dates';
-import { ageOn, taxYearOf } from '../../shared/uk';
+import { ACTIVE_STATES, actionState } from '../../shared/actions';
+import { ageOn, taxYear, taxYearOf } from '../../shared/uk';
 import type { Analytics } from '../analytics';
 import { agreementsView } from '../analytics/agreements';
 import { arrangementsInto } from '../analytics/arrangements';
@@ -158,13 +159,16 @@ export interface MonthDigestOptions {
 }
 
 /**
- * The month in review's digest (version 5, docs/AGENTS.md): the month's figures as the app works them
+ * The month in review's digest (version 6, docs/AGENTS.md): the month's figures as the app works them
  * out (`focus`, the same as the Overview's month card: where the money went, spending by category
  * against typical), the 12 months up to it (`history`), the year's payees (`payeesYear`) and trips
- * (`trips`), the review of the month before in full (`previousReview`) and every earlier one in short
- * (`earlierReviews`), and what the documents say as of the month's end. Only a review of the latest
- * month also gets today's figures (`asOfToday`, labelled as such), the owner's context and the earlier
- * notes; a review written later for an earlier month knows nothing after it.
+ * (`trips`), the review of the month before in full (`previousReview`, its parts) and every one before
+ * it in short (`earlierReviews`), what the title rests on (`verdictInputs`), each card's year
+ * (`cards`), categories that moved (`spendingTrends`), the people you saved (`people`), and what the
+ * documents say as of the month's end. Only a review of the latest month also gets today's figures
+ * (`asOfToday`, labelled as such, with the alerts the Overview shows and Self Assessment for the years
+ * before), what earlier reviews asked of you (`actions`), the owner's context and the earlier notes; a
+ * review written later for an earlier month knows nothing after it.
  */
 export function buildMonthDigest(store: Store, analytics: Analytics, opts: MonthDigestOptions) {
   const { month } = opts;
@@ -223,7 +227,10 @@ export function buildMonthDigest(store: Store, analytics: Analytics, opts: Month
     ? {
         month: previous.subject.month,
         title: previous.title,
-        body: previous.body,
+        keyPoints: (previous.keyPoints ?? []).map((k) => k.text),
+        // Its parts in full (its body is cut at 4,000 characters); a review older than parts, its body.
+        sections: previous.sections?.length ? previous.sections.map((x) => ({ heading: x.heading, body: x.body })) : null,
+        body: previous.sections?.length ? null : previous.body,
         watch: previous.watch ?? [],
         followUp: previous.followUp ?? [],
         status: previous.status,
@@ -233,10 +240,11 @@ export function buildMonthDigest(store: Store, analytics: Analytics, opts: Month
       }
     : null;
 
-  // Every earlier review in short, oldest first: what each said mattered, what it raised as limits,
-  // its lines to watch and how they turned out, and what you made of it.
+  // Every review before that one in short, oldest first: what each said mattered, what it raised as
+  // limits, its lines to watch and how they turned out (a line missed twice is a pattern), and what you
+  // made of it.
   const earlierReviews = store.insights
-    .filter((i) => i.kind === 'month-review' && i.subject.month && i.subject.month < month && i.status !== 'superseded')
+    .filter((i) => i.kind === 'month-review' && i.subject.month && i.subject.month < month && i.status !== 'superseded' && i.id !== previous?.id)
     .sort((a, b) => a.subject.month!.localeCompare(b.subject.month!) || a.createdAt.localeCompare(b.createdAt))
     .map((i) => ({
       month: i.subject.month,
@@ -244,9 +252,51 @@ export function buildMonthDigest(store: Store, analytics: Analytics, opts: Month
       keyPoints: (i.keyPoints ?? []).map((k) => k.text),
       caveats: i.caveats ?? [],
       watch: i.watch ?? [],
-      followUp: (i.followUp ?? []).map((f) => ({ watch: f.watch, outcome: f.outcome })),
+      followUp: (i.followUp ?? []).map((f) => ({ watch: f.watch, outcome: f.outcome, note: f.note ? f.note.slice(0, 120) : null })),
       feedback: i.feedback ? { useful: i.feedback.useful, note: i.feedback.note ?? null } : null,
     }));
+
+  // What the title rests on, computed (FORMULAS.md §18): spending against typical, the worth split, cash cover.
+  const sc = focus.spending.compared;
+  const verdictInputs = {
+    income: focus.moneyIn.income,
+    borrowed: focus.moneyIn.borrowed,
+    spending: focus.spending.total,
+    spendingMedian: sc?.median ?? null,
+    spendingVsMedianPct: sc && sc.median > 0 ? Math.round(((focus.spending.total - sc.median) / sc.median) * 100) : null,
+    spendingPosition: sc ? (focus.spending.total > sc.high ? 'above-range' : focus.spending.total < sc.low ? 'below-range' : 'within-range') : null,
+    typicalRestsOnMonths: sc?.months ?? 0,
+    leftOver: focus.net.amount,
+    worthChange: focus.worth.change,
+    worthSplit: focus.worth.split,
+    cashCoverMonths: focus.runway.months,
+    accessibleCash: focus.runway.accessibleCash,
+  };
+
+  // Each credit card's year to the month's end: what it charged in interest, and how often you paid it.
+  const yearFrom = startOfMonth(addMonths(from, -11));
+  const cards = store.accounts
+    .filter((a) => a.type === 'credit_card' && (!a.closedOn || a.closedOn >= from))
+    .map((a) => {
+      const rows = store.transactions(a.id).filter((t) => t.date >= yearFrom && t.date <= to);
+      const interest = rows.filter((t) => t.category === 'interest-charges' && t.amount < 0);
+      const end = analytics.engine.balanceOn(a.id, to);
+      return {
+        accountId: a.id,
+        name: a.name,
+        owedAtMonthEnd: end?.gbp ?? null,
+        interestCharged12m: fromMinor(-interest.reduce((x, t) => x + toMinor(t.amount), 0)),
+        monthsWithInterest12m: new Set(interest.map((t) => t.date.slice(0, 7))).size,
+        monthsWithPayments12m: new Set(rows.filter((t) => t.amount > 0 && (t.transferGroup || t.category === 'credit-card-payment')).map((t) => t.date.slice(0, 7))).size,
+      };
+    })
+    .filter((c) => c.owedAtMonthEnd !== null || c.monthsWithPayments12m > 0);
+
+  // Categories whose last 3 months moved from the 9 before (FORMULAS.md §10's signals), up to the month's end.
+  const spendingTrends = analytics
+    .spending(startOfMonth(addMonths(from, -2)), to)
+    .signals.filter((x) => x.id.startsWith('trend-'))
+    .map((x) => ({ id: x.id, title: x.title, detail: x.detail }));
 
   const baseFrom = startOfMonth(addMonths(from, -3));
   const asOfToday = opts.catchUp ? null : todayDigest(store, analytics, now, to);
@@ -262,6 +312,10 @@ export function buildMonthDigest(store: Store, analytics: Analytics, opts: Month
     history,
     previousReview,
     earlierReviews,
+    verdictInputs,
+    cards,
+    spendingTrends,
+    people: store.people.map((x) => ({ name: x.name, relation: x.relation ?? null })),
     payeesYear: payeesYear(store, cats, context, addMonths(from, -11), to, from),
     trips: trips(store, addMonths(from, -12), to),
     files: {
@@ -272,6 +326,7 @@ export function buildMonthDigest(store: Store, analytics: Analytics, opts: Month
     ...(asOfToday
       ? {
           asOfToday,
+          actions: actionsDigest(store, month, now),
           ownerContext: store.context.filter((c) => c.status === 'active').map((c) => ({ id: c.id, kind: c.kind, statement: c.statement, detail: c.detail })),
           earlierInsights: store.insights
             .filter((i) => i.status === 'active' && i.kind !== 'month-review')
@@ -308,7 +363,44 @@ function todayDigest(store: Store, analytics: Analytics, now: ISODate, since: IS
     projection: recent?.available ? { basis: recent.basis, monthlyIncome: recent.monthly.income, monthlySpending: recent.monthly.spending, monthlyNet: recent.monthly.net, confidence: recent.confidence } : null,
     owedPay: owedPayDigest(store, analytics),
     goals: goalsDigest(store, analytics),
+    // What the Overview's alerts already say (computed): the review never asks the same again.
+    alertsShown: summary.alerts.map((a) => ({ id: a.id, level: a.level, title: a.title })),
+    selfAssessment: priorSelfAssessment(analytics, now),
     taxCodesSince: store.hmrc.flatMap((r) => (r.type === 'tax-code' && r.date > since ? [{ id: r.id, employmentId: r.employmentId ?? null, employer: r.employer ?? null, date: r.date, code: r.code, cumulative: r.cumulative, taxYear: r.taxYear }] : [])),
+  };
+}
+
+/**
+ * Self Assessment for the two tax years before this one, as the app works it out and as you told it
+ * (FORMULAS.md §11): the reasons to file, each deadline with whether it has passed and is done.
+ */
+function priorSelfAssessment(analytics: Analytics, now: ISODate) {
+  const ty = taxYearOf(now);
+  return [1, 2]
+    .map((back) => analytics.selfAssessment(taxYear(ty.startYear - back).label))
+    .filter((sa) => sa.mayNeedToFile.length > 0 || sa.ownerStatus.status !== undefined || sa.ownerStatus.sendsReturns)
+    .map((sa) => ({
+      taxYear: sa.taxYear.label,
+      ownerStatus: sa.ownerStatus,
+      mayNeedToFile: sa.mayNeedToFile,
+      deadlines: sa.deadlines.map((d) => ({ date: d.date, kind: d.kind, passed: d.passed, done: d.done })),
+      settlementOutstanding: sa.settlement?.outstanding ?? null,
+    }));
+}
+
+/**
+ * What earlier reviews asked of you (actions.json): those still open from months before this one, to
+ * carry under the same key or drop with a reason, and those you decided, never to ask again.
+ */
+function actionsDigest(store: Store, month: string, now: ISODate) {
+  const yearAgo = addDays(now, -365);
+  return {
+    open: store.actions
+      .filter((a) => a.firstMonth < month && ACTIVE_STATES.has(actionState(a, now)))
+      .map((a) => ({ key: a.key, what: a.what, why: a.why, by: a.by ?? null, where: a.where ?? null, kind: a.kind, firstMonth: a.firstMonth, lastMonth: a.lastMonth, state: actionState(a, now) })),
+    decided: store.actions
+      .filter((a) => a.decision && a.decision.at.slice(0, 10) >= yearAgo)
+      .map((a) => ({ key: a.key, what: a.what, status: a.decision!.status, note: a.decision!.note ?? null, on: a.decision!.at.slice(0, 10) })),
   };
 }
 

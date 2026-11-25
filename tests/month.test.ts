@@ -313,13 +313,15 @@ describe('a month in review’s output', () => {
       ],
       sections: [
         { id: 'month', heading: 'The month', body: 'Pay of £2,000 came in.' },
-        { id: 'now', heading: 'What to do now', body: 'Use your ISA allowance.' },
+        { id: 'coming', heading: 'Coming up', body: 'Rent of £900 on the 1st.' },
       ],
       caveats: ['Typical rests on six months.'],
       confidence: 'medium',
       evidence,
     },
     insights: kinds.map((kind) => ({ kind, pages: ['overview'], subject: { accountId: null, instrumentId: null, category: null, taxYear: null, month: null }, title: `A ${kind}`, body: 'Said.', confidence: 'medium', evidence, expiresInDays: 30 })),
+    actions: [],
+    dropActions: [],
     watch: ['Whether the sofa was the last big payment', ''],
     followUp: [{ watch: 'Whether groceries stay near £200', outcome: 'not-happened', note: 'They were £155.50.' }],
     proposals: [],
@@ -328,7 +330,7 @@ describe('a month in review’s output', () => {
   const provenance = { setBy: 'agent' as const, model: 'test', promptVersion: REVIEW_VERSION, jobId: 'job_new' };
   const ctx = (params: Record<string, unknown>, proposals?: ProposalService) => ({ store, analytics: new Analytics(store), params, scratch: dir, ...(proposals ? { proposals } : {}) });
 
-  it('keeps its title, key points, parts and new limits; written later, it is the month’s review alone, with nothing about now', async () => {
+  it('keeps its title, key points, parts and new limits; written later, it is the month’s review alone', async () => {
     await months();
     await JOB_DEFS['monthly-review'].apply(ctx({ month: '2026-07', catchUp: true }), out(['habit']), provenance, ['£999.99']);
     const written = store.insights.filter((i) => i.status === 'active');
@@ -337,14 +339,17 @@ describe('a month in review’s output', () => {
       title: 'July: the sofa, and groceries steady',
       subject: { month: '2026-07' },
       keyPoints: [{ text: 'A £400 sofa was the month’s one big payment.', evidence: [{ type: 'computed', metric: 'focus.spending.total' }] }],
-      sections: [{ id: 'month', heading: 'The month', body: 'Pay of £2,000 came in.' }],
+      sections: [
+        { id: 'month', heading: 'The month', body: 'Pay of £2,000 came in.' },
+        { id: 'coming', heading: 'Coming up', body: 'Rent of £900 on the 1st.' },
+      ],
       caveats: ['Typical rests on six months.'],
       watch: ['Whether the sofa was the last big payment'],
       followUp: [{ watch: 'Whether groceries stay near £200', outcome: 'not-happened', note: 'They were £155.50.' }],
       unchecked: ['£999.99'],
       period: { from: '2026-07-01', to: '2026-07-31' },
     });
-    expect(written[0]!.body).toBe('The month\nPay of £2,000 came in.');
+    expect(written[0]!.body).toBe('The month\nPay of £2,000 came in.\n\nComing up\nRent of £900 on the 1st.');
   });
 
   it('proposes the fixes it found, leaving out a change that does not fit the data', async () => {
@@ -391,8 +396,8 @@ describe('a month in review’s output', () => {
     expect(old.map((i) => status(i.id))).toEqual(['superseded', 'superseded', 'active', 'active', 'active']);
     const fresh = store.insights.find((i) => i.provenance.jobId === 'job_new' && i.kind === 'month-review')!;
     expect(fresh.supersedes).toBe(old[0]!.id);
-    // The latest month keeps its part about now; a second month-review among the other notes is not kept.
-    expect(fresh.sections!.map((x) => x.id)).toEqual(['month', 'now']);
+    // A second month-review among the other notes is not kept.
+    expect(fresh.sections!.map((x) => x.id)).toEqual(['month', 'coming']);
     expect(store.insights.filter((i) => i.provenance.jobId === 'job_new')).toHaveLength(1);
   });
 
@@ -403,7 +408,7 @@ describe('a month in review’s output', () => {
   });
 });
 
-describe('the month in review’s digest, version 5', () => {
+describe('the month in review’s digest, version 6', () => {
   it('has every earlier review in short, the year’s payees, trips, who each payment was with, and a file of payments to search up to the month’s end', async () => {
     await months();
     await store.addTransactions(
@@ -417,10 +422,9 @@ describe('the month in review’s digest, version 5', () => {
     await store.upsertRecords('insights', [insight({ subject: { month: '2026-05' }, title: 'May', caveats: ['Typical rests on four months.'], keyPoints: [{ text: 'Rent rose.' }] }), insight({ subject: { month: '2026-06' }, title: 'June' })], 'i');
     const a = new Analytics(store);
     const july = buildMonthDigest(store, a, { month: '2026-07', catchUp: true });
-    expect(july.earlierReviews.map((r) => [r.month, r.title, r.keyPoints, r.caveats])).toEqual([
-      ['2026-05', 'May', ['Rent rose.'], ['Typical rests on four months.']],
-      ['2026-06', 'June', [], []],
-    ]);
+    // June is the review before, in full; the ones before it are in short, without it.
+    expect(july.previousReview).toMatchObject({ month: '2026-06', title: 'June', sections: null, body: 'What happened.' });
+    expect(july.earlierReviews.map((r) => [r.month, r.title, r.keyPoints, r.caveats])).toEqual([['2026-05', 'May', ['Rent rose.'], ['Typical rests on four months.']]]);
     expect(july.payeesYear[0]).toMatchObject({ payee: 'Example Lettings Rent', total: 6300, count: 7, months: 7, thisMonth: 900 });
     // The two June days are one trip; July's museum is another, small but on its own.
     expect(july.trips.map((t) => [t.from, t.to, t.spent])).toEqual([['2026-06-03', '2026-06-06', 165]]);
@@ -575,5 +579,110 @@ describe('the month’s worth, split; cash cover; who a payment was with', () =>
     expect(people).toContain('Samantha Taylor');
     expect(people).toContain('Alex Reed');
     expect(people).not.toContain('SAM TAYLOR');
+  });
+});
+
+describe('the month in review, version 7: what it reads, asks of you, and is checked for', () => {
+  const evidence = [{ type: 'computed', ids: null, id: null, metric: 'focus.spending.total', value: 1, label: null }];
+  const action = (key: string, extra: Record<string, unknown> = {}) => ({ key, what: `Check ${key}`, why: 'It cost £120 last month.', by: null, where: 'spending', kind: 'money', evidence, ...extra });
+  const out = (extra: Record<string, unknown> = {}) => ({
+    review: { title: 'A quiet month: £600 left over', keyPoints: [{ text: 'Pay of £2,000 came in.', evidence }], sections: [{ id: 'month', heading: 'Why', body: 'Pay of £2,000 came in.' }], caveats: [], confidence: 'medium', evidence },
+    actions: [],
+    dropActions: [],
+    watch: [],
+    followUp: [],
+    proposals: [],
+    insights: [],
+    ...extra,
+  });
+  const provenance = { setBy: 'agent' as const, model: 'test', promptVersion: REVIEW_VERSION, jobId: 'job_v7' };
+  const ctx = (params: Record<string, unknown>) => ({ store, analytics: new Analytics(store), params, scratch: dir });
+  const seed = async () => {
+    const { applyReviewActions, decideAction } = await import('../src/server/actions');
+    await applyReviewActions(store, '2026-07', { actions: [{ key: 'cat-groceries-creeping', what: 'Look at groceries', why: '£155 a month', kind: 'money' }, { key: 'plan-decided-already', what: 'Move the saver', why: 'A better rate', kind: 'money' }], drops: [] }, { setBy: 'agent', promptVersion: REVIEW_VERSION, jobId: 'job_jul' });
+    await decideAction(store, 'plan-decided-already', 'not-relevant', 'Kept for a deposit');
+  };
+  const writeDigest = async (month: string, catchUp = false) => {
+    const { writeFile } = await import('node:fs/promises');
+    await writeFile(path.join(dir, 'digest.json'), JSON.stringify(buildMonthDigest(store, new Analytics(store), { month, catchUp })));
+  };
+
+  it('reads what the title rests on, the cards, the people; the latest month also what earlier reviews asked, the alerts shown and Self Assessment', async () => {
+    await months();
+    await seed();
+    const latest = buildMonthDigest(store, new Analytics(store), { month: '2026-08' });
+    expect(latest.verdictInputs).toMatchObject({ spendingMedian: 1055.5, typicalRestsOnMonths: 7, worthSplit: { saved: latest.focus.net.amount } });
+    expect(['above-range', 'below-range', 'within-range']).toContain(latest.verdictInputs.spendingPosition);
+    expect(latest.actions!.open.map((a) => a.key)).toEqual(['cat-groceries-creeping']);
+    expect(latest.actions!.decided).toMatchObject([{ key: 'plan-decided-already', status: 'not-relevant', note: 'Kept for a deposit' }]);
+    expect(Array.isArray(latest.asOfToday!.alertsShown)).toBe(true);
+    expect(Array.isArray(latest.asOfToday!.selfAssessment)).toBe(true);
+    const later = buildMonthDigest(store, new Analytics(store), { month: '2026-08', catchUp: true });
+    expect(later).not.toHaveProperty('actions');
+    expect(later).not.toHaveProperty('asOfToday');
+  });
+
+  it('passes the review before in full, however long its parts', async () => {
+    await months();
+    const long = 'A sentence about the month. '.repeat(90);
+    await store.upsertRecords('insights', [insight({ subject: { month: '2026-07' }, body: long.slice(0, 4000), sections: [{ id: 'month', heading: 'The month', body: long.slice(0, 2500) }, { id: 'coming', heading: 'Coming up', body: long.slice(0, 2400) }] })], 'i');
+    const d = buildMonthDigest(store, new Analytics(store), { month: '2026-08', catchUp: true });
+    expect(d.previousReview!.sections!.map((x) => x.body.length)).toEqual([2500, 2400]);
+    expect(d.previousReview!.body).toBeNull();
+  });
+
+  it('checks its actions: the grammar, a record the key names, dates gone, open ones carried or dropped, decided ones, alerts', async () => {
+    await months();
+    await seed();
+    await writeDigest('2026-08');
+    const check = (o: unknown) => JOB_DEFS['monthly-review'].check!(ctx({ month: '2026-08' }), o);
+    const problems = [...(await check(out({ actions: [action('Register-for-SA'), action('acct-nowhere-idle'), action('acct-saver-idle', { by: '2020-01-01' })] }))), ...(await check(out({ actions: [action('plan-decided-already'), action('acct-saver-idle'), action('acct-saver-idle')] })))];
+    expect(problems.every((p) => p.startsWith('action: '))).toBe(true);
+    const text = problems.join('\n');
+    expect(text).toMatch(/"Register-for-SA" must be/);
+    expect(text).toMatch(/"acct-nowhere-idle" names no account/);
+    expect(text).toMatch(/by 2020-01-01 is not a date/);
+    expect(text).toMatch(/"plan-decided-already" is one the owner decided/);
+    expect(text).toMatch(/"acct-saver-idle" is used twice/);
+    expect(text).toMatch(/neither asked again in actions nor in dropActions: cat-groceries-creeping/);
+    expect(await check(out({ dropActions: [{ key: 'cat-groceries-creeping', reason: 'Groceries back to £120' }] }))).toEqual([]);
+  });
+
+  it('a figure in whole pounds may round either way; a figure in an action is checked too', async () => {
+    await months();
+    await writeDigest('2026-08', true);
+    const check = (o: unknown) => JOB_DEFS['monthly-review'].check!(ctx({ month: '2026-08', catchUp: true }), o);
+    // Groceries were £155.50: £155 and £156 both pass; £158 does not.
+    expect(await check(out({ review: { ...out().review, title: 'Groceries £155, or £156 rounded up' } }))).toEqual([]);
+    expect(await check(out({ review: { ...out().review, title: 'Groceries £7,777' } }))).toEqual(['£7,777']);
+  });
+
+  it('writes what it asks to actions.json for the latest month, leaving out what breaks a rule; written later, nothing', async () => {
+    await months();
+    await seed();
+    await writeDigest('2026-08');
+    await JOB_DEFS['monthly-review'].apply(
+      ctx({ month: '2026-08' }),
+      out({
+        actions: [action('cat-groceries-creeping', { what: 'Set a groceries budget' }), action('acct-saver-idle', { by: '2020-01-01' }), action('plan-decided-already')],
+        insights: [{ kind: 'habit', pages: ['overview', 'spending'], subject: { accountId: null, instrumentId: null, category: null, taxYear: null, month: null }, title: 'Groceries up', body: 'Said.', confidence: 'medium', evidence, expiresInDays: 30 }],
+      }),
+      provenance,
+      ['£12.34', 'action: open actions neither asked again'],
+    );
+    const keys = store.actions.map((a) => a.key).sort();
+    expect(keys).toEqual(['acct-saver-idle', 'cat-groceries-creeping', 'plan-decided-already']);
+    expect(store.actions.find((a) => a.key === 'cat-groceries-creeping')).toMatchObject({ what: 'Set a groceries budget', firstMonth: '2026-07', lastMonth: '2026-08' });
+    expect(store.actions.find((a) => a.key === 'acct-saver-idle')!.by).toBeUndefined();
+    expect(store.actions.find((a) => a.key === 'plan-decided-already')!.lastMonth).toBe('2026-07');
+    const review = store.insights.find((i) => i.kind === 'month-review' && i.status === 'active')!;
+    expect(review.actionKeys).toEqual(['cat-groceries-creeping', 'acct-saver-idle']);
+    expect(review.unchecked).toEqual(['£12.34']);
+    // Its note for other pages leaves the Overview to the review.
+    expect(store.insights.find((i) => i.kind === 'habit')!.pages).toEqual(['spending']);
+
+    await writeDigest('2026-07', true);
+    await JOB_DEFS['monthly-review'].apply(ctx({ month: '2026-07', catchUp: true }), out({ actions: [action('plan-written-later')] }), provenance);
+    expect(store.actions.some((a) => a.key === 'plan-written-later')).toBe(false);
   });
 });

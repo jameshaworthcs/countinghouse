@@ -2706,3 +2706,26 @@ value grown from the account's first flow is never below nothing, as rolled-back
 - **Considered:** a note in "About you" for the status (free text, a fragile switch for an alert);
   dismissing alerts one by one (the next import would bring it back, and nothing would say why).
 
+## 2026-11-25: The month in review, version 7: shorter, verdict first, actions tracked
+
+- **Owner:** perfect the month in review before the October one runs: easier to digest, more
+  actionable.
+- **Found** in the twelve reviews by `monthly-review-6`: 720–970 words each, nearly every figure to
+  the penny; parts that read back the figures beside them; no verdict on whether the month was a
+  problem; lines to watch that were routine (a card paid in full by direct debit, 10 of 36) and
+  never became a judgement; advice that nothing followed up; limits that were gaps in the app's data;
+  the app's own words in the text; and the next review reading the one before cut at 4,000
+  characters, mid-sentence in its advice.
+- **Done** (AGENTS.md, "monthly-review"; digest version 6): about 300 words in whole pounds; a title
+  resting on computed `verdictInputs`; 2 or 3 key points; parts only when they have something to
+  say; up to 2 lines to watch, never routine (`cards`), a twice-missed one becoming a judgement; up
+  to 3 actions in `actions.json` that later reviews carry or drop and that only you decide; the
+  Overview's alerts never repeated as actions; notes for other pages, not the Overview; the review
+  before passed in its parts. Its checks cover the actions, and a figure in whole pounds may round
+  either way.
+- **Reviewed** with a second model before building (two rounds), which moved deadlines to computed
+  alerts, actions to their own file, and the worth split to the app.
+- **Considered:** actions kept on the review insight (a rerun would lose your ticks, or bring back an
+  action a later month dropped); Claude's notes inside the computed table (they would blur what is
+  computed and what is inferred); a year table on the Reviews page (left for later).
+

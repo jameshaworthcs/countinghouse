@@ -11,13 +11,15 @@ import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { ACCOUNT_TYPE_META } from '../../shared/accounts';
+import { ACTION_KEY, ACTION_PAGE_IDS } from '../../shared/actions';
 import { LABEL_BATCH } from '../../shared/api';
 import { ASSUMPTION_DEFS, AssumptionSet, formatAssumptionValue } from '../../shared/assumptions';
 import { addDays, endOfMonth, today } from '../../shared/dates';
-import { ACCOUNT_TYPES, ASSET_CLASSES, CONTEXT_KINDS, INSIGHT_KINDS, INSIGHT_PAGES, INSTRUMENT_TYPES, REVIEW_SECTIONS, type ImportRecord, type Insight, type Note, type ProposalInput, type Provenance, type Research } from '../../shared/schema';
+import { ACCOUNT_TYPES, ACTION_KINDS, ASSET_CLASSES, CONTEXT_KINDS, INSIGHT_KINDS, INSIGHT_PAGES, INSTRUMENT_TYPES, REVIEW_SECTIONS, type ImportRecord, type Insight, type Note, type ProposalInput, type Provenance, type Research } from '../../shared/schema';
 import type { Analytics } from '../analytics';
 import { nowISO } from '../fsutil';
 import { ProposalProblems, type ProposalService } from '../proposals';
+import { applyReviewActions } from '../actions';
 import { applyRecords, researchIdOf, type ApplyResult, type RecordBatch, type RecordInput } from '../records';
 import type { Store } from '../store';
 import type { AgentTool } from './claude';
@@ -626,29 +628,45 @@ const ReviewChangeOut = z.object({
   rule: z.object({ name: z.string().nullable(), field: z.enum(['description', 'payee']), op: z.enum(['contains', 'equals', 'startsWith', 'regex']), value: z.string(), direction: z.enum(['in', 'out']).nullable() }).nullable(),
 });
 
-/** A month in review: the review itself, what to watch next, how the last review's lines turned out, fixes to propose, and (for the latest month) other notes. */
+/** The parts of a month in review the current prompt writes, in order (docs/AGENTS.md, "monthly-review"). */
+const REVIEW_PARTS = ['month', 'typical', 'worth', 'people', 'coming'] as const satisfies readonly (typeof REVIEW_SECTIONS)[number][];
+
+/** Something a review asks the owner to do (actions.json). */
+const ActionOut = z.object({
+  key: z.string(),
+  what: z.string(),
+  why: z.string(),
+  by: z.string().nullable(),
+  where: z.enum(ACTION_PAGE_IDS).nullable(),
+  kind: z.enum(ACTION_KINDS),
+  evidence: z.array(EvidenceOut),
+});
+
+/** A month in review: the review itself, what to ask of the owner, what to watch next, how the last review's lines turned out, fixes to propose, and (for the latest month) notes for other pages. */
 const MonthReviewOut = z.object({
   review: z.object({
     title: z.string(),
-    keyPoints: z.array(z.object({ text: z.string(), evidence: z.array(EvidenceOut) })).max(5),
-    sections: z.array(z.object({ id: z.enum(REVIEW_SECTIONS), heading: z.string(), body: z.string() })).max(REVIEW_SECTIONS.length),
-    caveats: z.array(z.string()).max(4),
+    keyPoints: z.array(z.object({ text: z.string(), evidence: z.array(EvidenceOut) })).max(3),
+    sections: z.array(z.object({ id: z.enum(REVIEW_PARTS), heading: z.string(), body: z.string() })).max(REVIEW_PARTS.length),
+    caveats: z.array(z.string()).max(3),
     confidence: Conf,
     evidence: z.array(EvidenceOut),
   }),
-  watch: z.array(z.string()).max(3),
+  actions: z.array(ActionOut).max(3),
+  dropActions: z.array(z.object({ key: z.string(), reason: z.string() })).max(12),
+  watch: z.array(z.string()).max(2),
   followUp: z.array(z.object({ watch: z.string(), outcome: z.enum(['happened', 'not-happened', 'unclear']), note: z.string().nullable() })).max(6),
   proposals: z.array(z.object({ title: z.string(), summary: z.string(), changes: z.array(ReviewChangeOut).max(40) })).max(3),
-  insights: z.array(InsightOut).max(5),
+  insights: z.array(InsightOut).max(3),
 });
 
 /** The parts of a month in review, in order (docs/AGENTS.md, "monthly-review"). */
 const MONTH_REVIEW_SHAPE = [
-  '   - "month" (The month): the story of the month in a few sentences: money in (pay, other income, gifts), borrowing (never income: a Student Finance maintenance instalment is a loan for its whole term, about four months), spending by kind (scheduled payments and one-offs named), and where the money went (focus.whereItWent: every item adds up to left over plus borrowed; name what went to accounts the app does not know from its parts). A trip that spans months is one trip (digest.trips).',
-  '   - "typical" (Against typical): only what moved: the category groups and categories furthest from their median (focus.categories, each with compared: median, low, high, months) and lines outside their range. Never list every line; never compare with a single month or an average; say how many months typical rests on when they are few. Use digest.payeesYear for what a payee costs over the year when that is the point (subscriptions, a regular you could question).',
-  '   - "people" (People and money back): gifts received against money paid back to you (the spending line "money-back"), by person (each payment\'s person), and payments with people or cash paid in still to confirm (focus.quality). Skip it when there is nothing.',
-  '   - "worth" (Worth): the change from focus.worth.start to focus.worth.end, split into what you put in and what grew. A value whose basis has prices:true is worked out from its holdings at published prices on the day: it is the month\'s, estimated. One marked oldValuation rests on a valuation from another time, so its change is not the month\'s: never call it flat or say it grew. A value marked estimated is rough.',
-  '   - "coming" (Coming up): what is due in the weeks after (focus.coming, agreements, regular payments), and anything to prepare for.',
+  '   - "month" (Why the month looked like this): two or three sentences on what drove money in, spending and where the rest went. Not the table’s lines read back. Borrowing is never income: a Student Finance maintenance instalment is a loan for its term, about four months. A trip that spans months is one trip (digest.trips).',
+  '   - "typical" (What moved): only the category groups and categories well outside their range (focus.categories, each with compared: median, low, high, months), each with why in a few words; and any pattern: a category in digest.spendingTrends, or a line earlier reviews watched that did not happen twice, as a judgement or a question ("Software has sat near £180 for four months against a £150 median: the new normal, or worth trimming?"). Never every line; never against one month or an average. Say how many months typical rests on when they are few.',
+  '   - "worth" (Worth): one or two sentences from digest.verdictInputs.worthSplit: what was left over, what came from outside (an employer, tax relief, a bonus) and what the market did; "other" is borrowing, money to or from accounts not in the app, transfers that cross the month’s end, or values from another date. A value marked oldValuation rests on a valuation from another time: never call it flat or say it grew.',
+  '   - "people" (People): gifts received and money paid back, by person, in a line or two. Skip it when there is little or nothing.',
+  '   - "coming" (Coming up): what is due in the weeks after that needs preparing for (focus.coming, agreements, a rate ending). Skip it when it is routine.',
 ].join('\n');
 
 /** A pound figure as written in a review ("£1,234.56", "£1,234", "−£12.40"), and words that make one approximate. */
@@ -682,7 +700,8 @@ async function knownFigures(scratch: string): Promise<{ exact: Set<number>; poun
     exact.add(list[i]! + list[j]!);
     exact.add(Math.abs(list[i]! - list[j]!));
   }
-  const pounds = new Set([...exact].map((p) => Math.round(p / 100)));
+  // A figure written in whole pounds may round either way (£142 or £143 for £142.40).
+  const pounds = new Set([...exact].flatMap((p) => [Math.floor(p / 100), Math.ceil(p / 100)]));
   return { exact, pounds };
 }
 
@@ -700,11 +719,74 @@ export function uncheckedFigures(texts: string[], known: { exact: Set<number>; p
   return [...out].slice(0, 20);
 }
 
-const reviewTexts = (out: z.infer<typeof MonthReviewOut>) => [out.review.title, ...out.review.keyPoints.map((k) => k.text), ...out.review.sections.map((x) => x.body), ...out.review.caveats, ...out.watch, ...out.followUp.map((f) => f.note ?? '')];
+const reviewTexts = (out: z.infer<typeof MonthReviewOut>) => [
+  out.review.title,
+  ...out.review.keyPoints.map((k) => k.text),
+  ...out.review.sections.map((x) => x.body),
+  ...out.review.caveats,
+  ...out.actions.flatMap((a) => [a.what, a.why]),
+  ...out.dropActions.map((d) => d.reason),
+  ...out.watch,
+  ...out.followUp.map((f) => f.note ?? ''),
+];
+
+/** What a review's digest says of actions and alerts, as `actionProblems` reads it. */
+interface ActionsSeen {
+  writtenOn: string;
+  catchUp: boolean;
+  open: string[];
+  decided: string[];
+  alerts: string[];
+}
+
+/** An action's key names a record that exists, when its prefix says it names one (acct-, job-, cat-). */
+function keyNamesRecord(store: Store, key: string): boolean {
+  const ids: Record<string, string[]> = { acct: store.accounts.map((a) => a.id), job: store.employments.map((e) => e.id), cat: store.categories.map((c) => c.id) };
+  const prefix = key.split('-')[0]!;
+  const list = ids[prefix];
+  if (!list) return true;
+  const rest = key.slice(prefix.length + 1);
+  return list.some((id) => rest === id || rest.startsWith(`${id}-`));
+}
+
+/**
+ * What is wrong with a review's actions (docs/AGENTS.md, "monthly-review"), each prefixed "action: ":
+ * a key off the grammar or naming nothing, a date already gone, an open action neither asked again nor
+ * dropped, one you decided asked again, one the Overview's alerts already ask, a key twice.
+ */
+export function actionProblems(store: Store, out: z.infer<typeof MonthReviewOut>, seen: ActionsSeen): string[] {
+  if (seen.catchUp) return [];
+  const problems: string[] = [];
+  const keys = out.actions.map((a) => a.key);
+  for (const a of out.actions) {
+    if (!ACTION_KEY.test(a.key)) problems.push(`key "${a.key}" must be acct-, job-, payee-, tax-, cat- or plan- and words, lower case with hyphens`);
+    else if (!keyNamesRecord(store, a.key)) problems.push(`key "${a.key}" names no ${a.key.startsWith('acct') ? 'account' : a.key.startsWith('job') ? 'job' : 'category'} id in the digest`);
+    if (a.by && (!/^\d{4}-\d{2}-\d{2}$/.test(a.by) || a.by < seen.writtenOn)) problems.push(`"${a.what}": by ${a.by} is not a date from today (${seen.writtenOn}) on; give a later deadline or none`);
+    if (seen.decided.includes(a.key)) problems.push(`"${a.key}" is one the owner decided (digest.actions.decided): do not ask it again`);
+    if (seen.alerts.some((id) => id.startsWith('sa-')) && /self.?assessment|tell hmrc|register/i.test(`${a.key} ${a.what}`)) problems.push(`"${a.what}" repeats a Self Assessment alert the Overview already shows (asOfToday.alertsShown): leave it out`);
+  }
+  for (const k of new Set(keys.filter((k, i) => keys.indexOf(k) !== i))) problems.push(`key "${k}" is used twice`);
+  const covered = new Set([...keys, ...out.dropActions.map((d) => d.key)]);
+  const missing = seen.open.filter((k) => !covered.has(k));
+  if (missing.length) problems.push(`open actions neither asked again in actions nor in dropActions: ${missing.join(', ')}`);
+  return problems.map((p) => `action: ${p}`);
+}
+
+/** The actions part of a review's digest, from its scratch directory. */
+async function actionsSeen(scratch: string): Promise<ActionsSeen> {
+  const d = JSON.parse(await readFile(path.join(scratch, 'digest.json'), 'utf8')) as { writtenOn: string; mode: string; actions?: { open: { key: string }[]; decided: { key: string }[] }; asOfToday?: { alertsShown?: { id: string }[] } | null };
+  return {
+    writtenOn: d.writtenOn,
+    catchUp: d.mode === 'catch-up',
+    open: d.actions?.open.map((a) => a.key) ?? [],
+    decided: d.actions?.decided.map((a) => a.key) ?? [],
+    alerts: d.asOfToday?.alertsShown?.map((a) => a.id) ?? [],
+  };
+}
 
 const monthlyReview: JobKindDef = {
   kind: 'monthly-review',
-  promptVersion: 'monthly-review-6',
+  promptVersion: 'monthly-review-7',
   privacy: 'personal',
   tools: ['Read', 'Grep', 'Glob'],
   label: ({ params }) => `Month in review: ${String(params.month)}${params.catchUp === true ? ' (written later)' : ''}`,
@@ -717,55 +799,70 @@ const monthlyReview: JobKindDef = {
     await writeFile(path.join(ctx.scratch, 'transactions.jsonl'), monthTransactionsFile(ctx.store, ctx.analytics, month));
     return [
       'Read ./digest.json with the Read tool. ./transactions.jsonl holds every payment of the 24 months to the month’s end, one a line: search it with Grep to check a finding or follow one up (what else went to a payee, a person, an amount) before you rest anything on it.',
-      `Review ${month}. digest.focus is the month as the app works it out by fixed rules, the figures the owner sees beside your review; digest.history is the 12 months up to it; digest.previousReview is the review of the month before, in full; digest.earlierReviews is every review before, in short, with the limits each raised and what the owner made of it.`,
+      `Review ${month}. digest.focus is the month as the app works it out by fixed rules, the figures the owner sees beside your review: explain why, never read its tables back. digest.verdictInputs is what your title rests on. digest.previousReview is the review of the month before, its parts in full; digest.earlierReviews is every one before that, in short, with what the owner made of each. digest.cards is each credit card’s year; digest.spendingTrends the categories whose last 3 months moved; digest.people the people the owner saved.`,
       ...(catchUp
         ? [`This review is written later, as of the end of ${month}: the digest and the file hold nothing after it. Write as at the end of ${month}: nothing of what came after, and no advice about today.`]
-        : ['digest.asOfToday holds today’s figures, apart from the month’s: use them only for what the month means now, and say they are today’s.']),
+        : [
+            'digest.asOfToday holds today’s figures, apart from the month’s: use them only for what to do now, and say they are today’s. asOfToday.alertsShown is what the Overview’s alerts already tell the owner; asOfToday.selfAssessment is Self Assessment for the years before, as the app works it out and as the owner told it. digest.actions.open is what earlier reviews asked that is still open; digest.actions.decided is what the owner marked done or not relevant.',
+          ]),
+      '',
+      'How to write it: the owner reads it once a month, often on a phone.',
+      '- About 300 words in all across the title, key points and parts. Short sentences, plain British English.',
+      '- Whole pounds (£1,240, not £1,239.60), except to name one payment. Write "about" before anything rounded further ("about £1,200").',
+      '- People by the name digest.people or the payment’s person gives, never a bank’s description in capitals.',
+      '- None of the app’s own words: not "scheduled", "one-offs line", "not placed", "couldn’t be placed", "accounts the app doesn’t know" (say "an account not in the app", or name it), "oldValuation", "completeData".',
+      '- Never say a thing twice: a part does not restate a key point.',
       '',
       'Write review:',
-      '- title: the month’s story in one line of up to 100 characters, its most important thing first ("June: £640 in gifts, first pay from the new job, and £850 a month of rent now regular").',
-      '- keyPoints: the 3 to 5 things that mattered most this month, most important first, one or two sentences each, each with its evidence. What is new or changed beats what is the same as usual. A point about the data itself only when it changes what the figures mean.',
-      '- sections, in this order, each a short paragraph or a few short bullet lines ("- "), never repeating a key point word for word:',
+      `- title: up to 95 characters, no month name: how the month went and whether that is a problem, with its main driver. Rest it on digest.verdictInputs: never call spending usual when spendingPosition is outside the range or spendingVsMedianPct is beyond 15; never call borrowed money saved; when worth moved, say whether it was money left over or paid in from outside (worthSplit.saved, worthSplit.fromOutside) or the market (worthSplit.market), and never let a rise in the market excuse spending. A one-off the cash covers many times over (cashCoverMonths) is not a problem: say so.${catchUp ? '' : ' When an alert in asOfToday.alertsShown is urgent (a deadline within 30 days, or passed), the title may name it briefly.'} Examples: "Spending ran £900 over typical on a laptop, easily covered; savings still grew £1,100", "A quiet month: £600 left over and £400 into the ISA".`,
+      '- keyPoints: 2 or 3, most important first, up to 30 words each, each with its evidence. What is new or changed beats what is usual; a quiet month needs only 2.',
+      '- sections, in this order, each only when it has something to say, each a few short lines ("- "):',
       MONTH_REVIEW_SHAPE,
-      ...(catchUp ? [] : ['   - "now" (What to do now): the few things worth doing now, from today’s figures: allowances with headroom and the days left (digest.asOfToday.taxYear: ISA, LISA, pension; dividends over their allowance mean a Self Assessment return), pay or tax that looks wrong, a deadline, a promotional rate ending. Practical, specific, never a product or provider.']),
-      '- caveats: only limits on what the data lets you say that no earlier review raised (digest.earlierReviews[].caveats, digest.previousReview). Do not repeat a standing one: a value resting on a valuation from another time is shown by the app already. None is fine.',
+      '- caveats: up to 3 limits on what the data lets you say that change a conclusion and that no earlier review raised (digest.earlierReviews[].caveats, digest.previousReview). Never a gap the app already shows (a value from another date, a missing day), never one in asOfToday.alertsShown, never a fix a proposal could make. None is best.',
       '- confidence, and evidence for the review as a whole.',
       '',
-      'watch: up to 3 lines for next month’s review to check, each about your money or a decision of yours, specific and measurable from the app’s figures ("Whether eating out comes back under its £150 median", "Whether the first full pay from the new job is about £1,420"). Never about how the app files or counts something.',
+      ...(catchUp
+        ? ['actions: none. dropActions: none. This is a record of the month.']
+        : [
+            'actions: 0 to 3 things the owner should do now that the Overview’s alerts do not already ask (asOfToday.alertsShown): judgements only you can make from the data, such as a subscription worth questioning, cash idle beside a better rate, pay or a tax code that looks wrong, an allowance with headroom and the days left. 0 is right for a quiet month. Each:',
+            '   - key: what it is about, then a few words, lower case with hyphens: acct-<account id>-…, job-<job id>-…, cat-<category id>-…, payee-<payee in words>-…, tax-<yyyy-yy>-…, or plan-… for anything else. Reuse the exact key of an open action you ask again.',
+            '   - what (up to 12 words, starting with a verb); why (one sentence, with the figure that shows it); by (a date only for a real deadline, never before today); where (the page to do it on); kind (money, tax, or data: data only for something wrong in the data that a proposal cannot fix); evidence.',
+            '   - Never one that repeats an alert in asOfToday.alertsShown (Self Assessment deadlines are alerts), and never one the owner decided (digest.actions.decided), under any key.',
+            'dropActions: every key in digest.actions.open that you do not ask again, with why it no longer applies or is no longer worth asking ("No gym payment since August"). Every open action is either asked again or dropped.',
+          ]),
+      'watch: up to 2 lines for next month’s review to check, each about the owner’s money or a decision, measurable from the app’s figures, and saying why it matters ("Whether eating out comes back under its £150 median: three months above adds about £600 a year"). Never something routine with a clean record: a card in digest.cards that charged no interest in 12 months is paid in full, so do not watch it. Never how the app files or counts something. A line earlier reviews watched that did not happen twice becomes a judgement in "typical", not a line here.',
       'followUp: for each line in digest.previousReview.watch, "happened" if this month’s figures show it did, "not-happened" if they show it did not, "unclear" if they cannot tell, with a short note citing the figure.',
       'proposals: when you find data that is wrong, propose the fix for the owner to apply or dismiss (up to 3 proposals, each one subject): set_category (transaction id and category id from digest.categories or one the month uses) when a payment is clearly filed wrong; add_rule (a payee or description match and a category) when a payee keeps coming and is filed the same way by hand; set_note to record what a payment was. Each change says why, from the data. Only what the data clearly shows; never a payment with a person (the owner decides those). None is fine.',
       ...(catchUp
-        ? ['insights: none; this is a record of the month.']
+        ? ['insights: none.']
         : [
-            'insights: up to 5 more notes, only where the data supports them and the review does not say it already:',
-            '   - habit changes, for spending; a subscription or regular payment worth questioning (digest.payeesYear);',
-            '   - allowance opportunities, for tax (digest.asOfToday.taxYear);',
-            '   - notes on investments (charges, make-up, drift from what the owner said they want);',
-            '   - how the month bears on the owner’s plans (digest.ownerContext), for projections;',
-            '   - pay (digest.pay, digest.asOfToday.owedPay), HMRC (digest.hmrc), account terms (digest.terms), agreements and pension arrangements, companies, budgets and goals.',
-            '   Set subject.month to the month for each.',
+            'insights: up to 3 notes for other pages (spending, tax, investments, projections, accounts), never the overview, only where the data supports them and neither the review nor an action says it already: a habit change; a regular payment worth questioning (digest.payeesYear); investments (charges, make-up, drift from what the owner said they want); how the month bears on the owner’s plans (digest.ownerContext); pay, HMRC, account terms, agreements, pensions, companies, budgets and goals. Set subject.month to the month for each.',
           ]),
       '',
-      'Quote figures as the digest or the file gives them, to the penny, or say "about". Every £ figure you write is checked against them.',
+      'Quote figures as the digest or the file gives them, in whole pounds or to the penny, or say "about". Every £ figure you write is checked against them.',
     ].join('\n');
   },
   async check(ctx, raw) {
     const out = MonthReviewOut.parse(raw);
-    return uncheckedFigures(reviewTexts(out), await knownFigures(ctx.scratch));
+    return [...uncheckedFigures(reviewTexts(out), await knownFigures(ctx.scratch)), ...actionProblems(ctx.store, out, await actionsSeen(ctx.scratch))];
   },
   recheck(problems, previous) {
+    const figures = problems.filter((p) => !p.startsWith('action: '));
+    const actions = problems.filter((p) => p.startsWith('action: ')).map((p) => p.slice('action: '.length));
     return [
-      `Your answer quoted figures that are not in digest.json or transactions.jsonl: ${problems.join(', ')}.`,
-      'Check each one there. Use the figure as given, a sum of payments you cite, or say "about". Then give the whole answer again, corrected. Your answer was:',
+      ...(figures.length ? [`Your answer quoted figures that are not in digest.json or transactions.jsonl: ${figures.join(', ')}. Check each one there. Use the figure as given, a sum of payments you cite, or say "about".`] : []),
+      ...(actions.length ? [`Your actions break these rules: ${actions.join('; ')}.`] : []),
+      'Then give the whole answer again, corrected. Your answer was:',
       JSON.stringify(previous),
     ].join('\n');
   },
-  async apply({ store, params, proposals }, raw, provenance, unresolved = []) {
+  async apply({ store, params, proposals, scratch }, raw, provenance, unresolved = []) {
     const out = MonthReviewOut.parse(raw);
     const month = String(params.month);
     const catchUp = params.catchUp === true;
     const period = { from: `${month}-01`, to: endOfMonth(`${month}-01`) };
     const resolve = evidenceResolver(store);
+    const unchecked = unresolved.filter((u) => !u.startsWith('action: '));
 
     // Fixes it found, as proposals the owner applies or dismisses; a change that does not fit the data is left out.
     const made: string[] = [];
@@ -794,12 +891,38 @@ const monthlyReview: JobKindDef = {
       }
     }
 
+    // What it asks of you, for the latest month only: what still breaks a rule after the second answer is left out.
+    let asked: string[] = [];
+    if (!catchUp) {
+      const seen = await actionsSeen(scratch).catch((): ActionsSeen => ({ writtenOn: today(), catchUp: false, open: [], decided: [], alerts: [] }));
+      const used = new Set<string>();
+      const actions = out.actions
+        .filter((a) => ACTION_KEY.test(a.key) && keyNamesRecord(store, a.key) && !seen.decided.includes(a.key) && !used.has(a.key) && used.add(a.key))
+        .filter((a) => !(seen.alerts.some((id) => id.startsWith('sa-')) && /self.?assessment|tell hmrc|register/i.test(`${a.key} ${a.what}`)))
+        .map((a) => {
+          const evidence = resolve(a.evidence).slice(0, 6);
+          return {
+            key: a.key,
+            what: a.what.trim().slice(0, 160),
+            why: a.why.trim().slice(0, 300),
+            kind: a.kind,
+            ...(a.by && /^\d{4}-\d{2}-\d{2}$/.test(a.by) && a.by >= seen.writtenOn ? { by: a.by } : {}),
+            ...(a.where ? { where: a.where } : {}),
+            evidence,
+          };
+        })
+        .filter((a) => a.what && a.why);
+      const drops = out.dropActions.filter((d) => seen.open.includes(d.key) && d.reason.trim()).map((d) => ({ key: d.key, reason: d.reason.trim() }));
+      await applyReviewActions(store, month, { actions, drops }, provenance);
+      asked = actions.map((a) => a.key);
+    }
+
     const r = out.review;
     const keyPoints = r.keyPoints
       .map((k) => ({ text: k.text.trim().slice(0, 400), evidence: resolve(k.evidence).slice(0, 6) }))
       .filter((k) => k.text)
       .map((k) => ({ text: k.text, ...(k.evidence.length ? { evidence: k.evidence } : {}) }));
-    const sections = r.sections.filter((x) => x.body.trim() && (!catchUp || x.id !== 'now')).map((x) => ({ id: x.id, heading: x.heading.trim().slice(0, 80) || x.id, body: x.body.trim().slice(0, 2500) }));
+    const sections = r.sections.filter((x) => x.body.trim()).map((x) => ({ id: x.id, heading: x.heading.trim().slice(0, 80) || x.id, body: x.body.trim().slice(0, 2500) }));
     const evidence = [...resolve(r.evidence), ...keyPoints.flatMap((k) => k.evidence ?? [])].slice(0, 40);
     const watch = out.watch.map((w) => w.trim().slice(0, 300)).filter(Boolean).slice(0, 3);
     const followUp = out.followUp
@@ -827,18 +950,24 @@ const monthlyReview: JobKindDef = {
           ...(caveats.length ? { caveats } : {}),
           ...(watch.length ? { watch } : {}),
           ...(followUp.length ? { followUp } : {}),
-          ...(unresolved.length ? { unchecked: unresolved.slice(0, 20).map((u) => u.slice(0, 40)) } : {}),
+          ...(unchecked.length ? { unchecked: unchecked.slice(0, 20).map((u) => u.slice(0, 40)) } : {}),
           ...(made.length ? { proposals: made.slice(0, 5) } : {}),
+          ...(asked.length ? { actionKeys: asked } : {}),
         },
       });
     }
-    const others = catchUp ? { records: [], dropped: 0 } : toInsightRecords(store, out.insights.filter((i) => i.kind !== 'month-review').map((i) => ({ ...i, subject: { ...i.subject, month } })), { period });
+    // Notes for other pages: never the Overview, where the review itself stands.
+    const notes = out.insights
+      .filter((i) => i.kind !== 'month-review')
+      .map((i) => ({ ...i, pages: i.pages.filter((p) => p !== 'overview'), subject: { ...i.subject, month } }))
+      .filter((i) => i.pages.length > 0);
+    const others = catchUp ? { records: [], dropped: 0 } : toInsightRecords(store, notes, { period });
     records.push(...others.records);
     const dropped = others.dropped;
     if (!records.length) return { summary: `Nothing kept${made.length ? `; ${made.length} proposal(s)` : ''}` };
     // A review of a month replaces every note an earlier review of the same month wrote.
     const result = await applyRecords(store, { provenance, supersede: true, records }, { replaces: (old) => old.subject.month === month && (old.provenance.promptVersion ?? '').startsWith('monthly-review') });
-    const parts = [`${records.length} insight(s) for ${month}${catchUp ? ', written later' : ''}`, made.length ? `${made.length} proposal(s)` : '', unresolved.length ? `${unresolved.length} figure(s) not found in the data` : '', dropped ? `${dropped} dropped for missing evidence` : ''].filter(Boolean);
+    const parts = [`${records.length} insight(s) for ${month}${catchUp ? ', written later' : ''}`, asked.length ? `${asked.length} action(s)` : '', made.length ? `${made.length} proposal(s)` : '', unchecked.length ? `${unchecked.length} figure(s) not found in the data` : '', dropped ? `${dropped} dropped for missing evidence` : ''].filter(Boolean);
     return { summary: parts.join('; '), result };
   },
 };

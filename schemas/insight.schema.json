@@ -962,6 +962,14 @@
         "pattern": "^prop_\\d{8}_\\d{6}_[0-9a-f]{4}$"
       }
     },
+    "actionKeys": {
+      "maxItems": 3,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 80
+      }
+    },
     "feedback": {
       "type": "object",
       "properties": {

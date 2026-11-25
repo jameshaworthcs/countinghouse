@@ -139,6 +139,8 @@ describe('what an insight may cite', () => {
         evidence: [cite('payslip', 'pay_00000000000000c1'), cite('hmrc', 'hmrc_00000000000000c1'), cite('agreement', 'flat-lease'), cite('employment', 'acme'), cite('payslip', 'pay_ffffffffffffffff'), cite('company', 'nowhere-ltd')],
       },
       insights: [],
+      actions: [],
+      dropActions: [],
       watch: [],
       followUp: [],
       proposals: [],
