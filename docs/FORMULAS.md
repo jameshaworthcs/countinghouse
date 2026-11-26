@@ -1917,3 +1917,105 @@ balance at all. Everything else gives a figure, with what to check and the dates
 The app can't know your intentions: a transfer it counts as put back might be savings of your own.
 Each payment says why it counts as it does (your decision, a rule, a transfer with a set-aside
 account, or a suggestion to check).
+
+## 22. Company books (`shared/company-books.ts`, `shared/uk.ts`)
+
+The records of a company you run, kept here (DATA_FORMAT.md, companies.json `books`). They are the
+company's: nothing here joins a personal figure, and only the company's own routes serve it
+(DECISIONS 2026-11-26). The rules and their sources are in UK_RULES.md, "Companies".
+
+### Deadlines
+
+`companyDeadlines(company, today)` lists what the company must file and pay, each
+`{kind, period, due, status, days, filing?, filedLate?}`. It is pure: the same books and day give the
+same list, whatever order the filings were recorded in.
+
+**Months.** A number of months *after* a day ends on the corresponding day of the month that many on;
+when the day is the last of its month, or that month has no such day (the 30th into February), on the
+last day of that month (`monthsAfter`, CA 2006 s443; HMRC count Corporation Tax the same way,
+CTM01800). A period of months *beginning with* a day ends the day before the corresponding day, or
+on the last day of the month when there is none (`lastDayOfMonths`): 12 months beginning with
+15 March 2024 end on 14 March 2025, with 29 February 2024 on 28 February 2025. A period is *longer
+than* *n* months when it ends after the last day of *n* months beginning with its start.
+
+**Accounting periods** (`accountingPeriodsOf`), from incorporation up to the one containing today:
+
+1. The reference date *R* is yours, or the last day of the month of the anniversary of incorporation.
+2. The first period ends on the first *R* on or after incorporation that makes it longer than 6
+   months (s391(5)); each later one ends 12 months after the one before (`monthsAfter(end, 12)`, so
+   a February year end follows the month's end into a leap year).
+3. A period you set is used as it is; the worked-out period before it ends the day before it starts,
+   and the next ones follow on from its end.
+
+**Accounts** at Companies House, for each period *P*:
+
+- due = `monthsAfter(P.end, 9)` (s442(2)(a));
+- for the first period, when longer than 12 months: due = max(`monthsAfter(first anniversary, 9)`,
+  `monthsAfter(P.end, 3)`) (s442(3)). The first anniversary of 29 February is 28 February.
+
+**Corporation Tax periods** (`ctPeriodsOf`): from the day trade started (from incorporation when not
+given; none when not yet, `null`), each ends on the earlier of the last day of 12 months beginning
+with its start and the end of its period of account (CTA 2009 s10(1)(a)–(b)); the next begins the
+day after. A period you set is used as it is, the worked-out one before it ending the day before.
+Its period of account is the accounting period its last day falls in.
+
+- **CT600** due = max(`monthsAfter(AP.end, 12)`, `monthsAfter(PoA.end, 12)`), or for a period of
+  account longer than 18 months, `lastDayOfMonths(PoA.start, 30)` in place of the second (FA 1998
+  Sch 18 para 14(1)(a)–(c)). Both returns for a 13-month first period are due 12 months after it.
+- **Corporation Tax** due = `monthsAfter(AP.end, 9)` + 1 day (TMA 1970 s59D(1)). Done when a
+  payment is recorded for the period, or its CT600 says there is nothing to pay (`taxPayable: 0`).
+
+**VAT periods** (`vatPeriodsOf`), from registration up to the one containing today (or to
+deregistration):
+
+1. The first begins on the registration day and ends on `firstPeriodEnd` when given; otherwise each
+   ends at the end of the month (monthly), of the next quarter end of its stagger, or of the 12-month
+   year running from its schedule entry (annual).
+2. A schedule change ends the period before it the day before it, and deregistration ends the last.
+3. A filed return's own dates win: one starting on a period's first day sets where that period ends;
+   one with no start does so when it ends within the period.
+
+Each return is due `monthsAfter(end, 1)` + 7 days, whatever day of the week (reg 25(1), 25A(20));
+under annual accounting, the last working day of the second month after the year (reg 50(2)(b)), or
+`monthsAfter(end, 1)` for a period shorter than 4 months. A working day is a weekday that is not
+Good Friday, Easter Monday or the last Monday of May or August (the bank holidays that can end a
+month in England and Wales).
+
+**Confirmation statements**: review periods of 12 months, the first beginning with incorporation (or
+ending on the next made-up date you give, statements made up before it being settled); a statement
+made up within a review period does it, and the next begins the day after its made-up date (s853A(5)–
+(6)). Due = made-up date + 14 days (s853A(1)); with none recorded, the made-up date is the review
+period's last day. The list goes on to the first one not done that is not yet due.
+
+**Matching.** Filings are taken in a fixed order (period end, start, id). A filing does a deadline of
+its kind with the same period end (a VAT return as above; a confirmation statement within its review
+period), each filing once. One that does none is listed too, done, marked as matching no period
+worked out here, so nothing you recorded is hidden.
+
+**Status** on `today`, with *d* = days from today to the due day:
+
+| | |
+|---|---|
+| done | a filing does it; `filedLate` when it was filed after the due day (a CT600 saying there is nothing to pay is never late for the payment) |
+| overdue | *d* < 0 |
+| due-soon | 0 ≤ *d* ≤ 60 (`DEADLINE_LEAD_DAYS`) |
+| upcoming | *d* > 60 |
+
+Deadlines due before `deadlinesFrom` that are not done are left out. The list is sorted by due day.
+
+**Alerts** (`companyDeadlineAlerts`, `GET /api/company-alerts`): each due-soon or overdue deadline,
+titled with the company's name, a warning when *d* ≤ 14 (`DEADLINE_WARN_DAYS`), information
+otherwise: the thresholds of Self Assessment's alerts (§11). The Overview shows them beside its own
+alerts, fetched from that route, never in `GET /api/summary`.
+
+Not worked out: Corporation Tax instalments (large companies), a later filing date from HMRC's notice
+(para 14(1)(d)), a shortened period's 3 months from its notice (s442(4)), extensions (s442(5)), PAYE,
+and VAT payments on account.
+
+**Tested** (`tests/company-books.test.ts`): HMRC's own tables (CTM01800's due dates, CTM93050's
+filing dates), s443's month ends and February, first periods shorter and longer than 12 months, the
+6-month rule, overrides, trade starting late or not at all, each stagger, schedule changes,
+deregistration, annual accounting over a bank holiday, confirmation statements made up early or
+anchored; and as properties over generated books and filings, that every deadline is due after its
+period ends, that what is done does not depend on the filings' order, and that periods follow on
+without gaps within the Acts' limits.

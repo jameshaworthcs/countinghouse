@@ -334,7 +334,7 @@ than changing old ones. National Insurance numbers are never stored.
 
 Companies you hold shares in that are not listed (shares in a listed company are a holding in an
 investment account). Each is `{id, name, number?, holdings, valuations, accountId?, employmentId?,
-notes?, createdBy, createdAt, updatedAt}`:
+directorLoanAccountId?, books?, notes?, createdBy, createdAt, updatedAt}`:
 
 - `number`: its Companies House number.
 - `holdings`: `[{shareClass, shares, totalShares?, certificate?, acquiredOn?, source}]`, your
@@ -356,6 +356,69 @@ The company's own accounts, when you keep them here, are accounts with its `comp
 
 An agent proposes a company from its documents (`add_company`); you change one with
 `PUT /api/companies/:id`.
+
+### A company's books (`books`)
+
+The records of a company you run, when you keep them here: its dates, registrations and filings, from
+which its deadlines are worked out ([FORMULAS.md §22](FORMULAS.md)). They are the company's, never
+yours: `GET /api/companies` leaves them out, and only the company's own routes serve them
+(`GET /api/companies/:id/books`, `/api/company-books`, `/api/company-alerts`). Optional and additive
+(no format version). `{incorporatedOn, accountingReferenceDate?, periods, vat?, paye?,
+confirmationStatement?, tradeStartedOn?, ctPeriods, deadlinesFrom?, filings, setBy, updatedAt}`:
+
+- `incorporatedOn`: the day Companies House incorporated it.
+- `accountingReferenceDate`: `"MM-DD"`, its reference date from incorporation. Absent, the default:
+  the last day of the month in which the anniversary of incorporation falls (CA 2006 s391(4)). The
+  last day of February is `"02-28"` or `"02-29"` and means the 29th in a leap year. A later change
+  of reference date is not written here but as the period it shortened or extended (below).
+- `periods`: `[{start, end}]`, accounting reference periods other than the worked-out ones (one
+  shortened or extended by notice, CA 2006 s392): never over 18 months, in order, not overlapping,
+  none before incorporation. The worked-out period before one ends the day before it starts, and
+  the next ones run 12 months on from its end.
+- `vat`: `{registeredFrom, scheme, schedule, firstPeriodEnd?, deregisteredOn?}`. `scheme` is
+  `"cash"` (accrual and flat rate are refused as not supported yet). `schedule` is
+  `[{from, stagger}]`, how often it makes returns from a day, in order of date: `monthly`,
+  `quarterly-1` (quarters to March, June, September, December), `quarterly-2` (April, July,
+  October, January), `quarterly-3` (May, August, November, February) or `annual`; the first applies
+  from registration, a later one when HMRC changed it. `firstPeriodEnd`: the end of its first VAT
+  period when HMRC set one other than its stagger's. The VAT number is not kept.
+- `paye`: `{from, closedOn?}`, its PAYE scheme: a record only (no deadlines are worked out from it).
+- `confirmationStatement`: `{nextMadeUpTo}`, the next confirmation statement's made-up date as
+  Companies House shows it. Absent, it is worked out from incorporation and the statements filed.
+- `tradeStartedOn`: the day it started to trade, which starts its first Corporation Tax period;
+  `null` when it has not (no Corporation Tax periods are worked out); absent, from incorporation.
+- `ctPeriods`: `[{start, end}]`, Corporation Tax accounting periods other than the worked-out ones
+  (HMRC's notice sets them in practice): each 12 months at most, in order, none before
+  incorporation.
+- `deadlinesFrom`: deadlines due before this day that no filing here does are not listed (they were
+  settled before the books were kept here).
+- `filings`: what the company filed or paid, each `{id, kind, periodStart?, periodEnd, filedOn,
+  reference?, note?, figures?, addedBy}`:
+  - `kind`: `accounts`, `ct600` (a company tax return), `ct-payment` (Corporation Tax paid;
+    `filedOn` is the day it was paid), `vat` (a VAT return) or `confirmation`.
+  - `periodEnd`: the balance sheet date, the end of the CT or VAT period, or a confirmation
+    statement's made-up date. `periodStart` for a VAT return or CT600 when known.
+  - `id`: `fil_` + 12 hex of its company, kind and period's end, set once. There is one filing per
+    kind and period's end. It is filed on or after its period ends (a payment may come earlier).
+  - `reference`: a submission receipt or payment reference. `addedBy`: `owner`, or `agent` when a
+    proposal you applied added it.
+  - `figures`, as the document gives them: for `vat`, the nine boxes by the names of HMRC's Making Tax
+    Digital API (`vatDueSales`, `vatDueAcquisitions`, `totalVatDue`, `vatReclaimedCurrPeriod`,
+    `netVatDue`, `totalValueSalesExVAT`, `totalValuePurchasesExVAT`,
+    `totalValueGoodsSuppliedExVAT`, `totalAcquisitionsExVAT`): boxes 1–5 in pounds and pence, box 3
+    being boxes 1 and 2 together and box 5 the difference of boxes 3 and 4 (never negative), boxes
+    6–9 in whole pounds; for `accounts`, optionally the micro-entity balance sheet lines `A`–`K`
+    (Small Companies Regulations 2008, Sch 1 Part 1 Section C, format 1) in whole pounds; for
+    `ct600`, `{taxPayable}` (0 says there is nothing to pay, which does the payment too); for
+    `ct-payment`, `{amount}`.
+- `setBy`: `owner`, or `agent` when a proposal you applied set them; `updatedAt` changes with every
+  change to the books other than a filing.
+
+You keep them with `PUT /api/companies/:id/books` (`{books, was}`; the filings stay) and record or
+remove a filing with `POST /api/companies/:id/filings` and `DELETE
+/api/companies/:id/filings/:filingId`. No agent token may use these; an agent proposes
+(`set_company_books`, `add_filing`). The store refuses a write that adds or changes books that do
+not fit; books a hand edit left wrong are listed on the company's page.
 
 ## agreements.json
 
@@ -641,10 +704,17 @@ lives in the work area (`<work>/proposals/`), never here.
     takes a decision away); the change's `why` is kept as the decision's reason. `was` is the
     payment's `decidedAt` when proposed (null: undecided). A proposal may replace a decision of
     yours, and says so.
+  - `set_company_books {company, books, was}`: a company's books (companies.json `books`) without
+    its filings, which stay. `was` is the books' `updatedAt` when proposed (null: none), so a change
+    made since stops it fitting; books you set (`setBy: "owner"`) are never replaced. Applied, they
+    are `setBy: "agent"`.
+  - `add_filing {company, filing}`: one filing of a company whose books are kept here, without its
+    id (given as the store gives it) and `addedBy: "agent"`; never a second for the same kind and
+    period's end.
 - `applied`: the keys of the changes you applied. `dismissedReason`: what you said, if anything.
-- `before`: `{transactions, accounts, balances?, terms?, categories?, rules?, earmarks?}`, the rows, accounts,
-  balances, terms, categories and rules the applied changes touched (a rule removed, a category
-  changed), as they were before: the audit trail, and a way back. (A rule or category a proposal
+- `before`: `{transactions, accounts, balances?, terms?, categories?, rules?, earmarks?, companies?}`, the rows, accounts,
+  balances, terms, categories, rules and companies the applied changes touched (a rule removed, a
+  category changed, a company's books set or a filing added), as they were before: the audit trail, and a way back. (A rule or category a proposal
   added has no before: the change itself says it.)
 
 ## goals.json

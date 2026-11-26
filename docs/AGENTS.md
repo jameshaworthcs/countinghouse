@@ -246,7 +246,9 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
       { "kind": "remove_terms", "account": "example-fixed", "asOf": "2025-01-31", "importId": "imp_…", "why": "…" },
       { "kind": "set_return_entry", "taxYear": "2025/26", "entry": "SA102:job-example-job:6", "value": false, "why": "…" },
       { "kind": "set_earmarks", "setup": { "everyday": ["example-current", "example-card"], "setAside": ["example-saver"], "pots": [{ "id": "tax-to-pay", "name": "Tax to pay", "start": "2026-04-06", "opening": 0, "rules": [{ "id": "marking", "name": "Marking pay", "effect": "source", "text": { "value": "EXAMPLE MARKING LTD" }, "direction": "in", "portion": { "percent": 30 } }, { "id": "hmrc", "name": "Self Assessment", "effect": "use", "text": { "value": "HMRC SELF ASSESSMENT" }, "direction": "out" }] }] }, "was": null, "why": "…" },
-      { "kind": "decide_earmark_flow", "pot": "tax-to-pay", "transaction": "tx_…", "parts": [{ "effect": "topped-up", "amount": 200 }], "was": null, "why": "…" }
+      { "kind": "decide_earmark_flow", "pot": "tax-to-pay", "transaction": "tx_…", "parts": [{ "effect": "topped-up", "amount": 200 }], "was": null, "why": "…" },
+      { "kind": "set_company_books", "company": "example-ltd", "books": { "incorporatedOn": "2024-03-15", "accountingReferenceDate": "12-31", "periods": [], "ctPeriods": [], "vat": { "registeredFrom": "2025-01-01", "scheme": "cash", "schedule": [{ "from": "2025-01-01", "stagger": "quarterly-1" }] } }, "was": null, "why": "…" },
+      { "kind": "add_filing", "company": "example-ltd", "filing": { "kind": "confirmation", "periodEnd": "2025-03-14", "filedOn": "2025-03-20" }, "why": "…" }
     ]
   }
   ```
@@ -295,6 +297,22 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
     the changes before it leave the return (a director's Yes opens the close company boxes), with a
     value of its kind; a box that needs a figure takes no nil. One the owner set already is theirs:
     the same value is already so, another does not fit.
+  - A company's books (`set_company_books`, DATA_FORMAT.md, companies.json `books`) are for a
+    company in the owner's data: its dates, registrations and period overrides from its documents
+    (the certificate of incorporation, a VAT registration certificate, Companies House's page,
+    HMRC's notice of its accounting periods), without filings, which stay as they are. They pass the
+    same checks as the owner's own (no accounting period over 18 months, no Corporation Tax period
+    over 12, in order, only the cash VAT scheme). Its `was` is the books' `updatedAt` from
+    `GET /api/companies/:id/books` (null when there are none): books changed since do not fit, and
+    books the owner set (`setBy: "owner"`) are never replaced; the same books again are already so.
+    No VAT number is proposed: none is kept.
+  - A filing (`add_filing`) is for a company whose books are kept here (set them up earlier in the
+    same proposal if need be), filed on a day that is not in the future and not before its period
+    ends. There is one per kind and period's end: the same filing again is already so, another for
+    that period does not fit. Its `why` names the document it is from (the filing history, a
+    submission receipt, a payment confirmation). The owner's own routes for the books
+    (`PUT /api/companies/:id/books`, `POST` and `DELETE /api/companies/:id/filings`) are closed to
+    tokens.
   - A company added (`add_company`) is new: no company with its id or number, and no account with
     the id its account would take. Its valuation is not in the future. A book value's `why` names
     the documents its figures come from (the share certificate, the accounts, the confirmation

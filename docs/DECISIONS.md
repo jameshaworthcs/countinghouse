@@ -3037,3 +3037,33 @@ part of their estate.
   of the loan, not of the warning (reviewed 2026-11-26 with a tax fact-check, which also added the
   close company condition, s458's claim timing, s464ZA's exception for repayments taxed as income,
   ITTOIA 2005 s415 on a loan written off, and Class 1A on the benefit).
+
+## 2026-11-26: Company deadlines are served apart from personal routes
+
+A company you run can keep its books here (`Company.books`): its dates, registrations and filings,
+and the deadlines worked out from them (FORMULAS.md §22). They are served from the company's own
+routes (`/api/company-books`, `/api/company-alerts`, `/api/companies/:id/books`), never in a
+personal route's JSON: `GET /api/companies` leaves `books` out, and the Overview fetches company
+alerts from their own route and shows them beside its alerts rather than adding them to
+`GET /api/summary`.
+
+- **Why apart.** The personal API is the owner's own figures, and agents' digests, Ask and the tests
+  read it as such. Mixing a company's obligations into it would blur whose they are (a company's
+  Corporation Tax due beside the owner's Self Assessment) and make the line between the two sides
+  something every route had to keep by hand. Served apart, the metamorphic test of company scope
+  stays the check: its company data now has books with filings, and only the three company routes
+  may answer differently, each with its reason.
+- **Rules as pure functions of dates**, not tax-year parameters: accounting periods, CT periods and
+  VAT periods are worked out from the books each time, and only filings are stored. Overrides (a
+  period set by notice, HMRC's CT periods, a filed return's own dates, the next made-up date
+  Companies House shows) win where the books give them.
+- **A payment kind of filing** (`ct-payment`), beyond the brief's four kinds, so the Corporation Tax
+  deadline can be done; a CT600 saying there is nothing to pay does it too.
+- **`deadlinesFrom`**, so an older company's books do not list every deadline since incorporation as
+  overdue before its past filings are recorded.
+- **Books are the owner's or an agent's as a whole** (`setBy`): a proposal sets books only when there
+  are none or the last were an agent's and unchanged since (`was`, a timestamp that moves on with
+  every change, even within a second), never over the owner's.
+- **The leak guard** reads the filings' references and figures at a small company's threshold (whole
+  pounds from £250), since a VAT box or a balance sheet line is as telling as a balance; the VAT
+  number is not stored at all.

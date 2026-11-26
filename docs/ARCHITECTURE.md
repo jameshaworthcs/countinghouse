@@ -62,6 +62,7 @@ Source layout:
 | `src/server/audit.ts` | The audit log: who is acting (carried through async work), the request middleware, the hash-chained log, search and the chain check; `auditdiff.ts` says what a write changed, record by record |
 | `src/server/sessions.ts` | Agent sessions: each run's record and transcript in the work area, their caps and retention; `sessionviews.ts` lists them (with earlier ones and agents with tokens) and says what each produced |
 | `src/server/proposals.ts` | Fixes agents propose to your data, checked against it and applied only by you ([AGENTS.md §5](AGENTS.md)) |
+| `src/server/routes/company-books.ts` | A company's own records and deadlines (`shared/company-books.ts`), served apart from every personal route ("A company's books", below) |
 | `src/web/` | The React app: `pages/`, `components/` (UI kit, charts), `lib/` (API client, prefs, data context) |
 | `scripts/` | Demo data, import CLI, records CLI, validate, schema export, screenshots (demo data only), set-password, deploy, `init-data` (a new data repository); the leak guard (`leak-guard.ts`, `leak-guard/`) and its git hooks (`hooks-install.ts`) keep personal data out of the repository ([LEAK_GUARD.md](LEAK_GUARD.md)), and `fixture-anonymise.ts` turns a real import's document into a synthetic fixture |
 | `tests/` | Vitest suites + synthetic fixtures for every supported bank format |
@@ -212,6 +213,32 @@ director's loan").
   Its page (`GET /api/accounts/:id`, `directorLoan`) lists the movements with their rows and the
   warnings (s455 and the beneficial loan threshold, from `shared/uk.ts`), which Data health and the
   Overview's alerts carry too.
+
+### A company's books
+
+The company seen from its own side: its records and deadlines, when you keep its books here
+(DECISIONS 2026-11-26, "Company deadlines are served apart").
+
+- **The record is on the company** (`Company.books`: its dates, VAT and PAYE registrations, period
+  overrides and filings; DATA_FORMAT.md). The store checks every write that adds or changes books
+  (`booksProblems`: periods within the Acts' limits, filings once each and after their periods), as
+  it checks a director's loan link; a hand edit is reported on the company's page instead.
+- **Deadlines are a pure function** (`shared/company-books.ts`, `companyDeadlines`) of the books, the
+  rules in `shared/uk.ts` and today (FORMULAS.md §22). Nothing is stored but what was filed.
+- **Its own routes only** (`routes/company-books.ts`): `GET /api/company-books` (the companies whose
+  books are kept, with what needs doing), `GET /api/company-alerts` (deadlines due within 60 days or
+  overdue, across companies), `GET /api/companies/:id/books` (the record, its periods and
+  deadlines), and the owner's writes (`PUT /api/companies/:id/books`, `POST` and `DELETE
+  /api/companies/:id/filings`), which no token may use. `GET /api/companies`, the personal view of the
+  companies you hold shares in, leaves `books` out (`companyView`), and no personal route (the
+  summary, Data health, the bootstrap) carries a deadline: `tests/company-scope.test.ts` gives the
+  company books with filings in its company data and lists only these three GET routes as answering
+  for the company.
+- **On the web**, a nav item (the company's name, when there is one) shows only when a company has
+  books, from `/api/company-books`; `/company/:id` and `/company/:id/settings` read the company's
+  routes and its accounts' group from `/api/company-accounts`. The Overview fetches
+  `/api/company-alerts` itself and shows them beside its own alerts, in the same list.
+- **Agents propose** (`set_company_books`, `add_filing`; AGENTS.md §5), never over books you set.
 
 ## Audit log
 
