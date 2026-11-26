@@ -1932,8 +1932,8 @@ same list, whatever order the filings were recorded in.
 
 **Months.** A number of months *after* a day ends on the corresponding day of the month that many on;
 when the day is the last of its month, or that month has no such day (the 30th into February), on the
-last day of that month (`monthsAfter`, CA 2006 s443; HMRC count Corporation Tax the same way,
-CTM01800). A period of months *beginning with* a day ends the day before the corresponding day, or
+last day of that month (`monthsAfter`: CA 2006 s443(2)–(4); for Corporation Tax, HMRC's practice,
+CTM01800 and CTM93040). A period of months *beginning with* a day ends the day before the corresponding day, or
 on the last day of the month when there is none (`lastDayOfMonths`): 12 months beginning with
 15 March 2024 end on 14 March 2025, with 29 February 2024 on 28 February 2025. A period is *longer
 than* *n* months when it ends after the last day of *n* months beginning with its start.
@@ -1953,11 +1953,13 @@ than* *n* months when it ends after the last day of *n* months beginning with it
 - for the first period, when longer than 12 months: due = max(`monthsAfter(first anniversary, 9)`,
   `monthsAfter(P.end, 3)`) (s442(3)). The first anniversary of 29 February is 28 February.
 
-**Corporation Tax periods** (`ctPeriodsOf`): from the day trade started (from incorporation when not
-given; none when not yet, `null`), each ends on the earlier of the last day of 12 months beginning
-with its start and the end of its period of account (CTA 2009 s10(1)(a)–(b)); the next begins the
-day after. A period you set is used as it is, the worked-out one before it ending the day before.
-Its period of account is the accounting period its last day falls in.
+**Corporation Tax periods** (`ctPeriodsOf`): from the day the company came within the charge
+(`withinChargeFrom`: business or income, interest included, CTA 2009 s9; when not given, incorporation,
+shown as an assumption; none when dormant for Corporation Tax, `null`), each ends on the earliest of
+the last day of 12 months beginning with its start, the end of its period of account (s10(1)(a)–(b)),
+and the day before trade started (`tradeStartedOn`, s10(1)(d)); the next begins the day after. A
+period you set is used as it is, the worked-out one before it ending the day before. Its period of
+account is the accounting period its last day falls in.
 
 - **CT600** due = max(`monthsAfter(AP.end, 12)`, `monthsAfter(PoA.end, 12)`), or for a period of
   account longer than 18 months, `lastDayOfMonths(PoA.start, 30)` in place of the second (FA 1998
@@ -1975,17 +1977,20 @@ deregistration):
 3. A filed return's own dates win: one starting on a period's first day sets where that period ends;
    one with no start does so when it ends within the period.
 
-Each return is due `monthsAfter(end, 1)` + 7 days, whatever day of the week (reg 25(1), 25A(20));
-under annual accounting, the last working day of the second month after the year (reg 50(2)(b)), or
-`monthsAfter(end, 1)` for a period shorter than 4 months. A working day is a weekday that is not
+Each return is due on the last day of the month after the one its period ends in, + 7 days, whatever
+day of the week (reg 25(1), and the direction under reg 25A(20)): a period to 10 February by 7 April.
+Under annual accounting, the last working day of the second month after the year (reg 50(2)(b)), or
+`monthsAfter(end, 1)` for a period shorter than 4 months (GOV.UK's guidance, not reg 50). A working day is a weekday that is not
 Good Friday, Easter Monday or the last Monday of May or August (the bank holidays that can end a
 month in England and Wales).
 
 **Confirmation statements**: review periods of 12 months, the first beginning with incorporation (or
-ending on the next made-up date you give, statements made up before it being settled); a statement
-made up within a review period does it, and the next begins the day after its made-up date (s853A(5)–
-(6)). Due = made-up date + 14 days (s853A(1)); with none recorded, the made-up date is the review
-period's last day. The list goes on to the first one not done that is not yet due.
+ending on the next made-up date you give, statements made up before it being settled, each in the
+review period counted back a year at a time from it); a statement made up within a review period does
+it, and the next begins the day after its made-up date (s853A(5)–(6)). Due = the review period's last
+day + 14 days (s853A(1)), even for a statement made up earlier: filed by then, it is not late. With
+none recorded, the made-up date is the review period's last day. The list goes on to the first one not
+done that is not yet due.
 
 **Matching.** Filings are taken in a fixed order (period end, start, id). A filing does a deadline of
 its kind with the same period end (a VAT return as above; a confirmation statement within its review
@@ -2001,7 +2006,14 @@ worked out here, so nothing you recorded is hidden.
 | due-soon | 0 ≤ *d* ≤ 60 (`DEADLINE_LEAD_DAYS`) |
 | upcoming | *d* > 60 |
 
-Deadlines due before `deadlinesFrom` that are not done are left out. The list is sorted by due day.
+Deadlines due before `deadlinesFrom` that are not done are left out. The list is sorted by due day. An
+unmatched filing's due day is a guess from its own dates, so it is never marked late.
+
+**Dated rules.** Each rule's figures (9 months, 14 days, 12 months, 7 days…) are rows dated from when
+they are in force (`ruleOn` in `shared/uk.ts`), looked up by the date that decides it: the period's
+first day for accounts, the review period's end for a confirmation statement, the accounting period's
+end for Corporation Tax, the VAT period's end for a return. A period before the first row takes the
+first (UK_RULES.md says which earlier rules are not covered).
 
 **Alerts** (`companyDeadlineAlerts`, `GET /api/company-alerts`): each due-soon or overdue deadline,
 titled with the company's name, a warning when *d* ≤ 14 (`DEADLINE_WARN_DAYS`), information
@@ -2014,8 +2026,9 @@ and VAT payments on account.
 
 **Tested** (`tests/company-books.test.ts`): HMRC's own tables (CTM01800's due dates, CTM93050's
 filing dates), s443's month ends and February, first periods shorter and longer than 12 months, the
-6-month rule, overrides, trade starting late or not at all, each stagger, schedule changes,
-deregistration, annual accounting over a bank holiday, confirmation statements made up early or
-anchored; and as properties over generated books and filings, that every deadline is due after its
+6-month rule, overrides, coming within the charge before trading or never (dormant), each stagger,
+a period not ending on a month's end, schedule changes, deregistration, annual accounting over a bank
+holiday, confirmation statements made up early (and filed within their review period's 14 days) or
+anchored, dated rows; and as properties over generated books and filings, that every deadline is due after its
 period ends, that what is done does not depend on the filings' order, and that periods follow on
 without gaps within the Acts' limits.

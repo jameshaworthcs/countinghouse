@@ -220,9 +220,12 @@ The company seen from its own side: its records and deadlines, when you keep its
 (DECISIONS 2026-11-26, "Company deadlines are served apart").
 
 - **The record is on the company** (`Company.books`: its dates, VAT and PAYE registrations, period
-  overrides and filings; DATA_FORMAT.md). The store checks every write that adds or changes books
-  (`booksProblems`: periods within the Acts' limits, filings once each and after their periods), as
-  it checks a director's loan link; a hand edit is reported on the company's page instead.
+  overrides and filings; DATA_FORMAT.md). Every write to it (the routes, an applied proposal) is
+  built on the company as it is at that moment, under the store's lock (`Store.updateCompany`), so a
+  filing recorded while a proposal applies is kept. The store refuses a write that adds a problem
+  (`addedBooksProblems`: periods within the Acts' limits, filings once each and after their periods),
+  as it checks a director's loan link; problems a hand edit left are listed on the company's page and
+  do not block the write that fixes them.
 - **Deadlines are a pure function** (`shared/company-books.ts`, `companyDeadlines`) of the books, the
   rules in `shared/uk.ts` and today (FORMULAS.md §22). Nothing is stored but what was filed.
 - **Its own routes only** (`routes/company-books.ts`): `GET /api/company-books` (the companies whose

@@ -385,8 +385,13 @@ confirmationStatement?, tradeStartedOn?, ctPeriods, deadlinesFrom?, filings, set
 - `paye`: `{from, closedOn?}`, its PAYE scheme: a record only (no deadlines are worked out from it).
 - `confirmationStatement`: `{nextMadeUpTo}`, the next confirmation statement's made-up date as
   Companies House shows it. Absent, it is worked out from incorporation and the statements filed.
-- `tradeStartedOn`: the day it started to trade, which starts its first Corporation Tax period;
-  `null` when it has not (no Corporation Tax periods are worked out); absent, from incorporation.
+- `withinChargeFrom`: the day it came within the charge to Corporation Tax (it began to carry on
+  business, or had a source of income such as interest on its bank account: not only trade, CTA 2009
+  s9), when its first Corporation Tax period starts. `null`: dormant for Corporation Tax (no CT600 or
+  payment is listed; a notice from HMRC to deliver a return must still be answered, entered as a
+  period in `ctPeriods`). Absent: assumed from incorporation, and the company's page says so.
+- `tradeStartedOn`: the day it started to trade, which ends a Corporation Tax period there (CTA 2009
+  s10(1)(d)); `null` or absent when it has not, or it is not known.
 - `ctPeriods`: `[{start, end}]`, Corporation Tax accounting periods other than the worked-out ones
   (HMRC's notice sets them in practice): each 12 months at most, in order, none before
   incorporation.
@@ -414,11 +419,14 @@ confirmationStatement?, tradeStartedOn?, ctPeriods, deadlinesFrom?, filings, set
 - `setBy`: `owner`, or `agent` when a proposal you applied set them; `updatedAt` changes with every
   change to the books other than a filing.
 
-You keep them with `PUT /api/companies/:id/books` (`{books, was}`; the filings stay) and record or
+You keep them with `PUT /api/companies/:id/books` (`{books, was, company}`; the filings stay;
+`company`, the page's, must be this one) and record or
 remove a filing with `POST /api/companies/:id/filings` and `DELETE
 /api/companies/:id/filings/:filingId`. No agent token may use these; an agent proposes
-(`set_company_books`, `add_filing`). The store refuses a write that adds or changes books that do
-not fit; books a hand edit left wrong are listed on the company's page.
+(`set_company_books`, `add_filing`). Every write is built on the company as it is at that moment
+(`Store.updateCompany`), so two at once never lose one another. The store refuses a write that adds a
+problem to the books; problems already there (a hand edit) do not block one, so they can be put right
+a step at a time, and they are listed on the company's page.
 
 ## agreements.json
 

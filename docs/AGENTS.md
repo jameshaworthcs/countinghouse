@@ -302,7 +302,10 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
     (the certificate of incorporation, a VAT registration certificate, Companies House's page,
     HMRC's notice of its accounting periods), without filings, which stay as they are. They pass the
     same checks as the owner's own (no accounting period over 18 months, no Corporation Tax period
-    over 12, in order, only the cash VAT scheme). Its `was` is the books' `updatedAt` from
+    over 12, in order, only the cash VAT scheme). `withinChargeFrom` is the day it came within the
+    charge to Corporation Tax (business or income, interest included), not the day it started to
+    trade; give it only when a document shows it, `null` only when it is dormant for Corporation Tax.
+    Its `was` is the books' `updatedAt` from
     `GET /api/companies/:id/books` (null when there are none): books changed since do not fit, and
     books the owner set (`setBy: "owner"`) are never replaced; the same books again are already so.
     No VAT number is proposed: none is kept.

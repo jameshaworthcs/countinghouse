@@ -3067,3 +3067,10 @@ alerts from their own route and shows them beside its alerts rather than adding 
 - **The leak guard** reads the filings' references and figures at a small company's threshold (whole
   pounds from £250), since a VAT box or a balance sheet line is as telling as a balance; the VAT
   number is not stored at all.
+- **Reviewed 2026-11-26** (a code review and a legislation check): Corporation Tax periods start when
+  the company comes within the charge (`withinChargeFrom`; interest alone does it), not when it starts
+  to trade, which now only ends a period (s10(1)(d)); a missing date is assumed to be incorporation
+  and labelled. A confirmation statement is due 14 days after its review period, however early it was
+  made up. VAT follows reg 25(1) to the letter for a period not ending on a month's end. Each rule is
+  a dated row looked up by the period's own date. Writes build on the company as it is under the lock
+  (`updateCompany`), and only problems a write adds are refused.

@@ -220,8 +220,16 @@ the company's books (below), which are the company's records, kept apart.
 For a private limited company whose books are kept here (FORMULAS.md §22): what it must file and pay,
 and by when, worked out by the pure functions and tables in `src/shared/uk.ts` ("Companies: periods
 and deadlines"). Months are calendar months; a number of months after a day ends on the
-corresponding day, or the month's last day when the day is a month's end or the month has none
-(CA 2006 s443(2)–(4); HMRC count Corporation Tax the same way, CTM01800).
+corresponding day, or the month's last day when the month has none (CA 2006 s443(2), (4)). A month's
+end runs to a month's end: by s443(3) for Companies House's periods, and by HMRC's practice for
+Corporation Tax (CTM01800 for payment; CTM93040 for returns: a period to 28 February before a leap year
+files on 29 February, one to 29 February on 28 February). Each rule is a row dated from when it is in
+force (`ruleOn`), looked up by the period's own date, so a later change is never applied to an earlier
+period: accounts from 6 April 2008 (CA 2006 Part 15, SI 2007/3495 art 3; CA 1985's earlier periods are
+not covered), confirmation statements from 30 June 2016 (Part 24 as substituted by the Small Business,
+Enterprise and Employment Act 2015 s92, SI 2016/321; annual returns are not covered), Corporation Tax
+for accounting periods ending from 1 July 1999 (Corporation Tax Self Assessment), and VAT returns
+from 1 April 2019 (Making Tax Digital, every return made online).
 
 - **Accounting reference periods (CA 2006 ss391–392).** The default accounting reference date is the
   last day of the month in which the anniversary of incorporation falls (s391(4), for a company
@@ -230,32 +238,39 @@ corresponding day, or the month's last day when the day is a month's end or the 
   months and not more than 18 months, ending on the reference date (s391(5)); later ones are 12
   months. A notice under s392 shortens or extends a period, never past 18 months (s392(5)), and an
   extension is not effective within 5 years of an earlier one (s392(3), with exceptions); the app
-  takes the periods you set and refuses one over 18 months, but does not check the 5 years. A
-  February reference date means the month's last day, the 29th in a leap year: the default is "the
+  takes the periods you set and refuses one over 18 months, but does not check the 5 years: copy
+  shortened or extended periods from the Companies House register. A February reference date means the month's last day, the 29th in a leap year: the default is "the
   last day of the month" (`ACCOUNTING_PERIOD_RULES`, `defaultAccountingReferenceDate`).
 - **Accounts (CA 2006 s442).** A private company delivers its accounts within **9 months** after the
   end of the period (s442(2)(a)). For a first period longer than 12 months, the later of **9 months
   from the first anniversary of incorporation** and **3 months from the end of the period**
   (s442(3)): 21 months from incorporation for most. Not worked out: a shortened period's 3 months
   from the notice (s442(4)) and the Secretary of State's extension (s442(5)–(5A)). The first
-  anniversary of a 29 February incorporation is taken as 28 February (`ACCOUNTS_FILING_RULES`,
+  anniversary of a 29 February incorporation is taken as 28 February: the Act does not settle it, and
+  this errs early (1 March would give a day later) (`ACCOUNTS_FILING_RULES`,
   `accountsFilingDeadline`).
 - **Confirmation statement (CA 2006 s853A).** Delivered within **14 days** after the end of each
   review period (s853A(1)). The first review period is 12 months beginning with the day of
   incorporation, each later one 12 months beginning the day after the last (s853A(5)); a statement
   made up to an earlier day starts the next review period the day after it (s853A(6)), and its
   made-up date is no later than the review period's last day (s853A(4)). So the first is made up to
-  the day before the anniversary of incorporation, as Companies House shows it
-  (`CONFIRMATION_STATEMENT_RULES`, `confirmationStatementDue`).
-- **Corporation Tax accounting periods (CTA 2009 ss9–10).** One begins when the company comes within
-  the charge (a UK resident company when it starts to carry on business, s9(2)) and again straight
-  after one ends (s9(1)(b)). One ends on the first of: **12 months from its beginning** (s10(1)(a));
-  its accounting date, or the end of a period it makes up no accounts for (s10(1)(b)–(c)); starting
-  or ceasing to trade (s10(1)(d)); and the other events of s10(1) the app does not know of. So a
-  period of account longer than 12 months is two accounting periods: 12 months, and the rest. The
-  app starts the first on the day trade started (from incorporation when not given: it assumes the
-  company was not within the charge before trading, such as with interest of its own), none while
-  trade has not started, and takes the periods you set (HMRC's notice) as they are (`CT_PERIOD_RULES`).
+  the day before the anniversary of incorporation, as Companies House shows it, and **one made up
+  early is still due 14 days after its review period's end**, not after its made-up date: filed by
+  then, it is not late (`CONFIRMATION_STATEMENT_RULES`, `confirmationStatementDue`).
+- **Corporation Tax accounting periods (CTA 2009 ss9–10).** One begins when the company **comes
+  within the charge** (s9(1)(a)): when it starts to carry on business (s9(2)) or has a source of
+  income. That is wider than trade: interest on its bank account alone brings it within the charge
+  (GOV.UK, "Dormant for Corporation Tax": "Trading includes … getting interest"). Another begins
+  straight after one ends (s9(1)(b)). One ends on the first of: **12 months from its beginning**
+  (s10(1)(a)); its accounting date, or the end of a period it makes up no accounts for
+  (s10(1)(b)–(c)); **starting or ceasing to trade** (s10(1)(d)); and the other events of s10(1) the
+  app does not know of. So a period of account longer than 12 months is two accounting periods: 12
+  months, and the rest. The books say when it came within the charge (`withinChargeFrom`); when they
+  do not, the app assumes incorporation and the company's page says it is an assumption. Dormant for
+  Corporation Tax (`null`): no CT600 or payment is listed; a company that has received a notice to
+  deliver a Company Tax Return must still file one (showing it dormant), so a period HMRC's notice
+  sets is entered as a period you set. The day trade started (`tradeStartedOn`) ends a period there,
+  the next beginning on it; periods you set (HMRC's notice) are used as they are (`CT_PERIOD_RULES`).
 - **Corporation Tax payment (TMA 1970 s59D).** Due on **the day after 9 months from the end of the
   accounting period** (s59D(1)): 1 January for a period to 31 March, the first day of the tenth month
   for any period to a month's end (CTM01800). This is for companies that do not pay by instalments:
@@ -265,26 +280,30 @@ corresponding day, or the month's last day when the day is a month's end or the 
   months from the end of the accounting period**; **12 months from the end of the period of account**
   its last day falls in, if that is not longer than 18 months, or **30 months from its beginning** if
   it is; and **3 months from HMRC's notice** to deliver it (para 14(1)(a)–(d), (2)). So both returns
-  for a 15-month period of account are due 12 months after it ends (CTM93050, example 3). The
+  for a 15-month period of account are due 12 months after it ends (CTM93050, example 3), with
+  months counted a month's end to a month's end (CTM93040). The
   notice's 3 months are not worked out: a notice served late gives a later date (`CT_RETURN_RULES`,
   `ct600Due`).
 - **VAT returns.** Each return is for a period ending on the dates HMRC set (VAT Regulations 1995 reg
-  25(1)): monthly, or quarterly in one of three **staggers**: stagger 1 quarters end in **March,
-  June, September and December**, stagger 2 in **April, July, October and January**, stagger 3 in
-  **May, August, November and February** (HMRC's DMBM530020). The first return is for the period
-  that includes the day of registration and begins on it (reg 25(1)). A return is due by the last day
-  of the month after its period (reg 25(1)); HMRC allow **7 days more** for one made online and paid
-  electronically, by direction under reg 25A(20) (VAT Notice 700/12), and under Making Tax Digital
-  every return is made online: **1 calendar month and 7 days** after the period, a day that does not
-  move for a weekend. Under **annual accounting**, the return for the year is due by **the last
-  working day of the second month after it** (reg 50(2)(b)); GOV.UK gives 1 month for an accounting
-  period shorter than 4 months. The app counts a working day as a weekday that is not one of the
-  bank holidays in England and Wales that can end a month (Good Friday, Easter Monday, the last
-  Mondays of May and August; Banking and Financial Dealings Act 1971 Sch 1): a holiday moved by
-  proclamation is not known. Payments are due by the same day; annual accounting's advance payments
-  and payments on account are not worked out. Only the **cash accounting scheme** is taken for now
-  (accrual and the flat rate scheme are refused as not supported yet) (`VAT_STAGGERS`,
-  `VAT_QUARTER_END_MONTHS`, `VAT_RETURN_RULES`, `vatReturnDue`, `lastWorkingDayOfMonth`).
+  25(1)): monthly (HMRC's "stagger 0"), or quarterly in one of three **staggers**: stagger 1 quarters
+  end in **March, June, September and December**, stagger 2 in **April, July, October and January**,
+  stagger 3 in **May, August, November and February** (HMRC's DMBM530020). The first return is for the
+  period that includes the day of registration and begins on it (reg 25(1)). A return is due "not
+  later than **the last day of the month next following the end of the period**" (reg 25(1)); HMRC
+  allow **7 days more** for one made online and paid electronically, by direction under reg 25A(20)
+  (VAT Notice 700/12), and under Making Tax Digital every return is made online. So a period to 31
+  March is due by 7 May, and one to 10 February by 7 April (the last day of March, and 7 days), not
+  17 March; the day does not move for a weekend. Under **annual accounting**, the return for the year
+  is due by **the last working day of the second month after it** (reg 50(2)(b)). For an annual
+  accounting period shorter than 4 months, GOV.UK's guidance gives 1 month after it ("VAT Annual
+  Accounting Scheme: return and payment deadlines"): that is guidance, not reg 50, and the app follows
+  it. The app counts a working day as a weekday that is not one of the bank holidays in England and
+  Wales that can end a month (Good Friday, Easter Monday, the last Mondays of May and August; Banking
+  and Financial Dealings Act 1971 Sch 1): a holiday moved by proclamation is not known. Payments are
+  due by the same day; annual accounting's advance payments and payments on account are not worked
+  out. Only the **cash accounting scheme** is taken for now (accrual and the flat rate scheme are
+  refused as not supported yet) (`VAT_STAGGERS`, `VAT_QUARTER_END_MONTHS`, `VAT_RETURN_RULES`,
+  `vatReturnDue`, `lastWorkingDayOfMonth`).
 - **Micro-entity accounts.** A filing of accounts may keep the balance sheet's lines **A to K** of
   the micro-entity format 1 (Small Companies and Groups (Accounts and Directors' Report) Regulations
   2008, Sch 1 Part 1 Section C): called up share capital not paid, fixed assets, current assets,
@@ -373,8 +392,8 @@ Checked 26 November 2026 (companies: periods and deadlines):
 - legislation.gov.uk, [CA 2006 s391](https://www.legislation.gov.uk/ukpga/2006/46/section/391) (the default accounting reference date, s391(4); the first period more than 6 and not more than 18 months, s391(5)), [CA 2006 s392](https://www.legislation.gov.uk/ukpga/2006/46/section/392) (shortening and extending; never over 18 months, s392(5); not again within 5 years, s392(3)), [CA 2006 s442](https://www.legislation.gov.uk/ukpga/2006/46/section/442) (9 months for a private company; a first period over 12 months, s442(3); a shortened one, s442(4); extensions, s442(5)–(5A)), [CA 2006 s443](https://www.legislation.gov.uk/ukpga/2006/46/section/443) (counting months: the corresponding date, a month's end, February), [CA 2006 s853A](https://www.legislation.gov.uk/ukpga/2006/46/section/853A) (confirmation statements: 14 days after each 12-month review period)
 - legislation.gov.uk, [CTA 2009 s9](https://www.legislation.gov.uk/ukpga/2009/4/section/9) and [s10](https://www.legislation.gov.uk/ukpga/2009/4/section/10) (when an accounting period begins and ends), [TMA 1970 s59D](https://www.legislation.gov.uk/ukpga/1970/9/section/59D) (the day after 9 months from the period's end; subject to s59E's instalments), [FA 1998 Sch 18 para 14](https://www.legislation.gov.uk/ukpga/1998/36/schedule/18/paragraph/14) (the CT600's filing date)
 - legislation.gov.uk, [VAT Regulations 1995 reg 25](https://www.legislation.gov.uk/uksi/1995/2518/regulation/25) (periods and the month after), [reg 25A](https://www.legislation.gov.uk/uksi/1995/2518/regulation/25A) (additional time for electronic returns by direction, para (20)), [reg 50](https://www.legislation.gov.uk/uksi/1995/2518/regulation/50) (annual accounting: the last working day of the second month, para (2)(b)); [Small Companies Regulations 2008 Sch 1](https://www.legislation.gov.uk/uksi/2008/409/schedule/1) (the micro-entity balance sheet, Part 1 Section C)
-- HMRC's manuals, [CTM01800](https://www.gov.uk/hmrc-internal-manuals/company-taxation-manual/ctm01800) (Corporation Tax due dates, with examples), [CTM92010](https://www.gov.uk/hmrc-internal-manuals/company-taxation-manual/ctm92010) (nine months and one day), [CTM93030](https://www.gov.uk/hmrc-internal-manuals/company-taxation-manual/ctm93030) and [CTM93050](https://www.gov.uk/hmrc-internal-manuals/company-taxation-manual/ctm93050) (the filing date and its examples), [DMBM530020](https://www.gov.uk/hmrc-internal-manuals/debt-management-and-banking/dmbm530020) (VAT staggers 1–3)
-- GOV.UK, [VAT Returns: deadlines](https://www.gov.uk/vat-returns/deadlines) (1 calendar month and 7 days, online), [VAT Annual Accounting Scheme: return and payment deadlines](https://www.gov.uk/vat-annual-accounting-scheme/return-and-payment-deadlines) (2 months; 1 month under 4 months), [Filing your company's confirmation statement](https://www.gov.uk/guidance/confirmation-statement-guidance) (the review period and 14 days)
+- HMRC's manuals, [CTM01800](https://www.gov.uk/hmrc-internal-manuals/company-taxation-manual/ctm01800) (Corporation Tax due dates, with examples), [CTM92010](https://www.gov.uk/hmrc-internal-manuals/company-taxation-manual/ctm92010) (nine months and one day), [CTM93030](https://www.gov.uk/hmrc-internal-manuals/company-taxation-manual/ctm93030), [CTM93040](https://www.gov.uk/hmrc-internal-manuals/company-taxation-manual/ctm93040) (counting the months; 28 and 29 February) and [CTM93050](https://www.gov.uk/hmrc-internal-manuals/company-taxation-manual/ctm93050) (the filing date and its examples), [DMBM530020](https://www.gov.uk/hmrc-internal-manuals/debt-management-and-banking/dmbm530020) (VAT staggers 1–3, and monthly returns as stagger 0)
+- GOV.UK, [Dormant for Corporation Tax](https://www.gov.uk/dormant-company/dormant-for-corporation-tax) ("Trading includes … getting interest"; a notice to deliver a return must be answered), [VAT Returns: deadlines](https://www.gov.uk/vat-returns/deadlines) (1 calendar month and 7 days, online), [VAT Annual Accounting Scheme: return and payment deadlines](https://www.gov.uk/vat-annual-accounting-scheme/return-and-payment-deadlines) (2 months; 1 month under 4 months), [Filing your company's confirmation statement](https://www.gov.uk/guidance/confirmation-statement-guidance) (the review period and 14 days)
 
 Checked 26 November 2026 (companies: a director's loan):
 

@@ -120,9 +120,10 @@ async function demoCompanyAccount(store: Store, dividendDay: string): Promise<vo
 
 /**
  * Example Studio's books (companies.json, `books`): Jo runs it and keeps its records here. Incorporated
- * on 2 May 2023, its year to 31 December, trading from June, registered for VAT from April 2024 with
- * quarters to March, June, September and December. What fell due before today is filed (the second VAT
- * return 9 days late), and last year's accounts and CT600 went in together; the rest is still to come.
+ * on 2 May 2023, its year to 31 December, trading (and so within the charge to Corporation Tax) from
+ * June, registered for VAT from April 2024 with quarters to March, June, September and December. What
+ * fell due before today is filed (the second VAT return 9 days late), and last year's accounts and
+ * CT600 went in together; the rest is still to come.
  * Worked out from its own deadlines, and drawing nothing from the random sequence.
  */
 async function demoCompanyBooks(store: Store): Promise<void> {
@@ -131,6 +132,8 @@ async function demoCompanyBooks(store: Store): Promise<void> {
   const books = CompanyBooksSchema.parse({
     incorporatedOn: '2023-05-02',
     accountingReferenceDate: '12-31',
+    // Within the charge to Corporation Tax from when it began trading: no interest or business before.
+    withinChargeFrom: '2023-06-01',
     tradeStartedOn: '2023-06-01',
     vat: { registeredFrom: '2024-04-01', scheme: 'cash', schedule: [{ from: '2024-04-01', stagger: 'quarterly-1' }] },
     paye: { from: '2023-07-01' },
