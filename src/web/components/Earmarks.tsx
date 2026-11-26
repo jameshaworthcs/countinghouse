@@ -2,14 +2,15 @@
 // nothing, and ask for nothing, without earmarks.json.
 
 import { HandCoins, Plus, Trash2, TriangleAlert } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import type { EarmarkFigures, EarmarksResponse } from '../../shared/api';
 import type { EarmarkEffect, Transaction } from '../../shared/schema';
 import { api, useApi, useApiMutation, type Json } from '../lib/api';
 import { useAppData } from '../lib/data';
 import { BY_WORDS, EFFECT_WORDS } from '../lib/earmarks';
-import { formatDate, money, plural } from '../lib/format';
+import { subMoney, sumMoney } from '../../shared/money';
+import { cn, formatDate, money } from '../lib/format';
 import { Button, Card, Dialog, ErrorNote, Field, IconButton, Input, Money, NumberInput, Select, Switch, useToast } from './ui';
 
 /** Which effects a payment in or out can have (as the server checks). */
@@ -31,33 +32,39 @@ export interface DecidePayment {
   decided?: boolean;
 }
 
-/** One decision for one payment, with its effect on the figure shown as you go. Nothing is written on the payment. */
+/** One decision for one payment (a fresh dialog for each payment), with its effect on the figure shown as you go. */
 export function DecisionDialog({ payment, onClose }: { payment: DecidePayment | null; onClose: () => void }) {
+  return payment ? <DecisionForm key={payment.transactionId} payment={payment} onClose={onClose} /> : null;
+}
+
+function DecisionForm({ payment, onClose }: { payment: DecidePayment; onClose: () => void }) {
   const { accountName } = useAppData();
   const toast = useToast();
-  const [parts, setParts] = useState(payment?.parts ?? []);
-  const [reason, setReason] = useState(payment?.reason ?? '');
+  const [parts, setParts] = useState(payment.parts);
+  const [reason, setReason] = useState(payment.reason ?? '');
   const [preview, setPreview] = useState<{ before: EarmarkFigures | null; after: EarmarkFigures | null } | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
-  useEffect(() => {
-    setParts(payment?.parts ?? []);
-    setReason(payment?.reason ?? '');
-    setPreview(null);
-  }, [payment]);
-  const abs = Math.abs(payment?.amount ?? 0);
-  const used = Math.round(parts.reduce((s, p) => s + (p.amount || 0), 0) * 100) / 100;
-  const rest = Math.round((abs - used) * 100) / 100;
-  const body = payment ? { decisions: [{ pot: payment.pot, transaction: payment.transactionId, parts: parts.length ? parts.filter((p) => p.amount > 0) : null, reason: reason.trim() || undefined }] } : null;
+  // Only the latest preview asked for is shown: an earlier one that answers late is dropped.
+  const asked = useRef(0);
+  const abs = Math.abs(payment.amount);
+  const used = sumMoney(parts.map((p) => p.amount || 0));
+  const rest = subMoney(abs, used);
+  const body = { decisions: [{ pot: payment.pot, transaction: payment.transactionId, parts: parts.length ? parts.filter((p) => p.amount > 0) : null, reason: reason.trim() || undefined }] };
   const key = JSON.stringify(body);
   useEffect(() => {
-    if (!body || rest < 0 || parts.some((p) => !(p.amount > 0))) return;
+    const n = ++asked.current;
+    if (rest < 0 || parts.some((p) => !(p.amount > 0))) {
+      setPreview(null);
+      return;
+    }
     const timer = setTimeout(() => {
       api<{ before: EarmarkFigures | null; after: EarmarkFigures | null }>('/earmarks/preview', { body })
         .then((r) => {
+          if (n !== asked.current) return;
           setPreview(r);
           setPreviewError(null);
         })
-        .catch((e: Error) => setPreviewError(e.message));
+        .catch((e: Error) => n === asked.current && setPreviewError(e.message));
     }, 300);
     return () => clearTimeout(timer);
     // `key` stands for the body.
@@ -69,7 +76,6 @@ export function DecisionDialog({ payment, onClose }: { payment: DecidePayment | 
       onClose();
     },
   });
-  if (!payment) return null;
   const allowed = payment.amount > 0 ? EFFECTS_IN : EFFECTS_OUT;
   const invalid = rest < 0 || parts.some((p) => !(p.amount > 0)) || !parts.length;
   return (
@@ -85,7 +91,7 @@ export function DecisionDialog({ payment, onClose }: { payment: DecidePayment | 
               Take my decision away
             </Button>
           )}
-          <Button variant="primary" disabled={invalid} loading={save.isPending} onClick={() => body && save.mutate(body)}>
+          <Button variant="primary" disabled={invalid} loading={save.isPending} onClick={() => save.mutate(body)}>
             Decide
           </Button>
         </>
@@ -102,7 +108,7 @@ export function DecisionDialog({ payment, onClose }: { payment: DecidePayment | 
           {parts.map((p, i) => (
             <div key={i} className="flex items-end gap-2">
               <Field label={i === 0 ? 'Counted as' : ' '} className="min-w-0 flex-1">
-                <Select value={p.effect} onChange={(e) => setParts(parts.map((x, j) => (j === i ? { ...x, effect: e.target.value as EarmarkEffect } : x)))}>
+                <Select aria-label={`Part ${i + 1}: counted as`} value={p.effect} onChange={(e) => setParts(parts.map((x, j) => (j === i ? { ...x, effect: e.target.value as EarmarkEffect } : x)))}>
                   {allowed.map((e) => (
                     <option key={e} value={e}>
                       {EFFECT_WORDS[e]}
@@ -111,7 +117,7 @@ export function DecisionDialog({ payment, onClose }: { payment: DecidePayment | 
                 </Select>
               </Field>
               <Field label={i === 0 ? 'Amount' : ' '} className="w-32">
-                <NumberInput value={p.amount} onValue={(v) => setParts(parts.map((x, j) => (j === i ? { ...x, amount: v ?? 0 } : x)))} />
+                <NumberInput aria-label={`Part ${i + 1}: amount`} value={p.amount} onValue={(v) => setParts(parts.map((x, j) => (j === i ? { ...x, amount: v ?? 0 } : x)))} />
               </Field>
               <IconButton label="Remove this part" onClick={() => setParts(parts.filter((_, j) => j !== i))}>
                 <Trash2 className="size-4" />
@@ -125,7 +131,7 @@ export function DecisionDialog({ payment, onClose }: { payment: DecidePayment | 
               </Button>
             </div>
           )}
-          <p className={rest < 0 ? 'text-bad-ink' : 'text-ink-3'}>{rest < 0 ? `The parts add up to ${money(used)}, more than the payment.` : rest > 0 ? `The rest, ${money(rest)}, is your own money.` : 'All of it is counted.'}</p>
+          <p className={cn('sensitive', rest < 0 ? 'text-bad-ink' : 'text-ink-3')}>{rest < 0 ? `The parts add up to ${money(used)}, more than the payment.` : rest > 0 ? `The rest, ${money(rest)}, is your own money.` : 'All of it is counted.'}</p>
         </div>
         <Field label="Why" hint="For you later, and for agents proposing more like it.">
           <Input value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Granny’s birthday money, saved" />
@@ -192,7 +198,7 @@ export function EarmarksPanel() {
         )}
         {r.toCheck.length > 0 && (
           <Link to="/earmarks#to-check" className="ml-2 font-medium text-accent hover:underline">
-            {plural(r.toCheck.length, 'payment')} to check
+            {r.toCheck.length} to check
           </Link>
         )}
       </p>
@@ -208,11 +214,15 @@ export function EarmarkSection({ tx }: { tx: Transaction }) {
   const setup = q.data?.setup;
   if (!data.earmarks.length || !setup || !q.data?.result || !setup.everyday.includes(tx.accountId)) return null;
   const said: string[] = [];
+  // The pot it counts in, and its parts there: where a decision starts from.
+  let countsIn: { pot: string; parts: { effect: EarmarkEffect; amount: number }[] } | undefined;
   for (const pot of q.data.result.pots) {
     if (tx.date < pot.start) continue;
     for (const line of pot.lines) {
       for (const row of line.rows) {
         if (row.transactionId !== tx.id) continue;
+        countsIn ??= { pot: pot.id, parts: [] };
+        if (countsIn.pot === pot.id && row.counted !== 0) countsIn.parts.push({ effect: line.effect, amount: Math.abs(row.counted) });
         const why = row.by === 'rule' ? `rule “${row.ruleName ?? row.ruleId}”` : row.by === 'decision' ? `your decision${row.reason ? `: “${row.reason}”` : ''}` : BY_WORDS[row.by];
         said.push(`${EFFECT_WORDS[line.effect]} (${pot.name}): ${money(Math.abs(row.counted))}, by ${why}.`);
       }
@@ -222,8 +232,8 @@ export function EarmarkSection({ tx }: { tx: Transaction }) {
   const onItsWay = q.data.result.onItsWay.some((w) => w.transactionId === tx.id);
   if (!said.length && !toCheck && !onItsWay) said.push('Your own money: it doesn’t change what is set aside.');
   if (onItsWay) said.push('Money on its way between two everyday accounts: the other one’s statements don’t show it yet.');
-  // The pot a decision would be for: the one it counts in, else the first that has started by its day.
-  const decidedPot = setup.decisions[tx.id]?.pot;
+  // The pot a decision would be for: the one it is decided for or counts in, else the first that has started by its day.
+  const decidedPot = setup.decisions[tx.id]?.pot ?? countsIn?.pot;
   const pot = setup.pots.find((p) => p.id === decidedPot) ?? setup.pots.find((p) => p.start <= tx.date);
   return (
     <section>
@@ -250,7 +260,7 @@ export function EarmarkSection({ tx }: { tx: Transaction }) {
           className="mt-1 text-[13px] text-accent hover:underline"
           onClick={() => {
             const decided = setup.decisions[tx.id];
-            setDeciding({ pot: pot.id, potName: pot.name, transactionId: tx.id, accountId: tx.accountId, date: tx.date, description: tx.description, amount: tx.amount, parts: decided?.parts ?? [{ effect: 'own', amount: Math.abs(tx.amount) }], ...(decided ? { reason: decided.reason, decided: true } : {}) });
+            setDeciding({ pot: pot.id, potName: pot.name, transactionId: tx.id, accountId: tx.accountId, date: tx.date, description: tx.description, amount: tx.amount, parts: decided?.parts ?? (countsIn?.parts.length ? countsIn.parts : [{ effect: 'own', amount: Math.abs(tx.amount) }]), ...(decided ? { reason: decided.reason, decided: true } : {}) });
           }}
         >
           {setup.decisions[tx.id] ? 'Change your decision…' : 'Decide what it did…'}

@@ -5,8 +5,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { addDays, today } from '../../shared/dates';
-import { fromMinor, toMinor } from '../../shared/money';
-import { EARMARK_EFFECTS, EarmarkSetupSchema, MoneySchema, POT_EFFECTS, SlugSchema, TimestampSchema, type EarmarkDecision, type Earmarks, type Transaction } from '../../shared/schema';
+import { EARMARK_EFFECTS, EarmarkSetupSchema, MoneySchema, SlugSchema, TimestampSchema, type EarmarkDecision, type Earmarks, type Transaction } from '../../shared/schema';
 import { decisionProblem, earmarkFigures, earmarks, setupProblem, withSetup } from '../analytics/earmarks';
 import { agentTokenOf as tokenOf, readJson, type AppContext } from '../context';
 import { nowISO } from '../fsutil';
@@ -28,7 +27,6 @@ const Decide = z.object({
     .min(1)
     .max(200),
 });
-const PotBody = z.object({ pot: SlugSchema });
 const SetupBody = z.object({ setup: EarmarkSetupSchema, was: TimestampSchema.nullable().optional() });
 
 /** Decisions as they would be with these changes, each checked; throws with every problem. */
@@ -95,11 +93,12 @@ export function earmarkRoutes(ctx: AppContext): Hono {
   app.put('/setup', async (c) => {
     ownerOnly(c);
     const { setup, was } = await readJson(c, SetupBody);
-    const now = store.earmarks?.updatedAt ?? null;
-    if (was !== undefined && was !== now) throw new StoreError('Set aside changed since you opened it (an applied proposal, or another tab): reload it and make your change again.', 409);
     const problem = setupProblem(setup, (id) => store.account(id), (id) => store.categories.some((x) => x.id === id));
     if (problem) throw new StoreError(problem, 422);
-    await store.setEarmarks(withSetup(store.earmarks, setup, nowISO()), store.earmarks ? 'set aside: change the setup' : 'set aside: set up');
+    await store.updateEarmarks((current) => {
+      if (was !== undefined && was !== (current?.updatedAt ?? null)) throw new StoreError('Set aside changed since you opened it (an applied proposal, or another tab): reload it and make your change again.', 409);
+      return withSetup(current, setup, nowISO());
+    }, store.earmarks ? 'set aside: change the setup' : 'set aside: set up');
     return c.json(ctx.analytics.earmarks());
   });
 
@@ -124,50 +123,65 @@ export function earmarkRoutes(ctx: AppContext): Hono {
   app.post('/decisions', async (c) => {
     ownerOnly(c);
     const { decisions } = await readJson(c, Decide);
-    const next = withDecisions(setupOrThrow(), (id) => store.transaction(id), decisions);
-    await store.setEarmarks({ ...next, updatedAt: nowISO() }, `set aside: ${decisions.length === 1 ? (decisions[0]!.parts ? 'decide a payment' : 'take a decision away') : `decide ${decisions.length} payments`}`);
+    setupOrThrow();
+    await store.updateEarmarks(
+      (current) => {
+        if (!current) throw new StoreError('Nothing is set aside.', 404);
+        return { ...withDecisions(current, (id) => store.transaction(id), decisions), updatedAt: nowISO() };
+      },
+      `set aside: ${decisions.length === 1 ? (decisions[0]!.parts ? 'decide a payment' : 'take a decision away') : `decide ${decisions.length} payments`}`,
+    );
     return c.json(ctx.analytics.earmarks());
   });
 
   /** "I've checked this": the figures as they are now, kept with each pot. */
   app.post('/checks', async (c) => {
     ownerOnly(c);
-    const setup = setupOrThrow();
+    setupOrThrow();
     const r = ctx.analytics.earmarks().result;
     if (!r) throw new StoreError('There is no figure to check: see the problems on the page.', 409);
     const at = nowISO();
-    const pots = setup.pots.map((p) => {
-      const now = r.pots.find((x) => x.id === p.id);
-      return now ? { ...p, checks: [...p.checks, { at, setAside: now.setAside, spendable: r.spendable }].slice(-100) } : p;
-    });
-    await store.setEarmarks({ ...setup, pots, updatedAt: at }, 'set aside: checked');
+    await store.updateEarmarks((current) => {
+      if (!current) throw new StoreError('Nothing is set aside.', 404);
+      const pots = current.pots.map((p) => {
+        const now = r.pots.find((x) => x.id === p.id);
+        return now ? { ...p, checks: [...p.checks, { at, setAside: now.setAside, spendable: r.spendable }].slice(-100) } : p;
+      });
+      return { ...current, pots, updatedAt: at };
+    }, 'set aside: checked');
     return c.json(ctx.analytics.earmarks());
   });
 
   /**
-   * Start a pot again from here: from the day after the oldest of the everyday accounts' latest days
-   * (every account has data to then), with what it had set aside on that day as its opening. Its
-   * decisions before then no longer count and go (git keeps them).
+   * Start again from here: every pot from the day after the latest day every open everyday account
+   * has data for (D), with what it had set aside at the end of D as its opening, and what its capped
+   * rules could still pay carried in. All pots together, so no payment moves from one to another.
+   * Decisions for payments to D go (git keeps them), and what was still to check is settled as
+   * suggested. The figure is the same before and after.
    */
   app.post('/restart', async (c) => {
     ownerOnly(c);
-    const { pot: potId } = await readJson(c, PotBody);
-    const setup = setupOrThrow();
-    const pot = setup.pots.find((p) => p.id === potId);
-    if (!pot) throw new StoreError(`There is no pot "${potId}".`, 404);
+    setupOrThrow();
     const r = ctx.analytics.earmarks().result;
-    const now = r?.pots.find((p) => p.id === potId);
-    if (!r || !now || !r.oldest) throw new StoreError('There is no figure to start again from: see the problems on the page.', 409);
+    if (!r?.oldest) throw new StoreError('There is no figure to start again from: see the problems on the page.', 409);
     const through = r.oldest;
-    if (through < pot.start) throw new StoreError(`${pot.name} started after the latest day every everyday account has data for.`, 409);
-    // What it had set aside at the end of that day: the opening and every part with an effect on it to then.
-    let n = toMinor(pot.opening);
-    for (const line of now.lines) if (POT_EFFECTS.includes(line.effect)) for (const row of line.rows) if (row.date <= through) n += toMinor(row.counted);
     const start = addDays(through, 1);
     if (start > today()) throw new StoreError('Every everyday account has data up to today: start again tomorrow.', 409);
-    const decisions = Object.fromEntries(Object.entries(setup.decisions).filter(([, d]) => d.pot !== potId || d.seen.date >= start));
-    const pots = setup.pots.map((p) => (p.id === potId ? { ...p, start, opening: fromMinor(n) } : p));
-    await store.setEarmarks({ ...setup, pots, decisions, updatedAt: nowISO() }, `set aside: ${pot.name} starts again on ${start}`);
+    const at = earmarks(store, ctx.analytics.engine, today(), store.earmarks, through).result;
+    if (!at) throw new StoreError('There is no figure to start again from: see the problems on the page.', 409);
+    await store.updateEarmarks((current) => {
+      if (!current) throw new StoreError('Nothing is set aside.', 404);
+      const restarted = new Set(current.pots.filter((p) => p.start <= through).map((p) => p.id));
+      if (!restarted.size) throw new StoreError(`Every pot starts after ${through}, the latest day every everyday account has data for: there is nothing to start again.`, 409);
+      const pots = current.pots.map((p) => {
+        const then = at.pots.find((x) => x.id === p.id);
+        if (!restarted.has(p.id) || !then) return p;
+        const { carried: _old, ...rest } = p;
+        return { ...rest, start, opening: then.setAside, ...(Object.keys(then.allowances).length ? { carried: then.allowances } : {}) };
+      });
+      const decisions = Object.fromEntries(Object.entries(current.decisions).filter(([, d]) => !restarted.has(d.pot) || d.seen.date >= start));
+      return { ...current, pots, decisions, updatedAt: nowISO() };
+    }, `set aside: starts again on ${start}`);
     return c.json(ctx.analytics.earmarks());
   });
 

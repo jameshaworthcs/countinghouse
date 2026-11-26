@@ -463,7 +463,7 @@ function ProposalPage({ id }: { id: string }) {
         <p className="text-[14px] leading-relaxed whitespace-pre-line text-ink-2">{p.summary}</p>
       </Card>
 
-      {pending && (check.data?.earmarks ?? view.earmarks) && <EarmarkEffect effect={(left.length ? check.data?.earmarks : undefined) ?? view.earmarks!} />}
+      {pending && (left.length ? check.data?.earmarks : view.earmarks) && <EarmarkEffect effect={(left.length ? check.data?.earmarks : view.earmarks)!} />}
 
       <Card
         title={`${pending ? 'Changes it proposes' : 'Changes'} (${p.changes.length})`}

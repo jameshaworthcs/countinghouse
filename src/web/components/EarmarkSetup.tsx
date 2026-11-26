@@ -3,9 +3,10 @@
 // Agents propose the same changes as `set_earmarks`.
 
 import { ArrowDown, ArrowUp, Plus, Trash2 } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { EarmarksResponse } from '../../shared/api';
 import { today } from '../../shared/dates';
+import { addMoney, sumMoney } from '../../shared/money';
 import { EARMARK_EFFECTS, type EarmarkEffect, type EarmarkRule, type EarmarkSetup, type Earmarks } from '../../shared/schema';
 import { api, useApiMutation, type Json } from '../lib/api';
 import { useAppData } from '../lib/data';
@@ -38,6 +39,20 @@ function draftOf(e: Earmarks | null): EarmarkSetup {
   return { everyday: e.everyday, setAside: e.setAside, pots: e.pots.map(({ checks: _c, ...p }) => p) };
 }
 
+/** What stops a draft being saved, in words (the server says the same, less kindly). */
+function draftProblem(d: EarmarkSetup): string | null {
+  if (!d.everyday.length) return 'Choose your everyday accounts.';
+  for (const p of d.pots) {
+    if (!p.name.trim()) return 'Every pot needs a name.';
+    for (const r of p.rules) {
+      if (!r.name.trim()) return `Every rule of ${p.name} needs a name.`;
+      const words = r.text?.value.trim();
+      if (!words && !r.direction && r.amountMin === undefined && r.amountMax === undefined && !r.accountIds && !r.category && !r.counterpartyAccountId) return `Rule “${r.name}” of ${p.name} needs a condition: words, money in or out, a category, an account or an amount.`;
+    }
+  }
+  return null;
+}
+
 /** A setup as it can be sent: a rule with no words has no text condition. */
 function cleaned(d: EarmarkSetup): EarmarkSetup {
   return {
@@ -60,12 +75,15 @@ export function EarmarkSetupForm({ current, onDone }: { current: Earmarks | null
   const [removing, setRemoving] = useState(false);
   const body = useMemo(() => ({ setup: cleaned(draft) }), [draft]);
   const key = JSON.stringify(body);
+  // Only the latest preview asked for is shown: an earlier one that answers late is dropped.
+  const asked = useRef(0);
   useEffect(() => {
-    if (!draft.everyday.length) return;
+    const n = ++asked.current;
+    if (draftProblem(draft)) return;
     const timer = setTimeout(() => {
       api<EarmarksResponse>('/earmarks/setup/preview', { body: body as unknown as Json })
-        .then(setPreview)
-        .catch((e: Error) => setPreview({ setup: null, result: null, problems: [e.message] }));
+        .then((r) => n === asked.current && setPreview(r))
+        .catch((e: Error) => n === asked.current && setPreview({ setup: null, result: null, problems: [e.message] }));
     }, 400);
     return () => clearTimeout(timer);
     // `key` stands for the body.
@@ -84,6 +102,10 @@ export function EarmarkSetupForm({ current, onDone }: { current: Earmarks | null
     },
   });
 
+  const problem = draftProblem(draft);
+  // Decisions of pots taken away go with them when you save.
+  const potIds = new Set(draft.pots.map((p) => p.id));
+  const dropping = Object.values(current?.decisions ?? {}).filter((d) => !potIds.has(d.pot)).length;
   const roleOf = (id: string): Role => (draft.everyday.includes(id) ? 'everyday' : draft.setAside.includes(id) ? 'set-aside' : 'none');
   const setRole = (id: string, role: Role) =>
     setDraft({
@@ -106,12 +128,12 @@ export function EarmarkSetupForm({ current, onDone }: { current: Earmarks | null
         if (!row.ruleId || effectOf.get(`${pot.id}:${row.ruleId}`) !== line.effect) continue;
         const k = `${pot.id}:${row.ruleId}`;
         const c = caught.get(k) ?? { count: 0, total: 0 };
-        caught.set(k, { count: c.count + 1, total: Math.round((c.total + row.counted) * 100) / 100 });
+        caught.set(k, { count: c.count + 1, total: addMoney(c.total, row.counted) });
       }
     }
   }
   const r = preview?.result;
-  const setAside = r ? r.pots.reduce((s, p) => s + Math.round(p.setAside * 100), 0) / 100 : null;
+  const setAside = r ? sumMoney(r.pots.map((p) => p.setAside)) : null;
 
   return (
     <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_18rem] lg:items-start">
@@ -170,7 +192,20 @@ export function EarmarkSetupForm({ current, onDone }: { current: Earmarks | null
                     rule={rule}
                     sources={pot.rules.filter((x) => x.effect === 'source' && x.id !== rule.id)}
                     caught={caught.get(`${pot.id}:${rule.id}`)}
-                    onChange={(next) => setPot(i, { ...pot, rules: pot.rules.map((x, j) => (j === k ? next : x)) })}
+                    onChange={(next) =>
+                      setPot(i, {
+                        ...pot,
+                        // A rule that no longer adds to the pot can't be what another is limited to.
+                        rules: pot.rules.map((x, j) => {
+                          if (j === k) return next;
+                          if (next.effect === 'source' || !x.limitTo?.includes(rule.id)) return x;
+                          const limitTo = x.limitTo.filter((id) => id !== rule.id);
+                          if (limitTo.length) return { ...x, limitTo };
+                          const { limitTo: _l, ...rest } = x;
+                          return rest;
+                        }),
+                      })
+                    }
                     onMove={(d) => {
                       const rules = [...pot.rules];
                       const [moved] = rules.splice(k, 1);
@@ -222,9 +257,11 @@ export function EarmarkSetupForm({ current, onDone }: { current: Earmarks | null
             <p className="text-[13px] text-ink-3">Working it out…</p>
           )}
         </Card>
+        {problem && draft.everyday.length > 0 && <p className="text-[13px] text-warn-ink">{problem}</p>}
+        {dropping > 0 && <p className="text-[13px] text-warn-ink">Saving takes away {dropping === 1 ? 'the decision' : `the ${dropping} decisions`} of the pot{dropping === 1 ? '' : 's'} you removed (your data’s history keeps them).</p>}
         {save.error && <ErrorNote error={save.error} />}
         <div className="flex flex-wrap gap-2">
-          <Button variant="primary" loading={save.isPending} disabled={!draft.everyday.length || !draft.pots.length} onClick={() => save.mutate()}>
+          <Button variant="primary" loading={save.isPending} disabled={Boolean(problem) || !draft.pots.length} onClick={() => save.mutate()}>
             {current ? 'Save changes' : 'Set it up'}
           </Button>
           <Button onClick={onDone}>Cancel</Button>
@@ -386,7 +423,7 @@ function RuleEditor({
           </div>
         </div>
       )}
-      <p className="mt-2 text-[12.5px] text-ink-3">{caught ? `Catches ${plural(caught.count, 'payment')}, ${money(caught.total)} counted.` : 'Catches nothing yet.'}</p>
+      <p className="sensitive mt-2 text-[12.5px] text-ink-3">{caught ? `Catches ${plural(caught.count, 'payment')}, ${money(caught.total)} counted.` : 'Catches nothing yet.'}</p>
     </li>
   );
 }

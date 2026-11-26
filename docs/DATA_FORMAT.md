@@ -49,7 +49,7 @@ data/
   coverage.json        { confirmations: [...] }  stretches you confirmed nothing is missing from, which count as covered
   people.json          { people: [...] }         people you send money to or get money from: the names their payments carry, and how money with them usually goes
   returns.json         { returns: [...] }        what you told the app for each tax year's Self Assessment return: answers and box figures
-  earmarks.json        { everyday, setAside, pots, decisions }  optional: money set aside inside your everyday accounts (no file, no feature)
+  earmarks.json        { everyday, setAside, pots, decisions, updatedAt }  optional: money set aside inside your everyday accounts (no file, no feature)
   transactions/<account-id>/<yyyy>.jsonl    one transaction per line, by posting date
   balances/<account-id>.jsonl               balance / valuation snapshots
   holdings/<account-id>.jsonl               holdings snapshots
@@ -419,7 +419,7 @@ written when you set it up or decide a payment on the Set aside page, or apply a
 |---|---|
 | `everyday` | account ids where your money and the pots' mix: current accounts, and the cards paid from them |
 | `setAside` | account ids whose money is all set aside (savers) |
-| `pots` | `[{id, name, purpose?, start, opening, rules, checks}]`: `opening` is set aside in the everyday accounts at `start` (negative: the pot owed you); `checks` are the figures you checked (`{at, setAside, spendable}`) |
+| `pots` | `[{id, name, purpose?, start, opening, rules, carried?, checks}]`: `opening` is set aside in the everyday accounts at `start` (negative: the pot owed you); `carried` is what each rule limited to its sources could still pay when it started again from here, by rule id; `checks` are the figures you checked (`{at, setAside, spendable}`) |
 | `pots[].rules` | in order, the first that fits decides: `{id, name, effect, text?: {field, op, value, caseSensitive}, direction?, amountMin?, amountMax?, accountIds?, category?, counterpartyAccountId?, portion?: {percent} \| {upTo}, limitTo?: [rule ids], note?}`. At least one condition. `effect` is one of `source`, `use`, `from-pot`, `to-pot`, `topped-up`, `own-back`, `own`. `limitTo` (a `use` only) names rules of the pot adding to it |
 | `decisions` | by transaction id: `{pot, parts: [{effect, amount}], reason, seen: {accountId, date, amount}, proposalId?, decidedAt}`. Amounts are positive (the payment's sign applies); what the parts don't cover is your own money. `seen` is the payment when decided: a change to it puts the decision back to check. `proposalId` is the proposal it came from (the decision is still yours) |
 | `updatedAt` | when it was last changed: a proposal names it (`was`), so a change made since stops it fitting |

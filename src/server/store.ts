@@ -823,8 +823,17 @@ export class Store extends EventEmitter {
 
   /** Money set aside inside your everyday accounts (docs/FORMULAS.md §21); null removes the file. */
   setEarmarks(earmarks: Earmarks | null, message = 'set aside: update'): Promise<void> {
+    return this.updateEarmarks(() => earmarks, message);
+  }
+
+  /**
+   * Change set aside from what it is at the moment of writing, under the lock: two changes at once
+   * each build on the other rather than one being lost. `change` may throw to refuse.
+   */
+  updateEarmarks(change: (current: Earmarks | null) => Earmarks | null, message = 'set aside: update'): Promise<void> {
     return this.exclusive(async () => {
-      const e = earmarks ? EarmarksSchema.parse(earmarks) : null;
+      const next = change(this.state.earmarks);
+      const e = next ? EarmarksSchema.parse(next) : null;
       if (e) await this.writeJson('earmarks.json', e);
       else {
         this.selfWrites.set('earmarks.json', 'deleted');

@@ -15,8 +15,6 @@ export const EARMARK_RULES = {
   pairDays: 5,
   /** The other side of a transfer to a set-aside account is looked for this many days either way. */
   otherSideDays: 5,
-  /** An account whose latest data is older than this many days is marked stale. */
-  staleDays: 14,
 } as const;
 
 /** What working out the pots needs: the data, read through plain functions so tests can build it. */
@@ -31,6 +29,8 @@ export interface EarmarksInput {
   lastDataOf: (accountId: string) => ISODate | null;
   firstDataOf: (accountId: string) => ISODate | null;
   today?: ISODate;
+  /** An account whose latest data is older than this many days is out of date (settings.staleAfterDays). */
+  staleAfterDays?: number;
 }
 
 interface Part {
@@ -111,10 +111,12 @@ function portionOf(r: EarmarkRule | undefined, t: Transaction): number {
  * transfers) opposite amounts within a few days. Paired rows change nothing. A row naming another
  * everyday account whose data ends before it is money on its way.
  */
-function pairEveryday(rows: readonly Transaction[], everyday: ReadonlySet<string>, cats: CategoryIndex, otherSidesOf: (t: Transaction) => string[], lastDataOf: (id: string) => ISODate | null) {
+function pairEveryday(rows: readonly Transaction[], everyday: ReadonlySet<string>, cats: CategoryIndex, otherSidesOf: (t: Transaction) => string[], lastDataOf: (id: string) => ISODate | null, decided: ReadonlySet<string>) {
   const internal = new Set<string>();
   const onItsWay: { t: Transaction; other: string }[] = [];
-  const isTransfer = (t: Transaction) => !t.category || cats.kindOf(t.category) === 'transfer';
+  // Paired by amount only: a transfer (by its category), not one you decided, and not one with an
+  // account outside the everyday ones (a saver, a loan) on its other side.
+  const isTransfer = (t: Transaction) => !decided.has(t.id) && Boolean(t.category) && cats.kindOf(t.category) === 'transfer' && otherSidesOf(t).every((a) => everyday.has(a));
   const loose: Transaction[] = [];
   for (const t of rows) {
     const others = otherSidesOf(t).filter((a) => everyday.has(a) && a !== t.accountId);
@@ -188,7 +190,7 @@ export function computeEarmarks(input: EarmarksInput): EarmarksResponse {
       const closed = a.closedOn !== undefined && a.closedOn <= now;
       const balance = asOf ? input.balanceOn(id, asOf) : closed ? 0 : null;
       if (role === 'everyday' && balance === null) problems.push(`There is no balance for ${a.name}: add a statement or a balance for it.`);
-      accounts.push({ accountId: id, name: a.name, role, balance: balance ?? 0, asOf, stale: !closed && (asOf === null || diffDays(asOf, now) > EARMARK_RULES.staleDays) });
+      accounts.push({ accountId: id, name: a.name, role, balance: balance ?? 0, asOf, closed, stale: !closed && (asOf === null || diffDays(asOf, now) > (input.staleAfterDays ?? 35)) });
       if (role === 'everyday') everydayTotal += toMinor(balance ?? 0);
       else held += toMinor(balance ?? 0);
     }
@@ -200,7 +202,7 @@ export function computeEarmarks(input: EarmarksInput): EarmarksResponse {
   const otherSidesOf = (t: Transaction) => otherSides(t, byGroup);
   const firstStart = setup.pots.reduce((m, p) => (p.start < m ? p.start : m), setup.pots[0]!.start);
   const rows = input.transactions.filter((t) => everyday.has(t.accountId) && t.date >= firstStart).sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
-  const { internal, onItsWay } = pairEveryday(rows, everyday, cats, otherSidesOf, input.lastDataOf);
+  const { internal, onItsWay } = pairEveryday(rows, everyday, cats, otherSidesOf, input.lastDataOf, new Set(Object.keys(setup.decisions)));
 
   const toCheck: EarmarkToCheck[] = [];
   const counted: Counted[] = [];
@@ -237,12 +239,28 @@ export function computeEarmarks(input: EarmarksInput): EarmarksResponse {
     claimed.add(txId);
   }
 
+  // Every pot's rules come before any default: a payment goes to the first pot (in order, started
+  // by its day) one of whose rules fits it; one no rule fits, to the first pot started by its day.
+  const matchers = new Map(setup.pots.map((p) => [p.id, makeMatcher(p, cats, otherSidesOf)]));
+  const ruleOf = new Map<string, { pot: string; rule: EarmarkRule }>();
+  const defaultPotOf = (t: Transaction) => setup.pots.find((p) => p.start <= t.date)?.id;
+  for (const t of rows) {
+    if (internal.has(t.id) || claimed.has(t.id)) continue;
+    for (const p of setup.pots) {
+      if (p.start > t.date) continue;
+      const rule = p.rules.find((r) => matchers.get(p.id)!(r, t));
+      if (rule) {
+        ruleOf.set(t.id, { pot: p.id, rule });
+        break;
+      }
+    }
+  }
+
   const potResults: EarmarkPotResult[] = [];
   const nByDay = new Map<ISODate, number>();
   let totalN = 0;
   for (const pot of setup.pots) {
-    const match = makeMatcher(pot, cats, otherSidesOf);
-    const potRows = rows.filter((t) => t.date >= pot.start && !internal.has(t.id) && !claimed.has(t.id));
+    const potRows = rows.filter((t) => t.date >= pot.start && !internal.has(t.id) && !claimed.has(t.id) && (ruleOf.has(t.id) ? ruleOf.get(t.id)!.pot === pot.id : defaultPotOf(t) === pot.id));
     const days = new Map<ISODate, Transaction[]>();
     for (const t of potRows) (days.get(t.date) ?? days.set(t.date, []).get(t.date)!).push(t);
     const decidedHere = counted.filter((c) => c.pot === pot.id && c.by === 'decision');
@@ -250,7 +268,8 @@ export function computeEarmarks(input: EarmarksInput): EarmarksResponse {
     for (const c of decidedHere) (decidedByDay.get(c.t.date) ?? decidedByDay.set(c.t.date, []).get(c.t.date)!).push(c);
     const allDays = [...new Set([...days.keys(), ...decidedByDay.keys()])].sort();
 
-    const allowance = new Map<string, number>();
+    // What capped rules may still pay: carried in when the pot started again (§21, "Start again").
+    const allowance = new Map<string, number>(Object.entries(pot.carried ?? {}).map(([id, v]) => [id, toMinor(v)]));
     const usedBy = new Map<string, number>();
     const potCounted: Counted[] = [...decidedHere];
     let n = toMinor(pot.opening);
@@ -269,7 +288,7 @@ export function computeEarmarks(input: EarmarksInput): EarmarksResponse {
       const capped: { t: Transaction; rule: EarmarkRule }[] = [];
       const defaultsOut: Transaction[] = [];
       for (const t of dayRows) {
-        const rule = pot.rules.find((r) => match(r, t));
+        const rule = ruleOf.get(t.id)?.rule;
         if (rule) {
           if (rule.limitTo) {
             capped.push({ t, rule });
@@ -294,6 +313,29 @@ export function computeEarmarks(input: EarmarksInput): EarmarksResponse {
           n += pence;
         } else defaultsOut.push(t);
       }
+      // Money paid from the pot only up to what its sources brought in: its refunds with the day's
+      // money in, its payments after the money put back.
+      const capRow = ({ t, rule }: { t: Transaction; rule: EarmarkRule }) => {
+        const want = portionOf(rule, t);
+        let pence: number;
+        if (isIn(t)) {
+          pence = Math.min(want, usedBy.get(rule.id) ?? 0);
+          usedBy.set(rule.id, (usedBy.get(rule.id) ?? 0) - pence);
+          allowance.set(rule.id, (allowance.get(rule.id) ?? 0) + pence);
+        } else {
+          pence = Math.min(want, allowance.get(rule.id) ?? 0);
+          allowance.set(rule.id, (allowance.get(rule.id) ?? 0) - pence);
+          usedBy.set(rule.id, (usedBy.get(rule.id) ?? 0) + pence);
+          pence = -pence;
+        }
+        const parts: Part[] = pence !== 0 ? [{ effect: rule.effect, pence }] : [];
+        const rest = toMinor(t.amount) - pence;
+        if (rest !== 0) parts.push({ effect: 'own', pence: rest });
+        potCounted.push({ t, pot: pot.id, parts, by: 'rule', rule });
+        claimed.add(t.id);
+        n += pence;
+      };
+      for (const c of capped) if (isIn(c.t)) capRow(c);
       // Money sent to a set-aside account: put back what the pot held that day; more than that needs checking.
       if (defaultsOut.length) {
         const total = defaultsOut.reduce((s, t) => s - toMinor(t.amount), 0);
@@ -334,27 +376,7 @@ export function computeEarmarks(input: EarmarksInput): EarmarksResponse {
         }
       }
       n += later;
-      // Money paid from the pot only up to what its sources brought in: after the day's money in.
-      for (const { t, rule } of capped) {
-        const want = portionOf(rule, t);
-        let pence: number;
-        if (isIn(t)) {
-          pence = Math.min(want, usedBy.get(rule.id) ?? 0);
-          usedBy.set(rule.id, (usedBy.get(rule.id) ?? 0) - pence);
-          allowance.set(rule.id, (allowance.get(rule.id) ?? 0) + pence);
-        } else {
-          pence = Math.min(want, allowance.get(rule.id) ?? 0);
-          allowance.set(rule.id, (allowance.get(rule.id) ?? 0) - pence);
-          usedBy.set(rule.id, (usedBy.get(rule.id) ?? 0) + pence);
-          pence = -pence;
-        }
-        const parts: Part[] = pence !== 0 ? [{ effect: rule.effect, pence }] : [];
-        const rest = toMinor(t.amount) - pence;
-        if (rest !== 0) parts.push({ effect: 'own', pence: rest });
-        potCounted.push({ t, pot: pot.id, parts, by: 'rule', rule });
-        claimed.add(t.id);
-        n += pence;
-      }
+      for (const c of capped) if (!isIn(c.t)) capRow(c);
     }
 
     // The other side of a transfer to a set-aside account should be there when its statements cover the day.
@@ -404,7 +426,10 @@ export function computeEarmarks(input: EarmarksInput): EarmarksResponse {
       lines,
       provisional: fromMinor(provisional),
       checks: pot.checks,
+      allowances: Object.fromEntries([...allowance].filter(([, v]) => v > 0).map(([id, v]) => [id, fromMinor(v)])),
     });
+    // Its opening counts from its own start.
+    nByDay.set(pot.start, (nByDay.get(pot.start) ?? 0) + toMinor(pot.opening));
     // Each day's change in this pot, for the series.
     for (const c of potCounted) for (const p of c.parts) if (POT_EFFECTS.includes(p.effect)) nByDay.set(c.t.date, (nByDay.get(c.t.date) ?? 0) + p.pence);
   }
@@ -413,7 +438,6 @@ export function computeEarmarks(input: EarmarksInput): EarmarksResponse {
   const spendable = everydayTotal + onItsWayTotal - totalN;
 
   // The lowest point and a weekly series: spendable only moves on days with payments.
-  const openingN = setup.pots.reduce((s, p) => s + toMinor(p.opening), 0);
   const totalOn = (d: ISODate) => {
     let sum = 0;
     for (const id of setup.everyday) {
@@ -429,7 +453,7 @@ export function computeEarmarks(input: EarmarksInput): EarmarksResponse {
   let lowest: EarmarksResult['lowest'] = null;
   const nTo = (() => {
     const sorted = [...nByDay.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-    return (d: ISODate) => sorted.reduce((s, [day, v]) => (day <= d ? s + v : s), openingN);
+    return (d: ISODate) => sorted.reduce((s, [day, v]) => (day <= d ? s + v : s), 0);
   })();
   for (const d of changeDays) {
     if (lastDay && d > lastDay) break;
@@ -443,8 +467,13 @@ export function computeEarmarks(input: EarmarksInput): EarmarksResponse {
       const n = nTo(d);
       series.push({ date: d, spendable: fromMinor(total - n), setAside: fromMinor(n), total: fromMinor(total) });
     }
+    // The last point is today's figure, money on its way included, so the chart ends where the headline is.
+    const end = { date: lastDay, spendable: fromMinor(spendable), setAside: fromMinor(totalN), total: fromMinor(everydayTotal + onItsWayTotal) };
+    if (series.at(-1)?.date === lastDay) series[series.length - 1] = end;
+    else series.push(end);
   }
-  const everydayDates = accounts.filter((a) => a.role === 'everyday' && a.asOf).map((a) => a.asOf!).sort();
+  // A closed account has no later data to wait for: the dates are the open accounts'.
+  const everydayDates = accounts.filter((a) => a.role === 'everyday' && a.asOf && !a.closed).map((a) => a.asOf!).sort();
 
   const result: EarmarksResult = {
     accounts,
@@ -552,18 +581,20 @@ export function earmarkFigures(
 
 /** The pots worked out from the store: each account to its own latest day. */
 export function earmarks(
-  store: Pick<import('../store').Store, 'earmarks' | 'accounts' | 'categories' | 'transactions'>,
+  store: Pick<import('../store').Store, 'earmarks' | 'accounts' | 'categories' | 'transactions' | 'settings'>,
   engine: Pick<import('./balances').BalanceEngine, 'balanceOn' | 'lastDataDate' | 'firstDataDate'>,
   on: ISODate = todayOf(),
   /** A setup to work out instead of the one in use (a preview while editing it). */
   setup: Earmarks | null = store.earmarks,
+  /** Only payments to this day (starting again from it). */
+  through?: ISODate,
 ): EarmarksResponse {
   if (!setup) return { setup: null, result: null, problems: [] };
   return computeEarmarks({
     setup,
     accounts: store.accounts,
     categories: store.categories,
-    transactions: store.transactions(),
+    transactions: through ? store.transactions().filter((t) => t.date <= through) : store.transactions(),
     balanceOn: (id, d) => {
       const p = engine.balanceOn(id, d);
       return p ? (p.gbp ?? p.value) : null;
@@ -571,5 +602,6 @@ export function earmarks(
     lastDataOf: (id) => engine.lastDataDate(id),
     firstDataOf: (id) => engine.firstDataDate(id),
     today: on,
+    staleAfterDays: store.settings.staleAfterDays,
   });
 }

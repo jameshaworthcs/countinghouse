@@ -664,12 +664,12 @@ export function ChangeBody({ change, view }: { change: ProposedChange; view: Pro
           {change.setup.pots.map((pot) => (
             <div key={pot.id} className="mt-1 grid gap-0.5">
               <div className="font-medium text-ink">
-                {pot.name} <span className="font-normal text-ink-3">from {formatDate(pot.start)}, opening {money(pot.opening)}</span>
+                {pot.name} <span className="sensitive font-normal text-ink-3">from {formatDate(pot.start)}, opening {money(pot.opening)}</span>
               </div>
               <ol className="ml-4 list-decimal text-ink-2">
                 {pot.rules.map((r) => (
                   <li key={r.id}>
-                    <span className="text-ink">{r.name}</span>: {EFFECT_WORDS[r.effect].toLowerCase()} · {earmarkRuleWords(r, name, cats.name.bind(cats))}
+                    <span className="text-ink">{r.name}</span>: {EFFECT_WORDS[r.effect].toLowerCase()} · <span className="sensitive">{earmarkRuleWords(r, name, cats.name.bind(cats))}</span>
                   </li>
                 ))}
               </ol>
@@ -683,7 +683,7 @@ export function ChangeBody({ change, view }: { change: ProposedChange; view: Pro
       return (
         <div className="grid gap-1.5">
           <TxLine row={row(change.transaction)} view={view} />
-          <div className="rounded-lg border border-line bg-panel px-3 py-2 text-[13px] text-ink-2">
+          <div className="sensitive rounded-lg border border-line bg-panel px-3 py-2 text-[13px] text-ink-2">
             {change.parts ? change.parts.map((p) => `${EFFECT_WORDS[p.effect]}: ${money(p.amount)}`).join(' · ') : 'Take your decision away'}
             {e?.replaces && (
               <div className="mt-1">

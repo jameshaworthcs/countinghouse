@@ -1283,6 +1283,8 @@ export interface EarmarkPotResult {
   /** How much of `setAside` rests on payments still to check. */
   provisional: number;
   checks: { at: string; setAside: number; spendable: number }[];
+  /** What each rule limited to its sources could still pay, by rule id (only those with something left). */
+  allowances: Record<string, number>;
 }
 
 export interface EarmarkAccount {
@@ -1292,6 +1294,8 @@ export interface EarmarkAccount {
   balance: number;
   /** The latest day it has data for: its figures run to here. */
   asOf: string | null;
+  /** Closed: it has no later data to wait for. */
+  closed: boolean;
   stale: boolean;
 }
 

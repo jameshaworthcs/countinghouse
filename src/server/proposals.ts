@@ -563,12 +563,13 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
         return { returnEntry: { what, value: shown } };
       }
       case 'set_earmarks': {
-        const was = store.earmarks?.updatedAt ?? null;
-        if (c.was !== was) return { problem: was ? `Set aside was changed on ${formatDate(was.slice(0, 10))}, after this was proposed: propose against it as it is now.` : 'Set aside is not set up now: propose it with was: null.' };
         const misfit = setupProblem(c.setup, account, (id) => Boolean(cats.get(id)));
         if (misfit) return { problem: misfit };
         const next = withSetup(setup, c.setup, setup?.updatedAt ?? nowISO());
+        // Already so whatever it was proposed against: you (or another proposal) made it so.
         if (setup && setupKey(setup) === setupKey(next)) return { alreadySo: true };
+        const was = store.earmarks?.updatedAt ?? null;
+        if (c.was !== was) return { problem: was ? `Set aside was changed on ${formatDate(was.slice(0, 10))}, after this was proposed: propose against it as it is now.` : 'Set aside is not set up now: propose it with was: null.' };
         const dropped = Object.keys(setup?.decisions ?? {}).length - Object.keys(next.decisions).length;
         setup = next;
         out.earmarks = next;
@@ -581,18 +582,18 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
         const misfit = decisionProblem(setup, c.pot, t, c.parts);
         if (misfit || !t) return { problem: t ? `${brief(t, accountName)}: ${misfit}` : gone(c.transaction) };
         const existing = setup.decisions[t.id];
+        // Already so whatever it was proposed against: decided the same way, or no decision to take away.
+        if (c.parts ? existing && existing.pot === c.pot && JSON.stringify(existing.parts) === JSON.stringify(c.parts) : !existing) return { alreadySo: true };
         const was = existing?.decidedAt ?? null;
         if (c.was !== was) return { problem: existing ? `It was decided on ${formatDate(existing.decidedAt.slice(0, 10))}, after this was proposed: propose against that decision.` : 'Its decision was taken away after this was proposed.' };
         const decisions = { ...setup.decisions };
         let what: string;
         if (c.parts) {
           const total = c.parts.reduce((n, p) => n + toMinor(p.amount), 0);
-          if (existing && existing.pot === c.pot && JSON.stringify(existing.parts) === JSON.stringify(c.parts)) return { alreadySo: true };
           decisions[t.id] = { pot: c.pot, parts: c.parts, reason: c.why.slice(0, 500), seen: { accountId: t.accountId, date: t.date, amount: t.amount }, proposalId: forProposal, decidedAt: nowISO() };
           const potParts = c.parts.filter((p) => POT_EFFECTS.includes(p.effect));
           what = `${brief(t, accountName)}: ${c.parts.map((p) => `${EFFECT_WORDS[p.effect].toLowerCase()} ${formatMoney(p.amount)}`).join(', ')}${total < Math.abs(toMinor(t.amount)) ? `, the rest your own money` : ''}${potParts.length ? '' : ' (no change to the money set aside)'}.`;
         } else {
-          if (!existing) return { alreadySo: true };
           delete decisions[t.id];
           what = `${brief(t, accountName)}: your decision taken away; it counts by the rules again.`;
         }
@@ -994,6 +995,8 @@ export class ProposalService extends EventEmitter {
     return this.lock.run(async () => {
       const p = this.requirePending(id);
       const skip = new Set(leaveOut.filter((key) => p.changes.some((c) => c.key === key)));
+      // Set aside as the changes were checked against: a change made to it meanwhile stops the apply.
+      const earmarksSeen = this.store.earmarks;
       const outcome = simulate(this.store, p.changes, skip, p.id);
       const problems = p.changes.flatMap((c) => {
         const problem = outcome.results.get(c.key)?.problem;
@@ -1012,6 +1015,15 @@ export class ProposalService extends EventEmitter {
 
       // One message for every write, so the data's history shows the proposal as one commit.
       const message = `proposal: ${p.title} (${doing.length} change${doing.length === 1 ? '' : 's'} applied)`;
+      // Set aside first, before any other write can come between the check and it.
+      const earmarksBefore = outcome.earmarks !== undefined ? this.store.earmarks : undefined;
+      if (outcome.earmarks !== undefined) {
+        const next = outcome.earmarks;
+        await this.store.updateEarmarks((current) => {
+          if (current !== earmarksSeen) throw new StoreError('Set aside changed while this was being applied: open the proposal again and apply it.', 409);
+          return next ? { ...next, updatedAt: nowISO() } : null;
+        }, message);
+      }
       // Categories first, then rules: the rows after them use both.
       if (outcome.categories) await this.store.setCategories(outcome.categories, message);
       if (outcome.rules.length || outcome.removedRules.size) await this.store.setRules([...this.store.rules.filter((r) => !outcome.removedRules.has(r.id)), ...outcome.rules], message);
@@ -1025,8 +1037,6 @@ export class ProposalService extends EventEmitter {
       if (termsGone.length) await this.store.removeRecords('terms', termsGone, message);
       if (outcome.terms.size) await this.store.upsertRecords('terms', [...outcome.terms.values()], message);
       if (outcome.balances.length) await this.store.addBalances(outcome.balances, message);
-      const earmarksBefore = outcome.earmarks !== undefined ? this.store.earmarks : undefined;
-      if (outcome.earmarks !== undefined) await this.store.setEarmarks(outcome.earmarks ? { ...outcome.earmarks, updatedAt: nowISO() } : null, message);
       for (const [taxYear, entries] of outcome.returns) {
         await this.store.setReturns([...this.store.returns.filter((r) => r.taxYear !== taxYear), { id: taxYear.replace('/', '-'), taxYear, entries, updatedAt: nowISO() }], message);
       }

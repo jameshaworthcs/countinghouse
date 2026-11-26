@@ -3,7 +3,8 @@
 // on the local model: the payments never leave this machine. Each payment to check goes to the
 // model with its question, the pot's rules in words and your earlier decisions with their reasons;
 // what it is sure enough of becomes one proposal of `decide_earmark_flow` changes, which you review.
-// Nothing is decided until you apply it, and it never re-decides a payment you decided.
+// Nothing is decided until you apply it; it never re-decides a payment you decided, nor asks again
+// about one whose suggestion you dismissed.
 
 import { EFFECT_WORDS } from '../shared/earmarks';
 import { descriptionKey } from '../shared/merchants';
@@ -94,7 +95,13 @@ export async function suggestEarmarks(store: Store, analytics: Analytics, config
   if (!config.inference) throw new StoreError('Suggesting decisions runs on the local model service, which is not set up here (INFERENCE_BASE_URL and INFERENCE_API_KEY in .env).', 503);
   running = true;
   try {
-    const items = toAsk(store, analytics, proposals);
+    // A payment whose suggestion you dismissed is not asked about again.
+    const dismissed = new Set<string>();
+    for (const d of store.proposals.filter((x) => x.status === 'dismissed').slice(0, 100)) {
+      const p = await store.readProposal(d.id);
+      for (const c of p?.changes ?? []) if (c.kind === 'decide_earmark_flow') dismissed.add(c.transaction);
+    }
+    const items = toAsk(store, analytics, proposals).filter((i) => !dismissed.has(i.t.id));
     if (!items.length) return { asked: 0, suggested: 0 };
     const choice = resolveTask('suggest-earmarks', store.settings.models.tasks);
     const def = TASKS['suggest-earmarks'];

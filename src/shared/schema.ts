@@ -1114,6 +1114,11 @@ export const EarmarkPotSchema = z.object({
   /** Set aside in the everyday accounts at the start (negative: the pot owed you). */
   opening: MoneySchema.default(0),
   rules: z.array(EarmarkRuleSchema).max(100).default([]),
+  /**
+   * What each of its rules limited to its sources (`limitTo`) could still pay when it started again
+   * from here, by rule id: carried in, so starting again changes no figure.
+   */
+  carried: z.record(SlugSchema, MoneySchema).optional(),
   /** "I've checked this": the figures you checked, newest last. */
   checks: z.array(z.object({ at: TimestampSchema, setAside: MoneySchema, spendable: MoneySchema })).max(100).default([]),
 });

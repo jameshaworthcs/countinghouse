@@ -171,6 +171,65 @@ describe('set aside: the sum', () => {
   });
 });
 
+describe('set aside: what the review found', () => {
+  it('pairs by amount only transfers between everyday accounts, never a saver transfer with a refund', () => {
+    const setup = base();
+    setup.pots[0]!.opening = 500;
+    // −200 to the saver (linked), and a +200 uncategorised refund on the card two days later.
+    const [save, saveIn] = move('current', 'saver', '2026-09-14', 200, 'SAVING');
+    const refund = tx('card', '2026-09-16', 200, 'EXAMPLE SHOP REFUND');
+    const r = computeEarmarks(input(setup, [...rows, save, saveIn, refund]));
+    expect(line(r, 'to-pot')!.rows.map((x) => x.transactionId)).toContain(save.id);
+    // Two transfers of opposite amounts, unlinked, between the current account and the card: paired.
+    const out = tx('current', '2026-09-21', -75, 'PAYMENT TO CARD', { category: 'transfer' });
+    const inn = tx('card', '2026-09-23', 75, 'PAYMENT RECEIVED', { category: 'transfer' });
+    expect(computeEarmarks(input(base(), [...rows, out, inn])).result!.internal.count).toBe(4);
+  });
+
+  it('every pot’s rules come before any default', () => {
+    const setup = base();
+    setup.everyday = ['current', 'card'];
+    setup.setAside = ['saver'];
+    setup.pots.push(EarmarksSchema.parse({ ...base(), pots: [{ id: 'holiday', name: 'Holiday', start: START, opening: 400, rules: [{ id: 'trip', name: 'Trip money', effect: 'to-pot', text: { value: 'HOLIDAY' }, direction: 'out' }] }] }).pots[0]!);
+    const [trip, tripIn] = move('current', 'saver', '2026-09-15', 100, 'HOLIDAY');
+    const r = computeEarmarks(input(setup, [...rows, trip, tripIn])).result!;
+    // The first pot is as without it; the holiday pot's rule takes the transfer.
+    expect(r.pots.map((p) => [p.id, p.setAside])).toEqual([
+      ['student-money', 600],
+      ['holiday', 300],
+    ]);
+  });
+
+  it('starting again carries what a limited rule could still pay, so no figure changes', () => {
+    // 1,500 of loan, 1,200 of rent by the end of the 28th: 300 the rent rule could still pay.
+    const laterRent = tx('card', '2026-10-05', -250, 'EXAMPLE HALL RENT', { category: 'rent' });
+    const all = [...rows, laterRent];
+    const before = computeEarmarks(input(base(), all, { card: '2026-10-05', current: '2026-10-05' })).result!;
+    const atD = computeEarmarks(input(base(), all.filter((t) => t.date <= '2026-09-28'))).result!.pots[0]!;
+    expect(atD.allowances).toEqual({ rent: 300 });
+    const restarted = base();
+    restarted.pots[0] = { ...restarted.pots[0]!, start: '2026-09-29', opening: atD.setAside, carried: atD.allowances };
+    const after = computeEarmarks(input(restarted, all, { card: '2026-10-05', current: '2026-10-05' })).result!;
+    expect([after.pots[0]!.setAside, after.spendable]).toEqual([before.pots[0]!.setAside, before.spendable]);
+    expect(after.pots[0]!.lines.find((l) => l.effect === 'use')!.total).toBe(-250);
+  });
+
+  it('a limited rule’s refund counts with the day’s money in, before money put back', () => {
+    const setup = base();
+    setup.pots[0]!.opening = 0;
+    // The rent is refunded (+200) on the day 200 goes to the saver: the refund is in the pot first.
+    const refund = tx('card', '2026-09-12', 200, 'EXAMPLE HALL RENT REFUND', { category: 'rent' });
+    const r = computeEarmarks(input(setup, [...rows, refund]));
+    expect(line(r, 'to-pot')!.rows.find((x) => x.transactionId === toSaver.id)?.counted).toBe(-200);
+    expect(r.result!.toCheck).toEqual([]);
+  });
+
+  it('the chart ends on today’s figure', () => {
+    const r = computeEarmarks(input(base(), rows)).result!;
+    expect(r.series.at(-1)).toEqual({ date: '2026-09-28', spendable: r.spendable, setAside: 600, total: 850 });
+  });
+});
+
 describe('set aside: properties', () => {
   const RUNS = { numRuns: 150 };
   const day = fc.integer({ min: 0, max: 29 }).map((n) => addDays(START, n));
@@ -190,15 +249,17 @@ describe('set aside: properties', () => {
   });
 
   it('the order rows are recorded in changes nothing, within a day too', () => {
+    // Rows are taken in date and id order, so giving the same payments other ids reorders each day.
     const [big, bigIn] = move('current', 'saver', '2026-09-05', 2500, 'SAVING');
-    const all = [...rows, big, bigIn, tx('current', '2026-09-05', -300, 'EXAMPLE PLATFORM ISA')];
+    const all = [...rows, big, bigIn, tx('current', '2026-09-05', -300, 'EXAMPLE PLATFORM ISA'), tx('current', '2026-09-05', 120, 'EXAMPLE STUDENT FINANCE TOP UP', { counterpartyAccountId: 'loan' })];
+    const figures = (r: EarmarksResponse) => JSON.stringify({ spendable: r.result!.spendable, setAside: r.result!.pots.map((p) => [p.setAside, p.provisional, p.lines.map((l) => [l.effect, l.total, l.in, l.out, l.count])]), toCheck: r.result!.toCheck.map((c) => [c.kind, c.date, c.amount]) });
+    const want = figures(computeEarmarks(input(base(), all)));
     fc.assert(
-      fc.property(fc.shuffledSubarray(all, { minLength: all.length, maxLength: all.length }), (shuffled) => {
-        const a = computeEarmarks(input(base(), all));
-        const b = computeEarmarks(input(base(), shuffled));
-        return JSON.stringify(a) === JSON.stringify(b);
+      fc.property(fc.shuffledSubarray(all.map((t) => t.id), { minLength: all.length, maxLength: all.length }), (ids) => {
+        const renamed = all.map((t, i) => ({ ...t, id: ids[i]! }));
+        return figures(computeEarmarks(input(base(), renamed))) === want;
       }),
-      { numRuns: 60 },
+      { numRuns: 80 },
     );
   });
 
@@ -406,4 +467,18 @@ describe('set aside: in the app, by proposals', () => {
     expect(app.ctx.store.earmarks!.decisions).toEqual({});
     expect(await suggestEarmarks(app.ctx.store, app.ctx.analytics, config, app.ctx.proposals, { fetch })).toMatchObject({ asked: 0, suggested: 0 });
   });
+
+  it('two decisions at once are both kept, and deciding by hand closes the same proposal', async () => {
+    await app.ctx.store.setEarmarks(base());
+    const decide = (id: string, effect: string, amount: number) => owner('/api/earmarks/decisions', { decisions: [{ pot: 'student-money', transaction: id, parts: [{ effect, amount }] }] });
+    const [a, b] = await Promise.all([decide(toSaver.id, 'topped-up', 200), decide(groceries.id, 'own', 50)]);
+    expect([a.status, b.status]).toEqual([200, 200]);
+    expect(Object.keys(app.ctx.store.earmarks!.decisions).sort()).toEqual([toSaver.id, groceries.id].sort());
+    // An agent proposes a decision; you then decide the same yourself: the proposal is already done.
+    const v = (await (await propose({ title: 'Decide the loan', summary: 'From the reference', changes: [{ kind: 'decide_earmark_flow', why: 'Borrowed', pot: 'student-money', transaction: currentIn.id, parts: [{ effect: 'from-pot', amount: 500 }], was: null }] })).json()) as ProposalView;
+    await decide(currentIn.id, 'from-pot', 500);
+    const closed = await app.ctx.proposals.closeDone();
+    expect(closed.map((p) => [p.id, p.status])).toEqual([[v.proposal.id, 'superseded']]);
+  });
 });
+

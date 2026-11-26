@@ -2870,3 +2870,23 @@ value grown from the account's first flow is never below nothing, as rolled-back
   - Considered: the job runner (a switch per job kind, a budget and a schedule, for something only
     ever started by hand); questions from the model kept beside the payments (model text outside a
     proposal, with no record of it); letting Ask draft proposals (Ask stays read-only).
+- **Review before publishing** (three independent reviews of the whole change; each finding checked
+  in the code first):
+  - Fixed in the sum: pairing by amount only between transfers with no account outside the
+    everyday ones on their other side (a transfer to a saver could pair with a card refund); every
+    pot's rules before any default (a first pot's default took payments a later pot's rule names);
+    "Start again" restarts every pot together and carries what limited rules could still pay (one
+    pot's restart moved payments to another, and a limited rule lost what it had left); a limited
+    rule's refunds counted with the day's money in; a pot's opening counted from its own start in
+    the chart; closed accounts left out of the latest days; out of date by `staleAfterDays`.
+  - Fixed in the app: changes to set aside are read, changed and written under the store's lock
+    (two quick decisions kept one); applying a proposal writes set aside first and refuses if it
+    changed meanwhile; a proposal the owner already carried out by hand closes as already done
+    (`was` was checked first); amounts hidden in privacy mode everywhere; the drawer decides for the
+    pot a payment counts in; the decision dialog is fresh for each payment and shows only the
+    latest preview; the setup form checks its rules before saving and says which decisions a removed
+    pot takes away; "Suggest decisions" skips payments whose suggestion was dismissed.
+- **`ask-4` evaluation:** the one answer marked wrong, asked again on `ask-4`, made one `compare`
+  call and answered with every figure the app's. It ran on the owner's Ask model (Claude Opus), not
+  the local model: the run should have passed `--model local-thinking`.
+

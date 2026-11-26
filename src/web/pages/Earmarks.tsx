@@ -3,10 +3,11 @@
 // proposals you apply.
 
 import { ChevronRight, CircleCheck, HandCoins, Pencil, RotateCcw, TriangleAlert } from 'lucide-react';
-import { createContext, useContext, useState } from 'react';
+import { createContext, useContext, useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import type { EarmarkLine, EarmarkPotResult, EarmarkRow, EarmarksResult } from '../../shared/api';
 import { EARMARK_EFFECTS, POT_EFFECTS, type EarmarkEffect, type Earmarks } from '../../shared/schema';
+import { subMoney, sumMoney } from '../../shared/money';
 import { DecisionDialog, useEarmarks, type DecidePayment } from '../components/Earmarks';
 import { EarmarkSetupForm } from '../components/EarmarkSetup';
 import { ChartFrame, SERIES } from '../components/charts/common';
@@ -24,7 +25,7 @@ export default function EarmarksPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const editing = location.hash === '#setup';
-  const setEditing = (on: boolean) => navigate({ hash: on ? 'setup' : '' }, { replace: true });
+  const setEditing = (on: boolean) => navigate({ hash: on ? 'setup' : '' });
   if (editing && (!data.earmarks.length || q.data)) {
     return (
       <div className="mx-auto max-w-6xl">
@@ -139,16 +140,16 @@ function useDecide(setup: Earmarks, pot: EarmarkPotResult) {
 
 function Figures({ result: r, setup }: { result: EarmarksResult; setup: Earmarks }) {
   const { accountName } = useAppData();
-  const setAside = r.pots.reduce((s, p) => s + Math.round(p.setAside * 100), 0) / 100;
-  const provisional = r.pots.reduce((s, p) => s + p.provisional, 0);
+  const setAside = sumMoney(r.pots.map((p) => p.setAside));
+  const provisional = sumMoney(r.pots.map((p) => p.provisional));
   const everyday = r.accounts.filter((a) => a.role === 'everyday');
   const held = r.accounts.filter((a) => a.role === 'set-aside');
   return (
     <div className="flex flex-col gap-5">
       <section className="grid gap-3 sm:grid-cols-3">
         <Stat label="Spendable" value={<Money value={r.spendable} />} />
-        <Stat label={setAside >= 0 ? 'Set aside in everyday accounts' : 'You’ve covered for the pots'} value={<Money value={Math.abs(setAside)} />} sub={setAside < 0 ? <span>move {money(-setAside)} from a set-aside account to square up</span> : undefined} />
-        <Stat label="In your everyday accounts" value={<Money value={r.everydayTotal + r.onItsWayTotal} />} sub={r.onItsWayTotal ? <span>including {money(r.onItsWayTotal)} on its way</span> : undefined} />
+        <Stat label={setAside >= 0 ? 'Set aside in everyday accounts' : 'You’ve covered for the pots'} value={<Money value={Math.abs(setAside)} />} sub={setAside < 0 ? <span className="sensitive">move {money(-setAside)} from a set-aside account to square up</span> : undefined} />
+        <Stat label="In your everyday accounts" value={<Money value={r.everydayTotal + r.onItsWayTotal} />} sub={r.onItsWayTotal ? <span className="sensitive">{r.onItsWayTotal > 0 ? 'including' : 'less'} {money(Math.abs(r.onItsWayTotal))} on its way</span> : undefined} />
       </section>
 
       <Card title="How it adds up">
@@ -157,7 +158,11 @@ function Figures({ result: r, setup }: { result: EarmarksResult; setup: Earmarks
             <Row key={a.accountId} label={<AccountLabel name={a.name} asOf={a.asOf} stale={a.stale} />} value={a.balance} />
           ))}
           {r.onItsWay.map((w) => (
-            <Row key={w.transactionId} label={<span className="text-ink-3">On its way to {accountName(w.otherAccountId)} ({formatDate(w.date)}): its statements don’t show it yet</span>} value={w.amount} />
+            <Row
+              key={w.transactionId}
+              label={<span className="text-ink-3">{w.amount > 0 ? `On its way to ${accountName(w.otherAccountId)} (${formatDate(w.date)}): its statements don’t show it arriving yet` : `On its way from ${accountName(w.otherAccountId)} (${formatDate(w.date)}): its statements don’t show it leaving yet`}</span>}
+              value={w.amount}
+            />
           ))}
           <Row label={<span className="font-medium text-ink">In your everyday accounts</span>} value={r.everydayTotal + r.onItsWayTotal} strong />
           {r.pots.map((p) => (
@@ -167,7 +172,7 @@ function Figures({ result: r, setup }: { result: EarmarksResult; setup: Earmarks
         </div>
         {provisional > 0 && (
           <p className="mt-3 text-[12.5px] text-ink-3">
-            {money(provisional)} of the payments behind it {provisional === 1 ? 'is' : 'are'} still to check: counted as suggested for now (<a href="#to-check" className="text-accent hover:underline">see below</a>).
+            <span className="sensitive">{money(provisional)}</span> of the payments behind it {provisional === 1 ? 'is' : 'are'} still to check: counted as suggested for now (<a href="#to-check" className="text-accent hover:underline">see below</a>).
           </p>
         )}
         {r.lowest && (
@@ -177,7 +182,7 @@ function Figures({ result: r, setup }: { result: EarmarksResult; setup: Earmarks
         )}
         {held.length > 0 && (
           <p className="mt-1 text-[12.5px] text-ink-3">
-            Your set-aside accounts hold a further <Money value={r.heldInSetAside} />: {held.map((a) => `${a.name} ${money(a.balance)}${a.asOf ? ` (${formatDate(a.asOf)})` : ''}`).join(', ')}.
+            Your set-aside accounts hold a further <Money value={r.heldInSetAside} />: <span className="sensitive">{held.map((a) => `${a.name} ${money(a.balance)}${a.asOf ? ` (${formatDate(a.asOf)})` : ''}`).join(', ')}</span>.
           </p>
         )}
         <p className="mt-1 text-[12.5px] text-ink-3">The app can’t know your intentions: a transfer it counts as “put back” might be savings of your own. Each payment below says why it counts as it does; change any of them with its pencil.</p>
@@ -225,6 +230,10 @@ function ToCheck({ result: r, setup }: { result: EarmarksResult; setup: Earmarks
     onSuccess: () => toast({ tone: 'good', text: 'Decided' }),
   });
   const open = useContext(DecideContext);
+  // Arriving from a "to check" link: the list is drawn only once the figures have loaded.
+  useEffect(() => {
+    if (window.location.hash === '#to-check') document.getElementById('to-check')?.scrollIntoView();
+  }, []);
   if (!r.toCheck.length) return null;
   const rows = new Map(r.pots.flatMap((p) => p.lines.flatMap((l) => l.rows.map((row) => [row.transactionId, { row, pot: p }] as const))));
   return (
@@ -382,9 +391,9 @@ function Checked({ result: r }: { result: EarmarksResult }) {
   const last = r.pots
     .flatMap((p) => p.checks.slice(-1).map((c) => ({ ...c, pot: p })))
     .sort((a, b) => b.at.localeCompare(a.at))[0];
-  const setAside = r.pots.reduce((s, p) => s + Math.round(p.setAside * 100), 0) / 100;
-  const lastSetAside = last ? r.pots.reduce((s, p) => s + Math.round((p.checks.at(-1)?.setAside ?? 0) * 100), 0) / 100 : 0;
-  const moved = last ? Math.round((setAside - lastSetAside) * 100) / 100 : 0;
+  const setAside = sumMoney(r.pots.map((p) => p.setAside));
+  const lastSetAside = last ? sumMoney(r.pots.map((p) => p.checks.at(-1)?.setAside ?? 0)) : 0;
+  const moved = last ? subMoney(setAside, lastSetAside) : 0;
   return (
     <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-line pt-3 text-[12.5px]">
       <Button size="sm" icon={<CircleCheck className="size-4" />} loading={check.isPending} onClick={() => check.mutate()}>
@@ -417,7 +426,7 @@ function PotCard({ pot, setup }: { pot: EarmarkPotResult; setup: Earmarks }) {
         {lines.filter((l) => POT_EFFECTS.includes(l.effect)).map((l) => (
           <LineRow key={l.effect} line={l} pot={pot} setup={setup} />
         ))}
-        <Row label={<span className="font-medium text-ink">{pot.setAside >= 0 ? 'Set aside now' : 'You’ve covered for it'}</span>} value={pot.setAside} strong />
+        <Row label={<span className="font-medium text-ink">{pot.setAside >= 0 ? 'Set aside now' : 'You’ve covered for it'}</span>} value={Math.abs(pot.setAside)} strong />
       </div>
       {lines.some((l) => !POT_EFFECTS.includes(l.effect)) && (
         <div className="mt-4 grid gap-1 border-t border-line pt-3 text-[13.5px]">
@@ -444,7 +453,11 @@ function LineRow({ line, own, pot, setup }: { line: EarmarkLine; own?: boolean; 
         <span className="inline-flex items-center gap-1 text-ink-2">
           <ChevronRight className={cn('size-3.5 shrink-0 text-ink-3 transition-transform', open && 'rotate-90', !line.rows.length && 'invisible')} aria-hidden />
           <span>
-            {EFFECT_WORDS[line.effect]} <span className="text-[12px] whitespace-nowrap text-ink-3">· {plural(line.count, 'payment')}</span>
+            {EFFECT_WORDS[line.effect]}{' '}
+            <span className="text-[12px] whitespace-nowrap text-ink-3">
+              · {plural(line.count, 'payment')}
+              {line.rows.length < line.count ? `, ${line.rows.length} listed` : ''}
+            </span>
           </span>
         </span>
         <Money value={own ? line.in - line.out : line.total} className="tabular shrink-0 text-ink" />
@@ -458,7 +471,7 @@ function LineRow({ line, own, pot, setup }: { line: EarmarkLine; own?: boolean; 
                 <span className="sensitive block truncate text-ink-2">{row.description}</span>
                 <span className="text-ink-3">
                   {accountName(row.accountId)} · {row.by === 'rule' ? `rule “${row.ruleName ?? row.ruleId}”` : row.by === 'decision' ? `your decision${row.reason ? `: “${row.reason}”` : ''}` : BY_WORDS[row.by]}
-                  {row.counted !== row.amount && <> · {money(Math.abs(row.counted))} of {money(Math.abs(row.amount))}</>}
+                  {row.counted !== row.amount && <span className="sensitive"> · {money(Math.abs(row.counted))} of {money(Math.abs(row.amount))}</span>}
                 </span>
               </span>
               <Money value={row.counted} className="tabular text-ink" />
@@ -483,7 +496,7 @@ function LineRow({ line, own, pot, setup }: { line: EarmarkLine; own?: boolean; 
 function HowItsWorkedOut({ setup, result }: { setup: Earmarks; result: EarmarksResult }) {
   const { accountName, cats } = useAppData();
   const open = useContext(DecideContext);
-  const [restarting, setRestarting] = useState<string | null>(null);
+  const [restarting, setRestarting] = useState(false);
   const decisions = Object.entries(setup.decisions).sort(([, a], [, b]) => a.seen.date.localeCompare(b.seen.date));
   return (
     <Card title="How it’s worked out" description="Change it with “Change the setup”, or an agent can propose changes for you to apply. Every payment in an everyday account counts as your own money unless a rule or your decision says otherwise; money to or from a set-aside account is put back into, or borrowed from, the pot.">
@@ -501,13 +514,13 @@ function HowItsWorkedOut({ setup, result }: { setup: Earmarks; result: EarmarksR
         {setup.pots.map((pot) => (
           <div key={pot.id}>
             <div className="font-medium text-ink">
-              {pot.name} <span className="font-normal text-ink-3">· from {formatDate(pot.start)} · set aside at the start {money(pot.opening)}</span>
+              {pot.name} <span className="sensitive font-normal text-ink-3">· from {formatDate(pot.start)} · set aside at the start {money(pot.opening)}</span>
             </div>
             {pot.rules.length > 0 ? (
               <ol className="mt-1 ml-5 list-decimal text-ink-2">
                 {pot.rules.map((r) => (
                   <li key={r.id}>
-                    <span className="text-ink">{r.name}</span>: {EFFECT_WORDS[r.effect].toLowerCase()} · {earmarkRuleWords(r, accountName, (id) => cats.name(id))}
+                    <span className="text-ink">{r.name}</span>: {EFFECT_WORDS[r.effect].toLowerCase()} · <span className="sensitive">{earmarkRuleWords(r, accountName, (id) => cats.name(id))}</span>
                   </li>
                 ))}
               </ol>
@@ -515,9 +528,7 @@ function HowItsWorkedOut({ setup, result }: { setup: Earmarks; result: EarmarksR
               <p className="text-ink-3">No rules: only your decisions and transfers with set-aside accounts count.</p>
             )}
             <p className="mt-1 text-[12px] text-ink-3">The first rule that fits a payment decides.</p>
-            <Button size="sm" variant="ghost" className="mt-1" icon={<RotateCcw className="size-4" />} onClick={() => setRestarting(pot.id)}>
-              Start {pot.name} again from here
-            </Button>
+
           </div>
         ))}
         <div>
@@ -557,36 +568,40 @@ function HowItsWorkedOut({ setup, result }: { setup: Earmarks; result: EarmarksR
           )}
         </div>
       </div>
-      <Restart pot={setup.pots.find((p) => p.id === restarting) ?? null} result={result} onClose={() => setRestarting(null)} />
+      <div className="mt-4 border-t border-line pt-3">
+        <Button size="sm" variant="ghost" icon={<RotateCcw className="size-4" />} onClick={() => setRestarting(true)}>
+          Start again from here
+        </Button>
+      </div>
+      {restarting && <Restart result={result} onClose={() => setRestarting(false)} />}
     </Card>
   );
 }
 
-/** Start a pot again from the latest day every everyday account has data for, with what it held then. */
-function Restart({ pot, result, onClose }: { pot: Earmarks['pots'][number] | null; result: EarmarksResult; onClose: () => void }) {
+/** Start every pot again from the latest day every open everyday account has data for, with what each held then. */
+function Restart({ result, onClose }: { result: EarmarksResult; onClose: () => void }) {
   const toast = useToast();
-  const restart = useApiMutation((id: string) => api('/earmarks/restart', { body: { pot: id } }), {
+  const restart = useApiMutation(() => api('/earmarks/restart', { body: {} }), {
     onSuccess: () => {
       toast({ tone: 'good', text: 'Started again' });
       onClose();
     },
   });
-  if (!pot) return null;
   return (
     <Dialog
       open
       onOpenChange={(o) => !o && onClose()}
-      title={`Start ${pot.name} again from here?`}
+      title="Start again from here?"
       description="For when the past is settled and you only want to count from now on."
       footer={
-        <Button variant="primary" loading={restart.isPending} onClick={() => restart.mutate(pot.id)}>
+        <Button variant="primary" loading={restart.isPending} onClick={() => restart.mutate()}>
           Start again
         </Button>
       }
     >
       <div className="grid gap-2 text-[13.5px] text-ink-2">
         <p>
-          It will start on the day after {result.oldest ? formatDate(result.oldest) : 'the latest day'} (the latest day every everyday account has data for), with what it had set aside then as its opening. Payments before then stop counting, and your decisions for them go: your data’s history keeps them.
+          Every pot will start on the day after {result.oldest ? formatDate(result.oldest) : 'the latest day'} (the latest day every open everyday account has data for), with what it had set aside then as its opening, and what its limited rules could still pay carried over. Payments to then stop counting, your decisions for them go (your data’s history keeps them), and anything still to check before then is settled as suggested.
         </p>
         <p>The figure today stays the same.</p>
         {restart.error && <ErrorNote error={restart.error} />}

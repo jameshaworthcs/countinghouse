@@ -1710,7 +1710,8 @@ nothing is worked out or shown. It is a sum over your payments; no model is invo
   (what you owe on a card counts against spendable at once).
 - **Set aside:** everything in them is set aside, your own money moved in included.
 - Each account counts to its own latest data, and the page shows the dates. An account whose latest
-  data is more than 14 days old is marked out of date; a closed one never is.
+  data is older than `settings.staleAfterDays` (35 days unless you change it) is marked out of date;
+  a closed one never is, and its dates are left out of the oldest and newest latest day.
 
 **What a payment does.** Each payment in an everyday account, from a pot's start, has one or more
 parts, each with an effect:
@@ -1731,8 +1732,11 @@ parts don't cover is your own money.
 **Which applies,** first to last:
 
 1. **Your decision** for the payment (its parts, kept by transaction id in `earmarks.json`).
-2. **A move between two everyday accounts** changes nothing: rows linked as a transfer, a row naming
-   the other account, or two transfers of opposite amounts within 5 days.
+2. **A move between two everyday accounts** changes nothing: rows linked as a transfer, or two
+   transfers (by category) of opposite amounts within 5 days, neither of them one you decided nor one
+   with an account outside the everyday ones (a saver, a loan) on its other side. A row naming
+   another everyday account with no other side found is on its way when that account's data ends
+   before it (below); otherwise it counts as any payment does.
 3. **The pot's rules,** in their order: the first whose conditions all hold. A rule can count only a
    share of a payment (a percent, rounded to the penny, or up to an amount), and a rule for money
    paid from the pot can be limited to what named rules adding to it brought in before, less what
@@ -1741,13 +1745,14 @@ parts don't cover is your own money.
    into it, up to what the pot held that day (below).
 5. Otherwise, your own money.
 
-With several pots, their rules are tried pot by pot in order; a payment one pot's rule or a
-decision has counted is not counted again by another. Transfers with set-aside accounts go to the
-first pot.
+With several pots, every pot's rules come before any default: a payment goes to the first pot (in
+the pots' order, started by its day) one of whose rules fits it. A transfer with a set-aside account
+no rule fits goes to the first pot started by its day. A payment is counted in one pot only.
 
 **A day.** Whatever order the rows of a day were recorded in, a day is taken in a fixed order: money
-in first (sources, borrowing, refunds); then money put back into the pot by rules or decisions;
-then the transfers to set-aside accounts left to the default; then money paid from the pot.
+in first (sources, borrowing, refunds, a limited rule's refunds included); then money put back into
+the pot by rules or decisions; then the transfers to set-aside accounts left to the default; then
+money paid from the pot.
 
 **More than the pot held.** The day's transfers to set-aside accounts left to the default are put
 back up to what the pot held at that point (*H* = max(*N*, 0)).
@@ -1772,8 +1777,11 @@ account and not yet shown in the other).
   fine).
 
 **Over time.** Each week from the first start to the newest latest day: the everyday total that day
-(an account's balance after its latest day held at that) and *N* to that day (the opening and every
-part dated on or before it), spendable being the difference. The chart draws spendable as an area,
+(an account's balance after its latest day held at that) and *N* to that day (each pot's opening
+from its own start, and every part dated on or before the day), spendable being the difference. The
+last point is the newest latest day, with today's figures (money on its way included), so the chart
+ends where the headline is. The lowest spendable is worked out the same way on each day with a
+payment, without money on its way. The chart draws spendable as an area,
 set aside as a line from zero and the total dashed, on one axis.
 
 **To check.** Three kinds, each counted as suggested (or by default) until you decide:
@@ -1794,10 +1802,14 @@ it, worked out by the same sum.
 time. The page then says how far set aside has moved since your last check (new payments, or a
 change to the rules or decisions).
 
-**Start again from here.** For when the past is settled: the pot starts on the day after the latest
-day every everyday account has data for (*D*), with its opening = what it had set aside at the end
-of *D* (its opening + every part with an effect dated on or before *D*). Its decisions for payments
-before the new start go (your data's history keeps them). The figure on the day it is done is
+**Start again from here.** For when the past is settled. Every pot started by then starts again,
+all together, on the day after the latest day every open everyday account has data for (*D*):
+- its opening = what it had set aside at the end of *D* (worked out from the payments to *D* only);
+- what each of its limited rules could still pay at the end of *D* is carried in (`carried`);
+- its decisions for payments to *D* go (your data's history keeps them), and anything still to
+  check to *D* is settled as it was counted (the suggestion).
+
+All pots together, so no payment moves from one pot to another. The figure on the day it is done is
 unchanged: payments after *D* count as before.
 
 **No figure** when an account named is not yours or not in pounds, or an everyday account has no

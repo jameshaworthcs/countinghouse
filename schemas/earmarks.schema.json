@@ -220,6 +220,20 @@
               ]
             }
           },
+          "carried": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+              "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+            },
+            "additionalProperties": {
+              "type": "number",
+              "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+            }
+          },
           "checks": {
             "default": [],
             "maxItems": 100,
