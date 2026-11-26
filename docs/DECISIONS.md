@@ -2979,3 +2979,46 @@ digest or Ask. An account now says whose it is (`companyId`, additive, no format
   transaction (company money is a property of the account, and a flag per row could disagree with
   it); excluding company accounts with `includeInNetWorth: false` alone (spending, income, the tax
   pages and the checks do not read it).
+
+## 2026-11-26: A director's loan is derived movements in the existing engine; marks live on your rows
+
+The owner pays some of the company's costs personally, lends it money and is paid back, and is paid
+by it. Those payments are not the owner's spending or income, and what the company owes the owner is
+part of their estate.
+
+- **The mark lives on the owner's own row** (`Transaction.company`: paid for it, a loan, pay, a
+  dividend), not on the company's. Whether a payment is the owner's spending must never depend on
+  whether the company's accounts are imported too: a hosting bill on a personal card has no company
+  row at all, and a transfer to the company's account is a personal row first. A row the owner
+  marked keeps its mark through every re-working (like `categorisedBy: "user"`); an agent's mark
+  comes only through a `set_company` proposal the owner applies, and never over the owner's.
+- **A marked row is never a transfer between the owner's accounts.** A transfer is two legs on one
+  side; money with the company crosses the line. So the mark refuses a linked row (unlink first),
+  and nothing links a marked one. It keeps its category (for the company's books later) but counts
+  in no personal figure built on categories while it moves the loan.
+- **The director's loan is a `director_loan` account the company names**
+  (`Company.directorLoanAccountId`), not an account with `companyId` (that would make it the
+  company's and take it out of the estate). Its movements are derived from the marked rows (the
+  negated amounts, stable ids from the rows' own) and fed to the existing balance engine as its rows;
+  the balances the owner records (the figure in the filed accounts) anchor them. Staleness, gaps,
+  "known on", incomplete stretches and the chart all come for free, and a filed figure that the marks
+  do not add up to shows as a gap. Considered: storing the movements as rows (two records of one
+  payment, kept in step by hand, and a second write path for every edit); a balance worked out beside
+  the engine (every engine path would need a special case, and they would drift); `includeInNetWorth`
+  on a company account (a company's money is never the owner's). A later slice adds the company's
+  own books' postings as a second source, matched to these in `directorLoanMovements`.
+- **The invariant is conservation, not "net worth unchanged".** A marked row stays in its own
+  account, and the loan gains its movement: the pair sums to nothing, as a transfer's legs do. So
+  every other account is the same with or without the marks, and the estate differs by the loan's
+  balance alone. Against the same row unmarked (spending), the estate is higher by what the company
+  now owes: that is the point, not a leak. The property test checks exactly this.
+- **Its own net-worth group**, "Director's loan", appended after the existing groups so no chart's
+  colours move; illiquid; a balance below nothing is a liability by its sign, as for any account.
+- **The s455 rate follows the dividend upper rate of the year lent** (Finance Act 2016 s50), read
+  from the year's dividend rates in `uk.ts` rather than a second table of its own: 33.75% for
+  2022/23 to 2025/26, 35.75% from 6 April 2026, 32.5% before, 25% before 6 April 2016. The
+  re-borrowing rules are s464ZA since 30 October 2024 (s464C before). With no company year end known
+  yet, the warning gives the rule and the rate, not a date.
+- **Refunds:** a paid-for row of money in is a refund of a cost the owner paid for the company, and
+  shrinks the loan by its amount; every marked movement is the row's amount negated, so the signs
+  never need a case of their own.

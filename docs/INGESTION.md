@@ -783,7 +783,10 @@ dates ("Proposed: …"), and keeps it when you change them.
     money between you and the company is not money moving between accounts of one owner. A row of
     yours is never the other leg of a company's row, at drafting, commit, re-applying, or a link by
     hand (refused), and a company's account's names are not evidence for your rows, nor yours for
-    its.
+    its. What a row of yours with the company was is a mark on it (`company`: paid for it, a loan,
+    pay, a dividend; DATA_FORMAT.md), which you set after the import, and a marked row is never a
+    transfer either: drafting, commit, re-applying and a link by hand all leave it unlinked. A
+    director's loan account takes no document: its movements are your marked rows (FORMULAS.md §9).
   - An account given to a company (or back to you) has its rows worked out again as its new side's,
     and any link across the line is taken away on both legs (`separateSides`), in the same request:
     if that fails, the account is put back as it was and the request says so. Start-up does the

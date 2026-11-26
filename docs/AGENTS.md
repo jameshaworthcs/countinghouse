@@ -77,7 +77,11 @@ numbers.
 The digest, Ask's tools and every figure in them are the owner's own: a company's own accounts
 (`Account.companyId`) and their rows are never in them (ARCHITECTURE.md, "Company accounts"). An
 import's part for a company's account is left out of the digest's imports, and an import of a
-company's accounts alone starts no `insights-after-import` job.
+company's accounts alone starts no `insights-after-import` job. A payment of the owner's marked as
+money with their company (`company`: paid for it or a loan, which are not spending or income; pay or
+a dividend, which are) carries its mark in the month in review's `transactions.jsonl` (`company`,
+`companyAs`) and in Ask's search rows; the digest's companies give the director's loan's balance on
+the day (`directorLoan`).
 
 **The live app's API** is open to an agent that holds a token the owner made (SELF_HOSTING.md, "Agent
 access"): `npm run -s api -- GET /imports`.
@@ -228,6 +232,7 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
       { "kind": "add_category", "category": { "id": "example-group", "name": "Example group", "kind": "expense" }, "why": "…" },
       { "kind": "change_category", "category": "example-category", "name": "New name", "parent": "example-group", "why": "…" },
       { "kind": "set_note", "transaction": "tx_…", "note": "Room 4, Example Court: instalment 1 of 3", "why": "…" },
+      { "kind": "set_company", "transaction": "tx_…", "company": { "id": "example-ltd", "as": "paid-for" }, "why": "…" },
       { "kind": "remove_duplicate", "transaction": "tx_…", "sameAs": ["tx_…", "tx_…"], "why": "…" },
       { "kind": "remove_wrong_sign", "transaction": "tx_…", "recordedAs": ["tx_…"], "why": "…" },
       { "kind": "remove_internal_move", "transaction": "tx_…", "why": "…" },
@@ -343,10 +348,23 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
     stays a group. Its payments, rules and budgets keep it: only its name or its place changes.
     Changes run in order, so a group added first can take a category moved next, and a later
     change can use either.
+  - A mark of money with a company (`set_company`, DATA_FORMAT.md transactions `company`) names a
+    company in companies.json and fits the row as any mark must: a row of the owner's on an account
+    that moves with its rows, not linked as a transfer between their accounts, not £0; `pay` and
+    `dividend` only on money in; `paid-for` and `loan` only in pounds and on a row not split.
+    `company: null` takes a mark away. A mark the owner set is never changed or taken away (an
+    agent's own may be); the same mark is already so. Applied, it is the agent's (`setBy: agent`),
+    and the owner can change it. A marked row is never linked as a transfer (`link_transfer` does not
+    fit). Propose `paid-for` for a cost of the company's paid from the owner's own account or card
+    (its words name a supplier the company uses, a receipt or invoice in the company's name), and
+    `loan` for money between the owner and the company's own account that is neither pay nor a
+    dividend; its `why` names what shows it. Never from a guess: a payment that could be the owner's
+    own spending is theirs to mark.
   - The owner wins: a category the owner set is not changed, a note already on a row is not
-    replaced (`set_note` adds one only where there is none), and a duplicate with something of
-    theirs on it (a category, payee, note, tag, split, correction, receipt, set-aside decision or
-    details another document filled in) is not removed. One exception the owner chose: a set-aside
+    replaced (`set_note` adds one only where there is none), a mark of theirs is not changed
+    (`set_company`), and a duplicate with something of theirs on it (a category, payee, note, tag,
+    split, correction, receipt, set-aside decision, a mark of money with their company or details
+    another document filled in) is not removed. One exception the owner chose: a set-aside
     decision may be replaced by a proposal, which says so (`decide_earmark_flow`).
   - Dates are in order and not in the future.
   - A proposal with a change that does not fit, or that the data already says, is refused (422,

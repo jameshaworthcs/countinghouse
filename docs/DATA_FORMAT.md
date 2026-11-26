@@ -64,7 +64,7 @@ data/
 |---|---|---|
 | `id` | slug | Stable; used in file paths |
 | `name` | string | |
-| `type` | enum | `current` `savings` `cash_isa` `stocks_isa` `lisa` `ifisa` `gia` `sipp` `workplace_pension` `personal_pension` `db_pension` `state_pension` `premium_bonds` `crypto` `property` `other_asset` `credit_card` `loan` `mortgage` `student_loan` `other_liability` |
+| `type` | enum | `current` `savings` `cash_isa` `stocks_isa` `lisa` `ifisa` `gia` `sipp` `workplace_pension` `personal_pension` `db_pension` `state_pension` `premium_bonds` `crypto` `property` `other_asset` `credit_card` `loan` `mortgage` `student_loan` `other_liability` `director_loan` |
 | `institutionId` | slug? | → institutions.json |
 | `currency` | ISO 4217 | default `GBP` |
 | `status` | `open` \| `closed` | plus optional `openedOn`, `closedOn` |
@@ -90,6 +90,22 @@ personal figure ([FORMULAS.md §9](FORMULAS.md), [ARCHITECTURE.md](ARCHITECTURE.
 accounts"). Reading the data warns of one naming a company that is not there, one that says it counts
 in the estate, a link carrying on across the line, and a record of yours that names one. Adding the field needed no format change: an
 account without it is yours, as every account was.
+
+**A director's loan account** (`type: "director_loan"`) is yours: what a company of yours owes you
+(negative: what you owe it), in your estate by default, in its own net-worth group ("Director's
+loan"), illiquid. A company names it (`Company.directorLoanAccountId`, companies.json), never
+`companyId`, which would make it the company's. It has no rows of its own: its movements are the
+payments of yours marked as paid for that company or as a loan with it (`company`, transactions,
+below), each the other way round, worked out when needed and never written ([FORMULAS.md §9](FORMULAS.md),
+"A director's loan"). Its balances (Record balance: the director's loan figure in the company's filed
+accounts) anchor those movements as a statement anchors a bank account. The store refuses a row added
+to one (an import, a row typed in), `companyId` on one, `balanceMode: "market"`, a currency other than
+pounds, an account with rows of its own becoming one, and one a company names changing type or being
+deleted. It takes no document (no account matching, no "Import into"), and covers no days of its own
+(coverage). Reading the data warns of rows stored in one (they are left out of its balance), of a
+company naming an account that cannot be its director's loan, and of a mark where it does not fit (it
+counts for nothing). Adding the type, the mark and the link needed no format change: each is new and
+optional.
 
 ## transactions/&lt;account&gt;/&lt;yyyy&gt;.jsonl
 
@@ -135,6 +151,7 @@ depend on).
 | `ruleId` | the rule that set it |
 | `transferGroup` | shared by both legs of a transfer between your accounts |
 | `counterpartyAccountId` | the other account |
+| `company` | yours: money with a company of yours, `{id, as, setBy}`. `id` names a company (companies.json); `as` is `paid-for` (a cost of the company's you paid, or its refund to you), `loan` (money you lent it, or it paid you back), `pay` or `dividend` (what it paid you); `setBy` is `user`, or `agent` when a proposal you applied set it. Paid-for and loan rows move its director's loan and are not your spending or income ([FORMULAS.md §14](FORMULAS.md)); pay and dividends stay income. Only on a row of an account of yours that moves with its rows (never a company's own account, an account valued at market or a director's loan), never on a row linked as a transfer between your accounts (unlink it first; enrichment never links a marked row), never £0; pay and dividends are money in; paid-for and loan rows are in pounds and not split. Every write is checked, and re-working rows out never changes it. On a company's own row (an account given to a company, or a hand edit) it is taken away when its rows are worked out |
 | `notes` | yours: free text, found by search, never grouped by. Added to many at once on a line of its own, never twice (`src/shared/annotations.ts`) |
 | `tags` | yours: short labels to group and filter by (up to 20, each up to 40 characters, one spelling per tag whatever the case). Tag Gift Aided donations `gift-aid` |
 | `splits` | yours: `[{amount, category, note?}]`, two or more lines adding up to `amount`, each signed like it, in spending or income categories. Spending, income and budgets count the lines ([FORMULAS.md §14](FORMULAS.md)). A transfer is never split, and correcting the amount so the lines no longer add up removes the split |
@@ -328,6 +345,10 @@ notes?, createdBy, createdAt, updatedAt}`:
   ([FORMULAS.md §9](FORMULAS.md), "Shares in a company").
 - `accountId`: the "other asset" account that carries its value in your estate (yours: never one
   of the company's own accounts). `employmentId`: your job there, when you work for it.
+- `directorLoanAccountId`: your director's loan account with it (accounts.json, `director_loan`):
+  one of yours, of that type, not its `accountId`, and no other company's. Set or taken away (`null`)
+  with `PUT /api/companies/:id`; `POST /api/companies/:id/director-loan` adds the account and links it
+  in one request, with a first balance when you give one.
 
 The company's own accounts, when you keep them here, are accounts with its `companyId`
 (accounts.json): listed under it on the Accounts page, apart from yours.
@@ -579,6 +600,11 @@ lives in the work area (`<work>/proposals/`), never here.
     its kind, or made a group (`parent: null`). Its payments, rules and budgets keep it.
   - `set_note {transaction, note}`: what the payment was for, from a document. Applied, it is your
     note; it never replaces one already there.
+  - `set_company {transaction, company: {id, as} | null}`: mark a payment of yours as money with a
+    company of yours (transactions, `company`), or take a mark away (`null`). Applied, the mark is
+    `setBy: "agent"`; a mark you set (`setBy: "user"`) is never changed or taken away by a proposal.
+    The mark must fit the row as any mark must; a marked row is never linked as a transfer by
+    `link_transfer`.
   - `remove_duplicate {transaction, sameAs}`: a row that repeats rows adding up to it.
   - `remove_wrong_sign {transaction, recordedAs}`: a row a document was read into with the wrong
     sign, whose money rows from another document record the right way round.

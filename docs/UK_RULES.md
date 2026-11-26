@@ -172,6 +172,34 @@ Used only to estimate the deductions on pay that is owed and not yet paid ([FORM
   share a group. Edit the groups in Settings → Data & git.
 - NS&I is 100% Treasury-backed and excluded.
 
+## Companies
+
+A director's loan (FORMULAS.md §9): what your company owes you, or you owe it. The app warns of
+two rules, from the account's balance (`src/shared/uk.ts`, analytics/director-loan.ts). It does not
+work out a date or a sum due: the company's accounting period is not known here, and a loan's tax is
+the company's to work out with its accountant.
+
+- **Loans to participators (CTA 2010 s455).** A close company that has lent money to a participator
+  (you, as its shareholder) owes Corporation Tax on what is still owed when it is due: **the day after
+  9 months from the end of the accounting period** the loan was made in (s455(3)). The rate is the
+  **dividend upper rate of the tax year the loan was made** (ITA 2007 s8(2); Finance Act 2016 s50,
+  for loans made on or after 6 April 2016; a flat **25%** before). `s455Rate` reads it from the
+  year's dividend rates in `TAX_YEAR_PARAMS`, so the two never disagree: **32.5%** for loans made
+  2016/17 to 2021/22, **33.75%** 2022/23 to 2025/26, **35.75%** from 6 April 2026 (the dividend
+  upper rate's rise in Budget 2025). Repaid or released, the tax on what was repaid is relieved
+  (s458): before the due date none is paid; after it, it is repaid 9 months after the end of the
+  period in which the loan was repaid.
+- **Repaying and borrowing again (CTA 2010 s464ZA).** A repayment of **£5,000** or more followed
+  within **30 days** by new borrowing of £5,000 or more (in a later accounting period) is matched to
+  the new borrowing, not the old; so is a repayment made while **£15,000** or more is owed when there
+  are arrangements to borrow again (£5,000 or more). These rules were s464C until 30 October 2024,
+  when Finance Act 2025 s81 replaced Chapter 3B with ss464ZA and 464ZB (`S455_REBORROWING`).
+- **Beneficial loans (ITEPA 2003 s180).** A loan to an employee or director (the company you work
+  for) whose total outstanding is over **£10,000 at any time in a tax year** is a benefit in kind,
+  taxed on the interest at HMRC's official rate less any interest paid (Finance Act 2014 s22: £10,000
+  from 2014/15, £5,000 before; `BENEFICIAL_LOAN_THRESHOLDS`). The app warns when the most you owed the
+  company on any day of this tax year so far is over it; the official rate itself is not used.
+
 ## Self Assessment
 
 For 2025/26 on, the Self Assessment prep page is the return box by box (FORMULAS.md §20), on the
@@ -244,6 +272,11 @@ Overpayment relief can be claimed for 4 years after the year ends; the app does 
 - Within the dividend allowance there is nothing to report.
 
 ## Sources
+
+Checked 26 November 2026 (companies: a director's loan):
+
+- legislation.gov.uk, [CTA 2010 s455](https://www.legislation.gov.uk/ukpga/2010/4/section/455) (the charge at the dividend upper rate of the tax year the loan is made; due under TMA 1970 s59D the day after 9 months from the end of the accounting period; s458 relief), [Finance Act 2016 s50](https://www.legislation.gov.uk/ukpga/2016/24/section/50) (25% replaced by the dividend upper rate, for loans made on or after 6 April 2016), [CTA 2010 s464ZA](https://www.legislation.gov.uk/ukpga/2010/4/section/464ZA) (repayments matched to new borrowing: £5,000 within 30 days; £15,000 owed with arrangements), [Finance Act 2025 s81](https://www.legislation.gov.uk/ukpga/2025/8/section/81) (ss464ZA and 464ZB in place of Chapter 3B, s464C, from 30 October 2024), [ITEPA 2003 s180](https://www.legislation.gov.uk/ukpga/2003/1/section/180) and [Finance Act 2014 s22](https://www.legislation.gov.uk/ukpga/2014/26/section/22) (the £10,000 threshold from 2014/15, £5,000 before)
+- GOV.UK, [Tax on dividends](https://www.gov.uk/tax-on-dividends) (2026/27 rates: 10.75%, 35.75%, 39.35%), the dividend upper rate s455 follows
 
 Checked 25 November 2026 (the 2025–26 return):
 

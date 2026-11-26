@@ -56,7 +56,7 @@ Source layout:
 | `src/shared/` | Isomorphic code: schemas (`schema.ts`), money, dates, UK rules, account-type metadata, categories, merchants, categoriser, who a payment is with when a person and what it looks like (`people.ts`), which payments an agreement schedules (`agreements.ts`), an account's terms as a reading gives them (`terms.ts`), reconciliation, what a document adds to a recorded payment (`detail.ts`), identifiers kept out of the data (`privacy.ts`), API types |
 | `src/server/` | Store, git, auth, security, migrations, enrichment, routes, app composition; `employments.ts` matches a document's employer to one of your jobs |
 | `src/server/ingest/` | Everything from bytes to committed records; `govuk.ts` reads HMRC's gov.uk pages and `payslips.ts` known payslip layouts from their text, on this machine; `pension-csv.ts` a pension or fund provider's trade histories and contribution summaries; `schedules.ts` drafts a document's schedules of payments as agreements (and student finance's as its student loan's movements) |
-| `src/server/analytics/` | Read-only computations over the store; `company-accounts.ts` is a company's own accounts on their own ("Company accounts", below); `model.ts` is pure (no store access); `sources.ts` decides which document's figure counts when several state one job's year; `taxreturn.ts` is a year's Self Assessment return box by box, worked out by `shared/taxcalc.ts` on the forms of `shared/saforms.ts`; `payslips.ts` reads payslips in full (their year to date, gaps, employer costs); `taxdocuments.ts` is Settings → Tax documents; `companies.ts` is your shares in companies; `arrangements.ts` checks what employers set up to pay into your pensions; `payroll-pensions.ts` pairs a pension's rows with the payslips whose money they are; `agreements.ts` checks an agreement's schedule against your payments; `terms.ts` is an account's terms over time and what ends soon; `queue.ts` is the To categorise page (people's payments and cash and cheques paid in, rules your decisions point to, what's left by payee, the categories the app guessed); `month.ts` is a month's figures, for the Overview's month card and the month in review's digest alike; `prices.ts` is published prices and what they say an account of investments was worth between its valuations (its holdings path, or a price index) |
+| `src/server/analytics/` | Read-only computations over the store; `company-accounts.ts` is a company's own accounts on their own ("Company accounts", below); `model.ts` is pure (no store access); `sources.ts` decides which document's figure counts when several state one job's year; `taxreturn.ts` is a year's Self Assessment return box by box, worked out by `shared/taxcalc.ts` on the forms of `shared/saforms.ts`; `payslips.ts` reads payslips in full (their year to date, gaps, employer costs); `taxdocuments.ts` is Settings → Tax documents; `companies.ts` is your shares in companies; `director-loan.ts` is a director's loan's movements, worked out from the payments you mark, and its warnings; `arrangements.ts` checks what employers set up to pay into your pensions; `payroll-pensions.ts` pairs a pension's rows with the payslips whose money they are; `agreements.ts` checks an agreement's schedule against your payments; `terms.ts` is an account's terms over time and what ends soon; `queue.ts` is the To categorise page (people's payments and cash and cheques paid in, rules your decisions point to, what's left by payee, the categories the app guessed); `month.ts` is a month's figures, for the Overview's month card and the month in review's digest alike; `prices.ts` is published prices and what they say an account of investments was worth between its valuations (its holdings path, or a price index) |
 | `src/server/agents/` | Agent jobs: the CLI runner, job kinds and prompts, the digest, the queue |
 | `src/server/records.ts` | The validated write path for agent-maintained records |
 | `src/server/audit.ts` | The audit log: who is acting (carried through async work), the request middleware, the hash-chained log, search and the chain check; `auditdiff.ts` says what a write changed, record by record |
@@ -183,6 +183,35 @@ the store's default, not by a filter in each loop (DECISIONS 2026-11-26):
   outside `tests/`): the canary of `tests/company-scope.test.ts`, which calls every GET route of the
   app, read from its router, over a personal store and over the same store with a company's data
   beside it (drawn from the same words, amounts, dates and banks), and checks they answer the same.
+  Its personal store has a director's loan and marked rows (below), so that is covered too.
+
+### Money with your company, and the director's loan
+
+The company seen from your side: what your own payments were to it (DECISIONS 2026-11-26, "A
+director's loan").
+
+- **The mark is on your row** (`Transaction.company`: paid for it, a loan, pay, a dividend;
+  `shared/company.ts`), set by you on the transaction, in bulk or from To categorise, or by a
+  `set_company` proposal you apply. The store checks every row a write adds or changes
+  (`companyMarkProblem`: your own row, on an account that moves with its rows, in pounds, not £0,
+  not linked as a transfer, not split; pay and dividends money in), so no path writes one that does
+  not fit; enrichment never changes it and never links a marked row as a transfer (nor do the
+  import's transfer matching, a manual link or a proposal). On a company's own row it is taken away
+  (`companyRowPatch`).
+- **Personal figures** leave out paid-for and loan rows wherever money is classified (`classifyFlow`
+  and the category filters of pay, tax, people, cash paid in and the queue; FORMULAS.md §14), and
+  the month in review shows them as money with the company (§18).
+- **The director's loan** is a `director_loan` account of yours that a company names
+  (`Company.directorLoanAccountId`; never `companyId`, which would make it the company's). Its rows
+  are derived: `analytics/director-loan.ts` (`directorLoanMovements`, a small pure function over your
+  rows) turns each marked paid-for or loan row into a movement of the negated amount, with a stable id
+  (`dlm_` + the row's hex), and `BalanceEngine` reads them as the account's rows (`directorLoanRows`)
+  in place of stored ones. Balances you record anchor them, so the engine's usual paths give its
+  balance, gaps, staleness and chart; nothing computes its balance elsewhere and nothing is written.
+  A later source (the company's own books) will join the movements there and be matched to them.
+  Its page (`GET /api/accounts/:id`, `directorLoan`) lists the movements with their rows and the
+  warnings (s455 and the beneficial loan threshold, from `shared/uk.ts`), which Data health and the
+  Overview's alerts carry too.
 
 ## Audit log
 
@@ -548,7 +577,9 @@ Per account:
   are surfaced in Data health.
 
 The estate value on a date is the sum of included accounts, converted to GBP (manual FX rates). A
-company's own account is never one ("Company accounts", above).
+company's own account is never one ("Company accounts", above). A director's loan account's rows are
+not stored: the engine reads the movements `analytics/director-loan.ts` works out from your marked
+payments ("Money with your company, and the director's loan", above).
 Groups are assigned by the sign of the balance, so an overdrawn current account counts as a debt
 and a card in credit counts as cash.
 

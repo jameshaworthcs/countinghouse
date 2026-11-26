@@ -538,6 +538,49 @@ store leaves company accounts and their rows out of everything it lists for you 
 A company account's balance is worked out by the same rules, over its company's accounts alone, for
 its own page (`analytics/company-accounts.ts`).
 
+**A director's loan** (`director_loan` accounts, `analytics/director-loan.ts`). What a company of
+yours owes you, on an account of yours the company names (`Company.directorLoanAccountId`). It is a
+ledger account whose rows are worked out, never stored (`directorLoanMovements`): for each row of
+yours marked as money with that company (`company.id`) as paid for it or a loan (`as` ∈ {`paid-for`,
+`loan`}), in pounds and not linked as a transfer, one movement
+
+- on the row's own date, with id `dlm_` + the row's own hex (stable: the account page lists each and
+  links to its row);
+- of amount m = −(the row's amount): money out of your account (a cost of the company's you paid, or
+  money you lent it) grows what it owes you; money in from it (a refund of such a cost, or a
+  repayment) shrinks it. A paid-for row of money in is a refund of a cost you paid for it.
+
+The balance engine reads these as the account's rows, and the balances you record on it (the director's
+loan figure in the company's filed accounts) as its anchors, by the ledger rules above:
+balance(D) = anchor + Σ m in (anchor, D]; before its first anchor, rolled back from it; with none,
+Σ m ≤ D, flagged estimated. So its staleness (yearly: 400 days), gaps, the days the estate is known
+on, incomplete stretches and its chart come from the engine as for any account. A director's loan no
+company names has no movements. Positive, it is an asset in its own group ("Director's loan",
+illiquid); negative (you owe the company) a liability, as any balance's sign decides. In
+projections it earns the rate you set on it (your `interest.rate` for it, or the account's rate),
+else nothing (a labelled fallback).
+
+**Nothing counts twice.** The marked row stays in its own account's balance and counts in none of your
+spending or income (§14), and the loan gains its movement: the row and its movement sum to nothing, as
+the two legs of a transfer do. With no anchor on the loan, every other account's balance on every day
+is the same with or without the marks, and the estate differs by the loan's balance alone: marking a
+row moves value between two of your accounts (what was spending becomes what the company owes you)
+and never makes or loses any. An anchor on the loan sets its level from that day (the figure in the
+accounts is what the company owed you then), and a gap shows where the movements you marked do not
+add up to the next one.
+
+**Warnings** (Data health, the Overview's alerts and the account's page; `directorLoanWarnings`,
+UK_RULES.md "Companies"), on the account's balance today and the most you owed the company on any day
+of this tax year so far (the engine's balance each day from the tax year's start):
+
+- balance < 0 (you owe the company): its Corporation Tax under CTA 2010 s455 on what is still owed
+  9 months and a day after the end of its accounting period, at the dividend upper rate of the tax
+  year the money was lent (`s455Rate`: 25% before 6 April 2016), unless repaid by then (s458), with
+  repaying and borrowing again not counting as repaid (s464ZA). The company's year end is not
+  known here, so no date is worked out;
+- most owed > the beneficial loan threshold for the tax year (`beneficialLoanThreshold`: £10,000
+  from 2014/15): a taxable benefit unless you paid interest at the official rate (ITEPA 2003 s180).
+
 **Estate value on D:**
 
 - Σ over included accounts of balance(D) in GBP (manual FX). Included accounts are yours only.
@@ -1180,13 +1223,17 @@ Only your own accounts' transactions count: a company's account's rows (`Account
 never income, spending or a transfer of yours. A transfer is linked only between two accounts on
 one side of the line between your money and a company's (yours with yours, or one company's with
 its own: INGESTION.md, "Company accounts"), so money between you and a company is never left out as
-a transfer either: a payment of yours to the company stays in your figures as what it is.
+a transfer either: a payment of yours to the company stays in your figures as what it is, until you
+mark it as paid for the company or a loan (below), which moves your director's loan instead (§9).
 
 A transaction counts as follows (`classifyFlow`):
 
 - **Excluded:**
   - it is on a market account;
   - or it is linked as a transfer;
+  - or it is marked as money with a company of yours, paid for it or a loan (`company.as` ∈
+    {`paid-for`, `loan`}: shared/company.ts, `movesDirectorLoan`), whatever its category: it moves
+    your director's loan (§9) instead. Pay and dividends marked as such count as their category says;
   - or its category is a transfer or investment kind, except a platform's fee
     (`investment-fee`) paid from a bank account: ii's monthly membership by direct debit is spent.
     Inside the investment account a fee only lowers the value, so it is left out there.
@@ -1199,7 +1246,14 @@ A transaction counts as follows (`classifyFlow`):
 - **Uncategorised:** by sign.
 - **A split payment** counts as its lines, each in its own category and with its own amount
   (`categoryLines`). What the lines do not add up to stays in the transaction's own category. A
-  transfer is never split.
+  transfer is never split, nor a row paid for your company or lent to it.
+
+**Money with your company** (`Transaction.company`). A paid-for or loan row is left out not only of
+income and spending but of every figure built on a category: pay (`analytics/pay.ts`), dividends
+(allowances, the company's dividends), side income and gifts to charity (Self Assessment and its
+return), payments with people, cash and cheques paid in, the To categorise queue and the categories
+the local model is asked to suggest; it is never a transfer between your accounts, so nothing pairs
+it as one. Its own account's balance keeps it (§9).
 
 **Spent this month** (the Overview, `monthToDate`):
 
@@ -1492,7 +1546,8 @@ Each line is broken down by category group.
 **Left over** = income − spending.
 
 **Moved:** money between your current accounts and your others, by where it went (savings, ISAs, the
-Lifetime ISA, pensions, investments, credit cards, loans, or an account the app doesn't know): a
+Lifetime ISA, pensions, investments, credit cards, loans, your company (a row paid for it or a loan,
+whatever its category), or an account the app doesn't know): a
 transfer's amount on the current account, by the other side's type. A loan's money in is borrowing,
 not moved; current account to current account is neither. (Kept for older readers; the card and the
 review use "Where it went".)
@@ -1508,6 +1563,9 @@ From the rows in the month on your cash accounts (current, savings, Premium Bond
 - **Paid off loans**: borrowed − the rows' parts whose other side is a loan + income less spending
   on loans. A Tuition Fee Loan's payment to the university (borrowed and spent on the loan) and a
   maintenance instalment (borrowed and moved from the loan) each come to nothing.
+- **Paid for or lent to your company**: Σ −amount of the rows on your cash accounts and cards
+  marked as paid for a company of yours or a loan with it (§14), by company. When it paid back more
+  than you paid or lent (a net below nothing), the line reads **Paid back by your company**.
 - **Sent to accounts the app doesn't know**: each part of a row that is not income or spending and
   has no other side among your accounts, by payee (your own Revolut, a transfer to yourself).
   When more came back from them than went (a withdrawal from an exchange), the net is negative
@@ -1546,7 +1604,9 @@ estimated.
 - **The rest** (`other`): the change less the three. It holds borrowing (a loan the estate leaves
   out lent or paid for something), money to or from accounts the app doesn't hold, a transfer whose
   other side falls in another month, and the change in a value resting on a valuation from another
-  time. With only cash accounts, and transfers between them, it is nothing.
+  time. With only cash accounts, and transfers between them, it is nothing. A row paid for your
+  company or lent to it is not in left over; its director's loan account (§9) holds it, so the rest
+  is nothing for it, and without one it is in the rest (money to an account the app doesn't hold).
 
 **Cash cover** (`runway`): the cash you could reach at once at the month's end (the estate's "now"
 access group, §9) over typical spending (the median of the complete months among the 12 before),
@@ -1597,7 +1657,8 @@ and money in are §14's, through `flows`; every sum is in integer pence.
   total × 100`, to 1 dp, none when the compared total is 0; a note when the two differ in length.
   The 10 categories whose difference is largest either way.
 - **A search's years** (`find_transactions`, when it spans more than one): money in, out and net for
-  each year of the rows matched.
+  each year of the rows matched. A row marked as money with your company says so (`company`: its name
+  and what it was), so a paid-for or loan row in the totals is never read as spending.
 - **Set aside** (`set_aside`, only when something is set aside): §21's figures as the page gives
   them; `everydayTotal` includes money on its way, and `setAside` is the pots' sum.
 - **A figure the app computed:** one whose every number is, to the penny, a number in the result of
