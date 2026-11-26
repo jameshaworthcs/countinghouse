@@ -13,6 +13,7 @@
 // Accounts valued at market (investments, pensions) are left out: their rows are not spending or
 // income (§14).
 
+import { movesDirectorLoan } from '../../shared/company';
 import { balanceModeOf } from '../../shared/accounts';
 import type { CategoriseQueue, GuessGroup, PayeeGroup, PersonGroup, PersonRow, QueueExample, RuleSuggestion } from '../../shared/api';
 import { CategoryIndex } from '../../shared/categories';
@@ -58,7 +59,8 @@ export function personParties(store: Store, index: PeopleIndex = peopleIndexFor(
   const skip = new Set(store.accounts.filter((a) => isWrapperAccount(a.type) || balanceModeOf(a) === 'market').map((a) => a.id));
   const out = new Map<string, PersonParty>();
   for (const t of store.transactions()) {
-    if (skip.has(t.accountId)) continue;
+    // Money with your company is not a payment with a person.
+    if (skip.has(t.accountId) || movesDirectorLoan(t)) continue;
     const party = index.party(t);
     if (party) out.set(t.id, party);
   }
@@ -73,7 +75,7 @@ export function paidInto(store: Store): Map<string, PaidIn> {
   const holds = new Map(store.accounts.map((a) => [a.id, holdsPaidIn(a.type)]));
   const out = new Map<string, PaidIn>();
   for (const t of store.transactions()) {
-    if (t.amount <= 0 || t.transferGroup || !(holds.get(t.accountId) ?? true)) continue;
+    if (t.amount <= 0 || t.transferGroup || movesDirectorLoan(t) || !(holds.get(t.accountId) ?? true)) continue;
     const kind = t.payee === CHEQUE_PAID_IN ? 'cheque' : t.payee === CASH_PAID_IN ? 'cash' : paidInKind(t.description, t.type);
     if (kind) out.set(t.id, kind);
   }
@@ -121,7 +123,8 @@ export function categoriseQueue(store: Store, opts: { from?: string | undefined 
   const parties = personParties(store, index);
   const cash = paidInto(store);
   const market = new Set(store.accounts.filter((a) => balanceModeOf(a) === 'market').map((a) => a.id));
-  const all = store.transactions().filter((t) => !market.has(t.accountId));
+  // Money paid for or lent to your company needs no category of yours (shared/company.ts): it leaves the queue.
+  const all = store.transactions().filter((t) => !market.has(t.accountId) && !movesDirectorLoan(t));
   const listed = (t: Transaction) => !opts.from || t.date >= opts.from;
   const peopleById = new Map(store.people.map((p) => [p.id, p]));
 

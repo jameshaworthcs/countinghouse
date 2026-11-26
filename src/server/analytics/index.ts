@@ -300,6 +300,10 @@ export class Analytics {
           detail: f.over ? `Above the ${formatMoney(f.limit, { decimals: 0 })} FSCS limit for one banking licence.` : `Close to the ${formatMoney(f.limit, { decimals: 0 })} FSCS limit for one banking licence.`,
         });
       }
+      // A director's loan you owe the company, or one over the benefit threshold this tax year (UK_RULES.md, "Companies").
+      for (const d of health.directorLoans ?? []) {
+        for (const w of d.warnings) alerts.push({ id: `director-loan-${w.kind}-${d.accountId}`, level: 'warning', title: w.title, detail: w.detail, action: { label: 'Director’s loan', href: `/accounts/${d.accountId}` } });
+      }
       if (!this.store.profile.dateOfBirth) {
         alerts.push({ id: 'profile', level: 'info', title: 'Add your date of birth', detail: 'It drives LISA, cash-ISA and pension-age rules.', action: { label: 'Settings', href: '/settings' } });
       }

@@ -584,3 +584,47 @@ export const RULE_NOTES: { from: ISODate; text: string }[] = [
   { from: '2028-04-06', text: 'Normal minimum pension age rises from 55 to 57.' },
   { from: '2029-04-06', text: 'Salary-sacrificed pension contributions above £2,000 a year become subject to National Insurance.' },
 ];
+
+// ─── Companies: a director's loan (docs/UK_RULES.md, "Companies") ───────────────────────────────
+
+/**
+ * Tax a close company owes on a loan to a participator (you, as its director and shareholder) that is
+ * still outstanding after its accounting period (CTA 2010 s455). From 6 April 2016 the rate is the
+ * dividend upper rate (ITA 2007 s8(2)) for the tax year the loan is made (Finance Act 2016 s50): read
+ * from `TAX_YEAR_PARAMS` (`dividendTaxRates.higher`), so the two never disagree. Before then, a flat
+ * rate: the rows here.
+ */
+export const S455_FLAT_RATES: { until: ISODate; rate: number }[] = [{ until: '2016-04-05', rate: 0.25 }];
+
+/** The s455 rate on money lent to you on `loanDate`. */
+export function s455Rate(loanDate: ISODate): number {
+  const flat = S455_FLAT_RATES.find((r) => loanDate <= r.until);
+  return flat ? flat.rate : taxYearParams(taxYearOf(loanDate)).dividendTaxRates.higher;
+}
+
+/**
+ * When s455 tax is due: the day after 9 months from the end of the accounting period the loan was made
+ * in (CTA 2010 s455(3)). Repaid (or released) before then, no tax is due on what was repaid (s458).
+ */
+export const S455_DUE_MONTHS = 9;
+
+/**
+ * Repaying and borrowing again (CTA 2010 s464ZA from 30 October 2024, before then s464C): a repayment
+ * of £5,000 or more followed within 30 days by new borrowing of £5,000 or more in a later accounting
+ * period is matched to the new borrowing, not the old; so is one made while £15,000 or more is owed
+ * with arrangements to borrow again.
+ */
+export const S455_REBORROWING = { days: 30, repaid: 5_000, owedWithArrangements: 15_000 } as const;
+
+/**
+ * A loan from your employer (your company, when you work for it) outstanding above this at any time
+ * in a tax year is a taxable benefit at the official rate of interest (ITEPA 2003 s180): £10,000 from
+ * 2014/15 (Finance Act 2014 s22), £5,000 before.
+ */
+export const BENEFICIAL_LOAN_THRESHOLDS: DatedLimit[] = [{ from: '2014-04-06', limit: 10_000 }];
+
+export function beneficialLoanThreshold(ty: TaxYear): number {
+  let limit = 5_000;
+  for (const row of BENEFICIAL_LOAN_THRESHOLDS) if (ty.start >= row.from) limit = row.limit;
+  return limit;
+}

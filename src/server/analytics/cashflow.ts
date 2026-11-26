@@ -1,10 +1,12 @@
-// Income and spending. Transfers between your own accounts and investment flows are excluded; a
-// refund, or money paid back to you for your share of something, reduces spending rather than
-// counting as income.
+// Income and spending. Transfers between your own accounts and investment flows are excluded, and so
+// is money paid for a company of yours or lent to it (or repaid by it), which moves your director's
+// loan instead (shared/company.ts); a refund, or money paid back to you for your share of something,
+// reduces spending rather than counting as income.
 
 import { balanceModeOf } from '../../shared/accounts';
 import type { CashflowMonth, CashflowResponse, CategoryAmount } from '../../shared/api';
 import { CategoryIndex } from '../../shared/categories';
+import { movesDirectorLoan } from '../../shared/company';
 import { eachMonth, endOfMonth, maxDate, minDate, monthKey } from '../../shared/dates';
 import { fromMinor, toMinor } from '../../shared/money';
 import type { Account, Transaction } from '../../shared/schema';
@@ -19,6 +21,8 @@ const PLATFORM_FEE = 'investment-fee';
 export function classifyFlow(t: Transaction, cats: CategoryIndex, account: Account | undefined): FlowClass {
   if (!account || balanceModeOf(account) === 'market') return 'excluded';
   if (t.transferGroup) return 'excluded';
+  // Paid for your company, or lent to it or repaid by it: the company's debt to you, not yours to spend.
+  if (movesDirectorLoan(t)) return 'excluded';
   const kind = cats.kindOf(t.category);
   // A platform's fee paid from a bank account (ii's monthly membership by direct debit) is spent;
   // inside the investment account it only lowers the value, so it is left out there (above).
@@ -42,7 +46,7 @@ export interface FlowTx {
  * in the transaction's own category. A transfer is never split.
  */
 export function categoryLines(t: Transaction): Transaction[] {
-  if (!t.splits?.length || t.transferGroup) return [t];
+  if (!t.splits?.length || t.transferGroup || movesDirectorLoan(t)) return [t];
   const lines: Transaction[] = t.splits.map((s) => ({ ...t, amount: s.amount, category: s.category }));
   const rest = toMinor(t.amount) - t.splits.reduce((sum, s) => sum + toMinor(s.amount), 0);
   if (rest !== 0) lines.push({ ...t, amount: fromMinor(rest) });

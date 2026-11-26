@@ -12,7 +12,7 @@
 //   - accounts with transactions but no import records (the demo, early data) are covered from
 //     their first to their last transaction.
 
-import { balanceModeOf } from '../../shared/accounts';
+import { ACCOUNT_TYPE_META, balanceModeOf } from '../../shared/accounts';
 import type { CoverageResponse } from '../../shared/api';
 import { addDays, diffDays, eachMonth, endOfMonth, maxDate, minDate, startOfMonth, today, type ISODate } from '../../shared/dates';
 import { toMinor } from '../../shared/money';
@@ -140,8 +140,13 @@ export function complement(intervals: Interval[], from: ISODate, to: ISODate): I
   return out;
 }
 
+/**
+ * An account whose days its own records cover: one that moves with its rows (ledger). A director's
+ * loan is not one: its movements are worked out from your marked payments, whose own accounts' days
+ * are covered (or not) where they are.
+ */
 export function isTransactionAccount(a: Account): boolean {
-  return balanceModeOf(a) === 'ledger';
+  return balanceModeOf(a) === 'ledger' && !ACCOUNT_TYPE_META[a.type].derived;
 }
 
 /**

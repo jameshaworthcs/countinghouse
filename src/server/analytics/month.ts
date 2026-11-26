@@ -7,6 +7,7 @@
 // its end, agreement payments as paid by then. Nothing after the month counts but the agreements'
 // payments due in the 60 days after it, which their documents gave.
 
+import { movesDirectorLoan } from '../../shared/company';
 import { ACCOUNT_TYPE_META, balanceModeOf, WRAPPER_GROUP_LABELS, WRAPPER_GROUPS, type WrapperGroup } from '../../shared/accounts';
 import type { MonthAccountValue, MonthCategory, MonthCompared, MonthLine, MonthPayment, MonthRegularChange, MonthRunway, MonthSummary, MonthWhereItem, MonthWhereItWent, MonthWorthSplit } from '../../shared/api';
 import { CategoryIndex } from '../../shared/categories';
@@ -64,7 +65,7 @@ const PAY = new Set(['salary', 'bonus']);
 /** Rows on a loan that cost you rather than lend you money. */
 const LOAN_CHARGES = new Set(['interest-charges', 'bank-fees']);
 /** Where money moved, as a sentence names it ("moved to savings £300, to the Lifetime ISA £333"). */
-const MOVED_TO: Record<string, string> = { savings: 'savings', isa: 'ISAs', lisa: 'the Lifetime ISA', pensions: 'pensions', investments: 'investments', cards: 'credit cards', loans: 'loans', unknown: 'accounts the app doesn’t know' };
+const MOVED_TO: Record<string, string> = { company: 'your company', savings: 'savings', isa: 'ISAs', lisa: 'the Lifetime ISA', pensions: 'pensions', investments: 'investments', cards: 'credit cards', loans: 'loans', unknown: 'accounts the app doesn’t know' };
 
 /** What a value at market rests on (balances.ts). */
 type Basis = NonNullable<ReturnType<BalanceEngine['balanceOn']>>['basis'];
@@ -118,11 +119,13 @@ function placeOf(a: Account | undefined): Place | undefined {
   return 'other';
 }
 
-const WHERE_LABELS: Record<MonthWhereItem['id'] | 'unknownBack', string> = {
+const WHERE_LABELS: Record<MonthWhereItem['id'] | 'unknownBack' | 'companyBack', string> = {
   cash: 'Kept in current accounts and savings',
   cards: 'Paid off credit cards',
   invested: 'Put into ISAs, pensions and investments',
   loans: 'Paid off loans',
+  company: 'Paid for or lent to your company',
+  companyBack: 'Paid back by your company',
   unknown: 'Sent to accounts the app doesn’t know',
   unknownBack: 'Came back from accounts the app doesn’t know',
   unexplained: 'Not placed (moving between accounts at the month’s end, or rows the app can’t place)',
@@ -318,6 +321,11 @@ export class MonthContext {
     for (const t of store.transactions()) {
       const account = this.accounts.get(t.accountId);
       if (account?.type !== 'current' || t.date < from || t.date > to) continue;
+      // Paid for your company or lent to it (or repaid by it): money moved to the company, whatever its category.
+      if (movesDirectorLoan(t)) {
+        moved.set('company', (moved.get('company') ?? 0) - toMinor(t.amount));
+        continue;
+      }
       const kind = cats.kindOf(t.category);
       if (!t.transferGroup && kind !== 'transfer' && kind !== 'investment') continue;
       // A loan's money in is borrowing, not money moved.
@@ -557,6 +565,7 @@ export class MonthContext {
     const lines = this.lines(month);
     const byAccount = { cash: new Map<string, number>(), cards: new Map<string, number>(), invested: new Map<string, number>() };
     const unknown = new Map<string, { name: string; minor: number; count: number }>();
+    const company = new Map<string, { name: string; minor: number; count: number }>();
     let toLoans = 0;
     const pairs = new Map<string, Transaction[]>();
     for (const t of store.transactions()) if (t.transferGroup && t.date >= addDays(from, -10) && t.date <= addDays(to, 10)) (pairs.get(t.transferGroup) ?? pairs.set(t.transferGroup, []).get(t.transferGroup)!).push(t);
@@ -567,6 +576,14 @@ export class MonthContext {
       const place = placeOf(account);
       if (place !== 'cash' && place !== 'cards') continue;
       add(byAccount[place], t.accountId, toMinor(t.amount));
+      // Paid for your company or lent to it, or repaid by it: money with the company (never split).
+      if (movesDirectorLoan(t)) {
+        const id = t.company!.id;
+        const e = company.get(id) ?? company.set(id, { name: store.company(id)?.name ?? id, minor: 0, count: 0 }).get(id)!;
+        e.minor -= toMinor(t.amount);
+        e.count++;
+        continue;
+      }
       for (const line of categoryLines(t)) {
         if (classifyFlow(line, cats, account) !== 'excluded') continue;
         const otherId = t.counterpartyAccountId ?? pairs.get(t.transferGroup ?? '')?.find((x) => x.id !== t.id)?.accountId;
@@ -602,11 +619,19 @@ export class MonthContext {
         .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
     const sum = (m: Map<string, number>) => [...m.values()].reduce((s, v) => s + v, 0);
     const unknownNet = [...unknown.values()].reduce((s, e) => s + e.minor, 0);
+    const companyNet = [...company.values()].reduce((s, e) => s + e.minor, 0);
     const items: MonthWhereItem[] = [
       { id: 'cash', label: WHERE_LABELS.cash, amount: fromMinor(sum(byAccount.cash)), parts: parts(byAccount.cash) },
       { id: 'cards', label: WHERE_LABELS.cards, amount: fromMinor(sum(byAccount.cards)), parts: parts(byAccount.cards) },
       { id: 'invested', label: WHERE_LABELS.invested, amount: fromMinor(sum(byAccount.invested)), parts: parts(byAccount.invested) },
       { id: 'loans', label: WHERE_LABELS.loans, amount: fromMinor(borrowed - toLoans + loanFlows), parts: [] },
+      {
+        id: 'company',
+        // Net money back from it (it repaid more than you lent this month) reads as such.
+        label: companyNet < 0 ? WHERE_LABELS.companyBack : WHERE_LABELS.company,
+        amount: fromMinor(companyNet),
+        parts: [...company.entries()].filter(([, e]) => e.minor !== 0).map(([id, e]) => ({ id, name: e.name, amount: fromMinor(e.minor), count: e.count })).sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount)),
+      },
       {
         id: 'unknown',
         // Net money back from them (a withdrawal from an exchange) reads as such, not as "sent".

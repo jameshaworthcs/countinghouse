@@ -21,6 +21,7 @@ import { balanceId, figureId, termsId, transactionId } from '../src/server/ids';
 import { Store } from '../src/server/store';
 import { addDays, addMonths, endOfMonth, startOfMonth, today } from '../src/shared/dates';
 import { taxYearOf } from '../src/shared/uk';
+import type { AccountDetailResponse } from '../src/shared/api';
 import type { Account, BalanceSnapshot, CategorisedBy, Figure, ImportRecord, Transaction } from '../src/shared/schema';
 
 const stamp = '2026-01-01T00:00:00+00:00';
@@ -34,7 +35,11 @@ const CSRF = { 'x-finance-csrf': '1', 'content-type': 'application/json' };
 
 const acct = (id: string, name: string, type: Account['type'], extra: Partial<Account> = {}): Account => ({ id, name, type, currency: 'GBP', status: 'open', aliases: [], includeInNetWorth: true, createdAt: stamp, updatedAt: stamp, ...extra });
 
-/** Yours: a current account, a saver and a card at the same banks as the company's, an ISA, a pension, and the shares the company's value is carried on. */
+/**
+ * Yours: a current account, a saver and a card at the same banks as the company's, an ISA, a pension,
+ * the shares the company's value is carried on, and your director's loan with it, moved by the rows of
+ * yours marked as paid for it or lent to it (so the company's data must change none of that either).
+ */
 const PERSONAL: Account[] = [
   acct('current', 'Everyday', 'current', { institutionId: 'example-bank', last4: '1111', aliases: ['Everyday Account'] }),
   acct('saver', 'Rainy Day', 'savings', { institutionId: 'example-bank', last4: '2222' }),
@@ -42,6 +47,7 @@ const PERSONAL: Account[] = [
   acct('isa', 'Stocks ISA', 'stocks_isa', { institutionId: 'example-invest' }),
   acct('pension', 'Example SIPP', 'sipp', { institutionId: 'example-pensions' }),
   acct('shares', 'Example Studio Ltd shares', 'other_asset'),
+  acct('studio-loan', 'Director’s loan', 'director_loan'),
 ];
 /** The company's own: its current account at your bank and its card at your card's issuer, named like yours. */
 const COMPANY_ACCOUNTS: Account[] = [
@@ -50,23 +56,24 @@ const COMPANY_ACCOUNTS: Account[] = [
 ];
 
 /** Words both sides' rows are drawn from: each has a figure of yours that would change if a company row counted. */
-const POOL: { description: string; sign: 1 | -1; category?: string }[] = [
-  { description: 'EXAMPLE STUDIO LTD SALARY ES12345', sign: 1, category: 'salary' },
+const POOL: { description: string; sign: 1 | -1; category?: string; company?: 'paid-for' | 'loan' | 'pay' | 'dividend' }[] = [
+  { description: 'EXAMPLE STUDIO LTD SALARY ES12345', sign: 1, category: 'salary', company: 'pay' },
   { description: 'EXAMPLE STUDIO LTD SALARY', sign: 1 },
-  { description: 'EXAMPLE STUDIO LTD DIVIDEND', sign: 1, category: 'dividends' },
+  { description: 'EXAMPLE STUDIO LTD DIVIDEND', sign: 1, category: 'dividends', company: 'dividend' },
+  { description: 'EXAMPLE STUDIO LTD REPAYMENT', sign: 1, category: 'salary', company: 'loan' },
   { description: 'GROSS INTEREST', sign: 1, category: 'interest' },
   { description: 'HMRC SELF ASSESSMENT', sign: -1, category: 'tax' },
   { description: 'HMRC CORPORATION TAX', sign: -1 },
   { description: 'HMRC REPAYMENT', sign: 1, category: 'tax-refund' },
   { description: 'CHILD BENEFIT', sign: 1, category: 'benefits' },
   { description: 'TESCO STORES 3297', sign: -1, category: 'groceries' },
-  { description: 'EXAMPLE HOSTING LTD', sign: -1, category: 'software' },
+  { description: 'EXAMPLE HOSTING LTD', sign: -1, category: 'software', company: 'paid-for' },
   { description: 'GIFT AID DONATION EXAMPLE CHARITY', sign: -1, category: 'charity' },
   { description: 'EXAMPLE CLIENT INVOICE', sign: 1, category: 'side-income' },
   { description: 'TO JO BLOGGS', sign: -1, category: 'transfers' },
   { description: 'FROM JO BLOGGS', sign: 1 },
   { description: 'TRANSFER TO EVERYDAY ACCOUNT 12341111', sign: -1 },
-  { description: 'TRANSFER TO STUDIO ACCOUNT 12344444', sign: -1 },
+  { description: 'TRANSFER TO STUDIO ACCOUNT 12344444', sign: -1, company: 'loan' },
   { description: 'PAYMENT TO EXAMPLE CARDS', sign: -1, category: 'credit-card-payment' },
   { description: 'PAYMENT RECEIVED THANK YOU', sign: 1 },
   { description: 'CASH WITHDRAWAL EXAMPLE BANK', sign: -1, category: 'cash-withdrawal' },
@@ -120,7 +127,9 @@ function rows(draws: readonly RowDraw[], accounts: readonly Account[], kept: (a:
     const n = occ.get(key) ?? 0;
     occ.set(key, n + 1);
     const by = p.category ? BY[d.by] : undefined;
-    return { id: transactionId(account.id, date, amount, p.description, n), accountId: account.id, date, amount, currency: 'GBP', description: p.description, source: {}, createdAt: stamp, ...(p.category && by !== undefined ? { category: p.category, categorisedBy: by } : {}) };
+    // Your rows with the company are marked as what they were (never a company's own row).
+    const mark = p.company && !account.companyId ? { company: { id: COMPANY, as: p.company, setBy: 'user' as const } } : {};
+    return { id: transactionId(account.id, date, amount, p.description, n), accountId: account.id, date, amount, currency: 'GBP', description: p.description, source: {}, createdAt: stamp, ...(p.category && by !== undefined ? { category: p.category, categorisedBy: by } : {}), ...mark };
   });
 }
 
@@ -158,7 +167,7 @@ async function writePersonal(dir: string, w: World, extra: { date: string; amoun
     await store.upsertInstitution(inst);
   await store.setAccounts(PERSONAL);
   await store.setEmployments([{ id: 'studio-job', employer: 'EXAMPLE STUDIO LTD', aliases: [], payrollNumbers: ['ES12345'], owed: [], pensionArrangements: [], createdBy: 'owner', createdAt: stamp, updatedAt: stamp }]);
-  await store.setCompanies([{ id: COMPANY, name: 'EXAMPLE STUDIO LTD', number: '12345678', holdings: [{ shareClass: 'Ordinary', shares: 100, totalShares: 100, acquiredOn: '2024-05-14', source: {} }], valuations: [], accountId: 'shares', employmentId: 'studio-job', createdBy: 'owner', createdAt: stamp, updatedAt: stamp }]);
+  await store.setCompanies([{ id: COMPANY, name: 'EXAMPLE STUDIO LTD', number: '12345678', holdings: [{ shareClass: 'Ordinary', shares: 100, totalShares: 100, acquiredOn: '2024-05-14', source: {} }], valuations: [], accountId: 'shares', directorLoanAccountId: 'studio-loan', employmentId: 'studio-job', createdBy: 'owner', createdAt: stamp, updatedAt: stamp }]);
   await store.setRules([{ id: 'rule_hosting', name: 'Hosting', enabled: true, priority: 100, match: { field: 'description', op: 'contains', value: 'EXAMPLE HOSTING', caseSensitive: false }, set: { category: 'software' }, createdAt: stamp, updatedAt: stamp }]);
   await store.setGoals([{ id: 'rainy-day', name: 'Rainy day', kind: 'savings', targetAmount: 10_000, accountIds: ['saver'], createdAt: stamp, updatedAt: stamp }]);
   const txs = [...rows(w.personal, PERSONAL, (a) => ['current', 'saver', 'card'].includes(a.id)), ...extra.map((x, i) => ({ id: transactionId('current', x.date, x.amount, x.description, 900 + i), accountId: 'current', currency: 'GBP', source: {}, createdAt: stamp, ...x }))];
@@ -168,7 +177,7 @@ async function writePersonal(dir: string, w: World, extra: { date: string; amoun
     ledger.flatMap((id, i) => [balance(id, endOfMonth(`${MONTH_LIST[2]}-01`), w.balances[i]! / 100), balance(id, endOfMonth(`${MONTH_LIST[MONTHS - 2]}-01`), w.balances[i + 3]! / 100)]),
     'test: your balances',
   );
-  await store.addBalances([balance('isa', endOfMonth(`${MONTH_LIST[6]}-01`), 18_250), balance('pension', endOfMonth(`${MONTH_LIST[6]}-01`), 42_100), balance('shares', endOfMonth(`${MONTH_LIST[3]}-01`), 25_000)], 'test: valuations');
+  await store.addBalances([balance('isa', endOfMonth(`${MONTH_LIST[6]}-01`), 18_250), balance('pension', endOfMonth(`${MONTH_LIST[6]}-01`), 42_100), balance('shares', endOfMonth(`${MONTH_LIST[3]}-01`), 25_000), balance('studio-loan', endOfMonth(`${MONTH_LIST[5]}-01`), 1_250)], 'test: valuations');
   const ty = taxYearOf(TODAY);
   await store.addFigures(
     [
@@ -420,6 +429,11 @@ describe('company accounts never touch a personal figure', () => {
             }
           }
           for (const t of store.transactions()) if (t.counterpartyAccountId) expect(company.has(t.counterpartyAccountId)).toBe(false);
+          // The director's loan was there to be changed, and re-working rows out kept every mark.
+          const loan = (await (await p.both.app.app.request('http://localhost/api/accounts/studio-loan', { headers: { host: 'localhost' } })).json()) as AccountDetailResponse;
+          expect(loan.directorLoan?.movements.length).toBeGreaterThan(0);
+          expect(loan.directorLoan?.movements.length).toBe(store.transactions().filter((t) => t.company?.as === 'paid-for' || t.company?.as === 'loan').length);
+          for (const t of store.transactions()) if (t.company) expect(t.transferGroup).toBeUndefined();
         } finally {
           await closePair(p);
         }

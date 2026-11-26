@@ -252,6 +252,18 @@ function platformFee(store: Store, r: Resolver, account: Account, value: number)
   return { rate: fromResolved(rate, 'platform fees'), fixed: fromResolved(fixed, 'flat fees') };
 }
 
+/**
+ * A director's loan earns what you set on it (your `interest.rate` assumption for it, or the rate on
+ * the account), else nothing: a company pays interest on what it owes you only when you agree it, and
+ * no document or research says so.
+ */
+function directorLoanInterest(r: Resolver, account: Account): Sourced {
+  const resolved = r.set.resolve('interest.rate', { accountId: account.id, accountType: account.type });
+  if (resolved.source === 'owner') return fromResolved(resolved, 'this director’s loan');
+  if (account.interestRate !== undefined) return { value: account.interestRate / 100, source: 'account', basis: 'The rate on the account (Accounts page)' };
+  return { value: 0, source: 'fallback', basis: 'A director’s loan earns no interest unless you set its rate' };
+}
+
 function interestRate(store: Store, r: Resolver, account: Account, on: string): Sourced {
   const target: ResolveTarget = { accountId: account.id, institutionId: account.institutionId, accountType: account.type };
   const resolved = r.set.resolve('interest.rate', target);
@@ -336,7 +348,7 @@ export function accountParams(store: Store, engine: BalanceEngine, r: Resolver, 
     };
   }
   const empty = { ...base, holdingsKnown: false, holdings: [], exposure: zeroExposure(), expectedReturn: none, volatility: none, fundFee: none, platformFee: none, platformFixed: none };
-  if (bucket === 'cash') return { ...empty, exposure: { ...zeroExposure(), cash: 1 }, interest: account.type === 'credit_card' ? { value: 0, source: 'fallback', basis: 'Card balances are assumed repaid each month' } : interestRate(store, r, account, on) };
+  if (bucket === 'cash') return { ...empty, exposure: { ...zeroExposure(), cash: 1 }, interest: account.type === 'credit_card' ? { value: 0, source: 'fallback', basis: 'Card balances are assumed repaid each month' } : account.type === 'director_loan' ? directorLoanInterest(r, account) : interestRate(store, r, account, on) };
   if (bucket === 'property') return { ...empty, exposure: { ...zeroExposure(), property: 1 }, growth: fromResolved(r.set.resolve('property.growth', { accountId: account.id }), 'this property') };
   return empty;
 }

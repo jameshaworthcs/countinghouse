@@ -1,6 +1,7 @@
 // UK tax-year allowances: ISA (and the cash-ISA cap from 2027/28), LISA, pension annual allowance
 // with carry-forward, Personal Savings Allowance and the dividend allowance.
 
+import { movesDirectorLoan } from '../../shared/company';
 import { ACCOUNT_TYPE_META, balanceModeOf } from '../../shared/accounts';
 import { DIVIDEND_WORDING } from '../../shared/categorise';
 import type { AllowanceLine, AllowancesResponse, ConfirmedNilView, MissingDaysView, TaxBandEstimate } from '../../shared/api';
@@ -316,7 +317,8 @@ export function dividendsOf(store: Store, ty: TaxYear): { minor: number; lines: 
   const ledger = store.accounts.filter((a) => !ACCOUNT_TYPE_META[a.type].taxFreeInterest && balanceModeOf(a) === 'ledger');
   const gias = store.accounts.filter((a) => a.type === 'gia' && !ledger.includes(a));
   const credits = [
-    ...ledger.flatMap((a) => store.transactions(a.id).filter((t) => inYear(t, ty) && t.category === 'dividends' && t.amount > 0)),
+    // A loan the company paid back is not a dividend, whatever its category (shared/company.ts).
+    ...ledger.flatMap((a) => store.transactions(a.id).filter((t) => inYear(t, ty) && t.category === 'dividends' && t.amount > 0 && !movesDirectorLoan(t))),
     ...gias.flatMap((a) => store.transactions(a.id).filter((t) => inYear(t, ty) && t.category === 'investment-income' && t.amount > 0 && DIVIDEND_WORDING.test(t.description))),
   ];
   const vouchers = store.figures.filter((f) => f.taxYear === ty.label && f.kind === 'dividends_paid').sort((a, b) => (a.periodEnd ?? a.date ?? '').localeCompare(b.periodEnd ?? b.date ?? ''));
@@ -562,7 +564,7 @@ export function reliefAtSource(store: Store, ty: TaxYear, pen: ReturnType<typeof
 
 /** Charity payments in the year, the ones tagged "gift-aid", Gift Aid figures from documents, and what was paid under Gift Aid. */
 export function giftAid(store: Store, ty: TaxYear) {
-  const charity = store.transactions().filter((t) => inYear(t, ty) && t.category === 'charity' && t.amount < 0);
+  const charity = store.transactions().filter((t) => inYear(t, ty) && t.category === 'charity' && t.amount < 0 && !movesDirectorLoan(t));
   const aided = charity.filter((t) => t.tags?.some((tag) => tag.toLowerCase() === 'gift-aid'));
   const figures = store.figures.filter((f) => f.kind === 'gift_aid_donation' && (f.taxYear === ty.label || (!f.taxYear && inYear({ date: f.periodEnd ?? f.date ?? '' }, ty))));
   const paid = fromMinor(-aided.reduce((s, t) => s + toMinor(t.amount), 0) + figures.reduce((s, f) => s + toMinor(f.amount), 0));
@@ -578,7 +580,7 @@ export function unexplainedSalary(store: Store, ty: TaxYear, employers: { payer:
   // Pay the Pay tab pairs with a payslip, or puts under an employer with payslips, is that employer's.
   const { periods, others } = pairPay(store, ty);
   const explained = new Set([...periods.flatMap((p) => [...(p.credit ? [p.credit.id] : []), ...(p.advances ?? []).map((a) => a.t.id)]), ...others.flatMap((o) => (o.employer ? [o.t.id] : []))]);
-  return store.transactions().filter((t) => inYear(t, ty) && t.category === 'salary' && t.amount > 0 && !explained.has(t.id) && !keys.some((k) => payerKey(`${t.description} ${t.payee ?? ''}`).includes(k)));
+  return store.transactions().filter((t) => inYear(t, ty) && t.category === 'salary' && t.amount > 0 && !movesDirectorLoan(t) && !explained.has(t.id) && !keys.some((k) => payerKey(`${t.description} ${t.payee ?? ''}`).includes(k)));
 }
 
 const figuresFor = (store: Store, ty: TaxYear, kind: Figure['kind']) =>
@@ -630,7 +632,7 @@ export function taxBandEstimate(store: Store, ty: TaxYear, now: ISODate, found: 
   }
   const benefits = figuresFor(store, ty, 'benefit_in_kind');
   if (benefits.length) lines.push({ label: 'Benefits in kind (P11D)', amount: sum(benefits), kind: 'pay' });
-  const side = store.transactions().filter((t) => inYear(t, ty) && t.category === 'side-income' && t.amount > 0);
+  const side = store.transactions().filter((t) => inYear(t, ty) && t.category === 'side-income' && t.amount > 0 && !movesDirectorLoan(t));
   const turnover = fromMinor(side.reduce((s, t) => s + toMinor(t.amount), 0) + figuresFor(store, ty, 'self_employment_income').reduce((s, f) => s + toMinor(f.amount), 0));
   if (turnover > params.tradingAllowance) {
     lines.push({ label: 'Side income over the trading allowance', amount: fromMinor(toMinor(turnover) - toMinor(params.tradingAllowance)), kind: 'self-employment' });

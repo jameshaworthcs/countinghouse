@@ -7,6 +7,7 @@ import { ACCOUNT_TYPE_META, balanceModeOf, sideOf, slugify } from '../../shared/
 import type { AccountDetailResponse, BootstrapResponse, EnrichGroup, EnrichPreview, TransactionsResponse } from '../../shared/api';
 import { addTags, appendNote, removeTags } from '../../shared/annotations';
 import { CategoryIndex } from '../../shared/categories';
+import { movesDirectorLoan } from '../../shared/company';
 import { today } from '../../shared/dates';
 import { catalogInstitution, findInstitution, INSTITUTION_CATALOG } from '../../shared/institutions';
 import { cleanPayee, descriptionKey } from '../../shared/merchants';
@@ -18,6 +19,7 @@ import {
   CurrencySchema,
   EmploymentSchema,
   CompanySchema,
+  COMPANY_MARKS,
   AgreementSchema,
   CoverageConfirmationSchema,
   FIGURE_KINDS,
@@ -67,6 +69,7 @@ import { categoriseQueue, payeeRuleMatch } from '../analytics/queue';
 import { parseTaxYear } from '../../shared/uk';
 import { taxReturn } from '../analytics/taxreturn';
 import { ownCoverage } from '../analytics/coverage';
+import { directorLoanView } from '../analytics/director-loan';
 
 const NewAccountBody = z.object({
   name: z.string().min(1).max(120),
@@ -145,6 +148,8 @@ const TxPatch = z.object({
   correctionNote: z.string().max(500).optional(),
   /** Split across categories (null removes the split). */
   splits: z.array(SplitLineSchema).min(2).max(30).optional().nullable(),
+  /** Money with a company of yours (null takes the mark away): yours, so nothing else changes it. */
+  company: z.object({ id: SlugSchema, as: z.enum(COMPANY_MARKS) }).optional().nullable(),
 });
 
 const PersonBody = z.object({
@@ -212,8 +217,9 @@ const FigureBody = z.object({
  * Split lines must add up to the payment, each with its sign, in spending or income categories. A
  * transfer between your accounts is not split.
  */
-export function checkSplits(lines: SplitLine[], amount: number, t: Pick<Transaction, 'transferGroup'>, cats: CategoryIndex): void {
+export function checkSplits(lines: SplitLine[], amount: number, t: Pick<Transaction, 'transferGroup' | 'company'>, cats: CategoryIndex): void {
   if (t.transferGroup) throw new StoreError('A transfer between your accounts cannot be split.');
+  if (movesDirectorLoan(t)) throw new StoreError('Money paid for or lent to your company is not your spending, so it cannot be split across categories: take its mark away first.');
   for (const l of lines) {
     const kind = cats.kindOf(l.category);
     if (kind !== 'expense' && kind !== 'income') throw new StoreError(`"${cats.name(l.category)}" is not a spending or income category.`);
@@ -417,6 +423,7 @@ export function dataRoutes(ctx: AppContext): Hono {
         .map((i) => ({ id: i.id, fileName: i.fileName, ...(i.label ? { label: i.label.text } : {}), documentId: i.documentId, ...(i.committedAt ? { committedAt: i.committedAt } : {}) })),
       ...(paid ? { paidIn: paid } : {}),
       ...(account.companyId ? { coverage: ownCoverage(store, account) } : {}),
+      ...(ACCOUNT_TYPE_META[account.type].derived ? { directorLoan: directorLoanView(store, engine, account, today()) } : {}),
     };
     return c.json(body);
   });
@@ -604,7 +611,9 @@ export function dataRoutes(ctx: AppContext): Hono {
     if (body.category || body.splits) refuseCompanyCategory(current.accountId);
     const patch = applyNulls(body) as Partial<Transaction>;
     if (body.tags) patch.tags = body.tags.length ? addTags([], body.tags) : undefined;
-    if (body.splits) checkSplits(body.splits, body.amount ?? current.amount, current, new CategoryIndex(store.categories));
+    // A mark you set or take away is yours: the store checks it fits the row (shared/company.ts).
+    if (body.company !== undefined) patch.company = body.company ? { id: body.company.id, as: body.company.as, setBy: 'user' } : undefined;
+    if (body.splits) checkSplits(body.splits, body.amount ?? current.amount, { transferGroup: current.transferGroup, company: 'company' in patch ? patch.company : current.company }, new CategoryIndex(store.categories));
     // A corrected amount the lines no longer add up to takes the split away: split it again.
     if (body.amount !== undefined && body.splits === undefined && current.splits && current.splits.reduce((s, l) => s + toMinor(l.amount), 0) !== toMinor(body.amount)) patch.splits = undefined;
     if ('category' in body) patch.categorisedBy = body.category ? 'user' : undefined;
@@ -631,6 +640,8 @@ export function dataRoutes(ctx: AppContext): Hono {
         notes: z.string().max(2000).optional(),
         /** Added to each one's notes on a line of its own (shared/annotations.ts). */
         appendNotes: z.string().min(1).max(2000).optional(),
+        /** Mark each as money with a company of yours (null takes the mark away). Every one must fit, or none changes. */
+        company: z.object({ id: SlugSchema, as: z.enum(COMPANY_MARKS) }).optional().nullable(),
       }),
     );
     if (body.notes !== undefined && body.appendNotes !== undefined) throw new StoreError('Replace the notes or add to them, not both.');
@@ -649,6 +660,7 @@ export function dataRoutes(ctx: AppContext): Hono {
         patch.tags = tags.length ? tags : undefined;
       }
       if (body.notes !== undefined) patch.notes = body.notes.trim() || undefined;
+      if (body.company !== undefined) patch.company = body.company ? { id: body.company.id, as: body.company.as, setBy: 'user' } : undefined;
       if (body.appendNotes !== undefined) {
         const notes = appendNote(t.notes, body.appendNotes);
         if (notes.length > 4000) throw new StoreError(`The notes on ${t.description} would be too long: shorten them first.`);
@@ -1121,7 +1133,7 @@ export function dataRoutes(ctx: AppContext): Hono {
 
   // ─── Companies you hold shares in (companies.json) ───────────────────────────────────────────
 
-  app.get('/companies', (c) => c.json(companiesView(store)));
+  app.get('/companies', (c) => c.json(companiesView(store, ctx.analytics.engine)));
 
   /** An account's terms as its documents give them: the latest, how they changed, what ends soon. */
   app.get('/accounts/:id/terms', (c) => {
@@ -1139,11 +1151,52 @@ export function dataRoutes(ctx: AppContext): Hono {
   app.put('/companies/:id', async (c) => {
     const company = store.company(c.req.param('id'));
     if (!company) throw new StoreError('No such company', 404);
-    const body = await readJson(c, CompanySchema.pick({ name: true, number: true, holdings: true, employmentId: true, notes: true }).partial());
+    const body = await readJson(
+      c,
+      CompanySchema.pick({ name: true, number: true, holdings: true, employmentId: true, notes: true })
+        .partial()
+        // Your director's loan account with it (a `director_loan` account of yours); null takes the link away.
+        .extend({ directorLoanAccountId: SlugSchema.nullable().optional() }),
+    );
     if (body.employmentId && !store.employment(body.employmentId)) throw new StoreError('No such job', 400);
-    const next = CompanySchema.parse({ ...company, ...body, updatedAt: nowISO() });
+    const merged = { ...company, ...applyNulls(body), updatedAt: nowISO() } as Record<string, unknown>;
+    for (const [k, v] of Object.entries(merged)) if (v === undefined) delete merged[k];
+    // The store checks the link: an account of yours, a director's loan, the only company naming it.
+    const next = CompanySchema.parse(merged);
     await store.upsertCompany(next, `company: ${next.name}`);
-    return c.json(companyView(store, next));
+    return c.json(companyView(store, next, ctx.analytics.engine));
+  });
+
+  /**
+   * Add your director's loan account with a company and link it, in one request: a `director_loan`
+   * account of yours, in your estate, with the balance you give (the figure in its last filed
+   * accounts, say) as its first anchor. If linking fails, the account is taken away again.
+   */
+  app.post('/companies/:id/director-loan', async (c) => {
+    const company = store.company(c.req.param('id'));
+    if (!company) throw new StoreError('No such company', 404);
+    if (company.directorLoanAccountId && store.account(company.directorLoanAccountId)) throw new StoreError(`${company.name} has a director’s loan account already.`, 409);
+    const body = await readJson(c, z.object({ name: z.string().trim().min(1).max(120).optional(), balance: MoneySchema.optional(), balanceDate: ISODateSchema.optional(), note: z.string().max(500).optional() }));
+    if (body.balanceDate && body.balance === undefined) throw new StoreError('A balance’s date needs its balance.');
+    if (body.balanceDate && body.balanceDate > today()) throw new StoreError('The balance’s date is in the future.');
+    const name = body.name ?? `Director’s loan: ${company.name}`;
+    const stamp = nowISO();
+    const account: Account = { id: slugify(`${company.id} directors loan`, store.accountIds()), name, type: 'director_loan', currency: 'GBP', status: 'open', aliases: [], includeInNetWorth: ACCOUNT_TYPE_META.director_loan.defaultInNetWorth, createdAt: stamp, updatedAt: stamp };
+    await store.upsertAccount(account, `account: add ${name}`);
+    try {
+      await store.upsertCompany(CompanySchema.parse({ ...company, directorLoanAccountId: account.id, updatedAt: stamp }), `company: ${company.name} director’s loan account`);
+    } catch (err) {
+      await store.deleteAccount(account.id);
+      throw err;
+    }
+    if (body.balance !== undefined) {
+      const date = body.balanceDate ?? today();
+      await store.addBalances(
+        [{ id: balanceId(account.id, date, body.balance, 'manual', stamp), accountId: account.id, date, balance: body.balance, currency: 'GBP', kind: 'manual', dateSource: 'manual', source: {}, createdAt: stamp, ...(body.note ? { note: body.note } : {}), ...(date === stamp.slice(0, 10) ? { at: stamp } : {}) }],
+        `balance: ${name} ${date}`,
+      );
+    }
+    return c.json({ account, company: companyView(store, store.company(company.id)!, ctx.analytics.engine) }, 201);
   });
   // ─── Agreements to pay (agreements.json) ─────────────────────────────────────────────────────
 

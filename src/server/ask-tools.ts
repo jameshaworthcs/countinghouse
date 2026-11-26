@@ -273,6 +273,8 @@ export function runTool(store: Store, analytics: Analytics, tool: AskTool, raw: 
             ...(t.original ? { original: `${t.original.amount} ${t.original.currency}` } : {}),
             category: t.category ? (cats.get(t.category)?.name ?? t.category) : null,
             ...(t.transferGroup ? { transfer: true } : {}),
+            // Money with your company: what it was, and whose (not your spending or income when paid for it or a loan).
+            ...(t.company ? { company: { name: store.company(t.company.id)?.name ?? t.company.id, as: t.company.as } } : {}),
           })),
           ...(rows.length > shown.length ? { rowsLeftOut: rows.length - shown.length, note: 'count and the totals cover every match; only the newest rows are listed' } : {}),
         },

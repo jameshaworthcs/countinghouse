@@ -293,7 +293,8 @@
                 "loan",
                 "mortgage",
                 "student_loan",
-                "other_liability"
+                "other_liability",
+                "director_loan"
               ]
             },
             "headerSignature": {
@@ -741,7 +742,8 @@
                           "loan",
                           "mortgage",
                           "student_loan",
-                          "other_liability"
+                          "other_liability",
+                          "director_loan"
                         ]
                       },
                       {
@@ -2671,7 +2673,8 @@
                           "loan",
                           "mortgage",
                           "student_loan",
-                          "other_liability"
+                          "other_liability",
+                          "director_loan"
                         ]
                       },
                       {
@@ -4547,7 +4550,8 @@
                       "loan",
                       "mortgage",
                       "student_loan",
-                      "other_liability"
+                      "other_liability",
+                      "director_loan"
                     ]
                   },
                   "last4": {
@@ -4626,7 +4630,8 @@
                               "loan",
                               "mortgage",
                               "student_loan",
-                              "other_liability"
+                              "other_liability",
+                              "director_loan"
                             ]
                           },
                           "institutionId": {

@@ -116,7 +116,7 @@ function pairEveryday(rows: readonly Transaction[], everyday: ReadonlySet<string
   const onItsWay: { t: Transaction; other: string }[] = [];
   // Paired by amount only: a transfer (by its category), not one you decided, and not one with an
   // account outside the everyday ones (a saver, a loan) on its other side.
-  const isTransfer = (t: Transaction) => !decided.has(t.id) && Boolean(t.category) && cats.kindOf(t.category) === 'transfer' && otherSidesOf(t).every((a) => everyday.has(a));
+  const isTransfer = (t: Transaction) => !decided.has(t.id) && !t.company && Boolean(t.category) && cats.kindOf(t.category) === 'transfer' && otherSidesOf(t).every((a) => everyday.has(a));
   const loose: Transaction[] = [];
   for (const t of rows) {
     const others = otherSidesOf(t).filter((a) => everyday.has(a) && a !== t.accountId);

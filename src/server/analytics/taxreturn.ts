@@ -7,6 +7,7 @@
 // return (whole pounds where the form takes them), so the liability is the return's, not a second
 // estimate beside it.
 
+import { movesDirectorLoan } from '../../shared/company';
 import type { ReturnBoxView, ReturnCheck, ReturnPageView, ReturnQuestion, ReturnTrace, TaxReturnView } from '../../shared/api';
 import { formatDate, today, type ISODate } from '../../shared/dates';
 import { formatMoney, fromMinor, toMinor } from '../../shared/money';
@@ -499,7 +500,7 @@ export function taxReturn(store: Store, label?: string, engine?: BalanceEngine, 
   if (crypto) blockers.push({ key: 'crypto', kind: 'not-covered', text: 'Crypto disposals: Counting House does not work out their gains. They go in their own section of the Capital Gains page.' });
 
   // ─── Areas Counting House does not prepare ───────────────────────────────────────────────────
-  const side = store.transactions().filter((t) => inYear(t.date, ty) && t.category === 'side-income' && t.amount > 0);
+  const side = store.transactions().filter((t) => inYear(t.date, ty) && t.category === 'side-income' && t.amount > 0 && !movesDirectorLoan(t));
   const sideTotal = fromMinor(side.reduce((s, t) => s + toMinor(t.amount), 0) + store.figures.filter((f) => f.kind === 'self_employment_income' && (f.taxYear === ty.label || inYear(f.periodEnd ?? f.date, ty))).reduce((s, f) => s + toMinor(f.amount), 0));
   ask(Q.selfEmployment, 'Did you do any work for yourself in the year (freelancing, a side business, selling things you made or bought to sell), however small?', {
     coverage: 'not-covered',

@@ -415,6 +415,67 @@
               },
               "kind": {
                 "type": "string",
+                "const": "set_company"
+              },
+              "why": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000
+              },
+              "transaction": {
+                "type": "string",
+                "pattern": "^tx_[0-9a-f]{16}$"
+              },
+              "company": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64,
+                        "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                        "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+                      },
+                      "as": {
+                        "type": "string",
+                        "enum": [
+                          "paid-for",
+                          "loan",
+                          "pay",
+                          "dividend"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "as"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "key",
+              "kind",
+              "why",
+              "transaction",
+              "company"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]{0,39}$"
+              },
+              "kind": {
+                "type": "string",
                 "const": "remove_duplicate"
               },
               "why": {
@@ -2094,6 +2155,39 @@
                 "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
                 "description": "Stable, human-readable identifier (lowercase-hyphenated)"
               },
+              "company": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                    "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+                  },
+                  "as": {
+                    "type": "string",
+                    "enum": [
+                      "paid-for",
+                      "loan",
+                      "pay",
+                      "dividend"
+                    ]
+                  },
+                  "setBy": {
+                    "type": "string",
+                    "enum": [
+                      "user",
+                      "agent"
+                    ]
+                  }
+                },
+                "required": [
+                  "id",
+                  "as",
+                  "setBy"
+                ]
+              },
               "notes": {
                 "type": "string"
               },
@@ -2253,7 +2347,8 @@
                   "loan",
                   "mortgage",
                   "student_loan",
-                  "other_liability"
+                  "other_liability",
+                  "director_loan"
                 ]
               },
               "institutionId": {

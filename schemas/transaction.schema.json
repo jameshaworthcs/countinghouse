@@ -263,6 +263,39 @@
       "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
       "description": "Stable, human-readable identifier (lowercase-hyphenated)"
     },
+    "company": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+        },
+        "as": {
+          "type": "string",
+          "enum": [
+            "paid-for",
+            "loan",
+            "pay",
+            "dividend"
+          ]
+        },
+        "setBy": {
+          "type": "string",
+          "enum": [
+            "user",
+            "agent"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "as",
+        "setBy"
+      ]
+    },
     "notes": {
       "type": "string"
     },

@@ -10,6 +10,7 @@ import { useApi } from '../lib/api';
 import { useAppData } from '../lib/data';
 import { cn, formatDate, matchWords, money, plural, timeAgo } from '../lib/format';
 import { RATE_NAMES } from '../../shared/terms';
+import { COMPANY_MARK_LABELS } from '../../shared/company';
 import { limitName, RatesList, rateText } from './Terms';
 import { Badge, Button, Card, IconButton, StatusBadge } from './ui';
 import { EFFECT_WORDS } from '../lib/earmarks';
@@ -42,6 +43,7 @@ export const CHANGE_LABELS: Record<ProposedChangeKind, { title: string; count: (
   add_category: { title: 'Add a category', count: (n) => `${plural(n, 'category', 'categories')} added`, icon: <FolderPlus className="size-4" aria-hidden /> },
   change_category: { title: 'Rename or move a category', count: (n) => `${plural(n, 'category', 'categories')} renamed or moved`, icon: <FolderPen className="size-4" aria-hidden /> },
   set_note: { title: 'Add a note', count: (n) => plural(n, 'note'), icon: <NotebookPen className="size-4" aria-hidden /> },
+  set_company: { title: 'Mark money with your company', count: (n) => `${plural(n, 'payment')} marked as money with your company`, icon: <Building2 className="size-4" aria-hidden /> },
   remove_duplicate: { title: 'Remove a duplicate', count: (n) => `${plural(n, 'duplicate')} removed`, icon: <CopyX className="size-4" aria-hidden /> },
   remove_internal_move: { title: 'Remove a move inside the account', count: (n) => `${plural(n, 'move')} inside an account removed`, icon: <PiggyBank className="size-4" aria-hidden /> },
   remove_wrong_sign: { title: 'Remove a row read with the wrong sign', count: (n) => `${plural(n, 'row')} with the wrong sign removed`, icon: <ArrowUpDown className="size-4" aria-hidden /> },
@@ -414,6 +416,27 @@ export function ChangeBody({ change, view }: { change: ProposedChange; view: Pro
             <Badge tone="accent">{nowGroup ? `${nowGroup} › ${change.name ?? wasName}` : `${change.name ?? wasName} (a group)`}</Badge>
           </div>
           <div className="text-[12.5px] text-ink-3">Its payments, budgets and rules keep it: only its name or its group changes.</div>
+        </div>
+      );
+    }
+    case 'set_company': {
+      const t = row(change.transaction);
+      // What the server says the mark is about (the company's name) and what it replaces.
+      const mark = view.changes.find((c) => c.change.key === change.key)?.mark;
+      return (
+        <div className="grid gap-2">
+          <TxLine row={t} view={view} />
+          <div className="flex flex-wrap items-center gap-2 text-[13px]">
+            <span className="text-ink-3">Company</span>
+            {(mark?.was ?? t?.company) && (
+              <>
+                <Badge tone="muted">{mark?.was ?? (t?.company ? COMPANY_MARK_LABELS[t.company.as] : '')}</Badge>
+                <ArrowRight className="size-3.5 text-ink-3" aria-hidden />
+              </>
+            )}
+            {change.company ? <Badge tone="accent">{`${COMPANY_MARK_LABELS[change.company.as]}${mark?.company ? `: ${mark.company}` : ''}`}</Badge> : <span className="text-ink-2">no mark</span>}
+          </div>
+          {change.company && (change.company.as === 'paid-for' || change.company.as === 'loan') && <div className="text-[12.5px] text-ink-3">Then it is not your spending or income: it moves your director’s loan with the company instead.</div>}
         </div>
       );
     }

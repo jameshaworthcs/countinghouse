@@ -3,8 +3,11 @@
 
 import type { Account, AccountType } from './schema';
 
-/** Net-worth groups, in fixed chart order (this order is the categorical colour order). */
-export const WRAPPER_GROUPS = ['cash', 'isa', 'lisa', 'investments', 'pensions', 'property', 'liabilities'] as const;
+/**
+ * Net-worth groups, in fixed chart order (this order is the categorical colour order). A director's
+ * loan came last, after the rest were in use, so no group's colour moved.
+ */
+export const WRAPPER_GROUPS = ['cash', 'isa', 'lisa', 'investments', 'pensions', 'property', 'liabilities', 'director_loan'] as const;
 export type WrapperGroup = (typeof WRAPPER_GROUPS)[number];
 
 export const WRAPPER_GROUP_LABELS: Record<WrapperGroup, string> = {
@@ -15,6 +18,7 @@ export const WRAPPER_GROUP_LABELS: Record<WrapperGroup, string> = {
   pensions: 'Pensions',
   property: 'Property & other',
   liabilities: 'Liabilities',
+  director_loan: 'Director’s loan',
 };
 
 /** Access groups: when could you actually spend it? */
@@ -62,6 +66,12 @@ export interface AccountTypeMeta {
    * balance worked out from its movements away from a statement leaves that out, so it is estimated.
    */
   interestUnrecorded?: boolean;
+  /**
+   * Its movements are worked out, never imported or entered: a director's loan's are the payments you
+   * mark as paid for or lent to its company (analytics/director-loan.ts). It has no rows of its own,
+   * so no statements to cover its days.
+   */
+  derived?: boolean;
   description: string;
 }
 
@@ -336,6 +346,22 @@ export const ACCOUNT_TYPE_META: Record<AccountType, AccountTypeMeta> = {
     expectsTransactions: false,
     description: 'Anything else you owe (negative).',
   },
+  director_loan: {
+    // A balance you record (the figure in its filed accounts) comes about yearly; its movements are
+    // the payments you mark, which a quiet month does not make stale.
+    cadence: 'yearly',
+    label: 'Director’s loan',
+    shortLabel: 'Director’s loan',
+    group: 'director_loan',
+    access: 'illiquid',
+    liability: false,
+    balanceMode: 'ledger',
+    taxFreeInterest: false,
+    defaultInNetWorth: true,
+    expectsTransactions: false,
+    derived: true,
+    description: 'What your company owes you: what you paid for it and lent it, less what it paid back. Negative when you owe it.',
+  },
 };
 
 export function typeMeta(type: AccountType): AccountTypeMeta {
@@ -394,6 +420,7 @@ export const ACCOUNT_TYPE_ORDER: AccountType[] = [
   'mortgage',
   'student_loan',
   'other_liability',
+  'director_loan',
 ];
 
 /** "Monzo Current Account" -> "monzo-current-account", unique against `taken`. */

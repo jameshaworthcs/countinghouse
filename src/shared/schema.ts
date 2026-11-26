@@ -72,6 +72,7 @@ export const ACCOUNT_TYPES = [
   'mortgage',
   'student_loan',
   'other_liability',
+  'director_loan',
 ] as const;
 
 export const AccountTypeSchema = z.enum(ACCOUNT_TYPES);
@@ -230,6 +231,25 @@ export const SeenInSchema = z.object({
 });
 export type SeenIn = z.infer<typeof SeenInSchema>;
 
+/**
+ * What a payment of yours was to a company of yours (docs/DATA_FORMAT.md, transactions): `paid-for`, a
+ * cost of the company you paid (or its refund to you); `loan`, money you lent it or it paid you back;
+ * `pay` and `dividend`, what it paid you. The first two move your director's loan and are not your
+ * spending or income; the last two stay your income.
+ */
+export const COMPANY_MARKS = ['paid-for', 'loan', 'pay', 'dividend'] as const;
+export type CompanyMarkKind = (typeof COMPANY_MARKS)[number];
+
+/** A payment of yours marked as money with a company of yours (companies.json): what it was, and who said so. */
+export const CompanyMarkSchema = z.object({
+  /** The company (companies.json). */
+  id: SlugSchema,
+  as: z.enum(COMPANY_MARKS),
+  /** `user`: you marked it, and nothing changes it but you. `agent`: a proposal you applied. */
+  setBy: z.enum(['user', 'agent']),
+});
+export type CompanyMark = z.infer<typeof CompanyMarkSchema>;
+
 export const TransactionSchema = z.object({
   id: z.string().regex(/^tx_[0-9a-f]{16}$/),
   accountId: SlugSchema,
@@ -312,6 +332,11 @@ export const TransactionSchema = z.object({
   transferGroup: z.string().optional(),
   /** Your own account on the other side of this transfer, when known. */
   counterpartyAccountId: SlugSchema.optional(),
+  /**
+   * Money with a company of yours (`CompanyMarkSchema`): on your own rows only, never on a transfer
+   * between your accounts. Re-working rows out never changes it.
+   */
+  company: CompanyMarkSchema.optional(),
   notes: z.string().optional(),
   tags: z.array(z.string()).optional(),
 
@@ -652,6 +677,11 @@ export const CompanySchema = z.object({
   /** The account that carries its value in your estate, and your job there if you work for it. */
   accountId: SlugSchema.optional(),
   employmentId: SlugSchema.optional(),
+  /**
+   * Your director's loan account with it (a `director_loan` account of yours, never one of the
+   * company's own): what it owes you, worked out from the payments you mark (FORMULAS.md §9).
+   */
+  directorLoanAccountId: SlugSchema.optional(),
   notes: z.string().max(2000).optional(),
   createdBy: z.enum(['owner', 'agent']).default('owner'),
   createdAt: TimestampSchema,
@@ -2203,6 +2233,11 @@ const changeUnion = <K extends z.ZodType<string | undefined>>(key: K) =>
      * a rent instalment paid, say). Applied, it is yours, like a note you typed; it never replaces one.
      */
     z.object({ key, kind: z.literal('set_note'), why: ChangeWhySchema, transaction: TransactionIdSchema, note: z.string().trim().min(1).max(500) }),
+    /**
+     * Mark a payment of yours as money with a company of yours (paid for it, a loan, pay or a
+     * dividend), or take a mark away (null). Never over a mark of yours.
+     */
+    z.object({ key, kind: z.literal('set_company'), why: ChangeWhySchema, transaction: TransactionIdSchema, company: CompanyMarkSchema.pick({ id: true, as: true }).nullable() }),
     /** Remove a transaction that repeats money already recorded: the rows it repeats add up to it. */
     z.object({ key, kind: z.literal('remove_duplicate'), why: ChangeWhySchema, transaction: TransactionIdSchema, sameAs: z.array(TransactionIdSchema).min(1).max(10) }),
     /**

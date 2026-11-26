@@ -10,6 +10,7 @@ import { fscsDepositLimit } from '../../shared/uk';
 import type { Store } from '../store';
 import { lastUpdated, type BalanceEngine } from './balances';
 import { classifyFlow } from './cashflow';
+import { directorLoanWarnings, owedMostInTaxYear } from './director-loan';
 
 const DEPOSIT_TYPES = new Set(['current', 'savings', 'cash_isa']);
 
@@ -46,7 +47,8 @@ export function dataHealth(store: Store, engine: BalanceEngine): DataHealthRespo
   for (const a of store.accounts) {
     for (const g of engine.gaps(a.id)) gaps.push({ accountId: a.id, name: a.name, ...g });
     const info = engine.info(a.id);
-    if (balanceModeOf(a) === 'ledger' && info && info.anchors === 0 && store.transactions(a.id).length > 0) noBalance.push({ accountId: a.id, name: a.name });
+    // Rows and no balance to anchor them (a director's loan's rows are its movements: info, not the store).
+    if (balanceModeOf(a) === 'ledger' && info && info.anchors === 0 && info.lastTransaction !== null) noBalance.push({ accountId: a.id, name: a.name });
     const last = lastUpdated(store, engine, a.id);
     if (a.status === 'open' && last && diffDays(last, now) > staleAfterDays(a.type, store.settings.staleAfterDays)) stale.push({ accountId: a.id, name: a.name, days: diffDays(last, now) });
   }
@@ -54,5 +56,19 @@ export function dataHealth(store: Store, engine: BalanceEngine): DataHealthRespo
   const uncategorised = store
     .transactions()
     .filter((t) => t.date >= since && !t.category && classifyFlow(t, cats, accounts.get(t.accountId)) !== 'excluded').length;
-  return { issues: store.issues, gaps, uncategorised, noBalance, stale, fscs: fscsExposure(store, engine) };
+  const directorLoans = directorLoanChecks(store, engine, now);
+  return { issues: store.issues, gaps, uncategorised, noBalance, stale, fscs: fscsExposure(store, engine), ...(directorLoans.length ? { directorLoans } : {}) };
+}
+
+/** Each director's loan a company names whose warnings say something today (director-loan.ts). */
+export function directorLoanChecks(store: Store, engine: BalanceEngine, on: string): NonNullable<DataHealthResponse['directorLoans']> {
+  const out: NonNullable<DataHealthResponse['directorLoans']> = [];
+  for (const c of store.companies) {
+    const a = c.directorLoanAccountId ? store.accounts.find((x) => x.id === c.directorLoanAccountId) : undefined;
+    if (!a || a.status !== 'open') continue;
+    const balance = engine.balanceOn(a.id, on)?.value ?? null;
+    const warnings = directorLoanWarnings(c.name, balance, owedMostInTaxYear(engine, a.id, on), on);
+    if (warnings.length) out.push({ accountId: a.id, name: a.name, companyName: c.name, balance, warnings });
+  }
+  return out;
 }

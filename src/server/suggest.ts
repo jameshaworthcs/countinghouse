@@ -7,6 +7,7 @@
 // categorised until you apply it. It runs only on the local model: the payments never leave this
 // machine.
 
+import { movesDirectorLoan } from '../shared/company';
 import type { Provenance, Transaction } from '../shared/schema';
 import { balanceModeOf } from '../shared/accounts';
 import { CategoryIndex } from '../shared/categories';
@@ -34,7 +35,7 @@ export function leftUncategorised(store: Store, limit = MAX_SUGGEST): { key: str
   const market = new Set(store.accounts.filter((a) => balanceModeOf(a) === 'market').map((a) => a.id));
   const rows = store
     .transactions()
-    .filter((t) => !t.category && t.categorisedBy !== 'user' && !t.transferGroup && !t.splits?.length && !people.has(t.id) && !cash.has(t.id) && !market.has(t.accountId))
+    .filter((t) => !t.category && t.categorisedBy !== 'user' && !t.transferGroup && !movesDirectorLoan(t) && !t.splits?.length && !people.has(t.id) && !cash.has(t.id) && !market.has(t.accountId))
     .sort((a, b) => b.date.localeCompare(a.date));
   for (const t of rows) {
     // Money in and money out under one description are different things (a refund, a purchase).

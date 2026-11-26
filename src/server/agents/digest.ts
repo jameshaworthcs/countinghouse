@@ -574,10 +574,12 @@ function documentsDigest(store: Store, analytics: Analytics, p: { from: ISODate;
     })),
   );
 
-  const companies = companiesView(store).map((c) => ({
+  const companies = companiesView(store, analytics.engine).map((c) => ({
     id: c.company.id,
     name: c.company.name,
     accountId: c.company.accountId ?? null,
+    // Your director's loan with it then (positive: it owes you), from the payments you marked and the balances you recorded.
+    directorLoan: c.directorLoan ? { accountId: c.directorLoan.accountId, balance: analytics.engine.balanceOn(c.directorLoan.accountId, p.asOf)?.value ?? null } : null,
     // Its valuation then: the latest made by that day.
     valuation: (() => {
       const v = c.company.valuations.filter((x) => x.asOf <= p.asOf).sort((a, b) => a.asOf.localeCompare(b.asOf)).at(-1);
@@ -691,6 +693,8 @@ export function monthTransactionsFile(store: Store, analytics: Analytics, month:
         category: t.category ?? null,
         categorisedBy: t.categorisedBy ?? null,
         ...(t.counterpartyAccountId ? { otherAccount: t.counterpartyAccountId } : {}),
+        // Money with your company (paid for it, a loan, pay or a dividend): paid for it and loans are not spending or income.
+        ...(t.company ? { company: t.company.id, companyAs: t.company.as } : {}),
         ...(t.notes ? { note: t.notes } : {}),
       }),
     );

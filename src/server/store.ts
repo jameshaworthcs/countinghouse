@@ -13,7 +13,8 @@ import { copyFile, mkdir, readdir, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import type { z } from 'zod';
 import type { ChangeDiff } from '../shared/audit';
-import { sideOf } from '../shared/accounts';
+import { ACCOUNT_TYPE_META, balanceModeOf, sideOf } from '../shared/accounts';
+import { companyMarkProblem } from '../shared/company';
 import { defaultCategories } from '../shared/categories';
 import { earmarkAccountIds } from '../shared/earmarks';
 import { sectionSpan } from '../shared/coverage';
@@ -533,6 +534,19 @@ export class Store extends EventEmitter {
     }
     for (const c of next.companies) {
       if (c.accountId && accountsById.get(c.accountId)?.companyId) issues.push({ file: 'companies.json', severity: 'warning', message: `Company "${c.id}" carries your shares on "${c.accountId}", which is a company's own account` });
+      const problem = c.directorLoanAccountId ? directorLoanLinkProblem(c, next.companies, next.accounts) : undefined;
+      if (problem) issues.push({ file: 'companies.json', severity: 'warning', message: `Company "${c.id}": ${problem}` });
+    }
+    // Director's loans (docs/DATA_FORMAT.md): rows of their own, and marks a hand edit put where they do not fit.
+    for (const a of next.accounts) {
+      if (ACCOUNT_TYPE_META[a.type].derived && (next.transactions.get(a.id)?.length ?? 0) > 0) issues.push({ file: `transactions/${a.id}`, severity: 'warning', message: `Account "${a.id}" is a director's loan: its movements are the payments you mark, so its own rows are left out of its balance` });
+    }
+    for (const list of next.transactions.values()) {
+      for (const t of list) {
+        if (!t.company) continue;
+        const problem = companyMarkProblem(t, t.company, { account: accountsById.get(t.accountId), company: next.companies.find((c) => c.id === t.company!.id), companyName: (id) => next.companies.find((c) => c.id === id)?.name });
+        if (problem) issues.push({ file: `transactions/${t.accountId}`, severity: 'warning', message: `Transaction ${t.id} is marked as money with a company where it does not fit (${problem}): its mark counts for nothing` });
+      }
     }
     const theirs = new Set(next.accounts.filter((a) => a.companyId).map((a) => a.id));
     for (const n of theirs.size ? recordsNaming(next, theirs) : []) issues.push({ file: n.file, severity: 'warning', message: `${n.what} names a company's own account (${n.accountId}): your records name only accounts of yours, so it is left out of your figures` });
@@ -1066,7 +1080,11 @@ export class Store extends EventEmitter {
           if (naming.length) throw new StoreError(`${a.name} cannot ${a.companyId ? 'become a company’s account' : 'become yours again'} while ${naming.map((n) => n.what).join(', ')} ${naming.length === 1 ? 'names' : 'name'} it: change ${naming.length === 1 ? 'that' : 'those'} first.`);
         }
       }
-      if (name === 'companies') checkCompanyEstateAccounts(after as Company[], before as Company[], this.state.accounts);
+      if (name === 'accounts') checkDirectorLoanAccounts(after as Account[], before as Account[], this.state.companies, (id) => (this.state.transactions.get(id)?.length ?? 0) > 0);
+      if (name === 'companies') {
+        checkCompanyEstateAccounts(after as Company[], before as Company[], this.state.accounts);
+        checkDirectorLoanLinks(after as Company[], before as Company[], this.state.accounts);
+      }
       // Only what this write adds or changes: one stored before (a hand edit) does not block the rest.
       const fresh = <T extends { id: string }>(list: T[]) => {
         const was = new Map((before as T[]).map((x) => [x.id, JSON.stringify(x)]));
@@ -1262,6 +1280,8 @@ export class Store extends EventEmitter {
   }
 
   async deleteAccount(accountId: string): Promise<void> {
+    const linked = this.state.companies.find((c) => c.directorLoanAccountId === accountId);
+    if (linked) throw new StoreError(`${linked.name} names it as your director’s loan account: take that link away first.`, 409);
     if (this.hasAccountData(accountId)) {
       throw new StoreError('Account still has transactions, balances or holdings. Close it instead, or delete its data first.', 409);
     }
@@ -1296,8 +1316,15 @@ export class Store extends EventEmitter {
       const touched = new Map<string, Set<string>>();
       let added = 0;
       const diff = new DiffCollector();
+      // Every row is checked before any is added: a refused one leaves nothing half-written.
+      const fresh: Transaction[] = [];
       for (const raw of txs) {
         const t = TransactionSchema.parse(raw);
+        if (this.txById.has(t.id)) continue;
+        this.checkRow(t, undefined);
+        fresh.push(t);
+      }
+      for (const t of fresh) {
         if (this.txById.has(t.id)) continue;
         diff.op('added', t);
         const list = this.state.transactions.get(t.accountId) ?? [];
@@ -1324,14 +1351,23 @@ export class Store extends EventEmitter {
       const out: Transaction[] = [];
       const stamp = nowISO();
       const diff = new DiffCollector();
+      // Every patch is worked out and checked before any is applied: a refused one leaves nothing
+      // half-written. A row patched twice takes both, in order.
+      const staged = new Map<string, Transaction>();
+      const plan: { id: string; current: Transaction; next: Transaction }[] = [];
       for (const { id, patch } of updates) {
-        const current = this.txById.get(id);
+        const current = staged.get(id) ?? this.txById.get(id);
         if (!current) throw new StoreError(`Unknown transaction ${id}`, 404);
         const { id: _i, accountId: _a, ...rest } = patch;
         const merged: Record<string, unknown> = { ...current, ...rest, updatedAt: stamp };
         // `undefined` in a patch means "clear this field".
         for (const [k, v] of Object.entries(rest)) if (v === undefined) delete merged[k];
         const next = TransactionSchema.parse(merged);
+        this.checkRow(next, this.txById.get(id));
+        staged.set(id, next);
+        plan.push({ id, current, next });
+      }
+      for (const { id, current, next } of plan) {
         diff.changed(current, next);
         const list = this.state.transactions.get(current.accountId)!;
         list[list.indexOf(current)] = next;
@@ -1349,6 +1385,22 @@ export class Store extends EventEmitter {
       if (out.length) this.changed(message, paths, diff.result());
       return out;
     });
+  }
+
+  /**
+   * A row a write adds or changes: never on a director's loan account (its movements are worked out
+   * from the payments you mark), and a mark of money with a company (`company`) only where it fits
+   * (shared/company.ts, `companyMarkProblem`). Checked when the row is new, or when its mark, link,
+   * amount, currency or split changes: a row stored before (a hand edit) does not block the rest.
+   */
+  private checkRow(next: Transaction, current: Transaction | undefined): void {
+    const account = this.state.accounts.find((a) => a.id === next.accountId);
+    if (!current && account && ACCOUNT_TYPE_META[account.type].derived) throw new StoreError(`${account.name} is a director’s loan account: its movements are the payments you mark as paid for or lent to its company, never rows of its own.`);
+    if (!next.company) return;
+    const same = current && JSON.stringify([current.company, current.transferGroup, current.amount, current.currency, current.splits]) === JSON.stringify([next.company, next.transferGroup, next.amount, next.currency, next.splits]);
+    if (same) return;
+    const problem = companyMarkProblem(next, next.company, { account, company: this.company(next.company.id), companyName: (id) => this.company(id)?.name });
+    if (problem) throw new StoreError(problem);
   }
 
   deleteTransactions(ids: string[], message: string): Promise<number> {
@@ -1676,6 +1728,51 @@ export function checkCompanyEstateAccounts(companies: readonly Company[], before
     if (was.get(c.id) === JSON.stringify(c)) continue;
     const account = c.accountId ? accounts.find((a) => a.id === c.accountId) : undefined;
     if (account?.companyId) throw new StoreError(`${account.name} is a company's own account, so it cannot carry your shares in ${c.name} in your estate.`);
+  }
+}
+
+/**
+ * Director's loan accounts (docs/DATA_FORMAT.md, accounts.json), for each account a write adds or
+ * changes: yours (never a company's own), moving with its movements (ledger, in pounds), with no rows
+ * of its own; and an account a company names as its director's loan stays one. Throws a 400.
+ */
+export function checkDirectorLoanAccounts(next: readonly Account[], before: readonly Account[], companies: readonly Company[], hasRows: (id: string) => boolean): void {
+  const was = new Map(before.map((a) => [a.id, a]));
+  for (const a of next) {
+    const prior = was.get(a.id);
+    if (prior && JSON.stringify(prior) === JSON.stringify(a)) continue;
+    if (ACCOUNT_TYPE_META[a.type].derived) {
+      if (a.companyId) throw new StoreError(`${a.name} is a director’s loan: it is yours (what the company owes you), never one of the company’s own accounts.`);
+      if (balanceModeOf(a) !== 'ledger') throw new StoreError(`${a.name} is a director’s loan: it moves with its movements, never at market.`);
+      if (a.currency !== 'GBP') throw new StoreError(`${a.name} is a director’s loan: it is kept in pounds.`);
+      if (prior && !ACCOUNT_TYPE_META[prior.type].derived && hasRows(a.id)) throw new StoreError(`${a.name} has rows of its own: a director’s loan’s movements are the payments you mark, so it cannot become one.`);
+    } else if (prior && ACCOUNT_TYPE_META[prior.type].derived) {
+      const linked = companies.find((c) => c.directorLoanAccountId === a.id);
+      if (linked) throw new StoreError(`${linked.name} names ${a.name} as your director’s loan account: take that link away before changing its type.`);
+    }
+  }
+}
+
+/** Why a company's director's loan account cannot be the one it names, or undefined. */
+export function directorLoanLinkProblem(c: Company, companies: readonly Company[], accounts: readonly Account[]): string | undefined {
+  if (!c.directorLoanAccountId) return undefined;
+  const account = accounts.find((a) => a.id === c.directorLoanAccountId);
+  if (!account) return `its director’s loan account "${c.directorLoanAccountId}" is not in your data.`;
+  if (!ACCOUNT_TYPE_META[account.type].derived) return `${account.name} is a ${ACCOUNT_TYPE_META[account.type].label.toLowerCase()}, not a director’s loan account.`;
+  if (account.companyId) return `${account.name} is a company’s own account: your director’s loan is yours.`;
+  if (c.accountId === account.id) return `${account.name} carries your shares in ${c.name}: a director’s loan is an account of its own.`;
+  const other = companies.find((x) => x.id !== c.id && x.directorLoanAccountId === account.id);
+  if (other) return `${account.name} is your director’s loan with ${other.name} already: each company has its own.`;
+  return undefined;
+}
+
+/** For each company a write adds or changes: its director's loan account fits (`directorLoanLinkProblem`). Throws a 400. */
+export function checkDirectorLoanLinks(companies: readonly Company[], before: readonly Company[], accounts: readonly Account[]): void {
+  const was = new Map(before.map((c) => [c.id, JSON.stringify(c)]));
+  for (const c of companies) {
+    if (was.get(c.id) === JSON.stringify(c)) continue;
+    const problem = directorLoanLinkProblem(c, companies, accounts);
+    if (problem) throw new StoreError(`${c.name}: ${problem}`);
   }
 }
 

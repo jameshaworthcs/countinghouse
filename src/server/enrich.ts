@@ -233,10 +233,12 @@ export async function enrich(store: Store, opts: { accountIds?: string[]; rows?:
   for (const [companyId, accounts] of companies) sides.push([store.companyTransactions(companyId), companyTransferReader(store, accounts), accounts, true]);
   for (const [rows, reader, accounts, company] of sides) {
     const viewed = rows.map(view);
-    const candidates = viewed.filter((t) => !t.transferGroup && !skipped(t) && inScope(t));
+    // A row marked as money with a company of yours (shared/company.ts) is never a transfer between
+    // your accounts: it is neither linked nor a partner for another row.
+    const candidates = viewed.filter((t) => !t.transferGroup && !t.company && !skipped(t) && inScope(t));
     const byAmount = new Map<number, Transaction[]>();
     for (const t of viewed) {
-      if (t.transferGroup || skipped(t)) continue;
+      if (t.transferGroup || t.company || skipped(t)) continue;
       const k = toMinor(t.amount);
       (byAmount.get(k) ?? byAmount.set(k, []).get(k)!).push(t);
     }
@@ -295,10 +297,13 @@ export async function enrich(store: Store, opts: { accountIds?: string[]; rows?:
  *   and no category at all. A category, rule or counterparty it carries is taken away, whoever set
  *   it: a category is one of yours, so on a company's row it is in the wrong place (from before its
  *   account was a company's, or set by hand). Company coding is separate, and comes later.
- * A payee you set stays.
+ * A payee you set stays, and a mark of money with a company is taken away (it is for your own rows).
  */
 export function companyRowPatch(raw: Transaction, t: Transaction, accountOf: (id: string) => Account | undefined, accounts: readonly Account[]): Partial<Transaction> {
   const patch: Partial<Transaction> = {};
+  // A mark of money with a company is for your own rows (shared/company.ts): on a company's row, from
+  // before its account was the company's or a hand edit, it is in the wrong place.
+  if (raw.company !== undefined) patch.company = undefined;
   const place = tidyPlace(t.merchant);
   if (place !== raw.place) patch.place = place;
   const self = accountOf(t.accountId);
@@ -600,7 +605,8 @@ export async function linkTransfers(store: Store, ids: string[], message: string
   for (const [side, wanted] of sides) {
     const want = new Set(wanted);
     const accounts = side ? store.companyAccounts(side) : store.accounts;
-    const all = (side ? store.companyTransactions(side) : store.transactions()).filter((t) => !t.transferGroup);
+    // A row marked as money with a company of yours is never a transfer between your accounts.
+    const all = (side ? store.companyTransactions(side) : store.transactions()).filter((t) => !t.transferGroup && !t.company);
     const byAmount = new Map<number, Transaction[]>();
     for (const t of all) (byAmount.get(toMinor(t.amount)) ?? byAmount.set(toMinor(t.amount), []).get(toMinor(t.amount))!).push(t);
     const pairs = pairTransfers(store, all.filter((t) => want.has(t.id)), byAmount, side ? companyTransferReader(store, accounts) : transferReader(store));

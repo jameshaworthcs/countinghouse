@@ -1,6 +1,7 @@
 // Pay, month by month: each payslip's figures (gross, tax, NI, pension, student loan), what reached
 // your bank, and pay seen in the bank with no payslip (docs/FORMULAS.md §17).
 
+import { movesDirectorLoan } from '../../shared/company';
 import type { EarnedPayroll, PayEmployer, PayMonth, PayResponse } from '../../shared/api';
 import { addDays, diffDays, formatDate, formatMonth, maxDate, today, type ISODate } from '../../shared/dates';
 import { formatMoney, fromMinor, toMinor } from '../../shared/money';
@@ -151,7 +152,8 @@ export function pairPay(store: Store, ty: TaxYear): { periods: PayPeriod[]; othe
   const payslipFigures = store.figures.filter((f) => f.kind !== 'earned_pay' && isPayslipFigure(store, f) && (f.taxYear === ty.label || (!f.taxYear && inYear(f.periodEnd ?? f.date, ty))));
   // Pay received: salary credits in the year, plus the days either side of it for pay dates near its
   // edges, and later ones for pay that is owed.
-  const salary = store.transactions().filter((t) => t.category === 'salary' && t.amount > 0 && t.date >= addDays(ty.start, -PAY_MATCH_DAYS));
+  // Money the company lent you back, or a cost of its you paid, is not pay, whatever its category.
+  const salary = store.transactions().filter((t) => t.category === 'salary' && t.amount > 0 && !movesDirectorLoan(t) && t.date >= addDays(ty.start, -PAY_MATCH_DAYS));
 
   // Payslips: one pay period per job (else employer) and period.
   const byEmployer = new Map<string, { payer: string; names: string[]; payrollNumbers: string[]; employmentId?: string; periods: Map<string, Figure[]> }>();

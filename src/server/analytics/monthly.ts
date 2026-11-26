@@ -37,7 +37,7 @@ const TIPS: Record<string, string> = {
 };
 
 function wantFor(a: Account): MonthlyItem['want'] {
-  if (a.type === 'property' || a.type === 'other_asset' || a.type === 'db_pension' || a.type === 'state_pension' || a.type === 'student_loan' || a.type === 'mortgage') return 'balance';
+  if (a.type === 'property' || a.type === 'other_asset' || a.type === 'db_pension' || a.type === 'state_pension' || a.type === 'student_loan' || a.type === 'mortgage' || a.type === 'director_loan') return 'balance';
   if (ACCOUNT_TYPE_META[a.type].expectsTransactions && balanceModeOf(a) === 'ledger') return 'statement';
   return 'screenshot';
 }
@@ -49,6 +49,7 @@ function tipFor(a: Account, want: MonthlyItem['want']): string {
   if (want === 'screenshot') return 'Screenshot the account value (and holdings or contributions if shown).';
   if (a.type === 'property') return 'Update the estimated value a few times a year (e.g. from a valuation site).';
   if (a.type === 'state_pension') return 'Check gov.uk/check-state-pension once a year and record the forecast.';
+  if (a.type === 'director_loan') return 'Mark payments with your company as you go; once a year, record the director’s loan figure from its filed accounts.';
   return 'Update the balance from your latest statement.';
 }
 

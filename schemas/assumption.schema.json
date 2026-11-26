@@ -84,7 +84,8 @@
                 "loan",
                 "mortgage",
                 "student_loan",
-                "other_liability"
+                "other_liability",
+                "director_loan"
               ]
             }
           },

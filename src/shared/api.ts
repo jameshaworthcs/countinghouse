@@ -2,6 +2,7 @@
 
 import type { AccessGroup, WrapperGroup } from './accounts';
 import type { ActionState } from './actions';
+import type { DirectorLoanKind } from './company';
 import type { PersonSuggestion } from './people';
 import type {
   InferenceProvenance,
@@ -851,6 +852,8 @@ export interface DataHealthResponse {
   stale: { accountId: string; name: string; days: number }[];
   /** Deposits per banking licence; `near` from 80% of the limit, `over` above it. */
   fscs: { group: string; institutions: string[]; total: number; limit: number; over: boolean; near: boolean }[];
+  /** Director's loans with a warning today (docs/UK_RULES.md, "Companies"): you owe the company, or owed it more than the benefit threshold this tax year. */
+  directorLoans?: { accountId: string; name: string; companyName: string; balance: number | null; warnings: DirectorLoanWarning[] }[];
 }
 
 export interface BootstrapResponse {
@@ -886,6 +889,8 @@ export interface AccountDetailResponse {
   paidIn?: { amount: number; source: 'provider' | 'transactions'; asOf?: string };
   /** A company's account: its own coverage grid (it is never in GET /api/coverage, which is yours). */
   coverage?: CoverageResponse;
+  /** A director's loan account: its company, its movements (the payments you marked) and its warnings. */
+  directorLoan?: DirectorLoanView;
 }
 
 export interface TransactionsResponse {
@@ -979,6 +984,39 @@ export interface ImportHistoryResponse {
 }
 
 /** A transaction a proposed change is about, as it is now (or was, for a decided proposal). */
+/** One movement of a director's loan (analytics/director-loan.ts), from the row of yours it comes from. */
+export interface DirectorLoanMovement {
+  /** `dlm_` and the source row's own hex: the same every time it is worked out. */
+  id: string;
+  /** The row of yours it comes from, and its account. */
+  transactionId: string;
+  accountId: string;
+  date: string;
+  /** Signed from your side: positive grows what the company owes you. The source row's amount, negated. */
+  amount: number;
+  as: 'paid-for' | 'loan';
+  kind: DirectorLoanKind;
+  description: string;
+  payee?: string;
+}
+
+/** A director's loan's warnings (docs/UK_RULES.md, "Companies"). */
+export interface DirectorLoanWarning {
+  kind: 's455' | 'beneficial-loan';
+  title: string;
+  detail: string;
+}
+
+/** A director's loan account's own part of its page. No company: no company names it yet. */
+export interface DirectorLoanView {
+  company?: { id: string; name: string };
+  /** Newest first. */
+  movements: (DirectorLoanMovement & { accountName: string })[];
+  warnings: DirectorLoanWarning[];
+  /** The most you owed the company on a day of this tax year, when you owed it any. */
+  owedMost?: { amount: number; date: string };
+}
+
 export interface ProposalRow {
   id: string;
   accountId: string;
@@ -993,6 +1031,8 @@ export interface ProposalRow {
   partner?: { id: string; accountId: string; date: string; amount: number; description: string };
   /** The document it came from. */
   source?: { importId: string; fileName?: string };
+  /** Its mark of money with a company of yours, as it is now (a decided proposal: as it was). */
+  company?: Transaction['company'];
   /** It is no longer in your data. */
   missing?: true;
 }
@@ -1027,6 +1067,8 @@ export interface ProposalChangeView {
   returnEntry?: { what: string; value: string };
   /** Set aside: what the change does, in words, and the decision of yours it replaces. */
   earmark?: { what: string; replaces?: string };
+  /** A mark set or taken away: the company's name, and the mark it replaces, in words. */
+  mark?: { company?: string; was?: string };
 }
 
 /** Set aside's figures, for a proposal's effect: before it and as it would leave them. */
@@ -1505,6 +1547,8 @@ export interface CompanyView {
   /** Each dividend: a voucher (with the credit that paid it, when found), or a credit with no voucher. */
   dividends: { date: string; amount: number; taxYear?: string; figureId?: string; importId?: string; paidIn?: { transactionId: string; accountId: string; date: string } }[];
   dividendsTotal: number;
+  /** Your director's loan with it (`directorLoanAccountId`): what it owes you now (negative: you owe it). */
+  directorLoan?: { accountId: string; name: string; balance: number | null; asOf: string | null; estimated: boolean };
 }
 
 /** Where one part of an account's terms is from: the latest document that gives it. */
@@ -1984,11 +2028,11 @@ export interface MonthSummary {
 
 /** One item of where a month's money went. */
 export interface MonthWhereItem {
-  id: 'cash' | 'cards' | 'invested' | 'loans' | 'unknown' | 'unexplained';
+  id: 'cash' | 'cards' | 'invested' | 'loans' | 'company' | 'unknown' | 'unexplained';
   label: string;
-  /** Positive: money that went there (kept in cash, paid off cards, invested, sent away). */
+  /** Positive: money that went there (kept in cash, paid off cards, invested, paid for or lent to your company, sent away). */
   amount: number;
-  /** By account (cash, cards, invested), or by who it went to (unknown), the largest first. */
+  /** By account (cash, cards, invested), by company (company), or by who it went to (unknown), the largest first. */
   parts: { id: string; name: string; amount: number; count?: number }[];
 }
 

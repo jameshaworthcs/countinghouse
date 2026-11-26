@@ -2,6 +2,7 @@
 // shows where each one came from, and flags gaps. It is an aid for filling the return yourself, not
 // tax advice; every figure must be checked against your own records before you submit.
 
+import { movesDirectorLoan } from '../../shared/company';
 import type { Alert, MissingDaysView, SaEmployment, SaItem, SaPaymentLink, SaSection, SaSource, SelfAssessmentResponse } from '../../shared/api';
 import { diffDays, formatDate, formatSpan, today, type ISODate } from '../../shared/dates';
 import { formatMoney, fromMinor, toMinor } from '../../shared/money';
@@ -82,7 +83,7 @@ export function selfAssessment(store: Store, label?: string, engine?: BalanceEng
   const bik = figuresOf(store, ty, 'benefit_in_kind');
   // Student loan deducted, like pay: one source per job.
   const slDeducted = jobs.flatMap((e) => e.chosen.student_loan_deducted?.figures ?? []);
-  const salaryTx = store.transactions().filter((t) => inYear(t.date, ty) && t.category === 'salary' && t.amount > 0);
+  const salaryTx = store.transactions().filter((t) => inYear(t.date, ty) && t.category === 'salary' && t.amount > 0 && !movesDirectorLoan(t));
   const employment: SaItem[] = [
     {
       id: 'pay',
@@ -253,7 +254,7 @@ export function selfAssessment(store: Store, label?: string, engine?: BalanceEng
       sources: childBenefit.map((t) => ({ type: 'transaction' as const, id: t.id, date: t.date, label: t.description, amount: t.amount })),
     });
   }
-  const side = store.transactions().filter((t) => inYear(t.date, ty) && t.category === 'side-income' && t.amount > 0);
+  const side = store.transactions().filter((t) => inYear(t.date, ty) && t.category === 'side-income' && t.amount > 0 && !movesDirectorLoan(t));
   const sideFigures = figuresOf(store, ty, 'self_employment_income');
   const sideTotal = fromMinor(side.reduce((s, t) => s + toMinor(t.amount), 0)) + sumFigures(sideFigures);
   if (sideTotal > 0) {

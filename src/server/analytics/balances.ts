@@ -29,10 +29,11 @@ import { parseTaxYear, taxYearOf } from '../../shared/uk';
 import type { BalanceBasis } from '../../shared/api';
 import type { Account, BalanceEvidence, BalanceSnapshot, Figure, HoldingsSnapshot, Settings, Transaction } from '../../shared/schema';
 import type { Store } from '../store';
+import { directorLoanRows } from './director-loan';
 import { covers, holdingsPath, indexNear, PriceBook, type HoldingsPath, type PriceIndex } from './prices';
 
 /** What the engine reads: a store, or a store as a proposal would leave it; holdings and prices when it has them. */
-export type BalanceSource = Pick<Store, 'accounts' | 'transactions' | 'balances' | 'settings'> & Partial<Pick<Store, 'holdings' | 'instruments' | 'research' | 'figures' | 'coverageConfirmations'>>;
+export type BalanceSource = Pick<Store, 'accounts' | 'transactions' | 'balances' | 'settings'> & Partial<Pick<Store, 'holdings' | 'instruments' | 'research' | 'figures' | 'coverageConfirmations' | 'companies'>>;
 
 /**
  * Whether stretches you confirmed nothing is missing from cover every day from `from` to `to`
@@ -386,7 +387,9 @@ export class BalanceEngine {
     this.prices = store.research && store.instruments && store.holdings ? new PriceBook(store.research) : undefined;
     for (const account of store.accounts) {
       const mode = balanceModeOf(account);
-      const txs = store.transactions(account.id);
+      // A director's loan has no rows of its own: its movements are the payments you marked as paid
+      // for its company or lent to it, worked out (director-loan.ts) and read here as its rows.
+      const txs = ACCOUNT_TYPE_META[account.type].derived ? directorLoanRows(store, account) : store.transactions(account.id);
       const snaps = store.balances(account.id);
       const anchors = new Map<ISODate, Anchor>();
       if (mode === 'ledger') {

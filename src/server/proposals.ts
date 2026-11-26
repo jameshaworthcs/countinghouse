@@ -21,6 +21,7 @@ import type { EarmarkFigures, ProposalBalance, ProposalChangeView, ProposalCheck
 import { ACCOUNT_TYPE_META } from '../shared/accounts';
 import { agreementPattern, isScheduledPayment } from '../shared/agreements';
 import { CategoryIndex } from '../shared/categories';
+import { COMPANY_MARK_LABELS, companyMarkProblem, sameMark } from '../shared/company';
 import { Categoriser, isWrapperAccount, linkedPayee, transferLegCategory } from '../shared/categorise';
 import { addDays, diffDays, formatDate, today } from '../shared/dates';
 import { formatMoney, fromMinor, isMoney, toMinor } from '../shared/money';
@@ -86,6 +87,8 @@ interface ChangeResult {
   returnEntry?: { what: string; value: string };
   /** Set aside: what the change does, in words, and the decision of yours it replaces. */
   earmark?: { what: string; replaces?: string };
+  /** A mark set or taken away: the company's name, and the mark it replaces, in words. */
+  mark?: { company?: string; was?: string };
 }
 
 interface Outcome {
@@ -213,7 +216,7 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
   // A receipt, or a set-aside decision, is yours on a row though it is kept beside it.
   const receiptsOn = new Set([...store.receipts.map((r) => r.transactionId), ...Object.keys(store.earmarks?.decisions ?? {})]);
   /** Something you set on the row (a transfer link is not: a proposal may undo one). */
-  const yours = (t: Transaction) => t.categorisedBy === 'user' || t.payeeSetBy === 'user' || Boolean(t.notes || t.tags?.length || t.splits?.length || t.corrections?.length || t.seenIn?.length) || receiptsOn.has(t.id);
+  const yours = (t: Transaction) => t.categorisedBy === 'user' || t.payeeSetBy === 'user' || t.company?.setBy === 'user' || Boolean(t.notes || t.tags?.length || t.splits?.length || t.corrections?.length || t.seenIn?.length) || receiptsOn.has(t.id);
   const accountName = (id: string) => store.account(id)?.name ?? id;
   let categoriserMemo: Categoriser | undefined;
   const categoriser = () => (categoriserMemo ??= categoriserFor(store));
@@ -256,8 +259,8 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
   };
   const gone = (id: string) => `Transaction ${id} is no longer in your data.`;
   /** What you added to a row beyond a category or payee, which taking it away would lose. */
-  const keptByYou = (t: Transaction) => Boolean(t.notes || t.tags?.length || t.splits?.length || t.corrections?.length || t.seenIn?.length) || receiptsOn.has(t.id);
-  const KEPT_BY_YOU = 'It has something of yours on it (a note, tag, split, correction, receipt, set-aside decision or details you added from another document), so a proposal leaves it to you.';
+  const keptByYou = (t: Transaction) => Boolean(t.notes || t.tags?.length || t.splits?.length || t.corrections?.length || t.seenIn?.length || t.company?.setBy === 'user') || receiptsOn.has(t.id);
+  const KEPT_BY_YOU = 'It has something of yours on it (a note, tag, split, correction, receipt, set-aside decision, a mark of money with your company or details you added from another document), so a proposal leaves it to you.';
   const remove = (t: Transaction) => {
     if (!out.touchedRows.has(t.id)) out.touchedRows.set(t.id, store.transaction(t.id)!);
     out.patches.delete(t.id);
@@ -294,6 +297,9 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
         if (a.transferGroup && a.transferGroup === b.transferGroup) return { alreadySo: true };
         if (a.transferGroup) return { problem: linkedNow(a) };
         if (b.transferGroup) return { problem: linkedNow(b) };
+        // Money with a company of yours is not a transfer between your accounts.
+        const marked = [a, b].find((t) => t.company);
+        if (marked) return { problem: `${brief(marked, accountName)} is marked as money with ${store.company(marked.company!.id)?.name ?? marked.company!.id} (${COMPANY_MARK_LABELS[marked.company!.as].toLowerCase()}), not a transfer between your accounts.` };
         const accA = account(a.accountId);
         const accB = account(b.accountId);
         if (!accA || !accB) return { problem: `Account ${!accA ? a.accountId : b.accountId} is no longer in your data.` };
@@ -330,6 +336,23 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
         patch(t, { category: c.category, categorisedBy: 'user', ...(untransferred && t.counterpartyAccountId ? { counterpartyAccountId: undefined } : {}), ...(payee && payee !== t.payee ? { payee } : {}) });
         return {};
       }
+      case 'set_company': {
+        const t = row(c.transaction);
+        if (!t) return { problem: gone(c.transaction) };
+        const markName = (m: { id: string; as: keyof typeof COMPANY_MARK_LABELS }) => `${COMPANY_MARK_LABELS[m.as]}: ${store.company(m.id)?.name ?? m.id}`;
+        if (sameMark(t.company, c.company)) return { alreadySo: true };
+        // Yours wins: a mark you set is not changed or taken away by a proposal.
+        const was = store.transaction(t.id)?.company;
+        if (was?.setBy === 'user') return { problem: `You marked it yourself (${markName(was)}), so a proposal leaves it to you: change it on the Transactions page if you want to.` };
+        if (c.company === null) {
+          patch(t, { company: undefined });
+          return { mark: { ...(t.company ? { was: markName(t.company) } : {}) } };
+        }
+        const problem = companyMarkProblem(t, c.company, { account: account(t.accountId), company: store.company(c.company.id), companyName: (id) => store.company(id)?.name });
+        if (problem) return { problem };
+        patch(t, { company: { id: c.company.id, as: c.company.as, setBy: 'agent' } });
+        return { mark: { company: store.company(c.company.id)!.name, ...(t.company ? { was: markName(t.company) } : {}) } };
+      }
       case 'set_note': {
         const t = row(c.transaction);
         if (!t) return { problem: gone(c.transaction) };
@@ -346,7 +369,7 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
         if (t.transferGroup) return { problem: linkedNow(t) };
         if (c.sameAs.includes(t.id)) return { problem: 'It cannot repeat itself.' };
         // A copy with something of yours on it (a category, note, split, receipt…) is never taken away.
-        if (yours(store.transaction(t.id)!)) return { problem: 'It has something of yours on it (a category, payee, note, tag, split, correction, receipt, set-aside decision or details you added from another document), so a proposal leaves it to you.' };
+        if (yours(store.transaction(t.id)!)) return { problem: 'It has something of yours on it (a category, payee, note, tag, split, correction, receipt, set-aside decision, a mark of money with your company or details you added from another document), so a proposal leaves it to you.' };
         let sum = 0;
         for (const id of c.sameAs) {
           const s = row(id);
@@ -814,7 +837,8 @@ function changesNothing(store: Store, o: Outcome): boolean {
   if ([...o.moves.values()].some((m) => m.to !== m.balance.accountId)) return false;
   for (const [id, patch] of o.patches) {
     const t = store.transaction(id) as Record<string, unknown> | undefined;
-    if (!t || Object.entries(patch).some(([k, v]) => t[k] !== v)) return false;
+    // A value may be an object (a mark of money with a company): compared by what it says.
+    if (!t || Object.entries(patch).some(([k, v]) => JSON.stringify(t[k]) !== JSON.stringify(v))) return false;
   }
   for (const [id, a] of o.accounts) {
     const was = store.account(id);
@@ -838,6 +862,7 @@ function namedRows(c: ProposedChange): string[] {
   switch (c.kind) {
     case 'unlink_transfer':
     case 'set_category':
+    case 'set_company':
     case 'set_note':
       return [c.transaction];
     case 'link_transfer':
@@ -1154,6 +1179,7 @@ export class ProposalService extends EventEmitter {
         ...(t.category ? { category: t.category } : {}),
         ...(t.categorisedBy ? { categorisedBy: t.categorisedBy } : {}),
         ...(t.transferGroup ? { transferGroup: t.transferGroup } : {}),
+        ...(t.company ? { company: t.company } : {}),
         ...(partner ? { partner: { id: partner.id, accountId: partner.accountId, date: partner.date, amount: partner.amount, description: partner.description } } : {}),
         ...(t.source?.importId ? { source: { importId: t.source.importId, ...(importName.has(t.source.importId) ? { fileName: importName.get(t.source.importId)! } : {}) } } : {}),
       };
