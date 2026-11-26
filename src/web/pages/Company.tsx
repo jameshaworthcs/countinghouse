@@ -156,6 +156,14 @@ function TodoCard({ view, onRecord }: { view: CompanyBooksResponse; onRecord: (d
           ))}
         </ul>
       )}
+      {view.withinCharge?.assumed && (
+        <p className="mt-3 text-[12.5px] text-ink-3">
+          <Badge tone="muted">Assumed</Badge> Its Corporation Tax periods start at incorporation: the records do not say when it came within the charge (began business, or had income such as interest). Set it in Settings.
+        </p>
+      )}
+      {view.withinCharge && view.withinCharge.from === null && (
+        <p className="mt-3 text-[12.5px] text-ink-3">Dormant for Corporation Tax: no CT600 or payment is listed. If HMRC sends a notice to deliver a Company Tax Return, one is due all the same.</p>
+      )}
       {view.problems.length > 0 && (
         <Callout tone="warn" className="mt-3" title="Its records need a look">
           <ul className="list-disc pl-4">
@@ -253,7 +261,7 @@ function PeriodsField({ label, hint, value, onChange }: { label: string; hint: R
   );
 }
 
-type Draft = Omit<CompanyBooksSetup, 'tradeStartedOn'> & { trade: 'incorporation' | 'not-yet' | 'on'; tradeOn: string; hasVat: boolean; hasPaye: boolean };
+type Draft = Omit<CompanyBooksSetup, 'tradeStartedOn' | 'withinChargeFrom'> & { within: 'assumed' | 'on' | 'dormant'; withinOn: string; tradeOn: string; hasVat: boolean; hasPaye: boolean };
 
 function draftOf(books: CompanyBooks | null): Draft {
   const vat = books?.vat ?? { registeredFrom: '', scheme: 'cash' as const, schedule: [{ from: '', stagger: 'quarterly-1' }] };
@@ -266,7 +274,8 @@ function draftOf(books: CompanyBooks | null): Draft {
     paye: books?.paye ?? { from: '' },
     ...(books?.confirmationStatement ? { confirmationStatement: books.confirmationStatement } : {}),
     ...(books?.deadlinesFrom ? { deadlinesFrom: books.deadlinesFrom } : {}),
-    trade: books?.tradeStartedOn === null ? 'not-yet' : books?.tradeStartedOn ? 'on' : 'incorporation',
+    within: books?.withinChargeFrom === null ? 'dormant' : books?.withinChargeFrom ? 'on' : 'assumed',
+    withinOn: books?.withinChargeFrom ?? '',
     tradeOn: books?.tradeStartedOn ?? '',
     hasVat: Boolean(books?.vat),
     hasPaye: Boolean(books?.paye),
@@ -285,7 +294,8 @@ function setupOf(d: Draft): CompanyBooksSetup {
     ...(d.hasPaye && d.paye ? { paye: { from: d.paye.from, ...(d.paye.closedOn ? { closedOn: d.paye.closedOn } : {}) } } : {}),
     ...(d.confirmationStatement?.nextMadeUpTo ? { confirmationStatement: d.confirmationStatement } : {}),
     ...(d.deadlinesFrom ? { deadlinesFrom: d.deadlinesFrom } : {}),
-    ...(d.trade === 'not-yet' ? { tradeStartedOn: null } : d.trade === 'on' && d.tradeOn ? { tradeStartedOn: d.tradeOn } : {}),
+    ...(d.within === 'dormant' ? { withinChargeFrom: null } : d.within === 'on' && d.withinOn ? { withinChargeFrom: d.withinOn } : {}),
+    ...(d.tradeOn ? { tradeStartedOn: d.tradeOn } : {}),
   };
 }
 
@@ -295,7 +305,7 @@ function BooksForm({ view, onSaved }: { view: CompanyBooksResponse; onSaved?: ()
   const set = (patch: Partial<Draft>) => setD((x) => ({ ...x, ...patch }));
   const vat = d.vat!;
   const setVat = (patch: Partial<NonNullable<Draft['vat']>>) => set({ vat: { ...vat, ...patch } });
-  const save = useApiMutation(() => api<{ updatedAt: string }>(`/companies/${view.company.id}/books`, { method: 'PUT', body: { books: setupOf(d), was: view.books?.updatedAt ?? null } }), {
+  const save = useApiMutation(() => api<{ updatedAt: string }>(`/companies/${view.company.id}/books`, { method: 'PUT', body: { books: setupOf(d), was: view.books?.updatedAt ?? null, company: view.company.id } }), {
     onSuccess: () => {
       toast({ tone: 'good', text: 'Saved' });
       onSaved?.();
@@ -344,20 +354,24 @@ function BooksForm({ view, onSaved }: { view: CompanyBooksResponse; onSaved?: ()
             <span className="text-[12px] text-ink-3">{ard ? `The day each period ends: ${formatMonthDay(ard)}.` : `The default is ${defaultArd} (CA 2006 s391(4)).`} A later change is a period below.</span>
           </div>
         </div>
-        <PeriodsField label="Accounting periods that differ" hint="A period shortened or extended by notice (CA 2006 s392), never over 18 months. The next ones follow on from its end." value={d.periods} onChange={(periods) => set({ periods })} />
+        <PeriodsField label="Accounting periods that differ" hint="A period shortened or extended by notice (CA 2006 s392), never over 18 months: copy it from the Companies House register (the app does not check the 5-year limit on extensions, s392(3)). The next ones follow on from its end." value={d.periods} onChange={(periods) => set({ periods })} />
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Trade started" hint="It starts its first Corporation Tax period. Not yet: no Corporation Tax deadlines are worked out.">
-            <Select value={d.trade} onChange={(e) => set({ trade: e.target.value as Draft['trade'] })}>
-              <option value="incorporation">From incorporation</option>
-              <option value="on">On a day</option>
-              <option value="not-yet">Not yet</option>
+          <Field label="Within the charge to Corporation Tax" hint="From when it carried on business or had income, interest on its bank account included (CTA 2009 s9): its first Corporation Tax period starts then.">
+            <Select value={d.within} onChange={(e) => set({ within: e.target.value as Draft['within'] })}>
+              <option value="assumed">From incorporation (assumed)</option>
+              <option value="on">From a day</option>
+              <option value="dormant">Dormant for Corporation Tax</option>
             </Select>
           </Field>
-          {d.trade === 'on' && (
-            <Field label="Trade started on">
-              <Input type="date" value={d.tradeOn} onChange={(e) => set({ tradeOn: e.target.value })} />
+          {d.within === 'on' && (
+            <Field label="Within the charge from">
+              <Input type="date" value={d.withinOn} onChange={(e) => set({ withinOn: e.target.value })} />
             </Field>
           )}
+          {d.within === 'dormant' && <p className="self-end text-[12px] text-ink-3">No CT600 or payment is listed. If HMRC sends a notice to deliver a Company Tax Return, one is due all the same: add its period below.</p>}
+          <Field label="Trade started on" hint="Starting to trade ends a Corporation Tax period (CTA 2009 s10(1)(d)). Empty: not yet, or not known.">
+            <Input type="date" value={d.tradeOn} onChange={(e) => set({ tradeOn: e.target.value })} />
+          </Field>
         </div>
         <PeriodsField label="Corporation Tax periods that differ" hint="As HMRC’s notice sets them, each 12 months at most (CTA 2009 s10)." value={d.ctPeriods} onChange={(ctPeriods) => set({ ctPeriods })} />
 
@@ -687,7 +701,8 @@ export default function Company() {
   const [recording, setRecording] = useState<FilingDraft | null | undefined>(undefined);
   if (q.error) return <ErrorNote error={q.error} />;
   const view = q.data;
-  if (!view) return <Loading />;
+  // The previous company's data shows while another loads: wait for this one's.
+  if (!view || view.company.id !== id) return <Loading />;
   const others = (list.data ?? []).filter((c) => c.id !== id);
   return (
     <div>
@@ -731,7 +746,8 @@ export default function Company() {
               </>
             ) : (
               <>
-                <BooksForm key={view.books.updatedAt} view={view} />
+                {/* Keyed by the company too: switching company never leaves one's draft under another's id. */}
+                <BooksForm key={`${view.company.id}:${view.books.updatedAt}`} view={view} />
                 <FilingsCard view={view} onRecord={() => setRecording(null)} />
               </>
             )}

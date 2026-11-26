@@ -745,9 +745,12 @@ export function ChangeBody({ change, view }: { change: ProposedChange; view: Pro
               <span className="text-ink-3">Accounting periods set:</span> {b.periods.map((p) => `${formatDate(p.start)} – ${formatDate(p.end)}`).join('; ')}
             </div>
           )}
-          {b.tradeStartedOn !== undefined && (
+          <div>
+            <span className="text-ink-3">Within the charge to Corporation Tax:</span> {b.withinChargeFrom === null ? 'dormant for Corporation Tax' : b.withinChargeFrom ? `from ${formatDate(b.withinChargeFrom)}` : 'not said (assumed from incorporation)'}
+          </div>
+          {b.tradeStartedOn && (
             <div>
-              <span className="text-ink-3">Trade started:</span> {b.tradeStartedOn ? formatDate(b.tradeStartedOn) : 'not yet'}
+              <span className="text-ink-3">Trade started:</span> {formatDate(b.tradeStartedOn)}
             </div>
           )}
           {b.vat && (
