@@ -765,6 +765,11 @@ async function demoIntelligence(store: Store) {
   // and pay the Lifetime ISA saving up to what they brought in. `--no-earmarks` leaves it out.
   if (!args.has('--no-earmarks')) {
     const text = (value: string) => ({ field: 'description' as const, op: 'contains' as const, value, caseSensitive: false });
+    // One saving decided as money put back (the boiler loan, repaid), so the page shows a decision.
+    const saving = store.transactions('current-account').filter((t) => t.description === 'EXAMPLE SAVINGS TRANSFER' && t.date >= START)[2];
+    const decisions = saving
+      ? { [saving.id]: { pot: 'flat-money', parts: [{ effect: 'to-pot' as const, amount: 300 }], reason: 'Paid back what I borrowed for the boiler (demo)', seen: { accountId: saving.accountId, date: saving.date, amount: saving.amount }, decidedAt: nowISO() } }
+      : {};
     await store.setEarmarks(
       {
         everyday: ['current-account', 'rewards-card'],
@@ -775,7 +780,8 @@ async function demoIntelligence(store: Store) {
             name: 'Flat money',
             purpose: 'Side income kept for the flat (demo)',
             start: START,
-            opening: 0,
+            // Some set aside at the start: the first month's saving is more than it held, to check.
+            opening: SPARSE ? 0 : 150,
             rules: [
               { id: 'marking', name: 'Marking pay', effect: 'source', text: text('EXAMPLE MARKING LTD'), direction: 'in' },
               { id: 'dividend', name: 'Studio dividend', effect: 'source', category: 'dividends' },
@@ -784,7 +790,7 @@ async function demoIntelligence(store: Store) {
             checks: [],
           },
         ],
-        decisions: {},
+        decisions,
         updatedAt: nowISO(),
       },
       'demo: set aside',

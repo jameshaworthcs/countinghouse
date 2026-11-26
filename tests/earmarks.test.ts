@@ -303,4 +303,36 @@ describe('set aside: in the app, by proposals', () => {
     // Against no decision, it no longer fits.
     expect((await decide([{ effect: 'to-pot', amount: 200 }], null, 'Stale')).status).toBe(422);
   });
+
+  it('the owner decides, checks and starts again on the page; no token can', async () => {
+    await app.ctx.store.setEarmarks(base());
+    const asOwner = (p: string, body: unknown) => owner(p, body);
+    // A token can't decide: it proposes instead.
+    const byToken = await req('/api/earmarks/decisions', { method: 'POST', headers: { ...CSRF, authorization: agent }, body: JSON.stringify({ decisions: [{ pot: 'student-money', transaction: toSaver.id, parts: [{ effect: 'topped-up', amount: 200 }] }] }) });
+    expect(byToken.status).toBe(403);
+    // The preview says what deciding would do, writing nothing.
+    const preview = (await (await asOwner('/api/earmarks/preview', { decisions: [{ pot: 'student-money', transaction: toSaver.id, parts: [{ effect: 'topped-up', amount: 200 }] }] })).json()) as { before: { setAside: number }; after: { setAside: number } };
+    expect([preview.before.setAside, preview.after.setAside]).toEqual([600, 800]);
+    expect(app.ctx.store.earmarks!.decisions).toEqual({});
+    // A decision that doesn't fit is refused with why.
+    const bad = await asOwner('/api/earmarks/decisions', { decisions: [{ pot: 'student-money', transaction: toSaver.id, parts: [{ effect: 'from-pot', amount: 200 }] }] });
+    expect(bad.status).toBe(422);
+    const decided = (await (await asOwner('/api/earmarks/decisions', { decisions: [{ pot: 'student-money', transaction: toSaver.id, parts: [{ effect: 'topped-up', amount: 200 }], reason: 'Birthday money, saved' }] })).json()) as EarmarksResponse;
+    expect(decided.result!.pots[0]!.setAside).toBe(800);
+    expect(app.ctx.store.earmarks!.decisions[toSaver.id]).toMatchObject({ reason: 'Birthday money, saved', seen: { amount: -200 } });
+    expect(app.ctx.store.earmarks!.decisions[toSaver.id]!.proposalId).toBeUndefined();
+    // "I've checked this" keeps the figures.
+    const checked = (await (await asOwner('/api/earmarks/checks', {})).json()) as EarmarksResponse;
+    expect(checked.result!.pots[0]!.checks).toMatchObject([{ setAside: 800, spendable: 50 }]);
+    // Starting again keeps today's figure, from the day after every everyday account's latest day.
+    const before = checked.result!;
+    const restarted = (await (await asOwner('/api/earmarks/restart', { pot: 'student-money' })).json()) as EarmarksResponse;
+    const pot2 = restarted.setup!.pots[0]!;
+    expect(pot2.start).toBe(addDays(before.oldest!, 1));
+    expect(restarted.result!.pots[0]!.setAside).toBe(before.pots[0]!.setAside);
+    expect(restarted.result!.spendable).toBe(before.spendable);
+    expect(restarted.setup!.decisions).toEqual({});
+    // Taking a decision away (none left now) is refused for a payment before the new start.
+    expect((await asOwner('/api/earmarks/decisions', { decisions: [{ pot: 'student-money', transaction: toSaver.id, parts: null }] })).status).toBe(422);
+  });
 });

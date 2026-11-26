@@ -13,7 +13,7 @@ export class ApiError extends Error {
   }
 }
 
-type Json = Record<string, unknown> | unknown[];
+export type Json = Record<string, unknown> | unknown[];
 
 export async function api<T>(path: string, init: { method?: string; body?: Json | FormData | undefined; signal?: AbortSignal } = {}): Promise<T> {
   const headers: Record<string, string> = { 'x-finance-csrf': '1' };

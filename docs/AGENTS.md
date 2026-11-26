@@ -272,7 +272,9 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
   - A payment decided (`decide_earmark_flow`) is in an everyday account, on or after its pot's start;
     its parts suit its direction (money out can't be borrowed from the pot) and add up to no more
     than it. Its `why` is kept as the decision's reason, so write it for the owner. Its `was` is the
-    payment's `decidedAt` (null: undecided). A proposal may replace a decision the owner made: the
+    payment's `decidedAt` (null: undecided). The owner's own routes for set aside
+    (`/api/earmarks/decisions`, `preview`, `checks`, `restart`) are closed to tokens. A proposal may
+    replace a decision the owner made: the
     page marks it "Replaces your decision", and the owner applies it or not. Propose only what the
     evidence settles (a reference, a matching amount, the owner's words); leave the rest on the
     page's "To check" list.

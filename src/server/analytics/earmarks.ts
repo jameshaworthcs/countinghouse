@@ -6,7 +6,7 @@ import type { EarmarkAccount, EarmarkBy, EarmarkLine, EarmarkPotResult, EarmarkR
 import { CategoryIndex } from '../../shared/categories';
 import { Categoriser } from '../../shared/categorise';
 import { addDays, diffDays, today as todayOf, type ISODate } from '../../shared/dates';
-import { fromMinor, toMinor } from '../../shared/money';
+import { formatMoney, fromMinor, toMinor } from '../../shared/money';
 import { EARMARK_EFFECTS, POT_EFFECTS, type Account, type Category, type EarmarkEffect, type EarmarkPot, type EarmarkRule, type Earmarks, type Rule, type Transaction } from '../../shared/schema';
 import { ruleCatches } from '../categoriser';
 
@@ -105,15 +105,6 @@ function portionOf(r: EarmarkRule | undefined, t: Transaction): number {
   return Math.min(abs, toMinor(r.portion.upTo));
 }
 
-const describeEffect: Record<EarmarkEffect, string> = {
-  source: 'adds to the pot',
-  use: 'paid from the pot',
-  'from-pot': 'borrowed from the pot',
-  'to-pot': 'put back into the pot',
-  'topped-up': 'you topped up the pot',
-  'own-back': 'your own money back',
-  own: 'your own money',
-};
 
 /**
  * Pair moves between two everyday accounts: linked rows, a row naming the other account, or (both
@@ -221,7 +212,7 @@ export function computeEarmarks(input: EarmarksInput): EarmarksResponse {
     const t = txById.get(txId);
     const pot = setup.pots.find((p) => p.id === d.pot);
     if (!t || !pot) {
-      toCheck.push({ kind: 'stale-decision', pot: d.pot, date: d.seen.date, transactionIds: [txId], question: `Your decision of ${d.decidedAt.slice(0, 10)} is for a payment that is no longer recorded (${d.seen.date}, ${d.seen.amount.toFixed(2)}). It isn't counted: remove it, or decide the payment that replaced it.`, amount: 0 });
+      toCheck.push({ kind: 'stale-decision', pot: d.pot, date: d.seen.date, transactionIds: [txId], question: `Your decision of ${d.decidedAt.slice(0, 10)} is for a payment that is no longer recorded (${d.seen.date}, ${formatMoney(d.seen.amount)}). It isn't counted: remove it, or decide the payment that replaced it.`, amount: 0 });
       continue;
     }
     if (!everyday.has(t.accountId) || t.date < pot.start) {
@@ -240,7 +231,7 @@ export function computeEarmarks(input: EarmarksInput): EarmarksResponse {
     const changed = d.seen.amount !== t.amount || d.seen.accountId !== t.accountId;
     const over = d.parts.reduce((s, p) => s + toMinor(p.amount), 0) > abs;
     if (changed || over) {
-      toCheck.push({ kind: 'stale-decision', pot: pot.id, date: t.date, transactionIds: [txId], question: changed ? `The payment changed since you decided it (it was ${d.seen.amount.toFixed(2)} in ${d.seen.accountId}). Check your decision still holds.` : 'Your decision adds up to more than the payment: only the payment is counted.', amount: fromMinor(Math.abs(parts.filter((p) => POT_EFFECTS.includes(p.effect)).reduce((s, p) => s + p.pence, 0))) });
+      toCheck.push({ kind: 'stale-decision', pot: pot.id, date: t.date, transactionIds: [txId], question: changed ? `The payment changed since you decided it (it was ${formatMoney(d.seen.amount)} in ${accountsById.get(d.seen.accountId)?.name ?? d.seen.accountId}). Check your decision still holds.` : 'Your decision adds up to more than the payment: only the payment is counted.', amount: fromMinor(Math.abs(parts.filter((p) => POT_EFFECTS.includes(p.effect)).reduce((s, p) => s + p.pence, 0))) });
     }
     counted.push({ t, pot: pot.id, parts, by: 'decision', reason: d.reason });
     claimed.add(txId);
@@ -336,7 +327,7 @@ export function computeEarmarks(input: EarmarksInput): EarmarksResponse {
             pot: pot.id,
             date: day,
             transactionIds: defaultsOut.map((t) => t.id),
-            question: `${fromMinor(total).toFixed(2)} went to your set-aside accounts on this day, more than the ${fromMinor(held).toFixed(2)} ${pot.name} held. Counted for now: ${fromMinor(held).toFixed(2)} put back, and ${fromMinor(total - held).toFixed(2)} you topping it up. Was any of it something else?`,
+            question: `${formatMoney(fromMinor(total))} went to your set-aside accounts on this day, more than the ${formatMoney(fromMinor(held))} ${pot.name} held. Counted for now: ${formatMoney(fromMinor(held))} put back, and ${formatMoney(fromMinor(total - held))} you topping it up. Was any of it something else?`,
             suggestion,
             amount: fromMinor(total),
           });
@@ -473,7 +464,52 @@ export function computeEarmarks(input: EarmarksInput): EarmarksResponse {
   return { setup, result, problems: [] };
 }
 
-export { describeEffect };
+
+/** Which effects a payment in or out can have in a pot. */
+export const EFFECTS_IN: readonly EarmarkEffect[] = ['source', 'use', 'from-pot', 'own-back', 'own'];
+export const EFFECTS_OUT: readonly EarmarkEffect[] = ['source', 'use', 'to-pot', 'topped-up', 'own'];
+
+/**
+ * Why a decision can't be made for a payment (null: it can): the pot is there, the payment is in an
+ * everyday account from the pot's start, its parts suit its direction and add up to no more than it.
+ */
+export function decisionProblem(setup: Earmarks, potId: string, t: Transaction | undefined, parts: readonly { effect: EarmarkEffect; amount: number }[] | null): string | null {
+  const pot = setup.pots.find((p) => p.id === potId);
+  if (!pot) return `There is no pot "${potId}".`;
+  if (!t) return 'That payment is no longer in your data.';
+  if (!setup.everyday.includes(t.accountId)) return 'It is not in one of the everyday accounts.';
+  if (t.date < pot.start) return `It is before ${pot.name} starts (${pot.start}).`;
+  if (!parts) return null;
+  const allowed = t.amount > 0 ? EFFECTS_IN : EFFECTS_OUT;
+  const misfit = parts.find((p) => !allowed.includes(p.effect));
+  if (misfit) return `It is money ${t.amount > 0 ? 'in' : 'out'}: it cannot be "${misfit.effect}".`;
+  const total = parts.reduce((n, p) => n + toMinor(p.amount), 0);
+  if (total > Math.abs(toMinor(t.amount))) return `The parts add up to ${formatMoney(fromMinor(total))}, more than the payment (${formatMoney(Math.abs(t.amount))}).`;
+  return null;
+}
+
+/** Set aside's headline figures for a setup and the rows as they are (or as a change would leave them). */
+export function earmarkFigures(
+  store: Pick<import('../store').Store, 'accounts' | 'categories'>,
+  setup: Earmarks | null | undefined,
+  transactions: readonly Transaction[],
+  engine: Pick<import('./balances').BalanceEngine, 'balanceOn' | 'lastDataDate' | 'firstDataDate'>,
+): { setAside: number; spendable: number; toCheck: number } | null {
+  if (!setup) return null;
+  const r = computeEarmarks({
+    setup,
+    accounts: store.accounts,
+    categories: store.categories,
+    transactions,
+    balanceOn: (id, d) => {
+      const p = engine.balanceOn(id, d);
+      return p ? (p.gbp ?? p.value) : null;
+    },
+    lastDataOf: (id) => engine.lastDataDate(id),
+    firstDataOf: (id) => engine.firstDataDate(id),
+  }).result;
+  return r ? { setAside: fromMinor(r.pots.reduce((s, p) => s + toMinor(p.setAside), 0)), spendable: r.spendable, toCheck: r.toCheck.length } : null;
+}
 
 /** The pots worked out from the store: each account to its own latest day. */
 export function earmarks(store: Pick<import('../store').Store, 'earmarks' | 'accounts' | 'categories' | 'transactions'>, engine: Pick<import('./balances').BalanceEngine, 'balanceOn' | 'lastDataDate' | 'firstDataDate'>, on: ISODate = todayOf()): EarmarksResponse {

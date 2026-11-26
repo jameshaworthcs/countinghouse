@@ -80,7 +80,7 @@ async function main() {
   // A document with a schedule of payments (a student finance page).
   const scheduleId = imports.pending.find((p) => p.draft?.agreements?.length && p.id !== pendingId)?.id;
   // Account pages from whatever data is being shot: the first current account and the first ISA.
-  const boot = (await (await fetch(`${base}/api/bootstrap`, { headers: { host: '127.0.0.1', cookie } })).json()) as { accounts: { id: string; type: string }[]; demo?: boolean };
+  const boot = (await (await fetch(`${base}/api/bootstrap`, { headers: { host: '127.0.0.1', cookie } })).json()) as { accounts: { id: string; type: string }[]; demo?: boolean; earmarks?: { id: string }[] };
   // Real data is shot only on purpose, and only into a directory no repository can take in.
   if (!boot.demo) {
     if (!allowReal) {
@@ -206,6 +206,19 @@ async function main() {
   if (!only || 'settings-audit-entry'.includes(only)) {
     await shoot('settings-audit-entry', '/settings#audit', { ...(mobile ? { width: 390, height: 1400, mobile: true } : { width: 1440, height: 1400 }), theme: dark ? 'dark' : 'light', act: openEntry });
     console.log('✓ settings-audit-entry');
+  }
+  // Set aside with a payment to check open in the decision dialog: its parts, and their effect on the figure.
+  const openDecision = async (page: Page) => {
+    const decide = await page.$('main button::-p-text(Decide…)');
+    if (!decide) throw new Error('earmarks-decide: no payment to check');
+    await decide.click();
+    await page.waitForSelector('[role="dialog"]', { timeout: 5_000 });
+    // The effect is worked out after a short pause.
+    await new Promise((r) => setTimeout(r, 1200));
+  };
+  if (boot.earmarks?.length && (!only || 'earmarks-decide'.includes(only))) {
+    await shoot('earmarks-decide', '/earmarks', { ...(mobile ? { width: 390, height: 844, mobile: true } : { width: 1440, height: 900 }), theme: dark ? 'dark' : 'light', act: openDecision });
+    console.log('✓ earmarks-decide');
   }
   // Tax year → Pay with a payslip open: its PDF beside what was read from it (the reading first on a phone).
   const openPayslip = async (page: Page) => {

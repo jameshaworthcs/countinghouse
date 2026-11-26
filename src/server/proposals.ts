@@ -25,10 +25,11 @@ import { Categoriser, isWrapperAccount, linkedPayee, transferLegCategory } from 
 import { addDays, diffDays, formatDate, today } from '../shared/dates';
 import { formatMoney, fromMinor, isMoney, toMinor } from '../shared/money';
 import { sameTerms, type TermsContent } from '../shared/terms';
-import { AccountSchema, AgreementSchema, BalanceSnapshotSchema, CompanySchema, EarmarkSetupSchema, EmploymentSchema, POT_EFFECTS, ProposalSchema, TermsSchema, type Earmarks, type EarmarkEffect, type Account, type Agreement, type BalanceSnapshot, type Category, type Company, type Terms, type Employment, type PensionArrangement, type Proposal, type ProposalInput, type ProposalStatus, type ProposedChange, type Provenance, type ReturnEntry, type Rule, type Transaction } from '../shared/schema';
+import { AccountSchema, AgreementSchema, BalanceSnapshotSchema, CompanySchema, EarmarkSetupSchema, EmploymentSchema, POT_EFFECTS, ProposalSchema, TermsSchema, type Earmarks, type Account, type Agreement, type BalanceSnapshot, type Category, type Company, type Terms, type Employment, type PensionArrangement, type Proposal, type ProposalInput, type ProposalStatus, type ProposedChange, type Provenance, type ReturnEntry, type Rule, type Transaction } from '../shared/schema';
 import { paidToText } from './analytics/agreements';
 import { BalanceEngine, type BalanceSource } from './analytics/balances';
-import { computeEarmarks } from './analytics/earmarks';
+import { decisionProblem, earmarkFigures } from './analytics/earmarks';
+import { EFFECT_WORDS } from '../shared/earmarks';
 import { taxReturn } from './analytics/taxreturn';
 import { runAs } from './audit';
 import { categoriseInputOf, categoriserFor, ruleCatches } from './categoriser';
@@ -122,33 +123,11 @@ interface Outcome {
   earmarks?: Earmarks | null;
 }
 
-/** Which effects a payment in or out can have in a pot. */
-const EFFECTS_IN: readonly EarmarkEffect[] = ['source', 'use', 'from-pot', 'own-back', 'own'];
-const EFFECTS_OUT: readonly EarmarkEffect[] = ['source', 'use', 'to-pot', 'topped-up', 'own'];
-
 /** A setup's accounts, pots and rules, read the same way whatever order of keys or defaults: two that say the same compare equal. */
 const setupKey = (e: Pick<Earmarks, 'everyday' | 'setAside' | 'pots'>) => JSON.stringify(EarmarkSetupSchema.parse({ everyday: e.everyday, setAside: e.setAside, pots: e.pots.map(({ checks: _c, ...p }) => p) }));
 /** Set aside as it would be written, without the times it was changed and decided. */
 const earmarksKey = (e: Earmarks | null | undefined) =>
   e ? JSON.stringify({ setup: setupKey(e), decisions: Object.entries(e.decisions).sort(([a], [b]) => a.localeCompare(b)).map(([id, d]) => [id, d.pot, d.parts, d.reason]) }) : 'none';
-
-/** Set aside's figures for a setup and the rows as they are (or as a proposal would leave them). */
-function earmarkFigures(store: Store, setup: Earmarks | null | undefined, transactions: readonly Transaction[], engine: BalanceEngine): EarmarkFigures | null {
-  if (!setup) return null;
-  const r = computeEarmarks({
-    setup,
-    accounts: store.accounts,
-    categories: store.categories,
-    transactions,
-    balanceOn: (id, d) => {
-      const p = engine.balanceOn(id, d);
-      return p ? (p.gbp ?? p.value) : null;
-    },
-    lastDataOf: (id) => engine.lastDataDate(id),
-    firstDataOf: (id) => engine.firstDataDate(id),
-  }).result;
-  return r ? { setAside: fromMinor(r.pots.reduce((s, p) => s + toMinor(p.setAside), 0)), spendable: r.spendable, toCheck: r.toCheck.length } : null;
-}
 
 /** What a proposal would do to the money set aside: only when it changes it. */
 function earmarkPreview(store: Store, o: Outcome): { before: EarmarkFigures | null; after: EarmarkFigures | null } | undefined {
@@ -623,27 +602,20 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
       }
       case 'decide_earmark_flow': {
         if (!setup) return { problem: 'Nothing is set aside yet: set it up first.' };
-        const pot = setup.pots.find((p) => p.id === c.pot);
-        if (!pot) return { problem: `There is no pot "${c.pot}".` };
         const t = row(c.transaction);
-        if (!t) return { problem: gone(c.transaction) };
-        if (!setup.everyday.includes(t.accountId)) return { problem: `${brief(t, accountName)} is not in one of the everyday accounts.` };
-        if (t.date < pot.start) return { problem: `${brief(t, accountName)} is before ${pot.name} starts (${formatDate(pot.start)}).` };
+        const misfit = decisionProblem(setup, c.pot, t, c.parts);
+        if (misfit || !t) return { problem: t ? `${brief(t, accountName)}: ${misfit}` : gone(c.transaction) };
         const existing = setup.decisions[t.id];
         const was = existing?.decidedAt ?? null;
         if (c.was !== was) return { problem: existing ? `It was decided on ${formatDate(existing.decidedAt.slice(0, 10))}, after this was proposed: propose against that decision.` : 'Its decision was taken away after this was proposed.' };
         const decisions = { ...setup.decisions };
         let what: string;
         if (c.parts) {
-          const allowed = t.amount > 0 ? EFFECTS_IN : EFFECTS_OUT;
-          const misfit = c.parts.find((p) => !allowed.includes(p.effect));
-          if (misfit) return { problem: `${brief(t, accountName)} is money ${t.amount > 0 ? 'in' : 'out'}: it cannot be "${misfit.effect}".` };
           const total = c.parts.reduce((n, p) => n + toMinor(p.amount), 0);
-          if (total > Math.abs(toMinor(t.amount))) return { problem: `The parts add up to ${formatMoney(fromMinor(total))}, more than the payment (${money({ ...t, amount: Math.abs(t.amount) })}).` };
           if (existing && existing.pot === c.pot && JSON.stringify(existing.parts) === JSON.stringify(c.parts)) return { alreadySo: true };
           decisions[t.id] = { pot: c.pot, parts: c.parts, reason: c.why.slice(0, 500), seen: { accountId: t.accountId, date: t.date, amount: t.amount }, proposalId: forProposal, decidedAt: nowISO() };
           const potParts = c.parts.filter((p) => POT_EFFECTS.includes(p.effect));
-          what = `${brief(t, accountName)}: ${c.parts.map((p) => `${formatMoney(p.amount)} ${p.effect}`).join(', ')}${total < Math.abs(toMinor(t.amount)) ? `, the rest your own money` : ''}${potParts.length ? '' : ' (no change to the money set aside)'}.`;
+          what = `${brief(t, accountName)}: ${c.parts.map((p) => `${EFFECT_WORDS[p.effect].toLowerCase()} ${formatMoney(p.amount)}`).join(', ')}${total < Math.abs(toMinor(t.amount)) ? `, the rest your own money` : ''}${potParts.length ? '' : ' (no change to the money set aside)'}.`;
         } else {
           if (!existing) return { alreadySo: true };
           delete decisions[t.id];

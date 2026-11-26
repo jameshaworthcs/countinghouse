@@ -2844,5 +2844,12 @@ value grown from the account's first flow is never below nothing, as rolled-back
   with access to everything, outside the tests); a figure written as an insight (an inference shown
   as a computed figure); notes or tags on the payments (clutter, and no single place to change a
   decision); seven narrow proposal kinds (two cover it); keeping cards outside the everyday accounts.
-- **Later slices:** deciding on the page, "I've checked this", setup without agents, a chart, an Ask
-  tool, and an agent job (off by default) that proposes decisions.
+- **Deciding (second slice):** decisions on the page (each to-check item, any payment's pencil, a
+  payment's drawer) with their effect shown first; "Confirm as suggested"; "I've checked this", which
+  keeps the figures so the page can say how far they moved; "Start again from here", from the latest
+  day every everyday account has data for, so no payment is counted twice or missed. The owner's own
+  routes (`/api/earmarks/decisions`, `preview`, `checks`, `restart`) are closed to every token:
+  agents propose instead. A transfer to a set-aside account while the pot holds nothing counts as
+  you topping it up without asking (asking each month about a regular saving was noise).
+- **Later slices:** setup without agents, a chart, an Ask tool, and an agent job (off by default)
+  that proposes decisions.

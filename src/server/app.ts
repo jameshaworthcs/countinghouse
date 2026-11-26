@@ -24,6 +24,7 @@ import { LOGIN_PATH, OidcClient, oidcSettingsFromEnv } from './oidc';
 import { ProposalProblems, ProposalService } from './proposals';
 import { SessionLog, sessionLimitsFromEnv } from './sessions';
 import { analyticsRoutes } from './routes/analytics';
+import { earmarkRoutes } from './routes/earmarks';
 import { authRoutes, safeNext } from './routes/auth';
 import { dataRoutes } from './routes/data';
 import { documentRoutes, importRoutes } from './routes/imports';
@@ -237,6 +238,7 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
   app.route('/api/sessions', sessionRoutes(ctx));
   app.route('/api/ask', askRoutes(ctx));
   app.route('/api/feeds', feedRoutes(ctx));
+  app.route('/api/earmarks', earmarkRoutes(ctx));
   app.route('/api/documents', documentRoutes(ctx));
   app.route('/api', dataRoutes(ctx));
   app.route('/api', recordRoutes(ctx));

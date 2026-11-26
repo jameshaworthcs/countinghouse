@@ -1778,6 +1778,21 @@ account and not yet shown in the other).
    decided), no longer in an everyday account from the start, or whose parts add up to more than
    it (only the payment is counted).
 
+**Deciding.** A decision you make on the page (or in a payment's drawer) is kept by transaction id
+with its reason and the payment as it was; nothing is written on the payment. "Confirm as
+suggested" keeps the suggestion as your decisions. The effect of a decision is shown before you make
+it, worked out by the same sum.
+
+**I've checked this** keeps the figures as they are (each pot's set aside, and spendable) with the
+time. The page then says how far set aside has moved since your last check (new payments, or a
+change to the rules or decisions).
+
+**Start again from here.** For when the past is settled: the pot starts on the day after the latest
+day every everyday account has data for (*D*), with its opening = what it had set aside at the end
+of *D* (its opening + every part with an effect dated on or before *D*). Its decisions for payments
+before the new start go (your data's history keeps them). The figure on the day it is done is
+unchanged: payments after *D* count as before.
+
 **No figure** when an account named is not yours or not in pounds, or an everyday account has no
 balance at all. Everything else gives a figure, with what to check and the dates beside it.
 
