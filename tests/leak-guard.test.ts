@@ -29,9 +29,10 @@ const PAYEE = 'Moorgate Fishery';
 const AMOUNT = 3141.59;
 const LAST4 = '8' + '264';
 const FILING_REF = 'VR' + '5530917';
+const PROPOSED_REF = 'PAY' + '8812046';
 
 /** Every value the persona would not want published. */
-const SECRETS = [OWNER, 'Penhallow', FRIEND, 'T KERRIDGE', EMPLOYER, PAYE, PAYROLL, COMPANY_NO, PAYEE, '3141.59', LAST4, '1991-03-07', FILING_REF];
+const SECRETS = [OWNER, 'Penhallow', FRIEND, 'T KERRIDGE', EMPLOYER, PAYE, PAYROLL, COMPANY_NO, PAYEE, '3141.59', LAST4, '1991-03-07', FILING_REF, PROPOSED_REF];
 
 const tx = (id: string, date: string, amount: number, description: string, extra: Record<string, unknown> = {}) =>
   JSON.stringify({ id, accountId: 'joint', date, amount, currency: 'GBP', description, source: {}, ...extra });
@@ -72,6 +73,13 @@ function writePersona(dir: string): void {
         updatedAt: stamp,
       },
     ],
+  });
+  // A decided proposal that recorded a filing, with the company as it was before.
+  w('proposals/2025/prop_20250501_120000_ab12.json', {
+    id: 'prop_20250501_120000_ab12',
+    status: 'applied',
+    changes: [{ key: 'a', kind: 'add_filing', why: 'Its filing history.', company: 'bw', filing: { kind: 'ct-payment', periodEnd: '2025-02-28', filedOn: '2025-11-20', reference: PROPOSED_REF, figures: { amount: 1287.35 } } }],
+    before: { transactions: [], accounts: [], companies: [{ id: 'bw', name: 'Bramblecote Widgets Ltd', books: { incorporatedOn: '2023-02-06', filings: [{ id: 'fil_000000000009', kind: 'accounts', periodEnd: '2023-02-28', filedOn: '2023-11-01', figures: { K: 1863 } }] } }] },
   });
   w('agreements.json', { agreements: [{ id: 'room', name: 'Gorsehill Hall room, 2025/26', counterparty: 'University of Exampleshire', category: 'rent', from: '2025-09-20', payments: [{ due: '2025-10-01', amount: 1618.03 }], createdAt: stamp, updatedAt: stamp }] });
   w(
@@ -216,6 +224,9 @@ describe('the denylist', () => {
     expect(distinctiveCompanyAmount(2024)).toBeUndefined();
     expect(distinctiveCompanyAmount(777)).toBeUndefined();
     expect(distinctiveCompanyAmount(-1234.5)).toBe('1234.50');
+    // From decided proposals too: an add_filing change's, and the companies as they were before.
+    expect(has(PROPOSED_REF)).toBe('filing-reference');
+    expect(denylist.amounts).toEqual(expect.arrayContaining(['1287.35', '1863.00']));
     const found = new Scanner({ denylist, allow: new Allowlist('') }).scanText('src/x.ts', `const lineB = 637;\nconst ref = '${FILING_REF}';\n`);
     expect(found.map((f) => `${f.line}:${f.rule}`)).toEqual(['1:amount', '2:filing-reference']);
   });

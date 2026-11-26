@@ -10,7 +10,7 @@ import path from 'node:path';
 import { tokenKey } from './text.ts';
 
 /** Bump when the build changes what it collects, so caches are rebuilt. */
-const BUILDER_VERSION = 9;
+const BUILDER_VERSION = 10;
 
 export interface Denylist {
   version: number;
@@ -244,20 +244,36 @@ export function distinctiveCompanyAmount(n: number): string | undefined {
   return `${pounds}.00`;
 }
 
-/** A company's books (companies.json, `books`): its filings' references, and every figure they hold, at the small-company threshold. */
-function collectBooks(companies: Json[], addReference: (value: string | undefined) => void, into: Set<string>): void {
-  for (const c of companies) {
-    const books = isObject(c.books) ? c.books : undefined;
-    for (const f of books && Array.isArray(books.filings) ? books.filings.filter(isObject) : []) {
-      addReference(str(f.reference));
-      for (const o of objects(f.figures)) {
-        for (const v of Object.values(o)) {
-          const a = typeof v === 'number' ? distinctiveCompanyAmount(v) : undefined;
-          if (a) into.add(a);
-        }
+/** Filings (a company's books): their references, and every figure they hold, at the small-company threshold. */
+function collectFilings(filings: Json[], addReference: (value: string | undefined) => void, into: Set<string>): void {
+  for (const f of filings) {
+    addReference(str(f.reference));
+    for (const o of objects(f.figures)) {
+      for (const v of Object.values(o)) {
+        const a = typeof v === 'number' ? distinctiveCompanyAmount(v) : undefined;
+        if (a) into.add(a);
       }
     }
   }
+}
+
+/** Each company's books' filings (`books.filings`), in companies.json or a proposal's `before.companies`. */
+const booksFilings = (companies: Json[]): Json[] => companies.flatMap((c) => (isObject(c.books) && Array.isArray(c.books.filings) ? c.books.filings.filter(isObject) : []));
+
+/**
+ * The filings in decided proposals (proposals/*.json): those an `add_filing` change records, any a
+ * `set_company_books` change carries, and those of the companies as they were before (`before.companies`).
+ */
+function proposalFilings(proposals: unknown[]): Json[] {
+  const out: Json[] = [];
+  for (const p of proposals.filter(isObject)) {
+    for (const c of Array.isArray(p.changes) ? p.changes.filter(isObject) : []) {
+      if (c.kind === 'add_filing' && isObject(c.filing)) out.push(c.filing);
+      if (c.kind === 'set_company_books' && isObject(c.books) && Array.isArray(c.books.filings)) out.push(...c.books.filings.filter(isObject));
+    }
+    if (isObject(p.before) && Array.isArray(p.before.companies)) out.push(...booksFilings(p.before.companies.filter(isObject)));
+  }
+  return out;
 }
 
 function collectAmounts(value: unknown, into: Set<string>, units: Set<string>): void {
@@ -477,10 +493,12 @@ export async function buildDenylist(dataDir: string): Promise<{ denylist: Denyli
   for (const dir of ['balances', 'holdings']) for (const f of listFiles(file(dir), (n) => n.endsWith('.jsonl'))) collectAmounts(readJsonl(f), amounts, units);
   for (const dir of ['imports', 'proposals']) for (const f of listFiles(file(dir), (n) => n.endsWith('.json'))) collectAmounts(readJson(f), amounts, units);
   // A company's filings: references (a submission receipt, a payment reference) and small figures.
-  collectBooks(companies, (ref) => {
-    // Four digits at least: a form's name ("CT600", "CS01") is everyone's.
+  // Four digits at least: a form's name ("CT600", "CS01") is everyone's.
+  const addReference = (ref: string | undefined) => {
     if (ref && (ref.match(/\d/g) ?? []).length >= 4 && ref.replace(/\W/g, '').length >= 5) add('filing-reference', ref, { min: 5, generic: false });
-  }, amounts);
+  };
+  collectFilings(booksFilings(companies), addReference, amounts);
+  collectFilings(proposalFilings(listFiles(file('proposals'), (n) => n.endsWith('.json')).map(readJson)), addReference, amounts);
   for (const a of publicAmounts()) amounts.delete(a);
   stats.amount = amounts.size;
   stats.last4 = last4.size;
