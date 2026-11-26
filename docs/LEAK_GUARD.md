@@ -24,6 +24,11 @@ logs and Claude transcripts stay clean.
      payroll numbers;
    - from `companies.json` and `agreements.json`: names, numbers, counterparties, references and
      the details that name a place or a person;
+   - from a company's books (`companies.json`, `books`): each filing's reference with four digits
+     or more (a submission receipt, a payment reference; a form's name such as "CT600" is not one),
+     and every figure its filings hold (VAT boxes, micro-entity lines A–K, Corporation Tax) at a
+     small company's threshold: £100 or more with pence, or £250 or more in whole pounds that is
+     not a multiple of £10 or a year, and not a placeholder. The VAT number is not stored;
    - from transactions: payees that are not on the public lists (`src/shared/merchants.ts` and
      `src/shared/institutions.ts`) and not plain bank wording, with their places; and, for a payee
      seen at most three times, its descriptions and references;

@@ -10,7 +10,7 @@ import path from 'node:path';
 import { tokenKey } from './text.ts';
 
 /** Bump when the build changes what it collects, so caches are rebuilt. */
-const BUILDER_VERSION = 8;
+const BUILDER_VERSION = 9;
 
 export interface Denylist {
   version: number;
@@ -230,6 +230,36 @@ function publicAmounts(): Set<string> {
   return out;
 }
 
+/**
+ * A small company's figure: its filings' VAT boxes, micro-entity lines and Corporation Tax are small
+ * enough that £250 in whole pounds can be telling. £100 or more with pence (as `distinctiveAmount`), or
+ * £250 or more in whole pounds that is not a multiple of £10 nor a year, nor a placeholder.
+ */
+export function distinctiveCompanyAmount(n: number): string | undefined {
+  const pence = Math.round(Math.abs(n) * 100);
+  if (!Number.isFinite(pence) || pence % 100) return distinctiveAmount(n);
+  const pounds = pence / 100;
+  if (/^(\d)\1+$/.test(String(pounds))) return undefined;
+  if (pounds < 250 || pounds % 10 === 0 || (pounds >= 1900 && pounds <= 2100)) return undefined;
+  return `${pounds}.00`;
+}
+
+/** A company's books (companies.json, `books`): its filings' references, and every figure they hold, at the small-company threshold. */
+function collectBooks(companies: Json[], addReference: (value: string | undefined) => void, into: Set<string>): void {
+  for (const c of companies) {
+    const books = isObject(c.books) ? c.books : undefined;
+    for (const f of books && Array.isArray(books.filings) ? books.filings.filter(isObject) : []) {
+      addReference(str(f.reference));
+      for (const o of objects(f.figures)) {
+        for (const v of Object.values(o)) {
+          const a = typeof v === 'number' ? distinctiveCompanyAmount(v) : undefined;
+          if (a) into.add(a);
+        }
+      }
+    }
+  }
+}
+
 function collectAmounts(value: unknown, into: Set<string>, units: Set<string>): void {
   for (const obj of objects(value)) {
     for (const [k, v] of Object.entries(obj)) {
@@ -369,7 +399,8 @@ export async function buildDenylist(dataDir: string): Promise<{ denylist: Denyli
     if (paye) for (const v of payeVariants(paye)) add('paye-reference', v, { min: 5, generic: false });
     for (const n of strings(e.payrollNumbers)) if (n.length >= 5 || (n.length >= 4 && /[a-z]/i.test(n))) add('payroll-number', n, { min: 4, generic: false });
   }
-  for (const c of list(readJson(file('companies.json')), 'companies')) {
+  const companies = list(readJson(file('companies.json')), 'companies');
+  for (const c of companies) {
     add('company', str(c.name));
     addWords('company', str(c.name));
     add('company-number', str(c.number), { generic: false });
@@ -445,6 +476,11 @@ export async function buildDenylist(dataDir: string): Promise<{ denylist: Denyli
   }
   for (const dir of ['balances', 'holdings']) for (const f of listFiles(file(dir), (n) => n.endsWith('.jsonl'))) collectAmounts(readJsonl(f), amounts, units);
   for (const dir of ['imports', 'proposals']) for (const f of listFiles(file(dir), (n) => n.endsWith('.json'))) collectAmounts(readJson(f), amounts, units);
+  // A company's filings: references (a submission receipt, a payment reference) and small figures.
+  collectBooks(companies, (ref) => {
+    // Four digits at least: a form's name ("CT600", "CS01") is everyone's.
+    if (ref && (ref.match(/\d/g) ?? []).length >= 4 && ref.replace(/\W/g, '').length >= 5) add('filing-reference', ref, { min: 5, generic: false });
+  }, amounts);
   for (const a of publicAmounts()) amounts.delete(a);
   stats.amount = amounts.size;
   stats.last4 = last4.size;

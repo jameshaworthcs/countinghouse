@@ -7,7 +7,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, st
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { buildDenylist, distinctiveAmount, parseExtras, type Denylist } from '../scripts/leak-guard/denylist.ts';
+import { buildDenylist, distinctiveAmount, distinctiveCompanyAmount, parseExtras, type Denylist } from '../scripts/leak-guard/denylist.ts';
 import { ibanValid, luhn, scanPatterns } from '../scripts/leak-guard/patterns.ts';
 import { Allowlist, Scanner } from '../scripts/leak-guard/scan.ts';
 import { globToRegExp, mask, tokenKey, trieSource, bounded } from '../scripts/leak-guard/text.ts';
@@ -28,9 +28,10 @@ const COMPANY_NO = '0' + '9876543';
 const PAYEE = 'Moorgate Fishery';
 const AMOUNT = 3141.59;
 const LAST4 = '8' + '264';
+const FILING_REF = 'VR' + '5530917';
 
 /** Every value the persona would not want published. */
-const SECRETS = [OWNER, 'Penhallow', FRIEND, 'T KERRIDGE', EMPLOYER, PAYE, PAYROLL, COMPANY_NO, PAYEE, '3141.59', LAST4, '1991-03-07'];
+const SECRETS = [OWNER, 'Penhallow', FRIEND, 'T KERRIDGE', EMPLOYER, PAYE, PAYROLL, COMPANY_NO, PAYEE, '3141.59', LAST4, '1991-03-07', FILING_REF];
 
 const tx = (id: string, date: string, amount: number, description: string, extra: Record<string, unknown> = {}) =>
   JSON.stringify({ id, accountId: 'joint', date, amount, currency: 'GBP', description, source: {}, ...extra });
@@ -50,7 +51,28 @@ function writePersona(dir: string): void {
     ],
   });
   w('employments.json', { employments: [{ id: 'qf', employer: EMPLOYER, aliases: ['QUILLFEATHER'], payeReference: PAYE, payrollNumbers: [PAYROLL], createdAt: stamp, updatedAt: stamp }] });
-  w('companies.json', { companies: [{ id: 'bw', name: 'Bramblecote Widgets Ltd', number: COMPANY_NO, valuations: [{ asOf: '2025-11-30', method: 'yours', value: 2718.28 }], createdAt: stamp, updatedAt: stamp }] });
+  w('companies.json', {
+    companies: [
+      {
+        id: 'bw',
+        name: 'Bramblecote Widgets Ltd',
+        number: COMPANY_NO,
+        valuations: [{ asOf: '2025-11-30', method: 'yours', value: 2718.28 }],
+        // Its books: a filing's reference and its small figures (VAT boxes, micro-entity lines, tax).
+        books: {
+          incorporatedOn: '2023-02-06',
+          filings: [
+            { id: 'fil_000000000001', kind: 'vat', periodStart: '2025-01-01', periodEnd: '2025-03-31', filedOn: '2025-04-20', reference: FILING_REF, figures: { vatDueSales: 813.27, vatDueAcquisitions: 0, totalVatDue: 813.27, vatReclaimedCurrPeriod: 96.4, netVatDue: 716.87, totalValueSalesExVAT: 4066, totalValuePurchasesExVAT: 482, totalValueGoodsSuppliedExVAT: 0, totalAcquisitionsExVAT: 0 } },
+            { id: 'fil_000000000002', kind: 'accounts', periodEnd: '2024-02-29', filedOn: '2024-10-01', figures: { B: 637, C: 2911, E: 450, K: 3098 } },
+            { id: 'fil_000000000003', kind: 'ct600', periodEnd: '2024-02-29', filedOn: '2024-10-01', reference: 'CT600', figures: { taxPayable: 341.75 } },
+          ],
+          updatedAt: stamp,
+        },
+        createdAt: stamp,
+        updatedAt: stamp,
+      },
+    ],
+  });
   w('agreements.json', { agreements: [{ id: 'room', name: 'Gorsehill Hall room, 2025/26', counterparty: 'University of Exampleshire', category: 'rent', from: '2025-09-20', payments: [{ due: '2025-10-01', amount: 1618.03 }], createdAt: stamp, updatedAt: stamp }] });
   w(
     'transactions/joint/2026.jsonl',
@@ -178,6 +200,24 @@ describe('the denylist', () => {
     expect(has('Chase Saver')).toBeUndefined();
     expect(has('Tesco')).toBeUndefined();
     expect(has('Cheque paid in')).toBeUndefined();
+  });
+
+  it('collects a company’s filings: references, and figures at a small company’s threshold', () => {
+    expect(has(FILING_REF)).toBe('filing-reference');
+    // A form's name is everyone's, not a reference.
+    expect(has('CT600')).toBeUndefined();
+    // VAT boxes with pence, and whole pounds from £250 a general amount would leave out.
+    expect(denylist.amounts).toEqual(expect.arrayContaining(['813.27', '716.87', '4066.00', '482.00', '637.00', '2911.00', '3098.00', '341.75']));
+    // Round figures, small ones and placeholders are not telling.
+    for (const a of ['96.40', '450.00', '0.00']) expect(denylist.amounts).not.toContain(a);
+    expect(distinctiveCompanyAmount(250)).toBeUndefined();
+    expect(distinctiveCompanyAmount(251)).toBe('251.00');
+    expect(distinctiveCompanyAmount(249)).toBeUndefined();
+    expect(distinctiveCompanyAmount(2024)).toBeUndefined();
+    expect(distinctiveCompanyAmount(777)).toBeUndefined();
+    expect(distinctiveCompanyAmount(-1234.5)).toBe('1234.50');
+    const found = new Scanner({ denylist, allow: new Allowlist('') }).scanText('src/x.ts', `const lineB = 637;\nconst ref = '${FILING_REF}';\n`);
+    expect(found.map((f) => `${f.line}:${f.rule}`)).toEqual(['1:amount', '2:filing-reference']);
   });
 
   it('keeps distinctive amounts only', () => {
