@@ -15,9 +15,10 @@ import { VAT_STAGGERS, type VatStagger } from '../../shared/uk';
 import { Badge, Button, Callout, Card, Checkbox, Dialog, EmptyState, ErrorNote, Field, Input, Loading, Money, NumberInput, PageHeader, Select, StatusBadge, Tabs, tableClasses, useToast } from '../components/ui';
 import { api, useApi, useApiMutation } from '../lib/api';
 import { KeepBooks } from '../components/KeepBooks';
+import { BooksTab } from '../components/CompanyLedger';
 import { cn } from '../lib/format';
 
-type Tab = 'overview' | 'settings';
+type Tab = 'overview' | 'books' | 'settings';
 
 /** A deadline's state, as a badge: done (filed late marked), overdue, due within 14 days, due soon, later. */
 function DeadlineBadge({ d }: { d: CompanyDeadline }) {
@@ -707,7 +708,7 @@ function FilingsCard({ view, onRecord }: { view: CompanyBooksResponse; onRecord:
 
 export default function Company() {
   const { id = '', tab: tabParam } = useParams();
-  const tab: Tab = tabParam === 'settings' ? 'settings' : 'overview';
+  const tab: Tab = tabParam === 'settings' || tabParam === 'books' ? tabParam : 'overview';
   const navigate = useNavigate();
   const q = useApi<CompanyBooksResponse>(['company-books', id], `/companies/${id}/books`);
   const list = useApi<CompanyBooksListItem[]>(['company-books'], '/company-books');
@@ -724,7 +725,7 @@ export default function Company() {
         subtitle={[view.company.number ? `Company ${view.company.number}` : '', view.books ? `incorporated ${formatDate(view.books.incorporatedOn)}` : '', 'its own records, apart from yours'].filter(Boolean).join(' · ')}
         actions={
           others.length > 0 ? (
-            <Select value={id} onChange={(e) => void navigate(`/company/${e.target.value}${tab === 'settings' ? '/settings' : ''}`)} aria-label="Company" className="w-56">
+            <Select value={id} onChange={(e) => void navigate(`/company/${e.target.value}${tab === 'overview' ? '' : `/${tab}`}`)} aria-label="Company" className="w-56">
               {[{ id, name: view.company.name }, ...others].map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
@@ -742,9 +743,10 @@ export default function Company() {
         <>
           <Tabs
             value={tab}
-            onChange={(v) => void navigate(v === 'overview' ? `/company/${id}` : `/company/${id}/settings`)}
+            onChange={(v) => void navigate(v === 'overview' ? `/company/${id}` : `/company/${id}/${v}`)}
             tabs={[
               { value: 'overview', label: 'Overview' },
+              { value: 'books', label: 'Books' },
               { value: 'settings', label: 'Settings' },
             ]}
           />
@@ -757,6 +759,8 @@ export default function Company() {
                 </section>
                 <DeadlinesCard view={view} onRecord={(d) => setRecording(blankFiling(d))} />
               </>
+            ) : tab === 'books' ? (
+              <BooksTab key={view.company.id} companyId={view.company.id} />
             ) : (
               <>
                 {/* Keyed by the company too: switching company never leaves one's draft under another's id. */}
