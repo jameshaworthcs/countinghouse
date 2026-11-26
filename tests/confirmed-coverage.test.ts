@@ -139,7 +139,7 @@ describe('coverage beyond documents', () => {
       { from: '2026-01-01', to: '2026-01-31' },
       { from: '2026-04-01', to: '2026-04-30' },
     ]);
-    await store.setCoverageConfirmations([{ id: 'cov_0123456789ab', accountId: 'card', from: '2026-02-01', to: '2026-03-31', confirmedAt: stamp }]);
+    await store.addCoverageConfirmations([{ id: 'cov_0123456789ab', accountId: 'card', from: '2026-02-01', to: '2026-03-31', confirmedAt: stamp }]);
     expect(accountCoverage(store, store.account('card')!).intervals).toEqual([{ from: '2026-01-01', to: '2026-04-30' }]);
     const cov = new Coverage(store);
     expect(cov.gaps(new BalanceEngine(store), '2026-01-01', '2026-04-30')).toEqual([]);

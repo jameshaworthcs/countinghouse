@@ -1,16 +1,16 @@
 // Build the reviewable draft from an extraction: match each extracted account to one of yours (or
 // propose a new one), categorise, flag duplicates and transfers, resolve the balance date.
 
-import { ACCOUNT_TYPE_META, balanceModeOf } from '../../shared/accounts';
+import { ACCOUNT_TYPE_META, balanceModeOf, sideOf } from '../../shared/accounts';
 import { findInstitution } from '../../shared/institutions';
-import { isWrapperAccount, transferLegCategory, type Categoriser } from '../../shared/categorise';
+import { fallbackPayeeOf, isWrapperAccount, transferLegCategory, type Categoriser, type CategoriseResult } from '../../shared/categorise';
 import { AGREEMENT_RECEIPT_DAYS } from '../../shared/agreements';
 import { addDays, dateOf, diffDays, formatDate, today } from '../../shared/dates';
 import { formatMoney, fromMinor, toMinor } from '../../shared/money';
 import { spaceMove } from '../../shared/spaces';
 import { categoriserFor } from '../categoriser';
 import { addsAnything, detailToAdd, fillIn, seenInEntry } from '../../shared/detail';
-import { rederive, transferEvidence, transferReader, type TransferSide } from '../enrich';
+import { companyTransferReader, rederive, transferEvidence, transferReader, type TransferSide } from '../enrich';
 import type {
   Account,
   AccountType,
@@ -282,7 +282,8 @@ export function recordedEvidence(store: Store, acc: Pick<ExtractedAccount, 'tran
   const first = acc.periodStart ?? settled.map((t) => t.date).sort()[0];
   if (acc.openingBalance !== null && toMinor(acc.openingBalance) !== 0 && first) {
     const since = addDays(first, -STATEMENT_CYCLE_DAYS);
-    const opens = store.accounts.flatMap((a) => {
+    // Any account's, a company's too: which account a document is of is for it to say.
+    const opens = store.allAccounts.flatMap((a) => {
       const anchors = [
         ...store.balances(a.id).filter((b) => !b.approximate).map((b) => ({ date: b.date, amount: b.balance })),
         ...store.transactions(a.id).flatMap((t) => (t.balanceAfter !== undefined ? [{ date: t.date, amount: t.balanceAfter }] : [])),
@@ -307,13 +308,15 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
   const statusAsOf = extraction.documentDate ?? ctx.document.capturedOn ?? ctx.uploadedOn;
   const studentFinance = extraction.schedules.filter(isStudentFinance);
   const loan = studentFinance.length ? studentLoanAccount(store) : undefined;
-  const newLoan = studentFinance.length && !loan ? proposeAccount({ institutionName: 'Student Loans Company', accountType: 'student_loan', accountName: 'Student loan' }, store.accounts, 'student_loan') : undefined;
+  const newLoan = studentFinance.length && !loan ? proposeAccount({ institutionName: 'Student Loans Company', accountType: 'student_loan', accountName: 'Student loan' }, store.allAccounts, 'student_loan') : undefined;
   const loanAccountId = loan?.id ?? newLoan?.id;
   const agreements = draftAgreements(store, extraction.schedules, { loanAccountId, statusAsOf });
   const replaced = new Set(agreements.flatMap((d) => (d.target.mode === 'existing' ? [d.target.agreementId] : [])));
   const categoriser = categoriserFor(store, { agreements: [...store.agreements.filter((a) => !replaced.has(a.id)), ...agreements.map((d) => asAgreement(d.record))] });
   const reader = transferReader(store, categoriser);
-  const allTx = store.transactions();
+  // Every account's rows, a company's too: they say which account a document is of (recordedEvidence).
+  // A row is only ever matched as a transfer's other leg on its own side (`sideRows` below).
+  const allTx = store.allTransactions();
   const txByAmount = new Map<number, Transaction[]>();
   for (const t of allTx) {
     const k = Math.abs(toMinor(t.amount));
@@ -325,14 +328,14 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
   const liveView = isLiveView(extraction.documentType, ctx.document.mediaType);
   let batchMatch: Draft['batchMatch'];
   // Each account's latest holdings: a fund's own page names no account, but the account holding it.
-  const held = new Map(store.accounts.map((a) => [a.id, store.holdings(a.id).at(-1)?.holdings ?? []]));
+  const held = new Map(store.allAccounts.map((a) => [a.id, store.holdings(a.id).at(-1)?.holdings ?? []]));
 
   // A statement that runs across the day one of your accounts carries on from another is two: the
   // rows before for the older account, the rest for the newer (docs/INGESTION.md, "Linked accounts").
   // What your accounts have recorded of each account it shows: worked out once for each.
   const evidence = new Map<ExtractedAccount, Map<string, RecordedEvidence>>();
   const recordedOf = (acc: ExtractedAccount) => evidence.get(acc) ?? evidence.set(acc, recordedEvidence(store, acc, txByAmount)).get(acc)!;
-  const entries = splitAtLinks(store, extraction.accounts, (acc) => matchAccount({ institutionName: providerOf(acc, extraction), accountName: acc.accountName ?? undefined, accountType: acc.accountType ?? undefined, last4: acc.last4 ?? undefined, currency: acc.currency ?? undefined, recorded: recordedOf(acc) }, store.accounts, store.institutions, extraction.accounts.length === 1 ? ctx.hintAccountId : undefined, held));
+  const entries = splitAtLinks(store, extraction.accounts, (acc) => matchAccount({ institutionName: providerOf(acc, extraction), accountName: acc.accountName ?? undefined, accountType: acc.accountType ?? undefined, last4: acc.last4 ?? undefined, currency: acc.currency ?? undefined, recorded: recordedOf(acc) }, store.allAccounts, store.allInstitutions, extraction.accounts.length === 1 ? ctx.hintAccountId : undefined, held));
   for (const e of entries) if (e.note) notes.push(e.note);
 
   // Each account as the document shows it, and the account of yours it matches by what it shows.
@@ -356,7 +359,7 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
     };
     const hint = extraction.accounts.length === 1 ? ctx.hintAccountId : undefined;
     const recorded = recordedOf(acc);
-    const matchAs = (d: Detected, among: Account[] = store.accounts) => matchAccount({ ...d, holdings: acc.holdings.map((h) => h.name), holdingsComplete: !holdingDetail && WHOLE_HOLDINGS.has(extraction.documentType), recorded }, among, store.institutions, hint, held);
+    const matchAs = (d: Detected, among: Account[] = store.allAccounts) => matchAccount({ ...d, holdings: acc.holdings.map((h) => h.name), holdingsComplete: !holdingDetail && WHOLE_HOLDINGS.has(extraction.documentType), recorded }, among, store.allInstitutions, hint, held);
     const match: AccountMatch = force ? { accountId: force, score: 100, reason: reason ?? 'Matched by the account it carries on from' } : matchAs(detected);
     // Something to record: an account it only mentions (a certificate's nominated account) says nothing of the screen.
     const carries = acc.closingBalance !== null || acc.transactions.length > 0 || acc.holdings.length > 0 || [acc.contributionsToDate, acc.governmentBonusToDate, acc.taxYearContributions, acc.taxYearInterest, acc.cashBalance, acc.annualIncome].some((v) => v !== null);
@@ -365,7 +368,7 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
   // One bank's screen of its accounts seldom prints the bank's name: the accounts beside one that
   // names no provider say it (providerBeside).
   const confident = (x: (typeof seen)[number]) => (x.match.score >= 50 && !x.match.tied ? x.match.accountId : undefined);
-  const beside = providerBeside(store, seen.filter((x) => x.carries).map((x) => ({ provider: x.shown, accountId: confident(x) })));
+  const beside = providerBeside({ account: (id) => store.account(id), institutions: store.allInstitutions }, seen.filter((x) => x.carries).map((x) => ({ provider: x.shown, accountId: confident(x) })));
 
   const sections: DraftSection[] = seen.map(({ acc, holdingDetail, typeFromRows, named, provider0, detected, shown, hint, matchAs, match: own, split }, si) => {
     if (named && !provider0) notes.push(`The only provider it names, ${named}, is the manager of a fund it shows, which does not say where the account is held.`);
@@ -375,7 +378,7 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
     const byBeside = beside && !shown && own.score < 50 && !own.tied && identifies(detected) ? beside : undefined;
     const seenAs: Detected = byBeside ? { ...detected, institutionName: byBeside.name } : detected;
     const taken = new Set(seen.flatMap((x, j) => (j !== si && confident(x) ? [confident(x)!] : [])));
-    const match = byBeside ? matchAs(seenAs, store.accounts.filter((a) => !taken.has(a.id))) : own;
+    const match = byBeside ? matchAs(seenAs, store.allAccounts.filter((a) => !taken.has(a.id))) : own;
     if (byBeside) {
       const yours = byBeside.accounts;
       const them = yours.length
@@ -390,7 +393,7 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
     // with it usually does. Only when this screen has no confident match of its own, shows one
     // account, and says nothing that contradicts that account.
     const batchAccount = ctx.batch && !existing && !hint && extraction.accounts.length === 1 ? store.account(ctx.batch.accountId) : undefined;
-    const byBatch = Boolean(batchAccount && fitsAccount(detected, batchAccount, store.institutions));
+    const byBatch = Boolean(batchAccount && fitsAccount(detected, batchAccount, store.allInstitutions));
     if (byBatch) {
       existing = batchAccount;
       batchMatch = { accountId: batchAccount!.id, importId: ctx.batch!.importId };
@@ -406,12 +409,12 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
     const tied = Boolean(!existing && !hint && match.tied?.length);
     // A screen that says only the kind of account (a scrolled list of a LISA's rows) is one of your
     // accounts of that kind, not a new one: ask which, and suggest it when you have only one.
-    const sameKind = !existing && !hint && !anonymous && onlyKind(detected) ? store.accounts.filter((a) => a.status !== 'closed' && fitsAccount(seenAs, a, store.institutions)) : [];
+    const sameKind = !existing && !hint && !anonymous && onlyKind(detected) ? store.allAccounts.filter((a) => a.status !== 'closed' && fitsAccount(seenAs, a, store.allInstitutions)) : [];
     const target: DraftSection['target'] = existing
       ? { mode: 'existing', accountId: existing.id }
       : anonymous || tied || sameKind.length
         ? { mode: 'skip' }
-        : { mode: 'new', account: proposeAccount(seenAs, store.accounts, fallbackType, store.institutions) };
+        : { mode: 'new', account: proposeAccount(seenAs, store.allAccounts, fallbackType, store.allInstitutions) };
     const targetType: AccountType = existing?.type ?? (target.mode === 'new' ? target.account.type : detected.accountType ?? fallbackType);
     const targetId = existing?.id ?? (target.mode === 'new' ? target.account.id : '');
     const currency = acc.currency ?? existing?.currency ?? 'GBP';
@@ -517,7 +520,7 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
     );
     // Rows another of your accounts under the same number and provider has recorded already (the
     // older or newer product, when the two are not linked): left out, to check.
-    const twins = existing?.last4 ? store.accounts.filter((a) => a.id !== existing.id && a.last4 === existing.last4 && a.institutionId === existing.institutionId) : [];
+    const twins = existing?.last4 ? store.accountsBeside(existing.id).filter((a) => a.id !== existing.id && a.last4 === existing.last4 && a.institutionId === existing.institutionId) : [];
     const twinDups = twins.length ? classifyDuplicates(candidates, twins.flatMap((a) => store.transactions(a.id)), 3) : [];
     const dups = ownDups.map((d, i) => {
       const twin = d.status === 'new' ? twinDups[i] : undefined;
@@ -529,8 +532,13 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
     // its type still names the Space.
     const shownSpaces = existing ? acc.transactions.flatMap((t) => (t.type ? (spaceMove({ ...existing, spaces: [] }, t) ?? []) : [])) : [];
     const spacesOf = existing ? { ...existing, spaces: [...new Set([...(existing.spaces ?? []), ...shownSpaces])] } : undefined;
+    // A company's account: its rows get no category of yours, and its transfers' other legs are its
+    // company's rows, by its company's accounts' names (enrich.ts, "Company accounts").
+    const companyId = existing?.companyId;
+    const sideReader = companyId ? companyTransferReader(store, store.companyAccounts(companyId)) : reader;
+    const onSide = (t: Transaction) => sideOf(store.account(t.accountId)) === (companyId ?? '');
     const transactions: DraftTransaction[] = acc.transactions.map((t, ti) => {
-      const cat = categoriser.categorise({
+      const input = {
         accountId: targetId,
         description: t.description,
         amount: t.amount,
@@ -540,7 +548,8 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
         bankCategory: t.bankCategory ?? undefined,
         aiCategory: t.category ?? undefined,
         aiPayee: t.payee ?? undefined,
-      });
+      };
+      const cat: CategoriseResult = companyId ? { payee: fallbackPayeeOf(input) } : categoriser.categorise(input);
       const dup = dups[ti]!;
       const space = spaceMove(spacesOf, t);
       let category = cat.category;
@@ -548,9 +557,9 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
       let counterpartyAccountId = cat.counterpartyAccountId;
       let transferMatch: string | undefined;
       if (dup.status === 'new' && !space && (!category || TRANSFER_CATEGORIES.has(category))) {
-        const candidates = txByAmount.get(Math.abs(toMinor(t.amount))) ?? [];
+        const candidates = (txByAmount.get(Math.abs(toMinor(t.amount))) ?? []).filter(onSide);
         const row = { id: `draft:${si}:${ti}`, accountId: targetId, date: t.date, amount: t.amount, description: t.description, ...(t.type ? { type: t.type } : {}), ...(category ? { category } : {}), ...(counterpartyAccountId ? { counterpartyAccountId } : {}) };
-        const other = findTransferMatch(row, counterpartyAccountId ? candidates.filter((c) => c.accountId === counterpartyAccountId) : candidates, takenTransfers, reader);
+        const other = findTransferMatch(row, counterpartyAccountId ? candidates.filter((c) => c.accountId === counterpartyAccountId) : candidates, takenTransfers, sideReader);
         const otherAccount = other ? store.account(other.accountId) : undefined;
         if (other && otherAccount) {
           takenTransfers.add(other.id);
@@ -612,7 +621,8 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
           // What this document calls it counts too, as on commit (it is kept as seen in).
           const named = found.differs.some((d) => d.field === 'description');
           const seenIn = named ? [...(recorded.seenIn ?? []), seenInEntry({}, Object.keys(found.fields) as DetailField[], found.differs, '')] : recorded.seenIn;
-          const change = rederive(categoriser, { ...recorded, ...fillIn(recorded, found.fields).patch, ...(seenIn ? { seenIn } : {}) }, [...Object.keys(found.fields), ...(named ? ['seenIn'] : [])]);
+          // A company's row is not categorised: what the document fills in changes nothing else of it.
+          const change = companyId ? {} : rederive(categoriser, { ...recorded, ...fillIn(recorded, found.fields).patch, ...(seenIn ? { seenIn } : {}) }, [...Object.keys(found.fields), ...(named ? ['seenIn'] : [])]);
           // Ticked by itself when the match is certain; when the record names no one ("Outgoing
           // transaction"), as this document's name for it is all gain; and when the match is on
           // like words and nothing it says conflicts (only the posting day or the wording differ).
@@ -897,7 +907,8 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
  * running balances reach.
  */
 export function splitAtLinks(store: Store, accounts: readonly ExtractedAccount[], matchOf: (acc: ExtractedAccount) => { accountId?: string | undefined; score: number }): { acc: ExtractedAccount; force?: string; reason?: string; note?: string; split?: true }[] {
-  const links = store.accounts.flatMap((n) => {
+  // Links are only ever between two accounts on one side (store.ts, checkCompanyAccounts).
+  const links = store.allAccounts.flatMap((n) => {
     const older = n.continues ? store.account(n.continues.accountId) : undefined;
     return older && n.continues ? [{ newer: n, older, from: n.continues.from }] : [];
   });

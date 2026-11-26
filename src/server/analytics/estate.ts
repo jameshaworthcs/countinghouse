@@ -207,5 +207,6 @@ export function accountSummary(store: Store, engine: BalanceEngine, account: Acc
     ...(mine ? { live: { at: mine.at, feed: mine.feed, recorded: recorded?.value ?? null, recordedAsOf } } : {}),
     ...(account.institutionId ? { institutionId: account.institutionId } : {}),
     ...(inst ? { institutionName: inst.name } : {}),
+    ...(account.companyId ? { companyId: account.companyId } : {}),
   };
 }

@@ -125,7 +125,9 @@ function period(args: ToolArgs, d: ToolDefaults, fallbackDays: number): { from: 
 function accountsOf(store: Store, args: ToolArgs, d: ToolDefaults): string[] | undefined {
   const ids = args.accounts?.length ? args.accounts : d.accounts?.length ? d.accounts : undefined;
   if (!ids) return undefined;
-  const unknown = ids.filter((id) => !store.account(id));
+  // Your accounts only: a company's account is not one Ask can look into, though a lookup by id would find it.
+  const yours = new Set(store.accounts.map((a) => a.id));
+  const unknown = ids.filter((id) => !yours.has(id));
   if (unknown.length) throw new ToolError(`No account with the id ${unknown.join(', ')}: use the ids from the list of accounts.`);
   return ids;
 }
@@ -186,7 +188,7 @@ function monthsIn(from: ISODate, to: ISODate): number {
 
 /** The accounts a question is about: those asked for, else every account with payments. */
 function accountsAbout(store: Store, ids: string[] | undefined) {
-  return ids ? ids.map((id) => store.account(id)!).filter(Boolean) : store.accounts.filter((a) => isTransactionAccount(a) && store.transactions(a.id).length > 0);
+  return ids ? store.accounts.filter((a) => ids.includes(a.id)).sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id)) : store.accounts.filter((a) => isTransactionAccount(a) && store.transactions(a.id).length > 0);
 }
 
 /** The days in a period these accounts have no data for (after today, none is expected). */

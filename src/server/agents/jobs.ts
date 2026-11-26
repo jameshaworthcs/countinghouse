@@ -257,6 +257,9 @@ export class JobRunner extends EventEmitter implements JobQueue {
   /** An import was committed: insights follow once imports stop arriving for a while. */
   onImportCommitted(importId: string): void {
     if (!this.store.settings.agents.enabled || !this.store.settings.agents.insightsAfterImport || !this.opts.autoRun) return;
+    // An import of a company's accounts alone has nothing of yours to look at.
+    const imported = this.store.imports.find((i) => i.id === importId);
+    if (imported && this.store.companyImport(imported)) return;
     this.importIds.push(importId);
     clearTimeout(this.importTimer);
     this.importTimer = setTimeout(() => {

@@ -254,7 +254,7 @@ describe('with a store', () => {
       await committed('mz-current', { periodStart: '2026-05-01', periodEnd: '2026-05-31', openingBalance: 0, balance: -50, transactions: [{ key: 't', include: true, status: 'new', date: '2026-05-10', amount: -50, description: 'x' }] });
       await store.addTransactions([tx('mz-current', '2026-06-10', -5, imported), tx('mz-current', '2026-06-20', -5, imported)], 'test');
       // Its rows are recorded, and their days covered by a confirmation: only 1–9 June are new.
-      await store.setCoverageConfirmations([{ id: 'cov_0123456789ab', accountId: 'mz-current', from: '2026-06-10', to: '2026-06-20', confirmedAt: stamp }]);
+      await store.addCoverageConfirmations([{ id: 'cov_0123456789ab', accountId: 'mz-current', from: '2026-06-10', to: '2026-06-20', confirmedAt: stamp }]);
       const extraction = exportOf([row('2026-06-10', -5), row('2026-06-20', -5)], { openingBalance: -50, last4: '1111' });
       const draft = buildDraft(extraction, { store, document: csvDoc(), uploadedOn: '2026-06-25' });
       expect(draft.sections[0]!.target).toEqual({ mode: 'existing', accountId: 'mz-current' });

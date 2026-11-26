@@ -79,6 +79,14 @@ export interface AccountSummary {
    * readings"): when it was read, and the recorded value it stands in for.
    */
   live?: LiveFigure;
+  /** A company's own account (`Account.companyId`): never in your estate or any personal figure. */
+  companyId?: string;
+}
+
+/** A company's own accounts, for the Accounts page's group of them (GET /api/company-accounts). */
+export interface CompanyAccountsGroup {
+  company: { id: string; name: string; known: boolean };
+  accounts: AccountSummary[];
 }
 
 /** A live feed's reading standing for an account's value today, beside the recorded one. */
@@ -872,6 +880,8 @@ export interface AccountDetailResponse {
   imports: { id: string; fileName: string; label?: string; committedAt?: string; documentId: string }[];
   /** A market account's total paid in, when known (FORMULAS.md §12): a document's, or its flows from the start. */
   paidIn?: { amount: number; source: 'provider' | 'transactions'; asOf?: string };
+  /** A company's account: its own coverage grid (it is never in GET /api/coverage, which is yours). */
+  coverage?: CoverageResponse;
 }
 
 export interface TransactionsResponse {

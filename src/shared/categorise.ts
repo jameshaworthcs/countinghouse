@@ -420,10 +420,12 @@ export class Categoriser {
       };
       if (rule.set.category) res.category = rule.set.category;
       if (rule.set.tags?.length) res.tags = rule.set.tags;
-      if (rule.set.counterpartyAccountId) {
-        res.counterpartyAccountId = rule.set.counterpartyAccountId;
-        const other = this.accountsById.get(rule.set.counterpartyAccountId);
-        if (!res.category && other) res.category = transferCategoryFor(other.type, account?.type);
+      // Only an account this categoriser knows: your rows never go to a company's account (the
+      // store gives it your accounts alone), nor a company's rows to yours.
+      const other = rule.set.counterpartyAccountId ? this.accountsById.get(rule.set.counterpartyAccountId) : undefined;
+      if (other) {
+        res.counterpartyAccountId = other.id;
+        if (!res.category) res.category = transferCategoryFor(other.type, account?.type);
       }
       if (res.category || res.counterpartyAccountId || rule.set.payee) return res;
     }

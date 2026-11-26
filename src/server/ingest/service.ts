@@ -3,7 +3,8 @@
 import { EventEmitter } from 'node:events';
 import { copyFile, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { slugify } from '../../shared/accounts';
+import { sideOf, slugify } from '../../shared/accounts';
+import { fallbackPayeeOf, type CategoriseResult } from '../../shared/categorise';
 import type { DraftLinkView, LinkCandidate, Reread } from '../../shared/api';
 import { CategoryIndex } from '../../shared/categories';
 import { findInstitution } from '../../shared/institutions';
@@ -153,6 +154,9 @@ async function readTextPdf(file: string): Promise<{ extraction: Extraction; engi
   if (payslip) return { extraction: payslip.extraction, engine: 'payslip', engineVersion: PAYSLIP_ENGINE_VERSION, detail: `${payslip.layout === 'sap' ? 'SAP paystub' : 'payslip'}, read on this machine` };
   return null;
 }
+
+/** Why a row of yours is never linked as a transfer with a company's (enrich.ts, "Company accounts"). */
+const ACROSS_THE_LINE = 'A transfer links two accounts on one side: yours with yours, or one company’s with its own. Money between you and a company is not one.';
 
 export class ImportService extends EventEmitter {
   private pending = new Map<string, ImportRecord>();
@@ -864,7 +868,9 @@ export class ImportService extends EventEmitter {
         // you set yourself and what a transfer link decided.
         const account = this.store.account(current.accountId)!;
         const categoriser = categoriserFor(this.store);
-        const cat = categoriser.categorise({ accountId: account.id, description: row.read.description, amount: row.read.amount, date: row.read.date, type: row.read.type ?? current.type, bankCategory: current.bankCategory });
+        const input = { accountId: account.id, description: row.read.description, amount: row.read.amount, date: row.read.date, type: row.read.type ?? current.type, bankCategory: current.bankCategory };
+        // A company's row is not categorised: only its payee follows the new description.
+        const cat: CategoriseResult = account.companyId ? { payee: fallbackPayeeOf(input) } : categoriser.categorise(input);
         if (current.payeeSetBy !== 'user' && cat.payee) patch.payee = cat.payee;
         if (!current.transferGroup && current.categorisedBy !== 'user' && current.categorisedBy !== 'transfer') {
           patch.category = cat.category;
@@ -877,7 +883,8 @@ export class ImportService extends EventEmitter {
       } else if (row.kind === 'added' && row.read) {
         const account = this.store.account(section.accountId)!;
         const categoriser = categoriserFor(this.store);
-        const cat = categoriser.categorise({ accountId: account.id, description: row.read.description, amount: row.read.amount, date: row.read.date, type: row.read.type });
+        const input = { accountId: account.id, description: row.read.description, amount: row.read.amount, date: row.read.date, type: row.read.type };
+        const cat: CategoriseResult = account.companyId ? { payee: fallbackPayeeOf(input) } : categoriser.categorise(input);
         let occurrence = 0;
         let id = transactionId(account.id, row.read.date, row.read.amount, row.read.description, occurrence, `${importId}:reread`);
         while (this.store.transaction(id)) id = transactionId(account.id, row.read.date, row.read.amount, row.read.description, ++occurrence, `${importId}:reread`);
@@ -1041,6 +1048,7 @@ export class ImportService extends EventEmitter {
       if (sameAccount(mine.account, { id: tx.accountId })) throw new StoreError('A transfer is between two of your accounts: these are in the same one.');
       const otherAccount = this.store.account(tx.accountId);
       if (!otherAccount) throw new StoreError('Unknown account', 404);
+      if (sideOf(otherAccount) !== sideOf(mine.account)) throw new StoreError(ACROSS_THE_LINE);
       await this.unlinkRow(ref, { quiet: true });
       const row = findRow(this.pending.get(ref.importId)!.draft, ref.key)!.row;
       await this.changeRows([{ importId: ref.importId, row: { ...asTransferLeg(withoutLink(row), mine.account, otherAccount), transferMatch: tx.id } }]);
@@ -1050,6 +1058,7 @@ export class ImportService extends EventEmitter {
     const theirs = this.linkable(to);
     if (toMinor(theirs.found.row.amount) !== -toMinor(mine.found.row.amount)) throw new StoreError('The two legs of a transfer are the same amount, one in and one out.');
     if ((to.importId === ref.importId && theirs.found.section.key === mine.found.section.key) || sameAccount(mine.account, theirs.account)) throw new StoreError('A transfer is between two of your accounts: these are in the same one.');
+    if (sideOf(theirs.account) !== sideOf(mine.account)) throw new StoreError(ACROSS_THE_LINE);
     await this.unlinkRow(ref, { quiet: true });
     await this.unlinkRow(to, { quiet: true });
     // Read again: unlinking may have changed either draft.
@@ -1089,12 +1098,13 @@ export class ImportService extends EventEmitter {
     const out = withoutLink(row);
     if (row.categorisedBy !== 'transfer') return out;
     const accountId = section.target.mode === 'existing' ? section.target.accountId : '';
-    const cat = categoriserFor(this.store).categorise({ accountId, description: row.description, amount: row.amount, date: row.date, type: row.detail?.type, payee: row.payee, bankCategory: row.detail?.bankCategory });
+    // A company's row is not categorised (enrich.ts, "Company accounts").
+    const cat = this.store.account(accountId)?.companyId ? undefined : categoriserFor(this.store).categorise({ accountId, description: row.description, amount: row.amount, date: row.date, type: row.detail?.type, payee: row.payee, bankCategory: row.detail?.bankCategory });
     delete out.category;
     delete out.categorisedBy;
     delete out.ruleId;
     delete out.counterpartyAccountId;
-    return { ...out, ...(cat.category ? { category: cat.category } : {}), ...(cat.categorisedBy ? { categorisedBy: cat.categorisedBy } : {}), ...(cat.ruleId ? { ruleId: cat.ruleId } : {}), ...(cat.counterpartyAccountId ? { counterpartyAccountId: cat.counterpartyAccountId } : {}) };
+    return { ...out, ...(cat?.category ? { category: cat.category } : {}), ...(cat?.categorisedBy ? { categorisedBy: cat.categorisedBy } : {}), ...(cat?.ruleId ? { ruleId: cat.ruleId } : {}), ...(cat?.counterpartyAccountId ? { counterpartyAccountId: cat.counterpartyAccountId } : {}) };
   }
 
   /**

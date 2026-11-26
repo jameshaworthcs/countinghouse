@@ -1,7 +1,7 @@
 // Commit a reviewed draft: create accounts, write transactions / balances / holdings / figures, link
 // transfers, archive the original document and record the import. Everything lands in one git commit.
 
-import { ACCOUNT_TYPE_META, slugify } from '../../shared/accounts';
+import { ACCOUNT_TYPE_META, sideOf, slugify } from '../../shared/accounts';
 import { linkedPayee, transferLegCategory } from '../../shared/categorise';
 import { fullerName } from '../../shared/funds';
 import { catalogInstitution, findInstitution } from '../../shared/institutions';
@@ -108,14 +108,14 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
     let institutionId = input.institutionId;
     if (!institutionId && input.institutionName) {
       const cat = findInstitution(input.institutionName);
-      institutionId = cat?.id ?? slugify(input.institutionName, store.institutions.map((i) => i.id));
+      institutionId = cat?.id ?? slugify(input.institutionName, store.institutionIds());
     }
     let institution: (typeof toCreate)[number]['institution'];
     if (institutionId && !store.institution(institutionId)) {
       const cat = catalogInstitution(institutionId);
       institution = { id: institutionId, name: cat?.name ?? input.institutionName ?? institutionId, kind: cat?.kind ?? 'bank', ...(cat?.fscsGroup ? { fscsGroup: cat.fscsGroup } : {}) };
     }
-    const taken = [...store.accounts.map((a) => a.id), ...toCreate.map((x) => x.account.id)];
+    const taken = [...store.accountIds(), ...toCreate.map((x) => x.account.id)];
     const id = taken.includes(input.id) ? slugify(input.id, taken) : input.id;
     const account: Account = {
       id,
@@ -150,6 +150,10 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
     if (!account) continue;
     accountIds.push(account.id);
     const occurrences = new Map<string, number>();
+    // A company's account (enrich.ts, "Company accounts"): its rows keep only a category you gave on
+    // the review page, and a transfer only to another of its company's accounts. A draft made while
+    // the account was yours is held to that too.
+    const side = sideOf(account);
     for (const row of section.transactions) {
       if (!row.include) {
         skipped++;
@@ -180,15 +184,29 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
         source: { ...source, ...(row.row !== undefined ? { row: row.row } : {}) },
         createdAt: stamp,
       };
-      // Not one another transfer has taken since the draft was made.
+      // Not one another transfer has taken since the draft was made, nor one across the line.
       const match = row.transferMatch ? store.transaction(row.transferMatch) : undefined;
-      if (match && !match.transferGroup && match.accountId !== account.id && !transferLinks.some((l) => l.otherId === match.id)) {
+      const matchSide = match ? sideOf(store.account(match.accountId)) : undefined;
+      if (match && matchSide === side && !match.transferGroup && match.accountId !== account.id && !transferLinks.some((l) => l.otherId === match.id)) {
         tx.transferGroup = transferGroupId(id, match.id);
         transferLinks.push({ newId: id, otherId: match.id, account });
         // A payee naming another account of yours than the one it is linked with takes that one's name.
         const other = store.account(match.accountId);
-        const payee = other ? linkedPayee(tx, other, store.accounts) : undefined;
+        const payee = other ? linkedPayee(tx, other, store.accountsBeside(account.id)) : undefined;
         if (payee) tx.payee = payee;
+      }
+      if (!tx.transferGroup) {
+        const counterparty = tx.counterpartyAccountId ? store.account(tx.counterpartyAccountId) : undefined;
+        const across = counterparty !== undefined && sideOf(counterparty) !== side;
+        // A company's row keeps no category of yours (only one you gave); no row keeps a link across
+        // the line, nor the transfer category that came with it.
+        const bare = tx.categorisedBy !== 'user' && (side !== '' || (across && tx.categorisedBy === 'transfer'));
+        if (bare) {
+          delete tx.category;
+          delete tx.categorisedBy;
+          delete tx.ruleId;
+        }
+        if (across || (side && tx.categorisedBy !== 'user')) delete tx.counterpartyAccountId;
       }
       if (row.pendingLink && row.pendingLink.importId !== record.id) heldForLink.add(id);
       byKey.set(row.key, { tx, row, account });
@@ -201,7 +219,7 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
     const link = row.pendingLink;
     if (!link || link.importId !== record.id || tx.transferGroup) continue;
     const other = byKey.get(link.key);
-    if (!other || other.tx.transferGroup || other.account.id === account.id || other.row.pendingLink?.key !== row.key) continue;
+    if (!other || other.tx.transferGroup || other.account.id === account.id || other.row.pendingLink?.key !== row.key || sideOf(other.account) !== sideOf(account)) continue;
     const group = transferGroupId(tx.id, other.tx.id);
     for (const [a, b] of [
       [{ tx, row, account }, other],
@@ -209,7 +227,7 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
     ] as const) {
       a.tx.transferGroup = group;
       a.tx.counterpartyAccountId = b.account.id;
-      const payee = linkedPayee(a.tx, b.account, [...store.accounts, ...toCreate.map((x) => x.account)]);
+      const payee = linkedPayee(a.tx, b.account, [...store.accountsBeside(a.account.id), ...toCreate.map((x) => x.account)]);
       if (payee) a.tx.payee = payee;
       if (a.row.categorisedBy !== 'user') {
         a.tx.category = transferLegCategory(a.account.type, b.account.type, a.tx.amount);
@@ -273,7 +291,8 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
           if (place !== recorded.place) patch.place = place;
         }
         const named = now.differs.some((d) => d.field === 'description');
-        Object.assign(patch, rederive(categoriser, merged, named ? [...added, 'seenIn'] : added));
+        // A company's row is not categorised: what the document fills in changes nothing else of it.
+        if (!account.companyId) Object.assign(patch, rederive(categoriser, merged, named ? [...added, 'seenIn'] : added));
         patch.seenIn = seenIn;
         detailed.push({ t: recorded, patch, added });
       }
@@ -496,7 +515,7 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
           patch.category = transferLegCategory(otherAccount.type, account.type, other.amount);
           patch.categorisedBy = 'transfer';
         }
-        const payee = linkedPayee(other, account, store.accounts);
+        const payee = linkedPayee(other, account, store.accountsBeside(account.id));
         if (payee) patch.payee = payee;
         return { id: otherId, patch };
       }),

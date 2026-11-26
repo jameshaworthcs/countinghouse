@@ -30,7 +30,8 @@ export function systemRoutes(ctx: AppContext): Hono {
         accounts: ctx.store.accounts.length,
         transactions: ctx.store.transactionCount(),
         balances: ctx.store.balances().length,
-        imports: ctx.store.imports.length,
+        // Yours, as the other counts are: not a statement of a company's accounts alone.
+        imports: ctx.store.imports.filter((i) => !ctx.store.companyImport(i)).length,
         figures: ctx.store.figures.length,
       },
     };

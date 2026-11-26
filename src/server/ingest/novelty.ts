@@ -99,7 +99,7 @@ function factsOf(record: ImportRecord, store: Store, covered: (accountId: string
     // A forecast with no balance is recorded as a figure on its account (ingest/commit.ts).
     if (s.annualIncome !== undefined && s.balanceDate && !(s.recordBalance && s.balance !== undefined)) {
       const figure: DraftFigure = { key: `${s.key}:forecast`, include: true, kind: 'pension_income_forecast', label: 'Forecast income per year', amount: s.annualIncome, currency: s.currency, periodEnd: s.balanceDate, payer: account };
-      const held = stored ? store.figures.some((f) => f.kind === 'pension_income_forecast' && f.accountId === stored && f.date === s.balanceDate && sameMoney(f.amount, s.annualIncome)) : false;
+      const held = stored ? store.figuresOf(stored).some((f) => f.kind === 'pension_income_forecast' && f.date === s.balanceDate && sameMoney(f.amount, s.annualIncome)) : false;
       out.push({ fact: { kind: 'figure', figure }, stored: held });
     }
     if (s.recordHoldings && s.balanceDate) {

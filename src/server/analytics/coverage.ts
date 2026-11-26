@@ -152,7 +152,8 @@ export function isTransactionAccount(a: Account): boolean {
  */
 export function coveredIntervals(store: Store, account: Account): Interval[] {
   const txs = store.transactions(account.id);
-  const confirmed = store.coverageConfirmations.filter((c) => c.accountId === account.id).map((c) => ({ from: c.from, to: c.to }));
+  // The account's own confirmations, whoever's account it is (a company's has its own page).
+  const confirmed = store.coverageConfirmationsOf(account.id).map((c) => ({ from: c.from, to: c.to }));
   const fromImports = importIntervals(store, account.id);
   if (fromImports.length) {
     const manual = txs.filter((t) => !t.source.importId).map((t) => ({ from: t.date, to: t.date }));
@@ -340,26 +341,8 @@ export class Coverage {
 
   /** Coverage per account and month over the last `months` months, for the data-health grid. */
   summary(months = 13, on: ISODate = today()): CoverageResponse {
-    const from = startOfMonth(addDays(startOfMonth(on), -1 - 31 * (months - 2)));
-    const monthKeys = eachMonth(from, on).slice(-months);
-    const accounts = this.store.accounts
-      .filter((a) => isTransactionAccount(a) && a.status === 'open' && a.includeInNetWorth)
-      .map((a) => {
-        const c = this.byAccount.get(a.id)!;
-        return {
-          accountId: a.id,
-          name: a.name,
-          source: c.source,
-          from: c.from,
-          to: c.to,
-          months: monthKeys.map((m) => {
-            const mStart = `${m}-01`;
-            const mEnd = minDate(endOfMonth(mStart), on)!;
-            const total = diffDays(mStart, mEnd) + 1;
-            return { month: m, fraction: total > 0 ? coveredDays(c.intervals, mStart, mEnd) / total : 0 };
-          }),
-        };
-      });
+    const monthKeys = coverageMonths(months, on);
+    const accounts = this.store.accounts.filter((a) => isTransactionAccount(a) && a.status === 'open' && a.includeInNetWorth).map((a) => coverageRow(a, this.byAccount.get(a.id)!, monthKeys, on));
     const joint = this.joint(`${monthKeys[0]}-01`, on);
     return {
       months: monthKeys,
@@ -369,4 +352,37 @@ export class Coverage {
       jointTo: joint.intervals[joint.intervals.length - 1]?.to ?? null,
     };
   }
+}
+
+/** The last `months` calendar months to `on`, oldest first: the coverage grid's columns. */
+export function coverageMonths(months = 13, on: ISODate = today()): string[] {
+  const from = startOfMonth(addDays(startOfMonth(on), -1 - 31 * (months - 2)));
+  return eachMonth(from, on).slice(-months);
+}
+
+/** One account's row of the coverage grid: the share of each month's days its records cover. */
+export function coverageRow(a: Account, c: AccountCoverage, monthKeys: readonly string[], on: ISODate): CoverageResponse['accounts'][number] {
+  return {
+    accountId: a.id,
+    name: a.name,
+    source: c.source,
+    from: c.from,
+    to: c.to,
+    months: monthKeys.map((m) => {
+      const mStart = `${m}-01`;
+      const mEnd = minDate(endOfMonth(mStart), on)!;
+      const total = diffDays(mStart, mEnd) + 1;
+      return { month: m, fraction: total > 0 ? coveredDays(c.intervals, mStart, mEnd) / total : 0 };
+    }),
+  };
+}
+
+/**
+ * A company's account's own coverage grid, for its own page: the account alone, never joined with
+ * yours (a company account that is behind makes no month of yours incomplete).
+ */
+export function ownCoverage(store: Store, account: Account, on: ISODate = today()): CoverageResponse {
+  const monthKeys = coverageMonths(13, on);
+  const c = accountCoverage(store, account);
+  return { months: monthKeys, accounts: c.source === 'none' ? [] : [coverageRow(account, c, monthKeys, on)], completeMonths: [], lastCompleteMonth: null, jointTo: null };
 }

@@ -10,6 +10,7 @@
 // they are here (`keepLinks`), so linking from another import's page is never undone by it.
 
 import type { DraftLinkView, LinkCandidate } from '../../shared/api';
+import { sideOf } from '../../shared/accounts';
 import { transferLegCategory } from '../../shared/categorise';
 import { diffDays } from '../../shared/dates';
 import { toMinor } from '../../shared/money';
@@ -44,6 +45,8 @@ export interface SectionAccount {
   id?: string;
   type: AccountType;
   name: string;
+  /** A company's own account (`Account.companyId`); an account the import creates is yours. */
+  companyId?: string;
 }
 
 /** The account a section's rows go into, as far as it is known before commit. */
@@ -51,7 +54,7 @@ export function sectionAccount(store: Store, section: DraftSection): SectionAcco
   const target = section.target;
   if (target.mode === 'existing') {
     const a = store.account(target.accountId);
-    return a ? { id: a.id, type: a.type, name: a.name } : undefined;
+    return a ? { id: a.id, type: a.type, name: a.name, ...(a.companyId ? { companyId: a.companyId } : {}) } : undefined;
   }
   if (target.mode === 'new') return { type: target.account.type, name: `${target.account.name} (new)` };
   return undefined;
@@ -163,7 +166,7 @@ export function linkCandidates(store: Store, pending: readonly ImportRecord[], s
     for (const section of r.draft.sections) {
       if (r.id === self.id && section.key === found.section.key) continue;
       const theirs = sectionAccount(store, section);
-      if (!theirs || sameAccount(mine, theirs)) continue;
+      if (!theirs || sameAccount(mine, theirs) || sideOf(theirs) !== sideOf(mine)) continue;
       for (const t of section.transactions) {
         if (t.status === 'duplicate' || !near(t.date, t.amount)) continue;
         if (t.pendingLink && !(t.pendingLink.importId === self.id && t.pendingLink.key === key)) continue;
@@ -172,7 +175,8 @@ export function linkCandidates(store: Store, pending: readonly ImportRecord[], s
     }
   }
   const recorded: LinkCandidate[] = [];
-  for (const t of store.transactions()) {
+  // Rows on its own side only: yours for a row of yours, its company's for a company's.
+  for (const t of mine.id ? store.transactionsBeside(mine.id) : store.transactions()) {
     if (t.transferGroup || !near(t.date, t.amount) || sameAccount(mine, { id: t.accountId }) || t.id === found.row.duplicateOf) continue;
     recorded.push({ kind: 'recorded', transactionId: t.id, accountName: store.account(t.accountId)?.name ?? t.accountId, date: t.date, amount: t.amount, description: t.payee ?? t.description, days: days(t.date, found.row.date) });
   }

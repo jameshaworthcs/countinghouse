@@ -60,7 +60,7 @@ async function statement(accountId: string, from: string, to: string, rows: Tran
 }
 
 async function confirm(accountId: string, from: string, to: string) {
-  await store.setCoverageConfirmations([...store.coverageConfirmations, { id: `cov_${(k++).toString(16).padStart(12, '0')}`, accountId, from, to, confirmedAt: stamp }], 'confirm');
+  await store.addCoverageConfirmations([{ id: `cov_${(k++).toString(16).padStart(12, '0')}`, accountId, from, to, confirmedAt: stamp }], 'confirm');
 }
 
 describe('the oldest tax year still open', () => {
@@ -136,7 +136,7 @@ describe('tax figures', () => {
     await statement('current', '2025-10-01', '2026-04-30', [], 100);
     await confirm('current', '2025-09-29', '2025-09-30');
     const note = 'No statements: next to no interest';
-    await store.setCoverageConfirmations([...store.coverageConfirmations, { id: 'cov_00000000abcd', accountId: 'nodata', from: '2024-04-06', to: '2025-07-31', note, confirmedAt: stamp }], 'confirm');
+    await store.addCoverageConfirmations([{ id: 'cov_00000000abcd', accountId: 'nodata', from: '2024-04-06', to: '2025-07-31', note, confirmedAt: stamp }], 'confirm');
     const a = allowances(store, '2025/26', '2026-10-03');
     expect(a.savings).toMatchObject({ incomplete: null, missing: [] });
     expect(a.savings.confirmedNil).toEqual([{ accountId: 'nodata', name: 'nodata', from: '2025-04-06', to: '2025-07-31', days: 117, note }]);

@@ -13,6 +13,7 @@ import { copyFile, mkdir, readdir, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import type { z } from 'zod';
 import type { ChangeDiff } from '../shared/audit';
+import { sideOf } from '../shared/accounts';
 import { defaultCategories } from '../shared/categories';
 import { sectionSpan } from '../shared/coverage';
 import {
@@ -520,6 +521,18 @@ export class Store extends EventEmitter {
         }
       }
     }
+    // Company accounts (docs/DATA_FORMAT.md, accounts.json): what a hand edit can get wrong.
+    const companyIds = new Set(next.companies.map((c) => c.id));
+    const accountsById = new Map(next.accounts.map((a) => [a.id, a]));
+    for (const a of next.accounts) {
+      if (a.companyId && !companyIds.has(a.companyId)) issues.push({ file: 'accounts.json', severity: 'warning', message: `Account "${a.id}" names unknown company "${a.companyId}"` });
+      if (a.companyId && a.includeInNetWorth) issues.push({ file: 'accounts.json', severity: 'warning', message: `Account "${a.id}" is a company's (${a.companyId}) but says it counts in your estate: it never does` });
+      const older = a.continues ? accountsById.get(a.continues.accountId) : undefined;
+      if (older && sideOf(older) !== sideOf(a)) issues.push({ file: 'accounts.json', severity: 'warning', message: `Account "${a.id}" carries on from "${older.id}" across the line between your money and a company's: link accounts on one side only` });
+    }
+    for (const c of next.companies) {
+      if (c.accountId && accountsById.get(c.accountId)?.companyId) issues.push({ file: 'companies.json', severity: 'warning', message: `Company "${c.id}" carries your shares on "${c.accountId}", which is a company's own account` });
+    }
     if (next.meta.version > FORMAT_VERSION) {
       issues.push({ file: 'meta.json', severity: 'error', message: `Data format v${next.meta.version} is newer than this app understands (v${FORMAT_VERSION}). Update the app before editing.` });
     }
@@ -633,11 +646,102 @@ export class Store extends EventEmitter {
   get settings(): Settings {
     return this.state.settings;
   }
+  /**
+   * The providers of your accounts, and any no account names: not one only a company's accounts
+   * are at (its business bank is not a bank of yours).
+   */
   get institutions(): Institution[] {
+    if (this.wide) return this.state.institutions;
+    const theirs = new Set(this.state.accounts.filter((a) => a.companyId && a.institutionId).map((a) => a.institutionId!));
+    if (!theirs.size) return this.state.institutions;
+    for (const a of this.scope().personal) if (a.institutionId) theirs.delete(a.institutionId);
+    return this.state.institutions.filter((i) => !theirs.has(i.id));
+  }
+  /** Every provider, a company's accounts' too: for infrastructure only (ESLint's allowlist). */
+  get allInstitutions(): Institution[] {
     return this.state.institutions;
   }
+  /** Every provider's id: the ids a new one's must differ from. */
+  institutionIds(): string[] {
+    return this.state.institutions.map((i) => i.id);
+  }
+
+  // ─── Scope: your money, not a company's ─────────────────────────────────────────────────────
+  //
+  // An account with a `companyId` is a company's (its bank account, its card), and its money is
+  // never yours. The accessors that list across accounts (`accounts`, `transactions()`,
+  // `balances()`, `holdings()`, `figures`, `terms()`, `coverageConfirmations`, `institutions`,
+  // `transactionCount()`) give your own only, so every figure built on them is personal without a
+  // filter of its own.
+  // Infrastructure that must see everything (ingestion, enrichment, transfer linking, validation)
+  // asks for it by name (`allAccounts`, `allTransactions()`…), and company code for one company
+  // (`companyAccounts`, `companyTransactions`). ESLint allows those names only in the files listed
+  // in eslint.config.js (docs/ARCHITECTURE.md, "Company accounts"). A lookup by id (`account(id)`,
+  // `transaction(id)`, `transactions(accountId)`) finds any record: a lookup is not a total.
+
+  /** Test only: every accessor sees company data too (tests/company-scope.test.ts's canary). */
+  private wide = false;
+  private sides?: { accounts: Account[]; company: Map<string, string>; personal: Account[] };
+
+  /** Company account id → its company, worked out once per accounts list. */
+  private scope(): { company: Map<string, string>; personal: Account[] } {
+    if (this.sides?.accounts !== this.state.accounts) {
+      const company = new Map<string, string>();
+      for (const a of this.state.accounts) if (a.companyId) company.set(a.id, a.companyId);
+      this.sides = { accounts: this.state.accounts, company, personal: this.state.accounts.filter((a) => !a.companyId) };
+    }
+    return this.sides;
+  }
+
+  /** Is the account yours: not a company's (an account not known is yours). */
+  private personal(accountId: string | undefined): boolean {
+    return this.wide || !accountId || !this.scope().company.has(accountId);
+  }
+
+  /**
+   * Your own records (goals, agreements, rules, set aside) are about your money: one that names a
+   * company's account would carry the company's money into a personal figure, so it is refused.
+   */
+  private refuseCompanyAccounts(ids: readonly string[], what: string): void {
+    const theirs = ids.map((id) => this.state.accounts.find((a) => a.id === id)).find((a) => a?.companyId);
+    if (theirs) throw new StoreError(`${what} names ${theirs.name}, a company's own account: it can only name accounts of yours.`);
+  }
+
+  /**
+   * The canary of the test that company data changes no personal figure: from now on the store's
+   * accessors no longer keep company data out, so that test must fail. Refused outside Vitest, and
+   * ESLint refuses it outside tests/.
+   */
+  widenScopeForTest(): void {
+    if (process.env.VITEST !== 'true') throw new Error('widenScopeForTest is for tests only');
+    this.wide = true;
+    this.version++;
+  }
+
+  /** Your accounts: not a company's. */
   get accounts(): Account[] {
+    return this.wide ? this.state.accounts : this.scope().personal;
+  }
+  /** Every account, a company's too: for infrastructure only (ESLint's allowlist). */
+  get allAccounts(): Account[] {
     return this.state.accounts;
+  }
+  /** Every account's id, a company's too: the ids a new account's must differ from. */
+  accountIds(): string[] {
+    return this.state.accounts.map((a) => a.id);
+  }
+  /** One company's own accounts (`Account.companyId`). */
+  companyAccounts(companyId: string): Account[] {
+    return this.state.accounts.filter((a) => a.companyId === companyId);
+  }
+  /**
+   * The accounts on the same side as this one (shared/accounts.ts, `sideOf`): yours for one of
+   * yours, its company's for a company's. For what an account's own page or a row's neighbours
+   * need, without ever mixing the two.
+   */
+  accountsBeside(accountId: string): Account[] {
+    const companyId = this.wide ? undefined : this.scope().company.get(accountId);
+    return companyId ? this.companyAccounts(companyId) : this.accounts;
   }
   get categories(): Category[] {
     return this.state.categories;
@@ -664,7 +768,12 @@ export class Store extends EventEmitter {
   get csvProfiles(): CsvProfile[] {
     return this.state.csvProfiles;
   }
+  /** Your figures: not those of a company's account. */
   get figures(): Figure[] {
+    return this.state.figures.filter((f) => this.personal(f.accountId));
+  }
+  /** Every figure, those of a company's accounts too: for infrastructure only. */
+  get allFigures(): Figure[] {
     return this.state.figures;
   }
   get companies(): Company[] {
@@ -694,7 +803,12 @@ export class Store extends EventEmitter {
     return this.state.returns.find((r) => r.taxYear === taxYear);
   }
 
+  /** Stretches you confirmed nothing is missing from, of your accounts. */
   get coverageConfirmations(): CoverageConfirmation[] {
+    return this.state.coverage.filter((c) => this.personal(c.accountId));
+  }
+  /** Every confirmation, a company account's too: what a write of coverage.json starts from. */
+  get allCoverageConfirmations(): CoverageConfirmation[] {
     return this.state.coverage;
   }
   get employments(): Employment[] {
@@ -706,9 +820,9 @@ export class Store extends EventEmitter {
   get hmrc(): HmrcRecord[] {
     return this.state.hmrc;
   }
-  /** Every account's terms, or one account's, oldest first. */
+  /** Each of your accounts' terms, or one account's, oldest first. */
   terms(accountId?: string): Terms[] {
-    const list = accountId ? this.state.terms.filter((t) => t.accountId === accountId) : this.state.terms;
+    const list = accountId ? this.state.terms.filter((t) => t.accountId === accountId) : this.state.terms.filter((t) => this.personal(t.accountId));
     return [...list].sort((a, b) => a.asOf.localeCompare(b.asOf) || a.createdAt.localeCompare(b.createdAt));
   }
   get payslips(): PayslipRecord[] {
@@ -740,6 +854,10 @@ export class Store extends EventEmitter {
   get imports(): ImportSummary[] {
     return this.state.imports;
   }
+  /** An import of a company's accounts alone (every section of it is a company account's): no document of yours. */
+  companyImport(summary: Pick<ImportSummary, 'sections'>): boolean {
+    return !this.wide && summary.sections.length > 0 && summary.sections.every((s) => !this.personal(s.accountId));
+  }
   /** Proposed fixes you applied or dismissed, the latest decided first. */
   get proposals(): DecidedProposalSummary[] {
     return this.state.proposals;
@@ -761,26 +879,79 @@ export class Store extends EventEmitter {
     return this.txById.get(id);
   }
 
-  /** Transactions for one account (sorted by date), or all transactions. */
+  /** Rows of the accounts `keep` lets through, sorted by date (source order within a day). */
+  private rowsOf<T extends { date: string }>(map: Map<string, T[]>, keep: (accountId: string) => boolean): T[] {
+    const out: T[] = [];
+    for (const [accountId, list] of map) if (keep(accountId)) out.push(...list);
+    return sortByDate(out);
+  }
+
+  /** One account's transactions (sorted by date), whoever's it is; or all of yours. */
   transactions(accountId?: string): Transaction[] {
     if (accountId) return this.state.transactions.get(accountId) ?? [];
-    const all: Transaction[] = [];
-    for (const list of this.state.transactions.values()) all.push(...list);
-    return sortByDate(all);
+    return this.rowsOf(this.state.transactions, (id) => this.personal(id));
+  }
+  /**
+   * The transactions of the accounts named, whoever's they are, in the order `transactions()` gives:
+   * a list asked for by account (an account's own page), which is a lookup, not a total.
+   */
+  transactionsOf(accountIds: ReadonlySet<string>): Transaction[] {
+    return this.rowsOf(this.state.transactions, (id) => accountIds.has(id));
+  }
+  /** Every transaction, a company's too: for infrastructure only (ESLint's allowlist). */
+  allTransactions(): Transaction[] {
+    return this.rowsOf(this.state.transactions, () => true);
+  }
+  /** One company's transactions: its own accounts' rows. */
+  companyTransactions(companyId: string): Transaction[] {
+    const ids = new Set(this.companyAccounts(companyId).map((a) => a.id));
+    return this.rowsOf(this.state.transactions, (id) => ids.has(id));
+  }
+  /** The transactions on the same side as this account (`accountsBeside`): yours, or its company's. */
+  transactionsBeside(accountId: string): Transaction[] {
+    const companyId = this.wide ? undefined : this.scope().company.get(accountId);
+    return companyId ? this.companyTransactions(companyId) : this.transactions();
   }
 
+  /** How many transactions of yours. */
   transactionCount(): number {
-    return this.txById.size;
+    if (this.wide) return this.txById.size;
+    let n = 0;
+    for (const [accountId, list] of this.state.transactions) if (this.personal(accountId)) n += list.length;
+    return n;
   }
 
+  /** One account's balances, whoever's it is; or all of yours. */
   balances(accountId?: string): BalanceSnapshot[] {
     if (accountId) return this.state.balances.get(accountId) ?? [];
-    return sortByDate([...this.state.balances.values()].flat());
+    return this.rowsOf(this.state.balances, (id) => this.personal(id));
+  }
+  /** Every balance, a company account's too: for infrastructure only. */
+  allBalances(): BalanceSnapshot[] {
+    return this.rowsOf(this.state.balances, () => true);
+  }
+  /** A balance by its id, whoever's account it is of. */
+  /** One account's figures, whoever's account it is. */
+  figuresOf(accountId: string): Figure[] {
+    return this.state.figures.filter((f) => f.accountId === accountId);
   }
 
+  balance(id: string): BalanceSnapshot | undefined {
+    for (const list of this.state.balances.values()) {
+      const found = list.find((b) => b.id === id);
+      if (found) return found;
+    }
+    return undefined;
+  }
+
+  /** One account's holdings, whoever's it is; or all of yours. */
   holdings(accountId?: string): HoldingsSnapshot[] {
     if (accountId) return this.state.holdings.get(accountId) ?? [];
-    return sortByDate([...this.state.holdings.values()].flat());
+    return this.rowsOf(this.state.holdings, (id) => this.personal(id));
+  }
+  /** Every holdings snapshot, a company account's too: for infrastructure only. */
+  allHoldings(): HoldingsSnapshot[] {
+    return this.rowsOf(this.state.holdings, () => true);
   }
 
   async readImport(id: string): Promise<ImportRecord | undefined> {
@@ -835,6 +1006,9 @@ export class Store extends EventEmitter {
     return this.exclusive(async () => {
       const next = change(this.state.earmarks);
       const e = next ? EarmarksSchema.parse(next) : null;
+      const named = (x: Earmarks | null) => (x ? [...x.everyday, ...x.setAside, ...x.pots.flatMap((p) => p.rules.flatMap((r) => [...(r.accountIds ?? []), ...(r.counterpartyAccountId ? [r.counterpartyAccountId] : [])]))] : []);
+      const was = new Set(named(this.state.earmarks));
+      if (e) this.refuseCompanyAccounts(named(e).filter((id) => !was.has(id)), 'Money set aside');
       if (e) await this.writeJson('earmarks.json', e);
       else {
         this.selfWrites.set('earmarks.json', 'deleted');
@@ -865,10 +1039,21 @@ export class Store extends EventEmitter {
 
   private setArray<K extends keyof typeof ARRAY_FILES>(name: K, items: State[K], message: string): Promise<void> {
     return this.exclusive(async () => {
-      const file = await this.writeArrayFile(name, items);
       const def = ARRAY_FILES[name];
       const before = this.state[name] as unknown[];
       const after = (items as unknown[]).map((i) => (def.schema as z.ZodType<unknown>).parse(i));
+      // Company accounts stay apart from yours: refused before anything is written.
+      if (name === 'accounts') checkCompanyAccounts(after as Account[], before as Account[], this.state.companies);
+      if (name === 'companies') checkCompanyEstateAccounts(after as Company[], before as Company[], this.state.accounts);
+      // Only what this write adds or changes: one stored before (a hand edit) does not block the rest.
+      const fresh = <T extends { id: string }>(list: T[]) => {
+        const was = new Map((before as T[]).map((x) => [x.id, JSON.stringify(x)]));
+        return list.filter((x) => was.get(x.id) !== JSON.stringify(x));
+      };
+      if (name === 'goals') for (const g of fresh(after as Goal[])) this.refuseCompanyAccounts(g.accountIds, `The goal "${g.name}"`);
+      if (name === 'agreements') for (const a of fresh(after as Agreement[])) this.refuseCompanyAccounts(a.accountId ? [a.accountId] : [], `The agreement "${a.name}"`);
+      if (name === 'rules') for (const r of fresh(after as Rule[])) this.refuseCompanyAccounts(r.set.counterpartyAccountId ? [r.set.counterpartyAccountId] : [], `The rule "${r.name ?? r.match.value}"`);
+      const file = await this.writeArrayFile(name, items);
       (this.state as unknown as Record<string, unknown>)[name] = after;
       this.changed(message, [file], diffById(before, after));
     });
@@ -928,8 +1113,29 @@ export class Store extends EventEmitter {
     return this.setArray('returns', list, message);
   }
 
-  setCoverageConfirmations(list: CoverageConfirmation[], message = 'coverage: update'): Promise<void> {
-    return this.setArray('coverage', list, message);
+  /**
+   * Add stretches you confirmed nothing is missing from. Kept beside every other confirmation, a
+   * company account's too: the readable list (`coverageConfirmations`) is yours alone, so a write is
+   * never built from it.
+   */
+  addCoverageConfirmations(list: CoverageConfirmation[], message = 'coverage: update'): Promise<void> {
+    return this.setArray('coverage', [...this.state.coverage, ...list], message);
+  }
+  /** Withdraw a confirmation by its id (any account's). */
+  removeCoverageConfirmation(id: string, message = 'coverage: update'): Promise<void> {
+    return this.setArray(
+      'coverage',
+      this.state.coverage.filter((c) => c.id !== id),
+      message,
+    );
+  }
+  /** One account's confirmations, whoever's account it is. */
+  coverageConfirmationsOf(accountId: string): CoverageConfirmation[] {
+    return this.state.coverage.filter((c) => c.accountId === accountId);
+  }
+  /** A confirmation by its id, whoever's account it is of. */
+  coverageConfirmation(id: string): CoverageConfirmation | undefined {
+    return this.state.coverage.find((c) => c.id === id);
   }
   async upsertAgreement(agreement: Agreement, message?: string): Promise<void> {
     const existing = this.state.agreements.findIndex((a) => a.id === agreement.id);
@@ -1391,6 +1597,40 @@ export class Store extends EventEmitter {
       this.state.proposals = [summariseProposal(p, rel), ...this.state.proposals.filter((x) => x.id !== p.id)].sort(latestDecidedFirst);
       this.changed(message, [rel], { added: 1, items: [{ id: p.id, op: 'added', label: `${p.status} ${p.title}`.slice(0, 160) }] });
     });
+  }
+}
+
+/**
+ * The rules that keep a company's accounts apart from yours (docs/DATA_FORMAT.md, accounts.json),
+ * for each account a write adds or changes (or that carries on from one it changes): it names a
+ * company that exists; it is never in your estate; it is not the account that carries your shares
+ * in a company in your estate (that one is yours); and it carries on only from an account on its own
+ * side. Throws a 400 naming the first problem.
+ */
+export function checkCompanyAccounts(next: readonly Account[], before: readonly Account[], companies: readonly Company[]): void {
+  const was = new Map(before.map((a) => [a.id, JSON.stringify(a)]));
+  const byId = new Map(next.map((a) => [a.id, a]));
+  const changed = new Set(next.filter((a) => was.get(a.id) !== JSON.stringify(a)).map((a) => a.id));
+  for (const a of next) {
+    const older = a.continues ? byId.get(a.continues.accountId) : undefined;
+    if (!changed.has(a.id) && !(older && changed.has(older.id))) continue;
+    if (a.companyId) {
+      const company = companies.find((c) => c.id === a.companyId);
+      if (!company) throw new StoreError(`${a.name} names a company that is not in your data ("${a.companyId}").`);
+      if (a.includeInNetWorth) throw new StoreError(`${a.name} is ${company.name}'s account: its money is the company's, so it is never counted in your estate.`);
+      if (companies.some((c) => c.accountId === a.id)) throw new StoreError(`${a.name} carries your shares in a company in your estate: it is yours, not the company's.`);
+    }
+    if (older && sideOf(older) !== sideOf(a)) throw new StoreError(`${a.name} cannot carry on from ${older.name}: one is a company's account and the other is not, or they are two companies'.`);
+  }
+}
+
+/** A company's `accountId` (its shares in your estate) is yours: never an account of a company. Checked for the companies a write adds or changes. */
+export function checkCompanyEstateAccounts(companies: readonly Company[], before: readonly Company[], accounts: readonly Account[]): void {
+  const was = new Map(before.map((c) => [c.id, JSON.stringify(c)]));
+  for (const c of companies) {
+    if (was.get(c.id) === JSON.stringify(c)) continue;
+    const account = c.accountId ? accounts.find((a) => a.id === c.accountId) : undefined;
+    if (account?.companyId) throw new StoreError(`${account.name} is a company's own account, so it cannot carry your shares in ${c.name} in your estate.`);
   }
 }
 

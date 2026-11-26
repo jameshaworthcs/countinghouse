@@ -152,6 +152,13 @@ export const AccountSchema = z.object({
    * split between the two (docs/INGESTION.md, "Linked accounts").
    */
   continues: z.object({ accountId: SlugSchema, from: ISODateSchema }).optional(),
+  /**
+   * The company (companies.json) this account belongs to: a company's own bank account or card,
+   * not yours. Its money is the company's, so it never counts in any personal figure: such an
+   * account is never in your estate (`includeInNetWorth` false), and the store keeps it and its
+   * rows out of everything personal (docs/ARCHITECTURE.md, "Company accounts"). Absent: yours.
+   */
+  companyId: SlugSchema.optional(),
   notes: z.string().optional(),
   attributes: AttributesSchema.optional(),
   createdAt: TimestampSchema,

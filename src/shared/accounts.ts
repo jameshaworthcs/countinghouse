@@ -361,6 +361,16 @@ export function balanceModeOf(account: Pick<Account, 'type' | 'balanceMode'>): '
   return account.balanceMode ?? ACCOUNT_TYPE_META[account.type].balanceMode;
 }
 
+/**
+ * Which side of the line between your money and a company's an account is on: `''` for yours, else
+ * the id of the company it belongs to (`Account.companyId`). An account that is not known is yours,
+ * as everything is unless an account says otherwise. Money moves as a transfer only between two
+ * accounts on one side (docs/INGESTION.md, "Transfers").
+ */
+export function sideOf(account: Pick<Account, 'companyId'> | undefined): string {
+  return account?.companyId ?? '';
+}
+
 /** Account types in a sensible display order. */
 export const ACCOUNT_TYPE_ORDER: AccountType[] = [
   'current',

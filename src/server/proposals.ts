@@ -125,6 +125,29 @@ interface Outcome {
 
 /** A setup's accounts, pots and rules, read the same way whatever order of keys or defaults: two that say the same compare equal. */
 const setupKey = (e: Pick<Earmarks, 'everyday' | 'setAside' | 'pots'>) => JSON.stringify(EarmarkSetupSchema.parse({ everyday: e.everyday, setAside: e.setAside, pots: e.pots.map(({ checks: _c, ...p }) => p) }));
+/**
+ * The first account, transaction or balance a change names that is a company's own (store.ts,
+ * "Scope"), as the problem to give; undefined when it names none.
+ */
+export function companyRecordIn(store: Store, c: ProposedChange): string | undefined {
+  const rows = [...('transaction' in c ? [c.transaction] : []), ...(c.kind === 'link_transfer' ? [c.from, c.to] : []), ...(c.kind === 'remove_duplicate' ? c.sameAs : []), ...(c.kind === 'remove_wrong_sign' ? c.recordedAs : [])];
+  const accounts = [
+    ...rows.flatMap((id) => {
+      const t = store.transaction(id);
+      return t ? [t.accountId] : [];
+    }),
+    ...('account' in c && typeof c.account === 'string' ? [c.account] : []),
+    ...(c.kind === 'link_accounts' ? [c.continues] : []),
+    ...(c.kind === 'move_balance' ? [c.to, ...(store.balance(c.balance) ? [store.balance(c.balance)!.accountId] : [])] : []),
+    ...(c.kind === 'add_agreement' && c.agreement.accountId ? [c.agreement.accountId] : []),
+    ...(c.kind === 'set_earmarks' ? [...c.setup.everyday, ...c.setup.setAside] : []),
+  ];
+  const theirs = accounts.map((id) => store.account(id)).find((a) => a?.companyId);
+  if (!theirs) return undefined;
+  const name = store.company(theirs.companyId)?.name ?? theirs.companyId;
+  return `${theirs.name} is ${name}'s own account, not yours: a proposal changes only your own data.`;
+}
+
 /** Set aside as it would be written, without the times it was changed and decided. */
 const earmarksKey = (e: Earmarks | null | undefined) =>
   e ? JSON.stringify({ setup: setupKey(e), decisions: Object.entries(e.decisions).sort(([a], [b]) => a.localeCompare(b)).map(([id, d]) => [id, d.pot, d.parts, d.reason]) }) : 'none';
@@ -241,6 +264,9 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
   };
 
   const run = (c: ProposedChange): ChangeResult => {
+    // A company's accounts and rows are not yours: a proposal changes only your own data.
+    const company = companyRecordIn(store, c);
+    if (company) return { problem: company };
     switch (c.kind) {
       case 'unlink_transfer': {
         const t = row(c.transaction);

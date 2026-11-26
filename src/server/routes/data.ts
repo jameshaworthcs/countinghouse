@@ -3,7 +3,7 @@
 
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { ACCOUNT_TYPE_META, balanceModeOf, slugify } from '../../shared/accounts';
+import { ACCOUNT_TYPE_META, balanceModeOf, sideOf, slugify } from '../../shared/accounts';
 import type { AccountDetailResponse, BootstrapResponse, EnrichGroup, EnrichPreview, TransactionsResponse } from '../../shared/api';
 import { addTags, appendNote, removeTags } from '../../shared/annotations';
 import { CategoryIndex } from '../../shared/categories';
@@ -48,7 +48,7 @@ import {
 import { SYSTEM_CATEGORY_IDS } from '../../shared/categories';
 import { csvCell, queryDate, readJson, type AppContext } from '../context';
 import { categoriserFor, ruleCatches } from '../categoriser';
-import { applyRule, enrich, reapply, salaryByPayroll } from '../enrich';
+import { applyRule, enrich, reapply, salaryByPayroll, separateSides } from '../enrich';
 import { nowISO, randomHex } from '../fsutil';
 import { balanceId, figureId, ruleId, transactionId } from '../ids';
 import { payerKey } from '../analytics/pay';
@@ -60,12 +60,13 @@ import { arrangementsInto } from '../analytics/arrangements';
 import { taxDocuments } from '../analytics/taxdocuments';
 import { matchEmployment } from '../employments';
 import { StoreError } from '../store';
-import { accountSummary } from '../analytics/estate';
+import { accountSummary, sampleDates } from '../analytics/estate';
 import { paidIn } from '../analytics/investments';
 import { handoverOf } from '../analytics/handover';
 import { categoriseQueue, payeeRuleMatch } from '../analytics/queue';
 import { parseTaxYear } from '../../shared/uk';
 import { taxReturn } from '../analytics/taxreturn';
+import { ownCoverage } from '../analytics/coverage';
 
 const NewAccountBody = z.object({
   name: z.string().min(1).max(120),
@@ -87,6 +88,8 @@ const NewAccountBody = z.object({
   flexibleIsa: z.boolean().optional(),
   interestRate: z.number().optional(),
   maturesOn: ISODateSchema.optional(),
+  /** The company (companies.json) it belongs to: a company's own account, never in your estate. */
+  companyId: SlugSchema.optional(),
   /** Optional opening balance recorded as a manual snapshot. */
   balance: MoneySchema.optional(),
   balanceDate: ISODateSchema.optional(),
@@ -107,6 +110,8 @@ const AccountPatch = NewAccountBody.omit({ id: true, balance: true, balanceDate:
       .nullable(),
     /** The account it carries on from, and from which day (a product change under one number); null unlinks it. */
     continues: z.object({ accountId: SlugSchema, from: ISODateSchema }).optional().nullable(),
+    /** null: yours again, not a company's. */
+    companyId: SlugSchema.optional().nullable(),
   });
 
 const ManualBalance = z.object({
@@ -265,7 +270,10 @@ export function filterTransactions(ctx: Pick<AppContext, 'store'>, q: Record<str
   const min = q.min ? Number(q.min) : undefined;
   const max = q.max ? Number(q.max) : undefined;
   const tag = q.tag?.toLowerCase();
-  return ctx.store.transactions().filter((t) => {
+  // Yours, unless accounts are named: a company's account is listed only when asked for by name
+  // (its own page), and never by an unfiltered list.
+  const rows = accounts ? ctx.store.transactionsOf(accounts) : ctx.store.transactions();
+  return rows.filter((t) => {
     if (from && t.date < from) return false;
     if (to && t.date > to) return false;
     if (accounts && !accounts.has(t.accountId)) return false;
@@ -329,7 +337,7 @@ export function dataRoutes(ctx: AppContext): Hono {
     let institutionId = body.institutionId;
     if (!institutionId && body.institutionName) {
       const cat = findInstitution(body.institutionName);
-      institutionId = cat?.id ?? slugify(body.institutionName, store.institutions.map((i) => i.id));
+      institutionId = cat?.id ?? slugify(body.institutionName, store.institutionIds());
     }
     if (institutionId && !store.institution(institutionId)) {
       const cat = catalogInstitution(institutionId);
@@ -340,7 +348,8 @@ export function dataRoutes(ctx: AppContext): Hono {
         ...(cat?.fscsGroup ? { fscsGroup: cat.fscsGroup } : {}),
       });
     }
-    const id = body.id && !store.account(body.id) ? body.id : slugify(body.id ?? `${institutionId ?? ''} ${body.name}`, store.accounts.map((a) => a.id));
+    // Unique among every account's ids, a company's too.
+    const id = body.id && !store.account(body.id) ? body.id : slugify(body.id ?? `${institutionId ?? ''} ${body.name}`, store.accountIds());
     const stamp = nowISO();
     const account: Account = {
       id,
@@ -349,7 +358,9 @@ export function dataRoutes(ctx: AppContext): Hono {
       currency: body.currency,
       status: 'open',
       aliases: body.aliases ?? [],
-      includeInNetWorth: body.includeInNetWorth ?? ACCOUNT_TYPE_META[body.type].defaultInNetWorth,
+      // A company's account is never in your estate: given as true, the store refuses it (a 400).
+      includeInNetWorth: body.includeInNetWorth ?? (body.companyId ? false : ACCOUNT_TYPE_META[body.type].defaultInNetWorth),
+      ...(body.companyId ? { companyId: body.companyId } : {}),
       createdAt: stamp,
       updatedAt: stamp,
       ...(institutionId ? { institutionId } : {}),
@@ -375,12 +386,13 @@ export function dataRoutes(ctx: AppContext): Hono {
   app.get('/accounts/:id', (c) => {
     const account = store.account(c.req.param('id'));
     if (!account) throw new StoreError('Unknown account', 404);
-    const engine = ctx.analytics.engine;
+    // A company's account is worked out over its company's accounts alone (company-accounts.ts).
+    const engine = ctx.analytics.engineFor(account.id);
     const first = engine.firstDataDate(account.id);
-    const series = first ? ctx.analytics.estateSeries(first, today()).dates.map((d) => ({ date: d, value: engine.balanceOn(account.id, d)?.value ?? null })) : [];
+    const series = first ? (account.companyId ? sampleDates(first, today()) : ctx.analytics.estateSeries(first, today()).dates).map((d) => ({ date: d, value: engine.balanceOn(account.id, d)?.value ?? null })) : [];
     // The account it carries on from, and the one that carries on from it (docs/FORMULAS.md §9).
     const carriesOnFrom = handoverOf(store, engine, account) ?? undefined;
-    const successor = store.accounts.find((a) => a.continues?.accountId === account.id);
+    const successor = store.accountsBeside(account.id).find((a) => a.continues?.accountId === account.id);
     const carriedOnAs = successor ? (handoverOf(store, engine, successor) ?? undefined) : undefined;
     // Today's value and paid in count a live reading that stands for today (FORMULAS.md §9, "Live readings").
     const live = ctx.feeds.liveOverride();
@@ -394,11 +406,12 @@ export function dataRoutes(ctx: AppContext): Hono {
       holdings: store.holdings(account.id),
       series,
       gaps: engine.gaps(account.id),
-      figures: store.figures.filter((f) => f.accountId === account.id),
+      figures: store.figuresOf(account.id),
       imports: store.imports
         .filter((i) => i.result?.accountIds.includes(account.id))
         .map((i) => ({ id: i.id, fileName: i.fileName, ...(i.label ? { label: i.label.text } : {}), documentId: i.documentId, ...(i.committedAt ? { committedAt: i.committedAt } : {}) })),
       ...(paid ? { paidIn: paid } : {}),
+      ...(account.companyId ? { coverage: ownCoverage(store, account) } : {}),
     };
     return c.json(body);
   });
@@ -424,13 +437,19 @@ export function dataRoutes(ctx: AppContext): Hono {
     }
     if (institutionName && !body.institutionId) {
       const cat = findInstitution(institutionName);
-      const instId = cat?.id ?? slugify(institutionName, store.institutions.map((i) => i.id));
+      const instId = cat?.id ?? slugify(institutionName, store.institutionIds());
       if (!store.institution(instId)) await store.upsertInstitution({ id: instId, name: cat?.name ?? institutionName, kind: cat?.kind ?? 'bank', ...(cat?.fscsGroup ? { fscsGroup: cat.fscsGroup } : {}) });
       merged.institutionId = instId;
     }
     await store.upsertAccount(merged as Account);
+    // Given to a company, or back to you: its rows are worked out again as their new side's, and
+    // any transfer linking them across the line is unlinked (enrich.ts, separateSides).
+    if (sideOf(merged) !== sideOf(account)) await separateSides(store, account.id);
     return c.json(store.account(account.id));
   });
+
+  // A company's own accounts, each company on its own: never in a personal figure.
+  app.get('/company-accounts', (c) => c.json(ctx.analytics.companyAccountGroups()));
 
   app.delete('/accounts/:id', async (c) => {
     await store.deleteAccount(c.req.param('id'));
@@ -472,7 +491,7 @@ export function dataRoutes(ctx: AppContext): Hono {
 
   app.patch('/balances/:id', async (c) => {
     const body = await readJson(c, ManualBalance.partial());
-    const was = store.accounts.flatMap((a) => store.balances(a.id)).find((b) => b.id === c.req.param('id'));
+    const was = store.balance(c.req.param('id'));
     // A figure you change is yours, whatever document it came with; a new date loses the time it was seen.
     const yours = was && body.balance !== undefined && toMinor(body.balance) !== toMinor(was.balance) && was.kind !== 'manual' ? { enteredBy: 'user' as const } : {};
     const moved = was && body.date !== undefined && body.date !== was.date ? { at: undefined } : {};
@@ -637,7 +656,8 @@ export function dataRoutes(ctx: AppContext): Hono {
     if (!t) throw new StoreError('Unknown transaction', 404);
     const key = descriptionKey(t.description);
     const payee = t.payee?.toLowerCase();
-    const similar = store.transactions().filter((x) => x.id !== t.id && ((payee && x.payee?.toLowerCase() === payee) || descriptionKey(x.description) === key));
+    // Its neighbours on its own side: a company's row is never like one of yours, nor yours like one of its.
+    const similar = store.transactionsBeside(t.accountId).filter((x) => x.id !== t.id && ((payee && x.payee?.toLowerCase() === payee) || descriptionKey(x.description) === key));
     return c.json({
       count: similar.length,
       differentCategory: similar.filter((x) => x.category !== t.category && x.categorisedBy !== 'user').length,
@@ -1119,7 +1139,6 @@ export function dataRoutes(ctx: AppContext): Hono {
   app.post('/coverage/confirmations', async (c) => {
     const body = await readJson(c, z.object({ stretches: z.array(CoverageConfirmationSchema.pick({ accountId: true, from: true, to: true, note: true })).min(1).max(200) }));
     const now = today();
-    const engine = ctx.analytics.engine;
     const added: CoverageConfirmation[] = [];
     for (const s of body.stretches) {
       const account = store.account(s.accountId);
@@ -1127,25 +1146,22 @@ export function dataRoutes(ctx: AppContext): Hono {
       if (s.from > s.to) throw new StoreError(`${account.name}: ${s.from} is after ${s.to}`, 400);
       if (s.to > now) throw new StoreError(`${account.name}: ${s.to} is in the future`, 400);
       const same = (x: { accountId: string; from: string; to: string }) => x.accountId === s.accountId && x.from === s.from && x.to === s.to;
-      if (store.coverageConfirmations.some(same) || added.some(same)) continue;
+      if (store.coverageConfirmationsOf(s.accountId).some(same) || added.some(same)) continue;
       // Why nothing is missing, in your words: the tax pages show it beside days no balances show.
       const note = s.note?.trim();
-      added.push(CoverageConfirmationSchema.parse({ id: `cov_${randomHex(6)}`, accountId: s.accountId, from: s.from, to: s.to, ...(note ? { note } : {}), evidence: engine.evidence(s.accountId, s.from, s.to), confirmedAt: nowISO() }));
+      added.push(CoverageConfirmationSchema.parse({ id: `cov_${randomHex(6)}`, accountId: s.accountId, from: s.from, to: s.to, ...(note ? { note } : {}), evidence: ctx.analytics.engineFor(s.accountId).evidence(s.accountId, s.from, s.to), confirmedAt: nowISO() }));
     }
     if (added.length) {
       const one = added.length === 1 ? `${store.account(added[0]!.accountId)!.name}, ${added[0]!.from} to ${added[0]!.to}` : `${added.length} stretches`;
-      await store.setCoverageConfirmations([...store.coverageConfirmations, ...added], `coverage: nothing missing from ${one}`);
+      await store.addCoverageConfirmations(added, `coverage: nothing missing from ${one}`);
     }
     return c.json({ added });
   });
   app.delete('/coverage/confirmations/:id', async (c) => {
     const id = c.req.param('id');
-    const gone = store.coverageConfirmations.find((x) => x.id === id);
+    const gone = store.coverageConfirmation(id);
     if (!gone) throw new StoreError('No such confirmation', 404);
-    await store.setCoverageConfirmations(
-      store.coverageConfirmations.filter((x) => x.id !== id),
-      `coverage: withdrew ${store.account(gone.accountId)?.name ?? gone.accountId}, ${gone.from} to ${gone.to}`,
-    );
+    await store.removeCoverageConfirmation(id, `coverage: withdrew ${store.account(gone.accountId)?.name ?? gone.accountId}, ${gone.from} to ${gone.to}`);
     return c.json({ ok: true });
   });
 

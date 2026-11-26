@@ -10,7 +10,7 @@ import { Analytics } from './analytics';
 import { AuditLog, auditRequests, DeviceNames, runAs } from './audit';
 import { Auth, hashPassword, loadSessionSecret } from './auth';
 import { codespaceRefusal, codespaceRequested, newDemoLogin, type DemoLogin } from './codespace';
-import { categoriseInvestmentRows, refreshPlaces } from './enrich';
+import { categoriseInvestmentRows, refreshPlaces, separateSides } from './enrich';
 import type { Config } from './config';
 import type { AppContext } from './context';
 import { GitCommitter } from './git';
@@ -114,6 +114,13 @@ export async function createApp(config: Config, opts: CreateAppOptions): Promise
       if (await refreshPlaces(store)) await git.flush();
     } catch (err) {
       console.warn(`[data] merchant addresses were not tidied: ${(err as Error).message}`);
+    }
+    // …and a transfer linked across the line between your money and a company's (a hand edit of
+    // accounts.json) is unlinked, its rows worked out again as their own side's.
+    try {
+      if (await separateSides(store)) await git.flush();
+    } catch (err) {
+      console.warn(`[data] transfers across a company's line were not unlinked: ${(err as Error).message}`);
     }
     // …and investment rows nothing categorised get a category once the app knows the provider's words.
     try {

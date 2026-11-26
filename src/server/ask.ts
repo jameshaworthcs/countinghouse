@@ -664,7 +664,8 @@ function cleanDefaults(store: Store, d: AskDefaults | undefined): AskDefaults {
   if (d.from && isISODate(d.from)) out.from = d.from;
   if (d.to && isISODate(d.to)) out.to = d.to;
   if (out.from && out.to && out.from > out.to) throw new StoreError('The period starts after it ends.', 400);
-  const accounts = (d.accounts ?? []).filter((id) => store.account(id));
+  // Your accounts only (a company's is never asked about).
+  const accounts = (d.accounts ?? []).filter((id) => store.accounts.some((a) => a.id === id));
   if (accounts.length) out.accounts = accounts;
   return out;
 }

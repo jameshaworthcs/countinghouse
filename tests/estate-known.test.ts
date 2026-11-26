@@ -64,7 +64,7 @@ describe('an account opened before its data starts', () => {
   });
 
   it('counts from its opening once you confirm nothing is missing before its data', async () => {
-    await store.setCoverageConfirmations([{ id: 'cov_000000000001', accountId: 'new-gia', from: '2026-11-05', to: '2026-11-05', confirmedAt: stamp }]);
+    await store.addCoverageConfirmations([{ id: 'cov_000000000001', accountId: 'new-gia', from: '2026-11-05', to: '2026-11-05', confirmedAt: stamp }]);
     const engine = new BalanceEngine(store);
     expect(engine.firstDataDate('new-gia')).toBe('2026-11-05');
     expect(engine.balanceOn('new-gia', '2026-11-05')?.value).toBe(0);
@@ -77,7 +77,7 @@ describe('an account opened before its data starts', () => {
 
   it('a confirmation short of its first data changes nothing', async () => {
     await store.upsertAccount({ ...store.account('new-gia')!, openedOn: '2026-11-01' });
-    await store.setCoverageConfirmations([{ id: 'cov_000000000002', accountId: 'new-gia', from: '2026-11-01', to: '2026-11-04', confirmedAt: stamp }]);
+    await store.addCoverageConfirmations([{ id: 'cov_000000000002', accountId: 'new-gia', from: '2026-11-01', to: '2026-11-04', confirmedAt: stamp }]);
     const engine = new BalanceEngine(store);
     expect(engine.firstDataDate('new-gia')).toBe('2026-11-06');
     expect(incompleteStretches(store, engine, '2026-10-01', '2026-11-06')).toEqual([{ from: '2026-11-01', to: '2026-11-05', accounts: [{ id: 'new-gia', name: 'Example new-gia' }] }]);

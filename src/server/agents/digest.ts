@@ -43,7 +43,16 @@ export function buildDigest(store: Store, analytics: Analytics, opts: DigestOpti
   // The period in focus: the month under review, or the span of the imports just committed.
   let from: ISODate;
   let to: ISODate;
-  const importSummaries = (opts.importIds ?? []).map((id) => store.imports.find((i) => i.id === id)).filter((i) => i !== undefined);
+  // Your accounts' part of each import: a company's account's rows are not yours to look at, and an
+  // import of a company's account alone is left out.
+  const yours = new Set(store.accounts.map((a) => a.id));
+  const importSummaries = (opts.importIds ?? [])
+    .map((id) => store.imports.find((i) => i.id === id))
+    .filter((i) => i !== undefined)
+    .flatMap((i) => {
+      const sections = i.sections.filter((s) => yours.has(s.accountId));
+      return i.sections.length && !sections.length ? [] : [{ ...i, sections }];
+    });
   if (opts.month) {
     from = `${opts.month}-01`;
     to = endOfMonth(from);

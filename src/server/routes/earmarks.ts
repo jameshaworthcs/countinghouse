@@ -84,7 +84,7 @@ export function earmarkRoutes(ctx: AppContext): Hono {
   app.post('/setup/preview', async (c) => {
     ownerOnly(c);
     const { setup } = await readJson(c, SetupBody);
-    const problem = setupProblem(setup, (id) => store.account(id), (id) => store.categories.some((x) => x.id === id));
+    const problem = setupProblem(setup, (id) => store.accounts.find((a) => a.id === id), (id) => store.categories.some((x) => x.id === id));
     if (problem) return c.json({ setup: null, result: null, problems: [problem] });
     return c.json(earmarks(store, ctx.analytics.engine, today(), withSetup(store.earmarks, setup, nowISO())));
   });
@@ -93,7 +93,7 @@ export function earmarkRoutes(ctx: AppContext): Hono {
   app.put('/setup', async (c) => {
     ownerOnly(c);
     const { setup, was } = await readJson(c, SetupBody);
-    const problem = setupProblem(setup, (id) => store.account(id), (id) => store.categories.some((x) => x.id === id));
+    const problem = setupProblem(setup, (id) => store.accounts.find((a) => a.id === id), (id) => store.categories.some((x) => x.id === id));
     if (problem) throw new StoreError(problem, 422);
     await store.updateEarmarks((current) => {
       if (was !== undefined && was !== (current?.updatedAt ?? null)) throw new StoreError('Set aside changed since you opened it (an applied proposal, or another tab): reload it and make your change again.', 409);

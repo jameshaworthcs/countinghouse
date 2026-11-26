@@ -8,6 +8,7 @@ import { daysLeftInTaxYear, oldestOpenTaxYear, saCorrectBy, taxYear, taxYearOf }
 import type { Store } from '../store';
 import { allowances, taxFigureAccounts } from './allowances';
 import { BalanceEngine } from './balances';
+import { companyAccountGroups, companyEngine } from './company-accounts';
 import { budgetAlerts, budgets } from './budgets';
 import { goalsProgress } from './goals';
 import { earmarks } from './earmarks';
@@ -50,6 +51,22 @@ export class Analytics {
 
   get engine(): BalanceEngine {
     return this.cached('engine', () => new BalanceEngine(this.store));
+  }
+
+  /** One company's own accounts' balance engine (company-accounts.ts): never part of `engine`. */
+  companyEngine(companyId: string): BalanceEngine {
+    return this.cached(`engine:company:${companyId}`, () => companyEngine(this.store, companyId));
+  }
+
+  /** The engine an account's own page reads: yours, or its company's. */
+  engineFor(accountId: string): BalanceEngine {
+    const companyId = this.store.account(accountId)?.companyId;
+    return companyId ? this.companyEngine(companyId) : this.engine;
+  }
+
+  /** Each company's own accounts, apart from yours (the Accounts page's groups of them). */
+  companyAccountGroups() {
+    return this.cached(`company-accounts:${today()}`, () => companyAccountGroups(this.store, (id) => this.companyEngine(id)));
   }
 
   get coverageIndex(): Coverage {
