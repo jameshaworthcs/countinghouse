@@ -1,7 +1,7 @@
 // Proposed fixes: what an agent proposes changing in your data, each change with its reason and the
 // rows it is about, waiting for you on the Import page (src/server/proposals.ts).
 
-import { ArrowDown, ArrowRight, ArrowRightLeft, ArrowUpDown, Building2, CalendarDays, ChevronRight, CircleCheck, CircleSlash, CopyX, FileText, FolderPen, FolderPlus, Handshake, Link2, Percent, NotebookPen, PiggyBank, Sparkles, Tag, Trash2, Unlink, Wand2, X } from 'lucide-react';
+import { ArrowDown, ArrowRight, ArrowRightLeft, ArrowUpDown, Building2, CalendarDays, HandCoins, ChevronRight, CircleCheck, CircleSlash, CopyX, FileText, FolderPen, FolderPlus, Handshake, Link2, Percent, NotebookPen, PiggyBank, Sparkles, Tag, Trash2, Unlink, Wand2, X } from 'lucide-react';
 import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import type { ProposalBalance, ProposalListResponse, ProposalRow, ProposalSummary, ProposalView } from '../../shared/api';
@@ -12,6 +12,22 @@ import { cn, formatDate, matchWords, money, plural, timeAgo } from '../lib/forma
 import { RATE_NAMES } from '../../shared/terms';
 import { limitName, RatesList, rateText } from './Terms';
 import { Badge, Button, Card, IconButton, StatusBadge } from './ui';
+import { EFFECT_WORDS } from '../lib/earmarks';
+import type { EarmarkRule } from '../../shared/schema';
+
+/** A set-aside rule's conditions, in words. */
+export function earmarkRuleWords(r: EarmarkRule, accountName: (id: string) => string, categoryName: (id: string) => string): string {
+  const parts: string[] = [];
+  if (r.text) parts.push(`${r.text.field === 'payee' ? 'the payee' : 'the description'} ${r.text.op === 'contains' ? 'contains' : r.text.op === 'equals' ? 'is' : r.text.op === 'startsWith' ? 'starts with' : r.text.op === 'endsWith' ? 'ends with' : 'matches'} “${r.text.value}”`);
+  if (r.category) parts.push(`in ${categoryName(r.category)}`);
+  if (r.counterpartyAccountId) parts.push(`money to or from ${accountName(r.counterpartyAccountId)}`);
+  if (r.direction) parts.push(r.direction === 'in' ? 'money in' : 'money out');
+  if (r.amountMin !== undefined || r.amountMax !== undefined) parts.push(r.amountMin !== undefined && r.amountMax !== undefined ? `${money(r.amountMin)}–${money(r.amountMax)}` : r.amountMin !== undefined ? `at least ${money(r.amountMin)}` : `at most ${money(r.amountMax)}`);
+  if (r.accountIds) parts.push(`in ${r.accountIds.map(accountName).join(' or ')}`);
+  if (r.portion) parts.push('percent' in r.portion ? `${r.portion.percent}% of it` : `up to ${money(r.portion.upTo)} of it`);
+  if (r.limitTo) parts.push('only up to the money its sources brought in');
+  return parts.join(', ');
+}
 
 export function useProposals() {
   return useApi<ProposalListResponse>(['proposals'], '/proposals', { refetchInterval: 30_000 });
@@ -38,6 +54,8 @@ export const CHANGE_LABELS: Record<ProposedChangeKind, { title: string; count: (
   set_terms: { title: 'Set an account’s terms', count: (n) => `${plural(n, 'account')}’ terms`, icon: <Percent className="size-4" aria-hidden /> },
   remove_terms: { title: 'Take away terms read into the wrong account', count: (n) => `${plural(n, 'set')} of terms taken away`, icon: <Percent className="size-4" aria-hidden /> },
   set_return_entry: { title: 'Answer on your Self Assessment return', count: (n) => plural(n, 'return answer'), icon: <FileText className="size-4" aria-hidden /> },
+  set_earmarks: { title: 'Set up money set aside', count: (n) => (n === 1 ? 'set aside set up' : `${n} set-aside setups`), icon: <HandCoins className="size-4" aria-hidden /> },
+  decide_earmark_flow: { title: 'Decide what a payment did to a pot', count: (n) => `${plural(n, 'payment')} decided for set aside`, icon: <HandCoins className="size-4" aria-hidden /> },
 };
 
 /** "5 transfers linked, 2 transfer links undone, 1 category" */
@@ -626,6 +644,53 @@ export function ChangeBody({ change, view }: { change: ProposedChange; view: Pro
               .
             </div>
           )}
+        </div>
+      );
+    }
+    case 'set_earmarks': {
+      const e = view.changes.find((x) => x.change.key === change.key)?.earmark;
+      const name = (id: string) => view.accounts[id]?.name ?? accountName(id);
+      return (
+        <div className="grid gap-1.5 rounded-lg border border-line bg-panel px-3 py-2 text-[13px]">
+          {e && <div className="text-ink-2">{e.what}</div>}
+          <div className="text-ink-2">
+            <span className="text-ink-3">Everyday accounts:</span> {change.setup.everyday.map(name).join(', ')}
+          </div>
+          {change.setup.setAside.length > 0 && (
+            <div className="text-ink-2">
+              <span className="text-ink-3">Set-aside accounts:</span> {change.setup.setAside.map(name).join(', ')}
+            </div>
+          )}
+          {change.setup.pots.map((pot) => (
+            <div key={pot.id} className="mt-1 grid gap-0.5">
+              <div className="font-medium text-ink">
+                {pot.name} <span className="font-normal text-ink-3">from {formatDate(pot.start)}, opening {money(pot.opening)}</span>
+              </div>
+              <ol className="ml-4 list-decimal text-ink-2">
+                {pot.rules.map((r) => (
+                  <li key={r.id}>
+                    <span className="text-ink">{r.name}</span>: {EFFECT_WORDS[r.effect].toLowerCase()} · {earmarkRuleWords(r, name, cats.name.bind(cats))}
+                  </li>
+                ))}
+              </ol>
+            </div>
+          ))}
+        </div>
+      );
+    }
+    case 'decide_earmark_flow': {
+      const e = view.changes.find((x) => x.change.key === change.key)?.earmark;
+      return (
+        <div className="grid gap-1.5">
+          <TxLine row={row(change.transaction)} view={view} />
+          <div className="rounded-lg border border-line bg-panel px-3 py-2 text-[13px] text-ink-2">
+            {change.parts ? change.parts.map((p) => `${EFFECT_WORDS[p.effect]}: ${money(p.amount)}`).join(' · ') : 'Take your decision away'}
+            {e?.replaces && (
+              <div className="mt-1">
+                <Badge tone="warn">{e.replaces}</Badge>
+              </div>
+            )}
+          </div>
         </div>
       );
     }

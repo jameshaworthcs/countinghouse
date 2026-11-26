@@ -49,6 +49,7 @@ data/
   coverage.json        { confirmations: [...] }  stretches you confirmed nothing is missing from, which count as covered
   people.json          { people: [...] }         people you send money to or get money from: the names their payments carry, and how money with them usually goes
   returns.json         { returns: [...] }        what you told the app for each tax year's Self Assessment return: answers and box figures
+  earmarks.json        { everyday, setAside, pots, decisions }  optional: money set aside inside your everyday accounts (no file, no feature)
   transactions/<account-id>/<yyyy>.jsonl    one transaction per line, by posting date
   balances/<account-id>.jsonl               balance / valuation snapshots
   holdings/<account-id>.jsonl               holdings snapshots
@@ -407,6 +408,25 @@ Assessment prep; FORMULAS.md §20). Optional: a missing file is no answers.
 An entry wins over the records' figure for its box, as a category you set does. Keys are checked
 against the year's return when set: only a box or question it has, with a value of its kind.
 
+## earmarks.json
+
+Money set aside inside the accounts you spend from, and what is yours to spend
+([FORMULAS.md](FORMULAS.md) §21). Optional: without the file nothing is worked out or shown. It is
+written when you apply a proposal that sets it up (`set_earmarks`) or decides a payment
+(`decide_earmark_flow`).
+
+| Field | Notes |
+|---|---|
+| `everyday` | account ids where your money and the pots' mix: current accounts, and the cards paid from them |
+| `setAside` | account ids whose money is all set aside (savers) |
+| `pots` | `[{id, name, purpose?, start, opening, rules, checks}]`: `opening` is set aside in the everyday accounts at `start` (negative: the pot owed you); `checks` are the figures you checked (`{at, setAside, spendable}`) |
+| `pots[].rules` | in order, the first that fits decides: `{id, name, effect, text?: {field, op, value, caseSensitive}, direction?, amountMin?, amountMax?, accountIds?, category?, counterpartyAccountId?, portion?: {percent} \| {upTo}, limitTo?: [rule ids], note?}`. At least one condition. `effect` is one of `source`, `use`, `from-pot`, `to-pot`, `topped-up`, `own-back`, `own`. `limitTo` (a `use` only) names rules of the pot adding to it |
+| `decisions` | by transaction id: `{pot, parts: [{effect, amount}], reason, seen: {accountId, date, amount}, proposalId?, decidedAt}`. Amounts are positive (the payment's sign applies); what the parts don't cover is your own money. `seen` is the payment when decided: a change to it puts the decision back to check. `proposalId` is the proposal it came from (the decision is still yours) |
+| `updatedAt` | when it was last changed: a proposal names it (`was`), so a change made since stops it fitting |
+
+Nothing is written on the transactions themselves. A row with a decision counts as having something
+of yours on it: proposals to remove it as a duplicate, misread or internal move leave it to you.
+
 ## payslips.jsonl
 
 Payslips in full, one per line: everything a payslip prints except your name and National Insurance
@@ -565,8 +585,16 @@ lives in the work area (`<work>/proposals/`), never here.
   - `remove_terms {account, asOf, importId}`: the terms one of its documents was read as giving an
     account on a day, taken away because they are another account's (a statement split at a link
     gave the older account the rate it prints for the newer). `before.terms` keeps them.
+  - `set_earmarks {setup, was}`: set up money set aside, or change its accounts, pots and rules
+    (`earmarks.json`; your decisions and checks stay, and a pot taken away takes its decisions).
+    `was` is the setup's `updatedAt` when proposed (null: none), so a change made since stops it
+    fitting.
+  - `decide_earmark_flow {pot, transaction, parts | null, was}`: what a payment did to a pot (null
+    takes a decision away); the change's `why` is kept as the decision's reason. `was` is the
+    payment's `decidedAt` when proposed (null: undecided). A proposal may replace a decision of
+    yours, and says so.
 - `applied`: the keys of the changes you applied. `dismissedReason`: what you said, if anything.
-- `before`: `{transactions, accounts, balances?, terms?, categories?, rules?}`, the rows, accounts,
+- `before`: `{transactions, accounts, balances?, terms?, categories?, rules?, earmarks?}`, the rows, accounts,
   balances, terms, categories and rules the applied changes touched (a rule removed, a category
   changed), as they were before: the audit trail, and a way back. (A rule or category a proposal
   added has no before: the change itself says it.)

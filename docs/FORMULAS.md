@@ -1695,3 +1695,92 @@ Allowances, its tax band against Allowances' estimate, its tax on pay against HM
 payments, and its balance against HMRC's working out of the year, each where there is one.
 
 **Ready** when nothing is missing, to check, open, or outside what Counting House prepares.
+
+## 21. Set aside (`analytics/earmarks.ts`)
+
+Money in your everyday accounts that is spoken for (a pot: tax to pay, a loan meant for rent, money
+you hold for someone), and what is yours to spend. Only with `data/earmarks.json`: without it,
+nothing is worked out or shown. It is a sum over your payments; no model is involved.
+
+**Accounts.**
+
+- **Everyday:** where your money and the pots' mix: current accounts, and the cards paid from them
+  (what you owe on a card counts against spendable at once).
+- **Set aside:** everything in them is set aside, your own money moved in included.
+- Each account counts to its own latest data, and the page shows the dates. An account whose latest
+  data is more than 14 days old is marked out of date; a closed one never is.
+
+**What a payment does.** Each payment in an everyday account, from a pot's start, has one or more
+parts, each with an effect:
+
+| Effect | In words | Set aside *N* |
+|---|---|---|
+| `source` | adds to the pot | + its signed amount |
+| `use` | paid from the pot | + its signed amount (money out lowers *N*; a refund raises it) |
+| `from-pot` | borrowed from the pot | + its amount (money from a set-aside account) |
+| `to-pot` | put back into the pot | − its amount (money to a set-aside account) |
+| `topped-up` | you topped up the pot | 0 (your money becomes set aside in the set-aside account) |
+| `own-back` | your own money back | 0 |
+| `own` | your own money | 0 |
+
+So *N* = the pot's opening + Σ the signed parts with the first four effects. Whatever a payment's
+parts don't cover is your own money.
+
+**Which applies,** first to last:
+
+1. **Your decision** for the payment (its parts, kept by transaction id in `earmarks.json`).
+2. **A move between two everyday accounts** changes nothing: rows linked as a transfer, a row naming
+   the other account, or two transfers of opposite amounts within 5 days.
+3. **The pot's rules,** in their order: the first whose conditions all hold. A rule can count only a
+   share of a payment (a percent, rounded to the penny, or up to an amount), and a rule for money
+   paid from the pot can be limited to what named rules adding to it brought in before, less what
+   it has counted already (`limitTo`; a refund gives back what it took).
+4. **A transfer with a set-aside account:** money in is borrowed from the pot; money out is put back
+   into it, up to what the pot held that day (below).
+5. Otherwise, your own money.
+
+With several pots, their rules are tried pot by pot in order; a payment one pot's rule or a
+decision has counted is not counted again by another. Transfers with set-aside accounts go to the
+first pot.
+
+**A day.** Whatever order the rows of a day were recorded in, a day is taken in a fixed order: money
+in first (sources, borrowing, refunds); then money put back into the pot by rules or decisions;
+then the transfers to set-aside accounts left to the default; then money paid from the pot.
+
+**More than the pot held.** The day's transfers to set-aside accounts left to the default are put
+back up to what the pot held at that point (*H* = max(*N*, 0)).
+
+- With *H* = 0 there is nothing to put back: they are you topping it up, and nothing is asked.
+- If they come to more than *H* > 0, the app can't tell what they were. It counts the suggestion
+  meanwhile (*H* put back, the rest you topping it up, the rows taken largest first) and lists the
+  day to check. The amount is shown as resting on payments still to check.
+
+**On its way.** A payment naming another everyday account whose data ends before the payment's date
+is money on its way: its amount, sign reversed, is added to the everyday total (it has left one
+account and not yet shown in the other).
+
+**The figures.**
+
+- Everyday total = Σ each everyday account's balance at its own latest day (§9) + on its way.
+- Spendable = everyday total − Σ *N* over the pots.
+- *N* < 0: you've covered that much for the pot; moving it from a set-aside account squares up.
+- Held in set-aside accounts = Σ their balances at their latest days (for information).
+- Lowest spendable: the least of the everyday total − *N* on each day with a payment, from the first
+  start to the newest latest day (for information: short dips that later money in makes good are
+  fine).
+
+**To check.** Three kinds, each counted as suggested (or by default) until you decide:
+
+1. more sent to set-aside accounts on a day than the pot held (above);
+2. a transfer naming a set-aside account whose statements cover the day but show no row of the
+   opposite amount within 5 days;
+3. a decision whose payment is gone, changed (its amount or account differ from when it was
+   decided), no longer in an everyday account from the start, or whose parts add up to more than
+   it (only the payment is counted).
+
+**No figure** when an account named is not yours or not in pounds, or an everyday account has no
+balance at all. Everything else gives a figure, with what to check and the dates beside it.
+
+The app can't know your intentions: a transfer it counts as put back might be savings of your own.
+Each payment says why it counts as it does (your decision, a rule, a transfer with a set-aside
+account, or a suggestion to check).

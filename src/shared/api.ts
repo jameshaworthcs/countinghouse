@@ -34,6 +34,8 @@ import type {
   Transaction,
   SaStatus,
   ReviewAction,
+  EarmarkEffect,
+  Earmarks,
 } from './schema';
 import type { TaxBand } from './uk';
 
@@ -849,6 +851,8 @@ export interface BootstrapResponse {
   goals: Goal[];
   budgets: Budget[];
   csvProfiles: CsvProfile[];
+  /** Your pots of money set aside (earmarks.json): none without the file, so nothing about them shows. */
+  earmarks: { id: string; name: string }[];
   user: string | null;
   dataDir: string;
   inboxDir: string;
@@ -1007,6 +1011,15 @@ export interface ProposalChangeView {
   removes?: { count: number; examples: ProposalRuleExample[] };
   /** A return's box or question set: what it is, and the value as you would enter it. */
   returnEntry?: { what: string; value: string };
+  /** Set aside: what the change does, in words, and the decision of yours it replaces. */
+  earmark?: { what: string; replaces?: string };
+}
+
+/** Set aside's figures, for a proposal's effect: before it and as it would leave them. */
+export interface EarmarkFigures {
+  setAside: number;
+  spendable: number;
+  toCheck: number;
 }
 
 /** A payment a proposed rule would categorise (or a removed one stop categorising), with the category it has now, and after a removal. */
@@ -1053,6 +1066,8 @@ export interface ProposalView {
   problems: number;
   /** Waiting, but applying it would change nothing: your data already says all of it. It closes as already done. */
   alreadyDone?: true;
+  /** What it would do to the money set aside (only when it changes it): the figures now, and after it. */
+  earmarks?: { before: EarmarkFigures | null; after: EarmarkFigures | null };
 }
 
 /** What applying, dismissing or closing a proposal returns. */
@@ -1086,6 +1101,8 @@ export interface ProposalCheckResponse {
   problems: number;
   /** The changes kept would change nothing: your data already says them. */
   alreadyDone?: true;
+  /** What the changes kept would do to the money set aside. */
+  earmarks?: { before: EarmarkFigures | null; after: EarmarkFigures | null };
 }
 
 export interface SystemResponse {
@@ -1204,6 +1221,109 @@ export interface GoalProgress {
   status: 'reached' | 'on-track' | 'behind' | 'no-date' | 'unknown';
   notes: string[];
   ownerNotes?: string;
+}
+
+// ─── Set aside (docs/FORMULAS.md §21) ────────────────────────────────────────────────────────────
+
+/** Why a payment counts as it does in a pot. */
+export type EarmarkBy = 'decision' | 'rule' | 'default' | 'suggested';
+
+export interface EarmarkRow {
+  transactionId: string;
+  date: string;
+  accountId: string;
+  description: string;
+  /** The payment's amount, signed. */
+  amount: number;
+  /** What counts towards this line, signed like the payment. */
+  counted: number;
+  by: EarmarkBy;
+  ruleId?: string;
+  ruleName?: string;
+  reason?: string;
+}
+
+export interface EarmarkLine {
+  effect: EarmarkEffect;
+  /** Signed: what it did to the money set aside (0 for your own money). */
+  total: number;
+  /** Money in and out under it. */
+  in: number;
+  out: number;
+  count: number;
+  /** The payments behind it; none listed for your own everyday money (too many), only its totals. */
+  rows: EarmarkRow[];
+}
+
+export type EarmarkCheckKind = 'more-than-held' | 'missing-other-side' | 'stale-decision';
+
+/** Something to check: the app can't tell, and has counted its suggestion (or the default) meanwhile. */
+export interface EarmarkToCheck {
+  kind: EarmarkCheckKind;
+  pot: string;
+  date: string;
+  transactionIds: string[];
+  /** Plain words: what is asked and why. */
+  question: string;
+  /** What is counted meanwhile, per payment. */
+  suggestion?: { transactionId: string; parts: { effect: EarmarkEffect; amount: number }[] }[];
+  /** How much of the set-aside figure rests on it (pounds, positive). */
+  amount: number;
+}
+
+export interface EarmarkPotResult {
+  id: string;
+  name: string;
+  purpose?: string;
+  start: string;
+  opening: number;
+  /** Set aside in the everyday accounts now (negative: you've covered that much for the pot). */
+  setAside: number;
+  lines: EarmarkLine[];
+  /** How much of `setAside` rests on payments still to check. */
+  provisional: number;
+  checks: { at: string; setAside: number; spendable: number }[];
+}
+
+export interface EarmarkAccount {
+  accountId: string;
+  name: string;
+  role: 'everyday' | 'set-aside';
+  balance: number;
+  /** The latest day it has data for: its figures run to here. */
+  asOf: string | null;
+  stale: boolean;
+}
+
+export interface EarmarksResult {
+  accounts: EarmarkAccount[];
+  /** The everyday accounts' balances, each to its own latest day. */
+  everydayTotal: number;
+  /** Money between two everyday accounts seen leaving one but not yet arriving (its statements end sooner), or the other way round. */
+  onItsWay: { transactionId: string; date: string; accountId: string; otherAccountId: string; amount: number }[];
+  onItsWayTotal: number;
+  pots: EarmarkPotResult[];
+  /** Everyday total + on its way − every pot's set aside. */
+  spendable: number;
+  /** What the set-aside accounts hold, each to its own latest day. */
+  heldInSetAside: number;
+  /** The oldest and newest latest days among the everyday accounts. */
+  oldest: string | null;
+  newest: string | null;
+  toCheck: EarmarkToCheck[];
+  /** The lowest spendable since the start, for information: short dips are fine. */
+  lowest: { date: string; spendable: number } | null;
+  /** Weekly, for a chart. */
+  series: { date: string; spendable: number; setAside: number; total: number }[];
+  /** Payments between everyday accounts, paired so they change nothing. */
+  internal: { count: number };
+}
+
+export interface EarmarksResponse {
+  setup: Earmarks | null;
+  result: EarmarksResult | null;
+  /** Why there is no figure: the setup can't be worked out as it is. */
+  problems: string[];
 }
 
 export interface GoalsResponse {

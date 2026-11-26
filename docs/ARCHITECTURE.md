@@ -35,6 +35,7 @@ Hono server  (Node 24, tsx; 127.0.0.1:4750 live, 4760 in development)
    │     the latest stands for today's value: feeds/live.ts)
    └─ Analytics (cached per store version)
         BalanceEngine · Coverage · estate · cashflow · spending (+ computed signals) · recurring · budgets · goals · pay
+        · set aside (earmarks: only with earmarks.json)
         · earned pay (timesheets → payslips → bank, owed pay pending beside the estate)
         params (per account and fund, from assumptions, research and statements) · model (pure
         projection, bands, retirement, fee drag) · projections · investments · allowances

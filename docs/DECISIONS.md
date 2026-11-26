@@ -2808,3 +2808,41 @@ value grown from the account's first flow is never below nothing, as rolled-back
   (a summer refund is usually the year before's, and it raised the balance by its whole amount);
   working out share matching for the Capital Gains page (left to the platform's figures and the
   owner, and flagged when the page is needed).
+
+## 2026-11-26: Set aside: money spoken for inside your everyday accounts, by rules and decisions
+
+- **Owner:** see how much of the money in the accounts they spend from is spoken for (student loan
+  money for rent, dividends for investing, savings they borrow from) and how much is theirs to
+  spend, to the penny and with every payment behind it; without notes or tags on transactions; with
+  agents proposing the setup and the hard calls; and invisible to anyone who doesn't use it.
+- **Done (first slice):** an optional `earmarks.json` (new file, no migration: no file, no feature),
+  worked out by `analytics/earmarks.ts` as an order-independent sum (FORMULAS.md §21), shown at
+  `/earmarks` (read-only), as an Overview card and in the transaction drawer, all hidden without the
+  file. Two proposal kinds set it up (`set_earmarks`) and decide a payment (`decide_earmark_flow`),
+  with their effect on the figure shown before applying.
+- **Choices:**
+  - Cards paid from the everyday accounts are everyday accounts: what you owe on them counts against
+    spendable at once. (Counting card-paid uses while leaving cards out made spendable read too high
+    until the card was paid.)
+  - Accounts count to their own latest day, with "on its way" for a move seen on one side only,
+    rather than all to the oldest day (often weeks old).
+  - Decisions live in the file, keyed by transaction, never on the rows. A row with one counts as
+    having something of yours on it.
+  - While a day sends more to a set-aside account than the pot held, the suggestion (put back what
+    it held, the rest topped up) is counted, so one early default doesn't cascade.
+  - A day is taken in a fixed order (money in, put back, then paid from the pot), so the order rows
+    were recorded in never changes the figure.
+  - The owner chose to let a proposal replace their decision, marked as doing so (an exception to
+    "the owner wins", AGENTS.md §5). Its effect preview is worked out only when one proposal is
+    shown, never for the list (polled every 30 seconds).
+- **Verified:** on a copy of the owner's data, the setup they agreed gives the set-aside figure they
+  had worked out by hand to the penny; it also found a card payment on its way the hand count
+  missed. Property tests: ordinary payments never move what is set aside and move spendable by
+  exactly their sum; shuffling rows (within a day too) changes nothing; set aside is the opening
+  plus its lines, and adds up with spendable to the everyday total; limits are never exceeded.
+- **Considered:** a general plugin hook loading code from the data repository (runs unreviewed code
+  with access to everything, outside the tests); a figure written as an insight (an inference shown
+  as a computed figure); notes or tags on the payments (clutter, and no single place to change a
+  decision); seven narrow proposal kinds (two cover it); keeping cards outside the everyday accounts.
+- **Later slices:** deciding on the page, "I've checked this", setup without agents, a chart, an Ask
+  tool, and an agent job (off by default) that proposes decisions.

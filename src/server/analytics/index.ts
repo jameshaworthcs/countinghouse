@@ -10,6 +10,7 @@ import { allowances, taxFigureAccounts } from './allowances';
 import { BalanceEngine } from './balances';
 import { budgetAlerts, budgets } from './budgets';
 import { goalsProgress } from './goals';
+import { earmarks } from './earmarks';
 import { earnedPay, owedPay, owedPayslips } from './earned';
 import { pay } from './pay';
 import { cashflow } from './cashflow';
@@ -101,6 +102,12 @@ export class Analytics {
   /** Timesheet work followed to payslips and the bank, and what is owed (FORMULAS §17, "Earned pay"). */
   earned() {
     return this.cached(`earned:${today()}`, () => earnedPay(this.store));
+  }
+
+  /** Money set aside inside your everyday accounts (FORMULAS §21); nothing without earmarks.json. */
+  earmarks() {
+    if (!this.store.earmarks) return { setup: null, result: null, problems: [] };
+    return this.cached(`earmarks:${today()}`, () => earmarks(this.store, this.engine, today()));
   }
 
   goals() {

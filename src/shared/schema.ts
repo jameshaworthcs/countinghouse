@@ -1045,6 +1045,126 @@ export const BudgetSchema = z.object({
 });
 export type Budget = z.infer<typeof BudgetSchema>;
 
+// ─── Set aside (earmarks.json) ───────────────────────────────────────────────────────────────────
+
+/**
+ * What a payment in an everyday account does to a pot (docs/FORMULAS.md §21). Only the first four
+ * move the money set aside in the everyday accounts, by the payment's signed amount; the rest are
+ * your own money and only say why.
+ */
+export const EARMARK_EFFECTS = ['source', 'use', 'from-pot', 'to-pot', 'topped-up', 'own-back', 'own'] as const;
+export type EarmarkEffect = (typeof EARMARK_EFFECTS)[number];
+/** The effects that move the money set aside in the everyday accounts. */
+export const POT_EFFECTS: readonly EarmarkEffect[] = ['source', 'use', 'from-pot', 'to-pot'];
+
+/** A pot's rule: every condition given must hold; the first rule in the pot's list that does decides. */
+export const EarmarkRuleSchema = z
+  .object({
+    id: SlugSchema,
+    name: z.string().trim().min(1).max(120),
+    effect: z.enum(EARMARK_EFFECTS),
+    /** The payment's words, as a categorising rule's (its description, or its payee). */
+    text: z
+      .object({
+        field: z.enum(['description', 'payee']).default('description'),
+        op: z.enum(['contains', 'equals', 'startsWith', 'endsWith', 'regex']).default('contains'),
+        value: z.string().min(1).max(200),
+        caseSensitive: z.boolean().default(false),
+      })
+      .optional(),
+    direction: z.enum(['in', 'out']).optional(),
+    amountMin: MoneySchema.optional(),
+    amountMax: MoneySchema.optional(),
+    /** Only payments in these everyday accounts. */
+    accountIds: z.array(SlugSchema).min(1).optional(),
+    /** A category, or a group (all its categories). */
+    category: SlugSchema.optional(),
+    /** Money moved to or from this account of yours (the other side of the transfer). */
+    counterpartyAccountId: SlugSchema.optional(),
+    /** Only part of each payment counts: a share of it, or up to an amount. The rest is your own money. */
+    portion: z.union([z.object({ percent: z.number().gt(0).max(100) }), z.object({ upTo: MoneySchema.refine((v) => v > 0) })]).optional(),
+    /** For money paid from the pot: only up to what these rules of the pot (adding to it) brought in before, less what this rule has counted already. */
+    limitTo: z.array(SlugSchema).min(1).optional(),
+    note: z.string().max(500).optional(),
+  })
+  .refine((r) => r.text || r.direction || r.amountMin !== undefined || r.amountMax !== undefined || r.accountIds || r.category || r.counterpartyAccountId, { message: 'A rule needs at least one condition' })
+  .refine((r) => !r.limitTo || r.effect === 'use', { message: 'Only a rule for money paid from the pot can be limited to what other rules brought in' });
+export type EarmarkRule = z.infer<typeof EarmarkRuleSchema>;
+
+/** Your decision for one payment: what its parts did. Whatever they don't cover is your own money. */
+export const EarmarkDecisionSchema = z.object({
+  pot: SlugSchema,
+  /** Amounts in pounds, positive: the payment's sign applies. */
+  parts: z.array(z.object({ effect: z.enum(EARMARK_EFFECTS), amount: MoneySchema.refine((v) => v > 0, { message: 'A part is more than £0' }) })).min(1).max(5),
+  reason: z.string().trim().min(1).max(500),
+  /** The payment as it was when decided: a change to it puts the decision back to check. */
+  seen: z.object({ accountId: SlugSchema, date: ISODateSchema, amount: MoneySchema }),
+  /** The proposal it came from, when you applied one (the decision is still yours). */
+  proposalId: z.string().max(64).optional(),
+  decidedAt: TimestampSchema,
+});
+export type EarmarkDecision = z.infer<typeof EarmarkDecisionSchema>;
+
+export const EarmarkPotSchema = z.object({
+  id: SlugSchema,
+  name: z.string().trim().min(1).max(60),
+  purpose: z.string().max(500).optional(),
+  /** Payments from this day count. */
+  start: ISODateSchema,
+  /** Set aside in the everyday accounts at the start (negative: the pot owed you). */
+  opening: MoneySchema.default(0),
+  rules: z.array(EarmarkRuleSchema).max(100).default([]),
+  /** "I've checked this": the figures you checked, newest last. */
+  checks: z.array(z.object({ at: TimestampSchema, setAside: MoneySchema, spendable: MoneySchema })).max(100).default([]),
+});
+export type EarmarkPot = z.infer<typeof EarmarkPotSchema>;
+
+/** What is wrong with a setup's accounts, pots and rules (none: it holds together). */
+export function earmarkSetupProblems(e: { everyday: readonly string[]; setAside: readonly string[]; pots: readonly Pick<EarmarkPot, 'id' | 'rules'>[] }): string[] {
+  const out: string[] = [];
+  if (e.everyday.some((a) => e.setAside.includes(a))) out.push('An account is either everyday or set aside, not both.');
+  if (new Set(e.everyday).size !== e.everyday.length || new Set(e.setAside).size !== e.setAside.length) out.push('An account is listed twice.');
+  if (new Set(e.pots.map((p) => p.id)).size !== e.pots.length) out.push('Two pots share an id.');
+  for (const p of e.pots) {
+    if (new Set(p.rules.map((r) => r.id)).size !== p.rules.length) out.push(`Two rules of ${p.id} share an id.`);
+    for (const r of p.rules) if (r.limitTo && !r.limitTo.every((id) => p.rules.some((x) => x.id === id && x.effect === 'source'))) out.push(`Rule "${r.name}" of ${p.id} is limited to a rule that is not one of the pot's adding to it.`);
+  }
+  return out;
+}
+
+const EarmarkSetupShape = {
+  /** Where your money and the pots' mix: current accounts and the cards paid from them. */
+  everyday: z.array(SlugSchema).min(1).max(20),
+  /** Everything in them is set aside (your own money moved in included). */
+  setAside: z.array(SlugSchema).max(20).default([]),
+};
+
+/** A setup as a proposal gives it: the accounts and pots, without your decisions or checks. */
+export const EarmarkSetupSchema = z
+  .object({ ...EarmarkSetupShape, pots: z.array(EarmarkPotSchema.omit({ checks: true })).min(1).max(10) })
+  .superRefine((e, ctx) => {
+    for (const message of earmarkSetupProblems(e)) ctx.addIssue({ code: 'custom', message });
+  });
+export type EarmarkSetup = z.infer<typeof EarmarkSetupSchema>;
+
+/**
+ * Money set aside inside accounts you spend from (data/earmarks.json, docs/FORMULAS.md §21). No file,
+ * no feature: nothing is worked out or shown.
+ */
+export const EarmarksSchema = z
+  .object({
+    ...EarmarkSetupShape,
+    pots: z.array(EarmarkPotSchema).min(1).max(10),
+    /** Your decisions, by transaction id. */
+    decisions: z.record(z.string().regex(/^tx_[0-9a-f]{16}$/), EarmarkDecisionSchema).default({}),
+    updatedAt: TimestampSchema,
+  })
+  .superRefine((e, ctx) => {
+    for (const message of earmarkSetupProblems(e)) ctx.addIssue({ code: 'custom', message });
+    if (!Object.values(e.decisions).every((d) => e.pots.some((p) => p.id === d.pot))) ctx.addIssue({ code: 'custom', message: 'A decision names a pot that is not there.' });
+  });
+export type Earmarks = z.infer<typeof EarmarksSchema>;
+
 // ─── CSV profiles ────────────────────────────────────────────────────────────────────────────────
 
 export const CsvProfileSchema = z.object({
@@ -2110,6 +2230,26 @@ const changeUnion = <K extends z.ZodType<string | undefined>>(key: K) =>
       entry: z.string().min(1).max(120),
       value: z.union([z.number(), z.string().max(300), z.boolean(), z.null()]),
     }),
+    /**
+     * Set up money set aside, or change its accounts, pots and rules (docs/FORMULAS.md §21). Your
+     * decisions and checks stay. `was` is when the setup was last changed (null: there is none), so a
+     * change you made since stops it fitting rather than being overwritten.
+     */
+    z.object({ key, kind: z.literal('set_earmarks'), why: ChangeWhySchema, setup: EarmarkSetupSchema, was: TimestampSchema.nullable() }),
+    /**
+     * Decide what a payment did to a pot: its parts (the rest is your own money), or null to take a
+     * decision away. Its why is kept as the decision's reason. `was` is when the payment was decided
+     * (null: it isn't), so a decision made since stops it fitting.
+     */
+    z.object({
+      key,
+      kind: z.literal('decide_earmark_flow'),
+      why: ChangeWhySchema,
+      pot: SlugSchema,
+      transaction: TransactionIdSchema,
+      parts: z.array(z.object({ effect: z.enum(EARMARK_EFFECTS), amount: MoneySchema.refine((v) => v > 0, { message: 'A part is more than £0' }) })).min(1).max(5).nullable(),
+      was: TimestampSchema.nullable(),
+    }),
   ]);
 
 export const ProposedChangeSchema = changeUnion(ChangeKeySchema);
@@ -2133,7 +2273,7 @@ export const ProposalSchema = z.object({
   /** Why it was dismissed, if you said. */
   dismissedReason: z.string().max(1000).optional(),
   /** The rows, accounts, balances, categories and rules the applied changes touched, as they were before: the audit trail. */
-  before: z.object({ transactions: z.array(TransactionSchema), accounts: z.array(AccountSchema), balances: z.array(BalanceSnapshotSchema).optional(), terms: z.array(TermsSchema).optional(), categories: z.array(CategorySchema).optional(), rules: z.array(RuleSchema).optional() }).optional(),
+  before: z.object({ transactions: z.array(TransactionSchema), accounts: z.array(AccountSchema), balances: z.array(BalanceSnapshotSchema).optional(), terms: z.array(TermsSchema).optional(), categories: z.array(CategorySchema).optional(), rules: z.array(RuleSchema).optional(), earmarks: EarmarksSchema.nullable().optional() }).optional(),
 });
 export type Proposal = z.infer<typeof ProposalSchema>;
 

@@ -17,7 +17,7 @@ import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { mkdir, readdir, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
-import type { ProposalBalance, ProposalChangeView, ProposalCheckResponse, ProposalDecision, ProposalListResponse, ProposalRow, ProposalRuleExample, ProposalSummary, ProposalView } from '../shared/api';
+import type { EarmarkFigures, ProposalBalance, ProposalChangeView, ProposalCheckResponse, ProposalDecision, ProposalListResponse, ProposalRow, ProposalRuleExample, ProposalSummary, ProposalView } from '../shared/api';
 import { ACCOUNT_TYPE_META } from '../shared/accounts';
 import { agreementPattern, isScheduledPayment } from '../shared/agreements';
 import { CategoryIndex } from '../shared/categories';
@@ -25,9 +25,10 @@ import { Categoriser, isWrapperAccount, linkedPayee, transferLegCategory } from 
 import { addDays, diffDays, formatDate, today } from '../shared/dates';
 import { formatMoney, fromMinor, isMoney, toMinor } from '../shared/money';
 import { sameTerms, type TermsContent } from '../shared/terms';
-import { AccountSchema, AgreementSchema, BalanceSnapshotSchema, CompanySchema, EmploymentSchema, ProposalSchema, TermsSchema, type Account, type Agreement, type BalanceSnapshot, type Category, type Company, type Terms, type Employment, type PensionArrangement, type Proposal, type ProposalInput, type ProposalStatus, type ProposedChange, type Provenance, type ReturnEntry, type Rule, type Transaction } from '../shared/schema';
+import { AccountSchema, AgreementSchema, BalanceSnapshotSchema, CompanySchema, EarmarkSetupSchema, EmploymentSchema, POT_EFFECTS, ProposalSchema, TermsSchema, type Earmarks, type EarmarkEffect, type Account, type Agreement, type BalanceSnapshot, type Category, type Company, type Terms, type Employment, type PensionArrangement, type Proposal, type ProposalInput, type ProposalStatus, type ProposedChange, type Provenance, type ReturnEntry, type Rule, type Transaction } from '../shared/schema';
 import { paidToText } from './analytics/agreements';
 import { BalanceEngine, type BalanceSource } from './analytics/balances';
+import { computeEarmarks } from './analytics/earmarks';
 import { taxReturn } from './analytics/taxreturn';
 import { runAs } from './audit';
 import { categoriseInputOf, categoriserFor, ruleCatches } from './categoriser';
@@ -82,6 +83,8 @@ interface ChangeResult {
   removes?: { count: number; examples: ProposalRuleExample[] };
   /** A return's box or question set: what it is, and the value as you would enter it. */
   returnEntry?: { what: string; value: string };
+  /** Set aside: what the change does, in words, and the decision of yours it replaces. */
+  earmark?: { what: string; replaces?: string };
 }
 
 interface Outcome {
@@ -115,6 +118,52 @@ interface Outcome {
   categoriesBefore: Map<string, Category>;
   /** Each tax year's return entries as the changes leave them, when a change sets one. */
   returns: Map<string, Record<string, ReturnEntry>>;
+  /** Set aside as the changes leave it, when one changes it (null: none). */
+  earmarks?: Earmarks | null;
+}
+
+/** Which effects a payment in or out can have in a pot. */
+const EFFECTS_IN: readonly EarmarkEffect[] = ['source', 'use', 'from-pot', 'own-back', 'own'];
+const EFFECTS_OUT: readonly EarmarkEffect[] = ['source', 'use', 'to-pot', 'topped-up', 'own'];
+
+/** A setup's accounts, pots and rules, read the same way whatever order of keys or defaults: two that say the same compare equal. */
+const setupKey = (e: Pick<Earmarks, 'everyday' | 'setAside' | 'pots'>) => JSON.stringify(EarmarkSetupSchema.parse({ everyday: e.everyday, setAside: e.setAside, pots: e.pots.map(({ checks: _c, ...p }) => p) }));
+/** Set aside as it would be written, without the times it was changed and decided. */
+const earmarksKey = (e: Earmarks | null | undefined) =>
+  e ? JSON.stringify({ setup: setupKey(e), decisions: Object.entries(e.decisions).sort(([a], [b]) => a.localeCompare(b)).map(([id, d]) => [id, d.pot, d.parts, d.reason]) }) : 'none';
+
+/** Set aside's figures for a setup and the rows as they are (or as a proposal would leave them). */
+function earmarkFigures(store: Store, setup: Earmarks | null | undefined, transactions: readonly Transaction[], engine: BalanceEngine): EarmarkFigures | null {
+  if (!setup) return null;
+  const r = computeEarmarks({
+    setup,
+    accounts: store.accounts,
+    categories: store.categories,
+    transactions,
+    balanceOn: (id, d) => {
+      const p = engine.balanceOn(id, d);
+      return p ? (p.gbp ?? p.value) : null;
+    },
+    lastDataOf: (id) => engine.lastDataDate(id),
+    firstDataOf: (id) => engine.firstDataDate(id),
+  }).result;
+  return r ? { setAside: fromMinor(r.pots.reduce((s, p) => s + toMinor(p.setAside), 0)), spendable: r.spendable, toCheck: r.toCheck.length } : null;
+}
+
+/** What a proposal would do to the money set aside: only when it changes it. */
+function earmarkPreview(store: Store, o: Outcome): { before: EarmarkFigures | null; after: EarmarkFigures | null } | undefined {
+  if (o.earmarks === undefined) return undefined;
+  const engine = new BalanceEngine(store);
+  const now = store.transactions();
+  const after = now.flatMap((t) => {
+    if (o.removed.has(t.id)) return [];
+    const p = o.patches.get(t.id);
+    if (!p) return [t];
+    const next: Record<string, unknown> = { ...t, ...p };
+    for (const [k, v] of Object.entries(p)) if (v === undefined) delete next[k];
+    return [next as Transaction];
+  });
+  return { before: earmarkFigures(store, store.earmarks, now, engine), after: earmarkFigures(store, o.earmarks, after, engine) };
 }
 
 /** Rows a rule's change shows of those it would categorise. */
@@ -158,7 +207,8 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
   // Your categories as the changes so far leave them: a category one adds can be used by the next.
   let catList: Category[] = store.categories;
   let cats = new CategoryIndex(catList);
-  const receiptsOn = new Set(store.receipts.map((r) => r.transactionId));
+  // A receipt, or a set-aside decision, is yours on a row though it is kept beside it.
+  const receiptsOn = new Set([...store.receipts.map((r) => r.transactionId), ...Object.keys(store.earmarks?.decisions ?? {})]);
   /** Something you set on the row (a transfer link is not: a proposal may undo one). */
   const yours = (t: Transaction) => t.categorisedBy === 'user' || t.payeeSetBy === 'user' || Boolean(t.notes || t.tags?.length || t.splits?.length || t.corrections?.length || t.seenIn?.length) || receiptsOn.has(t.id);
   const accountName = (id: string) => store.account(id)?.name ?? id;
@@ -173,6 +223,8 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
     cats = new CategoryIndex(catList);
     out.categories = catList;
   };
+  /** Set aside as the changes so far leave it. */
+  let setup: Earmarks | null = store.earmarks;
   /** Your rules as the changes so far leave them: those removed gone, those made added. */
   const rulesNow = () => [...store.rules.filter((r) => !out.removedRules.has(r.id)), ...out.rules];
   const balanceById = new Map(store.balances().map((b) => [b.id, b]));
@@ -201,7 +253,7 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
   const gone = (id: string) => `Transaction ${id} is no longer in your data.`;
   /** What you added to a row beyond a category or payee, which taking it away would lose. */
   const keptByYou = (t: Transaction) => Boolean(t.notes || t.tags?.length || t.splits?.length || t.corrections?.length || t.seenIn?.length) || receiptsOn.has(t.id);
-  const KEPT_BY_YOU = 'It has something of yours on it (a note, tag, split, correction, receipt or details you added from another document), so a proposal leaves it to you.';
+  const KEPT_BY_YOU = 'It has something of yours on it (a note, tag, split, correction, receipt, set-aside decision or details you added from another document), so a proposal leaves it to you.';
   const remove = (t: Transaction) => {
     if (!out.touchedRows.has(t.id)) out.touchedRows.set(t.id, store.transaction(t.id)!);
     out.patches.delete(t.id);
@@ -287,7 +339,7 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
         if (t.transferGroup) return { problem: linkedNow(t) };
         if (c.sameAs.includes(t.id)) return { problem: 'It cannot repeat itself.' };
         // A copy with something of yours on it (a category, note, split, receipt…) is never taken away.
-        if (yours(store.transaction(t.id)!)) return { problem: 'It has something of yours on it (a category, payee, note, tag, split, correction, receipt or details you added from another document), so a proposal leaves it to you.' };
+        if (yours(store.transaction(t.id)!)) return { problem: 'It has something of yours on it (a category, payee, note, tag, split, correction, receipt, set-aside decision or details you added from another document), so a proposal leaves it to you.' };
         let sum = 0;
         for (const id of c.sameAs) {
           const s = row(id);
@@ -531,6 +583,76 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
         out.returns.set(c.taxYear, entries);
         return { returnEntry: { what, value: shown } };
       }
+      case 'set_earmarks': {
+        const was = store.earmarks?.updatedAt ?? null;
+        if (c.was !== was) return { problem: was ? `Set aside was changed on ${formatDate(was.slice(0, 10))}, after this was proposed: propose against it as it is now.` : 'Set aside is not set up now: propose it with was: null.' };
+        for (const id of [...c.setup.everyday, ...c.setup.setAside]) {
+          const a = account(id);
+          if (!a) return { problem: `There is no account "${id}".` };
+          if (a.currency !== 'GBP') return { problem: `${a.name} is in ${a.currency}: only accounts in pounds can be counted.` };
+        }
+        for (const pot of c.setup.pots) {
+          if (pot.start > today()) return { problem: `${pot.name} starts on ${formatDate(pot.start)}, in the future.` };
+          for (const r of pot.rules) {
+            if (r.category && !cats.get(r.category)) return { problem: `Rule "${r.name}" names no category of yours ("${r.category}").` };
+            if (r.counterpartyAccountId && !account(r.counterpartyAccountId)) return { problem: `Rule "${r.name}" names no account of yours ("${r.counterpartyAccountId}").` };
+            if (r.text?.op === 'regex') {
+              try {
+                new RegExp(r.text.value);
+              } catch {
+                return { problem: `Rule "${r.name}": "${r.text.value}" is not a pattern that works.` };
+              }
+            }
+          }
+        }
+        const potIds = new Set(c.setup.pots.map((p) => p.id));
+        const next: Earmarks = {
+          everyday: c.setup.everyday,
+          setAside: c.setup.setAside,
+          pots: c.setup.pots.map((p) => ({ ...p, checks: setup?.pots.find((x) => x.id === p.id)?.checks ?? [] })),
+          // A pot taken away takes its decisions with it (git keeps them).
+          decisions: Object.fromEntries(Object.entries(setup?.decisions ?? {}).filter(([, d]) => potIds.has(d.pot))),
+          updatedAt: setup?.updatedAt ?? nowISO(),
+        };
+        if (setup && setupKey(setup) === setupKey(next)) return { alreadySo: true };
+        const dropped = Object.keys(setup?.decisions ?? {}).length - Object.keys(next.decisions).length;
+        setup = next;
+        out.earmarks = next;
+        const rules = next.pots.reduce((n, p) => n + p.rules.length, 0);
+        return { earmark: { what: `${store.earmarks ? 'Changes' : 'Sets up'} ${next.pots.map((p) => p.name).join(', ')}: ${next.everyday.length} everyday account${next.everyday.length === 1 ? '' : 's'}, ${next.setAside.length} set-aside, ${rules} rule${rules === 1 ? '' : 's'}${dropped ? `; ${dropped} decision${dropped === 1 ? '' : 's'} of a pot it takes away go${dropped === 1 ? 'es' : ''} with it` : ''}.` } };
+      }
+      case 'decide_earmark_flow': {
+        if (!setup) return { problem: 'Nothing is set aside yet: set it up first.' };
+        const pot = setup.pots.find((p) => p.id === c.pot);
+        if (!pot) return { problem: `There is no pot "${c.pot}".` };
+        const t = row(c.transaction);
+        if (!t) return { problem: gone(c.transaction) };
+        if (!setup.everyday.includes(t.accountId)) return { problem: `${brief(t, accountName)} is not in one of the everyday accounts.` };
+        if (t.date < pot.start) return { problem: `${brief(t, accountName)} is before ${pot.name} starts (${formatDate(pot.start)}).` };
+        const existing = setup.decisions[t.id];
+        const was = existing?.decidedAt ?? null;
+        if (c.was !== was) return { problem: existing ? `It was decided on ${formatDate(existing.decidedAt.slice(0, 10))}, after this was proposed: propose against that decision.` : 'Its decision was taken away after this was proposed.' };
+        const decisions = { ...setup.decisions };
+        let what: string;
+        if (c.parts) {
+          const allowed = t.amount > 0 ? EFFECTS_IN : EFFECTS_OUT;
+          const misfit = c.parts.find((p) => !allowed.includes(p.effect));
+          if (misfit) return { problem: `${brief(t, accountName)} is money ${t.amount > 0 ? 'in' : 'out'}: it cannot be "${misfit.effect}".` };
+          const total = c.parts.reduce((n, p) => n + toMinor(p.amount), 0);
+          if (total > Math.abs(toMinor(t.amount))) return { problem: `The parts add up to ${formatMoney(fromMinor(total))}, more than the payment (${money({ ...t, amount: Math.abs(t.amount) })}).` };
+          if (existing && existing.pot === c.pot && JSON.stringify(existing.parts) === JSON.stringify(c.parts)) return { alreadySo: true };
+          decisions[t.id] = { pot: c.pot, parts: c.parts, reason: c.why.slice(0, 500), seen: { accountId: t.accountId, date: t.date, amount: t.amount }, proposalId: forProposal, decidedAt: nowISO() };
+          const potParts = c.parts.filter((p) => POT_EFFECTS.includes(p.effect));
+          what = `${brief(t, accountName)}: ${c.parts.map((p) => `${formatMoney(p.amount)} ${p.effect}`).join(', ')}${total < Math.abs(toMinor(t.amount)) ? `, the rest your own money` : ''}${potParts.length ? '' : ' (no change to the money set aside)'}.`;
+        } else {
+          if (!existing) return { alreadySo: true };
+          delete decisions[t.id];
+          what = `${brief(t, accountName)}: your decision taken away; it counts by the rules again.`;
+        }
+        setup = { ...setup, decisions };
+        out.earmarks = setup;
+        return { earmark: { what, ...(existing ? { replaces: `Replaces your decision of ${formatDate(existing.decidedAt.slice(0, 10))} (“${existing.reason}”)` } : {}) } };
+      }
       case 'add_rule': {
         const cat = cats.get(c.rule.category);
         if (!cat) return { problem: `There is no category "${c.rule.category}".` };
@@ -711,6 +833,7 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
 /** Applying would leave the data as it is: every change is already so, or they undo each other. */
 function changesNothing(store: Store, o: Outcome): boolean {
   if (o.returns.size) return false;
+  if (o.earmarks !== undefined && earmarksKey(o.earmarks) !== earmarksKey(store.earmarks)) return false;
   if (o.removed.size || o.companies.size || o.balances.length || o.jobs.size || o.agreements.size || o.terms.size || o.termsRemoved.size || o.rules.length || o.removedRules.size || o.categories) return false;
   if ([...o.moves.values()].some((m) => m.to !== m.balance.accountId)) return false;
   for (const [id, patch] of o.patches) {
@@ -748,7 +871,9 @@ function namedRows(c: ProposedChange): string[] {
     case 'remove_wrong_sign':
       return [c.transaction, ...c.recordedAs];
     case 'remove_internal_move':
+    case 'decide_earmark_flow':
       return [c.transaction];
+    case 'set_earmarks':
     case 'set_account_dates':
     case 'link_accounts':
     case 'move_balance':
@@ -767,7 +892,17 @@ function namedRows(c: ProposedChange): string[] {
 }
 
 /** What a change does, ignoring its key and reason: two proposals that do the same are the same. */
-const signature = (changes: ProposedChange[]) => JSON.stringify(changes.map(({ key: _k, why: _w, ...rest }) => rest));
+const signature = (changes: ProposedChange[]) =>
+  JSON.stringify(
+    changes.map(({ key: _k, why: _w, ...rest }) => {
+      // When it was proposed against changes nothing about what it does.
+      if (rest.kind === 'set_earmarks' || rest.kind === 'decide_earmark_flow') {
+        const { was: _was, ...same } = rest;
+        return same;
+      }
+      return rest;
+    }),
+  );
 
 const newestFirst = (a: Proposal, b: Proposal) => Date.parse(b.createdAt) - Date.parse(a.createdAt);
 
@@ -843,7 +978,7 @@ export class ProposalService extends EventEmitter {
   async get(id: string): Promise<ProposalView> {
     const p = this.pending.get(id) ?? (await this.store.readProposal(id));
     if (!p) throw new StoreError('No such proposal', 404);
-    return this.view(p);
+    return this.view(p, { preview: true });
   }
 
   /**
@@ -900,7 +1035,8 @@ export class ProposalService extends EventEmitter {
     const outcome = simulate(this.store, p.changes, new Set(leaveOut), p.id);
     const changes = p.changes.filter((c) => !leaveOut.includes(c.key)).map((c) => ({ key: c.key, ...outcome.results.get(c.key) }));
     const problems = changes.filter((c) => c.problem).length;
-    return { changes, ready: changes.filter((c) => !c.problem && !c.alreadySo).length, problems, ...(!problems && changesNothing(this.store, outcome) ? { alreadyDone: true as const } : {}) };
+    const earmarks = earmarkPreview(this.store, outcome);
+    return { changes, ready: changes.filter((c) => !c.problem && !c.alreadySo).length, problems, ...(!problems && changesNothing(this.store, outcome) ? { alreadyDone: true as const } : {}), ...(earmarks ? { earmarks } : {}) };
   }
 
   /**
@@ -942,6 +1078,8 @@ export class ProposalService extends EventEmitter {
       if (termsGone.length) await this.store.removeRecords('terms', termsGone, message);
       if (outcome.terms.size) await this.store.upsertRecords('terms', [...outcome.terms.values()], message);
       if (outcome.balances.length) await this.store.addBalances(outcome.balances, message);
+      const earmarksBefore = outcome.earmarks !== undefined ? this.store.earmarks : undefined;
+      if (outcome.earmarks !== undefined) await this.store.setEarmarks(outcome.earmarks ? { ...outcome.earmarks, updatedAt: nowISO() } : null, message);
       for (const [taxYear, entries] of outcome.returns) {
         await this.store.setReturns([...this.store.returns.filter((r) => r.taxYear !== taxYear), { id: taxYear.replace('/', '-'), taxYear, entries, updatedAt: nowISO() }], message);
       }
@@ -950,7 +1088,7 @@ export class ProposalService extends EventEmitter {
       const termsBefore = [...outcome.termsRemoved.values()];
       const categoriesBefore = [...outcome.categoriesBefore.values()];
       const rulesBefore = [...outcome.removedRules.values()];
-      const before = { transactions: [...outcome.touchedRows.values()], accounts: [...outcome.touchedAccounts.values()], ...(balances.length ? { balances } : {}), ...(termsBefore.length ? { terms: termsBefore } : {}), ...(categoriesBefore.length ? { categories: categoriesBefore } : {}), ...(rulesBefore.length ? { rules: rulesBefore } : {}) };
+      const before = { transactions: [...outcome.touchedRows.values()], accounts: [...outcome.touchedAccounts.values()], ...(balances.length ? { balances } : {}), ...(termsBefore.length ? { terms: termsBefore } : {}), ...(categoriesBefore.length ? { categories: categoriesBefore } : {}), ...(rulesBefore.length ? { rules: rulesBefore } : {}), ...(earmarksBefore !== undefined ? { earmarks: earmarksBefore } : {}) };
       const decided = await this.decide(p, { status: 'applied', applied: doing.map((c) => c.key), before }, message);
       await this.commit();
       // Another proposal it has left with nothing to do closes now, in a commit of its own.
@@ -984,10 +1122,12 @@ export class ProposalService extends EventEmitter {
   }
 
   /** The proposal with the rows and accounts it names, and what each change would do now. */
-  view(p: Proposal): ProposalView {
+  view(p: Proposal, opts: { preview?: boolean } = {}): ProposalView {
     const { before, ...proposal } = p;
     const pending = p.status === 'pending';
     const outcome = pending ? simulate(this.store, p.changes, new Set(), p.id) : undefined;
+    // What it would do to the money set aside: worked out only when one proposal is shown, never for the list.
+    const earmarks = opts.preview && outcome ? earmarkPreview(this.store, outcome) : undefined;
     const changes: ProposalChangeView[] = p.changes.map((change) => ({ change, ...(outcome?.results.get(change.key) ?? {}) }));
     // A decided proposal shows its rows and accounts as they were before it: what it changed.
     const was = new Map((before?.transactions ?? []).map((t) => [t.id, t]));
@@ -1034,6 +1174,7 @@ export class ProposalService extends EventEmitter {
       };
     }
     for (const c of p.changes) {
+      if (c.kind === 'set_earmarks') for (const id of [...c.setup.everyday, ...c.setup.setAside]) accountIds.add(id);
       if (c.kind === 'set_account_dates' || c.kind === 'set_terms' || c.kind === 'remove_terms') accountIds.add(c.account);
       if (c.kind === 'link_accounts') accountIds.add(c.account).add(c.continues);
     }
@@ -1089,7 +1230,7 @@ export class ProposalService extends EventEmitter {
     }
     const ready = changes.filter((c) => !c.problem && !c.alreadySo).length;
     const done = outcome !== undefined && leavesNothing(this.store, p, outcome);
-    return { proposal, changes, rows, balances, accounts, ...(Object.keys(rules).length ? { rules } : {}), ...(Object.keys(removedTerms).length ? { removedTerms } : {}), ready, problems: changes.filter((c) => c.problem).length, ...(done ? { alreadyDone: true as const } : {}) };
+    return { proposal, changes, rows, balances, accounts, ...(Object.keys(rules).length ? { rules } : {}), ...(Object.keys(removedTerms).length ? { removedTerms } : {}), ready, problems: changes.filter((c) => c.problem).length, ...(done ? { alreadyDone: true as const } : {}), ...(earmarks ? { earmarks } : {}) };
   }
 
   /** Close the waiting proposals your data already says all of. The caller holds the lock. */

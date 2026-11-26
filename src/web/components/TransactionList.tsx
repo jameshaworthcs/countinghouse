@@ -9,6 +9,7 @@ import { useAppData } from '../lib/data';
 import { cn, formatDate, money } from '../lib/format';
 import { AmountInput, Badge, Button, Callout, Dialog, Drawer, Field, Input, KeyValue, Money, Select, Textarea, useToast } from './ui';
 import { ReceiptsSection, SplitSection, type SplitLineDraft } from './SplitReceipts';
+import { EarmarkSection } from './Earmarks';
 
 /**
  * A category to choose. For money in (`direction: "in"`) the income categories come first: a gift to
@@ -348,6 +349,7 @@ export function TransactionDrawer({ tx, onClose }: { tx: Transaction; onClose: (
         {showRule && <RuleFromTransaction tx={tx} category={category} onDone={onClose} />}
         <SplitSection tx={tx} proposal={proposal} onProposalUsed={() => setProposal(null)} />
         <ReceiptsSection tx={tx} onPropose={setProposal} />
+        <EarmarkSection tx={tx} />
         <section>
           <h3 className="mb-2 flex items-center gap-1.5 text-[13px] font-semibold text-ink">
             <Tag className="size-4 text-ink-3" /> Source details

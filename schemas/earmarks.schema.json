@@ -1,0 +1,369 @@
+{
+  "$id": "earmarks.schema.json",
+  "title": "earmarks",
+  "description": "Schema for data/earmarks.json (money set aside inside your everyday accounts; optional: no file, no feature). Generated from src/shared/schema.ts by `npm run schemas`; do not edit.",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "everyday": {
+      "minItems": 1,
+      "maxItems": 20,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+        "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+      }
+    },
+    "setAside": {
+      "default": [],
+      "maxItems": 20,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+        "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+      }
+    },
+    "pots": {
+      "minItems": 1,
+      "maxItems": 10,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+            "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 60
+          },
+          "purpose": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "start": {
+            "type": "string",
+            "description": "Calendar date, YYYY-MM-DD"
+          },
+          "opening": {
+            "default": 0,
+            "type": "number",
+            "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+          },
+          "rules": {
+            "default": [],
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64,
+                  "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                  "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120
+                },
+                "effect": {
+                  "type": "string",
+                  "enum": [
+                    "source",
+                    "use",
+                    "from-pot",
+                    "to-pot",
+                    "topped-up",
+                    "own-back",
+                    "own"
+                  ]
+                },
+                "text": {
+                  "type": "object",
+                  "properties": {
+                    "field": {
+                      "default": "description",
+                      "type": "string",
+                      "enum": [
+                        "description",
+                        "payee"
+                      ]
+                    },
+                    "op": {
+                      "default": "contains",
+                      "type": "string",
+                      "enum": [
+                        "contains",
+                        "equals",
+                        "startsWith",
+                        "endsWith",
+                        "regex"
+                      ]
+                    },
+                    "value": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "caseSensitive": {
+                      "default": false,
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "value"
+                  ]
+                },
+                "direction": {
+                  "type": "string",
+                  "enum": [
+                    "in",
+                    "out"
+                  ]
+                },
+                "amountMin": {
+                  "type": "number",
+                  "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                },
+                "amountMax": {
+                  "type": "number",
+                  "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                },
+                "accountIds": {
+                  "minItems": 1,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                    "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+                  }
+                },
+                "category": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64,
+                  "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                  "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+                },
+                "counterpartyAccountId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64,
+                  "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                  "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+                },
+                "portion": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "percent": {
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "maximum": 100
+                        }
+                      },
+                      "required": [
+                        "percent"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "upTo": {
+                          "type": "number",
+                          "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                        }
+                      },
+                      "required": [
+                        "upTo"
+                      ]
+                    }
+                  ]
+                },
+                "limitTo": {
+                  "minItems": 1,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                    "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+                  }
+                },
+                "note": {
+                  "type": "string",
+                  "maxLength": 500
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "effect"
+              ]
+            }
+          },
+          "checks": {
+            "default": [],
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "at": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                  "description": "ISO 8601 timestamp"
+                },
+                "setAside": {
+                  "type": "number",
+                  "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                },
+                "spendable": {
+                  "type": "number",
+                  "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                }
+              },
+              "required": [
+                "at",
+                "setAside",
+                "spendable"
+              ]
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "start"
+        ]
+      }
+    },
+    "decisions": {
+      "default": {},
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^tx_[0-9a-f]{16}$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "pot": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+            "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+          },
+          "parts": {
+            "minItems": 1,
+            "maxItems": 5,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "effect": {
+                  "type": "string",
+                  "enum": [
+                    "source",
+                    "use",
+                    "from-pot",
+                    "to-pot",
+                    "topped-up",
+                    "own-back",
+                    "own"
+                  ]
+                },
+                "amount": {
+                  "type": "number",
+                  "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                }
+              },
+              "required": [
+                "effect",
+                "amount"
+              ]
+            }
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "seen": {
+            "type": "object",
+            "properties": {
+              "accountId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+              },
+              "date": {
+                "type": "string",
+                "description": "Calendar date, YYYY-MM-DD"
+              },
+              "amount": {
+                "type": "number",
+                "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+              }
+            },
+            "required": [
+              "accountId",
+              "date",
+              "amount"
+            ]
+          },
+          "proposalId": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "decidedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "description": "ISO 8601 timestamp"
+          }
+        },
+        "required": [
+          "pot",
+          "parts",
+          "reason",
+          "seen",
+          "decidedAt"
+        ]
+      }
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+      "description": "ISO 8601 timestamp"
+    }
+  },
+  "required": [
+    "everyday",
+    "pots",
+    "updatedAt"
+  ]
+}

@@ -11,6 +11,7 @@ import { TimeChart, type TimeSeries } from '../components/charts/TimeChart';
 import { TransactionList } from '../components/TransactionList';
 import { Badge, Button, Card, Callout, Delta, EmptyState, ErrorNote, Loading, Money, PageHeader, Segmented, Stat } from '../components/ui';
 import { GoalsPanel } from '../components/Goals';
+import { EarmarksPanel } from '../components/Earmarks';
 import { InsightsPanel } from '../components/Intel';
 import { MonthReviewCard } from '../components/MonthReview';
 import { DropZone } from '../components/Upload';
@@ -384,6 +385,7 @@ export default function Dashboard() {
           </section>
 
           <Kpis summary={s} />
+          <EarmarksPanel />
           <CoverageNote summary={s} />
           <MonthReviewCard />
           <InsightsPanel page="overview" title="What to look at" excludeKinds={['month-review']} />

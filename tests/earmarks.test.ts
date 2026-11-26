@@ -1,0 +1,306 @@
+// Set aside (docs/FORMULAS.md §21): the money set aside in everyday accounts, worked out from rules,
+// decisions and transfers, and proposed by agents for the owner to apply. All data here is invented
+// (Jo Bloggs, a student, at "Example" providers).
+
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import fc from 'fast-check';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { BootstrapResponse, EarmarksResponse, ProposalDecision, ProposalView } from '../src/shared/api';
+import { addDays } from '../src/shared/dates';
+import { fromMinor, toMinor } from '../src/shared/money';
+import { EarmarksSchema, POT_EFFECTS, type Account, type Earmarks, type Transaction } from '../src/shared/schema';
+import { computeEarmarks, type EarmarksInput } from '../src/server/analytics/earmarks';
+import { createApp, type App } from '../src/server/app';
+import { loadConfig } from '../src/server/config';
+import { balanceId, transactionId, transferGroupId } from '../src/server/ids';
+
+const stamp = '2026-08-01T00:00:00+00:00';
+const acct = (id: string, type: Account['type'], extra: Partial<Account> = {}): Account => ({ id, name: `Example ${id}`, type, currency: 'GBP', status: 'open', aliases: [], includeInNetWorth: true, createdAt: stamp, updatedAt: stamp, ...extra });
+let seq = 0;
+const tx = (accountId: string, date: string, amount: number, description: string, extra: Partial<Transaction> = {}): Transaction => ({
+  id: transactionId(accountId, date, amount, description, seq++),
+  accountId,
+  date,
+  amount,
+  currency: 'GBP',
+  description,
+  source: {},
+  createdAt: stamp,
+  ...extra,
+});
+/** Both sides of a move between two accounts, linked. */
+const move = (from: string, to: string, date: string, amount: number, words: string): [Transaction, Transaction] => {
+  const a = tx(from, date, -amount, `${words} TO ${to.toUpperCase()}`, { category: 'transfer', counterpartyAccountId: to });
+  const b = tx(to, date, amount, `${words} FROM ${from.toUpperCase()}`, { category: 'transfer', counterpartyAccountId: from });
+  const g = transferGroupId(a.id, b.id);
+  return [{ ...a, transferGroup: g }, { ...b, transferGroup: g }];
+};
+
+const accounts = [acct('current', 'current'), acct('card', 'credit_card'), acct('saver', 'savings'), acct('loan', 'student_loan'), acct('platform', 'stocks_isa')];
+const categories = [
+  { id: 'rent', name: 'Rent', kind: 'expense' as const },
+  { id: 'groceries', name: 'Groceries', kind: 'expense' as const },
+  { id: 'transfer', name: 'Transfer', kind: 'transfer' as const },
+];
+const START = '2026-09-01';
+const base = (): Earmarks =>
+  EarmarksSchema.parse({
+    everyday: ['current', 'card'],
+    setAside: ['saver'],
+    pots: [
+      {
+        id: 'student-money',
+        name: 'Student money',
+        start: START,
+        opening: 0,
+        rules: [
+          { id: 'loan', name: 'Maintenance loan', effect: 'source', counterpartyAccountId: 'loan' },
+          { id: 'rent', name: 'Hall rent', effect: 'use', category: 'rent', direction: 'out', limitTo: ['loan'] },
+          { id: 'isa', name: 'ISA', effect: 'use', text: { value: 'EXAMPLE PLATFORM' }, direction: 'out' },
+        ],
+      },
+    ],
+    decisions: {},
+    updatedAt: stamp,
+  });
+
+const [toSaver, saverIn] = move('current', 'saver', '2026-09-12', 200, 'SAVING');
+const [fromSaver, currentIn] = move('saver', 'current', '2026-09-20', 500, 'LOAN');
+const [cardPay, cardIn] = move('current', 'card', '2026-09-28', 1200, 'CARD');
+const loanIn = tx('current', '2026-09-05', 1500, 'EXAMPLE STUDENT FINANCE', { counterpartyAccountId: 'loan' });
+const rent = tx('card', '2026-09-10', -1200, 'EXAMPLE HALL RENT', { category: 'rent' });
+const groceries = tx('current', '2026-09-25', -50, 'EXAMPLE SUPERMARKET', { category: 'groceries' });
+const rows = [loanIn, rent, toSaver, saverIn, fromSaver, currentIn, groceries, cardPay, cardIn];
+/** Opening balances on the day before the start. */
+const OPENING: Record<string, number> = { current: 300, card: 0, saver: 1000 };
+
+/** A plain ledger: each account's opening plus its rows to the day. */
+function input(setup: Earmarks, txs: Transaction[], last: Record<string, string> = {}): EarmarksInput {
+  return {
+    setup,
+    accounts,
+    categories,
+    transactions: txs,
+    balanceOn: (id, d) => {
+      if (!(id in OPENING)) return null;
+      return fromMinor(txs.filter((t) => t.accountId === id && t.date <= d).reduce((s, t) => s + toMinor(t.amount), toMinor(OPENING[id]!)));
+    },
+    lastDataOf: (id) => last[id] ?? txs.filter((t) => t.accountId === id).reduce<string | null>((m, t) => (!m || t.date > m ? t.date : m), id in OPENING ? addDays(START, -1) : null),
+    firstDataOf: (id) => (id in OPENING ? addDays(START, -1) : null),
+    today: '2026-10-01',
+  };
+}
+const pot = (r: EarmarksResponse) => r.result!.pots[0]!;
+const line = (r: EarmarksResponse, effect: string) => pot(r).lines.find((l) => l.effect === effect);
+
+describe('set aside: the sum', () => {
+  it('counts sources, uses up to what they brought in, and transfers with the saver', () => {
+    const r = computeEarmarks(input(base(), rows));
+    expect(r.problems).toEqual([]);
+    // 1,500 loan − 1,200 rent (on the card) − 200 put back + 500 borrowed.
+    expect(pot(r).setAside).toBe(600);
+    expect(line(r, 'source')!.total).toBe(1500);
+    expect(line(r, 'use')!.total).toBe(-1200);
+    expect(line(r, 'to-pot')!.total).toBe(-200);
+    expect(line(r, 'from-pot')!.total).toBe(500);
+    // The card repayment is a move between two everyday accounts: it changes nothing.
+    expect(r.result!.internal.count).toBe(2);
+    // Everyday: current 300 + 1500 − 200 + 500 − 50 − 1200 = 850; card 0 − 1200 + 1200 = 0.
+    expect(r.result!.everydayTotal).toBe(850);
+    expect(r.result!.spendable).toBe(250);
+    expect(r.result!.toCheck).toEqual([]);
+    expect(r.result!.heldInSetAside).toBe(1000 + 200 - 500);
+  });
+
+  it('pays from the pot only up to what its sources brought in', () => {
+    const bigRent = { ...rent, amount: -2000 };
+    const r = computeEarmarks(input(base(), rows.map((t) => (t.id === rent.id ? bigRent : t))));
+    expect(line(r, 'use')!.total).toBe(-1500);
+    const own = line(r, 'own')!;
+    expect(own.out).toBe(500);
+    // With nothing left in the pot, the 200 sent to the saver can only be you topping it up: nothing to ask.
+    expect(pot(r).setAside).toBe(500);
+    expect(r.result!.toCheck).toEqual([]);
+    expect(line(r, 'topped-up')!.rows.map((x) => [x.transactionId, x.counted, x.by])).toEqual([[toSaver.id, -200, 'default']]);
+  });
+
+  it('puts back what the pot held, and asks about more than that', () => {
+    const [big, bigIn] = move('current', 'saver', '2026-09-26', 1000, 'SAVING');
+    const r = computeEarmarks(input(base(), [...rows, big, bigIn]));
+    // It held 600: 600 put back, 400 counted as you topping it up until you decide.
+    expect(pot(r).setAside).toBe(0);
+    expect(r.result!.toCheck).toHaveLength(1);
+    expect(r.result!.toCheck[0]).toMatchObject({ kind: 'more-than-held', amount: 1000, transactionIds: [big.id] });
+    expect(r.result!.toCheck[0]!.suggestion![0]!.parts).toEqual([
+      { effect: 'to-pot', amount: 600 },
+      { effect: 'topped-up', amount: 400 },
+    ]);
+    expect(pot(r).provisional).toBe(1000);
+  });
+
+  it('a decision wins over rules and defaults, and a stale one is flagged', () => {
+    const [big, bigIn] = move('current', 'saver', '2026-09-26', 1000, 'SAVING');
+    const setup = base();
+    setup.decisions[big.id] = { pot: 'student-money', parts: [{ effect: 'topped-up', amount: 1000 }], reason: 'Birthday money, saved', seen: { accountId: 'current', date: big.date, amount: big.amount }, decidedAt: stamp };
+    setup.decisions['tx_0000000000000000'] = { pot: 'student-money', parts: [{ effect: 'source', amount: 10 }], reason: 'Gone', seen: { accountId: 'current', date: '2026-09-02', amount: 10 }, decidedAt: stamp };
+    const r = computeEarmarks(input(setup, [...rows, big, bigIn]));
+    expect(pot(r).setAside).toBe(600);
+    expect(r.result!.toCheck.map((c) => c.kind)).toEqual(['stale-decision']);
+    expect(line(r, 'topped-up')!.rows.find((x) => x.transactionId === big.id)).toMatchObject({ by: 'decision', reason: 'Birthday money, saved' });
+  });
+
+  it('a share of a payment, and money on its way between two everyday accounts', () => {
+    const setup = base();
+    setup.pots[0]!.rules.unshift({ id: 'tips', name: 'A third of tips', effect: 'source', text: { field: 'description', op: 'contains', value: 'EXAMPLE TIPS', caseSensitive: false }, portion: { percent: 33.33 } });
+    const tips = tx('current', '2026-09-15', 100, 'EXAMPLE TIPS');
+    // Paid to the card on the 29th; the card's data ends on the 28th.
+    const late = tx('current', '2026-09-29', -60, 'CARD PAYMENT', { category: 'transfer', counterpartyAccountId: 'card' });
+    const r = computeEarmarks(input(setup, [...rows, tips, late], { card: '2026-09-28' }));
+    expect(line(r, 'source')!.total).toBe(1500 + 33.33);
+    expect(r.result!.onItsWay).toMatchObject([{ transactionId: late.id, amount: 60, otherAccountId: 'card' }]);
+    expect(r.result!.spendable).toBe(fromMinor(toMinor(r.result!.everydayTotal) + toMinor(60) - toMinor(pot(r).setAside)));
+  });
+
+  it('can’t work out an account with no balance', () => {
+    const setup = { ...base(), everyday: ['current', 'card', 'platform'] };
+    const r = computeEarmarks(input(setup, rows));
+    expect(r.result).toBeNull();
+    expect(r.problems[0]).toMatch(/no balance/);
+  });
+});
+
+describe('set aside: properties', () => {
+  const RUNS = { numRuns: 150 };
+  const day = fc.integer({ min: 0, max: 29 }).map((n) => addDays(START, n));
+  const shop = fc.record({ date: day, pence: fc.integer({ min: -50_000, max: 50_000 }).filter((p) => p !== 0) });
+
+  it('ordinary payments never move what is set aside, and move spendable by exactly their sum', () => {
+    fc.assert(
+      fc.property(fc.array(shop, { maxLength: 30 }), (shops) => {
+        const extra = shops.map((s, i) => tx('current', s.date, fromMinor(s.pence), `EXAMPLE SHOP ${i}`, { category: 'groceries' }));
+        const a = computeEarmarks(input(base(), rows)).result!;
+        const b = computeEarmarks(input(base(), [...rows, ...extra])).result!;
+        const sum = shops.reduce((s, x) => s + x.pence, 0);
+        return b.pots[0]!.setAside === a.pots[0]!.setAside && toMinor(b.spendable) - toMinor(a.spendable) === sum;
+      }),
+      RUNS,
+    );
+  });
+
+  it('the order rows are recorded in changes nothing, within a day too', () => {
+    const [big, bigIn] = move('current', 'saver', '2026-09-05', 2500, 'SAVING');
+    const all = [...rows, big, bigIn, tx('current', '2026-09-05', -300, 'EXAMPLE PLATFORM ISA')];
+    fc.assert(
+      fc.property(fc.shuffledSubarray(all, { minLength: all.length, maxLength: all.length }), (shuffled) => {
+        const a = computeEarmarks(input(base(), all));
+        const b = computeEarmarks(input(base(), shuffled));
+        return JSON.stringify(a) === JSON.stringify(b);
+      }),
+      { numRuns: 60 },
+    );
+  });
+
+  it('set aside is the opening plus its lines, and adds up with spendable to the everyday accounts', () => {
+    fc.assert(
+      fc.property(fc.array(fc.record({ date: day, pence: fc.integer({ min: 1, max: 300_000 }), kind: fc.constantFrom('loan', 'rent', 'save', 'borrow', 'isa') }), { maxLength: 25 }), fc.integer({ min: -50_000, max: 50_000 }), (events, opening) => {
+        const extra = events.flatMap((e, i): Transaction[] => {
+          const amount = fromMinor(e.pence);
+          if (e.kind === 'loan') return [tx('current', e.date, amount, `EXAMPLE STUDENT FINANCE ${i}`, { counterpartyAccountId: 'loan' })];
+          if (e.kind === 'rent') return [tx('card', e.date, -amount, `EXAMPLE HALL RENT ${i}`, { category: 'rent' })];
+          if (e.kind === 'isa') return [tx('current', e.date, -amount, `EXAMPLE PLATFORM ${i}`)];
+          return move(e.kind === 'save' ? 'current' : 'saver', e.kind === 'save' ? 'saver' : 'current', e.date, amount, `MOVE ${i}`);
+        });
+        const setup = base();
+        setup.pots[0]!.opening = fromMinor(opening);
+        const r = computeEarmarks(input(setup, [...rows, ...extra])).result!;
+        const p = r.pots[0]!;
+        const fromLines = p.lines.filter((l) => POT_EFFECTS.includes(l.effect)).reduce((s, l) => s + toMinor(l.total), opening);
+        const addsUp = toMinor(r.spendable) + toMinor(p.setAside) === toMinor(r.everydayTotal) + toMinor(r.onItsWayTotal);
+        // Rent is never counted beyond the loans brought in.
+        const loans = (p.lines.find((l) => l.effect === 'source')?.in ?? 0) * 100;
+        const rentCounted = (p.lines.find((l) => l.effect === 'use')?.rows ?? []).filter((x) => x.ruleId === 'rent').reduce((s, x) => s - toMinor(x.counted), 0);
+        return fromLines === toMinor(p.setAside) && addsUp && rentCounted <= Math.round(loans);
+      }),
+      RUNS,
+    );
+  });
+});
+
+describe('set aside: in the app, by proposals', () => {
+  const CSRF = { 'x-finance-csrf': '1', 'content-type': 'application/json' };
+  let app: App;
+  let dir: string;
+  let agent: string;
+  const req = (p: string, init: RequestInit = {}) => app.app.request(`http://localhost${p}`, { ...init, headers: { host: 'localhost', ...(init.headers ?? {}) } });
+  const propose = (body: unknown) => req('/api/proposals', { method: 'POST', headers: { ...CSRF, authorization: agent }, body: JSON.stringify(body) });
+  const owner = (p: string, body: unknown = {}) => req(p, { method: 'POST', headers: CSRF, body: JSON.stringify(body) });
+  const get = async <T,>(p: string) => (await (await req(p)).json()) as T;
+  const setup = () => {
+    const { decisions: _d, updatedAt: _u, ...rest } = base();
+    return { ...rest, pots: rest.pots.map(({ checks: _c, ...p }) => p) };
+  };
+
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), 'finance-earmarks-'));
+    const config = loadConfig({ FINANCE_DATA_DIR: path.join(dir, 'data'), FINANCE_WORK_DIR: path.join(dir, 'work'), FINANCE_WATCH: '0' });
+    config.webDist = path.join(dir, 'no-web');
+    app = await createApp(config, { version: 'test', env: {}, inbox: false });
+    const { store } = app.ctx;
+    await store.setAccounts(accounts);
+    await store.setCategories([...store.categories.filter((c) => !categories.some((x) => x.id === c.id)), ...categories]);
+    await store.addTransactions(rows, 'test');
+    const day = addDays(START, -1);
+    await store.addBalances(
+      Object.entries(OPENING).map(([accountId, balance]) => ({ id: balanceId(accountId, day, balance, 'statement'), accountId, date: day, balance, currency: 'GBP', kind: 'statement' as const, source: {}, createdAt: stamp })),
+      'test',
+    );
+    agent = `Bearer ${(await app.ctx.tokens.create({ name: 'Test agent', scopes: ['records', 'read'], days: 1 })).token}`;
+  });
+  afterEach(async () => {
+    await app.close();
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
+  });
+
+  it('shows nothing and works out nothing without the file', async () => {
+    expect((await get<BootstrapResponse>('/api/bootstrap')).earmarks).toEqual([]);
+    expect(await get<EarmarksResponse>('/api/earmarks')).toEqual({ setup: null, result: null, problems: [] });
+  });
+
+  it('an agent proposes the setup; applying it writes earmarks.json and the figure follows', async () => {
+    const res = await propose({ title: 'Set aside Student money', summary: 'The loan is for rent.', changes: [{ kind: 'set_earmarks', why: 'From your answers', setup: setup(), was: null }] });
+    expect(res.status).toBe(201);
+    const view = (await res.json()) as ProposalView;
+    const shown = await get<ProposalView>(`/api/proposals/${view.proposal.id}`);
+    expect(shown.earmarks).toEqual({ before: null, after: { setAside: 600, spendable: 250, toCheck: 0 } });
+    const applied = (await (await owner(`/api/proposals/${view.proposal.id}/apply`)).json()) as ProposalDecision;
+    expect(applied.proposal.status).toBe('applied');
+    const file = EarmarksSchema.parse(JSON.parse(await readFile(path.join(dir, 'data', 'earmarks.json'), 'utf8')));
+    expect(file.pots[0]!.rules).toHaveLength(3);
+    expect((await get<BootstrapResponse>('/api/bootstrap')).earmarks).toEqual([{ id: 'student-money', name: 'Student money' }]);
+    const r = await get<EarmarksResponse>('/api/earmarks');
+    expect(r.result!.spendable).toBe(250);
+    // Proposed against no setup, it no longer fits once there is one.
+    const again = await propose({ title: 'Again', summary: 'Again', changes: [{ kind: 'set_earmarks', why: 'Again', setup: { ...setup(), setAside: [] }, was: null }] });
+    expect(again.status).toBe(422);
+  });
+
+  it('a decision is proposed, applied with its proposal noted, and replacing it says so', async () => {
+    await app.ctx.store.setEarmarks(base());
+    const decide = (parts: { effect: string; amount: number }[] | null, was: string | null, why: string) => propose({ title: 'Decide the saving', summary: 'From the reference', changes: [{ kind: 'decide_earmark_flow', why, pot: 'student-money', transaction: toSaver.id, parts, was }] });
+    // Its parts can't add up to more than the payment, and money out can't be borrowed from the pot.
+    expect((await decide([{ effect: 'topped-up', amount: 250 }], null, 'Too much')).status).toBe(422);
+    expect((await decide([{ effect: 'from-pot', amount: 200 }], null, 'Wrong way')).status).toBe(422);
+    const v = (await (await decide([{ effect: 'topped-up', amount: 200 }], null, 'Birthday money, saved')).json()) as ProposalView;
+    expect((await get<ProposalView>(`/api/proposals/${v.proposal.id}`)).earmarks).toEqual({ before: { setAside: 600, spendable: 250, toCheck: 0 }, after: { setAside: 800, spendable: 50, toCheck: 0 } });
+    await owner(`/api/proposals/${v.proposal.id}/apply`);
+    const d = app.ctx.store.earmarks!.decisions[toSaver.id]!;
+    expect(d).toMatchObject({ pot: 'student-money', reason: 'Birthday money, saved', proposalId: v.proposal.id, seen: { amount: -200 } });
+    // Against the decision as it is now, a proposal can replace it, and says whose it replaces.
+    const replace = (await (await decide([{ effect: 'to-pot', amount: 200 }], d.decidedAt, 'Paid back')).json()) as ProposalView;
+    expect(replace.changes[0]!.earmark!.replaces).toMatch(/Replaces your decision/);
+    // Against no decision, it no longer fits.
+    expect((await decide([{ effect: 'to-pot', amount: 200 }], null, 'Stale')).status).toBe(422);
+  });
+});

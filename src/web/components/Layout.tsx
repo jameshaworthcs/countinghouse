@@ -1,4 +1,4 @@
-import { ArrowLeftRight, ChartPie, Eye, EyeOff, Landmark, LayoutDashboard, Library, LogOut, Menu, MessageCircleQuestion, Monitor, Moon, ScrollText, Settings, Sun, Telescope, TrendingUp, Upload, Wallet, X } from 'lucide-react';
+import { ArrowLeftRight, ChartPie, Eye, EyeOff, HandCoins, Landmark, LayoutDashboard, Library, LogOut, Menu, MessageCircleQuestion, Monitor, Moon, ScrollText, Settings, Sun, Telescope, TrendingUp, Upload, Wallet, X } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router';
 import type { ImportListResponse } from '../../shared/api';
@@ -15,6 +15,8 @@ import { IconButton } from './ui';
 const NAV: { to: string; label: string; icon: ReactNode; end?: boolean }[] = [
   { to: '/', label: 'Overview', icon: <LayoutDashboard className="size-[18px]" />, end: true },
   { to: '/accounts', label: 'Accounts', icon: <Wallet className="size-[18px]" /> },
+  /** Only when something is set aside (earmarks.json). */
+  { to: '/earmarks', label: 'Set aside', icon: <HandCoins className="size-[18px]" /> },
   { to: '/transactions', label: 'Transactions', icon: <ArrowLeftRight className="size-[18px]" /> },
   { to: '/spending', label: 'Spending', icon: <ChartPie className="size-[18px]" /> },
   { to: '/projections', label: 'Projections', icon: <Telescope className="size-[18px]" /> },
@@ -49,9 +51,10 @@ function PrivacyButton() {
 
 function NavList({ reviewCount, running, onNavigate }: { reviewCount: number; running: number; onNavigate?: () => void }) {
   const { pathname } = useLocation();
+  const { data } = useAppData();
   return (
     <nav aria-label="Main" className="flex flex-col gap-0.5">
-      {NAV.map((n) => (
+      {NAV.filter((n) => n.to !== '/earmarks' || data.earmarks.length > 0).map((n) => (
         <NavLink
           key={n.to}
           to={n.to}

@@ -263,6 +263,33 @@ function QueueNav({ at, total, prev, next, first }: { at: number; total: number;
   );
 }
 
+/** What applying the changes kept would do to the money set aside (docs/FORMULAS.md §21). */
+function EarmarkEffect({ effect }: { effect: NonNullable<ProposalView['earmarks']> }) {
+  const { before, after } = effect;
+  const line = (label: string, a: number | undefined, b: number | undefined) => (
+    <div className="flex items-baseline justify-between gap-3">
+      <span className="text-ink-3">{label}</span>
+      <span className="sensitive tabular text-ink">
+        {a === undefined ? '—' : money(a)} → {b === undefined ? '—' : money(b)}
+      </span>
+    </div>
+  );
+  return (
+    <Card title="What it does to money set aside" description="Worked out from your payments and balances, as applying the changes you kept would leave them." className="mb-5">
+      <div className="grid gap-1 text-[13.5px] sm:max-w-md">
+        {line('Set aside', before?.setAside, after?.setAside)}
+        {line('Spendable', before?.spendable, after?.spendable)}
+        <div className="flex items-baseline justify-between gap-3">
+          <span className="text-ink-3">To check</span>
+          <span className="tabular text-ink">
+            {before?.toCheck ?? '—'} → {after?.toCheck ?? '—'}
+          </span>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 export default function Proposal() {
   const { id = '' } = useParams();
   // A page of its own for each proposal: nothing chosen or typed on one carries to the next.
@@ -435,6 +462,8 @@ function ProposalPage({ id }: { id: string }) {
       <Card title="What the agent found" className="mb-5">
         <p className="text-[14px] leading-relaxed whitespace-pre-line text-ink-2">{p.summary}</p>
       </Card>
+
+      {pending && (check.data?.earmarks ?? view.earmarks) && <EarmarkEffect effect={(left.length ? check.data?.earmarks : undefined) ?? view.earmarks!} />}
 
       <Card
         title={`${pending ? 'Changes it proposes' : 'Changes'} (${p.changes.length})`}

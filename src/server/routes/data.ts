@@ -309,6 +309,7 @@ export function dataRoutes(ctx: AppContext): Hono {
       goals: store.goals,
       budgets: store.budgets,
       csvProfiles: store.csvProfiles,
+      earmarks: store.earmarks?.pots.map((p) => ({ id: p.id, name: p.name })) ?? [],
       user: ctx.auth.sessionFrom(c)?.user ?? null,
       dataDir: ctx.config.dataDir,
       inboxDir: ctx.config.inboxDir,

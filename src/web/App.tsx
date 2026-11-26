@@ -24,6 +24,7 @@ const Assumptions = lazy(() => import('./pages/Assumptions'));
 const Sessions = lazy(() => import('./pages/Sessions'));
 const Reviews = lazy(() => import('./pages/Reviews'));
 const Ask = lazy(() => import('./pages/Ask'));
+const Earmarks = lazy(() => import('./pages/Earmarks'));
 
 interface AuthStatus {
   configured: boolean;
@@ -78,6 +79,7 @@ const router = createBrowserRouter([
           { index: true, element: page(<Dashboard />) },
           { path: 'accounts', element: page(<Accounts />) },
           { path: 'accounts/:id', element: page(<AccountDetail />) },
+          { path: 'earmarks', element: page(<Earmarks />) },
           { path: 'transactions', element: page(<Transactions />) },
           { path: 'spending', element: page(<Spending />) },
           { path: 'spending/categorise', element: page(<Categorise />) },

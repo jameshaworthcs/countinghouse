@@ -26,6 +26,7 @@ import {
   CoverageConfirmationSchema,
   PersonSchema,
   TaxReturnSchema,
+  EarmarksSchema,
   HmrcRecordSchema,
   PayslipRecordSchema,
   TermsSchema,
@@ -81,6 +82,7 @@ import {
   type Proposal,
   type Research,
   type Rule,
+  type Earmarks,
   type Settings,
   type Transaction,
 } from '../shared/schema';
@@ -204,6 +206,8 @@ interface State {
   people: Person[];
   /** What you told the app for each tax year's Self Assessment return (returns.json). */
   returns: TaxReturn[];
+  /** Money set aside inside your everyday accounts (earmarks.json); null without the file. */
+  earmarks: Earmarks | null;
   /** Append-only: every version of every assumption, in file order. */
   assumptions: Assumption[];
   /** Append-only: every research record, in file order. */
@@ -244,6 +248,7 @@ function emptyState(): State {
     coverage: [],
     people: [],
     returns: [],
+    earmarks: null,
     assumptions: [],
     research: [],
     insights: [],
@@ -409,6 +414,8 @@ export class Store extends EventEmitter {
       (next as unknown as Record<string, unknown[]>)[name] = list;
     }
     if (next.categories.length === 0) next.categories = defaultCategories();
+    // Optional: no file, no feature (docs/FORMULAS.md §21).
+    next.earmarks = await single<Earmarks | null>('earmarks.json', EarmarksSchema, null);
 
     const loadJsonl = async <T>(rel: string, schema: z.ZodType<T>): Promise<T[]> => {
       const text = await readTextIfExists(this.abs(rel));
@@ -499,6 +506,18 @@ export class Store extends EventEmitter {
     }
     for (const id of next.balances.keys()) {
       if (!accountIds.has(id)) issues.push({ file: `balances/${id}.jsonl`, severity: 'warning', message: `Balances for unknown account "${id}"` });
+    }
+    if (next.earmarks) {
+      for (const id of [...next.earmarks.everyday, ...next.earmarks.setAside]) {
+        if (!accountIds.has(id)) issues.push({ file: 'earmarks.json', severity: 'warning', message: `Set aside names unknown account "${id}"` });
+      }
+      const categoryIds = new Set(next.categories.map((c) => c.id));
+      for (const pot of next.earmarks.pots) {
+        for (const r of pot.rules) {
+          if (r.category && !categoryIds.has(r.category)) issues.push({ file: 'earmarks.json', severity: 'warning', message: `Rule "${r.name}" of ${pot.name} names unknown category "${r.category}"` });
+          if (r.counterpartyAccountId && !accountIds.has(r.counterpartyAccountId)) issues.push({ file: 'earmarks.json', severity: 'warning', message: `Rule "${r.name}" of ${pot.name} names unknown account "${r.counterpartyAccountId}"` });
+        }
+      }
     }
     if (next.meta.version > FORMAT_VERSION) {
       issues.push({ file: 'meta.json', severity: 'error', message: `Data format v${next.meta.version} is newer than this app understands (v${FORMAT_VERSION}). Update the app before editing.` });
@@ -662,6 +681,10 @@ export class Store extends EventEmitter {
   get people(): Person[] {
     return this.state.people;
   }
+  /** Money set aside inside your everyday accounts; null without earmarks.json. */
+  get earmarks(): Earmarks | null {
+    return this.state.earmarks;
+  }
   get returns(): TaxReturn[] {
     return this.state.returns;
   }
@@ -795,6 +818,21 @@ export class Store extends EventEmitter {
       this.state.settings = s;
       await this.applyDocumentTracking();
       this.changed('settings: update', ['settings.json'], { fields: diffFields(before, s) });
+    });
+  }
+
+  /** Money set aside inside your everyday accounts (docs/FORMULAS.md §21); null removes the file. */
+  setEarmarks(earmarks: Earmarks | null, message = 'set aside: update'): Promise<void> {
+    return this.exclusive(async () => {
+      const e = earmarks ? EarmarksSchema.parse(earmarks) : null;
+      if (e) await this.writeJson('earmarks.json', e);
+      else {
+        this.selfWrites.set('earmarks.json', 'deleted');
+        await rm(this.abs('earmarks.json'), { force: true });
+      }
+      const before = this.state.earmarks;
+      this.state.earmarks = e;
+      this.changed(message, ['earmarks.json'], { fields: diffFields(before ?? {}, e ?? {}) });
     });
   }
 

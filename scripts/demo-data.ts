@@ -760,6 +760,36 @@ async function demoIntelligence(store: Store) {
     ],
     'demo: budgets',
   );
+
+  // Set aside (FORMULAS §21): the marking job's pay and the studio's dividend are kept for the flat,
+  // and pay the Lifetime ISA saving up to what they brought in. `--no-earmarks` leaves it out.
+  if (!args.has('--no-earmarks')) {
+    const text = (value: string) => ({ field: 'description' as const, op: 'contains' as const, value, caseSensitive: false });
+    await store.setEarmarks(
+      {
+        everyday: ['current-account', 'rewards-card'],
+        setAside: ['easy-access'],
+        pots: [
+          {
+            id: 'flat-money',
+            name: 'Flat money',
+            purpose: 'Side income kept for the flat (demo)',
+            start: START,
+            opening: 0,
+            rules: [
+              { id: 'marking', name: 'Marking pay', effect: 'source', text: text('EXAMPLE MARKING LTD'), direction: 'in' },
+              { id: 'dividend', name: 'Studio dividend', effect: 'source', category: 'dividends' },
+              { id: 'lisa', name: 'Lifetime ISA saving', effect: 'use', text: text('EXAMPLE APP LISA SAVING'), direction: 'out', limitTo: ['marking', 'dividend'] },
+            ],
+            checks: [],
+          },
+        ],
+        decisions: {},
+        updatedAt: nowISO(),
+      },
+      'demo: set aside',
+    );
+  }
 }
 
 await main();

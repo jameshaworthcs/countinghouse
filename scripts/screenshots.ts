@@ -111,6 +111,7 @@ async function main() {
     ['overview', '/'],
     ['reviews', '/reviews'],
     ['accounts', '/accounts'],
+    ['earmarks', '/earmarks'],
     ...accountPage('account-current', 'current'),
     ...accountPage('account-savings', 'savings'),
     ...accountPage('account-isa', 'stocks_isa'),
@@ -242,10 +243,10 @@ async function main() {
   }
   if (!only) {
     if (txs.total > 0) await shoot('transaction-drawer', '/transactions', { width: 390, height: 844, theme: 'dark', mobile: true, act: openDrawer });
-    for (const [name, route] of [['overview', '/'], ['spending', '/spending'], ['projections', '/projections'], ['assumptions', '/assumptions'], ['review', pendingId ? `/import/${pendingId}` : '/import'], ...(nothingId ? [['review-nothing-to-record', `/import/${nothingId}`]] : []), ...(proposalId ? [['proposal', `/proposals/${proposalId}`]] : [])] as [string, string][]) {
+    for (const [name, route] of [['overview', '/'], ['earmarks', '/earmarks'], ['spending', '/spending'], ['projections', '/projections'], ['assumptions', '/assumptions'], ['review', pendingId ? `/import/${pendingId}` : '/import'], ...(nothingId ? [['review-nothing-to-record', `/import/${nothingId}`]] : []), ...(proposalId ? [['proposal', `/proposals/${proposalId}`]] : [])] as [string, string][]) {
       await shoot(name, route, { width: 1440, height: 900, theme: 'dark' });
     }
-    for (const [name, route] of [['overview', '/'], ['import', '/import'], ['transactions', '/transactions'], ['projections', '/projections'], ...(repeatsId ? [['review-already-here', `/import/${repeatsId}`]] : []), ...(proposalId ? [['proposal', `/proposals/${proposalId}`]] : [])] as [string, string][]) {
+    for (const [name, route] of [['overview', '/'], ['earmarks', '/earmarks'], ['import', '/import'], ['transactions', '/transactions'], ['projections', '/projections'], ...(repeatsId ? [['review-already-here', `/import/${repeatsId}`]] : []), ...(proposalId ? [['proposal', `/proposals/${proposalId}`]] : [])] as [string, string][]) {
       await shoot(name, route, { width: 390, height: 844, theme: 'light', mobile: true });
     }
   }

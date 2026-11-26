@@ -232,7 +232,9 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
       { "kind": "add_agreement", "agreement": { "id": "example-hall-2025-26", "name": "Example Hall room, 2025/26", "counterparty": "Example University", "names": ["EXAMPLE UNI"], "category": "rent", "from": "2025-09-13", "until": "2026-06-20", "total": 6720, "payments": [{ "due": "2025-10-31", "amount": 2240, "label": "Instalment 1" }], "details": [{ "label": "Let length", "value": "40 weeks" }], "source": { "importId": "imp_…" } }, "why": "…" },
       { "kind": "set_terms", "account": "example-card", "asOf": "2026-08-14", "importId": "imp_…", "terms": { "limit": 3000, "rates": [{ "applies": "purchases", "rate": 0, "until": "2027-03-31", "balance": 87.4, "label": "Promotional purchases" }, { "applies": "purchases", "rate": 24.9, "basis": "simple", "variable": true }], "minimumPayment": 5, "paymentDue": "2026-09-08" }, "why": "…" },
       { "kind": "remove_terms", "account": "example-fixed", "asOf": "2025-01-31", "importId": "imp_…", "why": "…" },
-      { "kind": "set_return_entry", "taxYear": "2025/26", "entry": "SA102:job-example-job:6", "value": false, "why": "…" }
+      { "kind": "set_return_entry", "taxYear": "2025/26", "entry": "SA102:job-example-job:6", "value": false, "why": "…" },
+      { "kind": "set_earmarks", "setup": { "everyday": ["example-current", "example-card"], "setAside": ["example-saver"], "pots": [{ "id": "tax-to-pay", "name": "Tax to pay", "start": "2026-04-06", "opening": 0, "rules": [{ "id": "marking", "name": "Marking pay", "effect": "source", "text": { "value": "EXAMPLE MARKING LTD" }, "direction": "in", "portion": { "percent": 30 } }, { "id": "hmrc", "name": "Self Assessment", "effect": "use", "text": { "value": "HMRC SELF ASSESSMENT" }, "direction": "out" }] }] }, "was": null, "why": "…" },
+      { "kind": "decide_earmark_flow", "pot": "tax-to-pay", "transaction": "tx_…", "parts": [{ "effect": "topped-up", "amount": 200 }], "was": null, "why": "…" }
     ]
   }
   ```
@@ -263,6 +265,17 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
   - A pension arrangement (`add_pension_arrangement`) is for a job and a pension account you pay
     into (not a State or defined-benefit pension), does not start in the future, and is not there
     already.
+  - Set aside (`set_earmarks`, [FORMULAS.md](FORMULAS.md) §21) names your accounts in pounds,
+    categories you have and patterns that work, and no pot starts in the future. Its `was` is the
+    setup's `updatedAt` from `GET /api/earmarks` (null when there is none): a setup the owner
+    changed since does not fit. Keep the rules few and ordered: the first that fits decides.
+  - A payment decided (`decide_earmark_flow`) is in an everyday account, on or after its pot's start;
+    its parts suit its direction (money out can't be borrowed from the pot) and add up to no more
+    than it. Its `why` is kept as the decision's reason, so write it for the owner. Its `was` is the
+    payment's `decidedAt` (null: undecided). A proposal may replace a decision the owner made: the
+    page marks it "Replaces your decision", and the owner applies it or not. Propose only what the
+    evidence settles (a reference, a matching amount, the owner's words); leave the rest on the
+    page's "To check" list.
   - A return answer (`set_return_entry`) is a question or an editable box the year's return has, as
     the changes before it leave the return (a director's Yes opens the close company boxes), with a
     value of its kind; a box that needs a figure takes no nil. One the owner set already is theirs:
@@ -322,8 +335,9 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
     change can use either.
   - The owner wins: a category the owner set is not changed, a note already on a row is not
     replaced (`set_note` adds one only where there is none), and a duplicate with something of
-    theirs on it (a category, payee, note, tag, split, correction, receipt or details another
-    document filled in) is not removed.
+    theirs on it (a category, payee, note, tag, split, correction, receipt, set-aside decision or
+    details another document filled in) is not removed. One exception the owner chose: a set-aside
+    decision may be replaced by a proposal, which says so (`decide_earmark_flow`).
   - Dates are in order and not in the future.
   - A proposal with a change that does not fit, or that the data already says, is refused (422,
     with each problem). One that stops fitting later is shown with the problem, and applying it
