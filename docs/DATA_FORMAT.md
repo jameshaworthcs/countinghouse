@@ -415,7 +415,8 @@ confirmationStatement?, tradeStartedOn?, ctPeriods, deadlinesFrom?, filings, set
     6–9 in whole pounds; for `accounts`, optionally the micro-entity balance sheet lines `A`–`K`
     (Small Companies Regulations 2008, Sch 1 Part 1 Section C, format 1) in whole pounds; for
     `ct600`, `{taxPayable}` (0 says there is nothing to pay, which does the payment too); for
-    `ct-payment`, `{amount}`.
+    `ct-payment`, `{amount}`, never negative: `0` records that there is no Corporation Tax to pay for
+    the period ("Nothing to pay" on the payment's deadline, or an agent's `add_filing`).
 - `setBy`: `owner`, or `agent` when a proposal you applied set them; `updatedAt` changes with every
   change to the books other than a filing.
 

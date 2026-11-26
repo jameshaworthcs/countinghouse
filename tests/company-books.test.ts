@@ -6,7 +6,7 @@ import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { accountingPeriodsOf, addedBooksProblems, booksProblems, withinChargeAssumed, companyDeadlineAlerts, companyDeadlines, ctPeriodsOf, vatPeriodsOf, type CompanyDeadline } from '../src/shared/company-books';
 import { addDays, fromUTC } from '../src/shared/dates';
-import { CompanyBooksSchema, CompanyVatSchema, MonthDaySchema, type CompanyBooks, type CompanyFiling, type CompanyFilingInput } from '../src/shared/schema';
+import { CompanyBooksSchema, CompanyFilingSchema, CompanyVatSchema, MonthDaySchema, type CompanyBooks, type CompanyFiling, type CompanyFilingInput } from '../src/shared/schema';
 import {
   ACCOUNTS_FILING_RULES,
   CONFIRMATION_STATEMENT_RULES,
@@ -245,6 +245,16 @@ describe('Corporation Tax (CTA 2009 ss9–10, TMA 1970 s59D, FA 1998 Sch 18 para
     expect(d[0]).toMatchObject({ status: 'done', nothingToPay: true });
     expect(d[0]!.filedLate).toBeUndefined();
     expect(d[1]).toMatchObject({ status: 'done', due: '2027-01-01', filedLate: true });
+  });
+
+  it('a £0 payment says there is nothing to pay: done, and never late, though recorded after the day', () => {
+    const b = books({ incorporatedOn: '2024-04-01', accountingReferenceDate: '03-31', filings: [filing({ kind: 'ct-payment', periodStart: '2024-04-01', periodEnd: '2025-03-31', filedOn: '2026-02-20', figures: { amount: 0 } })] });
+    const [first] = of(companyDeadlines({ books: b }, '2026-03-01'), 'ct-payment');
+    expect(first).toMatchObject({ status: 'done', due: '2026-01-01', nothingToPay: true });
+    expect(first!.filedLate).toBeUndefined();
+    expect(companyDeadlineAlerts({ id: 'x', name: 'Example Ltd' }, companyDeadlines({ books: b }, '2026-03-01')).some((a) => a.id.includes('ct-payment:2025-03-31'))).toBe(false);
+    // A negative payment is not one.
+    expect(CompanyFilingSchema.safeParse({ id: 'fil_000000000abc', kind: 'ct-payment', periodEnd: '2025-03-31', filedOn: '2026-01-02', figures: { amount: -1 } }).success).toBe(false);
   });
 });
 

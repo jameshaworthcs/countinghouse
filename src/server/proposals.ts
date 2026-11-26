@@ -700,7 +700,7 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
         const id = filingId(company.id, c.filing.kind, c.filing.periodEnd);
         const filing = CompanyFilingSchema.parse({ ...c.filing, id, addedBy: 'agent' });
         const there = company.books.filings.find((f) => f.kind === c.filing.kind && f.periodEnd === c.filing.periodEnd);
-        const label = FILING_KIND_LABELS[c.filing.kind];
+        const label = c.filing.kind === 'ct-payment' && c.filing.figures?.amount === 0 ? 'No Corporation Tax to pay' : FILING_KIND_LABELS[c.filing.kind];
         if (there) return filingKey(there) === filingKey(filing) ? { alreadySo: true } : { problem: `${label} for the period to ${formatDate(c.filing.periodEnd)} is recorded already, otherwise: change it on ${company.name}’s page.` };
         if (c.filing.filedOn > today()) return { problem: `${formatDate(c.filing.filedOn)} is in the future.` };
         const books = { ...company.books, filings: [...company.books.filings, filing] };

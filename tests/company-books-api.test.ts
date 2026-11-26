@@ -220,6 +220,23 @@ describe('a company’s books through the app', () => {
     expect(dormant.deadlines.filter((d) => d.kind === 'ct600' || d.kind === 'ct-payment')).toEqual([]);
   });
 
+  it('nothing to pay for a CT period: recorded by the owner or proposed by an agent, the payment is done', async () => {
+    await put({ books: SETUP() });
+    const view = await json<CompanyBooksResponse>(`/api/companies/${COMPANY}/books`);
+    const [first, second] = view.deadlines.filter((d) => d.kind === 'ct-payment' && d.period.end < today());
+    expect((await file({ kind: 'ct-payment', periodStart: first!.period.start, periodEnd: first!.period.end, filedOn: today(), figures: { amount: 0 } })).status).toBe(201);
+    const p = await propose({ title: 'No tax', summary: 'Its CT600 workings.', changes: [{ kind: 'add_filing', why: 'Its computations show no profit.', company: COMPANY, filing: { kind: 'ct-payment', periodStart: second!.period.start, periodEnd: second!.period.end, filedOn: today(), figures: { amount: 0 } } }] });
+    expect(p.body.changes[0]!.books!.what).toContain('No Corporation Tax to pay');
+    await req(`/api/proposals/${p.body.proposal.id}/apply`, { method: 'POST', headers: CSRF, body: '{}' });
+    const after = await json<CompanyBooksResponse>(`/api/companies/${COMPANY}/books`);
+    for (const d of [first!, second!]) {
+      const x = after.deadlines.find((y) => y.id === d.id)!;
+      expect(x).toMatchObject({ status: 'done', nothingToPay: true });
+      expect(x.filedLate).toBeUndefined();
+    }
+    expect((await json<{ alerts: Alert[] }>('/api/company-alerts')).alerts.some((a) => a.id.includes(first!.id) || a.id.includes(second!.id))).toBe(false);
+  });
+
   it('a filing proposed for a company whose books are not kept here, or for one not in your data, does not fit', async () => {
     const filing = { kind: 'confirmation' as const, periodEnd: '2025-05-01', filedOn: '2025-05-02' };
     expect((await propose({ title: 'x', summary: 'x', changes: [{ kind: 'add_filing', why: 'x', company: COMPANY, filing }] })).body.problems[0]!.problem).toContain('books are not kept here');

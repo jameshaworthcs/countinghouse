@@ -1965,7 +1965,8 @@ account is the accounting period its last day falls in.
   account longer than 18 months, `lastDayOfMonths(PoA.start, 30)` in place of the second (FA 1998
   Sch 18 para 14(1)(a)–(c)). Both returns for a 13-month first period are due 12 months after it.
 - **Corporation Tax** due = `monthsAfter(AP.end, 9)` + 1 day (TMA 1970 s59D(1)). Done when a
-  payment is recorded for the period, or its CT600 says there is nothing to pay (`taxPayable: 0`).
+  payment is recorded for the period, or there is nothing to pay: a payment of £0 recorded for it, or
+  its CT600 saying so (`taxPayable: 0`); nothing to pay is never late, whenever it was recorded.
 
 **VAT periods** (`vatPeriodsOf`), from registration up to the one containing today (or to
 deregistration):
@@ -2001,7 +2002,7 @@ worked out here, so nothing you recorded is hidden.
 
 | | |
 |---|---|
-| done | a filing does it; `filedLate` when it was filed after the due day (a CT600 saying there is nothing to pay is never late for the payment) |
+| done | a filing does it; `filedLate` when it was filed after the due day (nothing to pay, by a £0 payment or the CT600, is never late for the payment) |
 | overdue | *d* < 0 |
 | due-soon | 0 ≤ *d* ≤ 60 (`DEADLINE_LEAD_DAYS`) |
 | upcoming | *d* > 60 |

@@ -780,7 +780,7 @@ export function ChangeBody({ change, view }: { change: ProposedChange; view: Pro
           <div className="text-ink">{what ?? `${FILING_KIND_LABELS[f.kind]} to ${formatDate(f.periodEnd)}, filed ${formatDate(f.filedOn)}`}</div>
           {f.kind === 'vat' && f.figures && <div className="sensitive tabular-nums">Box 5, net VAT: {money(f.figures.netVatDue)}</div>}
           {f.kind === 'ct600' && f.figures && <div className="sensitive tabular-nums">Tax payable: {money(f.figures.taxPayable)}</div>}
-          {f.kind === 'ct-payment' && f.figures && <div className="sensitive tabular-nums">Paid: {money(f.figures.amount)}</div>}
+          {f.kind === 'ct-payment' && f.figures && <div className="sensitive tabular-nums">{f.figures.amount === 0 ? 'No tax to pay' : `Paid: ${money(f.figures.amount)}`}</div>}
         </div>
       );
     }

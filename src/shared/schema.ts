@@ -729,7 +729,8 @@ const filingKinds = <T extends z.ZodRawShape>(extra: T) =>
   [
     z.object({ ...extra, kind: z.literal('accounts'), ...filingBase, figures: MicroEntityLinesSchema.optional() }),
     z.object({ ...extra, kind: z.literal('ct600'), ...filingBase, figures: z.object({ taxPayable: MoneySchema.refine((v) => v >= 0, { message: 'Tax payable is not negative' }) }).optional() }),
-    z.object({ ...extra, kind: z.literal('ct-payment'), ...filingBase, figures: z.object({ amount: MoneySchema.refine((v) => v > 0, { message: 'A payment is more than £0' }) }).optional() }),
+    // A payment of £0 says there is no Corporation Tax to pay for the period.
+    z.object({ ...extra, kind: z.literal('ct-payment'), ...filingBase, figures: z.object({ amount: MoneySchema.refine((v) => v >= 0, { message: 'A payment is not negative (£0: nothing to pay)' }) }).optional() }),
     z.object({ ...extra, kind: z.literal('vat'), ...filingBase, figures: VatBoxesSchema.optional() }),
     z.object({ ...extra, kind: z.literal('confirmation'), ...filingBase }),
   ] as const;

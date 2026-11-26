@@ -36,7 +36,32 @@ function DeadlineBadge({ d }: { d: CompanyDeadline }) {
 /** Its period has ended, so a filing for it can be recorded. */
 const recordable = (d: CompanyDeadline) => d.status !== 'done' && d.period.end < today();
 
-function DeadlineRows({ list, onRecord }: { list: CompanyDeadline[]; onRecord?: (d: CompanyDeadline) => void }) {
+/**
+ * What can be done about a deadline whose period has ended: record its filing, and for Corporation Tax,
+ * say in one click there is nothing to pay (a £0 payment: done, never late).
+ */
+function RecordButtons({ d, companyId, onRecord }: { d: CompanyDeadline; companyId: string; onRecord: (d: CompanyDeadline) => void }) {
+  const toast = useToast();
+  const nothing = useApiMutation(() => api(`/companies/${companyId}/filings`, { method: 'POST', body: { kind: 'ct-payment', ...(d.period.start ? { periodStart: d.period.start } : {}), periodEnd: d.period.end, filedOn: today(), figures: { amount: 0 } } }), {
+    onSuccess: () => toast({ tone: 'good', text: 'Recorded: no tax to pay' }),
+    onError: (e) => toast({ tone: 'bad', text: e.message }),
+  });
+  if (!recordable(d)) return null;
+  return (
+    <span className="inline-flex flex-wrap justify-end gap-1.5">
+      {d.kind === 'ct-payment' && (
+        <Button size="sm" variant="ghost" loading={nothing.isPending} onClick={() => nothing.mutate(undefined)}>
+          Nothing to pay
+        </Button>
+      )}
+      <Button size="sm" onClick={() => onRecord(d)}>
+        Record it
+      </Button>
+    </span>
+  );
+}
+
+function DeadlineRows({ list, companyId, onRecord }: { list: CompanyDeadline[]; companyId: string; onRecord?: (d: CompanyDeadline) => void }) {
   return (
     <>
       {list.map((d) => (
@@ -51,22 +76,14 @@ function DeadlineRows({ list, onRecord }: { list: CompanyDeadline[]; onRecord?: 
             {/* On a phone its state and button sit under it. */}
             <div className="mt-1.5 flex flex-wrap items-center gap-2 sm:hidden">
               <DeadlineBadge d={d} />
-              {onRecord && recordable(d) && (
-                <Button size="sm" onClick={() => onRecord(d)}>
-                  Record it
-                </Button>
-              )}
+              {onRecord && <RecordButtons d={d} companyId={companyId} onRecord={onRecord} />}
             </div>
           </td>
           <td className={cn(tableClasses.td, 'hidden sm:table-cell')}>
             <DeadlineBadge d={d} />
           </td>
           <td className={cn(tableClasses.td, 'hidden text-right sm:table-cell')}>
-            {onRecord && recordable(d) && (
-              <Button size="sm" onClick={() => onRecord(d)}>
-                Record it
-              </Button>
-            )}
+            {onRecord && <RecordButtons d={d} companyId={companyId} onRecord={onRecord} />}
           </td>
         </tr>
       ))}
@@ -108,7 +125,7 @@ function DeadlinesCard({ view, onRecord }: { view: CompanyBooksResponse; onRecor
               </tr>
             </thead>
             <tbody>
-              <DeadlineRows list={open} onRecord={onRecord} />
+              <DeadlineRows list={open} companyId={view.company.id} onRecord={onRecord} />
               {done.length > 0 && (
                 <tr>
                   <td colSpan={4} className="bg-panel-2 px-3 py-1.5 text-[12px] font-medium text-ink-3">
@@ -116,7 +133,7 @@ function DeadlinesCard({ view, onRecord }: { view: CompanyBooksResponse; onRecor
                   </td>
                 </tr>
               )}
-              <DeadlineRows list={shownDone} />
+              <DeadlineRows list={shownDone} companyId={view.company.id} />
             </tbody>
           </table>
           {done.length > DONE_SHOWN && (
@@ -147,11 +164,7 @@ function TodoCard({ view, onRecord }: { view: CompanyBooksResponse; onRecord: (d
               <span className="min-w-0 flex-1 text-ink">
                 {d.title}, by {formatDate(d.due)}
               </span>
-              {recordable(d) && (
-                <Button size="sm" onClick={() => onRecord(d)}>
-                  Record it
-                </Button>
-              )}
+              <RecordButtons d={d} companyId={view.company.id} onRecord={onRecord} />
             </li>
           ))}
         </ul>
@@ -609,7 +622,7 @@ function FilingDialog({ companyId, initial, onClose }: { companyId: string; init
           </details>
         )}
         {(f.kind === 'ct600' || f.kind === 'ct-payment') && (
-          <Field label={f.kind === 'ct600' ? 'Tax payable (optional; 0 says there is nothing to pay)' : 'Amount paid (optional)'} className="sm:w-60">
+          <Field label={f.kind === 'ct600' ? 'Tax payable (optional; 0 says there is nothing to pay)' : 'Amount paid (optional; 0 says there is no tax to pay)'} className="sm:w-60">
             <NumberInput value={f.amount} onValue={(v) => set({ amount: v })} className="sensitive tabular" />
           </Field>
         )}
@@ -626,7 +639,7 @@ function FilingFigures({ f }: { f: CompanyFiling }) {
   );
   if (f.kind === 'vat' && f.figures) return figure('Box 5', f.figures.netVatDue);
   if (f.kind === 'ct600' && f.figures) return figure('Tax', f.figures.taxPayable);
-  if (f.kind === 'ct-payment' && f.figures) return figure('Paid', f.figures.amount);
+  if (f.kind === 'ct-payment' && f.figures) return f.figures.amount === 0 ? <span>No tax to pay</span> : figure('Paid', f.figures.amount);
   if (f.kind === 'accounts' && f.figures?.K !== undefined) return figure('Capital and reserves', f.figures.K, 0);
   return null;
 }

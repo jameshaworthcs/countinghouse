@@ -71,7 +71,7 @@ export interface CompanyDeadline {
   filedLate?: boolean;
   /** A filing that matches no period worked out here: listed so nothing you recorded is hidden. */
   unmatched?: true;
-  /** Corporation Tax done because its CT600 says there is nothing to pay. */
+  /** Corporation Tax done because there is nothing to pay: a £0 payment recorded, or its CT600 saying so. */
   nothingToPay?: true;
 }
 
@@ -284,8 +284,10 @@ export function companyDeadlines(company: Pick<Company, 'books'>, today: ISODate
     const ct600 = take('ct600', (f) => f.periodEnd === ap.end);
     push({ kind: 'ct600', period: { start: ap.start, end: ap.end }, due: ct600Due(ap, ap.periodOfAccount), title: `Corporation Tax return (CT600) for ${span}`, to: 'HMRC', rule: 'FA 1998 Sch 18 para 14', ...(ct600 ? { filing: ct600 } : {}) });
     const paid = take('ct-payment', (f) => f.periodEnd === ap.end);
+    // Nothing to pay: a payment of £0 you recorded, or its CT600 saying so. Never late.
+    const zero = paid?.kind === 'ct-payment' && paid.figures?.amount === 0;
     const nothing = !paid && ct600?.kind === 'ct600' && ct600.figures?.taxPayable === 0 ? ct600 : undefined;
-    push({ kind: 'ct-payment', period: { start: ap.start, end: ap.end }, due: ctPaymentDue(ap.end), title: `Corporation Tax for ${span}`, to: 'HMRC', rule: 'TMA 1970 s59D', ...(paid ? { filing: paid } : nothing ? { filing: nothing, nothingToPay: true as const } : {}) });
+    push({ kind: 'ct-payment', period: { start: ap.start, end: ap.end }, due: ctPaymentDue(ap.end), title: `Corporation Tax for ${span}`, to: 'HMRC', rule: 'TMA 1970 s59D', ...(paid ? { filing: paid, ...(zero ? { nothingToPay: true as const } : {}) } : nothing ? { filing: nothing, nothingToPay: true as const } : {}) });
   }
 
   // VAT returns (VAT Regulations 1995 regs 25, 25A(20) and 50).
