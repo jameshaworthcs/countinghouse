@@ -319,7 +319,7 @@ Questions about your money, asked on the Ask page (`src/server/ask.ts`, `ask-too
   `ask/<conversationId>/`. Follow-ups wait behind the turn running, and one turn runs at a time
   across conversations (the local model has one interactive slot). Stop works on the one running,
   and takes back one waiting; the audit log records both, with who did it.
-- **Step by step (prompt `ask-3`).** The model is given the accounts, categories, the last 13
+- **Step by step (prompt `ask-4`).** The model is given the accounts, categories, the last 13
   months' totals, this year to date and last year (to the same date and whole), and recent trips (`openingContext`, about 2,000 tokens, kept with the
   conversation so every turn starts from the same prefix and the local model reuses its cached
   prompt). Each step is either a call of one tool or the answer, as one flat JSON schema. The app
@@ -333,8 +333,9 @@ Questions about your money, asked on the Ask page (`src/server/ask.ts`, `ask-too
   account, as the Spending page counts, with what was paid and refunded; by month, whether each
   month's data is complete and totals and averages by year), `compare` (two periods, by default
   the same dates a year earlier: totals, averages, completeness, the difference, the change and the
-  categories that moved most), `trips`, `month`, `balances`, `coverage` (missing days) and `sum`
-  (of chosen ids). Every sum is in integer pence (FORMULAS.md §19). The results give the totals a
+  categories that moved most), `trips`, `month`, `balances`, `coverage` (missing days), `sum`
+  (of chosen ids), and `set_aside` (the Set aside page's figures, offered only when something is set
+  aside). Every sum is in integer pence (FORMULAS.md §19). The results give the totals a
   question needs, so the model has nothing left to add up. Each result links to where it can be checked: the Transactions page with the
   same filters (which takes `currency` too), or the page it came from.
 - **The answer**: its text, figures with the step each is from, confidence, caveats, and whether
@@ -380,6 +381,7 @@ the task allows.
 | Read receipts (`read-receipt`) | local `vision-extract` | batch | a proposal you accept; not measured on receipts |
 | Name imports, understand notes (`label-imports`, `interpret-note`) | local `fast-chat` | batch, normal | short answers |
 | Suggest categories (`suggest-categories`) | local `fast-chat`, local only | batch | one payment description per request, as a proposal |
+| Suggest set-aside decisions (`suggest-earmarks`) | local `fast-chat`, thinking, local only | normal | one payment to check per request, as a proposal; shown in Settings → Models only when something is set aside |
 | Answer questions (`ask`) | local `fast-chat`, thinking | interactive | someone is waiting |
 | Month in review, insights after imports | Claude (CLI), Opus | — | they read with tools, which the local model does not have |
 | Research (funds, providers, assumptions) | Claude (CLI), Opus | — | they need the web, which the local model does not have |

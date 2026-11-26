@@ -7,6 +7,7 @@ import type { SystemResponse } from '../../shared/api';
 import type { Settings } from '../../shared/schema';
 import { CLAUDE_MODELS, EFFORTS, INFERENCE_ALIASES, modelFits, resolveTask, TASK_KINDS, TASKS, type TaskChoiceInput, type TaskEngine, type TaskKind } from '../../shared/tasks';
 import { Badge, Callout, Card, Field, Input, Select, Switch } from './ui';
+import { useAppData } from '../lib/data';
 
 const ENGINE_NAMES: Record<TaskEngine, string> = {
   inference: 'Local model (this machine)',
@@ -120,6 +121,8 @@ function TaskRow({ task, s, set }: { task: TaskKind; s: Settings; set: (task: Ta
 }
 
 export function ModelsCard({ s, setS, sys }: { s: Settings; setS: (s: Settings) => void; sys: SystemResponse | undefined }) {
+  // Set aside's task shows only to someone who uses Set aside.
+  const hasEarmarks = useAppData().data.earmarks.length > 0;
   const set = (task: TaskKind, patch: TaskChoiceInput) => {
     const prev = s.models.tasks[task] ?? {};
     const next = Object.fromEntries(Object.entries({ ...prev, ...patch }).filter(([, v]) => v !== undefined)) as TaskChoiceInput;
@@ -142,7 +145,7 @@ export function ModelsCard({ s, setS, sys }: { s: Settings; setS: (s: Settings) 
       </ul>
       {local && !local.available && <Callout tone="warn" className="mb-3">The local model is not answering now. Work for it waits until it does, unless its task lets Claude stand in.</Callout>}
       <div>
-        {TASK_KINDS.map((t) => (
+        {TASK_KINDS.filter((t) => t !== 'suggest-earmarks' || hasEarmarks).map((t) => (
           <TaskRow key={t} task={t} s={s} set={set} />
         ))}
       </div>

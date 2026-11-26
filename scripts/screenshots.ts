@@ -146,6 +146,7 @@ async function main() {
     ['settings-categories', '/settings#categories'],
     ['settings-rules', '/settings#rules'],
     ['settings-tax-documents', '/settings#tax-documents'],
+    ['settings-earmarks', '/settings#earmarks'],
     ['settings-access', '/settings#access'],
     ['settings-audit', '/settings#audit'],
     ['settings-health', '/settings#health'],

@@ -47,7 +47,7 @@ export const isInferenceAlias = (model: string | undefined): boolean => INFERENC
 export type Priority = 'batch' | 'normal' | 'interactive';
 export type TaskNeed = 'vision' | 'web' | 'tools' | 'reasoning' | 'long-context' | 'structured';
 
-export const TASK_KINDS = ['read-document', 'check-reading', 'read-receipt', 'label-imports', 'interpret-note', 'suggest-categories', 'ask', 'monthly-review', 'insights-after-import', 'research'] as const;
+export const TASK_KINDS = ['read-document', 'check-reading', 'read-receipt', 'label-imports', 'interpret-note', 'suggest-categories', 'suggest-earmarks', 'ask', 'monthly-review', 'insights-after-import', 'research'] as const;
 export type TaskKind = (typeof TASK_KINDS)[number];
 
 /** One task's model, as Settings → Models stores it (each field optional: the default fills it). */
@@ -208,6 +208,21 @@ export const TASKS: Record<TaskKind, TaskDef> = {
     runMinutes: 5,
     maxTokens: 256,
     jobs: ['suggest-categories'],
+  },
+  'suggest-earmarks': {
+    kind: 'suggest-earmarks',
+    label: 'Suggest set-aside decisions',
+    description: 'A decision for each of Set aside’s payments to check, from its question, your rules and your earlier decisions, as one proposal you review. Only when you ask, and only with its switch on.',
+    needs: ['structured', 'reasoning'],
+    privacy: 'personal',
+    engines: ['inference'],
+    default: local('fast-chat', true),
+    claude: { model: 'sonnet', effort: 'high' },
+    local: { model: 'fast-chat', thinking: true },
+    priority: 'normal',
+    runMinutes: 10,
+    maxTokens: 2048,
+    jobs: [],
   },
   ask: {
     kind: 'ask',

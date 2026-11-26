@@ -10,7 +10,7 @@ import { api, useApi, useApiMutation, type Json } from '../lib/api';
 import { useAppData } from '../lib/data';
 import { BY_WORDS, EFFECT_WORDS } from '../lib/earmarks';
 import { formatDate, money, plural } from '../lib/format';
-import { Button, Card, Dialog, ErrorNote, Field, IconButton, Input, Money, NumberInput, Select, useToast } from './ui';
+import { Button, Card, Dialog, ErrorNote, Field, IconButton, Input, Money, NumberInput, Select, Switch, useToast } from './ui';
 
 /** Which effects a payment in or out can have (as the server checks). */
 const EFFECTS_IN: EarmarkEffect[] = ['source', 'from-pot', 'own-back', 'use', 'own'];
@@ -264,6 +264,8 @@ export function EarmarkSection({ tx }: { tx: Transaction }) {
 /** Settings → Set aside: optional, and the only trace of it until it is set up. */
 export function EarmarksSettings() {
   const { data } = useAppData();
+  const toast = useToast();
+  const save = useApiMutation((on: boolean) => api('/settings', { method: 'PUT', body: { ...data.settings, agents: { ...data.settings.agents, earmarkSuggest: on } } as unknown as Json }), { onSuccess: () => toast({ tone: 'good', text: 'Saved' }) });
   return (
     <Card title={<span className="inline-flex items-center gap-2">Set aside <span className="rounded-full bg-panel-2 px-2 text-[11.5px] font-medium text-ink-3">optional</span></span>}>
       <div className="grid gap-3 text-[13.5px] text-ink-2">
@@ -274,6 +276,14 @@ export function EarmarksSettings() {
             {data.earmarks.length ? 'Open Set aside' : 'Set one up'}
           </Link>
         </div>
+        {data.earmarks.length > 0 && (
+          <Switch
+            checked={data.settings.agents.earmarkSuggest}
+            onChange={(v) => save.mutate(v)}
+            label="Let the local model suggest decisions"
+            description="On the Set aside page, “Suggest decisions” then asks the local model about each payment to check, with the pot’s rules and your earlier decisions and their reasons, and what it is sure of becomes one proposal you review. It runs only when you press it, only on the local model (nothing leaves this machine), and never changes a decision of yours."
+          />
+        )}
       </div>
     </Card>
   );

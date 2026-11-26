@@ -11,6 +11,7 @@ import { decisionProblem, earmarkFigures, earmarks, setupProblem, withSetup } fr
 import { agentTokenOf as tokenOf, readJson, type AppContext } from '../context';
 import { nowISO } from '../fsutil';
 import { StoreError } from '../store';
+import { suggestEarmarks, toAsk, type EarmarkSuggestResult } from '../earmark-suggest';
 
 const Parts = z.array(z.object({ effect: z.enum(EARMARK_EFFECTS), amount: MoneySchema.refine((v) => v > 0, { message: 'A part is more than £0' }) })).min(1).max(5);
 const Decide = z.object({
@@ -60,6 +61,26 @@ export function earmarkRoutes(ctx: AppContext): Hono {
   };
 
   app.get('/', (c) => c.json(ctx.analytics.earmarks()));
+
+  // The local model suggesting decisions for the payments to check: yours to start, with its switch on.
+  let last: (EarmarkSuggestResult & { at: string }) | { error: string; at: string } | undefined;
+  let suggesting = false;
+  app.get('/suggest', (c) =>
+    c.json({ enabled: store.settings.agents.earmarkSuggest, available: Boolean(ctx.config.inference), running: suggesting, waiting: store.earmarks ? toAsk(store, ctx.analytics, ctx.proposals).length : 0, last: last ?? null }),
+  );
+  app.post('/suggest', (c) => {
+    ownerOnly(c);
+    setupOrThrow();
+    if (!store.settings.agents.earmarkSuggest) throw new StoreError('Suggesting set-aside decisions is off: turn it on in Settings → Set aside.', 409);
+    if (!ctx.config.inference) throw new StoreError('Suggesting decisions runs on the local model service, which is not set up here.', 503);
+    if (suggesting) throw new StoreError('Decisions are being suggested already.', 409);
+    suggesting = true;
+    void suggestEarmarks(store, ctx.analytics, ctx.config, ctx.proposals, { sessions: ctx.sessions })
+      .then((r) => (last = { ...r, at: new Date().toISOString() }))
+      .catch((err: Error) => (last = { error: err.message, at: new Date().toISOString() }))
+      .finally(() => (suggesting = false));
+    return c.json({ running: true }, 202);
+  });
 
   /** What a setup being edited would give, without saving it. */
   app.post('/setup/preview', async (c) => {

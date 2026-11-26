@@ -4,7 +4,7 @@
 
 import type { AuditActor } from './audit';
 
-export const ASK_PROMPT_VERSION = 'ask-3';
+export const ASK_PROMPT_VERSION = 'ask-4';
 
 /** The models a question can be asked of (Settings → Models gives the default). */
 export const ASK_MODEL_OPTIONS = [

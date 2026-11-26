@@ -9,7 +9,7 @@
 import { z } from 'zod';
 import { CategoryIndex } from '../shared/categories';
 import { addDays, addMonths, diffDays, eachMonth, endOfMonth, isISODate, maxDate, minDate, today, type ISODate } from '../shared/dates';
-import { fromMinor, toMinor } from '../shared/money';
+import { formatMoney, fromMinor, toMinor } from '../shared/money';
 import { trips } from './agents/digest';
 import type { Analytics } from './analytics';
 import { flows, type FlowTx } from './analytics/cashflow';
@@ -18,8 +18,13 @@ import { isTransactionAccount, missingDays } from './analytics/coverage';
 import { filterTransactions } from './routes/data';
 import type { Store } from './store';
 
-export const ASK_TOOLS = ['find_transactions', 'spending_by', 'compare', 'trips', 'month', 'balances', 'coverage', 'sum'] as const;
+export const ASK_TOOLS = ['find_transactions', 'spending_by', 'compare', 'trips', 'month', 'balances', 'coverage', 'sum', 'set_aside'] as const;
 export type AskTool = (typeof ASK_TOOLS)[number];
+
+/** The tools a question may use: set_aside only when something is set aside (earmarks.json). */
+export function toolsFor(store: Pick<Store, 'earmarks'>): AskTool[] {
+  return ASK_TOOLS.filter((t) => t !== 'set_aside' || store.earmarks !== null);
+}
 
 /** What each tool does, for the model (the system prompt lists them). */
 export const TOOL_HELP: Record<AskTool, string> = {
@@ -31,6 +36,7 @@ export const TOOL_HELP: Record<AskTool, string> = {
   balances: 'balances(on? "YYYY-MM-DD", accounts?): each account\'s balance on that day (default today) in pounds, whether it is estimated, and the estate\'s assets, debts and net worth.',
   coverage: 'coverage(from?, to?, accounts?): the days each account has no data for in the period, so an answer can say what it does not cover.',
   sum: 'sum(ids): the exact count and total of the transactions with these ids, in and out apart. Use it whenever you need a total of rows you chose.',
+  set_aside: 'set_aside(): money in the everyday accounts that is set aside in pots (earmarks) and what is spendable, as the Set aside page works it out: spendable, each pot\'s set aside (negative: the owner has covered that much for it), what each kind of payment did to it, the everyday accounts\' balances and the latest day each has data for, money on its way, and the payments still to check. Use it for "how much can I spend", "how much is set aside" or "what is in my pot".',
 };
 
 /** The arguments a step may give (one flat object: the step's schema stays flat for the local model). */
@@ -434,6 +440,25 @@ export function runTool(store: Store, analytics: Analytics, tool: AskTool, raw: 
         result: { period: { from, to }, accountsWithMissingDays: list, ...(list.length ? {} : { note: 'every account has data for every day of the period' }) },
         summary: list.length ? `${list.length} account${list.length === 1 ? '' : 's'} with days missing` : 'Every account has data for the whole period',
         href: '/settings#health',
+      };
+    }
+    case 'set_aside': {
+      const { result, problems } = analytics.earmarks();
+      if (!result) throw new ToolError(problems.length ? `Set aside can't be worked out: ${problems.join(' ')}` : 'Nothing is set aside.');
+      const setAside = fromMinor(result.pots.reduce((n, p) => n + toMinor(p.setAside), 0));
+      return {
+        summary: `Spendable ${formatMoney(result.spendable)}; ${setAside >= 0 ? `${formatMoney(setAside)} set aside` : `${formatMoney(-setAside)} covered for the pots`}`,
+        href: '/earmarks',
+        result: {
+          spendable: result.spendable,
+          everydayTotal: fromMinor(toMinor(result.everydayTotal) + toMinor(result.onItsWayTotal)),
+          onItsWay: result.onItsWayTotal,
+          setAside,
+          pots: result.pots.map((p) => ({ name: p.name, start: p.start, opening: p.opening, setAside: p.setAside, stillToCheck: p.provisional, lines: p.lines.map((l) => ({ effect: l.effect, total: l.total, in: l.in, out: l.out, payments: l.count })) })),
+          accounts: result.accounts.map((a) => ({ name: a.name, role: a.role, balance: a.balance, latestDay: a.asOf, outOfDate: a.stale })),
+          toCheck: result.toCheck.map((c) => ({ date: c.date, question: c.question, amount: c.amount })),
+          lowest: result.lowest,
+        },
       };
     }
     case 'sum': {

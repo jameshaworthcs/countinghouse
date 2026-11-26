@@ -1579,6 +1579,8 @@ and money in are §14's, through `flows`; every sum is in integer pence.
   The 10 categories whose difference is largest either way.
 - **A search's years** (`find_transactions`, when it spans more than one): money in, out and net for
   each year of the rows matched.
+- **Set aside** (`set_aside`, only when something is set aside): §21's figures as the page gives
+  them; `everydayTotal` includes money on its way, and `setAside` is the pots' sum.
 - **A figure the app computed:** one whose every number is, to the penny, a number in the result of
   the step it names (any step when it names none). An answer with any other figure has its
   confidence set to low, and says so.
@@ -1768,6 +1770,11 @@ account and not yet shown in the other).
 - Lowest spendable: the least of the everyday total − *N* on each day with a payment, from the first
   start to the newest latest day (for information: short dips that later money in makes good are
   fine).
+
+**Over time.** Each week from the first start to the newest latest day: the everyday total that day
+(an account's balance after its latest day held at that) and *N* to that day (the opening and every
+part dated on or before it), spendable being the difference. The chart draws spendable as an area,
+set aside as a line from zero and the total dashed, on one axis.
 
 **To check.** Three kinds, each counted as suggested (or by default) until you decide:
 

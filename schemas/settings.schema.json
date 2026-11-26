@@ -59,6 +59,7 @@
               "label-imports",
               "interpret-note",
               "suggest-categories",
+              "suggest-earmarks",
               "ask",
               "monthly-review",
               "insights-after-import",
@@ -172,6 +173,7 @@
         "timeoutSeconds": 1200,
         "autoResearch": false,
         "labelImports": false,
+        "earmarkSuggest": false,
         "backgroundBudgetPerDayUsd": 5,
         "backgroundBudgetPerMonthUsd": 40
       },
@@ -206,6 +208,10 @@
           "type": "boolean"
         },
         "labelImports": {
+          "default": false,
+          "type": "boolean"
+        },
+        "earmarkSuggest": {
           "default": false,
           "type": "boolean"
         },

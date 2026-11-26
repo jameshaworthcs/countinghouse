@@ -2857,5 +2857,16 @@ value grown from the account's first flow is never below nothing, as rolled-back
   saved. Saving names the setup it started from, so an applied proposal or another tab in between
   is not overwritten. Removing it deletes the file. A new editor, not the rules editor's: that one
   has no payee, amount, account or category conditions to reuse.
-- **Later slices:** a chart, an Ask tool, and an agent job (off by default) that proposes
-  decisions.
+- **Agents and extras (fourth slice):**
+  - Ask has a read-only `set_aside` tool, offered (in its prompt and step schema) only when
+    something is set aside, so other users' Ask is unchanged in all but its version (`ask-4`).
+  - "Suggest decisions" follows the category suggestions, not the job runner: started only by the
+    owner, only with `agents.earmarkSuggest` on (off by default), only on the local model, one
+    payment to check per request, as one proposal. It never asks about a payment the owner decided
+    or one already proposed. Its task shows in Settings → Models only when something is set aside.
+  - A weekly chart of spendable (an area), set aside (a line from zero) and the everyday total
+    (dashed), with a table view. Not stacked: set aside is small beside the total, and stacked it
+    drew as spikes up to the total whenever it was above zero.
+  - Considered: the job runner (a switch per job kind, a budget and a schedule, for something only
+    ever started by hand); questions from the model kept beside the payments (model text outside a
+    proposal, with no record of it); letting Ask draft proposals (Ask stays read-only).

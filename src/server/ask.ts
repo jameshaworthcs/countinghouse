@@ -26,7 +26,7 @@ import { claudeChoice, resolveTask, TASKS } from '../shared/tasks';
 import { runAgent } from './agents/claude';
 import { trips } from './agents/digest';
 import type { Analytics } from './analytics';
-import { ASK_TOOLS, runTool, TOOL_ARGS_SCHEMA, TOOL_HELP, ToolError, type AskTool } from './ask-tools';
+import { ASK_TOOLS, runTool, TOOL_ARGS_SCHEMA, TOOL_HELP, ToolError, toolsFor, type AskTool } from './ask-tools';
 import { currentActor, currentRequestId, type AuditLog } from './audit';
 import type { Config } from './config';
 import { atomicWrite, nowISO, randomHex } from './fsutil';
@@ -44,9 +44,10 @@ const HISTORY_CHARS = 60_000;
 const SWEEP_EVERY_MS = 6 * 3600_000;
 const LIVE_EVERY_MS = 1000;
 
-// ─── The prompt (ask-3) ──────────────────────────────────────────────────────────────────────────
+// ─── The prompt (ask-4) ──────────────────────────────────────────────────────────────────────────
 
-export function systemPrompt(maxToolCalls: number): string {
+/** `tools`: the tools this question may use (set_aside only when something is set aside). */
+export function systemPrompt(maxToolCalls: number, tools: readonly AskTool[] = ASK_TOOLS): string {
   return `You answer the owner's questions about their money, for a private UK personal-finance app. You look things up with the app's tools: the app runs them on its own data and gives you the results.
 
 You work one step at a time. Each step is either:
@@ -54,7 +55,7 @@ You work one step at a time. Each step is either:
 - step "answer": your answer, in answer, figures, confidence, caveats and cannotAnswer (tool, and every arg, null).
 
 Tools:
-${ASK_TOOLS.map((t) => `- ${TOOL_HELP[t]}`).join('\n')}
+${tools.map((t) => `- ${TOOL_HELP[t]}`).join('\n')}
 
 Rules:
 - Every figure in your answer is from a tool's result, quoted as the result gives it, with the number of the step it came from (figures[].step). Never add up, subtract, average, project or estimate a figure yourself, not even months into a year: the tools give totals (total, byYear, averagePerMonth, difference, changePercent). When you need a total no result gives, make the call that gives it: sum with the ids, compare for two periods, or find_transactions or spending_by with filters that select exactly those rows.
@@ -77,7 +78,7 @@ const nullable = (type: string | string[]) => ({ type: [...(Array.isArray(type) 
  * needs. A question's first step must be a call (on the real service, the local model without
  * thinking otherwise answered "cannot say" before looking); after the last call allowed, an answer.
  */
-export function stepSchema(only?: 'call' | 'answer'): Record<string, unknown> {
+export function stepSchema(only?: 'call' | 'answer', tools: readonly AskTool[] = ASK_TOOLS): Record<string, unknown> {
   return {
     type: 'object',
     additionalProperties: false,
@@ -85,7 +86,7 @@ export function stepSchema(only?: 'call' | 'answer'): Record<string, unknown> {
     properties: {
       step: { type: 'string', enum: only ? [only] : ['call', 'answer'] },
       why: { type: 'string' },
-      tool: { type: ['string', 'null'], enum: [...ASK_TOOLS, null] },
+      tool: { type: ['string', 'null'], enum: [...tools, null] },
       args: TOOL_ARGS_SCHEMA,
       answer: nullable('string'),
       figures: { type: ['array', 'null'], items: { type: 'object', additionalProperties: false, required: ['label', 'value', 'step'], properties: { label: { type: 'string' }, value: { type: 'string' }, step: nullable('integer') } } },
@@ -516,7 +517,8 @@ export class AskService extends EventEmitter {
   /** One turn on one engine, as a session: steps until it answers, or the tool calls run out. */
   private async run(c: AskConversation, t: AskTurn, model: AskModel, signal: AbortSignal, fallback?: { fallbackOf?: string | undefined; fallbackReason: string }): Promise<void> {
     const maxCalls = this.store.settings.ask.maxToolCalls;
-    const system = systemPrompt(maxCalls);
+    const tools = toolsFor(this.store);
+    const system = systemPrompt(maxCalls, tools);
     const history = this.history(c, t);
     const first = history.length ? questionText(t, this.store) : `${c.context}\n\n${questionText(t, this.store)}`;
     const bin = model.engine === 'claude-cli' ? await resolveClaudeBin() : null;
@@ -531,7 +533,7 @@ export class AskService extends EventEmitter {
       model: model.model,
       ...(model.engine === 'inference' ? { thinking: Boolean(model.thinking) } : { effort: model.effort ?? 'high' }),
       promptVersion: ASK_PROMPT_VERSION,
-      tools: [...ASK_TOOLS],
+      tools: [...tools],
       privacy: 'personal',
       startedBy: { actor, reason: c.turns.indexOf(t) === 0 ? 'You asked a question' : 'You asked a follow-up question' },
       ...(t.requestId ? { requestId: t.requestId } : {}),
@@ -554,7 +556,7 @@ export class AskService extends EventEmitter {
         const answerOnly = calls >= maxCalls;
         const prompt = answerOnly ? `${next}\n\nYou have made ${calls} tool calls, the most for one question: answer now from what you have.` : next;
         this.live(c, t, { phase: 'reading', reasoningChars: 0, text: '' });
-        const out = await this.step(model, { system, history: [...history, ...mine], prompt, schema: stepSchema(answerOnly ? 'answer' : calls === 0 ? 'call' : undefined), sink, signal, bin, c, t });
+        const out = await this.step(model, { system, history: [...history, ...mine], prompt, schema: stepSchema(answerOnly ? 'answer' : calls === 0 ? 'call' : undefined, tools), sink, signal, bin, c, t });
         mine.push({ role: 'user', content: prompt }, { role: 'assistant', content: out.text });
         const step = out.step;
         if (step.step === 'answer' || answerOnly) {
@@ -571,7 +573,7 @@ export class AskService extends EventEmitter {
         let resultText: string;
         const s: AskStep = { n, at: nowISO(), why: step.why.slice(0, 300), tool: tool ?? '(none)', args: compactArgs(step.args), ms: 0, said: out.text, resultText: '' };
         try {
-          if (!tool || !ASK_TOOLS.includes(tool)) throw new ToolError(`Choose one of the tools: ${ASK_TOOLS.join(', ')}.`);
+          if (!tool || !tools.includes(tool)) throw new ToolError(`Choose one of the tools: ${tools.join(', ')}.`);
           if (key === lastCall) throw new ToolError('You made this same call in the step before: use its result, or change the call.');
           const r = runTool(this.store, this.analytics, tool, step.args ?? {}, t.defaults);
           let json = JSON.stringify(r.result);

@@ -622,7 +622,7 @@ describe('through the app', () => {
     const conv = (await res.json()) as AskConversation;
     const c = await turnDone(conv.id, 1);
     const t = c.turns[0]!;
-    expect(t).toMatchObject({ status: 'answered', promptVersion: 'ask-3', model: { id: 'local-thinking' } });
+    expect(t).toMatchObject({ status: 'answered', promptVersion: 'ask-4', model: { id: 'local-thinking' } });
     expect(t.steps).toHaveLength(1);
     expect(t.steps[0]).toMatchObject({ n: 1, tool: 'find_transactions', args: { currency: 'MYR' }, why: 'Payments in Malaysian ringgit', summary: '2 payments found, money out £8.40' });
     expect(t.steps[0]!.href).toContain('currency=MYR');
@@ -641,7 +641,7 @@ describe('through the app', () => {
     ]);
     // Its session: kind ask, beside the conversation, every step in the transcript.
     const s = (await get<SessionListResponse>('/api/sessions')).sessions.find((x) => x.kind === 'ask')!;
-    expect(s).toMatchObject({ conversationId: c.id, status: 'succeeded', promptVersion: 'ask-3' });
+    expect(s).toMatchObject({ conversationId: c.id, status: 'succeeded', promptVersion: 'ask-4' });
     expect(t.sessions).toEqual([s.id]);
     const types = (await get<TranscriptResponse>(`/api/sessions/${s.id}/transcript`)).events.map((e) => (e as { type: string }).type);
     expect(types).toEqual(['finance.request', 'assistant', 'result', 'finance.tool', 'finance.request', 'assistant', 'result', 'finance.answer']);
@@ -663,7 +663,7 @@ describe('through the app', () => {
 
     // "This is wrong" goes into the evaluation set; Delete takes it off the list but keeps it.
     await post(`/api/ask/${c.id}/turns/${t.id}/feedback`, { wrong: true, note: 'It missed the hotel.' });
-    expect((await get<{ items: AskFeedbackItem[] }>('/api/ask/feedback')).items).toMatchObject([{ conversationId: c.id, turnId: t.id, note: 'It missed the hotel.', promptVersion: 'ask-3' }]);
+    expect((await get<{ items: AskFeedbackItem[] }>('/api/ask/feedback')).items).toMatchObject([{ conversationId: c.id, turnId: t.id, note: 'It missed the hotel.', promptVersion: 'ask-4' }]);
     // An agent token with the records scope may mark one too, and is named; it may not ask.
     const made = (await app.ctx.tokens.create({ name: 'Reviewer', scopes: ['records'], days: 7 })) as { token: string };
     const bearer = { authorization: `Bearer ${made.token}`, ...CSRF, 'content-type': 'application/json' };

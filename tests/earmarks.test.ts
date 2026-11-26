@@ -363,4 +363,47 @@ describe('set aside: in the app, by proposals', () => {
     expect(app.ctx.store.earmarks).toBeNull();
     expect((await get<BootstrapResponse>('/api/bootstrap')).earmarks).toEqual([]);
   });
+
+  it('Ask reads it with its own tool, offered only when something is set aside', async () => {
+    const { toolsFor, runTool } = await import('../src/server/ask-tools');
+    const { systemPrompt, stepSchema } = await import('../src/server/ask');
+    expect(toolsFor(app.ctx.store)).not.toContain('set_aside');
+    expect(systemPrompt(8, toolsFor(app.ctx.store))).not.toMatch(/set_aside/);
+    await app.ctx.store.setEarmarks(base());
+    const tools = toolsFor(app.ctx.store);
+    expect(tools).toContain('set_aside');
+    expect(JSON.stringify(stepSchema(undefined, tools))).toMatch(/set_aside/);
+    const r = runTool(app.ctx.store, app.ctx.analytics, 'set_aside', {});
+    expect(r.href).toBe('/earmarks');
+    expect(r.result).toMatchObject({ spendable: 250, setAside: 600, pots: [{ name: 'Student money', setAside: 600 }] });
+  });
+
+  it('the local model suggests decisions as one proposal, only with its switch on', async () => {
+    const { suggestEarmarks } = await import('../src/server/earmark-suggest');
+    const config = loadConfig({ FINANCE_DATA_DIR: path.join(dir, 'data'), FINANCE_WORK_DIR: path.join(dir, 'work'), FINANCE_WATCH: '0', INFERENCE_BASE_URL: 'http://127.0.0.1:9/v1', INFERENCE_API_KEY: 'inf_finance_test' });
+    // 1,000 to the saver when the pot held 600: one payment to check.
+    const [big, bigIn] = move('current', 'saver', '2026-09-26', 1000, 'SAVING');
+    await app.ctx.store.addTransactions([big, bigIn], 'test');
+    await app.ctx.store.setEarmarks(base());
+    const seen: string[] = [];
+    const fetch = ((_url: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(init?.body as string) as { messages: { content: { text: string }[] | string }[] };
+      seen.push(JSON.stringify(body.messages));
+      const out = { choice: 'as-suggested', reason: 'The pot held 600: the rest is your own saving.', confidence: 'high' };
+      return Promise.resolve(new Response(JSON.stringify({ model: 'qwen-test-q4', choices: [{ message: { content: JSON.stringify(out) }, finish_reason: 'stop' }], usage: { prompt_tokens: 50, completion_tokens: 10 }, provenance: { request_id: 'inf_1', alias: 'fast-chat', model_id: 'qwen-test-q4', schema_valid: true } }), { status: 200 }));
+    }) as typeof globalThis.fetch;
+    // Off until you turn it on.
+    await expect(suggestEarmarks(app.ctx.store, app.ctx.analytics, config, app.ctx.proposals, { fetch })).rejects.toThrow(/off/);
+    await app.ctx.store.setSettings({ ...app.ctx.store.settings, agents: { ...app.ctx.store.settings.agents, earmarkSuggest: true } });
+    const r = await suggestEarmarks(app.ctx.store, app.ctx.analytics, config, app.ctx.proposals, { fetch });
+    expect(r).toMatchObject({ asked: 1, suggested: 1 });
+    // It was given the payment and why the app asks.
+    expect(seen[0]).toMatch(/more than the £600\.00 Student money held/);
+    const view = await app.ctx.proposals.get(r.proposalId!);
+    expect(view.proposal.provenance).toMatchObject({ setBy: 'agent', engine: 'inference', promptVersion: 'suggest-earmarks-1' });
+    expect(view.proposal.changes).toMatchObject([{ kind: 'decide_earmark_flow', transaction: big.id, parts: [{ effect: 'to-pot', amount: 600 }, { effect: 'topped-up', amount: 400 }] }]);
+    // Nothing is decided until you apply it, and a payment already proposed is not asked about again.
+    expect(app.ctx.store.earmarks!.decisions).toEqual({});
+    expect(await suggestEarmarks(app.ctx.store, app.ctx.analytics, config, app.ctx.proposals, { fetch })).toMatchObject({ asked: 0, suggested: 0 });
+  });
 });

@@ -9,9 +9,11 @@ import type { EarmarkLine, EarmarkPotResult, EarmarkRow, EarmarksResult } from '
 import { EARMARK_EFFECTS, POT_EFFECTS, type EarmarkEffect, type Earmarks } from '../../shared/schema';
 import { DecisionDialog, useEarmarks, type DecidePayment } from '../components/Earmarks';
 import { EarmarkSetupForm } from '../components/EarmarkSetup';
+import { ChartFrame, SERIES } from '../components/charts/common';
+import { TimeChart } from '../components/charts/TimeChart';
 import { earmarkRuleWords, proposedBy, useProposals } from '../components/Proposals';
 import { Badge, Button, Callout, Card, Dialog, EmptyState, ErrorNote, IconButton, Loading, Money, PageHeader, Stat, useToast } from '../components/ui';
-import { api, useApiMutation } from '../lib/api';
+import { api, useApi, useApiMutation } from '../lib/api';
 import { useAppData } from '../lib/data';
 import { BY_WORDS, EFFECT_WORDS } from '../lib/earmarks';
 import { cn, formatDate, money, plural } from '../lib/format';
@@ -182,6 +184,8 @@ function Figures({ result: r, setup }: { result: EarmarksResult; setup: Earmarks
         <Checked result={r} />
       </Card>
 
+      <OverTime result={r} />
+
       <ToCheck result={r} setup={setup} />
 
       {r.pots.map((p) => (
@@ -287,7 +291,87 @@ function ToCheck({ result: r, setup }: { result: EarmarksResult; setup: Earmarks
         })}
       </ul>
       {confirm.error && <ErrorNote error={confirm.error} />}
+      <SuggestDecisions />
     </Card>
+  );
+}
+
+/** The local model's suggestions for the payments to check: only with its switch on, only when you press it. */
+function SuggestDecisions() {
+  const q = useApi<{ enabled: boolean; available: boolean; running: boolean; waiting: number; last: { asked?: number; suggested?: number; proposalId?: string; stopped?: string; error?: string; at: string } | null }>(['earmarks-suggest'], '/earmarks/suggest', {
+    refetchInterval: (d) => (d?.running ? 3000 : false),
+  });
+  const start = useApiMutation(() => api('/earmarks/suggest', { body: {} }));
+  const s = q.data;
+  if (!s?.enabled) return null;
+  const last = s.last;
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line pt-3 text-[12.5px] text-ink-3">
+      <Button size="sm" loading={s.running || start.isPending} disabled={!s.available || !s.waiting} onClick={() => start.mutate()}>
+        Suggest decisions
+      </Button>
+      <span>
+        {!s.available
+          ? 'The local model service is not set up here.'
+          : s.running
+            ? 'The local model is reading them…'
+            : s.waiting
+              ? `The local model reads the ${plural(s.waiting, 'payment')} not yet decided or proposed, and what it is sure of becomes a proposal you review.`
+              : 'Every payment to check is decided or proposed.'}
+      </span>
+      {last && !s.running && (
+        <span>
+          {'error' in last && last.error
+            ? `Last run: ${last.error}`
+            : last.proposalId
+              ? (
+                  <>
+                    Last run: {plural(last.suggested ?? 0, 'decision')} suggested.{' '}
+                    <Link to={`/proposals/${last.proposalId}`} state={{ from: '/earmarks' }} className="text-accent hover:underline">
+                      Review them
+                    </Link>
+                  </>
+                )
+              : `Last run: nothing it was sure enough of (${plural(last.asked ?? 0, 'payment')} read).`}
+          {last.stopped ? ` It stopped early: ${last.stopped}` : ''}
+        </span>
+      )}
+      {start.error && <ErrorNote error={start.error} />}
+    </div>
+  );
+}
+
+/** Spendable and set aside each week since the start: they stack to what is in the everyday accounts. */
+function OverTime({ result: r }: { result: EarmarksResult }) {
+  if (r.series.length < 2) return null;
+  const dates = r.series.map((p) => p.date);
+  return (
+    <ChartFrame
+      title="Spendable and set aside over time"
+      subtitle="Weekly, from the start. Spendable is what was in your everyday accounts less what was set aside; set aside below zero is what you had covered for the pots."
+      legend={[
+        { label: 'Spendable', color: SERIES[0]!, kind: 'area' },
+        { label: 'Set aside', color: SERIES[1]!, kind: 'line' },
+        { label: 'In your everyday accounts', color: 'var(--ink-2)', kind: 'dash' },
+      ]}
+      table={{
+        columns: ['Week of', 'Spendable', 'Set aside', 'In your everyday accounts'],
+        rows: [...r.series].reverse().map((p) => [formatDate(p.date), money(p.spendable), money(p.setAside), money(p.total)]),
+        numeric: [1, 2, 3],
+        sortValues: [...r.series].reverse().map((p) => [p.date, p.spendable, p.setAside, p.total]),
+      }}
+    >
+      <TimeChart
+        dates={dates}
+        series={[
+          { id: 'spendable', label: 'Spendable', color: SERIES[0]!, values: r.series.map((p) => p.spendable), kind: 'area' },
+          { id: 'set-aside', label: 'Set aside', color: SERIES[1]!, values: r.series.map((p) => p.setAside), kind: 'line' },
+          { id: 'total', label: 'In your everyday accounts', color: 'var(--ink-2)', values: r.series.map((p) => p.total), kind: 'line', dashed: true },
+        ]}
+        height={240}
+        ariaLabel="Spendable and set aside over time"
+      />
+    </ChartFrame>
   );
 }
 

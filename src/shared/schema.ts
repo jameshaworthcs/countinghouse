@@ -1378,10 +1378,15 @@ export const SettingsSchema = z.object({
        * what a document is rather than its file name. Off until you turn it on.
        */
       labelImports: z.boolean().default(false),
+      /**
+       * The local model may suggest decisions for Set aside's payments to check, as one proposal,
+       * when you ask it to (`suggest-earmarks`). Off until you turn it on.
+       */
+      earmarkSuggest: z.boolean().default(false),
       backgroundBudgetPerDayUsd: z.number().min(0).max(100).default(5),
       backgroundBudgetPerMonthUsd: z.number().min(0).max(1000).default(40),
     })
-    .default({ enabled: false, researchStaleAfterDays: 90, insightsAfterImport: true, monthlyReview: true, timeoutSeconds: 1200, autoResearch: false, labelImports: false, backgroundBudgetPerDayUsd: 5, backgroundBudgetPerMonthUsd: 40 }),
+    .default({ enabled: false, researchStaleAfterDays: 90, insightsAfterImport: true, monthlyReview: true, timeoutSeconds: 1200, autoResearch: false, labelImports: false, earmarkSuggest: false, backgroundBudgetPerDayUsd: 5, backgroundBudgetPerMonthUsd: 40 }),
 });
 export type Settings = z.infer<typeof SettingsSchema>;
 
