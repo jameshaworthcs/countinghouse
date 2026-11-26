@@ -36,8 +36,8 @@ export default function Transactions() {
   const toast = useToast();
   const [search, setSearch] = useState(params.get('q') ?? '');
   const q = useDebounced(search);
-  const period = params.get('period') ?? (params.get('from') ? 'custom' : '90d');
-  const [from, to] = period === 'custom' ? [params.get('from') ?? undefined, params.get('to') ?? undefined] : (PERIODS.find((p) => p.id === period) ?? PERIODS[2]!).range();
+  const period = params.get('period') ?? (params.get('from') ? 'custom' : 'all');
+  const [from, to] = period === 'custom' ? [params.get('from') ?? undefined, params.get('to') ?? undefined] : (PERIODS.find((p) => p.id === period) ?? PERIODS[0]!).range();
   const filters = {
     from,
     to,
@@ -157,7 +157,7 @@ export default function Transactions() {
           <option value="only">Only transfers</option>
         </Select>
         {active && (
-          <Button size="sm" variant="ghost" icon={<X className="size-3.5" />} onClick={() => { setSearch(''); setParams(new URLSearchParams({ ...(period !== '90d' ? { period } : {}), ...(filters.sort ? { sort: filters.sort } : {}) }), { replace: true }); }}>
+          <Button size="sm" variant="ghost" icon={<X className="size-3.5" />} onClick={() => { setSearch(''); setParams(new URLSearchParams({ ...(period !== 'all' ? { period } : {}), ...(filters.sort ? { sort: filters.sort } : {}) }), { replace: true }); }}>
             Clear
           </Button>
         )}
