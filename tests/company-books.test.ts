@@ -4,10 +4,16 @@
 
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { accountingPeriodsOf, booksProblems, companyDeadlineAlerts, companyDeadlines, ctPeriodsOf, vatPeriodsOf, type CompanyDeadline } from '../src/shared/company-books';
+import { accountingPeriodsOf, addedBooksProblems, booksProblems, withinChargeAssumed, companyDeadlineAlerts, companyDeadlines, ctPeriodsOf, vatPeriodsOf, type CompanyDeadline } from '../src/shared/company-books';
 import { addDays, fromUTC } from '../src/shared/dates';
 import { CompanyBooksSchema, CompanyVatSchema, MonthDaySchema, type CompanyBooks, type CompanyFiling, type CompanyFilingInput } from '../src/shared/schema';
 import {
+  ACCOUNTS_FILING_RULES,
+  CONFIRMATION_STATEMENT_RULES,
+  CT_PAYMENT_RULES,
+  CT_RETURN_RULES,
+  ruleOn,
+  VAT_RETURN_RULES,
   accountsFilingDeadline,
   confirmationStatementDue,
   ct600Due,
@@ -194,14 +200,30 @@ describe('Corporation Tax (CTA 2009 ss9–10, TMA 1970 s59D, FA 1998 Sch 18 para
     expect(ct600Due({ end: '2019-12-31' }, { start: '2018-05-01', end: '2019-12-31' })).toBe('2020-12-31');
   });
 
-  it('starting to trade starts the first accounting period; not trading yet gives none; periods you set win', () => {
-    const later = ctPeriodsOf(books({ incorporatedOn: '2024-03-15', accountingReferenceDate: '03-31', tradeStartedOn: '2024-09-02' }), '2025-05-01');
+  it('the first accounting period starts when it came within the charge, interest alone included (s9); starting to trade ends one (s10(1)(d))', () => {
+    const later = ctPeriodsOf(books({ incorporatedOn: '2024-03-15', accountingReferenceDate: '03-31', withinChargeFrom: '2024-09-02', tradeStartedOn: '2024-09-02' }), '2025-05-01');
     expect(later.map((p) => [p.start, p.end])).toEqual([
       ['2024-09-02', '2025-03-31'],
       ['2025-04-01', '2026-03-31'],
     ]);
-    expect(ctPeriodsOf(books({ incorporatedOn: '2024-03-15', tradeStartedOn: null }), '2026-05-01')).toEqual([]);
-    expect(of(companyDeadlines({ books: books({ incorporatedOn: '2024-03-15', tradeStartedOn: null }) }, '2026-05-01'), 'ct600')).toEqual([]);
+    // Not trading yet, but earning interest from incorporation: within the charge, with a period break when trade starts.
+    const pre = ctPeriodsOf(books({ incorporatedOn: '2024-03-15', accountingReferenceDate: '03-31', tradeStartedOn: '2024-11-04' }), '2025-05-01');
+    expect(pre.map((p) => [p.start, p.end])).toEqual([
+      ['2024-03-15', '2024-11-03'],
+      ['2024-11-04', '2025-03-31'],
+      ['2025-04-01', '2026-03-31'],
+    ]);
+    // Trade not started (null) does not make it dormant: it is within the charge from incorporation, assumed.
+    expect(ctPeriodsOf(books({ incorporatedOn: '2024-03-15', tradeStartedOn: null }), '2026-05-01').length).toBeGreaterThan(0);
+    expect(withinChargeAssumed(books({ incorporatedOn: '2024-03-15' }))).toBe(true);
+    expect(withinChargeAssumed(books({ incorporatedOn: '2024-03-15', withinChargeFrom: '2024-03-15' }))).toBe(false);
+    // Dormant for Corporation Tax (null): no CT600 or payment, unless periods are set (HMRC's notice).
+    expect(ctPeriodsOf(books({ incorporatedOn: '2024-03-15', withinChargeFrom: null }), '2026-05-01')).toEqual([]);
+    expect(of(companyDeadlines({ books: books({ incorporatedOn: '2024-03-15', withinChargeFrom: null }) }, '2026-05-01'), 'ct600')).toEqual([]);
+    expect(ctPeriodsOf(books({ incorporatedOn: '2024-03-15', withinChargeFrom: null, ctPeriods: [{ start: '2025-04-01', end: '2026-03-31' }] }), '2026-05-01').map((p) => p.start)).toEqual(['2025-04-01']);
+    // Trading before it came within the charge, or while dormant, is a problem.
+    expect(booksProblems(books({ incorporatedOn: '2024-03-15', withinChargeFrom: '2024-06-01', tradeStartedOn: '2024-05-01' }))).toEqual([expect.stringContaining('trading brings a company within the charge')]);
+    expect(booksProblems(books({ incorporatedOn: '2024-03-15', withinChargeFrom: null, tradeStartedOn: '2024-05-01' }))).toEqual([expect.stringContaining('not dormant for Corporation Tax')]);
     const set = ctPeriodsOf(books({ incorporatedOn: '2024-03-15', ctPeriods: [{ start: '2024-04-01', end: '2025-03-31' }] }), '2025-05-01');
     expect(set.map((p) => [p.start, p.end, p.source])).toEqual([
       ['2024-03-15', '2024-03-31', 'worked-out'],
@@ -243,6 +265,12 @@ describe('VAT returns (VAT Regulations 1995 regs 25, 25A(20), 50)', () => {
     expect(vatReturnDue({ start: '2026-01-01', end: '2026-01-31' }, 'monthly')).toBe('2026-03-07');
     // 7 March 2026 is a Saturday: the day does not move.
     expect(vatReturnDue({ start: '2025-12-01', end: '2026-01-31' }, 'quarterly-2')).toBe('2026-03-07');
+  });
+
+  it('a period not ending on a month’s end: the last day of the month after, and 7 days (reg 25(1))', () => {
+    expect(vatReturnDue({ start: '2025-11-14', end: '2026-02-10' }, 'quarterly-1')).toBe('2026-04-07');
+    expect(vatReturnDue({ start: '2025-02-14', end: '2025-06-15' }, 'quarterly-1')).toBe('2025-08-07');
+    expect(vatReturnDue({ start: '2026-01-05', end: '2026-01-04' }, 'monthly')).toBe('2026-03-07');
   });
 
   it('under annual accounting, by the last working day of the second month after the year (reg 50(2)(b)); 1 month for a period under 4 months', () => {
@@ -295,6 +323,23 @@ describe('VAT returns (VAT Regulations 1995 regs 25, 25A(20), 50)', () => {
   });
 });
 
+describe('rules as dated rows', () => {
+  it('each period takes the row in force by its date, never a later one', () => {
+    const rows = [
+      { from: '2008-04-06', months: 9 },
+      { from: '2030-01-01', months: 6 },
+    ];
+    expect(ruleOn(rows, '2025-12-31').months).toBe(9);
+    expect(ruleOn(rows, '2030-01-01').months).toBe(6);
+    // Before the first row: the first (earlier rules are not covered).
+    expect(ruleOn(rows, '2001-01-01').months).toBe(9);
+    for (const table of [ACCOUNTS_FILING_RULES, CONFIRMATION_STATEMENT_RULES, CT_PAYMENT_RULES, CT_RETURN_RULES, VAT_RETURN_RULES]) {
+      expect(table.length).toBeGreaterThan(0);
+      expect([...table].map((r) => r.from)).toEqual([...table].map((r) => r.from).sort());
+    }
+  });
+});
+
 describe('confirmation statements (CA 2006 s853A)', () => {
   it('made up to the last day of each 12-month review period, due 14 days after', () => {
     const d = of(companyDeadlines({ books: books({ incorporatedOn: '2023-05-02' }) }, '2024-06-01'), 'confirmation');
@@ -309,9 +354,20 @@ describe('confirmation statements (CA 2006 s853A)', () => {
   it('one made up early starts the next review period the day after (s853A(6))', () => {
     const b = books({ incorporatedOn: '2023-05-02', filings: [filing({ kind: 'confirmation', periodEnd: '2024-03-10', filedOn: '2024-03-10' })] });
     expect(short(of(companyDeadlines({ books: b }, '2024-06-01'), 'confirmation'))).toEqual([
-      ['2023-05-02', '2024-03-10', '2024-03-24'],
+      ['2023-05-02', '2024-03-10', '2024-05-15'],
       ['2024-03-11', '2025-03-10', '2025-03-24'],
     ]);
+  });
+
+  it('one made up early is due 14 days after its review period, not its made-up date (s853A(1))', () => {
+    // Made up on 10 March, filed on 20 April: within 14 days of the review period's end (1 May), not late.
+    const b = books({ incorporatedOn: '2023-05-02', filings: [filing({ kind: 'confirmation', periodEnd: '2024-03-10', filedOn: '2024-04-20' })] });
+    const [first] = of(companyDeadlines({ books: b }, '2024-06-01'), 'confirmation');
+    expect(first).toMatchObject({ status: 'done', due: '2024-05-15' });
+    expect(first!.filedLate).toBeUndefined();
+    // Filed after it, late.
+    const late = books({ incorporatedOn: '2023-05-02', filings: [filing({ kind: 'confirmation', periodEnd: '2024-03-10', filedOn: '2024-05-16' })] });
+    expect(of(companyDeadlines({ books: late }, '2024-06-01'), 'confirmation')[0]).toMatchObject({ filedLate: true });
   });
 
   it('the next made-up date Companies House shows anchors the chain; statements before it are settled', () => {
@@ -371,6 +427,18 @@ describe('deadlines and what was filed', () => {
     expect(alerts.find((a) => a.id === 'company-example-studio-ct-payment:2023-12-31')).toMatchObject({ level: 'warning' });
   });
 
+  it('a write is refused only for problems it adds, so a hand edit can be put right one problem at a time', () => {
+    const two = { ...b, periods: [{ start: '2024-01-01', end: '2025-12-31' }], ctPeriods: [{ start: '2024-01-01', end: '2025-03-31' }] };
+    expect(booksProblems(two)).toHaveLength(2);
+    // Fixing one and adding none: nothing added.
+    expect(addedBooksProblems(two, { ...two, periods: [] })).toEqual([]);
+    // Recording a filing beside them adds none either.
+    expect(addedBooksProblems(two, { ...two, filings: [...b.filings, filing({ kind: 'confirmation', periodEnd: '2024-05-01', filedOn: '2024-05-02' })] })).toEqual([]);
+    // A new problem is the write's.
+    expect(addedBooksProblems(two, { ...two, tradeStartedOn: '2020-01-01' })).toEqual([expect.stringContaining('before the company was incorporated')]);
+    expect(addedBooksProblems(undefined, two)).toHaveLength(2);
+  });
+
   it('filings are checked: VAT boxes add up, one per kind and period, filed after the period', () => {
     const boxes = { vatDueSales: 2468.1, vatDueAcquisitions: 0, totalVatDue: 2468.1, vatReclaimedCurrPeriod: 812.45, netVatDue: 1655.65, totalValueSalesExVAT: 12341, totalValuePurchasesExVAT: 4062, totalValueGoodsSuppliedExVAT: 0, totalAcquisitionsExVAT: 0 };
     const ok = filing({ kind: 'vat', periodStart: '2024-07-01', periodEnd: '2024-09-30', filedOn: '2024-10-20', figures: boxes });
@@ -398,6 +466,7 @@ const world = fc
     inc: day(D2015, D2024),
     ard: fc.option(md, { nil: undefined }),
     trade: fc.option(fc.integer({ min: 0, max: 400 }), { nil: undefined }),
+    within: fc.option(fc.option(fc.integer({ min: 0, max: 300 }), { nil: null }), { nil: undefined }),
     vat: fc.option(fc.record({ after: fc.integer({ min: 0, max: 900 }), stagger, change: fc.option(fc.record({ after: fc.integer({ min: 30, max: 700 }), stagger }), { nil: undefined }) }), { nil: undefined }),
     today: fc.integer({ min: 0, max: 3000 }),
     files: fc.array(fc.tuple(fc.boolean(), fc.integer({ min: -20, max: 40 })), { minLength: 80, maxLength: 80 }),
@@ -407,7 +476,9 @@ const world = fc
     const base = books({
       incorporatedOn: w.inc,
       ...(w.ard ? { accountingReferenceDate: w.ard } : {}),
-      ...(w.trade !== undefined ? { tradeStartedOn: addDays(w.inc, w.trade) } : {}),
+      // Within the charge from a day (trade no earlier), dormant (no trade), or not said.
+      ...(w.within !== undefined ? { withinChargeFrom: w.within === null ? null : addDays(w.inc, w.within) } : {}),
+      ...(w.trade !== undefined && w.within !== null ? { tradeStartedOn: addDays(w.inc, (w.within ?? 0) + w.trade) } : {}),
       ...(w.vat && vatFrom ? { vat: { registeredFrom: vatFrom, scheme: 'cash' as const, schedule: [{ from: vatFrom, stagger: w.vat.stagger }, ...(w.vat.change ? [{ from: addDays(vatFrom, w.vat.change.after), stagger: w.vat.change.stagger }] : [])] } } : {}),
     });
     const today = addDays(w.inc, w.today);

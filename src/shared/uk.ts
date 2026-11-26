@@ -665,9 +665,11 @@ export function isMonthEnd(date: ISODate): boolean {
  * The day `months` calendar months after `date`, as CA 2006 s443 counts a period "after" a date: the
  * corresponding day of the month `months` on (s443(2)); the last day of that month when `date` is the
  * last day of its month (s443(3)) or the corresponding day does not exist, such as the 30th of February
- * (s443(4)). HMRC count Corporation Tax's months the same way (CTM01800: a period ending on 28 February
- * in a leap year pays on 29 November; on 28 February in any other year, the month's last day, on
- * 1 December).
+ * (s443(4)). A month's end running to a month's end is s443(3) for Companies House's periods, and
+ * HMRC's practice for Corporation Tax (CTM01800: a period ending on 28 February in a leap year pays on
+ * 29 November, on 28 February in any other year, the month's last day, on 1 December; CTM93040: a
+ * return for a period to 28 February before a leap year is due on 29 February, one to 29 February on
+ * 28 February).
  */
 export function monthsAfter(date: ISODate, months: number): ISODate {
   return isMonthEnd(date) ? endOfMonth(addMonths(startOfMonth(date), months)) : addMonths(date, months);
@@ -686,6 +688,17 @@ export function lastDayOfMonths(start: ISODate, months: number): ISODate {
   if (day === 1) return addDays(target, -1);
   const lastDay = Number(endOfMonth(target).slice(8));
   return day > lastDay ? endOfMonth(target) : addDays(`${target.slice(0, 8)}${start.slice(8)}`, -1);
+}
+
+/**
+ * The row of a dated table of rules in force on `date` (the latest row from then or before): a rule
+ * that changes gets a new row, so the change is not applied to periods before it. A date before the
+ * first row takes the first: earlier rules are not covered (docs/UK_RULES.md says which).
+ */
+export function ruleOn<T extends { from: ISODate }>(rows: readonly T[], date: ISODate): T {
+  let row = rows[0]!;
+  for (const r of rows) if (r.from <= date) row = r;
+  return row;
 }
 
 /** An accounting reference date: a day of the year, "MM-DD" (CA 2006 s391). */
@@ -757,17 +770,21 @@ export function nextAccountingPeriodEnd(end: ISODate): ISODate {
  * accounting reference period (CA 2006 s442(2)(a)). A first period longer than 12 months has until the
  * later of 9 months from the first anniversary of incorporation and 3 months from the period's end
  * (s442(3)). A shortened period has until 3 months from the notice if that is later (s442(4)), and the
- * Secretary of State can extend the period (s442(5)): neither is worked out here.
+ * Secretary of State can extend the period (s442(5)): neither is worked out here. By the period's first
+ * day: CA 2006 Part 15 came into force on 6 April 2008 (SI 2007/3495 art 3), for financial years
+ * beginning on or after it; earlier ones (CA 1985) are not covered.
  */
-export const ACCOUNTS_FILING_RULES = { privateMonths: 9, firstLongMonthsFromAnniversary: 9, firstLongMonthsFromEnd: 3 } as const;
+export const ACCOUNTS_FILING_RULES: readonly { from: ISODate; privateMonths: number; firstLongMonthsFromAnniversary: number; firstLongMonthsFromEnd: number }[] = [
+  { from: '2008-04-06', privateMonths: 9, firstLongMonthsFromAnniversary: 9, firstLongMonthsFromEnd: 3 },
+];
 
 /**
  * When a private company's accounts for `period` are due at Companies House: s442(2)(a), or s442(3) for
  * a first period longer than 12 months. The first anniversary of a 29 February incorporation is taken
- * as 28 February.
+ * as 28 February: the Act does not say, and this errs early (1 March would give a day later).
  */
 export function accountsFilingDeadline(period: { start: ISODate; end: ISODate }, incorporatedOn: ISODate): ISODate {
-  const r = ACCOUNTS_FILING_RULES;
+  const r = ruleOn(ACCOUNTS_FILING_RULES, period.start);
   if (period.start === incorporatedOn && longerThanMonths(period.start, period.end, 12)) {
     const a = monthsAfter(addYears(incorporatedOn, 1), r.firstLongMonthsFromAnniversary);
     const b = monthsAfter(period.end, r.firstLongMonthsFromEnd);
@@ -781,22 +798,26 @@ export function accountsFilingDeadline(period: { start: ISODate; end: ISODate },
  * beginning with the day of incorporation and each later one with the day after the last (s853A(5));
  * one made up to an earlier day starts the next review period the day after it (s853A(6)). It is
  * delivered within 14 days after the end of the review period (s853A(1)), made up to a day no later
- * than its last (s853A(4)).
+ * than its last (s853A(4)): one made up early is still due 14 days after its review period's end. By
+ * the review period's end: Part 24 as substituted by the Small Business, Enterprise and Employment Act
+ * 2015 s92 is in force from 30 June 2016 (SI 2016/321); annual returns before it are not covered.
  */
-export const CONFIRMATION_STATEMENT_RULES = { reviewMonths: 12, days: 14 } as const;
+export const CONFIRMATION_STATEMENT_RULES: readonly { from: ISODate; reviewMonths: number; days: number }[] = [{ from: '2016-06-30', reviewMonths: 12, days: 14 }];
 
-/** When a confirmation statement made up to `madeUpTo` is due (s853A(1)). */
-export function confirmationStatementDue(madeUpTo: ISODate): ISODate {
-  return addDays(madeUpTo, CONFIRMATION_STATEMENT_RULES.days);
+/** When the confirmation statement for a review period ending `reviewEnd` is due (s853A(1)), whatever day it is made up to. */
+export function confirmationStatementDue(reviewEnd: ISODate): ISODate {
+  return addDays(reviewEnd, ruleOn(CONFIRMATION_STATEMENT_RULES, reviewEnd).days);
 }
 
 /**
  * Corporation Tax accounting periods (CTA 2009 ss9–10). One begins when the company comes within the
- * charge (for a UK resident company, when it starts to carry on business: s9(2)), and again straight
- * after one ends while it stays within it (s9(1)(b)). One ends on the first of: 12 months from its
- * beginning (s10(1)(a)); the company's accounting date, or the end of a period it does not make up
- * accounts for (s10(1)(b)–(c)); starting or ceasing to trade (s10(1)(d)); and the rest of s10(1),
- * which the app does not know of (residence, administration, ceasing to be within the charge).
+ * charge (s9(1)(a)): when it starts to carry on business (s9(2)) or has a source of income, such as
+ * interest on its bank account; trading is not needed (GOV.UK, "Dormant for Corporation Tax": "Trading
+ * includes … getting interest"). Again straight after one ends while it stays
+ * within it (s9(1)(b)). One ends on the first of: 12 months from its beginning (s10(1)(a)); the
+ * company's accounting date, or the end of a period it does not make up accounts for (s10(1)(b)–(c));
+ * starting or ceasing to trade (s10(1)(d)); and the rest of s10(1), which the app does not know of
+ * (residence, administration, ceasing to be within the charge).
  */
 export const CT_PERIOD_RULES = { maxMonths: 12 } as const;
 
@@ -804,13 +825,15 @@ export const CT_PERIOD_RULES = { maxMonths: 12 } as const;
  * Corporation Tax is due on the day after 9 months from the end of the accounting period (TMA 1970
  * s59D(1)), for a company that does not pay by instalments. Large companies pay by quarterly
  * instalments (s59E and the Corporation Tax (Instalment Payments) Regulations 1998), which the app does
- * not work out.
+ * not work out. By the period's end: Corporation Tax Self Assessment, for accounting periods ending on
+ * or after 1 July 1999 (the day after 9 months is statutory from then; before, by concession: CTM92010).
  */
-export const CT_PAYMENT_RULES = { months: 9, days: 1 } as const;
+export const CT_PAYMENT_RULES: readonly { from: ISODate; months: number; days: number }[] = [{ from: '1999-07-01', months: 9, days: 1 }];
 
 /** When Corporation Tax for an accounting period ending `end` is due, outside instalments (TMA 1970 s59D(1); HMRC's CTM01800). */
 export function ctPaymentDue(end: ISODate): ISODate {
-  return addDays(monthsAfter(end, CT_PAYMENT_RULES.months), CT_PAYMENT_RULES.days);
+  const r = ruleOn(CT_PAYMENT_RULES, end);
+  return addDays(monthsAfter(end, r.months), r.days);
 }
 
 /**
@@ -819,13 +842,15 @@ export function ctPaymentDue(end: ISODate): ISODate {
  * accounting period's last day falls in, if that is not longer than 18 months, or 30 months from its
  * beginning if it is; and 3 months from HMRC's notice to deliver it (para 14(1)(d)), which the app does
  * not know and does not work out. So both returns for a 15-month period of account are due 12 months
- * after it ends (HMRC's CTM93050, example 3).
+ * after it ends (HMRC's CTM93050, example 3). Months as `monthsAfter` counts them, a month's end to a
+ * month's end, the 29 February rule included (CTM93040). By the accounting period's end: Schedule 18
+ * applies to accounting periods ending on or after 1 July 1999 (Corporation Tax Self Assessment).
  */
-export const CT_RETURN_RULES = { monthsFromEnd: 12, longPeriodOfAccountMonths: 18, longMonthsFromStart: 30 } as const;
+export const CT_RETURN_RULES: readonly { from: ISODate; monthsFromEnd: number; longPeriodOfAccountMonths: number; longMonthsFromStart: number }[] = [{ from: '1999-07-01', monthsFromEnd: 12, longPeriodOfAccountMonths: 18, longMonthsFromStart: 30 }];
 
 /** When the CT600 for accounting period `ap`, whose last day falls in period of account `poa`, is due (without the notice's 3 months). */
 export function ct600Due(ap: { end: ISODate }, poa: { start: ISODate; end: ISODate }): ISODate {
-  const r = CT_RETURN_RULES;
+  const r = ruleOn(CT_RETURN_RULES, ap.end);
   const own = monthsAfter(ap.end, r.monthsFromEnd);
   const ofAccount = longerThanMonths(poa.start, poa.end, r.longPeriodOfAccountMonths) ? lastDayOfMonths(poa.start, r.longMonthsFromStart) : monthsAfter(poa.end, r.monthsFromEnd);
   return own > ofAccount ? own : ofAccount;
@@ -836,7 +861,7 @@ export const VAT_STAGGERS = ['monthly', 'quarterly-1', 'quarterly-2', 'quarterly
 export type VatStagger = (typeof VAT_STAGGERS)[number];
 
 /**
- * The months HMRC's quarterly staggers end in (HMRC's DMBM530020): stagger 1 March, June, September and
+ * The months HMRC's quarterly staggers end in (HMRC's DMBM530020, which calls monthly returns stagger 0): stagger 1 March, June, September and
  * December; stagger 2 April, July, October and January; stagger 3 May, August, November and February.
  * Returns are for quarters ending on the dates HMRC set (VAT Regulations 1995 reg 25(1)).
  */
@@ -847,16 +872,21 @@ export const VAT_QUARTER_END_MONTHS: Record<Exclude<VatStagger, 'monthly' | 'ann
 };
 
 /**
- * When VAT returns are due. A return is due by the end of the month after its period (VAT Regulations
- * 1995 reg 25(1)), and HMRC allow 7 days more for one made online and paid electronically (reg
- * 25A(20), by direction: VAT Notice 700/12; under Making Tax Digital every return is made online), so
- * 1 calendar month and 7 days after the period, whatever day of the week that is. Under annual
- * accounting the return for the year is due by the last working day of the second month after it (reg
- * 50(2)(b)); for an accounting period shorter than 4 months, 1 month after it (GOV.UK, "VAT Annual
- * Accounting Scheme: return and payment deadlines"). The payment is due by the same day; annual
- * accounting's advance payments are not worked out.
+ * When VAT returns are due. A return is due "not later than the last day of the month next following
+ * the end of the period" (VAT Regulations 1995 reg 25(1)), and HMRC allow 7 days more for one made
+ * online and paid electronically (reg 25A(20), by direction: VAT Notice 700/12), whatever day of the
+ * week that is: a period to 31 March by 7 May, and one to 10 February by 7 April (the last day of March,
+ * and 7 days), not 17 March. Under annual accounting the return for the year is due by the last
+ * working day of the second month after it (reg 50(2)(b)). For an annual accounting period shorter
+ * than 4 months, GOV.UK's guidance ("VAT Annual Accounting Scheme: return and payment deadlines") gives
+ * 1 month after it; that is guidance, not reg 50. The payment is due by the same day; annual
+ * accounting's advance payments are not worked out. By the period's end: from 1 April 2019, when Making
+ * Tax Digital for VAT began, every return is made online, so the 7 days are taken for every return; an
+ * earlier period made on paper had none (not covered).
  */
-export const VAT_RETURN_RULES = { months: 1, days: 7, annualMonths: 2, annualShortMonths: 1, annualShortUnderMonths: 4 } as const;
+export const VAT_RETURN_RULES: readonly { from: ISODate; electronicDays: number; annualMonths: number; annualShortMonths: number; annualShortUnderMonths: number }[] = [
+  { from: '2019-04-01', electronicDays: 7, annualMonths: 2, annualShortMonths: 1, annualShortUnderMonths: 4 },
+];
 
 /** The last day of the VAT period in a stagger that contains `date` (monthly or quarterly). */
 export function vatPeriodEnd(stagger: Exclude<VatStagger, 'annual'>, date: ISODate): ISODate {
@@ -869,9 +899,10 @@ export function vatPeriodEnd(stagger: Exclude<VatStagger, 'annual'>, date: ISODa
 
 /** When the VAT return for `period` is due, under `stagger` (`VAT_RETURN_RULES`). */
 export function vatReturnDue(period: { start: ISODate; end: ISODate }, stagger: VatStagger): ISODate {
-  const r = VAT_RETURN_RULES;
-  if (stagger !== 'annual') return addDays(monthsAfter(period.end, r.months), r.days);
-  // Shorter than 4 months: it ends before the last day of 4 months beginning with its start.
+  const r = ruleOn(VAT_RETURN_RULES, period.end);
+  // reg 25(1): the last day of the month after the one the period ends in, then the direction's days.
+  if (stagger !== 'annual') return addDays(endOfMonth(addMonths(startOfMonth(period.end), 1)), r.electronicDays);
+  // GOV.UK's guidance, not reg 50: a period shorter than 4 months (it ends before the last day of 4 months beginning with its start).
   if (period.end < lastDayOfMonths(period.start, r.annualShortUnderMonths)) return monthsAfter(period.end, r.annualShortMonths);
   return lastWorkingDayOfMonth(addMonths(startOfMonth(period.end), r.annualMonths));
 }
