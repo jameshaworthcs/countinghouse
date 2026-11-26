@@ -161,6 +161,8 @@ describe('CSV bank formats', () => {
       ['2026-09-29', '16:02:11', -250, 'Capital on Tap · Card repayment', 'FasterPaymentOut', 'tide-txn-0010'],
     ]);
     expect(result.skipped).toBe(1);
+    // The row left out is said, with why, in the notes the review page shows.
+    expect(result.extraction.notes).toContain('1 row left out: Status is "Pending", and only "Cleared" rows are money that moved.');
     const fee = acc!.transactions[0]!;
     expect(fee).toMatchObject({ reference: 'September', bankCategory: 'Bank fees' });
     // The row as the file gave it, From and To and who started it included.

@@ -135,6 +135,8 @@ export function parseWithProfile(rows: string[][], match: ProfileMatch): CsvPars
   };
   const warnings: string[] = [];
   let skipped = 0;
+  // Rows a profile's filter leaves out, by the value that left them out: said in the notes, never dropped unseen.
+  const filtered = new Map<string, number>();
 
   type Row = { tx: ExtractedTransaction; group: string; groupValues: Record<string, string>; accountNumber?: string | undefined };
   const parsed: Row[] = [];
@@ -150,6 +152,7 @@ export function parseWithProfile(rows: string[][], match: ProfileMatch): CsvPars
       const v = col(profile.filter.column, row) ?? '';
       if (!profile.filter.values.some((x) => x.toLowerCase() === v.toLowerCase())) {
         skipped++;
+        filtered.set(v, (filtered.get(v) ?? 0) + 1);
         return;
       }
     }
@@ -317,6 +320,7 @@ export function parseWithProfile(rows: string[][], match: ProfileMatch): CsvPars
     });
   }
 
+  for (const [value, n] of filtered) warnings.push(`${n} row${n === 1 ? '' : 's'} left out: ${profile.filter!.column} is "${value || '(blank)'}", and only ${profile.filter!.values.map((x) => `"${x}"`).join(' or ')} rows are money that moved.`);
   if (skipped) warnings.push(`${skipped} row(s) were skipped (filtered or unreadable).`);
   const extraction = ExtractionSchema.parse({
     documentType: 'csv_export',
