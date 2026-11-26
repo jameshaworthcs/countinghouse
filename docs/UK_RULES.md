@@ -311,6 +311,43 @@ from 1 April 2019 (Making Tax Digital, every return made online).
   total assets less current liabilities, creditors due after more than one year, provisions for
   liabilities, accruals and deferred income, capital and reserves.
 
+### VAT rates (a company's books)
+
+The rates a coding's VAT helper works with (`VAT_RATES`, `vatRateOn`; FORMULAS.md §22): the **standard
+rate, 20%** from 4 January 2011 (VATA 1994 s2(1), as amended by Finance (No. 2) Act 2010 s3), and the
+**reduced rate, 5%** (VATA 1994 s29A and Sch 7A). The temporary rates for hospitality, holiday
+accommodation and attractions (5% from 15 July 2020, 12.5% from 1 October 2021 to 31 March 2022) were
+rates for those supplies alone, not changes to these; earlier rates (17.5%, 15%) are not covered. VAT
+in a VAT-inclusive amount is the amount × rate ÷ (1 + rate): one sixth at 20%, one twenty-first at 5%.
+A **reverse charge** (VATA 1994 s8, services bought from abroad; VAT Notice 741A) has the buyer account
+for the VAT on what it paid: output VAT and input VAT of the same amount, which a fully taxable company
+reclaims in the same return, so nothing is paid. The amounts are the coding's: the helper only fills
+them in.
+
+### The micro-entity formats (a company's chart of accounts)
+
+The chart of accounts (`shared/ledger.ts`, FORMULAS.md §22) maps each code to a line of the
+micro-entity accounts: the balance sheet's format 1 and the profit and loss account's format in the
+Small Companies and Groups (Accounts and Directors' Report) Regulations 2008 (SI 2008/409), Sch 1 Part 1
+Section C, inserted by the Small Companies (Micro-Entities' Accounts) Regulations 2013 (SI 2013/3008),
+for a company preparing micro-entity accounts under FRS 105.
+
+- **Balance sheet (format 1):** A called up share capital not paid; B fixed assets; C current assets;
+  D prepayments and accrued income; E creditors: amounts falling due within one year; F net current
+  assets (liabilities); G total assets less current liabilities; H creditors: amounts falling due after
+  more than one year; I provisions for liabilities; J accruals and deferred income; K capital and
+  reserves. F and G are totals; a code whose balance can be either way (a bank account, the director's
+  loan, VAT) is shown under C as a debit and E (or H for a loan) as a credit.
+- **Profit and loss account:** A turnover; B other income; C cost of raw materials and consumables; D
+  staff costs; E depreciation and other amounts written off assets; F other charges; G tax; H profit or
+  loss (their total).
+
+The Corporation Tax treatment beside each code is where the tax computation starts, not a ruling:
+depreciation is added back for capital allowances (CTA 2009 s53, capital expenditure not deductible),
+client entertaining is not allowable (s1298), formation costs are capital in nature, and interest
+received is a non-trading loan relationship credit (Part 5). A car's capital allowances have rules of
+their own (CAA 2001 Part 2 Ch 10A), not worked out.
+
 **These are aids, not advice:** check every date with Companies House and HMRC, whose own records
 (the company's page, its HMRC online account and notices) are the authority.
 
@@ -394,6 +431,12 @@ Checked 26 November 2026 (companies: periods and deadlines):
 - legislation.gov.uk, [VAT Regulations 1995 reg 25](https://www.legislation.gov.uk/uksi/1995/2518/regulation/25) (periods and the month after), [reg 25A](https://www.legislation.gov.uk/uksi/1995/2518/regulation/25A) (additional time for electronic returns by direction, para (20)), [reg 50](https://www.legislation.gov.uk/uksi/1995/2518/regulation/50) (annual accounting: the last working day of the second month, para (2)(b)); [Small Companies Regulations 2008 Sch 1](https://www.legislation.gov.uk/uksi/2008/409/schedule/1) (the micro-entity balance sheet, Part 1 Section C)
 - HMRC's manuals, [CTM01800](https://www.gov.uk/hmrc-internal-manuals/company-taxation-manual/ctm01800) (Corporation Tax due dates, with examples), [CTM92010](https://www.gov.uk/hmrc-internal-manuals/company-taxation-manual/ctm92010) (nine months and one day), [CTM93030](https://www.gov.uk/hmrc-internal-manuals/company-taxation-manual/ctm93030), [CTM93040](https://www.gov.uk/hmrc-internal-manuals/company-taxation-manual/ctm93040) (counting the months; 28 and 29 February) and [CTM93050](https://www.gov.uk/hmrc-internal-manuals/company-taxation-manual/ctm93050) (the filing date and its examples), [DMBM530020](https://www.gov.uk/hmrc-internal-manuals/debt-management-and-banking/dmbm530020) (VAT staggers 1–3, and monthly returns as stagger 0)
 - GOV.UK, [Dormant for Corporation Tax](https://www.gov.uk/dormant-company/dormant-for-corporation-tax) ("Trading includes … getting interest"; a notice to deliver a return must be answered), [VAT Returns: deadlines](https://www.gov.uk/vat-returns/deadlines) (1 calendar month and 7 days, online), [VAT Annual Accounting Scheme: return and payment deadlines](https://www.gov.uk/vat-annual-accounting-scheme/return-and-payment-deadlines) (2 months; 1 month under 4 months), [Filing your company's confirmation statement](https://www.gov.uk/guidance/confirmation-statement-guidance) (the review period and 14 days)
+
+Cited 26 November 2026 (companies: a company's ledger, its VAT rates and the micro-entity formats),
+from the legislation as known, not fetched again for this change, so worth a check against the current
+text:
+
+- legislation.gov.uk, [VATA 1994 s2](https://www.legislation.gov.uk/ukpga/1994/23/section/2) (the standard rate), [s8](https://www.legislation.gov.uk/ukpga/1994/23/section/8) (the reverse charge on services received from abroad), [s29A](https://www.legislation.gov.uk/ukpga/1994/23/section/29A) and [Sch 7A](https://www.legislation.gov.uk/ukpga/1994/23/schedule/7A) (the reduced rate), [Finance (No. 2) Act 2010 s3](https://www.legislation.gov.uk/ukpga/2010/31/section/3) (20% from 4 January 2011); [SI 2013/3008](https://www.legislation.gov.uk/uksi/2013/3008) (the micro-entity formats inserted into SI 2008/409 Sch 1 Part 1 Section C); [CTA 2009 s53](https://www.legislation.gov.uk/ukpga/2009/4/section/53) (capital expenditure), [s1298](https://www.legislation.gov.uk/ukpga/2009/4/section/1298) (business entertainment); FRS 105 (the Financial Reporting Council's standard for the micro-entities regime); GOV.UK, VAT Notice 741A (place of supply of services)
 
 Checked 26 November 2026 (companies: a director's loan):
 

@@ -771,7 +771,15 @@ dates ("Proposed: …"), and keeps it when you change them.
     on a company's row it is in the wrong place whoever set it: re-applying takes away one it
     carries (from before its account was a company's, or a hand edit), commit keeps none given on
     the review page, and setting one by hand (a row, several at once, the To categorise page,
-    re-applying's "decided", an agent's proposal) is refused. Company coding is separate, and later.
+    re-applying's "decided", an agent's proposal) is refused. What a row means to the company is its
+    coding in the company's books (`books`; FORMULAS.md §22), set on the company's Books tab, by a
+    proposal, or by the company's **book rules**: rules in rules.json with `set.books` and
+    `match.company`, the only rules that reach its rows (your rules still never do). Re-applying runs
+    them after transfers are linked, never over a coding you set, and takes a coding off a row it no
+    longer applies to (one now a leg of a transfer between its accounts, which posts by itself). It
+    also links, by itself, a company row to a loan of yours that is the same money to the penny within
+    4 days (`companyLink`), and a company row linked to your loans, or one you coded, is never paired as
+    a transfer, at drafting, commit, re-applying or by hand.
   - The one exception: each leg of a transfer between two of the company's accounts has the transfer
     category for its leg (`credit-card-payment`, `transfers`…, by `transfer`), whatever it had
     before, so linking, unlinking and re-applying work as for yours.

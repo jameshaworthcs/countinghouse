@@ -296,6 +296,206 @@
         "setBy"
       ]
     },
+    "books": {
+      "type": "object",
+      "properties": {
+        "ledger": {
+          "type": "string",
+          "maxLength": 100,
+          "pattern": "^[a-z][a-z0-9-]*(?::[a-z0-9-]+){0,2}$",
+          "description": "A ledger code of the chart (src/shared/ledger.ts)"
+        },
+        "vat": {
+          "type": "object",
+          "properties": {
+            "amount": {
+              "type": "number",
+              "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+            },
+            "treatment": {
+              "type": "string",
+              "enum": [
+                "standard",
+                "reduced",
+                "zero",
+                "exempt",
+                "outside",
+                "reverse-charge"
+              ]
+            }
+          },
+          "required": [
+            "amount",
+            "treatment"
+          ]
+        },
+        "covers": {
+          "type": "object",
+          "properties": {
+            "from": {
+              "type": "string",
+              "description": "Calendar date, YYYY-MM-DD"
+            },
+            "to": {
+              "type": "string",
+              "description": "Calendar date, YYYY-MM-DD"
+            }
+          },
+          "required": [
+            "from",
+            "to"
+          ]
+        },
+        "asset": {
+          "type": "object",
+          "properties": {
+            "class": {
+              "type": "string",
+              "enum": [
+                "computer",
+                "office",
+                "furniture",
+                "motor"
+              ]
+            },
+            "months": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 600
+            }
+          },
+          "required": [
+            "class"
+          ]
+        },
+        "lines": {
+          "maxItems": 30,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "ledger": {
+                "type": "string",
+                "maxLength": 100,
+                "pattern": "^[a-z][a-z0-9-]*(?::[a-z0-9-]+){0,2}$",
+                "description": "A ledger code of the chart (src/shared/ledger.ts)"
+              },
+              "amount": {
+                "type": "number",
+                "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+              },
+              "vat": {
+                "type": "object",
+                "properties": {
+                  "amount": {
+                    "type": "number",
+                    "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                  },
+                  "treatment": {
+                    "type": "string",
+                    "enum": [
+                      "standard",
+                      "reduced",
+                      "zero",
+                      "exempt",
+                      "outside",
+                      "reverse-charge"
+                    ]
+                  }
+                },
+                "required": [
+                  "amount",
+                  "treatment"
+                ]
+              },
+              "covers": {
+                "type": "object",
+                "properties": {
+                  "from": {
+                    "type": "string",
+                    "description": "Calendar date, YYYY-MM-DD"
+                  },
+                  "to": {
+                    "type": "string",
+                    "description": "Calendar date, YYYY-MM-DD"
+                  }
+                },
+                "required": [
+                  "from",
+                  "to"
+                ]
+              },
+              "asset": {
+                "type": "object",
+                "properties": {
+                  "class": {
+                    "type": "string",
+                    "enum": [
+                      "computer",
+                      "office",
+                      "furniture",
+                      "motor"
+                    ]
+                  },
+                  "months": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 600
+                  }
+                },
+                "required": [
+                  "class"
+                ]
+              }
+            },
+            "required": [
+              "ledger",
+              "amount"
+            ]
+          }
+        },
+        "setBy": {
+          "type": "string",
+          "enum": [
+            "user",
+            "rule",
+            "agent"
+          ]
+        },
+        "ruleId": {
+          "type": "string",
+          "pattern": "^rule_[0-9a-z]+$"
+        }
+      },
+      "required": [
+        "setBy"
+      ]
+    },
+    "companyLink": {
+      "type": "object",
+      "properties": {
+        "rows": {
+          "maxItems": 30,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^tx_[0-9a-f]{16}$"
+          }
+        },
+        "setBy": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "user",
+            "agent"
+          ]
+        }
+      },
+      "required": [
+        "rows",
+        "setBy"
+      ]
+    },
     "notes": {
       "type": "string"
     },

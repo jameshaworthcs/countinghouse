@@ -56,7 +56,7 @@ Source layout:
 | `src/shared/` | Isomorphic code: schemas (`schema.ts`), money, dates, UK rules, account-type metadata, categories, merchants, categoriser, who a payment is with when a person and what it looks like (`people.ts`), which payments an agreement schedules (`agreements.ts`), an account's terms as a reading gives them (`terms.ts`), reconciliation, what a document adds to a recorded payment (`detail.ts`), identifiers kept out of the data (`privacy.ts`), API types |
 | `src/server/` | Store, git, auth, security, migrations, enrichment, routes, app composition; `employments.ts` matches a document's employer to one of your jobs |
 | `src/server/ingest/` | Everything from bytes to committed records; `govuk.ts` reads HMRC's gov.uk pages and `payslips.ts` known payslip layouts from their text, on this machine; `pension-csv.ts` a pension or fund provider's trade histories and contribution summaries; `schedules.ts` drafts a document's schedules of payments as agreements (and student finance's as its student loan's movements) |
-| `src/server/analytics/` | Read-only computations over the store; `company-accounts.ts` is a company's own accounts on their own ("Company accounts", below); `model.ts` is pure (no store access); `sources.ts` decides which document's figure counts when several state one job's year; `taxreturn.ts` is a year's Self Assessment return box by box, worked out by `shared/taxcalc.ts` on the forms of `shared/saforms.ts`; `payslips.ts` reads payslips in full (their year to date, gaps, employer costs); `taxdocuments.ts` is Settings → Tax documents; `companies.ts` is your shares in companies; `director-loan.ts` is a director's loan's movements, worked out from the payments you mark, and its warnings; `arrangements.ts` checks what employers set up to pay into your pensions; `payroll-pensions.ts` pairs a pension's rows with the payslips whose money they are; `agreements.ts` checks an agreement's schedule against your payments; `terms.ts` is an account's terms over time and what ends soon; `queue.ts` is the To categorise page (people's payments and cash and cheques paid in, rules your decisions point to, what's left by payee, the categories the app guessed); `month.ts` is a month's figures, for the Overview's month card and the month in review's digest alike; `prices.ts` is published prices and what they say an account of investments was worth between its valuations (its holdings path, or a price index) |
+| `src/server/analytics/` | Read-only computations over the store; `company-accounts.ts` is a company's own accounts on their own ("Company accounts", below); `model.ts` is pure (no store access); `sources.ts` decides which document's figure counts when several state one job's year; `taxreturn.ts` is a year's Self Assessment return box by box, worked out by `shared/taxcalc.ts` on the forms of `shared/saforms.ts`; `payslips.ts` reads payslips in full (their year to date, gaps, employer costs); `taxdocuments.ts` is Settings → Tax documents; `companies.ts` is your shares in companies; `director-loan.ts` is a director's loan's movements, worked out from the payments you mark (or, once the company keeps books here, from its ledger), and its warnings; `ledger.ts` is a company's general ledger, worked out from its rows, your rows with it, its journals and book rules ("A company's books", below); `arrangements.ts` checks what employers set up to pay into your pensions; `payroll-pensions.ts` pairs a pension's rows with the payslips whose money they are; `agreements.ts` checks an agreement's schedule against your payments; `terms.ts` is an account's terms over time and what ends soon; `queue.ts` is the To categorise page (people's payments and cash and cheques paid in, rules your decisions point to, what's left by payee, the categories the app guessed); `month.ts` is a month's figures, for the Overview's month card and the month in review's digest alike; `prices.ts` is published prices and what they say an account of investments was worth between its valuations (its holdings path, or a price index) |
 | `src/server/agents/` | Agent jobs: the CLI runner, job kinds and prompts, the digest, the queue |
 | `src/server/records.ts` | The validated write path for agent-maintained records |
 | `src/server/audit.ts` | The audit log: who is acting (carried through async work), the request middleware, the hash-chained log, search and the chain check; `auditdiff.ts` says what a write changed, record by record |
@@ -158,7 +158,8 @@ the store's default, not by a filter in each loop (DECISIONS 2026-11-26):
   "similar payments", the import page's link candidates.
 - **Infrastructure asks by name**: `allAccounts`, `allTransactions()`, `allBalances()`,
   `allHoldings()`, `allFigures`, `allCoverageConfirmations`, `allInstitutions`, and for one company
-  `companyAccounts(id)`, `companyTransactions(id)`. ESLint allows these only in the files listed in
+  `companyAccounts(id)`, `companyTransactions(id)`, `companyJournals(id)` and `bookRules(id)` (its book
+  rules: `rules` gives your rules only). ESLint allows these only in the files listed in
   `eslint.config.js` (`SCOPE_ALLOWLIST`), each with its reason:
   - `src/server/store.ts`: defines them;
   - `src/server/enrich.ts`: tidy addresses for every row; your rows and each company's worked out
@@ -168,7 +169,10 @@ the store's default, not by a filter in each loop (DECISIONS 2026-11-26):
     for on its own side only;
   - `src/server/analytics/company-accounts.ts`: each company's accounts on their own, with a balance
     engine of their own, for their page and their group on the Accounts page
-    (`GET /api/company-accounts`).
+    (`GET /api/company-accounts`);
+  - `src/server/analytics/ledger.ts`: a company's general ledger, one company at a time, and what its
+    book rules and links make of its rows; your director's loan reads its postings to the loan once the
+    company keeps books here (below), the one way company data reaches a figure of yours.
   Ids a new account or provider must differ from are `accountIds()` and `institutionIds()`; a
   provider typed by name is the one already there (`institutionNamed`), even one only a company's
   accounts are at.
@@ -209,7 +213,9 @@ director's loan").
   (`dlm_` + the row's hex), and `BalanceEngine` reads them as the account's rows (`directorLoanRows`)
   in place of stored ones. Balances you record anchor them, so the engine's usual paths give its
   balance, gaps, staleness and chart; nothing computes its balance elsewhere and nothing is written.
-  A later source (the company's own books) will join the movements there and be matched to them.
+  Once the company keeps its books here, the movements come from its ledger instead (`loanMovements`:
+  its postings to the loan, where your marked rows, or the company rows linked to them, are posted
+  once; "A company's books", below).
   Its page (`GET /api/accounts/:id`, `directorLoan`) lists the movements with their rows and the
   warnings (s455 and the beneficial loan threshold, from `shared/uk.ts`), which Data health and the
   Overview's alerts carry too.
@@ -235,13 +241,35 @@ The company seen from its own side: its records and deadlines, when you keep its
   /api/companies/:id/filings`), which no token may use. `GET /api/companies`, the personal view of the
   companies you hold shares in, leaves `books` out (`companyView`), and no personal route (the
   summary, Data health, the bootstrap) carries a deadline: `tests/company-scope.test.ts` gives the
-  company books with filings in its company data and lists only these three GET routes as answering
+  company books with filings in its company data and lists only the company's GET routes as answering
   for the company.
 - **On the web**, a nav item (the company's name, when there is one) shows only when a company has
   books, from `/api/company-books`; `/company/:id` and `/company/:id/settings` read the company's
   routes and its accounts' group from `/api/company-accounts`. The Overview fetches
   `/api/company-alerts` itself and shows them beside its own alerts, in the same list.
 - **Agents propose** (`set_company_books`, `add_filing`; AGENTS.md §5), never over books you set.
+- **Its general ledger is worked out, never stored** (`analytics/ledger.ts`, `companyLedger`; FORMULAS.md
+  §22, "The general ledger"), from a small chart of accounts (`shared/ledger.ts`): its own accounts'
+  rows with their codings (`Transaction.books`), your rows paid for it or lent to it, the links between
+  them (`Transaction.companyLink`, on the company's row so your rows never change for it), its book
+  rules (rules.json, `set.books`) and its journals (journals.jsonl), as postings in integer pence,
+  debits positive, each source adding up to nothing, with the checks it raises. The store refuses a
+  coding, a link, a book rule or a journal that does not fit (`codingPlace`, `codingProblems`,
+  `linkUpkeep`, `journalProblems`), and keeps an index of which company rows name a row of yours, so a
+  change to your row that breaks a link takes the app's own link with it and is refused for one you
+  made. Enrichment codes by book rules and links exact matches (`bookRulePatches`, `autoLinkPatches`)
+  after it works out transfers.
+- **Its own routes serve it** (`GET /api/companies/:id/ledger`, `GET /api/companies/:id/coding`), and
+  the owner's writes (`PUT /api/companies/:id/rows/:txId/books` and `/link`, `POST
+  /api/companies/:id/links/auto`, journals and book rules), which no token may use; an agent proposes
+  (`set_books`, `link_company`, `add_journal`, `remove_journal`, `add_rule` with `books`). The company's
+  page has a Books tab for them.
+- **Your director's loan moves by its postings to the loan** once the company keeps books here
+  (`loanMovements`, DECISIONS 2026-11-26): the one thing of yours the company's data changes, by design,
+  and `tests/company-scope.test.ts` checks exactly that (nothing differs while the books say what your
+  marks say; with what only the books know, every account but the loan is the same on every day, the
+  loan differs by exactly that and the estate by exactly the loan; with the loan taken away from the
+  company, nothing differs).
 
 ## Audit log
 

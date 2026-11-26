@@ -45,6 +45,9 @@ system as built, and [DECISIONS.md](DECISIONS.md) records why it is the way it i
   an account in another currency takes one manual rate (Settings).
 - **Open Banking** read-only feeds, in place of exports.
 - **A household mode:** joint accounts and split ownership.
+- **A company's reports:** its general ledger is built (FORMULAS.md §22); its trial balance, profit
+  and loss and balance sheet by period, depreciation, apportioning prepayments and accruals, the
+  micro-entity lines from the ledger, reconciliation and locking a period are next.
 
 ## Worth revisiting
 

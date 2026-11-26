@@ -152,9 +152,11 @@ function companySides(store: Store): Map<string, Account[]> {
  *
  * Your rows and a company's are worked out apart and never linked to each other (docs/INGESTION.md,
  * "Company accounts"): your rows by your rules, categories and accounts, as they always were; a
- * company's rows get a payee and a tidy address but no category (company coding is separate, and
- * comes later), except as the legs of a transfer between two of that company's accounts. A link
- * found across the line is taken away (`crossingRows`).
+ * company's rows get a payee and a tidy address but no category (they are coded in the company's own
+ * books instead, by its book rules), except as the legs of a transfer between two of that company's
+ * accounts. A link found across the line is taken away (`crossingRows`). Then each company's books are
+ * worked out again: codings left where they do not apply go, book rules code what they match, and the
+ * app's own links between a company's rows and your loans are found again.
  */
 export async function enrich(store: Store, opts: { accountIds?: string[]; rows?: ReadonlySet<string>; dryRun?: boolean; detail?: boolean; skip?: ReadonlySet<string> } = {}): Promise<EnrichResult> {
   const scope = opts.accountIds ? new Set(opts.accountIds) : null;
@@ -334,7 +336,8 @@ export async function enrich(store: Store, opts: { accountIds?: string[]; rows?:
  * - Any other row: its tidy address, the payee its source names (or one cut from its description),
  *   and no category at all. A category, rule or counterparty it carries is taken away, whoever set
  *   it: a category is one of yours, so on a company's row it is in the wrong place (from before its
- *   account was a company's, or set by hand). Company coding is separate, and comes later.
+ *   account was a company's, or set by hand). What it means to the company is its coding in the
+ *   company's books (`books`), set apart from here.
  * A payee you set stays, and a mark of money with a company is taken away (it is for your own rows).
  */
 export function companyRowPatch(raw: Transaction, t: Transaction, accountOf: (id: string) => Account | undefined, accounts: readonly Account[]): Partial<Transaction> {

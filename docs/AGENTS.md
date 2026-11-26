@@ -213,6 +213,9 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
 
 - **Only the owner's data.** A change that names a company's own account, one of its rows or
   balances (`Account.companyId`), is refused as a problem: a proposal changes only the owner's data.
+  The exceptions are the changes to a company's books, which are about its rows by design:
+  `set_company_books`, `add_filing`, `set_books`, `link_company`, `add_journal`, `remove_journal` and
+  `add_rule` with `books`.
 - **How.** `POST /api/proposals` with a token that has the `records` scope (`npm run -s api --
   POST /proposals @proposal.json`), or, in an in-app job, `ctx.proposals.create(input, provenance)`
   from the job's `apply`, with the provenance it is given. Both are checked the same way.
@@ -248,7 +251,12 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
       { "kind": "set_earmarks", "setup": { "everyday": ["example-current", "example-card"], "setAside": ["example-saver"], "pots": [{ "id": "tax-to-pay", "name": "Tax to pay", "start": "2026-04-06", "opening": 0, "rules": [{ "id": "marking", "name": "Marking pay", "effect": "source", "text": { "value": "EXAMPLE MARKING LTD" }, "direction": "in", "portion": { "percent": 30 } }, { "id": "hmrc", "name": "Self Assessment", "effect": "use", "text": { "value": "HMRC SELF ASSESSMENT" }, "direction": "out" }] }] }, "was": null, "why": "…" },
       { "kind": "decide_earmark_flow", "pot": "tax-to-pay", "transaction": "tx_…", "parts": [{ "effect": "topped-up", "amount": 200 }], "was": null, "why": "…" },
       { "kind": "set_company_books", "company": "example-ltd", "books": { "incorporatedOn": "2024-03-15", "accountingReferenceDate": "12-31", "periods": [], "ctPeriods": [], "vat": { "registeredFrom": "2025-01-01", "scheme": "cash", "schedule": [{ "from": "2025-01-01", "stagger": "quarterly-1" }] } }, "was": null, "why": "…" },
-      { "kind": "add_filing", "company": "example-ltd", "filing": { "kind": "confirmation", "periodEnd": "2025-03-14", "filedOn": "2025-03-20" }, "why": "…" }
+      { "kind": "add_filing", "company": "example-ltd", "filing": { "kind": "confirmation", "periodEnd": "2025-03-14", "filedOn": "2025-03-20" }, "why": "…" },
+      { "kind": "set_books", "transaction": "tx_…", "books": { "ledger": "software-hosting", "vat": { "amount": -4.17, "treatment": "standard" } }, "why": "…" },
+      { "kind": "link_company", "transaction": "tx_… (the company's row)", "rows": ["tx_… (yours)"], "why": "…" },
+      { "kind": "add_journal", "company": "example-ltd", "journal": { "date": "2025-06-30", "memo": "June payroll: tax and NI taken from pay", "lines": [{ "ledger": "directors-salaries", "amount": 92.4 }, { "ledger": "paye", "amount": -92.4 }], "evidence": "Payroll summary" }, "why": "…" },
+      { "kind": "remove_journal", "journal": "jnl_…", "why": "…" },
+      { "kind": "add_rule", "rule": { "match": { "field": "description", "op": "contains", "value": "EXAMPLE HOSTING", "company": { "id": "example-ltd", "rows": "own" } }, "books": { "ledger": "software-hosting", "vat": { "treatment": "standard" } } }, "why": "…" }
     ]
   }
   ```
@@ -316,6 +324,32 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
     submission receipt, a payment confirmation). The owner's own routes for the books
     (`PUT /api/companies/:id/books`, `POST` and `DELETE /api/companies/:id/filings`) are closed to
     tokens.
+  - A coding (`set_books`, DATA_FORMAT.md transactions `books`; FORMULAS.md §22) is on a row of a
+    company's books: one of its own accounts' rows (not a leg of a transfer between them), or a row of
+    the owner's marked as paid for it. Its ledger is one of the chart's a payment can be coded to (never
+    the director's loan on a row paid for the company), its VAT signed like the row and smaller, none
+    for zero rate, exempt and outside the scope, and a reverse charge's the notional VAT on what was
+    paid; lines add up to the row; a fixed asset only on that class's cost. A coding the owner set is
+    never changed (`books: null` takes only an agent's or a rule's away); the same coding is already so.
+    A company row linked to the owner's loans is the director's loan and takes no other coding. Code
+    from the invoice or receipt (its VAT as printed), never from a guess at a rate.
+  - A link (`link_company`, transactions `companyLink`) is set on a company account's row and names the
+    owner's rows marked as a loan with that company that are the same money: opposite ways, at most 31
+    days apart, what arrived no more than what was sent and short by at most 3% of the owner's side
+    (at least £1, at most £25), one row on one side. Never over a link the owner made; `rows: null`
+    takes an agent's or the app's away. The app links exact, unique matches within 4 days by itself:
+    propose the rest (a fee taken on the way, several card payments settled as one receipt), with the
+    rows' words and amounts in the `why`.
+  - A journal (`add_journal`, journals.jsonl) is for a company whose books are kept here, dated no
+    later than today, its lines on codes of the chart (or the company's own accounts), never the books'
+    clearing codes, debits positive and credits negative, adding up to nothing; the same journal there
+    already is already so. Its `evidence` names the document (a payroll summary, a board minute).
+    Taking one away (`remove_journal`) is only for an agent's journal; the owner's is theirs.
+  - A book rule (`add_rule` with `rule.books` and `rule.match.company`) codes a company's rows: its own
+    (`rows: own`), the owner's rows paid for it (`paid-for`) or both; it sets no category, and its
+    accounts are those whose rows it reaches. It never codes a row the owner or a proposal coded, or a
+    linked one. The proposal shows the rows it codes now. Propose one for a supplier that comes again
+    and is always one thing.
   - A company added (`add_company`) is new: no company with its id or number, and no account with
     the id its account would take. Its valuation is not in the future. A book value's `why` names
     the documents its figures come from (the share certificate, the accounts, the confirmation

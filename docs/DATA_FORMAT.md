@@ -10,7 +10,7 @@ point at them with `"$schema"` so editors validate as you type.
 | | |
 |---|---|
 | Money | JSON number in **pounds** (major units), at most 2 dp: `-4.5`, `1234.56`. Integer pence internally. |
-| Sign | From your point of view. Positive increases net worth (money in, assets); negative decreases it (money out, balances owed). A credit-card purchase is negative; a card balance owed is negative. |
+| Sign | From your point of view. Positive increases net worth (money in, assets); negative decreases it (money out, balances owed). A credit-card purchase is negative; a card balance owed is negative. One exception: a company's journal lines (`journals.jsonl`) are inside its books, so debits are positive and credits negative (below). |
 | Dates | `YYYY-MM-DD` calendar dates. Timestamps are ISO 8601 with offset (`2026-09-28T21:08:17+01:00`). |
 | Ids | Accounts, institutions, categories and jobs are readable slugs (`monzo-current`). Records have prefixed content hashes assigned once at creation: `tx_`, `bal_`, `hld_`, `fig_` + 16 hex. HMRC's records: `hmrc_` + 16 hex of what the record says, and payslips: `pay_` + 16 hex of what identifies one, so one read twice is stored once. Imports: `imp_YYYYMMDD_HHMMSS_xxxx`. Documents: `doc_` + first 16 hex of the SHA-256. |
 | Unknown fields | Not part of the format. They are reported by `npm run validate`, and a record that fails validation is kept verbatim (quarantined) rather than lost. |
@@ -44,6 +44,7 @@ data/
   hmrc.jsonl           what HMRC's pages say: tax codes, payments, employments, settlements, NI years, the State Pension forecast
   payslips.jsonl       payslips in full: every line, the totals, the codes and the year to date
   terms.jsonl          each account's terms as each document gives them: its rates, its limit and a card's minimum payment
+  journals.jsonl       a company's journals: the entries in its books that are not payments (optional: no file, none)
   companies.json       { companies: [...] }      companies you hold shares in: the holding and its valuations
   agreements.json      { agreements: [...] }     agreements: an offer's, contract's or award's schedule of payments, and what its document says
   coverage.json        { confirmations: [...] }  stretches you confirmed nothing is missing from, which count as covered
@@ -151,10 +152,55 @@ depend on).
 | `ruleId` | the rule that set it |
 | `transferGroup` | shared by both legs of a transfer between your accounts |
 | `counterpartyAccountId` | the other account |
+| `books` | what the payment means to a company whose books are kept here ("Coding a payment", below): on a company account's own row, or on a row of yours marked as paid for the company (its cost to the company); never on any other |
+| `companyLink` | on a company account's row: the rows of yours marked as a loan with that company that are the same money ("Linking money with you", below) |
 | `company` | yours: money with a company of yours, `{id, as, setBy}`. `id` names a company (companies.json); `as` is `paid-for` (a cost of the company's you paid, or its refund to you), `loan` (money you lent it, or it paid you back), `pay` or `dividend` (what it paid you); `setBy` is `user`, or `agent` when a proposal you applied set it. Paid-for and loan rows move its director's loan and are not your spending or income ([FORMULAS.md §14](FORMULAS.md)); pay and dividends stay income. Only on a row of an account of yours that moves with its rows (never a company's own account, an account valued at market or a director's loan), never on a row linked as a transfer between your accounts (unlink it first; enrichment never links a marked row), never £0; pay and dividends are money in; paid-for and loan rows are in pounds and not split. Every write is checked, re-working rows out never changes it, and an account cannot change type, valuation (`balanceMode`) or side (`companyId`) while that would break a mark on its rows (refused, naming them). A mark that no longer fits anyway (a hand edit, its company taken away) counts for nothing: its row is an ordinary row of yours everywhere, and Data health lists it. On a company's own row (a hand edit) it is taken away when its rows are worked out |
 | `notes` | yours: free text, found by search, never grouped by. Added to many at once on a line of its own, never twice (`src/shared/annotations.ts`) |
 | `tags` | yours: short labels to group and filter by (up to 20, each up to 40 characters, one spelling per tag whatever the case). Tag Gift Aided donations `gift-aid` |
 | `splits` | yours: `[{amount, category, note?}]`, two or more lines adding up to `amount`, each signed like it, in spending or income categories. Spending, income and budgets count the lines ([FORMULAS.md §14](FORMULAS.md)). A transfer is never split, and correcting the amount so the lines no longer add up removes the split |
+
+**Coding a payment** (`books`): `{ledger?, vat?, covers?, asset?, lines?, setBy, ruleId?}`, the
+company's chart of accounts and what each code means being [FORMULAS.md §22](FORMULAS.md), "The
+general ledger" (`src/shared/ledger.ts`):
+
+- `ledger`: a code a payment can be coded to (`software-hosting`, `turnover`,
+  `fixed-assets:computer:cost`…); never one of the company's own accounts (money between them is a
+  transfer, linked as one), and on a row of yours paid for the company never `directors-loan` (that
+  row moves the loan already).
+- `vat`: `{amount, treatment}`. `treatment` is `standard`, `reduced`, `zero`, `exempt`, `outside` or
+  `reverse-charge`; `amount` is the VAT in the row's amount, signed like it and smaller than it, `0` for
+  zero rate, exempt and outside the scope. For a reverse charge it is the notional VAT on an amount that
+  does not include it (a service bought from abroad), posted both ways.
+- `covers`: `{from, to}`, the period a cost or income is for (a year's subscription), not ending
+  before it starts.
+- `asset`: `{class, months?}` on a fixed asset's cost only, of that code's class (`computer`,
+  `office`, `furniture`, `motor`), with its life in whole months when known.
+- `lines`: two or more `{ledger, amount, vat?, covers?, asset?}` adding up to the row's amount (an HMRC
+  repayment that is part VAT, part interest), in place of `ledger` and the rest beside it.
+- `setBy`: `user` (you: nothing else changes it), `rule` (a book rule, `ruleId`), `agent` (a proposal
+  you applied).
+
+Every write is checked: a coding only where it applies (a company account's row that is not a leg of
+a transfer between two of its own accounts, which posts by itself, or a row of yours paid for the
+company with a mark that counts), and only one that fits. Re-working rows out takes away one left on a
+row it does not apply to (a hand edit, a mark taken away), whoever set it, and never changes yours;
+one that applies but does not fit counts for nothing and is listed on the company's Books tab. Changing
+a row's mark away from paid for that company takes its coding away in the same write.
+
+**Linking money with you** (`companyLink`): `{rows, setBy}` on a company account's row, naming the
+rows of yours marked as a loan with that company that are the same money (you lent it; it paid you
+back). `setBy` is `auto` (the app, worked out again whenever rows are: an exact, unique match within 4
+days), `user` (you; no rows says it is linked to none, so the app never links it) or `agent` (a
+proposal you applied). One company row naming several rows of yours, or several naming one, is one
+link; several and several are not. It fits when the two sides go opposite ways, are at most 31 days
+apart, and what arrived is no more than what was sent, short by at most 3% of your side (at least £1,
+at most £25): a fee taken on the way. A linked company row is coded to the director's loan or not at
+all. The store refuses a link that does not fit; a change to a row that breaks one (a mark taken away,
+an amount corrected, a row removed) takes an automatic link with it and is refused for one you or a
+proposal made. The link is on the company's row, not yours, so your rows never change because a
+company's data is here (DECISIONS 2026-11-26).
+
+Adding `books` and `companyLink` needed no format change: each is new and optional.
 
 **Provenance**: `source{importId, documentId, row}`, `createdAt`, `updatedAt`, and:
 
@@ -428,6 +474,13 @@ remove a filing with `POST /api/companies/:id/filings` and `DELETE
 (`Store.updateCompany`), so two at once never lose one another. The store refuses a write that adds a
 problem to the books; problems already there (a hand edit) do not block one, so they can be put right
 a step at a time, and they are listed on the company's page.
+
+Its **general ledger** is not stored: it is worked out from its own accounts' rows and their codings
+(transactions, `books`), the rows of yours paid for it or lent to it, the links between them
+(`companyLink`), its book rules (rules.json) and its journals (journals.jsonl), and served from
+`GET /api/companies/:id/ledger` and `GET /api/companies/:id/coding` ([FORMULAS.md §22](FORMULAS.md),
+"The general ledger"). Once the company keeps books here, your director's loan with it moves by the
+ledger's postings to the loan (§22, "The director's loan from the books").
 
 ## agreements.json
 
@@ -720,11 +773,45 @@ lives in the work area (`<work>/proposals/`), never here.
   - `add_filing {company, filing}`: one filing of a company whose books are kept here, without its
     id (given as the store gives it) and `addedBy: "agent"`; never a second for the same kind and
     period's end.
+  - `set_books {transaction, books | null}`: code a row in a company's books (transactions, `books`,
+    without `setBy`), or take an agent's coding away (`null`); applied, it is `setBy: "agent"`, and a
+    coding you set is never changed.
+  - `link_company {transaction, rows | null}`: on a company account's row, the rows of yours that are
+    the same money (transactions, `companyLink`), or no link (`null`); applied, `setBy: "agent"`, never
+    over a link you made.
+  - `add_journal {company, journal}`: a journal in a company's books (journals.jsonl, without its id,
+    which is the proposal's and the change's, and `createdBy: "agent"`).
+  - `remove_journal {journal}`: a journal an agent's proposal wrote, taken away (never one of yours);
+    `before.journals` keeps it.
+  - `add_rule` with `rule: {name?, match, books}` (and `match.company`) in place of `category`: a book
+    rule (rules.json), coding the company's rows it matches when applied.
 - `applied`: the keys of the changes you applied. `dismissedReason`: what you said, if anything.
-- `before`: `{transactions, accounts, balances?, terms?, categories?, rules?, earmarks?, companies?}`, the rows, accounts,
-  balances, terms, categories, rules and companies the applied changes touched (a rule removed, a
-  category changed, a company's books set or a filing added), as they were before: the audit trail, and a way back. (A rule or category a proposal
+- `before`: `{transactions, accounts, balances?, terms?, categories?, rules?, earmarks?, companies?, journals?}`, the rows, accounts,
+  balances, terms, categories, rules, companies and journals the applied changes touched (a rule removed, a
+  category changed, a company's books set or a filing added, a journal taken away), as they were before: the audit trail, and a way back. (A rule or category a proposal
   added has no before: the change itself says it.)
+
+## journals.jsonl
+
+A company's journals: the entries in its books that are not payments (shares issued at incorporation,
+a month's pay and its PAYE, a dividend declared), one per line. Optional: no file, none. Each is
+`{id, companyId, date, memo, lines, evidence?, createdBy, createdAt, updatedAt}`:
+
+- `id`: `jnl_` + 12 hex, set once.
+- `companyId`: a company in companies.json whose books are kept here.
+- `lines`: two or more `{ledger, amount, vat?, covers?, asset?}`. **Inside the company's books, debits
+  are positive and credits negative**, not signed from your point of view (DECISIONS 2026-11-26):
+  a journal is written as an accountant writes one. They add up to nothing, none is £0, each `ledger`
+  is a code of the chart or one of the company's own accounts (`bank:<accountId>`, an opening balance),
+  never the ledger's own clearing codes (`suspense`, `bank-not-imported`). `vat` is `{treatment}`, a tag
+  for the VAT return; `covers` and `asset` as on a coding.
+- `memo`: what it is; `evidence`: what shows it (a payroll summary, a board minute).
+- `createdBy`: `owner`, or `agent` when a proposal you applied wrote it.
+
+You write, change and take away journals on the company's Books tab
+(`POST /api/companies/:id/journals`, `PUT` and `DELETE /api/companies/:id/journals/:jid`); no token may.
+The store refuses one that does not fit; one a hand edit left that does not fit is reported and posts
+nothing. Adding the file needed no format change.
 
 ## goals.json
 
@@ -764,9 +851,18 @@ A monthly spending budget, yours to set (Spending → Budgets). How it is measur
   - `contribution` / `employer-contribution` / `tax-relief` / `government-bonus` feed the ISA and
     pension allowances.
 - **Rule**:
-  - `match`: `{field: description|payee, op: contains|equals|startsWith|endsWith|regex, value, caseSensitive, accountIds?, amountMin?, amountMax?, direction?}`.
-  - `set`: `{category?, payee?, tags?, counterpartyAccountId?}`.
+  - `match`: `{field: description|payee, op: contains|equals|startsWith|endsWith|regex, value, caseSensitive, accountIds?, amountMin?, amountMax?, direction?, company?}`.
+  - `set`: `{category?, payee?, tags?, counterpartyAccountId?, books?}`.
   - `priority` (lower runs first), `enabled`.
+  - **A book rule** codes rows in a company's books: `match.company` is `{id, rows}`, the company and
+    which rows it reaches (`own`: its own accounts' rows; `paid-for`: your rows paid for it; `both`), and
+    `set.books` is `{ledger, vat?: {treatment}, asset?, coversMonths?}` (its VAT amount worked out from
+    the rate on each row's day; `coversMonths`: the months a payment covers from its day). It sets nothing
+    else of yours, and its `accountIds` are accounts whose rows it reaches. A rule without them never
+    touches a company's rows, as before; a book rule never touches your rows but those paid for its
+    company, and never a row you or a proposal coded. Book rules live in `rules.json` beside yours but
+    are company data: `GET /api/rules` and Settings → Rules list yours only, and the company's Books tab
+    keeps its own (`/api/companies/:id/book-rules`).
 - **CSV profile**: `headerSignature` (normalised header names), column mapping, `dateOrder`,
   `timeZone?` (`"UTC"`: the date column's date-times are UTC, read as the UK day and time),
   `amountSign`, `filter`, `splitBy`, `negativeWhen`, `positiveWhen`, `skipDescriptions`. Same shape as the built-in bank profiles in

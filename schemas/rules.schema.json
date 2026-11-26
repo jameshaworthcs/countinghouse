@@ -81,6 +81,30 @@
                   "in",
                   "out"
                 ]
+              },
+              "company": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                    "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+                  },
+                  "rows": {
+                    "default": "own",
+                    "type": "string",
+                    "enum": [
+                      "own",
+                      "paid-for",
+                      "both"
+                    ]
+                  }
+                },
+                "required": [
+                  "id"
+                ]
               }
             },
             "required": [
@@ -108,6 +132,66 @@
                 "maxLength": 64,
                 "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
                 "description": "Stable, human-readable identifier (lowercase-hyphenated)"
+              },
+              "books": {
+                "type": "object",
+                "properties": {
+                  "ledger": {
+                    "type": "string",
+                    "maxLength": 100,
+                    "pattern": "^[a-z][a-z0-9-]*(?::[a-z0-9-]+){0,2}$",
+                    "description": "A ledger code of the chart (src/shared/ledger.ts)"
+                  },
+                  "vat": {
+                    "type": "object",
+                    "properties": {
+                      "treatment": {
+                        "type": "string",
+                        "enum": [
+                          "standard",
+                          "reduced",
+                          "zero",
+                          "exempt",
+                          "outside",
+                          "reverse-charge"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "treatment"
+                    ]
+                  },
+                  "asset": {
+                    "type": "object",
+                    "properties": {
+                      "class": {
+                        "type": "string",
+                        "enum": [
+                          "computer",
+                          "office",
+                          "furniture",
+                          "motor"
+                        ]
+                      },
+                      "months": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 600
+                      }
+                    },
+                    "required": [
+                      "class"
+                    ]
+                  },
+                  "coversMonths": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 120
+                  }
+                },
+                "required": [
+                  "ledger"
+                ]
               }
             }
           },

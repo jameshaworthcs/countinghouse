@@ -3074,3 +3074,55 @@ alerts from their own route and shows them beside its alerts rather than adding 
   made up. VAT follows reg 25(1) to the letter for a period not ending on a month's end. Each rule is
   a dated row looked up by the period's own date. Writes build on the company as it is under the lock
   (`updateCompany`), and only problems a write adds are refused.
+
+## 2026-11-26: A company's general ledger is worked out from records, and is the loan's source once books are kept
+
+A company whose books are kept here now has a general ledger: what each money movement means to it,
+as double-entry postings (FORMULAS.md §22, "The general ledger"). This is the first half of its books;
+the reports (trial balance, profit and loss, balance sheet by period, depreciation, apportioning
+prepayments and accruals, reconciliation and locking) come next and are built on these postings.
+
+- **Postings are worked out, never stored**, as a director's loan's movements are: from the company's
+  own rows and their codings (`Transaction.books`), the owner's rows paid for it or lent to it, the
+  links between them, its book rules and its journals. A coding changed changes the postings with it;
+  there is no second record to keep in step. Each carries what the reports will need (its date, ledger,
+  pence, VAT treatment and side, the period it covers, the fixed asset it is, its source).
+- **Journals are debits positive, credits negative**, inside the company's books: the one exception to
+  "signed from the owner's point of view" (DATA_FORMAT.md, Conventions). A journal has no owner's side
+  to sign from (a dividend declared to the director's loan is a debit to dividends and a credit to the
+  loan: which line would be "the owner's"?); it is written as an accountant writes one, and its lines are
+  its postings as written. A coding on a row stays signed like its row, as every row is, and the ledger
+  turns it into postings.
+- **The ledger is the director's loan's source once books are kept** (`loanMovements`). The books know
+  what the marks cannot: a dividend or pay credited to the loan, the company paying something of the
+  owner's, the figure the filed accounts give. Marks alone would disagree with the accounts, and adding
+  the books' postings to the marks would count the same money twice. So with books kept, the loan's
+  movements are the ledger's postings to it; a loan of the owner's linked to the company's row is posted
+  once, through that row, on its day. Without books nothing changes. The company-scope test now encodes
+  exactly this one difference: nothing differs while the books say what the marks say; with what only
+  the books know, every other account is the same on every day, the loan differs by exactly that, and
+  the estate by exactly the loan; with the loan taken from the company, nothing differs at all.
+- **A link lives on the company's row** (`companyLink: {rows, setBy}`), naming the owner's rows, not
+  on the owner's row as first planned. The owner's rows then never change because a company's data is
+  here (auto links included), so the property above holds exactly, not "except the link field"; and the
+  common case of several card payments settled as one receipt is one company row naming several. An
+  empty link of the owner's says "not linked", so the app never links it again.
+- **A fee the two sides of a link differ by is the company's bank charge**, and the loan moves by the
+  owner's own side, as it did from the marks: what was sent less what arrived, at most 3% of the owner's
+  side, at least £1 and at most £25 (a card processor's or a bank's fee), and never more arriving than
+  was sent. Automatic links are exact to the penny, unique and within 4 days, as transfer pairing is
+  careful; anything looser is the owner's or an agent's to propose.
+- **Book rules live in rules.json**, beside the owner's, reusing the matcher, but are company data:
+  `Store.rules` gives the owner's rules only (so the categoriser, Settings → Rules and
+  `GET /api/rules` never see a book rule), `bookRules` is on ESLint's list, and a book rule is written
+  only through `setBookRules`. A rule without `set.books` still never touches a company's row. A rule
+  for rows the owner paid for the company, and those rows' codings, are about the owner's rows: the
+  company-scope test keeps them in the owner's data, as it keeps the marks.
+- **A coding is one ledger or a split**, not both: `ledger` is optional when `lines` are given (the
+  brief had `ledger` always), so a split cannot disagree with a ledger beside it.
+- **VAT rates are a dated table** in `uk.ts` (`VAT_RATES`), as every UK rule is; the coding editor's
+  helpers fill amounts in, and the coding keeps what the invoice says.
+- Considered: storing postings (a second record of every payment, kept in step on every edit, as the
+  director's loan's decision rejected); signing journals from the owner's side (ambiguous, above); the
+  link on the owner's row (it would make the owner's rows depend on company data); a separate file for
+  book rules (the brief asked for rules.json and the matcher; scoping the accessors keeps them apart).

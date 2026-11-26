@@ -562,6 +562,10 @@ projections it earns the rate you set for it (your `interest.rate` record scoped
 to director's loans, never a global or provider one; else the account's rate), else nothing (a
 labelled fallback).
 
+**Once the company keeps its books here**, the movements are its ledger's postings to the director's
+loan instead (§22, "The director's loan from the books"): your marked rows (or the company's own rows
+linked to them), and what only the books know (a journal on the loan, a company row coded to it).
+
 **Nothing counts twice.** The marked row stays in its own account's balance and counts in none of your
 spending or income (§14), and the loan gains its movement: the row and its movement sum to nothing, as
 the two legs of a transfer do. With no anchor on the loan, every other account's balance on every day
@@ -1918,11 +1922,12 @@ The app can't know your intentions: a transfer it counts as put back might be sa
 Each payment says why it counts as it does (your decision, a rule, a transfer with a set-aside
 account, or a suggestion to check).
 
-## 22. Company books (`shared/company-books.ts`, `shared/uk.ts`)
+## 22. Company books (`shared/company-books.ts`, `shared/ledger.ts`, `shared/uk.ts`)
 
-The records of a company you run, kept here (DATA_FORMAT.md, companies.json `books`). They are the
-company's: nothing here joins a personal figure, and only the company's own routes serve it
-(DECISIONS 2026-11-26). The rules and their sources are in UK_RULES.md, "Companies".
+The records of a company you run, kept here (DATA_FORMAT.md, companies.json `books`, journals.jsonl):
+its deadlines, and its general ledger. They are the company's: nothing here joins a personal figure but
+your director's loan's movements once its books are kept (below), and only the company's own routes
+serve it (DECISIONS 2026-11-26). The rules and their sources are in UK_RULES.md, "Companies".
 
 ### Deadlines
 
@@ -2033,3 +2038,142 @@ holiday, confirmation statements made up early (and filed within their review pe
 anchored, dated rows; and as properties over generated books and filings, that every deadline is due after its
 period ends, that what is done does not depend on the filings' order, and that periods follow on
 without gaps within the Acts' limits.
+
+### The general ledger (`shared/ledger.ts`, `analytics/ledger.ts`)
+
+What each money movement means to the company, as double-entry postings worked out from records, never
+stored: `companyLedger(source, companyId)` gives every posting `{id, date, ledger, amount, source, vat?,
+covers?, asset?, memo}` and the ledger's checks. Amounts are **integer pence, debits positive, credits
+negative**, inside the company's books (not signed from your point of view); the postings of each
+source add up to nothing. Pure: the same records give the same postings, in the same order, with the
+same ids (`<source kind>:<source id>:<n>`). Served from `GET /api/companies/:id/ledger?from=&to=` (the
+postings in the range, what they add up to by ledger, and every check) and
+`GET /api/companies/:id/coding` (the rows to code, the links, journals and book rules).
+
+**The chart** (`LEDGER_CODES`). A small, conventional chart for a UK micro company: each code has a
+kind (asset, liability, equity, income, expense), the line of the micro-entity accounts it is shown on
+(Small Companies and Groups (Accounts and Directors' Report) Regulations 2008, SI 2008/409, Sch 1 Part
+1 Section C, the formats inserted by SI 2013/3008; FRS 105; UK_RULES.md, "The micro-entity formats"),
+and how Corporation Tax treats it:
+
+| Codes | Kind | Balance sheet line (debit / credit) or profit and loss line | Corporation Tax |
+|---|---|---|---|
+| `share-capital-unpaid` | asset | A / A | none |
+| `fixed-assets:<class>:cost` (computer, office, furniture, motor) | asset | B / B | capital |
+| `fixed-assets:<class>:depreciation` | asset | B / B | none |
+| `debtors:trade`, `bank:<account>`, `vat`, `suspense`, `bank-not-imported` | asset (VAT: liability) | C / E | none |
+| `prepayments`, `accrued-income` | asset | D / D | none |
+| `card:<account>`, `creditors:trade`, `paye`, `corporation-tax`, `directors-loan` | liability | C / E | none |
+| `loans:<account>` | liability | C / H | none |
+| `accruals`, `deferred-income` | liability | D / J | none |
+| `share-capital`, `retained-earnings`, `dividends` | equity | K / K | none |
+| `turnover` | income | A turnover | trading income |
+| `interest-receivable` | income | B other income | non-trading income |
+| `cost-of-sales` | expense | C raw materials and consumables | allowable |
+| `directors-salaries`, `employer-ni`, `staff-pensions` | expense | D staff costs | allowable |
+| `depreciation` | expense | E depreciation | disallowable |
+| `software-hosting`, `bank-charges`, `interest-payable`, `professional-fees`, `companies-house-fees`, `registered-office`, `rent`, `telephone-internet`, `travel`, `small-equipment`, `advertising`, `insurance`, `office-costs`, `general-expenses` | expense | F other charges | allowable |
+| `formation-costs`, `entertainment` | expense | F other charges | disallowable |
+| `corporation-tax-charge` | expense | G tax | tax |
+
+A balance sheet code's line depends on its balance's sign where it can go either way: a bank account
+overdrawn is a creditor (E), the director's loan a debtor (C) when you owe the company. F and G of the
+balance sheet are totals, I (provisions) has no code yet. Each of the company's own accounts posts to a
+ledger of its own (`accountLedger`): a card to `card:<id>`, a loan account to `loans:<id>`, any other
+to `bank:<id>`. A payment can be coded only to the codes marked codable; `suspense` and
+`bank-not-imported` are the ledger's own clearing codes, never written by you; depreciation,
+prepayments, accruals, retained earnings and the tax charge are written in journals (and by the later
+slices that work them out).
+
+**Coding a payment** (`books`, DATA_FORMAT.md; `codingProblems`, `codingPlace`). A coding is on a
+company account's row (not a leg of a transfer between two of the company's own accounts), or on a row
+of yours paid for the company with a mark that counts. Its lines (`codingLines`: its ledger as one line
+of the whole amount, or its split) each have a gross amount *g* signed like the row, and VAT *v* (signed
+like *g*, |*v*| < |*g*|; *v* = 0 for zero rate, exempt and outside the scope; for a reverse charge,
+|*v*| ≤ |*g*| is the notional VAT on an amount that does not include it). The VAT helpers: the VAT in a
+VAT-inclusive amount is *g* × *r* ÷ (1 + *r*) to the penny, half a penny away from nothing
+(`vatInGross`); a reverse charge's is *g* × *r* (`reverseChargeVat`), *r* the rate on the row's day
+(`VAT_RATES`, uk.ts).
+
+**Postings, source by source** (each balances):
+
+| Source (`source.kind`) | Postings |
+|---|---|
+| A company account's row *t* (`row`) | *t* to its account's own ledger; then, linked to loans of yours: −*t* to `directors-loan`; coded: for each line, −(*g* − *v*) to the line's ledger and −*v* to `vat` (a reverse charge: −*g* to the line's ledger, +*v* to `vat` as output VAT and −*v* to `vat` as input VAT, so it nets to nothing); uncoded, or coded where it does not fit: −*t* to `suspense` |
+| The two legs of a transfer between the company's own accounts (`transfer`, the group's id) | each leg's amount to its own account's ledger (bank −250, card +250); no coding. A leg whose other leg is not there posts as a row, to `suspense` |
+| A row of yours *m* paid for the company (`personal`) | *m* to `directors-loan` (a cost you paid, *m* < 0, is a credit: the company owes you more), and its coding's lines as a company row's would be (uncoded: −*m* to `suspense`) |
+| A row of yours *m* lent to the company or repaid by it, not linked (`personal`) | *m* to `directors-loan`, −*m* to `bank-not-imported` (the company's bank side is not in its imported accounts) |
+| A row of yours lent or repaid, linked (`link`, its row of yours) | nothing of its own (its company rows post it), but the fee *d* its two sides differ by: +*d* to `bank-charges`, −*d* to `directors-loan`, on the latest day of the link |
+| A journal (`journal`, with its `line`) | its lines as written |
+
+So a sale of £1,200 with £200 VAT is bank +120000, turnover −100000, VAT −20000; a laptop of £1,440
+with £240 VAT capitalised is fixed assets +120000, VAT +24000, bank −144000; a £24 domain you paid for
+the company with £4 VAT is software +2000, VAT +400, director's loan −2400.
+
+Each posting carries what the later reports need: its VAT (`{treatment, side, part}`: input when
+reclaimed, output when charged, by the line's ledger being income or not; the net amount or the tax),
+the period a cost covers (`covers`) and the fixed asset it is (`asset`).
+
+**Links** (`companyLink`, `linkGroupProblem`, `companyLinkProblem`). A company row naming rows of yours
+lent to it or repaid by it, and those rows, are one link group (`linkGroups`: rows naming a row of
+yours in common are one group). A group fits when one side has one row; each row of yours is a loan
+with that company whose mark counts and every company row is that company's, not a transfer leg, coded
+to the director's loan or not at all; the two sides go opposite ways, at most 31 days apart
+(`LINK_DAYS`); and the fee *d* = −(Σ yours + Σ the company's), in pence, is 0 ≤ *d* ≤ min(£25, max(£1,
+3% of |Σ yours|)) (`linkTolerance`): what was sent less what arrived, a fee taken on the way (a card
+processor's on money you lent, a bank's on money it repaid), which the company bears as a bank charge, so
+your loan moves by your own side. One that does not fit counts for nothing: its rows post as not
+linked, and it is a check.
+
+The app links by itself (`autoLinks`, enrichment) a row of yours marked as a loan and a company row the
+same amount the other way, to the penny, at most 4 days apart (`AUTO_LINK_DAYS`), neither linked by you
+or a proposal, the company row coded to the director's loan or not at all, where each is the other's
+only such row. It works these out again whenever rows are worked out (`setBy: auto`); yours and an
+agent's stay, and an empty link of yours ("not linked") stops it. The Books tab suggests the company
+rows within 10 days (`DOUBLE_COUNT_DAYS`) and the fee tolerance for each loan not linked.
+
+**Book rules** (`bookRulePatches`, `ruleCoding`). A company's enabled book rules, by priority then age,
+reach its own rows, the rows of yours paid for it, or both; each row in reach that no one coded by hand
+or by proposal, not linked and not a transfer leg, takes the coding of the first rule whose words match
+it (the matcher of your rules) and whose coding fits it: its ledger; its VAT amount from the treatment
+on the row's day (the VAT in it at the standard or reduced rate, a reverse charge's notional VAT, £0
+otherwise); its asset; and, with `coversMonths` *n*, `covers` from the row's day to the last day of *n*
+months beginning with it. A row a rule coded that none matches now loses its coding. Applied when a rule
+is made, changed or removed, and whenever rows are worked out.
+
+**Checks** (`LedgerCheck`), across the whole ledger: a row not coded (posted to suspense); a coding
+that does not fit; a loan of yours with no company row (posted to the bank not imported); a transfer leg
+whose other leg is not there; **maybe the same money twice**: a loan of yours not linked and a company
+row coded to the director's loan not linked, the same amount the other way within 10 days (both would
+move the loan); a link or a journal that does not fit; VAT on a posting before the company registered
+for VAT (or after it deregistered); and a source whose postings do not add up, which by construction
+never happens (it is there to say so if it did).
+
+### The director's loan from the books (`director-loan.ts`, `loanMovements`)
+
+Without books kept here, a director's loan's movements are your marked rows (§9). Once its company
+keeps books here (`Company.books`), they are its ledger's postings to `directors-loan`
+(`ledgerDirectorLoanMovements`), added up by source and negated to your side: a credit in the company's
+books (it owes you more) is the loan you hold growing. A row of yours keeps its mark's id and kind; a
+company row linked to loans of yours is "Lent" or "Paid back"; one coded to the loan alone is "Into"
+or "Out of the company's account"; a journal's lines on it are a "Journal"; a link's fee is "Fee taken
+on the way". The balance engine reads them as before, and balances you record still anchor them.
+
+So with nothing but your marks and links (every loan of yours linked to company rows or not linked,
+every row paid for the company coded or not), the loan is the same as from your marks alone, on every
+day outside a link's span (a linked loan moves on its company row's day, the day the money arrived in or
+left the company's account), and its total the same; what only the books know moves it besides: a
+journal's lines on the loan (a dividend declared and credited to it, pay owed to you) and a company row
+coded to it (the company paying something of yours). Your other accounts, figures and pages never change
+because the company's data is here: the loan is the one way it reaches you, and
+`tests/company-scope.test.ts` checks exactly that.
+
+**Tested** (`tests/ledger.test.ts`, `tests/company-ledger-api.test.ts`): the chart's lines and
+treatments; VAT in a gross amount and on a reverse charge; coding, journal and link validation (the fee
+tolerance, one to many and many to one, signs, the span); every source's postings with their signs; the
+director's loan from the books against the marks; the checks; book rules' scope, order and VAT; the
+store's refusals on every write path; automatic links made, kept and dropped; proposals; and as
+properties over generated books (links exact, with a fee, split one way or the other, or none; rows paid
+for the company coded or not; the company's rows coded or not; transfers; journals), that every source's
+postings and the whole ledger add up to nothing, and that the director's loan from the books is the loan
+from your marks plus what only the books know, on every day outside a link's span.
