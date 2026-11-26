@@ -3012,8 +3012,11 @@ part of their estate.
   every other account is the same with or without the marks, and the estate differs by the loan's
   balance alone. Against the same row unmarked (spending), the estate is higher by what the company
   now owes: that is the point, not a leak. The property test checks exactly this.
-- **Its own net-worth group**, "Director's loan", appended after the existing groups so no chart's
-  colours move; illiquid; a balance below nothing is a liability by its sign, as for any account.
+- **In "Property & other"**, beside the owner's shares in the company, with its own type label
+  ("Director's loan"); illiquid; a balance below nothing is a liability by its sign, as for any
+  account. A group of its own was tried first: appended last so no colour moved, it took the eighth
+  series colour, which is red and the charts' catch-all, and read as a warning or a debt on the
+  Accounts page.
 - **The s455 rate follows the dividend upper rate of the year lent** (Finance Act 2016 s50), read
   from the year's dividend rates in `uk.ts` rather than a second table of its own: 33.75% for
   2022/23 to 2025/26, 35.75% from 6 April 2026, 32.5% before, 25% before 6 April 2016. The

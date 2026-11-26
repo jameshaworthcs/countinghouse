@@ -556,8 +556,8 @@ loan figure in the company's filed accounts) as its anchors, by the ledger rules
 balance(D) = anchor + Σ m in (anchor, D]; before its first anchor, rolled back from it; with none,
 Σ m ≤ D, flagged estimated. So its staleness (yearly: 400 days), gaps, the days the estate is known
 on, incomplete stretches and its chart come from the engine as for any account. A director's loan no
-company names has no movements. Positive, it is an asset in its own group ("Director's loan",
-illiquid); negative (you owe the company) a liability, as any balance's sign decides. In
+company names has no movements. Positive, it is an asset in "Property & other" (beside your
+shares in the company; illiquid); negative (you owe the company) a liability, as any balance's sign decides. In
 projections it earns the rate you set for it (your `interest.rate` record scoped to this account or
 to director's loans, never a global or provider one; else the account's rate), else nothing (a
 labelled fallback).

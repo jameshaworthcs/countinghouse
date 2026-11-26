@@ -92,8 +92,8 @@ in the estate, a link carrying on across the line, and a record of yours that na
 account without it is yours, as every account was.
 
 **A director's loan account** (`type: "director_loan"`) is yours: what a company of yours owes you
-(negative: what you owe it), in your estate by default, in its own net-worth group ("Director's
-loan"), illiquid. A company names it (`Company.directorLoanAccountId`, companies.json), never
+(negative: what you owe it), in your estate by default, in the "Property & other" net-worth group
+beside your shares in the company (its own type label, "Director's loan"), illiquid. A company names it (`Company.directorLoanAccountId`, companies.json), never
 `companyId`, which would make it the company's. It has no rows of its own: its movements are the
 payments of yours marked as paid for that company or as a loan with it (`company`, transactions,
 below), each the other way round, worked out when needed and never written ([FORMULAS.md §9](FORMULAS.md),

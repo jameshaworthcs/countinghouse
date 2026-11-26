@@ -3,11 +3,8 @@
 
 import type { Account, AccountType } from './schema';
 
-/**
- * Net-worth groups, in fixed chart order (this order is the categorical colour order). A director's
- * loan came last, after the rest were in use, so no group's colour moved.
- */
-export const WRAPPER_GROUPS = ['cash', 'isa', 'lisa', 'investments', 'pensions', 'property', 'liabilities', 'director_loan'] as const;
+/** Net-worth groups, in fixed chart order (this order is the categorical colour order). */
+export const WRAPPER_GROUPS = ['cash', 'isa', 'lisa', 'investments', 'pensions', 'property', 'liabilities'] as const;
 export type WrapperGroup = (typeof WRAPPER_GROUPS)[number];
 
 export const WRAPPER_GROUP_LABELS: Record<WrapperGroup, string> = {
@@ -18,7 +15,6 @@ export const WRAPPER_GROUP_LABELS: Record<WrapperGroup, string> = {
   pensions: 'Pensions',
   property: 'Property & other',
   liabilities: 'Liabilities',
-  director_loan: 'Director’s loan',
 };
 
 /** Access groups: when could you actually spend it? */
@@ -352,7 +348,8 @@ export const ACCOUNT_TYPE_META: Record<AccountType, AccountTypeMeta> = {
     cadence: 'yearly',
     label: 'Director’s loan',
     shortLabel: 'Director’s loan',
-    group: 'director_loan',
+    // Beside your shares in the company, in "Property & other": not a group (and a chart colour) of its own.
+    group: 'property',
     access: 'illiquid',
     liability: false,
     balanceMode: 'ledger',
