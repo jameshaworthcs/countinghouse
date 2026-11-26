@@ -3022,3 +3022,15 @@ part of their estate.
 - **Refunds:** a paid-for row of money in is a refund of a cost the owner paid for the company, and
   shrinks the loan by its amount; every marked movement is the row's amount negated, so the signs
   never need a case of their own.
+- **One test of whether a mark counts** (`markCounts`), asked by the store, every figure and the
+  loan's movements alike, so they can never disagree. A mark that no longer fits (a hand edit, a
+  company taken away) counts for nothing and Data health lists it: otherwise a mark on an account now
+  valued at market made value from nothing, and one naming a company that is gone took money out of
+  every figure. An account cannot change type, valuation or side while that would break a mark on its
+  rows (refused, as a side change is while records name the account). Automatic linking still skips
+  any marked row, counting or not: linking it would make its mark not fit, so the owner decides.
+- **The s455 warning says each part's rate** by when it was borrowed (the engine's balance on each day
+  the loan moved; repayments clear the oldest borrowing first), since the rate depends on the tax year
+  of the loan, not of the warning (reviewed 2026-11-26 with a tax fact-check, which also added the
+  close company condition, s458's claim timing, s464ZA's exception for repayments taxed as income,
+  ITTOIA 2005 s415 on a loan written off, and Class 1A on the benefit).

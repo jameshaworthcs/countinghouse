@@ -542,7 +542,8 @@ its own page (`analytics/company-accounts.ts`).
 yours owes you, on an account of yours the company names (`Company.directorLoanAccountId`). It is a
 ledger account whose rows are worked out, never stored (`directorLoanMovements`): for each row of
 yours marked as money with that company (`company.id`) as paid for it or a loan (`as` ∈ {`paid-for`,
-`loan`}), in pounds and not linked as a transfer, one movement
+`loan`}) whose mark counts (§14, "Money with your company": the one test every figure uses), one
+movement
 
 - on the row's own date, with id `dlm_` + the row's own hex (stable: the account page lists each and
   links to its row);
@@ -557,8 +558,9 @@ balance(D) = anchor + Σ m in (anchor, D]; before its first anchor, rolled back 
 on, incomplete stretches and its chart come from the engine as for any account. A director's loan no
 company names has no movements. Positive, it is an asset in its own group ("Director's loan",
 illiquid); negative (you owe the company) a liability, as any balance's sign decides. In
-projections it earns the rate you set on it (your `interest.rate` for it, or the account's rate),
-else nothing (a labelled fallback).
+projections it earns the rate you set for it (your `interest.rate` record scoped to this account or
+to director's loans, never a global or provider one; else the account's rate), else nothing (a
+labelled fallback).
 
 **Nothing counts twice.** The marked row stays in its own account's balance and counts in none of your
 spending or income (§14), and the loan gains its movement: the row and its movement sum to nothing, as
@@ -573,13 +575,21 @@ add up to the next one.
 UK_RULES.md "Companies"), on the account's balance today and the most you owed the company on any day
 of this tax year so far (the engine's balance each day from the tax year's start):
 
-- balance < 0 (you owe the company): its Corporation Tax under CTA 2010 s455 on what is still owed
-  9 months and a day after the end of its accounting period, at the dividend upper rate of the tax
-  year the money was lent (`s455Rate`: 25% before 6 April 2016), unless repaid by then (s458), with
-  repaying and borrowing again not counting as repaid (s464ZA). The company's year end is not
-  known here, so no date is worked out;
-- most owed > the beneficial loan threshold for the tax year (`beneficialLoanThreshold`: £10,000
-  from 2014/15): a taxable benefit unless you paid interest at the official rate (ITEPA 2003 s180).
+- balance < 0 (you owe the company): if it is a close company and you are a participator, its
+  Corporation Tax under CTA 2010 s455 on what is still owed 9 months and a day after the end of the
+  accounting period it was borrowed in, at the dividend upper rate of the tax year it was borrowed
+  (`s455Rate`: 25% before 6 April 2016). What you owe is split by when you borrowed it (`owedLots`):
+  on each day the loan moved (a movement's or a recorded balance's) and today, the engine's balance;
+  a day it goes further below nothing is borrowing that day, a day it comes back up pays off the
+  oldest borrowing first, and what was owed before the first such day has no known date. Each
+  tax year's borrowing is said with its rate; the undated part with the table of rates. The warning
+  also gives s458 (relief on repayment: none due if repaid by then; repaid later, reclaimed no sooner
+  than 9 months after the end of the period of repayment, within 4 years of the end of its financial
+  year), s464ZA (repaying and borrowing again) and ITTOIA 2005 s415 (a loan written off is taxed as
+  your income). The company's year end is not known here, so no date is worked out;
+- most owed > the beneficial loan threshold for the tax year (`beneficialLoanThreshold`, from its
+  table: £5,000 to 2013/14, £10,000 from 2014/15): a taxable benefit unless you paid interest at the
+  official rate, with Class 1A National Insurance for the company (ITEPA 2003 s180).
 
 **Estate value on D:**
 
@@ -1232,7 +1242,8 @@ A transaction counts as follows (`classifyFlow`):
   - it is on a market account;
   - or it is linked as a transfer;
   - or it is marked as money with a company of yours, paid for it or a loan (`company.as` ∈
-    {`paid-for`, `loan`}: shared/company.ts, `movesDirectorLoan`), whatever its category: it moves
+    {`paid-for`, `loan`}), with a mark that counts (shared/company.ts, `movesDirectorLoan`, below),
+    whatever its category: it moves
     your director's loan (§9) instead. Pay and dividends marked as such count as their category says;
   - or its category is a transfer or investment kind, except a platform's fee
     (`investment-fee`) paid from a bank account: ii's monthly membership by direct debit is spent.
@@ -1248,7 +1259,15 @@ A transaction counts as follows (`classifyFlow`):
   (`categoryLines`). What the lines do not add up to stays in the transaction's own category. A
   transfer is never split, nor a row paid for your company or lent to it.
 
-**Money with your company** (`Transaction.company`). A paid-for or loan row is left out not only of
+**Money with your company** (`Transaction.company`). A mark counts only while it fits its row
+(`markCounts`, shared/company.ts, the one test the store, cashflow, the tax pages, pay, the queue and
+the director's loan all use): the company is in your data; the row is on an account of yours that
+moves with its rows (not a company's, not valued at market, not a director's loan); not linked as a
+transfer; not £0; pay and dividends money in; paid-for and loan rows in pounds and not split. Every
+write checks it, and an account cannot change type, valuation or side while that would break a mark
+on its rows; a mark broken anyway (a hand edit, a company taken away) counts for nothing, so its row
+is an ordinary row of yours in every figure, and Data health lists it. A paid-for or loan row whose
+mark counts is left out not only of
 income and spending but of every figure built on a category: pay (`analytics/pay.ts`), dividends
 (allowances, the company's dividends), side income and gifts to charity (Self Assessment and its
 return), payments with people, cash and cheques paid in, the To categorise queue and the categories
