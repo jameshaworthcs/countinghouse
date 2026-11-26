@@ -87,7 +87,7 @@ function tx(accountId: string, date: string, amount: number, description: string
 /**
  * The company's own current account (Account.companyId): its money is the company's, so nothing on it
  * counts in any figure of Jo's. Its rows are written last and draw nothing from the random sequence, so
- * every personal figure is the same as without it. They look like Jo's on purpose: pay from Acme, an
+ * every personal figure is the same as without it. Some look like Jo's on purpose: Jo's salary paid out, an
  * HMRC payment, and the dividend that Jo's account received, paid out the same day for the same amount.
  */
 async function demoCompanyAccount(store: Store, dividendDay: string): Promise<void> {
@@ -100,7 +100,7 @@ async function demoCompanyAccount(store: Store, dividendDay: string): Promise<vo
     const m = startOfMonth(addMonths(END, k));
     row(addDays(m, 4), 2_400 + 150 * (k + 4), 'EXAMPLE CLIENT LTD INV');
     row(addDays(m, 9), -24.99, 'EXAMPLE HOSTING LTD');
-    row(addDays(m, 24), 1_150, 'ACME ANALYTICS LTD SALARY');
+    row(addDays(m, 24), 1_150, 'EXAMPLE AGENCY LTD INV');
     row(addDays(m, 27), -1_200, 'J BLOGGS SALARY');
   }
   row(addDays(startOfMonth(addMonths(END, -2)), 18), -1_312.4, 'HMRC CORPORATION TAX');

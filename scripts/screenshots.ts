@@ -107,6 +107,10 @@ async function main() {
     const id = boot.accounts.find((a) => a.type === type)?.id;
     return id ? [[name, `/accounts/${id}`]] : [];
   };
+  // A company's own account (Account.companyId), when the data has one: bootstrap lists yours only.
+  const companyGroups = (await (await fetch(`${base}/api/company-accounts`, { headers: { host: '127.0.0.1', cookie } })).json()) as { records: { id: string }[] }[];
+  const companyAccountId = companyGroups[0]?.records[0]?.id;
+  const companyAccountPage: [string, string][] = companyAccountId ? [['account-company', `/accounts/${companyAccountId}`]] : [];
   const pages: [string, string][] = [
     ['overview', '/'],
     ['reviews', '/reviews'],
@@ -118,6 +122,7 @@ async function main() {
     ...accountPage('account-isa', 'stocks_isa'),
     ...accountPage('account-asset', 'other_asset'),
     ...accountPage('account-pension', 'workplace_pension'),
+    ...companyAccountPage,
     ['transactions', '/transactions'],
     ['spending', '/spending'],
     ['spending-categorise', '/spending/categorise'],
