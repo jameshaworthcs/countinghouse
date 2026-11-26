@@ -6,7 +6,7 @@
 // rows; the loan's balance is its anchor plus the negated marked amounts since. Every name and figure is
 // invented.
 
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import fc from 'fast-check';
@@ -16,16 +16,19 @@ import { defaultCategories } from '../src/shared/categories';
 import { addDays, today } from '../src/shared/dates';
 import { fromMinor, toMinor } from '../src/shared/money';
 import { SettingsSchema, type Account, type BalanceSnapshot, type Company, type CompanyMark, type ProposalInput, type Transaction } from '../src/shared/schema';
-import { s455Rate, taxYearOf } from '../src/shared/uk';
+import { beneficialLoanThreshold, s455Rate, taxYear, taxYearOf } from '../src/shared/uk';
 import { createApp, type App } from '../src/server/app';
 import { BalanceEngine, type BalanceSource } from '../src/server/analytics/balances';
 import { flows } from '../src/server/analytics/cashflow';
-import { directorLoanMovements, directorLoanWarnings, movementId } from '../src/server/analytics/director-loan';
+import { directorLoanMovements, directorLoanWarnings, movementId, owedLots } from '../src/server/analytics/director-loan';
 import { estateOn } from '../src/server/analytics/estate';
 import { loadConfig } from '../src/server/config';
-import { enrich } from '../src/server/enrich';
+import { companyRowPatch, enrich } from '../src/server/enrich';
 import { balanceId, transactionId, transferGroupId } from '../src/server/ids';
 import type { Store } from '../src/server/store';
+import { sourceAsLeft } from '../src/server/proposals';
+import { directorLoanInterest } from '../src/server/analytics/params';
+import { AssumptionSet } from '../src/shared/assumptions';
 import { requiredScope } from '../src/server/tokens';
 
 const stamp = '2026-01-01T00:00:00+00:00';
@@ -193,11 +196,51 @@ describe("money with your company and the director's loan", () => {
       expect(store.transaction(hosting.id)!.company).toBeUndefined();
     });
 
-    it("a company's row loses a mark a hand edit left on it when its rows are worked out", async () => {
-      await store.updateTransactions([{ id: lent.id, patch: { company: { id: COMPANY, as: 'loan', setBy: 'user' } } }], 'test');
-      // The account becomes the company's: its rows are worked out again for their new side.
-      expect((await send('PATCH', '/api/accounts/current', { companyId: COMPANY, includeInNetWorth: false })).status).toBe(200);
-      expect(store.transaction(lent.id)!.company).toBeUndefined();
+    it("an account cannot change so that a mark on it stops fitting; a company's row loses one a hand edit left", async () => {
+      await mark(lent, 'loan');
+      // Given to the company, or valued at market: refused, naming the payment, and nothing changes.
+      const side = await send('PATCH', '/api/accounts/current', { companyId: COMPANY, includeInNetWorth: false });
+      expect(side.status).toBe(400);
+      expect(side.body.error).toMatch(/marked as money with your company \(TRANSFER TO STUDIO ACCOUNT 12344444 on /);
+      expect((await send('PATCH', '/api/accounts/current', { balanceMode: 'market' })).body.error).toMatch(/would no longer count/);
+      expect((await send('PATCH', '/api/accounts/current', { type: 'stocks_isa' })).body.error).toMatch(/would no longer count/);
+      expect(store.account('current')).toMatchObject({ type: 'current' });
+      expect(store.account('current')!.companyId).toBeUndefined();
+      // Taken away, the account may change.
+      await mark(lent, null);
+      expect((await send('PATCH', '/api/accounts/current', { balanceMode: 'market' })).status).toBe(200);
+      // A mark on a company's own row (a hand edit) is taken away when its rows are worked out.
+      const t = { ...studioRow, company: { id: COMPANY, as: 'loan' as const, setBy: 'user' as const } };
+      expect(companyRowPatch(t, t, (id) => store.account(id), store.companyAccounts(COMPANY))).toHaveProperty('company', undefined);
+    });
+
+    it('a mark that no longer fits counts for nothing: the row is an ordinary one, nothing moves, and data health lists it', async () => {
+      await mark(hosting, 'paid-for');
+      await mark(lent, 'loan');
+      const range = `?from=${T0}&to=${today()}`;
+      const counted = await get<CashflowResponse>(`/api/cashflow${range}`);
+      expect((await get<AccountDetailResponse>('/api/accounts/loan')).summary.balance).toBe(524);
+      // A hand edit makes the card an account valued at market: its mark no longer fits.
+      const file = path.join(dir, 'data', 'accounts.json');
+      const data = JSON.parse(await readFile(file, 'utf8')) as { accounts: Account[] };
+      await writeFile(file, JSON.stringify({ ...data, accounts: data.accounts.map((a) => (a.id === 'card' ? { ...a, balanceMode: 'market' } : a)) }));
+      await store.load();
+      // The card is valued at market now: its rows are in no income or spending, the hosting included,
+      // and it moves no loan either. Value is neither made nor lost.
+      const loan = await get<AccountDetailResponse>('/api/accounts/loan');
+      expect(loan.summary.balance).toBe(500);
+      expect(loan.directorLoan!.movements.map((m) => m.transactionId)).toEqual([lent.id]);
+      // The company taken away: its marks count for nothing, and the lent money is ordinary spending again.
+      await store.setCompanies(store.companies.filter((c) => c.id !== COMPANY));
+      const after = await get<CashflowResponse>(`/api/cashflow${range}`);
+      expect(toMinor(after.totals.spending) - toMinor(counted.totals.spending)).toBe(50_000);
+      const health = await get<DataHealthResponse>('/api/data-health');
+      expect(health.marksThatDoNotCount?.map((m) => [m.transactionId, m.problem])).toEqual(
+        expect.arrayContaining([
+          [hosting.id, expect.stringMatching(/no company "example-studio"/)],
+          [lent.id, expect.stringMatching(/no company "example-studio"/)],
+        ]),
+      );
     });
   });
 
@@ -286,6 +329,42 @@ describe("money with your company and the director's loan", () => {
       expect(directorLoanWarnings('EXAMPLE STUDIO LTD', 0, { amount: 10_000.01, date: today() }, today()).map((w) => w.kind)).toEqual(['beneficial-loan']);
     });
 
+    it('says the s455 rate for what is owed by when it was borrowed, and the rules on paying back, writing off and the benefit', () => {
+      // Owed: £300 from before the first day known, then £1,000 borrowed in 2025/26 and £2,000 in 2026/27, less £500 paid back (the oldest first).
+      const balances: Record<string, number> = { '2025-06-09': -300, '2025-06-10': -1300, '2026-05-01': -3300, '2026-06-01': -2800 };
+      const engine = { balanceOn: (_id: string, d: string) => {
+        const known = Object.keys(balances).filter((k) => k <= d).sort().at(-1);
+        return known ? { value: balances[known]!, gbp: balances[known]!, estimated: false } : null;
+      } };
+      const lots = owedLots(engine, 'loan', ['2025-06-10', '2026-05-01', '2026-06-01'], '2026-07-01');
+      expect(lots).toEqual([{ date: '2025-06-10', amount: 800 }, { date: '2026-05-01', amount: 2000 }]);
+      const [s455, benefit] = directorLoanWarnings('EXAMPLE STUDIO LTD', -2800, { amount: 12_000, date: '2026-05-01' }, '2026-07-01', [{ date: null, amount: 100 }, ...lots]);
+      expect(s455!.detail).toContain('£2,000.00 borrowed in 2026/27, at 35.75%; £800.00 borrowed in 2025/26, at 33.75%; £100.00 borrowed before 10 Jun 2025, at the rate of the year it was borrowed (25% before 6 Apr 2016, 32.5% from 6 Apr 2016 to 5 Apr 2022, 33.75% from 6 Apr 2022 to 5 Apr 2026, 35.75% from 6 Apr 2026)');
+      expect(s455!.detail).toMatch(/close company \(most owner-managed companies are\) and you are a participator/);
+      expect(s455!.detail).toMatch(/not until 9 months after the end of the accounting period in which you paid it back, and within 4 years of the end of the financial year/);
+      expect(s455!.detail).toMatch(/£5,000 or more and borrowing £5,000 or more again within 30 days, the new borrowing in a later accounting period.*unless what pays it back is taxed as your income/);
+      expect(s455!.detail).toMatch(/£15,000 or more is owed/);
+      expect(s455!.detail).toMatch(/taxed as your income \(ITTOIA 2005 s415\)/);
+      expect(benefit!.detail).toMatch(/Class 1A National Insurance/);
+    });
+
+    it('the benefit threshold comes from its table: £5,000 to 2013/14, £10,000 from 2014/15', () => {
+      expect(beneficialLoanThreshold(taxYear(2013))).toBe(5_000);
+      expect(beneficialLoanThreshold(taxYear(2014))).toBe(10_000);
+      expect(beneficialLoanThreshold(taxYear(2026))).toBe(10_000);
+    });
+
+    it('earns only a rate set for it: a rate you set for savings in general is not one for it', () => {
+      const loanAccount = acct('loan', 'Director’s loan', 'director_loan');
+      const record = (scope: Record<string, string>, value: number) => ({ id: `asm_${value.toString(16).padStart(16, '0')}`, key: 'interest.rate', scope, value, unit: 'rate', asOf: '2026-01-01', source: 'you', evidence: [], basedOn: [], rationale: 'Set by hand.', provenance: { setBy: 'owner' }, status: 'active', createdAt: stamp });
+      const at = (records: unknown[]) => directorLoanInterest({ set: new AssumptionSet(records as never, '2026-06-01') }, loanAccount);
+      expect(at([record({ kind: 'global' }, 0.04)])).toMatchObject({ value: 0, source: 'fallback' });
+      expect(at([record({ kind: 'global' }, 0.04), record({ kind: 'accountType', accountType: 'current' }, 0.01)])).toMatchObject({ value: 0, source: 'fallback' });
+      expect(at([record({ kind: 'global' }, 0.04), record({ kind: 'accountType', accountType: 'director_loan' }, 0.03)])).toMatchObject({ value: 0.03, source: 'owner' });
+      expect(at([record({ kind: 'account', accountId: 'loan' }, 0.02)])).toMatchObject({ value: 0.02, source: 'owner' });
+      expect(directorLoanInterest({ set: new AssumptionSet([], '2026-06-01') }, { ...loanAccount, interestRate: 5 })).toMatchObject({ value: 0.05, source: 'account' });
+    });
+
     it("s455 follows the dividend upper rate of the year the money was lent; 25% before 6 April 2016", () => {
       expect(s455Rate('2016-04-05')).toBe(0.25);
       expect(s455Rate('2016-04-06')).toBe(0.325);
@@ -351,6 +430,22 @@ describe("money with your company and the director's loan", () => {
       expect(undo.body.changes[0]!.mark).toEqual({ was: 'Paid for the company: EXAMPLE STUDIO LTD' });
     });
 
+    it("the balance checks of a proposal see the director's loan's movements, as its changes leave them", async () => {
+      await mark(lent, 'loan');
+      await send('POST', '/api/accounts/loan/balances', { date: day(1), balance: 100 });
+      // A statement balance read into the saver by mistake: the loan's, once the £500 lent is counted.
+      const misread: BalanceSnapshot = { ...anchor('saver', day(4), 600), id: balanceId('saver', day(4), 600, 'statement'), kind: 'statement', dateSource: 'document', source: { importId: 'imp_20260101_000000_abcd' } };
+      await store.addBalances([anchor('saver', day(7), 1000), misread], 'test');
+      const res = await propose([{ key: 'm', kind: 'move_balance', why: 'It is the director’s loan figure.', balance: misread.id, to: 'loan' }]);
+      expect(res.status).toBe(201);
+      expect(res.body.changes[0]!.moved?.beside.map((b) => b.balance)).toEqual([100]);
+      // The engine a proposal builds counts a mark set earlier in it: the loan grows by the hosting too.
+      const marked = { ...store.transaction(hosting.id)!, company: { id: COMPANY, as: 'paid-for' as const, setBy: 'agent' as const } };
+      const left = new BalanceEngine(sourceAsLeft(store, (id) => (id === hosting.id ? marked : store.transaction(id))));
+      expect(left.balanceOn('loan', day(5))?.value).toBe(100 + 500 + 24);
+      expect(new BalanceEngine(sourceAsLeft(store, (id) => store.transaction(id))).balanceOn('loan', day(5))?.value).toBe(600);
+    });
+
     it('never over a mark of yours, never on a company’s row, and only where a mark fits', async () => {
       await mark(lent, 'loan');
       const res = await propose([
@@ -407,12 +502,15 @@ function rowsOf(draws: readonly Draw[], marked: boolean): Transaction[] {
   });
 }
 
-function sourceOf(txs: Transaction[], balances: BalanceSnapshot[]): BalanceSource & Pick<Store, 'categories'> {
+function sourceOf(txs: Transaction[], balances: BalanceSnapshot[], accounts: Account[] = ACCOUNTS): BalanceSource & Pick<Store, 'categories' | 'account' | 'company'> {
   const sorted = [...txs].sort((a, b) => a.date.localeCompare(b.date));
+  const companies = [company({ accountId: undefined, directorLoanAccountId: 'loan' })];
   return {
-    accounts: ACCOUNTS,
+    accounts,
+    account: (id: string) => accounts.find((a) => a.id === id),
+    company: (id: string | undefined) => companies.find((c) => c.id === id),
     settings: SettingsSchema.parse({}),
-    companies: [company({ accountId: undefined, directorLoanAccountId: 'loan' })],
+    companies,
     categories: defaultCategories(),
     transactions: ((id?: string) => (id ? sorted.filter((t) => t.accountId === id) : sorted)),
     balances: ((id?: string) => [...balances].filter((b) => !id || b.accountId === id).sort((a, b) => a.date.localeCompare(b.date))),
@@ -496,6 +594,63 @@ describe("the director's loan, as properties", () => {
         }
       }),
       { seed: 20261128, numRuns: 60 },
+    );
+  });
+});
+
+// ─── Marks that do not fit, as a property ────────────────────────────────────────────────────────
+
+const WIDE: Account[] = [...ACCOUNTS, acct('isa', 'Stocks ISA', 'stocks_isa')];
+const wideDraw = fc.record({
+  account: fc.constantFrom(0, 1, 2, 4),
+  day: fc.nat(DAYS - 1),
+  pence: fc.integer({ min: -300_000, max: 300_000 }),
+  as: fc.constantFrom<CompanyMark['as']>('paid-for', 'loan', 'pay', 'dividend'),
+  known: fc.boolean(),
+  usd: fc.boolean(),
+  split: fc.boolean(),
+});
+
+/** Whether a mark counts, written out on its own (DATA_FORMAT.md, transactions `company`), to check the app's one test against. */
+function oracle(t: Transaction): boolean {
+  const account = WIDE.find((a) => a.id === t.accountId)!;
+  if (!t.company || t.company.id !== COMPANY || account.type === 'stocks_isa' || t.amount === 0) return false;
+  if ((t.company.as === 'pay' || t.company.as === 'dividend') && t.amount < 0) return false;
+  if ((t.company.as === 'paid-for' || t.company.as === 'loan') && (t.currency !== 'GBP' || t.splits?.length)) return false;
+  return true;
+}
+
+describe('a mark that does not fit, as a property', () => {
+  it('the estate never moves by an amount with no row behind it: only marks that fit move the loan, and every other figure treats the rest as ordinary rows', () => {
+    fc.assert(
+      fc.property(fc.array(wideDraw, { minLength: 1, maxLength: 50 }), (draws) => {
+        const rows = draws.map((d, i) => {
+          const account = WIDE[d.account]!;
+          const amount = d.pence / 100;
+          const cats = amount ? [{ amount: fromMinor(Math.trunc(d.pence / 2)), category: 'groceries' }, { amount: fromMinor(d.pence - Math.trunc(d.pence / 2)), category: 'software' }] : [];
+          const split = d.split && amount && cats.every((l) => l.amount !== 0) ? { splits: cats } : {};
+          return tx(account.id, addDays(START, d.day), amount, `ROW ${i}`, { currency: d.usd ? 'USD' : 'GBP', ...split, company: { id: d.known ? COMPANY : 'gone-ltd', as: d.as, setBy: 'user' as const } }, i);
+        });
+        const plain = rows.map(({ company: _c, ...t }) => t);
+        const anchors = [anchor('isa', START, 1000)];
+        const settings = { ...SettingsSchema.parse({}), fx: { USD: 0.8 } };
+        const [s0, s1] = [{ ...sourceOf(plain, anchors, WIDE), settings }, { ...sourceOf(rows, anchors, WIDE), settings }];
+        const [e0, e1] = [new BalanceEngine(s0), new BalanceEngine(s1)];
+        const moving = rows.filter((t) => oracle(t) && (t.company!.as === 'paid-for' || t.company!.as === 'loan'));
+        // The app's movements are exactly the rows the rules let count, each its row's amount negated.
+        expect(directorLoanMovements(s1, COMPANY).map((m) => [m.transactionId, toMinor(m.amount)]).sort()).toEqual(moving.map((t) => [t.id, -toMinor(t.amount)]).sort());
+        for (let d = 0; d < DAYS; d += 7) {
+          const date = addDays(START, d);
+          for (const a of WIDE.filter((x) => x.id !== 'loan')) expect(e1.balanceOn(a.id, date)?.value).toBe(e0.balanceOn(a.id, date)?.value);
+          const loanMinor = moving.filter((t) => t.date <= date).reduce((s, t) => s - toMinor(t.amount), 0);
+          expect(toMinor(estateOn(s1 as unknown as Store, e1, date).total) - toMinor(estateOn(s0 as unknown as Store, e0, date).total)).toBe(loanMinor);
+        }
+        // Spending and income drop exactly the rows whose mark counts and moves the loan; the rest (and their split lines) are as unmarked.
+        const ids = (f: ReturnType<typeof flows>) => f.map((x) => `${x.t.id}:${x.cls}:${x.minor}`).sort();
+        const counted = new Set(moving.map((t) => t.id));
+        expect(ids(flows(s1 as unknown as Store, START, addDays(START, DAYS)))).toEqual(ids(flows(s0 as unknown as Store, START, addDays(START, DAYS)).filter((f) => !counted.has(f.t.id))));
+      }),
+      { seed: 20261129, numRuns: 80 },
     );
   });
 });

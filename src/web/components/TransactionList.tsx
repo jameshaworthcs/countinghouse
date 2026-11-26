@@ -2,7 +2,8 @@ import { ArrowLeftRight, Building2, ExternalLink, FilePlus2, FileText, History, 
 import { useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import type { CompanyView } from '../../shared/api';
-import { COMPANY_MARK_LABELS, movesDirectorLoan } from '../../shared/company';
+import { ACCOUNT_TYPE_META, balanceModeOf } from '../../shared/accounts';
+import { COMPANY_MARK_LABELS, markCounts, movesDirectorLoan, type MarkContext } from '../../shared/company';
 import { describeDifference, fieldsInWords } from '../../shared/detail';
 import { parseAmount } from '../../shared/money';
 import { COMPANY_MARKS, type CompanyMarkKind, type Rule, type Transaction } from '../../shared/schema';
@@ -75,9 +76,9 @@ export function moneyBackHint(cats: ReturnType<typeof useAppData>['cats'], amoun
   return `Money in here counts as money back: it lowers your ${cats.name(category)} spending, and isn’t income.${gift}`;
 }
 
-export function categoryBadge(t: Transaction, name: string): ReactNode {
+export function categoryBadge(t: Transaction, name: string, marks: MarkContext): ReactNode {
   // Paid for your company, or lent to it or repaid by it: not your spending or income, whatever its category.
-  if (movesDirectorLoan(t)) return <Badge tone="accent" icon={<Building2 className="size-3" />}>{COMPANY_MARK_LABELS[t.company!.as]}</Badge>;
+  if (movesDirectorLoan(t, marks)) return <Badge tone="accent" icon={<Building2 className="size-3" />}>{COMPANY_MARK_LABELS[t.company!.as]}</Badge>;
   if (t.splits?.length && !t.transferGroup) return <Badge tone="neutral">Split: {t.splits.length} categories</Badge>;
   if (!t.category) return <Badge tone="warn">Uncategorised</Badge>;
   return (
@@ -122,6 +123,16 @@ export function CompanyMarkSelect({ value, onChange, amount, companies, id, plac
       ))}
     </Select>
   );
+}
+
+/**
+ * Where a payment's mark is judged on the web, as the server judges it (shared/company.ts,
+ * `markCounts`): your accounts, a company's, and the companies you hold shares in.
+ */
+export function useMarkContext(): MarkContext {
+  const { anyAccount } = useAppData();
+  const companies = useCompanies();
+  return { account: (id) => anyAccount(id), company: (id) => companies.data?.find((c) => c.company.id === id)?.company };
 }
 
 /** What notes are for, beside tags: said wherever you write either. */
@@ -223,6 +234,7 @@ export function NoteDialog({ txs, onClose, onDone }: { txs: Transaction[]; onClo
 /** Compact list of transactions; each row opens the detail drawer. */
 export function TransactionList({ items, compact = false, showAccount = true }: { items: Transaction[]; compact?: boolean; showAccount?: boolean }) {
   const { cats, accountName } = useAppData();
+  const marks = useMarkContext();
   const [open, setOpen] = useState<Transaction | null>(null);
   return (
     <>
@@ -242,7 +254,7 @@ export function TransactionList({ items, compact = false, showAccount = true }: 
                 <div className="truncate text-[13.5px] font-medium text-ink">{t.payee ?? t.description}</div>
                 <div className="truncate text-[12px] text-ink-3">
                   {showAccount && <span>{accountName(t.accountId)} · </span>}
-                  {movesDirectorLoan(t) ? COMPANY_MARK_LABELS[t.company!.as] : cats.name(t.category)}
+                  {movesDirectorLoan(t, marks) ? COMPANY_MARK_LABELS[t.company!.as] : cats.name(t.category)}
                   {t.notes && <StickyNote className="ml-1 inline size-3" aria-label="Has notes" />}
                 </div>
               </div>
@@ -304,6 +316,10 @@ export function TransactionDrawer({ tx, onClose }: { tx: Transaction; onClose: (
   const { cats, accountName, accountsById } = useAppData();
   const toast = useToast();
   const companies = useCompanies();
+  const marks = useMarkContext();
+  // A row of yours on an account that moves with its rows can be marked (never a company's, a market account's or a director's loan's).
+  const own = accountsById.get(tx.accountId);
+  const markable = Boolean(own && balanceModeOf(own) === 'ledger' && !ACCOUNT_TYPE_META[own.type].derived);
   const [payee, setPayee] = useState(tx.payee ?? '');
   const [category, setCategory] = useState(tx.category);
   const [mark, setMark] = useState(markValue(tx.company));
@@ -363,7 +379,7 @@ export function TransactionDrawer({ tx, onClose }: { tx: Transaction; onClose: (
       <div className="flex flex-col gap-5">
         <div>
           <Money value={tx.amount} className={cn('text-[28px] font-semibold', tx.amount > 0 ? 'text-good-ink' : 'text-ink')} />
-          <div className="mt-1">{categoryBadge(tx, cats.path(tx.category))}</div>
+          <div className="mt-1">{categoryBadge(tx, cats.path(tx.category), marks)}</div>
         </div>
         <form
           className="flex flex-col gap-3"
@@ -379,8 +395,22 @@ export function TransactionDrawer({ tx, onClose }: { tx: Transaction; onClose: (
             <CategorySelect value={category} onChange={setCategory} direction={tx.amount > 0 ? 'in' : 'out'} />
           </Field>
           {/* Your own rows only (a company's own account's rows are its own), and never a transfer between your accounts. */}
-          {accountsById.has(tx.accountId) && (companies.data?.length || tx.company) ? (
-            <Field label="Your company" hint={tx.transferGroup ? 'Linked as a transfer between your accounts: unlink it before marking it as money with your company.' : tx.company?.setBy === 'agent' ? `${COMPANY_MARK_HINT} Marked by a proposal you applied; saving a change makes it yours.` : COMPANY_MARK_HINT}>
+          {/* Your own rows on an account that moves with its rows; a mark already there (one that may no longer count) always shows. */}
+          {(markable || tx.company) && (companies.data?.length || tx.company) ? (
+            <Field
+              label="Your company"
+              hint={
+                tx.company && !markCounts(tx, marks)
+                  ? 'This mark no longer fits the payment, so it counts for nothing: take it away or change it.'
+                  : !markable
+                    ? 'On an account valued at market, a payment is not marked: mark it on the account the money left or arrived in.'
+                    : tx.transferGroup
+                      ? 'Linked as a transfer between your accounts: unlink it before marking it as money with your company.'
+                      : tx.company?.setBy === 'agent'
+                        ? `${COMPANY_MARK_HINT} Marked by a proposal you applied; saving a change makes it yours.`
+                        : COMPANY_MARK_HINT
+              }
+            >
               <CompanyMarkSelect value={mark} onChange={setMark} amount={tx.amount} companies={companies.data ?? []} ariaLabel="Your company" />
             </Field>
           ) : null}

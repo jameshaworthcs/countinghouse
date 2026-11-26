@@ -768,13 +768,7 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
   // this proposal takes away), the statement or your own balances either side of it add up.
   const moves = changes.filter((c) => c.kind === 'remove_internal_move' && !leaveOut.has(c.key) && !out.results.get(c.key)?.problem && !out.results.get(c.key)?.alreadySo);
   if (moves.length) {
-    const without: BalanceSource = {
-      accounts: store.accounts,
-      settings: store.settings,
-      balances: (id) => store.balances(id),
-      transactions: (id) => store.transactions(id).flatMap((t) => row(t.id) ?? []),
-    };
-    const engine = new BalanceEngine(without);
+    const engine = new BalanceEngine(sourceAsLeft(store, row));
     for (const c of moves) {
       const t = out.removed.get((c as Extract<ProposedChange, { kind: 'remove_internal_move' }>).transaction)!;
       const b = engine.between(t.accountId, t.date);
@@ -793,7 +787,7 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
     const engineWith = (keep?: string) => {
       const placed = (b: BalanceSnapshot) => (b.id === keep ? b.accountId : (out.moves.get(b.id)?.to ?? b.accountId));
       const all = store.balances();
-      return new BalanceEngine({ accounts, settings: store.settings, balances: (id) => all.filter((b) => placed(b) === id), transactions: (id) => store.transactions(id).flatMap((t) => row(t.id) ?? []) });
+      return new BalanceEngine(sourceAsLeft(store, row, { accounts, balances: (id) => all.filter((b) => placed(b) === id) }));
     };
     const after = engineWith();
     const said = (b: { balance: number; date: string }) => `${formatMoney(b.balance)} on ${formatDate(b.date)}`;
@@ -827,6 +821,22 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
     }
   }
   return out;
+}
+
+/**
+ * The data as a proposal's changes leave it, for the balance engine: your rows as `row` gives them
+ * (undefined: removed), your accounts and balances (as given), and your companies, so a director's
+ * loan's movements are worked out from the rows as the changes leave them (a mark set earlier in the
+ * proposal counts).
+ */
+export function sourceAsLeft(store: Store, row: (id: string) => Transaction | undefined, opts: { accounts?: Account[]; balances?: (id: string) => BalanceSnapshot[] } = {}): BalanceSource {
+  return {
+    accounts: opts.accounts ?? store.accounts,
+    settings: store.settings,
+    companies: store.companies,
+    balances: opts.balances ?? ((id) => store.balances(id)),
+    transactions: (id) => (id ? store.transactions(id) : store.transactions()).flatMap((t) => row(t.id) ?? []),
+  };
 }
 
 /** Applying would leave the data as it is: every change is already so, or they undo each other. */

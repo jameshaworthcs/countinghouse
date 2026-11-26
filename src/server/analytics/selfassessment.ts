@@ -83,7 +83,7 @@ export function selfAssessment(store: Store, label?: string, engine?: BalanceEng
   const bik = figuresOf(store, ty, 'benefit_in_kind');
   // Student loan deducted, like pay: one source per job.
   const slDeducted = jobs.flatMap((e) => e.chosen.student_loan_deducted?.figures ?? []);
-  const salaryTx = store.transactions().filter((t) => inYear(t.date, ty) && t.category === 'salary' && t.amount > 0 && !movesDirectorLoan(t));
+  const salaryTx = store.transactions().filter((t) => inYear(t.date, ty) && t.category === 'salary' && t.amount > 0 && !movesDirectorLoan(t, store));
   const employment: SaItem[] = [
     {
       id: 'pay',
@@ -254,7 +254,7 @@ export function selfAssessment(store: Store, label?: string, engine?: BalanceEng
       sources: childBenefit.map((t) => ({ type: 'transaction' as const, id: t.id, date: t.date, label: t.description, amount: t.amount })),
     });
   }
-  const side = store.transactions().filter((t) => inYear(t.date, ty) && t.category === 'side-income' && t.amount > 0 && !movesDirectorLoan(t));
+  const side = store.transactions().filter((t) => inYear(t.date, ty) && t.category === 'side-income' && t.amount > 0 && !movesDirectorLoan(t, store));
   const sideFigures = figuresOf(store, ty, 'self_employment_income');
   const sideTotal = fromMinor(side.reduce((s, t) => s + toMinor(t.amount), 0)) + sumFigures(sideFigures);
   if (sideTotal > 0) {

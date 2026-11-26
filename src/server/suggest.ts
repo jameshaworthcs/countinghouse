@@ -35,7 +35,7 @@ export function leftUncategorised(store: Store, limit = MAX_SUGGEST): { key: str
   const market = new Set(store.accounts.filter((a) => balanceModeOf(a) === 'market').map((a) => a.id));
   const rows = store
     .transactions()
-    .filter((t) => !t.category && t.categorisedBy !== 'user' && !t.transferGroup && !movesDirectorLoan(t) && !t.splits?.length && !people.has(t.id) && !cash.has(t.id) && !market.has(t.accountId))
+    .filter((t) => !t.category && t.categorisedBy !== 'user' && !t.transferGroup && !movesDirectorLoan(t, store) && !t.splits?.length && !people.has(t.id) && !cash.has(t.id) && !market.has(t.accountId))
     .sort((a, b) => b.date.localeCompare(a.date));
   for (const t of rows) {
     // Money in and money out under one description are different things (a refund, a purchase).

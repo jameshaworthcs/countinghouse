@@ -14,7 +14,7 @@ import path from 'node:path';
 import type { z } from 'zod';
 import type { ChangeDiff } from '../shared/audit';
 import { ACCOUNT_TYPE_META, balanceModeOf, sideOf } from '../shared/accounts';
-import { companyMarkProblem } from '../shared/company';
+import { companyMarkProblem, markMisfit } from '../shared/company';
 import { defaultCategories } from '../shared/categories';
 import { earmarkAccountIds } from '../shared/earmarks';
 import { sectionSpan } from '../shared/coverage';
@@ -1080,7 +1080,10 @@ export class Store extends EventEmitter {
           if (naming.length) throw new StoreError(`${a.name} cannot ${a.companyId ? 'become a company’s account' : 'become yours again'} while ${naming.map((n) => n.what).join(', ')} ${naming.length === 1 ? 'names' : 'name'} it: change ${naming.length === 1 ? 'that' : 'those'} first.`);
         }
       }
-      if (name === 'accounts') checkDirectorLoanAccounts(after as Account[], before as Account[], this.state.companies, (id) => (this.state.transactions.get(id)?.length ?? 0) > 0);
+      if (name === 'accounts') {
+        checkDirectorLoanAccounts(after as Account[], before as Account[], this.state.companies, (id) => (this.state.transactions.get(id)?.length ?? 0) > 0);
+        checkMarksStillFit(after as Account[], before as Account[], (id) => this.state.transactions.get(id) ?? [], (id) => this.state.companies.some((c) => c.id === id));
+      }
       if (name === 'companies') {
         checkCompanyEstateAccounts(after as Company[], before as Company[], this.state.accounts);
         checkDirectorLoanLinks(after as Company[], before as Company[], this.state.accounts);
@@ -1750,6 +1753,24 @@ export function checkDirectorLoanAccounts(next: readonly Account[], before: read
       const linked = companies.find((c) => c.directorLoanAccountId === a.id);
       if (linked) throw new StoreError(`${linked.name} names ${a.name} as your director’s loan account: take that link away before changing its type.`);
     }
+  }
+}
+
+/**
+ * An account whose type, valuation (`balanceMode`) or side (`companyId`) a write changes must leave
+ * every mark of money with a company on its rows fitting (shared/company.ts): a payment on an account
+ * now valued at market, or now a company's own, would otherwise keep a mark that counts for nothing.
+ * Refused with the marks to take away first, as a side change is refused while your records name it.
+ */
+export function checkMarksStillFit(next: readonly Account[], before: readonly Account[], rowsOf: (id: string) => readonly Transaction[], companyKnown: (id: string) => boolean): void {
+  const was = new Map(before.map((a) => [a.id, a]));
+  for (const a of next) {
+    const prior = was.get(a.id);
+    if (!prior || (prior.type === a.type && prior.balanceMode === a.balanceMode && prior.companyId === a.companyId)) continue;
+    const broken = rowsOf(a.id).filter((t) => t.company && !markMisfit(t, t.company, prior, companyKnown(t.company.id)) && markMisfit(t, t.company, a, companyKnown(t.company.id)));
+    if (!broken.length) continue;
+    const listed = broken.slice(0, 3).map((t) => `${t.description} on ${t.date}`).join('; ');
+    throw new StoreError(`${a.name} cannot change like that while ${broken.length === 1 ? 'a payment on it is' : `${broken.length} payments on it are`} marked as money with your company (${listed}${broken.length > 3 ? '…' : ''}): the mark${broken.length === 1 ? '' : 's'} would no longer count. Take ${broken.length === 1 ? 'it' : 'them'} away first.`);
   }
 }
 

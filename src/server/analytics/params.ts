@@ -253,13 +253,16 @@ function platformFee(store: Store, r: Resolver, account: Account, value: number)
 }
 
 /**
- * A director's loan earns what you set on it (your `interest.rate` assumption for it, or the rate on
- * the account), else nothing: a company pays interest on what it owes you only when you agree it, and
- * no document or research says so.
+ * A director's loan earns what you set for it (your `interest.rate` record scoped to this account, or
+ * to director's loans), else the rate on the account, else nothing: a company pays interest on what it
+ * owes you only when you agree it, and no document or research says so. A rate you set for savings in
+ * general (a global record, or one for a provider) is not one for it.
  */
-function directorLoanInterest(r: Resolver, account: Account): Sourced {
+export function directorLoanInterest(r: Pick<Resolver, 'set'>, account: Account): Sourced {
   const resolved = r.set.resolve('interest.rate', { accountId: account.id, accountType: account.type });
-  if (resolved.source === 'owner') return fromResolved(resolved, 'this director’s loan');
+  const scope = resolved.record?.scope;
+  const forIt = (scope?.kind === 'account' && scope.accountId === account.id) || (scope?.kind === 'accountType' && scope.accountType === 'director_loan');
+  if (resolved.source === 'owner' && forIt) return fromResolved(resolved, 'this director’s loan');
   if (account.interestRate !== undefined) return { value: account.interestRate / 100, source: 'account', basis: 'The rate on the account (Accounts page)' };
   return { value: 0, source: 'fallback', basis: 'A director’s loan earns no interest unless you set its rate' };
 }

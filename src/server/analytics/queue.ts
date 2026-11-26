@@ -60,7 +60,7 @@ export function personParties(store: Store, index: PeopleIndex = peopleIndexFor(
   const out = new Map<string, PersonParty>();
   for (const t of store.transactions()) {
     // Money with your company is not a payment with a person.
-    if (skip.has(t.accountId) || movesDirectorLoan(t)) continue;
+    if (skip.has(t.accountId) || movesDirectorLoan(t, store)) continue;
     const party = index.party(t);
     if (party) out.set(t.id, party);
   }
@@ -75,7 +75,7 @@ export function paidInto(store: Store): Map<string, PaidIn> {
   const holds = new Map(store.accounts.map((a) => [a.id, holdsPaidIn(a.type)]));
   const out = new Map<string, PaidIn>();
   for (const t of store.transactions()) {
-    if (t.amount <= 0 || t.transferGroup || movesDirectorLoan(t) || !(holds.get(t.accountId) ?? true)) continue;
+    if (t.amount <= 0 || t.transferGroup || movesDirectorLoan(t, store) || !(holds.get(t.accountId) ?? true)) continue;
     const kind = t.payee === CHEQUE_PAID_IN ? 'cheque' : t.payee === CASH_PAID_IN ? 'cash' : paidInKind(t.description, t.type);
     if (kind) out.set(t.id, kind);
   }
@@ -124,7 +124,7 @@ export function categoriseQueue(store: Store, opts: { from?: string | undefined 
   const cash = paidInto(store);
   const market = new Set(store.accounts.filter((a) => balanceModeOf(a) === 'market').map((a) => a.id));
   // Money paid for or lent to your company needs no category of yours (shared/company.ts): it leaves the queue.
-  const all = store.transactions().filter((t) => !market.has(t.accountId) && !movesDirectorLoan(t));
+  const all = store.transactions().filter((t) => !market.has(t.accountId) && !movesDirectorLoan(t, store));
   const listed = (t: Transaction) => !opts.from || t.date >= opts.from;
   const peopleById = new Map(store.people.map((p) => [p.id, p]));
 

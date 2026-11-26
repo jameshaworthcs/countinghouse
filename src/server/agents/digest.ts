@@ -2,6 +2,7 @@
 // ids of the records behind them so every insight can cite its evidence. Built deterministically;
 // it goes only to Claude, in a job that has no web tools.
 
+import { markCounts } from '../../shared/company';
 import { ACCOUNT_TYPE_META } from '../../shared/accounts';
 import { CategoryIndex } from '../../shared/categories';
 import { nameKey } from '../../shared/categorise';
@@ -694,7 +695,7 @@ export function monthTransactionsFile(store: Store, analytics: Analytics, month:
         categorisedBy: t.categorisedBy ?? null,
         ...(t.counterpartyAccountId ? { otherAccount: t.counterpartyAccountId } : {}),
         // Money with your company (paid for it, a loan, pay or a dividend): paid for it and loans are not spending or income.
-        ...(t.company ? { company: t.company.id, companyAs: t.company.as } : {}),
+        ...(t.company && markCounts(t, store) ? { company: t.company.id, companyAs: t.company.as } : {}),
         ...(t.notes ? { note: t.notes } : {}),
       }),
     );

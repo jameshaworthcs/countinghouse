@@ -322,7 +322,7 @@ export class MonthContext {
       const account = this.accounts.get(t.accountId);
       if (account?.type !== 'current' || t.date < from || t.date > to) continue;
       // Paid for your company or lent to it (or repaid by it): money moved to the company, whatever its category.
-      if (movesDirectorLoan(t)) {
+      if (movesDirectorLoan(t, store)) {
         moved.set('company', (moved.get('company') ?? 0) - toMinor(t.amount));
         continue;
       }
@@ -531,7 +531,7 @@ export class MonthContext {
         if (t.date <= s.basis.date || t.date > e.basis.date) continue;
         if (t.transferGroup && groups.has(t.transferGroup)) continue;
         const source = this.accounts.get(t.accountId);
-        if (classifyFlow(t, this.cats, source) !== 'excluded') continue;
+        if (classifyFlow(t, this.cats, source, this.store) !== 'excluded') continue;
         if (unlinked.some((f) => toMinor(f.amount) === -toMinor(t.amount) && Math.abs(diffDays(f.date, t.date)) <= 10)) continue;
         const sourceFx = source ? fxRate(source.currency, settings) : null;
         if (sourceFx === null) continue;
@@ -577,15 +577,15 @@ export class MonthContext {
       if (place !== 'cash' && place !== 'cards') continue;
       add(byAccount[place], t.accountId, toMinor(t.amount));
       // Paid for your company or lent to it, or repaid by it: money with the company (never split).
-      if (movesDirectorLoan(t)) {
+      if (movesDirectorLoan(t, store)) {
         const id = t.company!.id;
         const e = company.get(id) ?? company.set(id, { name: store.company(id)?.name ?? id, minor: 0, count: 0 }).get(id)!;
         e.minor -= toMinor(t.amount);
         e.count++;
         continue;
       }
-      for (const line of categoryLines(t)) {
-        if (classifyFlow(line, cats, account) !== 'excluded') continue;
+      for (const line of categoryLines(t, store)) {
+        if (classifyFlow(line, cats, account, store) !== 'excluded') continue;
         const otherId = t.counterpartyAccountId ?? pairs.get(t.transferGroup ?? '')?.find((x) => x.id !== t.id)?.accountId;
         const other = otherId ? placeOf(this.accounts.get(otherId)) : undefined;
         const minor = toMinor(line.amount);

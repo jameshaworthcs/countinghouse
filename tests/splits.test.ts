@@ -71,7 +71,7 @@ describe('splitting a payment', () => {
     expect(fixed.splits).toBeUndefined();
     // Written by hand, lines short of the amount leave the rest in the transaction's own category.
     const t = { ...fixed, splits: [{ category: 'groceries', amount: -40 }, { category: 'home-garden', amount: -12 }] };
-    expect(categoryLines(t).map((l) => [l.category, l.amount])).toEqual([
+    expect(categoryLines(t, { account: () => undefined, company: () => undefined }).map((l) => [l.category, l.amount])).toEqual([
       ['groceries', -40],
       ['home-garden', -12],
       ['groceries', -10],

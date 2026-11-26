@@ -854,6 +854,8 @@ export interface DataHealthResponse {
   fscs: { group: string; institutions: string[]; total: number; limit: number; over: boolean; near: boolean }[];
   /** Director's loans with a warning today (docs/UK_RULES.md, "Companies"): you owe the company, or owed it more than the benefit threshold this tax year. */
   directorLoans?: { accountId: string; name: string; companyName: string; balance: number | null; warnings: DirectorLoanWarning[] }[];
+  /** Payments marked as money with your company whose mark no longer fits (shared/company.ts): it counts for nothing until you change it. */
+  marksThatDoNotCount?: { transactionId: string; accountId: string; name: string; date: string; amount: number; description: string; problem: string }[];
 }
 
 export interface BootstrapResponse {

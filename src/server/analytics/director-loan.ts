@@ -17,11 +17,11 @@
 
 import { ACCOUNT_TYPE_META } from '../../shared/accounts';
 import type { DirectorLoanMovement, DirectorLoanView, DirectorLoanWarning } from '../../shared/api';
-import { directorLoanKind, movesDirectorLoan } from '../../shared/company';
+import { directorLoanKind, movesDirectorLoan, type MarkContext } from '../../shared/company';
 import { addDays, formatDate, type ISODate } from '../../shared/dates';
 import { formatMoney, fromMinor, toMinor } from '../../shared/money';
 import type { Account, Company, Transaction } from '../../shared/schema';
-import { beneficialLoanThreshold, S455_DUE_MONTHS, S455_REBORROWING, s455Rate, taxYearOf } from '../../shared/uk';
+import { beneficialLoanThreshold, S455_DUE_MONTHS, S455_REBORROWING, s455Rate, s455RateHistory, taxYearOf } from '../../shared/uk';
 import type { Store } from '../store';
 import type { BalanceEngine } from './balances';
 
@@ -32,14 +32,15 @@ export const movementId = (transactionId: string): string => `dlm_${transactionI
 
 /**
  * The movements of a company's director's loan, oldest first (source order within a day): every row
- * of yours marked as paid for it or a loan with it, in pounds, not linked as a transfer between your
- * accounts (a row that breaks those rules by a hand edit is left out; reading the data warns of it).
+ * of yours marked as paid for it or a loan with it whose mark counts (shared/company.ts, `markCounts`:
+ * the one test cashflow and every other figure use). A mark that no longer fits its row (its account
+ * now valued at market, a split, a company gone) moves nothing, and its row is an ordinary row.
  */
-export function directorLoanMovements(store: { transactions(accountId?: string): Transaction[] }, companyId: string): DirectorLoanMovement[] {
+export function directorLoanMovements(store: { transactions(accountId?: string): Transaction[] } & MarkContext, companyId: string): DirectorLoanMovement[] {
   const out: DirectorLoanMovement[] = [];
   for (const t of store.transactions()) {
-    if (!movesDirectorLoan(t) || t.company!.id !== companyId || t.transferGroup || t.currency !== 'GBP' || !t.amount) continue;
-    const as = t.company!.as as DirectorLoanMovement['as'];
+    if (t.company?.id !== companyId || !movesDirectorLoan(t, store)) continue;
+    const as = t.company.as as DirectorLoanMovement['as'];
     out.push({
       id: movementId(t.id),
       transactionId: t.id,
@@ -64,40 +65,102 @@ export function directorLoanCompany(companies: readonly Company[] | undefined, a
  * What the balance engine reads as a director's loan account's rows: its movements as rows of that
  * account (never written). A director's loan account no company names has none.
  */
-export function directorLoanRows(store: { transactions(accountId?: string): Transaction[]; companies?: readonly Company[] | undefined }, account: Account): Transaction[] {
+export function directorLoanRows(store: { transactions(accountId?: string): Transaction[]; accounts: readonly Account[]; companies?: readonly Company[] | undefined }, account: Account): Transaction[] {
   if (!ACCOUNT_TYPE_META[account.type].derived) return [];
   const company = directorLoanCompany(store.companies, account.id);
   if (!company) return [];
-  return directorLoanMovements(store, company.id).map((m) => ({ id: m.id, accountId: account.id, date: m.date, amount: m.amount, currency: account.currency, description: m.description, source: {} }));
+  // The engine's own accounts and companies judge the marks, as the store does.
+  const marks: MarkContext = { account: (id) => store.accounts.find((a) => a.id === id), company: (id) => store.companies?.find((c) => c.id === id) };
+  return directorLoanMovements({ transactions: (id?: string) => store.transactions(id), ...marks }, company.id).map((m) => ({ id: m.id, accountId: account.id, date: m.date, amount: m.amount, currency: account.currency, description: m.description, source: {} }));
 }
 
 const pct = (r: number) => `${(Math.round(r * 10_000) / 100).toString()}%`;
 
+/** What you owe the company, by when you borrowed it: `date` null for what you owed before the first day known. */
+export interface OwedLot {
+  date: ISODate | null;
+  amount: number;
+}
+
+/**
+ * What you owe the company on `on`, split by when you borrowed it (each lot's date), from the
+ * engine's balance on each day the loan moved (`dates`: its movements' days, and an anchor's day
+ * moves it too, when given) and on `on`. A day the balance goes further below nothing is borrowing on
+ * that day; a day it comes back up pays off the oldest borrowing first. What was owed before the first
+ * of those days has no known date (`date: null`). The lots add up to what is owed on `on`.
+ */
+export function owedLots(engine: Pick<BalanceEngine, 'balanceOn'>, accountId: string, dates: readonly ISODate[], on: ISODate): OwedLot[] {
+  const days = [...new Set([...dates.filter((d) => d <= on), on])].sort();
+  const minorOn = (d: ISODate, fallback: number) => {
+    const v = engine.balanceOn(accountId, d)?.value;
+    return v === undefined ? fallback : toMinor(v);
+  };
+  let prev = minorOn(addDays(days[0]!, -1), 0);
+  const lots: { date: ISODate | null; minor: number }[] = prev < 0 ? [{ date: null, minor: -prev }] : [];
+  for (const d of days) {
+    const now = minorOn(d, prev);
+    const [before, after] = [Math.max(0, -prev), Math.max(0, -now)];
+    if (after > before) lots.push({ date: d, minor: after - before });
+    let repaid = before - after;
+    while (repaid > 0 && lots.length) {
+      const take = Math.min(repaid, lots[0]!.minor);
+      lots[0]!.minor -= take;
+      repaid -= take;
+      if (!lots[0]!.minor) lots.shift();
+    }
+    prev = now;
+  }
+  return lots.filter((l) => l.minor > 0).map((l) => ({ date: l.date, amount: fromMinor(l.minor) }));
+}
+
+/** The s455 rates by when the money was lent, in words: "25% before 6 April 2016, 32.5% to 5 April 2022, …". */
+function rateHistoryWords(on: ISODate): string {
+  return s455RateHistory(on)
+    .map((r, i, all) => `${pct(r.rate)} ${i === 0 ? `before ${formatDate(all[1]?.from ?? on)}` : i === all.length - 1 ? `from ${formatDate(r.from)}` : `from ${formatDate(r.from)} to ${formatDate(addDays(all[i + 1]!.from, -1))}`}`)
+    .join(', ');
+}
+
 /**
  * The warnings a director's loan carries on a day (docs/UK_RULES.md, "Companies"), from its balance
- * then and the most you owed the company at any time in that day's tax year (`owedMost`, positive):
- * - you owe the company (the balance is below nothing): it may owe tax under CTA 2010 s455 on what is
- *   still owed 9 months and a day after the end of its accounting period, at the dividend upper rate of
- *   the tax year the money was lent, unless repaid by then (s458), with repaying and borrowing again
- *   not counting as repaid (s464ZA). The company's year end is not known here, so no date is given;
+ * then, what you owe by when you borrowed it (`lots`, `owedLots`), and the most you owed the company at
+ * any time in that day's tax year (`owedMost`, positive):
+ * - you owe the company (the balance is below nothing): if it is a close company and you are a
+ *   participator, it owes tax under CTA 2010 s455 on what is still owed 9 months and a day after the
+ *   end of the accounting period it was lent in, at the dividend upper rate of the tax year it was
+ *   lent (said for each lot), unless repaid by then (s458: else reclaimed later), with repaying and
+ *   borrowing again not counting as repaid (s464ZA), and a loan written off taxed as your income
+ *   (ITTOIA 2005 s415). The company's year end is not known here, so no date is given;
  * - you owed it more than the beneficial loan threshold at some time in the tax year: a taxable
- *   benefit unless you paid interest at the official rate (ITEPA 2003 s180).
+ *   benefit unless you paid interest at the official rate, with Class 1A National Insurance for the
+ *   company (ITEPA 2003 s180).
  */
-export function directorLoanWarnings(companyName: string, balance: number | null, owedMost: { amount: number; date: ISODate } | null, on: ISODate): DirectorLoanWarning[] {
+export function directorLoanWarnings(companyName: string, balance: number | null, owedMost: { amount: number; date: ISODate } | null, on: ISODate, lots: readonly OwedLot[] = []): DirectorLoanWarning[] {
   const out: DirectorLoanWarning[] = [];
   const ty = taxYearOf(on);
   if (balance !== null && balance < 0) {
-    const owed = formatMoney(-balance);
-    const rate = s455Rate(on);
-    const before = s455Rate(addDays(ty.start, -1));
+    // What is owed, by the tax year it was borrowed in, each at its year's rate; what has no known date, by the table.
+    const byYear = new Map<string, { minor: number; rate: number }>();
+    let undated = 0;
+    for (const l of lots) {
+      if (!l.date) {
+        undated += toMinor(l.amount);
+        continue;
+      }
+      const label = taxYearOf(l.date).label;
+      const e = byYear.get(label) ?? byYear.set(label, { minor: 0, rate: s455Rate(l.date) }).get(label)!;
+      e.minor += toMinor(l.amount);
+    }
+    const dated = [...byYear.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([label, e]) => `${formatMoney(fromMinor(e.minor))} borrowed in ${label}, at ${pct(e.rate)}`);
+    const earliest = lots.find((l) => l.date)?.date;
+    if (undated || !lots.length) dated.push(`${lots.length ? formatMoney(fromMinor(undated)) : 'what you owe'} borrowed ${earliest ? `before ${formatDate(earliest)}` : 'at a time not known here'}, at the rate of the year it was borrowed (${rateHistoryWords(on)})`);
     out.push({
       kind: 's455',
-      title: `You owe ${companyName} ${owed}`,
+      title: `You owe ${companyName} ${formatMoney(-balance)}`,
       detail:
-        `If any of it is still owed ${S455_DUE_MONTHS} months and a day after the end of the company’s accounting period it was lent in, the company owes Corporation Tax on what is still owed (CTA 2010 s455): ` +
-        `${pct(rate)} of money lent in ${ty.label}${before !== rate ? ` (${pct(before)} for money lent before ${formatDate(ty.start)})` : ''}, the dividend upper rate of the tax year it was lent. ` +
-        `Paid back before then, none is due on what was paid back (s458), and tax paid is refunded once it is paid back later. ` +
-        `Paying back ${formatMoney(S455_REBORROWING.repaid, { decimals: 0 })} or more and borrowing as much again within ${S455_REBORROWING.days} days, or while ${formatMoney(S455_REBORROWING.owedWithArrangements, { decimals: 0 })} or more is owed with plans to borrow again, does not count as paying back (s464ZA). Check the company’s year end and its accounts.`,
+        `If ${companyName} is a close company (most owner-managed companies are) and you are a participator in it, such as a shareholder, it owes Corporation Tax on what you still owe ${S455_DUE_MONTHS} months and a day after the end of the accounting period you borrowed it in (CTA 2010 s455), at the dividend upper rate of the tax year you borrowed it: ${dated.join('; ')}. ` +
+        `Paid back by then, none is due on what you paid back (s458). Paid back later, the company can claim the tax back, but not until ${S455_DUE_MONTHS} months after the end of the accounting period in which you paid it back, and within 4 years of the end of the financial year you paid it back in. ` +
+        `Paying back ${formatMoney(S455_REBORROWING.repaid, { decimals: 0 })} or more and borrowing ${formatMoney(S455_REBORROWING.repaid, { decimals: 0 })} or more again within ${S455_REBORROWING.days} days, the new borrowing in a later accounting period, does not count as paying back (s464ZA), unless what pays it back is taxed as your income (a dividend or salary); nor does paying back while ${formatMoney(S455_REBORROWING.owedWithArrangements, { decimals: 0 })} or more is owed when you plan to borrow ${formatMoney(S455_REBORROWING.repaid, { decimals: 0 })} or more again. ` +
+        `If the company writes off what you owe instead, its s455 tax is relieved, but the amount is taxed as your income (ITTOIA 2005 s415). Check the company’s year end and its accounts.`,
     });
   }
   const threshold = beneficialLoanThreshold(ty);
@@ -105,10 +168,15 @@ export function directorLoanWarnings(companyName: string, balance: number | null
     out.push({
       kind: 'beneficial-loan',
       title: `You owed ${companyName} more than ${formatMoney(threshold, { decimals: 0 })} in ${ty.label}`,
-      detail: `${formatMoney(owedMost.amount)} on ${formatDate(owedMost.date)}. A loan from a company you work for (as a director or an employee) that is over ${formatMoney(threshold, { decimals: 0 })} at any time in a tax year is a taxable benefit, unless you paid it interest at HMRC’s official rate (ITEPA 2003 s180): the company reports it, and you pay tax on it.`,
+      detail: `${formatMoney(owedMost.amount)} on ${formatDate(owedMost.date)}. A loan from a company you work for (as a director or an employee) that is over ${formatMoney(threshold, { decimals: 0 })} at any time in a tax year is a taxable benefit, unless you paid it interest at HMRC’s official rate (ITEPA 2003 s180): the company reports it and owes Class 1A National Insurance on it, and you pay income tax on it.`,
     });
   }
   return out;
+}
+
+/** The days a director's loan moved: its movements' and its recorded balances' (an anchor moves it too). */
+export function loanDays(store: Pick<Store, 'balances'>, accountId: string, movements: readonly { date: ISODate }[]): ISODate[] {
+  return [...movements.map((m) => m.date), ...store.balances(accountId).map((b) => b.date)];
 }
 
 /** The most you owed the company (a balance below nothing) on any day of `on`'s tax year up to `on`, from the engine. */
@@ -124,7 +192,7 @@ export function owedMostInTaxYear(engine: Pick<BalanceEngine, 'balanceOn'>, acco
 }
 
 /** A director's loan account's page: its company, its movements (newest first, each with its source row's account) and its warnings. */
-export function directorLoanView(store: Pick<Store, 'companies' | 'transactions' | 'account'>, engine: Pick<BalanceEngine, 'balanceOn'>, account: Account, on: ISODate): DirectorLoanView {
+export function directorLoanView(store: Pick<Store, 'companies' | 'transactions' | 'account' | 'company' | 'balances'>, engine: Pick<BalanceEngine, 'balanceOn'>, account: Account, on: ISODate): DirectorLoanView {
   const company = directorLoanCompany(store.companies, account.id);
   if (!company) return { movements: [], warnings: [] };
   const movements = directorLoanMovements(store, company.id)
@@ -132,5 +200,6 @@ export function directorLoanView(store: Pick<Store, 'companies' | 'transactions'
     .reverse();
   const balance = engine.balanceOn(account.id, on)?.value ?? null;
   const owedMost = owedMostInTaxYear(engine, account.id, on);
-  return { company: { id: company.id, name: company.name }, movements, warnings: directorLoanWarnings(company.name, balance, owedMost, on), ...(owedMost ? { owedMost } : {}) };
+  const lots = balance !== null && balance < 0 ? owedLots(engine, account.id, loanDays(store, account.id, movements), on) : [];
+  return { company: { id: company.id, name: company.name }, movements, warnings: directorLoanWarnings(company.name, balance, owedMost, on, lots), ...(owedMost ? { owedMost } : {}) };
 }

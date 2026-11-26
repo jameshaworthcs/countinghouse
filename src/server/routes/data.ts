@@ -7,7 +7,7 @@ import { ACCOUNT_TYPE_META, balanceModeOf, sideOf, slugify } from '../../shared/
 import type { AccountDetailResponse, BootstrapResponse, EnrichGroup, EnrichPreview, TransactionsResponse } from '../../shared/api';
 import { addTags, appendNote, removeTags } from '../../shared/annotations';
 import { CategoryIndex } from '../../shared/categories';
-import { movesDirectorLoan } from '../../shared/company';
+import { DIRECTOR_LOAN_MARKS } from '../../shared/company';
 import { today } from '../../shared/dates';
 import { catalogInstitution, findInstitution, INSTITUTION_CATALOG } from '../../shared/institutions';
 import { cleanPayee, descriptionKey } from '../../shared/merchants';
@@ -219,7 +219,7 @@ const FigureBody = z.object({
  */
 export function checkSplits(lines: SplitLine[], amount: number, t: Pick<Transaction, 'transferGroup' | 'company'>, cats: CategoryIndex): void {
   if (t.transferGroup) throw new StoreError('A transfer between your accounts cannot be split.');
-  if (movesDirectorLoan(t)) throw new StoreError('Money paid for or lent to your company is not your spending, so it cannot be split across categories: take its mark away first.');
+  if (t.company && DIRECTOR_LOAN_MARKS.has(t.company.as)) throw new StoreError('Money paid for or lent to your company is not your spending, so it cannot be split across categories: take its mark away first.');
   for (const l of lines) {
     const kind = cats.kindOf(l.category);
     if (kind !== 'expense' && kind !== 'income') throw new StoreError(`"${cats.name(l.category)}" is not a spending or income category.`);

@@ -106,7 +106,7 @@ describe('money that is neither spending nor income', () => {
     const debit = c.categorise({ accountId: 'card', description: 'DEBIT ADJUSTMENT', amount: -150 });
     expect([credit.category, debit.category]).toEqual(['refunds', 'refunds']);
     const card = acct('card', 'credit_card');
-    const counted = [tx('card', '2026-06-12', 150, 'CREDIT FOR DISPUTED CHARGE', { category: credit.category }), tx('card', '2026-06-12', -150, 'DEBIT ADJUSTMENT', { category: debit.category })].map((t) => classifyFlow(t, cats, card));
+    const counted = [tx('card', '2026-06-12', 150, 'CREDIT FOR DISPUTED CHARGE', { category: credit.category }), tx('card', '2026-06-12', -150, 'DEBIT ADJUSTMENT', { category: debit.category })].map((t) => classifyFlow(t, cats, card, { account: () => undefined, company: () => undefined }));
     expect(counted).toEqual(['spending', 'spending']);
   });
 

@@ -6,6 +6,7 @@
 // told to quote them, never to add up rows itself. Results are cut to a size the model reads well;
 // counts and totals always cover every row, cut or not.
 
+import { markCounts } from '../shared/company';
 import { z } from 'zod';
 import { CategoryIndex } from '../shared/categories';
 import { addDays, addMonths, diffDays, eachMonth, endOfMonth, isISODate, maxDate, minDate, today, type ISODate } from '../shared/dates';
@@ -274,7 +275,7 @@ export function runTool(store: Store, analytics: Analytics, tool: AskTool, raw: 
             category: t.category ? (cats.get(t.category)?.name ?? t.category) : null,
             ...(t.transferGroup ? { transfer: true } : {}),
             // Money with your company: what it was, and whose (not your spending or income when paid for it or a loan).
-            ...(t.company ? { company: { name: store.company(t.company.id)?.name ?? t.company.id, as: t.company.as } } : {}),
+            ...(t.company && markCounts(t, store) ? { company: { name: store.company(t.company.id)?.name ?? t.company.id, as: t.company.as } } : {}),
           })),
           ...(rows.length > shown.length ? { rowsLeftOut: rows.length - shown.length, note: 'count and the totals cover every match; only the newest rows are listed' } : {}),
         },

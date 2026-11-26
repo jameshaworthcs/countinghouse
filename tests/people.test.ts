@@ -640,8 +640,8 @@ describe('format v9: money paid back counts against spending', () => {
     expect(JSON.parse(await readFile(path.join(data, 'people.json'), 'utf8'))).toEqual({ $schema: '../schemas/people.schema.json', people: [] });
     const index = new CategoryIndex(store.categories);
     const bank = acct('bank', 'current');
-    expect(classifyFlow(tx('bank', '2026-06-01', 30, 'x', { category: 'repaid' }), index, bank)).toBe('spending');
-    expect(classifyFlow(tx('bank', '2026-06-01', 30, 'x', { category: 'trains' }), index, bank)).toBe('spending');
-    expect(classifyFlow(tx('bank', '2026-06-01', 30, 'x', { category: 'gifts-received' }), index, bank)).toBe('income');
+    expect(classifyFlow(tx('bank', '2026-06-01', 30, 'x', { category: 'repaid' }), index, bank, store)).toBe('spending');
+    expect(classifyFlow(tx('bank', '2026-06-01', 30, 'x', { category: 'trains' }), index, bank, store)).toBe('spending');
+    expect(classifyFlow(tx('bank', '2026-06-01', 30, 'x', { category: 'gifts-received' }), index, bank, store)).toBe('income');
   });
 });

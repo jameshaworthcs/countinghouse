@@ -1158,7 +1158,7 @@ function Health() {
   if (!h) return <Loading />;
   const clean =
     !h.remotes &&
-    !h.issues.length && !h.gaps.length && !h.noBalance.length && !h.stale.length && !h.coverageGaps?.some((g) => g.evidence.status === 'unexplained') && !h.handovers?.some((x) => x.status === 'unexplained') && !h.closedHolding?.length && !h.directorLoans?.length;
+    !h.issues.length && !h.gaps.length && !h.noBalance.length && !h.stale.length && !h.coverageGaps?.some((g) => g.evidence.status === 'unexplained') && !h.handovers?.some((x) => x.status === 'unexplained') && !h.closedHolding?.length && !h.directorLoans?.length && !h.marksThatDoNotCount?.length;
   const cov = h.coverage;
   return (
     <div className="flex flex-col gap-5">
@@ -1253,6 +1253,23 @@ function Health() {
                 </li>
               )),
             )}
+          </ul>
+        </Card>
+      )}
+      {(h.marksThatDoNotCount?.length ?? 0) > 0 && (
+        <Card title="Marks that count for nothing" description="Payments marked as money with your company where the mark no longer fits. Until you change the mark, each is an ordinary payment of yours: spending or income, and not in a director’s loan.">
+          <ul className="flex flex-col gap-2 text-[13px]">
+            {h.marksThatDoNotCount!.map((m) => (
+              <li key={m.transactionId}>
+                <Link to={`/transactions?accounts=${m.accountId}&period=custom&from=${m.date}&to=${m.date}`} className="text-accent hover:underline">
+                  {m.description}
+                </Link>{' '}
+                <span className="text-ink-3">
+                  {m.name}, {formatDate(m.date)}
+                </span>
+                <div className="text-ink-2">{m.problem}</div>
+              </li>
+            ))}
           </ul>
         </Card>
       )}

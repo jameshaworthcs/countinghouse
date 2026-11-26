@@ -153,7 +153,7 @@ export function pairPay(store: Store, ty: TaxYear): { periods: PayPeriod[]; othe
   // Pay received: salary credits in the year, plus the days either side of it for pay dates near its
   // edges, and later ones for pay that is owed.
   // Money the company lent you back, or a cost of its you paid, is not pay, whatever its category.
-  const salary = store.transactions().filter((t) => t.category === 'salary' && t.amount > 0 && !movesDirectorLoan(t) && t.date >= addDays(ty.start, -PAY_MATCH_DAYS));
+  const salary = store.transactions().filter((t) => t.category === 'salary' && t.amount > 0 && !movesDirectorLoan(t, store) && t.date >= addDays(ty.start, -PAY_MATCH_DAYS));
 
   // Payslips: one pay period per job (else employer) and period.
   const byEmployer = new Map<string, { payer: string; names: string[]; payrollNumbers: string[]; employmentId?: string; periods: Map<string, Figure[]> }>();

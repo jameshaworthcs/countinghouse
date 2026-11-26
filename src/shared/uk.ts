@@ -603,6 +603,20 @@ export function s455Rate(loanDate: ISODate): number {
 }
 
 /**
+ * The s455 rate by when the money was lent, from the first row up to `on`'s tax year: each rate with
+ * the day it starts (the first, the flat rate, from no day in particular).
+ */
+export function s455RateHistory(on: ISODate): { from: ISODate; rate: number }[] {
+  const out: { from: ISODate; rate: number }[] = [{ from: '1900-01-01', rate: S455_FLAT_RATES[0]!.rate }];
+  for (let year = Number(S455_FLAT_RATES.at(-1)!.until.slice(0, 4)); year <= taxYearOf(on).startYear; year++) {
+    const ty = taxYear(year);
+    const rate = s455Rate(ty.start);
+    if (rate !== out.at(-1)!.rate) out.push({ from: ty.start, rate });
+  }
+  return out;
+}
+
+/**
  * When s455 tax is due: the day after 9 months from the end of the accounting period the loan was made
  * in (CTA 2010 s455(3)). Repaid (or released) before then, no tax is due on what was repaid (s458).
  */
@@ -618,13 +632,19 @@ export const S455_REBORROWING = { days: 30, repaid: 5_000, owedWithArrangements:
 
 /**
  * A loan from your employer (your company, when you work for it) outstanding above this at any time
- * in a tax year is a taxable benefit at the official rate of interest (ITEPA 2003 s180): £10,000 from
- * 2014/15 (Finance Act 2014 s22), £5,000 before.
+ * in a tax year is a taxable benefit at the official rate of interest (ITEPA 2003 s180), and the
+ * employer owes Class 1A National Insurance on it. Each row from the tax year it starts: £5,000 to
+ * 2013/14 (ITEPA 2003 s180 as enacted, from 2003/04, the first year of ITEPA), £10,000 from 2014/15
+ * (Finance Act 2014 s22).
  */
-export const BENEFICIAL_LOAN_THRESHOLDS: DatedLimit[] = [{ from: '2014-04-06', limit: 10_000 }];
+export const BENEFICIAL_LOAN_THRESHOLDS: DatedLimit[] = [
+  { from: '2003-04-06', limit: 5_000 },
+  { from: '2014-04-06', limit: 10_000 },
+];
 
+/** The threshold for a tax year: the latest row starting by then (the first row before any). */
 export function beneficialLoanThreshold(ty: TaxYear): number {
-  let limit = 5_000;
+  let limit = BENEFICIAL_LOAN_THRESHOLDS[0]!.limit;
   for (const row of BENEFICIAL_LOAN_THRESHOLDS) if (ty.start >= row.from) limit = row.limit;
   return limit;
 }

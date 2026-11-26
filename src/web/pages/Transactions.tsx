@@ -94,6 +94,9 @@ export default function Transactions() {
   const virtual = useVirtualizer({ count: items.length, getScrollElement: () => parentRef.current, estimateSize: () => 52, overscan: 12 });
   const allSelected = items.length > 0 && selected.size === items.length;
   const selectedItems = useMemo(() => items.filter((t) => selected.has(t.id)), [items, selected]);
+  // Pay and dividends are offered only when every chosen row is loaded here and is money in; otherwise
+  // only the marks that fit either way (paid for the company, a loan).
+  const allMoneyIn = selectedItems.length > 0 && selected.size === selectedItems.length && selectedItems.every((t) => t.amount > 0);
   const exportHref = `/api/transactions/export.csv${qs({ ...filters, sort: undefined, limit: undefined })}`;
   const sort = parseSortParam(filters.sort ?? DEFAULT_SORT) ?? { key: 'date', dir: 'desc' as const };
   const sortProps = (key: string): SortProps => ({
@@ -298,7 +301,7 @@ export default function Transactions() {
         {(companies.data?.length ?? 0) > 0 && (
           <span className="flex items-center gap-1.5" title={COMPANY_MARK_HINT}>
             <span className="w-52">
-              <CompanyMarkSelect value={bulkMark} onChange={setBulkMark} amount={selectedItems.every((t) => t.amount > 0) ? 1 : -1} companies={companies.data ?? []} placeholder="Your company…" ariaLabel="Mark as money with your company" />
+              <CompanyMarkSelect value={bulkMark} onChange={setBulkMark} amount={allMoneyIn ? 1 : -1} companies={companies.data ?? []} placeholder="Your company…" ariaLabel="Mark as money with your company" />
             </span>
             <Button size="sm" disabled={!bulkMark} loading={bulk.isPending} onClick={() => bulk.mutate({ ids: [...selected], company: parseMark(bulkMark) })}>
               Mark

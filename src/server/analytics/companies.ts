@@ -22,7 +22,7 @@ export function companyView(store: Store, c: Company, engine: BalanceEngine = ne
   const names = [c.name];
   const vouchers = store.figures.filter((f) => f.kind === 'dividends_paid' && f.payer && names.some((n) => fromEmployer({ description: f.payer!, payee: undefined, counterpartyName: undefined }, n))).sort((a, b) => (a.periodEnd ?? a.date ?? '').localeCompare(b.periodEnd ?? b.date ?? ''));
   // A credit you marked as a loan repaid (or a refund of a cost you paid for it) is not a dividend.
-  const credits = store.transactions().filter((t) => t.amount > 0 && !movesDirectorLoan(t) && (t.category === 'dividends' || t.category === 'investment-income') && names.some((n) => fromEmployer(t, n)));
+  const credits = store.transactions().filter((t) => t.amount > 0 && !movesDirectorLoan(t, store) && (t.category === 'dividends' || t.category === 'investment-income') && names.some((n) => fromEmployer(t, n)));
   const used = new Set<string>();
   const dividends: CompanyView['dividends'] = vouchers.map((f) => {
     const day = f.periodEnd ?? f.date;
