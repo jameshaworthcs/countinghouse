@@ -369,7 +369,7 @@ const ProviderOut = z.object({
 
 const researchProvider: JobKindDef = {
   kind: 'research-provider',
-  promptVersion: 'research-provider-1',
+  promptVersion: 'research-provider-2',
   privacy: 'public',
   tools: ['WebSearch', 'WebFetch'],
   label: ({ store, params }) => `Research ${store.institution(String(params.institutionId))?.name ?? String(params.institutionId)} rates and charges`,
