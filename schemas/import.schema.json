@@ -1057,6 +1057,57 @@
                       }
                     ]
                   },
+                  "listShows": {
+                    "default": null,
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "newestEnd": {
+                            "default": null,
+                            "type": [
+                              "boolean",
+                              "null"
+                            ]
+                          },
+                          "oldestEnd": {
+                            "default": null,
+                            "type": [
+                              "boolean",
+                              "null"
+                            ]
+                          },
+                          "from": {
+                            "default": null,
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "description": "Calendar date, YYYY-MM-DD"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "to": {
+                            "default": null,
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "description": "Calendar date, YYYY-MM-DD"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        }
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "transactions": {
                     "default": [],
                     "type": "array",
@@ -2936,6 +2987,57 @@
                       }
                     ]
                   },
+                  "listShows": {
+                    "default": null,
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "newestEnd": {
+                            "default": null,
+                            "type": [
+                              "boolean",
+                              "null"
+                            ]
+                          },
+                          "oldestEnd": {
+                            "default": null,
+                            "type": [
+                              "boolean",
+                              "null"
+                            ]
+                          },
+                          "from": {
+                            "default": null,
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "description": "Calendar date, YYYY-MM-DD"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "to": {
+                            "default": null,
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "description": "Calendar date, YYYY-MM-DD"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        }
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "transactions": {
                     "default": [],
                     "type": "array",
@@ -4616,6 +4718,10 @@
               "coversTo": {
                 "type": "string",
                 "description": "Calendar date, YYYY-MM-DD"
+              },
+              "coversWhy": {
+                "type": "string",
+                "maxLength": 400
               },
               "openingBalance": {
                 "type": "number",

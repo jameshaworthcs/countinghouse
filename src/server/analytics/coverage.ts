@@ -69,13 +69,30 @@ export const STATEMENT_CYCLE_DAYS = 40;
  */
 export function importIntervals(store: Store, accountId: string): Interval[] {
   const sections = store.imports.flatMap((i) => i.sections.filter((s) => s.accountId === accountId));
-  const closed = sections.filter((s) => s.closing !== undefined).sort((a, b) => (a.to < b.to ? -1 : a.to > b.to ? 1 : 0));
-  return sections.map((s) => {
-    if (s.fromStated || s.opening === undefined) return { from: s.from, to: s.to };
-    const prev = closed.filter((p) => p.to < s.to).at(-1);
-    if (!prev || toMinor(prev.closing!) !== toMinor(s.opening) || diffDays(prev.to, s.to) > STATEMENT_CYCLE_DAYS) return { from: s.from, to: s.to };
-    return { from: minDate(s.from, addDays(prev.to, 1))!, to: s.to };
-  });
+  const closed = closedSections(store, accountId);
+  return sections.map((s) => runsOn(s, closed));
+}
+
+type SectionSpan = { from: ISODate; to: ISODate; fromStated?: boolean | undefined; opening?: number | undefined };
+
+/** An account's committed sections with a closing balance, earliest-ending first. */
+function closedSections(store: Store, accountId: string) {
+  return store.imports
+    .flatMap((i) => i.sections.filter((s) => s.accountId === accountId && s.closing !== undefined))
+    .sort((a, b) => (a.to < b.to ? -1 : a.to > b.to ? 1 : 0));
+}
+
+/** A section's days, run on from the statement before it when it prints no start and the balances chain (`importIntervals`). */
+function runsOn(s: SectionSpan, closed: { to: ISODate; closing?: number | undefined }[]): Interval {
+  if (s.fromStated || s.opening === undefined) return { from: s.from, to: s.to };
+  const prev = closed.filter((p) => p.to < s.to).at(-1);
+  if (!prev || toMinor(prev.closing!) !== toMinor(s.opening) || diffDays(prev.to, s.to) > STATEMENT_CYCLE_DAYS) return { from: s.from, to: s.to };
+  return { from: minDate(s.from, addDays(prev.to, 1))!, to: s.to };
+}
+
+/** The days a section not yet committed would cover for an account, as `importIntervals` would count them once it is. */
+export function wouldCover(store: Store, accountId: string, s: SectionSpan): Interval {
+  return runsOn(s, closedSections(store, accountId));
 }
 
 export function covers(intervals: Interval[], date: ISODate): boolean {

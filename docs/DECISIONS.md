@@ -2890,3 +2890,46 @@ value grown from the account's first flow is never below nothing, as rolled-back
   call and answered with every figure the app's. It ran on the owner's Ask model (Claude Opus), not
   the local model: the run should have passed `--model local-thinking`.
 
+
+## 2026-11-26: An import says which account and which days it covers from what it shows
+
+Exports and screenshots waiting for review showed what drafting missed. An export that named only
+its bank was drafted into a new account, with its rows, all recorded already, offered as new. An
+export's file name gave the range exported, yet it covered only its first row to its last. A
+screenshot showing the newest end of an account's list proved nothing had moved since its latest
+row, yet covered no new days. And a list of payments recorded already could be dismissed as
+"nothing new", losing the days only it covered.
+
+- **Which account, from what it holds** (`recordedEvidence`, docs/INGESTION.md): rows an account
+  has on the same day for the same amount, with the same balance after (60 points, as good as a
+  number), most of its rows without balances (40), or opening on a balance of the account's latest
+  day within a cycle (30). One account only: a tie is no evidence. A different number rules an
+  account out, and none of this counts for it.
+- **The range in an export's file name** ("Statement for … to ….csv") is what it covers, to the
+  day before the file was made when it reaches that day. Not when a row falls outside it.
+- **How much of a list is in view** (reader rule 25, `extract-17`, the reader that keeps
+  everything): its newest end, its oldest end, and the period it is limited to. The draft covers to
+  the day before a screenshot was taken when its newest end shows, and from a month tab's first day
+  when its oldest end does. Only when the image's metadata or file name dates it: a file's saved day
+  moves with a copy, and the upload day says nothing. Not for a screen that prints its period.
+- The draft proposes these as `coversFrom`/`coversTo`, with why (`coversWhy`, kept when you change
+  the dates), rather than as a period: you can change them, and a period is what a document prints.
+- **"Nothing new" counts days**: days an import would cover that the account's records do not,
+  counted as coverage will count them (`wouldCover`, run on from the statement before), are
+  something to add.
+- **An export's first row is not a printed start** (`sectionSpan`, `fromStated`): an export that
+  opens on the closing balance of the statement before it runs on from it, as any statement that
+  prints no start does. Coverage of committed exports can only grow by it.
+- Considered: reading the period from the reader's remarks ("cut off at the bottom"), which are
+  words for you, not a field; a period for screenshots (they print none, and the review check on
+  rows outside a period would then mean nothing); the screenshot's own day as covered (it was not
+  over when taken).
+- `extract-17` lists documents read by an older reader as worth reading again; a screenshot's list
+  is the only thing it adds, and nothing is read again unless you start it.
+- **Review before deploying** (one independent review of the change; each finding checked in the
+  code first). Fixed: a screen that prints its period was widened past it; a file's saved day was
+  taken as when a screenshot was taken; a proposal on an investment account was hidden on the
+  review page; "nothing new" missed days an export would run on over; the opening balance depended
+  on the order a day's balances were kept; rows recorded could outweigh a different number; the
+  reason was cleared when one date was changed, and could name a date it did not set; the evidence
+  and each account's coverage were worked out more than once.

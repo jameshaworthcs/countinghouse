@@ -3,15 +3,16 @@
 // extractions can be told apart (and re-run) later. An example's values swapped for other invented
 // ones is not a change: the rules and the schema are the same (docs/DECISIONS.md, 2026-10-08).
 //
-// Reading everything (Settings → Models & import, `readEverything`) adds rules 20 to 24 and their
+// Reading everything (Settings → Models & import, `readEverything`) adds rules 20 to 25 and their
 // part of the schema: a payslip in full, HMRC's pages as records, an account's terms (its rates,
-// limit and minimum payment), every other labelled value the document prints, and schedules of
-// payments (a student finance award, an offer's instalments). It is PROMPT_VERSION_EVERYTHING.
+// limit and minimum payment), every other labelled value the document prints, schedules of
+// payments (a student finance award, an offer's instalments), and how much of a screenshot's list
+// is in view. It is PROMPT_VERSION_EVERYTHING.
 
 import { ACCOUNT_TYPES, AGREEMENT_PAYMENT_STATUSES, ASSET_CLASSES, EXTRACTION_DOC_TYPES, FIGURE_KINDS, SCHEDULE_DIRECTIONS, TERMS_RATE_APPLIES } from '../../shared/schema';
 
 export const PROMPT_VERSION = 'extract-12';
-export const PROMPT_VERSION_EVERYTHING = 'extract-16';
+export const PROMPT_VERSION_EVERYTHING = 'extract-17';
 
 /** The prompt version a reading is made with. */
 export const promptVersion = (everything: boolean) => (everything ? PROMPT_VERSION_EVERYTHING : PROMPT_VERSION);
@@ -78,7 +79,7 @@ Accuracy matters more than completeness:
     - Holiday balances (accrued, taken, carried over, left) are not figures.
     For every figure that is not earned_pay, work is null.`;
 
-/** Rules 20 to 24: everything else the document prints (extract-15). */
+/** Rules 20 to 25: everything else the document prints (extract-15), and how much of a list is in view (extract-17). */
 const EVERYTHING_RULES = `
 20. payslips: each payslip on the document in full, as well as its figures for the period under rule 13: gross_pay, tax_deducted, national_insurance, pension_contribution_employee (the pension deducted from your pay) and student_loan_deducted, each when printed. The employer's NI and pension are never figures: they go in employerCosts.
     - employer as the payslip names it; otherNames for any other company it prints (a group company); payeReference ("123/AB45678") and payrollNumber (your payroll or works number) when printed.
@@ -105,9 +106,13 @@ const EVERYTHING_RULES = `
     - from and until: the period it covers, when printed; reference as printed, never a customer, account or student support number that identifies you; total as printed.
     - payments: every payment it lists, in printed order: date, amount (positive, whichever way it goes), label as printed ("Instalment 1"), and status: paid ("Paid", "We've paid you"), due ("Due", "Ready to be paid"), scheduled ("Expected", "Planned", a timetable's dates), awaiting ("Awaiting confirmation") or cancelled; null when it shows none.
     - details: other labelled facts about it as printed (course, course year, university or college, room, let period), never a name, address, date of birth or a number that identifies you.
-    A schedule's payments are never transactions, and a document that gives a schedule is never nothingToRecord. Every payment it lists goes in payments, never only in notes or printed.`;
+    A schedule's payments are never transactions, and a document that gives a schedule is never nothingToRecord. Every payment it lists goes in payments, never only in notes or printed.
+25. listShows, on each account whose movements a screenshot lists: how much of that list is in view, so the days it shows in full are known. null on a statement or export, and on a screen with no list of movements.
+    - newestEnd: true when the list's most recent end is in view, with nothing more recent above it or scrolled away (the top of a list that starts at its latest movements); false when it is cut off there or scrolled down; null when you cannot tell.
+    - oldestEnd: true when the list's oldest end is in view: it ends (blank space below its last row, "No more transactions", the end of a month's list), with nothing cut off; false when it is cut off or continues ("Load more", "See all", a row half out of view); null when you cannot tell.
+    - from and to: the period the list is limited to, as the screen shows it: a month tab or heading that is selected ("Nov. 2026" → 2026-11-01 and 2026-11-30), a date filter. null when the list is not limited to a period.`;
 
-/** The system prompt: rules 1 to 19, and 20 to 24 when reading everything. */
+/** The system prompt: rules 1 to 19, and 20 to 25 when reading everything. */
 /**
  * Rules added for the local model service only (`vision-extract`; DECISIONS 2026-10-04). Its
  * evaluation found readings that passed every check yet left out what Claude reads unprompted: a
@@ -217,6 +222,18 @@ export function extractionJsonSchema(everything = false): Record<string, unknown
     statedMoneyIn: nullable(num('Printed total of money in for the period, positive')),
     statedMoneyOut: nullable(num('Printed total of money out for the period, positive')),
     runningBalanceOf: nullable({ type: 'string', enum: ['account', 'cash'], description: 'What a running Balance column tracks' }),
+    ...(everything
+      ? {
+          listShows: nullable(
+            object({
+              newestEnd: nullable(bool('The most recent end of the list of movements is in view')),
+              oldestEnd: nullable(bool('The list of movements ends in view, nothing cut off')),
+              from: nullable(date('First day of the period the list is limited to (a month tab)')),
+              to: nullable(date('Last day of that period')),
+            }),
+          ),
+        }
+      : {}),
     transactions: { type: 'array', items: transaction },
     holdings: { type: 'array', items: holding },
   });

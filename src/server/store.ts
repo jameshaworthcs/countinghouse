@@ -14,6 +14,7 @@ import path from 'node:path';
 import type { z } from 'zod';
 import type { ChangeDiff } from '../shared/audit';
 import { defaultCategories } from '../shared/categories';
+import { sectionSpan } from '../shared/coverage';
 import {
   AccountSchema,
   AssumptionSchema,
@@ -1422,25 +1423,18 @@ function sectionsOf(r: ImportRecord): ImportSummary['sections'] {
   if (r.status !== 'committed' || !r.draft) return [];
   const out: ImportSummary['sections'] = [];
   for (const s of r.draft.sections) {
-    // A schedule's rows (a loan's instalments) are not a statement: they cover none of its days.
-    if (s.target.mode === 'skip' || s.fromSchedule) continue;
+    if (s.target.mode === 'skip') continue;
     const accountId = r.result?.sections?.find((x) => x.key === s.key)?.accountId ?? (s.target.mode === 'existing' ? s.target.accountId : s.target.account.id);
-    const dates = s.transactions.map((t) => t.date).sort();
-    // A statement with an opening balance and no rows still covers the day it closed; coverage
-    // can link it back to the statement before it.
-    const readTo = s.periodEnd ?? dates[dates.length - 1] ?? (s.openingBalance !== undefined ? s.balanceDate : undefined);
-    const readFrom = s.periodStart ?? dates[0] ?? readTo;
-    // The range you gave for a document that does not print its period widens what it covers.
-    const from = s.coversFrom && (!readFrom || s.coversFrom < readFrom) ? s.coversFrom : readFrom;
-    const to = s.coversTo && (!readTo || s.coversTo > readTo) ? s.coversTo : readTo;
-    if (!from || !to || from > to) continue;
+    const span = sectionSpan(s, r.draft.documentType);
+    if (!span) continue;
+    const { from, to } = span;
     // With an investment app's activity list, the balances are its cash, and so is `cash`.
     const closing = s.cashLedger ? s.cash : s.balance;
     out.push({
       accountId,
       from,
       to,
-      ...(s.periodStart || s.coversFrom ? { fromStated: true } : {}),
+      ...(span.fromStated ? { fromStated: true } : {}),
       ...(s.openingBalance !== undefined ? { opening: s.openingBalance } : {}),
       ...(closing !== undefined ? { closing } : {}),
     });

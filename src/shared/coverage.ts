@@ -3,6 +3,7 @@
 
 import type { CoverageGapView } from './api';
 import { addDays, addMonths, startOfMonth, type ISODate } from './dates';
+import type { DraftSection } from './schema';
 
 /**
  * The last day "confirm all" reaches: the end of the month before last. Every monthly statement
@@ -33,4 +34,33 @@ export function settledStretches(gaps: CoverageGapView[], now: ISODate): { accou
     const end = to && to > settled ? settled : to;
     return end && end >= g.from ? [{ accountId: g.accountId, from: g.from, to: end }] : [];
   });
+}
+
+/**
+ * Documents whose period is the span of their rows, not printed: a CSV export. Its first row's date
+ * is not a printed start (docs/FORMULAS.md §3).
+ */
+export function periodFromRows(documentType: string | undefined): boolean {
+  return documentType === 'csv_export';
+}
+
+/**
+ * The days a draft section covers for its account (docs/FORMULAS.md §3): its printed period, else
+ * the span of its rows (a statement with an opening balance and no rows: its closing day), widened
+ * to `coversFrom`/`coversTo`. `fromStated` says the start was given (printed, or a range for a
+ * document that prints none), so coverage does not run it on from the statement before. Null when
+ * it covers no days. A schedule's rows (a loan's instalments) are not a statement: none.
+ */
+export function sectionSpan(
+  s: Pick<DraftSection, 'periodStart' | 'periodEnd' | 'coversFrom' | 'coversTo' | 'transactions' | 'openingBalance' | 'balanceDate' | 'fromSchedule'>,
+  documentType: string | undefined,
+): { from: ISODate; to: ISODate; fromStated: boolean } | null {
+  if (s.fromSchedule) return null;
+  const dates = s.transactions.map((t) => t.date).sort();
+  const readTo = s.periodEnd ?? dates[dates.length - 1] ?? (s.openingBalance !== undefined ? s.balanceDate : undefined);
+  const readFrom = s.periodStart ?? dates[0] ?? readTo;
+  const from = s.coversFrom && (!readFrom || s.coversFrom < readFrom) ? s.coversFrom : readFrom;
+  const to = s.coversTo && (!readTo || s.coversTo > readTo) ? s.coversTo : readTo;
+  if (!from || !to || from > to) return null;
+  return { from, to, fromStated: Boolean((s.periodStart && !periodFromRows(documentType)) || s.coversFrom) };
 }

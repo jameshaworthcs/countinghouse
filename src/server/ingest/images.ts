@@ -9,6 +9,20 @@ import { dateOf, makeDate, type ISODate } from '../../shared/dates';
 import type { DateSource } from '../../shared/schema';
 import { nowISO } from '../fsutil';
 
+/**
+ * The range an export's file name gives, "<date> to <date>" ("Statement for 14 March 2026 to 13 May
+ * 2026.csv", "transactions_2026-04-01_to_2026-04-30.csv"): both ends read as
+ * `dateFromFileName` reads one, the first no later than the second. Null when it gives no range.
+ */
+export function dateRangeFromFileName(name: string): { from: ISODate; to: ISODate } | null {
+  const base = path.basename(name).replace(/\.[a-z0-9]{2,5}$/i, '');
+  const parts = base.split(/[\s_]+to[\s_]+|\s*[–—]\s*|\s+-\s+/i);
+  if (parts.length !== 2) return null;
+  const from = dateFromFileName(parts[0]!);
+  const to = dateFromFileName(parts[1]!);
+  return from && to && from <= to ? { from, to } : null;
+}
+
 /** Dates in screenshot / photo file names from iOS, Android, macOS, Windows, GNOME and apps. */
 export function dateFromFileName(name: string): ISODate | null {
   const base = path.basename(name);

@@ -8,6 +8,8 @@ import { diffDays, formatDate, parseFlexibleDate } from '../../shared/dates';
 import { formatMoney, parseAmount, toMinor } from '../../shared/money';
 import type { Agreement, DraftFigure, DraftSection, Holding, ImportRecord } from '../../shared/schema';
 import type { Store } from '../store';
+import { complement, coveredIntervals, wouldCover, type Interval } from '../analytics/coverage';
+import { sectionSpan } from '../../shared/coverage';
 import { addsAnything, detailToAdd, stillAdds, type DetailFields } from '../../shared/detail';
 import { candidateOf, classifyDuplicates, type DedupResult } from './dedup';
 import { sameHolding } from './match';
@@ -39,7 +41,10 @@ type Fact =
   // A payslip in full is known by what identifies it (ids.ts, `payslipId`).
   | { kind: 'payslip'; id: string }
   // A schedule, as the agreement it records: known by who, what and its payments.
-  | { kind: 'agreement'; key: string; name: string };
+  | { kind: 'agreement'; key: string; name: string }
+  // Days the import covers that the account's records do not (docs/FORMULAS.md §3): a list of
+  // payments recorded already still says nothing else happened on its days.
+  | { kind: 'coverage'; account: string; from: string; to: string };
 
 /** A fact and where it already is: the stored data, or another import. */
 interface Placed {
@@ -55,7 +60,7 @@ function accountKey(record: ImportRecord, s: DraftSection): string {
 }
 
 /** Everything an import would record if committed as it is, each marked if already stored. */
-function factsOf(record: ImportRecord, store: Store): Placed[] {
+function factsOf(record: ImportRecord, store: Store, covered: (accountId: string) => Interval[]): Placed[] {
   const draft = record.draft!;
   const out: Placed[] = [];
   for (const s of draft.sections) {
@@ -73,6 +78,11 @@ function factsOf(record: ImportRecord, store: Store): Placed[] {
       const adds = found && addsAnything(found) ? found.fields : undefined;
       out.push({ fact: { kind: 'row', account, date: t.date, amount: t.amount, description: t.description, ...(adds ? { adds } : {}) }, stored: dup.status === 'duplicate' && !adds });
     });
+    const span = stored ? sectionSpan(s, draft.documentType) : null;
+    if (span && stored) {
+      const days = wouldCover(store, stored, { ...span, opening: s.openingBalance });
+      for (const g of complement(covered(stored), days.from, days.to)) out.push({ fact: { kind: 'coverage', account, from: g.from, to: g.to }, stored: false });
+    }
     if (s.recordBalance && s.balance !== undefined && s.balanceDate) {
       const values = Object.fromEntries(BALANCE_FIELDS.filter((k) => s[k] !== undefined).map((k) => [k, s[k]])) as Partial<Record<BalanceField, number>>;
       const date = s.balanceDate;
@@ -171,6 +181,7 @@ function covers(k: Fact, f: Fact): boolean {
   if (k.kind === 'hmrc' && f.kind === 'hmrc') return k.id === f.id;
   if (k.kind === 'payslip' && f.kind === 'payslip') return k.id === f.id;
   if (k.kind === 'agreement' && f.kind === 'agreement') return k.key === f.key;
+  if (k.kind === 'coverage' && f.kind === 'coverage') return k.account === f.account && k.from <= f.from && f.to <= k.to;
   if (k.kind === 'figure' && f.kind === 'figure') {
     const [a, b] = [k.figure, f.figure];
     return a.kind === b.kind && sameMoney(a.amount, b.amount) && (a.taxYear ?? '') === (b.taxYear ?? '') && (a.periodEnd ?? '') === (b.periodEnd ?? '') && (a.payer ?? '').toLowerCase() === (b.payer ?? '').toLowerCase();
@@ -209,6 +220,10 @@ function describe(facts: { fact: Fact; where: string }[]): string {
     if (kind === 'terms') return `${list.length === 1 ? 'its terms (rates and limit) are' : `its terms for ${plural(list.length, 'account')} are`} ${place}`;
     if (kind === 'hmrc') return `${list.length === 1 ? 'its HMRC record is' : `its ${plural(list.length, 'HMRC record')} are`} ${place}`;
     if (kind === 'payslip') return `${list.length === 1 ? 'the payslip is' : `its ${plural(list.length, 'payslip')} are`} ${place}`;
+    if (kind === 'coverage') {
+      const days = list as Extract<Fact, { kind: 'coverage' }>[];
+      return `${days.length === 1 ? `the days it covers (${formatDate(days[0]!.from)} to ${formatDate(days[0]!.to)}) are` : `the ${days.length} stretches of days it covers are`} ${place}`;
+    }
     if (kind === 'agreement') return `${list.length === 1 ? `its schedule (${(list[0] as Extract<Fact, { kind: 'agreement' }>).name}) is` : `its ${plural(list.length, 'schedule')} are`} ${place}`;
     return `${list.length === 1 ? 'its tax figure is' : `its ${plural(list.length, 'tax figure')} are`} ${place}`;
   });
@@ -223,9 +238,18 @@ function describe(facts: { fact: Fact; where: string }[]): string {
  */
 export function assessNovelty(pending: ImportRecord[], store: Store): Map<string, NothingNew> {
   const out = new Map<string, NothingNew>();
+  // Each account's covered days, worked out once (they read every import).
+  const coverage = new Map<string, Interval[]>();
+  const covered = (accountId: string): Interval[] => {
+    if (!coverage.has(accountId)) {
+      const account = store.account(accountId);
+      coverage.set(accountId, account ? coveredIntervals(store, account) : []);
+    }
+    return coverage.get(accountId)!;
+  };
   const candidates = pending
     .filter((r) => r.status === 'review' && r.draft)
-    .map((r) => ({ r, facts: factsOf(r, store), doubtful: doubtful(r) }))
+    .map((r) => ({ r, facts: factsOf(r, store, covered), doubtful: doubtful(r) }))
     .sort(
       (a, b) =>
         Number(b.doubtful) - Number(a.doubtful) ||

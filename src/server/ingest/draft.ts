@@ -29,6 +29,8 @@ import type {
 import { isNiNumber, withoutNiNumbers } from '../../shared/privacy';
 import { DraftSchema, WorkDetailSchema, type DetailField, type DraftJob, type Employment, type WorkDetail } from '../../shared/schema';
 import { isPayslipFigure, payeReference, payerKey } from '../analytics/sources';
+import { STATEMENT_CYCLE_DAYS } from '../analytics/coverage';
+import { periodFromRows } from '../../shared/coverage';
 import { jobOfFigure, jobOfHmrc, matchEmployment, newEmploymentId, type JobIdentity } from '../employments';
 import { hmrcId, payslipId } from '../ids';
 import { earnedReplaced, inferPayroll } from '../analytics/earned';
@@ -36,8 +38,8 @@ import type { Store } from '../store';
 import { classifyDuplicates, storedTwice } from './dedup';
 import { saysNothing } from '../../shared/merchants';
 import { isCancelled, isReinvested } from '../../shared/review';
-import { dateFromFileName } from './images';
-import { fitsAccount, identifies, matchAccount, onlyKind, proposeAccount, providerBeside, providerShown, sameHolding, type AccountMatch, type Detected } from './match';
+import { dateFromFileName, dateRangeFromFileName } from './images';
+import { fitsAccount, identifies, matchAccount, onlyKind, proposeAccount, providerBeside, providerShown, sameHolding, type AccountMatch, type Detected, type RecordedEvidence } from './match';
 import { asAgreement, draftAgreements, isStudentFinance, paymentLabel, STUDENT_FINANCE, studentLoanAccount } from './schedules';
 
 export { fitsAccount } from './match';
@@ -193,6 +195,111 @@ export function providerOf(acc: Pick<ExtractedAccount, 'institutionName' | 'hold
   return fundsByIt.length === acc.holdings.length ? undefined : named;
 }
 
+/**
+ * The days a document that prints no period covers beyond its first and last rows (docs/FORMULAS.md
+ * §3; docs/INGESTION.md, "Coverage"), with why, shown on the review page:
+ * - an export whose file name gives the range exported: that range, to the day before it was saved
+ *   when it runs to that day (a day not over when the file was made);
+ * - a screenshot whose list shows its newest end: to the day before it was taken (or the end of the
+ *   period its list is limited to, when that is earlier); and from the start of that period when its
+ *   oldest end is in view too.
+ * Never narrower than its rows, and nothing when a row falls outside what it would cover.
+ */
+export function coverageBeyondRows(
+  extraction: Pick<Extraction, 'documentType'>,
+  acc: Pick<ExtractedAccount, 'periodStart' | 'periodEnd' | 'listShows'> & { transactions: readonly { date: string }[] },
+  document: Pick<DocumentRef, 'fileName' | 'mediaType' | 'lastModified' | 'capturedOn' | 'capturedOnSource'>,
+  uploadedOn: string,
+): Pick<DraftSection, 'coversFrom' | 'coversTo' | 'coversWhy'> {
+  const dates = acc.transactions.map((t) => t.date).sort();
+  const [first, last] = [dates[0], dates.at(-1)];
+  if (!first || !last) return {};
+  const out = (from: string | undefined, to: string | undefined, why: (kept: { from: boolean; to: boolean }) => string): Pick<DraftSection, 'coversFrom' | 'coversTo' | 'coversWhy'> => {
+    const kept = { from: Boolean(from && from < first), to: Boolean(to && to > last) };
+    if (!kept.from && !kept.to) return {};
+    return { ...(kept.from ? { coversFrom: from } : {}), ...(kept.to ? { coversTo: to } : {}), coversWhy: why(kept) };
+  };
+  const image = document.mediaType.startsWith('image/');
+  if (!image && (periodFromRows(extraction.documentType) || (!acc.periodStart && !acc.periodEnd))) {
+    const range = dateRangeFromFileName(document.fileName);
+    if (!range || first < range.from || last > range.to) return {};
+    const saved = document.lastModified ? dateOf(document.lastModified) : undefined;
+    const madeOn = saved && saved <= uploadedOn ? saved : uploadedOn;
+    const to = range.to >= madeOn ? addDays(madeOn, -1) : range.to;
+    return out(range.from, to, (kept) => `The file name gives the range exported, ${formatDate(range.from)} to ${formatDate(range.to)}${kept.to && to !== range.to ? `; the file was made on ${formatDate(madeOn)}, a day not over then, so it covers to ${formatDate(to)}` : ''}.`);
+  }
+  // A screen that prints its period is covered by it.
+  const list = acc.listShows;
+  if (!isLiveView(extraction.documentType, document.mediaType) || !list || acc.periodStart || acc.periodEnd) return {};
+  if ((list.from && first < list.from) || (list.to && last > list.to)) return {};
+  // When it was taken, by the image itself or its name: a file's saved day can be later (a copy).
+  const taken = document.capturedOn && (document.capturedOnSource === 'exif' || document.capturedOnSource === 'filename') ? document.capturedOn : undefined;
+  const period = list.from && list.to ? ` (${formatDate(list.from)} to ${formatDate(list.to)})` : '';
+  const dayBefore = taken ? addDays(taken, -1) : undefined;
+  const periodEnds = Boolean(dayBefore && list.to && list.to < dayBefore);
+  const to = list.newestEnd && dayBefore ? (periodEnds ? list.to! : dayBefore) : undefined;
+  const from = list.oldestEnd && list.from && (!taken || list.from <= taken) ? list.from : undefined;
+  return out(from, to, (kept) =>
+    [
+      kept.to ? (periodEnds ? `Its list${period} shows its newest end, so nothing moved after its latest row in that period.` : `It shows the newest end of its list, taken on ${formatDate(taken!)}: nothing moved after its latest row until then, so it covers to ${formatDate(to!)}.`) : '',
+      kept.from ? `Its list${period} ends in view, so it covers from ${formatDate(from!)}.` : '',
+    ]
+      .filter(Boolean)
+      .join(' '),
+  );
+}
+
+/**
+ * What each of your accounts has recorded already of an extracted account (docs/INGESTION.md, "Which
+ * account"): its settled rows on the same day for the same amount, those with the same balance after,
+ * and whether the account's balance just before the document's first day is the one it opens on.
+ * Each is evidence for one account only: rows go to the account with the most of them (none on a
+ * tie), and an opening balance to the one account that held it.
+ */
+export function recordedEvidence(store: Store, acc: Pick<ExtractedAccount, 'transactions' | 'openingBalance' | 'periodStart'>, byAmount: Map<number, Transaction[]>): Map<string, RecordedEvidence> {
+  const settled = acc.transactions.filter((t) => !t.pending);
+  const counts = new Map<string, { rows: number; balances: number }>();
+  const used = new Set<string>();
+  for (const t of settled) {
+    const minor = toMinor(t.amount);
+    // One stored row per account for each of the document's rows.
+    const seenIn = new Set<string>();
+    for (const x of byAmount.get(Math.abs(minor)) ?? []) {
+      if (x.date !== t.date || toMinor(x.amount) !== minor || used.has(x.id) || seenIn.has(x.accountId)) continue;
+      seenIn.add(x.accountId);
+      used.add(x.id);
+      const c = counts.get(x.accountId) ?? { rows: 0, balances: 0 };
+      c.rows++;
+      if (t.balanceAfter !== null && x.balanceAfter !== undefined && toMinor(t.balanceAfter) === toMinor(x.balanceAfter)) c.balances++;
+      counts.set(x.accountId, c);
+    }
+  }
+  const out = new Map<string, RecordedEvidence>();
+  const ranked = [...counts.entries()].sort((a, b) => b[1].balances - a[1].balances || b[1].rows - a[1].rows);
+  const [best, next] = ranked;
+  if (best && !(next && next[1].balances === best[1].balances && next[1].rows === best[1].rows)) out.set(best[0], { of: settled.length, ...best[1] });
+  // The balance it opens on, as a balance an account has on its latest day with one, within a cycle before its first day.
+  const first = acc.periodStart ?? settled.map((t) => t.date).sort()[0];
+  if (acc.openingBalance !== null && toMinor(acc.openingBalance) !== 0 && first) {
+    const since = addDays(first, -STATEMENT_CYCLE_DAYS);
+    const opens = store.accounts.flatMap((a) => {
+      const anchors = [
+        ...store.balances(a.id).filter((b) => !b.approximate).map((b) => ({ date: b.date, amount: b.balance })),
+        ...store.transactions(a.id).flatMap((t) => (t.balanceAfter !== undefined ? [{ date: t.date, amount: t.balanceAfter }] : [])),
+      ].filter((b) => b.date < first && b.date >= since);
+      // Any balance of its latest day: which one ends the day is not known from the order kept.
+      const day = anchors.reduce<string | undefined>((m, b) => (!m || b.date > m ? b.date : m), undefined);
+      const held = anchors.find((b) => b.date === day && toMinor(b.amount) === toMinor(acc.openingBalance!));
+      return held ? [{ accountId: a.id, date: held.date, amount: held.amount }] : [];
+    });
+    if (opens.length === 1) {
+      const o = opens[0]!;
+      out.set(o.accountId, { ...(out.get(o.accountId) ?? { of: settled.length, rows: 0, balances: 0 }), opening: { amount: o.amount, date: o.date } });
+    }
+  }
+  return out;
+}
+
 export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
   const { store } = ctx;
   // Schedules (extract-15): the agreements they are, which the categoriser reads beside yours. Student
@@ -222,11 +329,14 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
 
   // A statement that runs across the day one of your accounts carries on from another is two: the
   // rows before for the older account, the rest for the newer (docs/INGESTION.md, "Linked accounts").
-  const entries = splitAtLinks(store, extraction.accounts, (acc) => matchAccount({ institutionName: providerOf(acc, extraction), accountName: acc.accountName ?? undefined, accountType: acc.accountType ?? undefined, last4: acc.last4 ?? undefined, currency: acc.currency ?? undefined }, store.accounts, store.institutions, extraction.accounts.length === 1 ? ctx.hintAccountId : undefined, held));
+  // What your accounts have recorded of each account it shows: worked out once for each.
+  const evidence = new Map<ExtractedAccount, Map<string, RecordedEvidence>>();
+  const recordedOf = (acc: ExtractedAccount) => evidence.get(acc) ?? evidence.set(acc, recordedEvidence(store, acc, txByAmount)).get(acc)!;
+  const entries = splitAtLinks(store, extraction.accounts, (acc) => matchAccount({ institutionName: providerOf(acc, extraction), accountName: acc.accountName ?? undefined, accountType: acc.accountType ?? undefined, last4: acc.last4 ?? undefined, currency: acc.currency ?? undefined, recorded: recordedOf(acc) }, store.accounts, store.institutions, extraction.accounts.length === 1 ? ctx.hintAccountId : undefined, held));
   for (const e of entries) if (e.note) notes.push(e.note);
 
   // Each account as the document shows it, and the account of yours it matches by what it shows.
-  const seen = entries.map(({ acc, force, reason }) => {
+  const seen = entries.map(({ acc, force, reason, split }) => {
     // A screen about one holding: its value, gain and amount invested are the holding's, not the
     // account's, and the name at the top is the fund's (or the app's nickname for it).
     const holdingDetail =
@@ -245,18 +355,19 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
       currency: acc.currency ?? undefined,
     };
     const hint = extraction.accounts.length === 1 ? ctx.hintAccountId : undefined;
-    const matchAs = (d: Detected, among: Account[] = store.accounts) => matchAccount({ ...d, holdings: acc.holdings.map((h) => h.name), holdingsComplete: !holdingDetail && WHOLE_HOLDINGS.has(extraction.documentType) }, among, store.institutions, hint, held);
+    const recorded = recordedOf(acc);
+    const matchAs = (d: Detected, among: Account[] = store.accounts) => matchAccount({ ...d, holdings: acc.holdings.map((h) => h.name), holdingsComplete: !holdingDetail && WHOLE_HOLDINGS.has(extraction.documentType), recorded }, among, store.institutions, hint, held);
     const match: AccountMatch = force ? { accountId: force, score: 100, reason: reason ?? 'Matched by the account it carries on from' } : matchAs(detected);
     // Something to record: an account it only mentions (a certificate's nominated account) says nothing of the screen.
     const carries = acc.closingBalance !== null || acc.transactions.length > 0 || acc.holdings.length > 0 || [acc.contributionsToDate, acc.governmentBonusToDate, acc.taxYearContributions, acc.taxYearInterest, acc.cashBalance, acc.annualIncome].some((v) => v !== null);
-    return { acc, holdingDetail, typeFromRows, named, provider0, detected, shown: providerShown(detected), carries, hint, matchAs, match };
+    return { acc, holdingDetail, typeFromRows, named, provider0, detected, shown: providerShown(detected), carries, hint, matchAs, match, split };
   });
   // One bank's screen of its accounts seldom prints the bank's name: the accounts beside one that
   // names no provider say it (providerBeside).
   const confident = (x: (typeof seen)[number]) => (x.match.score >= 50 && !x.match.tied ? x.match.accountId : undefined);
   const beside = providerBeside(store, seen.filter((x) => x.carries).map((x) => ({ provider: x.shown, accountId: confident(x) })));
 
-  const sections: DraftSection[] = seen.map(({ acc, holdingDetail, typeFromRows, named, provider0, detected, shown, hint, matchAs, match: own }, si) => {
+  const sections: DraftSection[] = seen.map(({ acc, holdingDetail, typeFromRows, named, provider0, detected, shown, hint, matchAs, match: own, split }, si) => {
     if (named && !provider0) notes.push(`The only provider it names, ${named}, is the manager of a fund it shows, which does not say where the account is held.`);
     if (typeFromRows) notes.push('The screen does not name the account, but its Lifetime ISA bonus rows say it is a Lifetime ISA.');
     // Matched and named as it would be had the screen printed the provider of the accounts beside it:
@@ -603,6 +714,8 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
       readBalance: balance ?? null,
       ...(acc.periodStart && periodShown ? { periodStart: acc.periodStart } : {}),
       ...(acc.periodEnd && periodShown ? { periodEnd: acc.periodEnd } : {}),
+      // A statement split between two linked accounts covers each part's own rows.
+      ...(split ? {} : coverageBeyondRows(extraction, acc, ctx.document, ctx.uploadedOn)),
       ...(opening !== undefined ? { openingBalance: opening } : acc.openingBalance !== null ? { openingBalance: acc.openingBalance } : {}),
       ...(acc.availableBalance !== null ? { availableBalance: acc.availableBalance } : {}),
       ...(acc.creditLimit !== null ? { creditLimit: acc.creditLimit } : {}),
@@ -783,7 +896,7 @@ export function buildDraft(extraction: Extraction, ctx: DraftContext): Draft {
  * keeps only its rows, and ends on its last day (the day before the link) with the balance its
  * running balances reach.
  */
-export function splitAtLinks(store: Store, accounts: readonly ExtractedAccount[], matchOf: (acc: ExtractedAccount) => { accountId?: string | undefined; score: number }): { acc: ExtractedAccount; force?: string; reason?: string; note?: string }[] {
+export function splitAtLinks(store: Store, accounts: readonly ExtractedAccount[], matchOf: (acc: ExtractedAccount) => { accountId?: string | undefined; score: number }): { acc: ExtractedAccount; force?: string; reason?: string; note?: string; split?: true }[] {
   const links = store.accounts.flatMap((n) => {
     const older = n.continues ? store.account(n.continues.accountId) : undefined;
     return older && n.continues ? [{ newer: n, older, from: n.continues.from }] : [];
@@ -831,8 +944,8 @@ export function splitAtLinks(store: Store, accounts: readonly ExtractedAccount[]
     const newer: ExtractedAccount = { ...acc, transactions: after, ...(acc.periodStart && acc.periodStart < link.from ? { periodStart: link.from } : {}), openingBalance: carried, statedMoneyIn: null, statedMoneyOut: null };
     const note = `Split at ${formatDate(link.from)}, where ${link.newer.name} carries on from ${link.older.name}: ${before.length === 1 ? 'the row' : `the ${before.length} rows`} before ${before.length === 1 ? 'goes' : 'go'} to ${link.older.name}, ${after.length === 1 ? 'the row' : `the ${after.length} rows`} from it to ${link.newer.name}.${carried !== null ? ` The balance carried over: ${formatMoney(carried)}.` : ''}`;
     return [
-      { acc: older, force: link.older.id, reason: `The statement’s rows before ${day}: ${link.newer.name} carries on from ${link.older.name} from that day`, note },
-      { acc: newer, force: link.newer.id, reason: `The statement’s rows from ${day}: ${link.newer.name} carries on from ${link.older.name} from that day` },
+      { acc: older, force: link.older.id, reason: `The statement’s rows before ${day}: ${link.newer.name} carries on from ${link.older.name} from that day`, note, split: true },
+      { acc: newer, force: link.newer.id, reason: `The statement’s rows from ${day}: ${link.newer.name} carries on from ${link.older.name} from that day`, split: true },
     ];
   });
 }

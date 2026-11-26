@@ -472,7 +472,9 @@ number. Its pay, tax, NI, pension and student loan for the period are also tax f
     every other labelled value the document prints, `{section?, label, value}` as printed. Since
     `extract-15` it also has `schedules`: each schedule of payments the document gives, `{provider,
     name, direction (to-you, from-you, to-other), paidTo?, from?, until?, reference?, total?,
-    payments [{date, amount, label?, status?}], details}`.
+    payments [{date, amount, label?, status?}], details}`. Since `extract-17` each account can have
+    `listShows`: how much of a screenshot's list of movements is in view, `{newestEnd, oldestEnd,
+    from, to}` (each null when not known; the whole of it null on a statement or export).
   - `verification` records how the reading was checked (docs/INGESTION.md, "Checking every
     figure"): `{method: checks|second-reading, firstModel, secondModel?, firstInference?,
     secondInference?, byClaude?, reasons, disagreements, kept: first|second, error?}`. A model is
@@ -488,8 +490,10 @@ number. Its pay, tax, NI, pension and student loan for the period are also tax f
   the draft proposed from the reading (`null`: none); a committed `balance` that differs is one you
   typed (`enteredBy` on the balance).
   A section's `coversFrom` and `coversTo` (optional) are the days a document that does not print
-  its period covers, as you gave them while reviewing (the range you chose for an export). They
-  widen its coverage beyond its first and last rows; they never narrow it.
+  its period covers: proposed by the draft from the range in an export's file name or from how much
+  of a screenshot's list is in view, with why in `coversWhy` (optional: what the draft proposed and
+  why, shown while reviewing and kept when you change the dates), or given by you (the range you
+  chose for an export). They widen its coverage beyond its first and last rows; they never narrow it.
   A row's `insideAccount` names the Space it moves money to or from, inside the account: left
   unticked, and remembered on the account's `spaces` when committed so.
   A row's `pendingLink` (`{importId, key}`) is a transfer leg you linked to a row of another import

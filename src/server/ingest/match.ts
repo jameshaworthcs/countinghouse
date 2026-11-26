@@ -1,6 +1,8 @@
 // Which of your accounts does an extracted account belong to?
 
 import { ACCOUNT_TYPE_META, slugify } from '../../shared/accounts';
+import { formatDate } from '../../shared/dates';
+import { formatMoney } from '../../shared/money';
 import { sameFundName } from '../../shared/funds';
 import { catalogInstitution, findInstitution } from '../../shared/institutions';
 import type { Account, AccountType, Holding, Institution, NewAccountInput } from '../../shared/schema';
@@ -15,6 +17,48 @@ export interface Detected {
   holdings?: string[] | undefined;
   /** The list is the account's whole holdings (an export or a statement), not one fund's page or a scrolled screen. */
   holdingsComplete?: boolean | undefined;
+  /**
+   * What your accounts have recorded already of what the document shows, by account (draft.ts,
+   * `recordedEvidence`): an export that names no account is still the account its rows are in.
+   */
+  recorded?: Map<string, RecordedEvidence> | undefined;
+}
+
+/** One account's share of a document's rows and opening balance, as recorded already. */
+export interface RecordedEvidence {
+  /** The document's settled rows, and how many of them the account has on the same day for the same amount. */
+  of: number;
+  rows: number;
+  /** Of those, the rows whose balance after is the account's too. */
+  balances: number;
+  /** The account's balance just before the document's first day is the balance it opens on. */
+  opening?: { amount: number; date: string } | undefined;
+}
+
+const rowsWord = (n: number) => (n === 1 ? 'row' : 'rows');
+
+/**
+ * Points for what an account has recorded already of the document (docs/INGESTION.md, "Which
+ * account"): a row with the same balance after is as good as the account's number; most of its rows
+ * on the same days for the same amounts, or opening on the account's own balance, nearly so.
+ */
+function recordedPoints(ev: RecordedEvidence | undefined): { score: number; reasons: string[] } {
+  if (!ev) return { score: 0, reasons: [] };
+  let score = 0;
+  const reasons: string[] = [];
+  const some = (n: number) => (n === ev.of ? (n === 1 ? 'its row' : `its ${n} rows`) : `${n} of its ${ev.of} ${rowsWord(ev.of)}`);
+  if (ev.balances > 0) {
+    score += 60;
+    reasons.push(`${some(ev.rows)} recorded there${ev.balances === ev.rows ? ', with the same balances' : `, ${ev.balances} with the same balance`}`);
+  } else if (ev.rows >= 2 && ev.rows * 2 >= ev.of) {
+    score += 40;
+    reasons.push(`${some(ev.rows)} recorded there`);
+  }
+  if (ev.opening) {
+    score += 30;
+    reasons.push(`it opens on that account's balance (${formatMoney(ev.opening.amount)} on ${formatDate(ev.opening.date)})`);
+  }
+  return { score, reasons };
 }
 
 /**
@@ -148,6 +192,10 @@ export function matchAccount(detected: Detected, accounts: Account[], institutio
       score -= 25;
     }
     if (detected.currency && detected.currency !== a.currency) score -= 50;
+    // Never for an account whose number the document contradicts.
+    const known = detected.last4 && a.last4 && detected.last4 !== a.last4 ? { score: 0, reasons: [] } : recordedPoints(detected.recorded?.get(a.id));
+    score += known.score;
+    reasons.push(...known.reasons);
     // An account already holding every fund the screen lists (a fund's own page names no account).
     const funds = detected.holdings ?? [];
     const has = held?.get(a.id) ?? [];

@@ -420,7 +420,8 @@ function SectionEditor({ section, index, total, latest, periodFromRows, onChange
   // span; the range you chose can widen it (docs/FORMULAS.md §3).
   const rowDates = section.transactions.map((t) => t.date).sort();
   const [rowsFrom, rowsTo] = [rowDates[0] ?? '', rowDates.at(-1) ?? ''];
-  const coverable = !market && !section.fromSchedule && rowDates.length > 0 && (periodFromRows || !section.periodStart);
+  // An investment account's list is offered only when the draft proposed its days: then they show, to change.
+  const coverable = (!market || section.coversFrom !== undefined || section.coversTo !== undefined) && !section.fromSchedule && rowDates.length > 0 && (periodFromRows || !section.periodStart);
   const suggested = section.suggestedAccountId ? data.accounts.find((a) => a.id === section.suggestedAccountId) : undefined;
   const into = target.mode === 'existing' ? data.accounts.find((a) => a.id === target.accountId) : target.mode === 'new' ? target.account : undefined;
   const checks = target.mode === 'skip' ? [] : sectionChecks(section, { accountType: type, latest, periodFromRows, openedOn: into?.openedOn, closedOn: into?.closedOn });
@@ -560,6 +561,7 @@ function SectionEditor({ section, index, total, latest, periodFromRows, onChange
               </div>
             )}
             <ChecksPanel checks={checks} />
+            {coverable && section.coversWhy && <div className="text-[12.5px] text-ink-3">Proposed: {section.coversWhy} Change the dates below if that is wrong.</div>}
             {coverable && (
               <div className="grid gap-3 sm:grid-cols-2">
                 <Field

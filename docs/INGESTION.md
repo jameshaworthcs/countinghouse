@@ -204,12 +204,12 @@ is paid ([FORMULAS.md §17](FORMULAS.md), "Earned pay").
   stays in `figures.jsonl` and no longer counts. The draft says what it replaces, and is held back
   from "Commit all ready".
 
-### Reading everything (`extract-15`)
+### Reading everything (`extract-17`)
 
 The reader keeps every value a document prints when **Read everything a document prints** is on
 (Settings → Models & import; `settings.extraction.readEverything`). With it off, readings are
 `extract-11`. The gov.uk pages and payslip layouts read on this machine (above) are read in full
-either way. Five rules are added to the prompt (`prompt.ts`), each with its part of the schema:
+either way. Six rules are added to the prompt (`prompt.ts`), each with its part of the schema:
 
 - **20. Payslips in full**, as the local readers keep them (`payslips.jsonl`): every payment and
   deduction line, signed as printed; the totals and net pay; employer costs; the tax code and its
@@ -244,6 +244,11 @@ either way. Five rules are added to the prompt (`prompt.ts`), each with its part
   Its payments are never transactions (rule 5 stays), a document that gives one is never "nothing to
   record", and a payment is never left only in the remarks or `printed`. A schedule is recorded as an
   agreement ("Schedules", below).
+- **25. How much of a list is in view** (`extract-17`; `listShows` on each account): on a
+  screenshot of an account's movements, whether the list's newest end is in view (nothing more
+  recent above it), whether its oldest end is (the list ends, nothing cut off), and the period it
+  is limited to (a selected month tab). The draft proposes the days it covers from it ("Coverage
+  beyond the rows", below). A reading that gets it wrong loses only this.
 - **Never a personal identifier.** The prompt says to leave out names, addresses, dates of birth,
   NI numbers and full account numbers. The normaliser also takes any NI number out of all three,
   drops a payroll number that is one, and keeps only the NI letter.
@@ -407,6 +412,28 @@ than the moment the screen was captured. The capture date stands (the phone's cl
 witness), the row is marked for you to check (the *balance date* review check), and the document is
 read again.
 
+### Coverage beyond the rows
+
+A document that prints no period covers from its first row to its last (docs/FORMULAS.md §3). Many
+show more than that, and the draft proposes the days they cover (`coverageBeyondRows`; the section's
+`coversFrom` and `coversTo`, with why in `coversWhy`). The review page shows the reason above the two
+dates ("Proposed: …"), and keeps it when you change them.
+
+- **An export whose file name gives its range** ("Statement for 14 March 2026 to 13 May
+  2026.csv"): that range. It runs to the day before the file was made (the file's date, else the
+  upload day) when it reaches that day, which was not over.
+- **A screenshot whose list shows its newest end** (rule 25), when the image's metadata or its
+  file name says when it was taken (not the file's saved day, which a copy moves, nor the upload
+  day): to the day before it was taken, since nothing moved after its latest row until then. A list
+  limited to an earlier period (last month's tab) covers to that period's end.
+- **A list limited to a period whose oldest end is in view** (a month's tab, scrolled to its end):
+  from that period's first day.
+- Never narrower than its rows, and nothing at all when a row falls outside what it would cover (the
+  name or the tab is not the range), or the document prints its period. A statement split between
+  two linked accounts covers each part's own rows. The reason says only what was widened.
+- An investment account's list shows the two dates on the review page only when the draft proposed
+  them.
+
 ## From extraction to draft
 
 `src/server/ingest/draft.ts` does the following:
@@ -443,6 +470,16 @@ read again.
   - A whole holdings list (an export or a statement) that is all one account holds matches that
     account more strongly than one holding those funds among others: your ISA and your SIPP can
     hold the same fund.
+  - **What your accounts have recorded already** (`recordedEvidence`). A bank's export seldom names
+    the account, only the bank; its rows do. A row on the same day, for the same amount and with
+    the same balance after, as a row an account has is as good as the account's number. Most of
+    its rows (at least 2, and at least half) on the same days for the same amounts count for a bit
+    less. Opening on the balance an account had last, within a cycle (40 days) before its first
+    day, counts too (not £0).
+    - Rows go to the one account with most of them; two accounts with as many is no evidence.
+    - An opening balance counts only when one account had it, as any balance of that account's
+      latest day before (which of a day's balances ends it is not known from the order kept).
+    - A different number on the document still rules an account out: none of this counts for it.
   - Two accounts that match equally well (both hold the one fund a page shows) are a question, not
     a match: the section names both and waits for you to choose.
   - A screen with no confident match of its own can take its account from a **screenshot taken
@@ -941,6 +978,11 @@ click, not left looking failed or stuck (`src/server/ingest/novelty.ts`).
   - A row already imported that would fill in details its record lacks is something to add. Another
     import waiting beside it covers it only if it fills in the same.
     Once filled in, the same screen uploaded again adds nothing.
+  - **Days it would cover** that the account's records do not (docs/FORMULAS.md §3) are something
+    to add: a list of payments recorded already still says nothing else happened on its days. Its
+    days are counted as coverage would count them once committed, run on from the statement
+    before it when the balances chain (`wouldCover`). Another import waiting beside it covers them
+    only if it covers all of them.
 - **Never for a reading that needs a look**: readers that disagreed, warnings, low confidence,
   offline OCR.
 - It is worked out afresh whenever the import list is shown, so it follows what is committed,

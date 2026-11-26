@@ -65,13 +65,17 @@ account it is, is the union of intervals:
   covers no days. A statement period in which nothing moved is kept with no balance when none is
   printed, and covers its days;
   - a document that does not print its period (an export, a screenshot of a list) covers from its
-    first row to its last, widened to the range you gave while reviewing it (`coversFrom`,
-    `coversTo`). A range inside its rows never narrows it;
+    first row to its last, widened to the range its section gives (`coversFrom`, `coversTo`;
+    `sectionSpan` in `shared/coverage.ts`). The draft proposes it from the range in an export's
+    file name, or from how much of a screenshot's list is in view, and you can change it while
+    reviewing (docs/INGESTION.md, "Coverage beyond the rows"). A range inside its rows never
+    narrows it;
   - a statement that does not print its start runs from the day after the statement before it
     (the latest-ending one with a closing balance) when it opens on that one's closing balance and
     ends within `STATEMENT_CYCLE_DAYS` = 40 of it (`importIntervals`). The balances chain, so a
     quiet stretch before its first row is covered, not missing. Two cycles apart, a statement is
-    missing between, and it is not linked;
+    missing between, and it is not linked. An export's period is its first and last rows, so its
+    start is not printed either (unless a range gives it: `fromStated`);
 - each hand-entered transaction's day;
 - each stretch you confirmed nothing is missing from (`coverage.json`);
 - for an account with transactions but no import records: from its first to its last transaction.

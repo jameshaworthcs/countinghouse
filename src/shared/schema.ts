@@ -1572,6 +1572,21 @@ export const ExtractedAccountSchema = z.object({
   statedMoneyOut: MoneySchema.nullable().default(null),
   /** What a running Balance column tracks: the account itself, or only its uninvested cash (an investment account's activity list). */
   runningBalanceOf: z.enum(['account', 'cash']).nullable().default(null),
+  /**
+   * How much of a screenshot's list of movements is in view (the reader that keeps everything,
+   * extract-17): its newest end, its oldest end, and the period it is limited to (a month tab).
+   */
+  listShows: z
+    .object({
+      newestEnd: z.boolean().nullable().default(null),
+      oldestEnd: z.boolean().nullable().default(null),
+      from: ISODateSchema.nullable().default(null),
+      to: ISODateSchema.nullable().default(null),
+    })
+    .nullable()
+    .optional()
+    // A reading that gets it wrong loses only this: nothing is proposed from it.
+    .catch(null),
   transactions: z.array(ExtractedTransactionSchema).default([]),
   holdings: z.array(ExtractedHoldingSchema).default([]),
 });
@@ -1808,11 +1823,17 @@ export const DraftSectionSchema = z.object({
   periodStart: ISODateSchema.optional(),
   periodEnd: ISODateSchema.optional(),
   /**
-   * The days the document covers as you gave them, when it does not print its period (the range you
-   * chose for an export): coverage runs over them, not just from its first row to its last.
+   * The days the document covers, when it does not print its period: the range in an export's file
+   * name, what a screenshot's list shows (its newest end, a month tab), or the range you gave while
+   * reviewing. Coverage runs over them, not just from its first row to its last; they never narrow it.
    */
   coversFrom: ISODateSchema.optional(),
   coversTo: ISODateSchema.optional(),
+  /**
+   * Why the draft proposed `coversFrom`/`coversTo`, when it did (the export range in the file name, a
+   * screenshot showing the newest end of its list): shown beside them while reviewing.
+   */
+  coversWhy: z.string().max(400).optional(),
   openingBalance: MoneySchema.optional(),
   /** Totals printed on the statement, for checking the rows against. Money out is positive. */
   statedTotals: z.object({ moneyIn: MoneySchema.optional(), moneyOut: MoneySchema.optional() }).optional(),
