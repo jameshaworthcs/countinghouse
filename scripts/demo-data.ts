@@ -22,9 +22,10 @@ import { applyRecords, researchIdOf, setOwnerAssumption } from '../src/server/re
 import { WorkArea } from '../src/server/ingest/workarea';
 import { Store } from '../src/server/store';
 import { addDays, addMonths, endOfMonth, formatMonth, startOfMonth, today, weekday } from '../src/shared/dates';
+import { reverseChargeVat, vatInGross } from '../src/shared/ledger';
 import { roundMoney } from '../src/shared/money';
 import { employeeNi, parseTaxCode, payeTax, taxMonth } from '../src/shared/paye';
-import { taxYearOf } from '../src/shared/uk';
+import { lastDayOfMonths, taxYearOf } from '../src/shared/uk';
 import { companyDeadlines, type CompanyDeadline } from '../src/shared/company-books';
 import { CompanyBooksSchema, EmploymentSchema, ExtractionSchema, HmrcRecordSchema, PayslipRecordSchema, type Account, type BalanceSnapshot, type CompanyFiling, type Employment, type ExtractedHmrc, type ExtractedPayslip, type Figure, type HmrcRecord, type HoldingsSnapshot, type ImportRecord, type MicroEntityLines, type PayslipRecord, type Transaction } from '../src/shared/schema';
 // A PDF with a text layer, as a saved gov.uk page has (the tests' helper).
@@ -103,7 +104,15 @@ async function demoCompanyAccount(store: Store, dividendDay: string): Promise<vo
     row(addDays(m, 9), -24.99, 'EXAMPLE HOSTING LTD');
     row(addDays(m, 24), 1_150, 'EXAMPLE AGENCY LTD INV');
     row(addDays(m, 27), -1_200, 'J BLOGGS SALARY');
+    row(endOfMonth(m), -5, 'EXAMPLE BANK MONTHLY FEE');
   }
+  // What its books make something of (demoCompanyLedger): a laptop kept for years, a year's design
+  // tools paid up front, and a service bought from abroad (a reverse charge).
+  row(addDays(startOfMonth(addMonths(END, -3)), 11), -1_199, 'EXAMPLE COMPUTERS LTD');
+  row(addDays(startOfMonth(addMonths(END, -2)), 2), -288, 'EXAMPLE DESIGN TOOLS ANNUAL');
+  row(addDays(startOfMonth(addMonths(END, -1)), 14), -36, 'EXAMPLE CLOUD INC');
+  // One left for Jo to code, so the Books tab has something to ask.
+  row(addDays(startOfMonth(END), 1), -18.4, 'EXAMPLE STATIONERS');
   row(addDays(startOfMonth(addMonths(END, -2)), 18), -1_312.4, 'HMRC CORPORATION TAX');
   row(dividendDay, -480, 'DIVIDEND J BLOGGS');
   // The other side of Jo's loan to it, and of what it paid back (STUDIO_MONEY).
@@ -182,6 +191,53 @@ async function demoCompanyBooks(store: Store): Promise<void> {
     }
   });
   await store.upsertCompany({ ...company, books: { ...books, filings }, updatedAt: stamp }, 'demo: the studio’s books');
+}
+
+/**
+ * Example Studio's general ledger (FORMULAS.md §22): its rows coded (sales with VAT, the laptop
+ * capitalised, a year's design tools over the year they cover, a reverse charge on the service from
+ * abroad, its salary, Corporation Tax and dividend), book rules for its hosting and bank fees, the
+ * hosting plan Jo paid for it coded too, Jo's loan linked to the company's row for it (its repayment is
+ * left for the app to link), and two journals: the shares issued at incorporation, unpaid, and each
+ * month's pay with the PAYE taken from it. Drawing nothing from the random sequence.
+ */
+async function demoCompanyLedger(store: Store): Promise<void> {
+  const own = store.transactions('studio-current');
+  if (!own.length) return;
+  const vat = (amount: number, date: string) => ({ amount: vatInGross(amount, date, 'standard'), treatment: 'standard' as const });
+  const code = (t: Transaction): Transaction['books'] | undefined => {
+    if (/CLIENT LTD INV|AGENCY LTD INV/.test(t.description)) return { ledger: 'turnover', vat: vat(t.amount, t.date), setBy: 'user' };
+    if (t.description === 'EXAMPLE COMPUTERS LTD') return { ledger: 'fixed-assets:computer:cost', vat: vat(t.amount, t.date), asset: { class: 'computer', months: 36 }, setBy: 'user' };
+    if (t.description === 'EXAMPLE DESIGN TOOLS ANNUAL') return { ledger: 'software-hosting', vat: vat(t.amount, t.date), covers: { from: t.date, to: lastDayOfMonths(t.date, 12) }, setBy: 'user' };
+    if (t.description === 'EXAMPLE CLOUD INC') return { ledger: 'software-hosting', vat: { amount: reverseChargeVat(t.amount, t.date), treatment: 'reverse-charge' }, setBy: 'user' };
+    if (t.description === 'J BLOGGS SALARY') return { ledger: 'directors-salaries', setBy: 'user' };
+    if (t.description === 'HMRC CORPORATION TAX') return { ledger: 'corporation-tax', setBy: 'user' };
+    if (t.description === 'DIVIDEND J BLOGGS') return { ledger: 'dividends', setBy: 'user' };
+    return undefined;
+  };
+  const coded = own.flatMap((t) => {
+    const books = code(t);
+    return books ? [{ id: t.id, patch: { books } }] : [];
+  });
+  // Jo's hosting plan paid on the card, coded as the studio's cost (over the year it covers).
+  const plan = STUDIO_MONEY.find((r) => r.as === 'paid-for');
+  const paid = plan ? store.transactions(plan.accountId).find((t) => t.date === plan.date && t.description === plan.description) : undefined;
+  if (paid) coded.push({ id: paid.id, patch: { books: { ledger: 'software-hosting', vat: vat(paid.amount, paid.date), covers: { from: paid.date, to: lastDayOfMonths(paid.date, 12) }, setBy: 'user' } } });
+  // Jo's loan to it, linked to the company's row for the same money.
+  const lent = STUDIO_MONEY.find((r) => r.as === 'loan' && r.amount < 0);
+  const lentRow = lent ? store.transactions(lent.accountId).find((t) => t.date === lent.date && t.description === lent.description) : undefined;
+  const arrived = lentRow ? own.find((t) => t.date === lentRow.date && t.amount === -lentRow.amount) : undefined;
+  const links = lentRow && arrived ? [{ id: arrived.id, patch: { companyLink: { rows: [lentRow.id], setBy: 'user' as const } } }] : [];
+  await store.updateTransactions([...coded, ...links], 'demo: the studio’s rows coded');
+  await store.setBookRules('example-studio', [
+    { id: 'rule_demohosting', name: 'Hosting', enabled: true, priority: 100, match: { field: 'description', op: 'contains', value: 'EXAMPLE HOSTING', caseSensitive: false, company: { id: 'example-studio', rows: 'own' } }, set: { books: { ledger: 'software-hosting', vat: { treatment: 'standard' } } }, createdAt: stamp, updatedAt: stamp },
+    { id: 'rule_demobankfee', name: 'Bank fees', enabled: true, priority: 100, match: { field: 'description', op: 'contains', value: 'MONTHLY FEE', caseSensitive: false, company: { id: 'example-studio', rows: 'own' } }, set: { books: { ledger: 'bank-charges', vat: { treatment: 'exempt' } } }, createdAt: stamp, updatedAt: stamp },
+  ]);
+  const journal = (id: string, date: string, memo: string, lines: [string, number][], evidence: string) => ({ id, companyId: 'example-studio', date, memo, lines: lines.map(([ledger, amount]) => ({ ledger, amount })), evidence, createdBy: 'owner' as const, createdAt: stamp, updatedAt: stamp });
+  await store.putJournal(journal('jnl_de0000000001', '2023-05-02', 'Shares issued at incorporation, not yet paid for', [['share-capital-unpaid', 20], ['share-capital', -20]], 'Certificate of incorporation: 20 ordinary shares of £1'), 'demo: the studio’s shares');
+  for (const t of own.filter((x) => x.description === 'J BLOGGS SALARY')) {
+    await store.putJournal(journal(`jnl_de${t.date.replace(/-/g, '').padStart(10, '0')}`, t.date, `${formatMonth(t.date)} payroll: tax and National Insurance taken from pay`, [['directors-salaries', 92.4], ['paye', -92.4]], 'Payroll summary'), 'demo: the studio’s payroll');
+  }
 }
 
 /** Jo's payments with the studio: each is marked (Transaction.company) as what it was. */
@@ -658,6 +714,7 @@ async function main() {
     await demoCompanyAccount(store, day);
     await demoCompanyBooks(store);
     await studioMarks(store);
+    await demoCompanyLedger(store);
     // The director's loan in its accounts to 31 Dec 2025: what it owed Jo then, its first balance.
     await store.addBalances([{ id: balanceId('studio-loan', '2025-12-31', 350, 'manual'), accountId: 'studio-loan', date: '2025-12-31', balance: 350, currency: 'GBP', kind: 'manual', dateSource: 'document', note: 'Director’s loan owed to Jo in the accounts to 31 Dec 2025.', source: {}, createdAt: stamp }], 'demo: director’s loan');
   }
