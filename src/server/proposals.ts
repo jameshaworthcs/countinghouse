@@ -23,7 +23,7 @@ import { agreementPattern, isScheduledPayment } from '../shared/agreements';
 import { CategoryIndex } from '../shared/categories';
 import { COMPANY_MARK_LABELS, companyMarkProblem, sameMark } from '../shared/company';
 import { Categoriser, isWrapperAccount, linkedPayee, transferLegCategory } from '../shared/categorise';
-import { booksProblems, FILING_KIND_LABELS } from '../shared/company-books';
+import { addedBooksProblems, booksProblems, FILING_KIND_LABELS } from '../shared/company-books';
 import { addDays, diffDays, formatDate, formatSpan, today } from '../shared/dates';
 import { formatMoney, fromMinor, isMoney, toMinor } from '../shared/money';
 import { sameTerms, type TermsContent } from '../shared/terms';
@@ -107,10 +107,14 @@ interface Outcome {
   touchedAccounts: Map<string, Account>;
   /** Balances to move, by id: to which account, and from which (as the changes before it left it). */
   moves: Map<string, { balance: BalanceSnapshot; from: string; to: string }>;
-  /** Companies to add or change (their books), and the balances (valuations) to record on new accounts. */
+  /** Companies to add, and the balances (their valuations) to record on their new accounts. */
   companies: Map<string, Company>;
-  /** Companies the changes change, as they are now. */
-  companiesBefore: Map<string, Company>;
+  /**
+   * Changes to companies' books, applied to each company as it is when written (`Store.updateCompany`),
+   * so a filing recorded meanwhile is kept: the books set up (with the `updatedAt` seen when checked),
+   * and the filings to add.
+   */
+  books: Map<string, { setup?: { books: CompanyBooks; seen: string | null }; filings: CompanyFiling[] }>;
   /** Jobs as they will be (a pension arrangement added). */
   jobs: Map<string, Employment>;
   balances: BalanceSnapshot[];
@@ -235,7 +239,7 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
   const accountName = (id: string) => store.account(id)?.name ?? id;
   let categoriserMemo: Categoriser | undefined;
   const categoriser = () => (categoriserMemo ??= categoriserFor(store));
-  const out: Outcome = { results: new Map(), patches: new Map(), removed: new Map(), accounts: new Map(), touchedRows: new Map(), touchedAccounts: new Map(), moves: new Map(), companies: new Map(), companiesBefore: new Map(), jobs: new Map(), balances: [], agreements: new Map(), terms: new Map(), termsRemoved: new Map(), rules: [], removedRules: new Map(), categoriesBefore: new Map(), returns: new Map() };
+  const out: Outcome = { results: new Map(), patches: new Map(), removed: new Map(), accounts: new Map(), touchedRows: new Map(), touchedAccounts: new Map(), moves: new Map(), companies: new Map(), books: new Map(), jobs: new Map(), balances: [], agreements: new Map(), terms: new Map(), termsRemoved: new Map(), rules: [], removedRules: new Map(), categoriesBefore: new Map(), returns: new Map() };
   /** Change a category, or add one (`was` undefined), in the list the next changes see. */
   const putCategory = (next: Category, was: Category | undefined) => {
     const original = was ? store.categories.find((x) => x.id === was.id) : undefined;
@@ -246,6 +250,10 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
   };
   /** Set aside as the changes so far leave it. */
   let setup: Earmarks | null = store.earmarks;
+  /** Companies as the changes so far leave them (a company added, books set, a filing added). */
+  const companyNow = new Map<string, Company>();
+  const companyOf = (id: string) => companyNow.get(id) ?? out.companies.get(id) ?? store.company(id);
+  const booksOp = (id: string) => out.books.get(id) ?? out.books.set(id, { filings: [] }).get(id)!;
   /** Your rules as the changes so far leave them: those removed gone, those made added. */
   const rulesNow = () => [...store.rules.filter((r) => !out.removedRules.has(r.id)), ...out.rules];
   const balanceById = new Map(store.balances().map((b) => [b.id, b]));
@@ -668,7 +676,7 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
         return { earmark: { what, ...(existing ? { replaces: `Replaces your decision of ${formatDate(existing.decidedAt.slice(0, 10))} (“${existing.reason}”)` } : {}) } };
       }
       case 'set_company_books': {
-        const company = out.companies.get(c.company) ?? store.company(c.company);
+        const company = companyOf(c.company);
         if (!company) return { problem: `There is no company "${c.company}" in your data.` };
         const now = company.books;
         const next = CompanyBooksSchema.parse({ ...c.books, filings: now?.filings ?? [], setBy: 'agent', updatedAt: now?.updatedAt ?? nowISO() });
@@ -679,13 +687,14 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
         if (c.was !== was) return { problem: was ? `${company.name}’s books were changed on ${formatDate(was.slice(0, 10))}, after this was proposed: propose against them as they are now.` : `${company.name}’s books are not kept here now: propose them with was: null.` };
         const problems = booksProblems(next);
         if (problems.length) return { problem: problems.join(' ') };
-        if (!out.companiesBefore.has(company.id) && store.company(company.id)) out.companiesBefore.set(company.id, store.company(company.id)!);
-        out.companies.set(company.id, CompanySchema.parse({ ...company, books: { ...next, updatedAt: nowAfter(now?.updatedAt) }, updatedAt: nowISO() }));
+        const set = { ...next, updatedAt: nowAfter(now?.updatedAt) };
+        booksOp(company.id).setup = { books: set, seen: was };
+        companyNow.set(company.id, { ...company, books: set });
         const vat = next.vat ? `, VAT from ${formatDate(next.vat.registeredFrom)}` : '';
         return { books: { what: `${now ? 'Changes' : 'Keeps'} ${company.name}’s books${now ? '' : ' here'}: incorporated ${formatDate(next.incorporatedOn)}${vat}${next.paye ? `, PAYE from ${formatDate(next.paye.from)}` : ''}.` } };
       }
       case 'add_filing': {
-        const company = out.companies.get(c.company) ?? store.company(c.company);
+        const company = companyOf(c.company);
         if (!company) return { problem: `There is no company "${c.company}" in your data.` };
         if (!company.books) return { problem: `${company.name}’s books are not kept here: set them up first.` };
         const id = filingId(company.id, c.filing.kind, c.filing.periodEnd);
@@ -697,8 +706,8 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
         const books = { ...company.books, filings: [...company.books.filings, filing] };
         const problems = booksProblems(books);
         if (problems.length) return { problem: problems.join(' ') };
-        if (!out.companiesBefore.has(company.id) && store.company(company.id)) out.companiesBefore.set(company.id, store.company(company.id)!);
-        out.companies.set(company.id, CompanySchema.parse({ ...company, books, updatedAt: nowISO() }));
+        booksOp(company.id).filings.push(filing);
+        companyNow.set(company.id, { ...company, books });
         return { books: { what: `${label} for ${c.filing.periodStart ? formatSpan(c.filing.periodStart, c.filing.periodEnd) : `the period to ${formatDate(c.filing.periodEnd)}`}, filed on ${formatDate(c.filing.filedOn)}${c.filing.reference ? `, reference ${c.filing.reference}` : ''}.` } };
       }
       case 'add_rule': {
@@ -892,7 +901,7 @@ export function sourceAsLeft(store: Store, row: (id: string) => Transaction | un
 function changesNothing(store: Store, o: Outcome): boolean {
   if (o.returns.size) return false;
   if (o.earmarks !== undefined && earmarksKey(o.earmarks) !== earmarksKey(store.earmarks)) return false;
-  if (o.removed.size || o.companies.size || o.balances.length || o.jobs.size || o.agreements.size || o.terms.size || o.termsRemoved.size || o.rules.length || o.removedRules.size || o.categories) return false;
+  if (o.removed.size || o.companies.size || o.books.size || o.balances.length || o.jobs.size || o.agreements.size || o.terms.size || o.termsRemoved.size || o.rules.length || o.removedRules.size || o.categories) return false;
   if ([...o.moves.values()].some((m) => m.to !== m.balance.accountId)) return false;
   for (const [id, patch] of o.patches) {
     const t = store.transaction(id) as Record<string, unknown> | undefined;
@@ -1145,6 +1154,35 @@ export class ProposalService extends EventEmitter {
       if (outcome.removed.size) await this.store.deleteTransactions([...outcome.removed.keys()], message);
       for (const account of outcome.accounts.values()) await this.store.upsertAccount(account, message);
       for (const company of outcome.companies.values()) await this.store.upsertCompany(company, message);
+      // Books, on each company as it is now: a filing recorded since the check is kept, and books
+      // changed since (by you, or another proposal) stop the apply rather than being overwritten.
+      const companiesBefore: Company[] = [];
+      for (const [cid, op] of outcome.books) {
+        await this.store.updateCompany(
+          cid,
+          (current) => {
+            if (!current) throw new StoreError(`Company ${cid} is no longer in your data.`, 409);
+            const changed = () => new StoreError(`${current.name}’s books changed while this was being applied: open the proposal again and apply it.`, 409);
+            let books = current.books;
+            if (op.setup) {
+              if ((books?.updatedAt ?? null) !== op.setup.seen) throw changed();
+              books = { ...op.setup.books, filings: books?.filings ?? [] };
+            }
+            if (!books) throw changed();
+            for (const f of op.filings) {
+              const there = books.filings.find((x) => x.kind === f.kind && x.periodEnd === f.periodEnd);
+              if (there && filingKey(there) === filingKey(f)) continue;
+              if (there) throw changed();
+              books = { ...books, filings: [...books.filings, f] };
+            }
+            if (addedBooksProblems(current.books, books).length) throw changed();
+            // As it was, for the audit trail: not one this proposal added.
+            if (!outcome.companies.has(cid)) companiesBefore.push(current);
+            return CompanySchema.parse({ ...current, books, updatedAt: nowISO() });
+          },
+          message,
+        );
+      }
       for (const job of outcome.jobs.values()) await this.store.upsertEmployment(job, message);
       for (const agreement of outcome.agreements.values()) await this.store.upsertAgreement(agreement, message);
       const termsGone = [...outcome.termsRemoved.keys()].filter((tid) => !outcome.terms.has(tid));
@@ -1159,7 +1197,6 @@ export class ProposalService extends EventEmitter {
       const termsBefore = [...outcome.termsRemoved.values()];
       const categoriesBefore = [...outcome.categoriesBefore.values()];
       const rulesBefore = [...outcome.removedRules.values()];
-      const companiesBefore = [...outcome.companiesBefore.values()];
       const before = { transactions: [...outcome.touchedRows.values()], accounts: [...outcome.touchedAccounts.values()], ...(balances.length ? { balances } : {}), ...(termsBefore.length ? { terms: termsBefore } : {}), ...(categoriesBefore.length ? { categories: categoriesBefore } : {}), ...(rulesBefore.length ? { rules: rulesBefore } : {}), ...(earmarksBefore !== undefined ? { earmarks: earmarksBefore } : {}), ...(companiesBefore.length ? { companies: companiesBefore } : {}) };
       const decided = await this.decide(p, { status: 'applied', applied: doing.map((c) => c.key), before }, message);
       await this.commit();

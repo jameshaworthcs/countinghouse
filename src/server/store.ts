@@ -15,7 +15,7 @@ import type { z } from 'zod';
 import type { ChangeDiff } from '../shared/audit';
 import { ACCOUNT_TYPE_META, balanceModeOf, sideOf } from '../shared/accounts';
 import { companyMarkProblem, markMisfit } from '../shared/company';
-import { booksProblems } from '../shared/company-books';
+import { addedBooksProblems } from '../shared/company-books';
 import { defaultCategories } from '../shared/categories';
 import { earmarkAccountIds } from '../shared/earmarks';
 import { sectionSpan } from '../shared/coverage';
@@ -1064,44 +1064,47 @@ export class Store extends EventEmitter {
   }
 
   private setArray<K extends keyof typeof ARRAY_FILES>(name: K, items: State[K], message: string): Promise<void> {
-    return this.exclusive(async () => {
-      const def = ARRAY_FILES[name];
-      const before = this.state[name] as unknown[];
-      const after = (items as unknown[]).map((i) => (def.schema as z.ZodType<unknown>).parse(i));
-      // Company accounts stay apart from yours: refused before anything is written.
-      if (name === 'accounts') {
-        checkCompanyAccounts(after as Account[], before as Account[], this.state.companies);
-        // An account that changes side may not leave your records naming it (a goal reading a
-        // company's rows by id): refused, with the records to change first.
-        const was = new Map((before as Account[]).map((a) => [a.id, a]));
-        for (const a of after as Account[]) {
-          const prior = was.get(a.id);
-          if (!prior || sideOf(prior) === sideOf(a)) continue;
-          const naming = recordsNaming(this.state, new Set([a.id]));
-          if (naming.length) throw new StoreError(`${a.name} cannot ${a.companyId ? 'become a company’s account' : 'become yours again'} while ${naming.map((n) => n.what).join(', ')} ${naming.length === 1 ? 'names' : 'name'} it: change ${naming.length === 1 ? 'that' : 'those'} first.`);
-        }
+    return this.exclusive(() => this.writeArray(name, items, message));
+  }
+
+  /** `setArray`'s work, for a caller that holds the lock already (`updateCompany`). */
+  private async writeArray<K extends keyof typeof ARRAY_FILES>(name: K, items: State[K], message: string): Promise<void> {
+    const def = ARRAY_FILES[name];
+    const before = this.state[name] as unknown[];
+    const after = (items as unknown[]).map((i) => (def.schema as z.ZodType<unknown>).parse(i));
+    // Company accounts stay apart from yours: refused before anything is written.
+    if (name === 'accounts') {
+      checkCompanyAccounts(after as Account[], before as Account[], this.state.companies);
+      // An account that changes side may not leave your records naming it (a goal reading a
+      // company's rows by id): refused, with the records to change first.
+      const was = new Map((before as Account[]).map((a) => [a.id, a]));
+      for (const a of after as Account[]) {
+        const prior = was.get(a.id);
+        if (!prior || sideOf(prior) === sideOf(a)) continue;
+        const naming = recordsNaming(this.state, new Set([a.id]));
+        if (naming.length) throw new StoreError(`${a.name} cannot ${a.companyId ? 'become a company’s account' : 'become yours again'} while ${naming.map((n) => n.what).join(', ')} ${naming.length === 1 ? 'names' : 'name'} it: change ${naming.length === 1 ? 'that' : 'those'} first.`);
       }
-      if (name === 'accounts') {
-        checkDirectorLoanAccounts(after as Account[], before as Account[], this.state.companies, (id) => (this.state.transactions.get(id)?.length ?? 0) > 0);
-        checkMarksStillFit(after as Account[], before as Account[], (id) => this.state.transactions.get(id) ?? [], (id) => this.state.companies.some((c) => c.id === id));
-      }
-      if (name === 'companies') {
-        checkCompanyEstateAccounts(after as Company[], before as Company[], this.state.accounts);
-        checkDirectorLoanLinks(after as Company[], before as Company[], this.state.accounts);
-        checkCompanyBooks(after as Company[], before as Company[]);
-      }
-      // Only what this write adds or changes: one stored before (a hand edit) does not block the rest.
-      const fresh = <T extends { id: string }>(list: T[]) => {
-        const was = new Map((before as T[]).map((x) => [x.id, JSON.stringify(x)]));
-        return list.filter((x) => was.get(x.id) !== JSON.stringify(x));
-      };
-      if (name === 'goals') for (const g of fresh(after as Goal[])) this.refuseCompanyAccounts(g.accountIds, `The goal "${g.name}"`);
-      if (name === 'agreements') for (const a of fresh(after as Agreement[])) this.refuseCompanyAccounts(a.accountId ? [a.accountId] : [], `The agreement "${a.name}"`);
-      if (name === 'rules') for (const r of fresh(after as Rule[])) this.refuseCompanyAccounts(ruleAccountIds(r), `The rule "${r.name ?? r.match.value}"`);
-      const file = await this.writeArrayFile(name, items);
-      (this.state as unknown as Record<string, unknown>)[name] = after;
-      this.changed(message, [file], diffById(before, after));
-    });
+    }
+    if (name === 'accounts') {
+      checkDirectorLoanAccounts(after as Account[], before as Account[], this.state.companies, (id) => (this.state.transactions.get(id)?.length ?? 0) > 0);
+      checkMarksStillFit(after as Account[], before as Account[], (id) => this.state.transactions.get(id) ?? [], (id) => this.state.companies.some((c) => c.id === id));
+    }
+    if (name === 'companies') {
+      checkCompanyEstateAccounts(after as Company[], before as Company[], this.state.accounts);
+      checkDirectorLoanLinks(after as Company[], before as Company[], this.state.accounts);
+      checkCompanyBooks(after as Company[], before as Company[]);
+    }
+    // Only what this write adds or changes: one stored before (a hand edit) does not block the rest.
+    const fresh = <T extends { id: string }>(list: T[]) => {
+      const was = new Map((before as T[]).map((x) => [x.id, JSON.stringify(x)]));
+      return list.filter((x) => was.get(x.id) !== JSON.stringify(x));
+    };
+    if (name === 'goals') for (const g of fresh(after as Goal[])) this.refuseCompanyAccounts(g.accountIds, `The goal "${g.name}"`);
+    if (name === 'agreements') for (const a of fresh(after as Agreement[])) this.refuseCompanyAccounts(a.accountId ? [a.accountId] : [], `The agreement "${a.name}"`);
+    if (name === 'rules') for (const r of fresh(after as Rule[])) this.refuseCompanyAccounts(ruleAccountIds(r), `The rule "${r.name ?? r.match.value}"`);
+    const file = await this.writeArrayFile(name, items);
+    (this.state as unknown as Record<string, unknown>)[name] = after;
+    this.changed(message, [file], diffById(before, after));
   }
 
   setCategories(list: Category[], message = 'categories: update'): Promise<void> {
@@ -1147,6 +1150,18 @@ export class Store extends EventEmitter {
     if (existing >= 0) list[existing] = company;
     else list.push(company);
     await this.setCompanies(list, message ?? `${existing >= 0 ? 'company: update' : 'company: add'} ${company.name}`);
+  }
+  /**
+   * Change one company from what it is at the moment of writing, under the lock: two changes at once
+   * (a filing recorded while a proposal applies) each build on the other rather than one being lost.
+   * `change` gets the company as it is now (undefined: none) and may throw to refuse.
+   */
+  updateCompany(id: string, change: (current: Company | undefined) => Company, message: string): Promise<void> {
+    return this.exclusive(async () => {
+      const next = change(this.state.companies.find((c) => c.id === id));
+      const list = this.state.companies.some((c) => c.id === id) ? this.state.companies.map((c) => (c.id === id ? next : c)) : [...this.state.companies, next];
+      await this.writeArray('companies', list, message);
+    });
   }
   setAgreements(list: Agreement[], message = 'agreements: update'): Promise<void> {
     return this.setArray('agreements', list, message);
@@ -1800,16 +1815,18 @@ export function checkDirectorLoanLinks(companies: readonly Company[], before: re
 }
 
 /**
- * For each company a write adds or changes: its books fit (`booksProblems`: periods within the Acts'
- * limits, in order, filings once each and after their periods). One a hand edit left is listed on its
- * page, not refused here. Throws a 422.
+ * For each company a write adds or changes: its books gain no problem (`addedBooksProblems`: periods
+ * within the Acts' limits, in order, filings once each and after their periods). A problem already
+ * there (a hand edit) does not block the write, so the app can fix one at a time; one the write adds
+ * is refused. Throws a 422.
  */
 export function checkCompanyBooks(companies: readonly Company[], before: readonly Company[]): void {
-  const was = new Map(before.map((c) => [c.id, JSON.stringify(c.books ?? null)]));
+  const was = new Map(before.map((c) => [c.id, c.books]));
   for (const c of companies) {
-    if (!c.books || was.get(c.id) === JSON.stringify(c.books)) continue;
-    const problems = booksProblems(c.books);
-    if (problems.length) throw new StoreError(`${c.name}: ${problems.join(' ')}`, 422);
+    const prior = was.get(c.id);
+    if (!c.books || JSON.stringify(prior ?? null) === JSON.stringify(c.books)) continue;
+    const added = addedBooksProblems(prior, c.books);
+    if (added.length) throw new StoreError(`${c.name}: ${added.join(' ')}`, 422);
   }
 }
 

@@ -2,10 +2,10 @@
 // the owner keeps them and records filings, an agent only proposes them, and nothing of them reaches a
 // personal route. Every company, date, reference and figure is invented.
 
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Alert, CompanyBooksListItem, CompanyBooksResponse, CompanyView, ProposalDecision, ProposalView } from '../src/shared/api';
 import { addDays, addMonths, today } from '../src/shared/dates';
 import type { CompanyBooksSetup, ProposalInput } from '../src/shared/schema';
@@ -148,6 +148,76 @@ describe('a company’s books through the app', () => {
     expect((await app.ctx.store.readProposal(f.body.proposal.id))!.before!.companies).toMatchObject([{ id: COMPANY, books: { setBy: 'agent', filings: [] } }]);
     expect((await app.ctx.store.readProposal(first.body.proposal.id))!.before!.companies).toMatchObject([{ id: COMPANY }]);
     expect((await app.ctx.store.readProposal(first.body.proposal.id))!.before!.companies![0]).not.toHaveProperty('books');
+  });
+
+  it('a filing recorded while a proposal applies is kept; books changed meanwhile stop the apply', async () => {
+    await put({ books: SETUP() });
+    const { store } = app.ctx;
+    const inc = SETUP().incorporatedOn;
+    const theirs = { kind: 'confirmation' as const, periodEnd: addDays(inc, 364), filedOn: addDays(inc, 366) };
+    const p = await propose({ title: 'A filing', summary: 'Its filing history.', changes: [{ kind: 'add_category', why: 'For its costs.', category: { id: 'example-forge-costs', name: 'Example Forge costs', kind: 'expense' } }, { kind: 'add_filing', why: 'Its filing history.', company: COMPANY, filing: theirs }] });
+    expect(p.body).toMatchObject({ ready: 2 });
+    // While the apply writes the category, the owner records a Corporation Tax payment.
+    const setCategories = store.setCategories.bind(store);
+    const spy = vi.spyOn(store, 'setCategories').mockImplementationOnce(async (list, message) => {
+      const res = file({ kind: 'ct-payment', periodEnd: addDays(inc, 200), filedOn: addDays(inc, 500) });
+      await setCategories(list, message);
+      expect((await res).status).toBe(201);
+    });
+    const applied = await req(`/api/proposals/${p.body.proposal.id}/apply`, { method: 'POST', headers: CSRF, body: '{}' });
+    spy.mockRestore();
+    expect(applied.status).toBe(200);
+    expect(store.company(COMPANY)!.books!.filings.map((f) => f.kind).sort()).toEqual(['confirmation', 'ct-payment']);
+  });
+
+  it('books an agent set, changed by the owner while a proposal applies: refused, not overwritten', async () => {
+    const { store } = app.ctx;
+    const first = await propose({ title: 'Books', summary: 'Its certificate.', changes: [{ kind: 'set_company_books', why: 'Its certificate.', company: COMPANY, books: SETUP(), was: null }] });
+    await req(`/api/proposals/${first.body.proposal.id}/apply`, { method: 'POST', headers: CSRF, body: '{}' });
+    expect(store.company(COMPANY)!.books!.setBy).toBe('agent');
+    const inc = SETUP().incorporatedOn;
+    const next = await propose({ title: 'Trade', summary: 'Its first invoice.', changes: [{ kind: 'add_category', why: 'For its sales.', category: { id: 'example-forge-sales', name: 'Example Forge sales', kind: 'income' } }, { kind: 'set_company_books', why: 'Its first invoice.', company: COMPANY, books: { ...SETUP(), tradeStartedOn: inc }, was: store.company(COMPANY)!.books!.updatedAt }] });
+    expect(next.body).toMatchObject({ ready: 2 });
+    const setCategories = store.setCategories.bind(store);
+    const spy = vi.spyOn(store, 'setCategories').mockImplementationOnce(async (list, message) => {
+      const res = put({ books: { ...SETUP(), paye: { from: inc } } });
+      await setCategories(list, message);
+      expect((await res).status).toBe(200);
+    });
+    const res = await req(`/api/proposals/${next.body.proposal.id}/apply`, { method: 'POST', headers: CSRF, body: '{}' });
+    spy.mockRestore();
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: string }).error).toContain('changed while this was being applied');
+    expect(store.company(COMPANY)!.books).toMatchObject({ setBy: 'owner', paye: { from: inc } });
+    expect(store.company(COMPANY)!.books!.tradeStartedOn).toBeUndefined();
+  });
+
+  it('a hand edit that left two problems can be put right one at a time; a change that adds one is refused', async () => {
+    const { store } = app.ctx;
+    const file0 = path.join(dir, 'data', 'companies.json');
+    const data = JSON.parse(await readFile(file0, 'utf8')) as { companies: Record<string, unknown>[] };
+    data.companies[0]!.books = { ...SETUP(), periods: [{ start: '2025-01-01', end: '2026-12-31' }], ctPeriods: [{ start: '2025-01-01', end: '2026-01-31' }], filings: [], setBy: 'owner', updatedAt: stamp };
+    await writeFile(file0, JSON.stringify(data));
+    await store.load();
+    expect((await json<CompanyBooksResponse>(`/api/companies/${COMPANY}/books`)).problems).toHaveLength(2);
+    // Recording a filing beside them, and fixing one of them, both go through.
+    const inc = SETUP().incorporatedOn;
+    expect((await file({ kind: 'confirmation', periodEnd: addDays(inc, 364), filedOn: addDays(inc, 366) })).status).toBe(201);
+    expect((await put({ books: { ...SETUP(), ctPeriods: [{ start: '2025-01-01', end: '2026-01-31' }] } })).status).toBe(200);
+    expect((await json<CompanyBooksResponse>(`/api/companies/${COMPANY}/books`)).problems).toHaveLength(1);
+    // One that adds a problem does not.
+    expect((await put({ books: { ...SETUP(), ctPeriods: [{ start: '2025-01-01', end: '2026-01-31' }], tradeStartedOn: '2001-01-01' } })).status).toBe(422);
+  });
+
+  it('a page’s save for another company is refused; the response says when it came within the charge, and whether that is assumed', async () => {
+    await put({ books: SETUP() });
+    expect((await put({ books: SETUP(), company: 'example-other' })).status).toBe(409);
+    expect((await put({ books: SETUP(), company: COMPANY })).status).toBe(200);
+    expect((await json<CompanyBooksResponse>(`/api/companies/${COMPANY}/books`)).withinCharge).toEqual({ from: SETUP().incorporatedOn, assumed: true });
+    await put({ books: { ...SETUP(), withinChargeFrom: null } });
+    const dormant = await json<CompanyBooksResponse>(`/api/companies/${COMPANY}/books`);
+    expect(dormant.withinCharge).toEqual({ from: null, assumed: false });
+    expect(dormant.deadlines.filter((d) => d.kind === 'ct600' || d.kind === 'ct-payment')).toEqual([]);
   });
 
   it('a filing proposed for a company whose books are not kept here, or for one not in your data, does not fit', async () => {

@@ -770,7 +770,14 @@ const companyBooksShape = {
   paye: z.object({ from: ISODateSchema, closedOn: ISODateSchema.optional() }).optional(),
   /** The next confirmation statement's made-up date, as Companies House shows it (absent: worked out). */
   confirmationStatement: z.object({ nextMadeUpTo: ISODateSchema }).optional(),
-  /** The day it started to trade (null: not yet, so no Corporation Tax periods; absent: from incorporation). */
+  /**
+   * The day it came within the charge to Corporation Tax (CTA 2009 s9: it began to carry on business,
+   * or had a source of income such as interest; not only trade): its first CT period starts then.
+   * null: dormant for Corporation Tax (no CT600 or payment is listed; a notice from HMRC to deliver a
+   * return still has to be answered). Absent: assumed from incorporation, and labelled so.
+   */
+  withinChargeFrom: ISODateSchema.nullable().optional(),
+  /** The day it started to trade, which ends a CT period (CTA 2009 s10(1)(d)); null or absent: not known, or not yet. */
   tradeStartedOn: ISODateSchema.nullable().optional(),
   /** Corporation Tax accounting periods other than the worked-out ones (HMRC's notice sets them in practice). */
   ctPeriods: z.array(BooksPeriodSchema).max(60).default([]),

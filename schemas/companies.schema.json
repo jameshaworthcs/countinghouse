@@ -286,6 +286,17 @@
                   "nextMadeUpTo"
                 ]
               },
+              "withinChargeFrom": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "Calendar date, YYYY-MM-DD"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
               "tradeStartedOn": {
                 "anyOf": [
                   {

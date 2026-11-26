@@ -1573,6 +1573,11 @@ export interface CompanyBooksResponse {
   deadlines: CompanyDeadline[];
   /** What is wrong with its books (a hand edit), in words. */
   problems: string[];
+  /**
+   * When it came within the charge to Corporation Tax, as its CT periods are worked out from (null:
+   * dormant for Corporation Tax); `assumed` when the books do not say and incorporation is taken.
+   */
+  withinCharge: { from: string | null; assumed: boolean } | null;
   /** Your director's loan with it: what it owes you now (your own account). */
   directorLoan?: CompanyView['directorLoan'];
 }

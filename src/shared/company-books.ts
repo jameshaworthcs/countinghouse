@@ -109,22 +109,31 @@ export function accountingPeriodsOf(books: Pick<CompanyBooksSetup, 'incorporated
 }
 
 /**
- * When the company is within the charge to Corporation Tax from, as far as the books say: the day it
- * started to trade; from incorporation when that is not given; none when it has not started (null).
+ * When the company came within the charge to Corporation Tax (CTA 2009 s9: carrying on business or a
+ * source of income, such as interest; not only trade), as far as the books say: the day given; none
+ * when it is dormant for Corporation Tax (null); from incorporation when not given, an assumption the
+ * company's page labels (`withinChargeAssumed`).
  */
-function ctStartOf(books: Pick<CompanyBooksSetup, 'incorporatedOn' | 'tradeStartedOn'>): ISODate | undefined {
-  return books.tradeStartedOn === null ? undefined : (books.tradeStartedOn ?? books.incorporatedOn);
+export function withinChargeFrom(books: Pick<CompanyBooksSetup, 'incorporatedOn' | 'withinChargeFrom'>): ISODate | undefined {
+  return books.withinChargeFrom === null ? undefined : (books.withinChargeFrom ?? books.incorporatedOn);
+}
+
+/** Whether the day it came within the charge is the assumed one (incorporation), not one the books give. */
+export function withinChargeAssumed(books: Pick<CompanyBooksSetup, 'withinChargeFrom'>): boolean {
+  return books.withinChargeFrom === undefined;
 }
 
 /**
  * Corporation Tax accounting periods (CTA 2009 ss9–10) up to the one containing `until`: from the day
- * the company came within the charge (`ctStartOf`), each ending on the first of 12 months from its
- * beginning and the end of its period of account; periods you set (HMRC's notice) are used as they are,
- * the one before ending the day before. With trade not started (null), only the periods you set.
+ * the company came within the charge (`withinChargeFrom`), each ending on the first of 12 months from
+ * its beginning, the end of its period of account, and the day before it started to trade (s10(1)(d));
+ * periods you set (HMRC's notice) are used as they are, the one before ending the day before. Dormant
+ * for Corporation Tax (null): only the periods you set.
  */
-export function ctPeriodsOf(books: Pick<CompanyBooksSetup, 'incorporatedOn' | 'accountingReferenceDate' | 'periods' | 'tradeStartedOn' | 'ctPeriods'>, until: ISODate): CtPeriod[] {
+export function ctPeriodsOf(books: Pick<CompanyBooksSetup, 'incorporatedOn' | 'accountingReferenceDate' | 'periods' | 'tradeStartedOn' | 'withinChargeFrom' | 'ctPeriods'>, until: ISODate): CtPeriod[] {
   const yours = byStart(books.ctPeriods);
-  const start = ctStartOf(books);
+  const start = withinChargeFrom(books);
+  const trade = books.tradeStartedOn ?? undefined;
   const first = [start, yours[0]?.start].filter((d): d is ISODate => Boolean(d)).sort()[0];
   if (!first) return [];
   // Periods of account far enough on for the last CT period's own (one you set can end later).
@@ -149,6 +158,8 @@ export function ctPeriodsOf(books: Pick<CompanyBooksSetup, 'incorporatedOn' | 'a
       if (!poa) break;
       end = lastDayOfMonths(cursor, CT_PERIOD_RULES.maxMonths);
       if (poa.end < end) end = poa.end;
+      // Starting to trade ends a period (s10(1)(d)): the next begins on the day it started.
+      if (trade && trade > cursor && trade <= end) end = addDays(trade, -1);
       const next = yours.find((p) => p.start > cursor);
       if (next && next.start <= end) end = addDays(next.start, -1);
     }
@@ -254,7 +265,8 @@ export function companyDeadlines(company: Pick<Company, 'books'>, today: ISODate
       id: d.id ?? `${d.kind}:${d.period.end}`,
       status: deadlineStatus(d.due, today, done),
       days: diffDays(today, d.due),
-      ...(d.filing && !d.nothingToPay && d.filing.filedOn > d.due ? { filedLate: true } : {}),
+      // Late only against a day worked out for it: an unmatched filing's day is a guess.
+      ...(d.filing && !d.nothingToPay && !d.unmatched && d.filing.filedOn > d.due ? { filedLate: true } : {}),
     });
   };
 
@@ -293,19 +305,23 @@ export function companyDeadlines(company: Pick<Company, 'books'>, today: ISODate
     reviewEnd = anchor;
     const start = addDays(monthsAfter(anchor, -12), 1);
     reviewStart = start > books.incorporatedOn ? start : books.incorporatedOn;
-    // Statements made up before the review period Companies House shows next are settled: each its own.
+    // Statements made up before the review period Companies House shows next are settled: each its own,
+    // due 14 days after the review period it falls in, those counted back a year at a time from it.
     for (const f of confirmations) {
       if (f.periodEnd >= reviewStart) break;
+      let end = monthsAfter(anchor, -12);
+      for (let k = 2; monthsAfter(anchor, -12 * k) >= f.periodEnd && k < MAX_PERIODS; k++) end = monthsAfter(anchor, -12 * k);
       used.add(f.id);
-      push({ kind: 'confirmation', period: { end: f.periodEnd }, due: confirmationStatementDue(f.periodEnd), title: `Confirmation statement made up to ${formatDate(f.periodEnd)}`, to: 'Companies House', rule: 'CA 2006 s853A', filing: f });
+      push({ kind: 'confirmation', period: { end: f.periodEnd }, due: confirmationStatementDue(end), title: `Confirmation statement made up to ${formatDate(f.periodEnd)}`, to: 'Companies House', rule: 'CA 2006 s853A(1)', filing: f });
     }
   }
   for (let i = 0; i < MAX_PERIODS; i++) {
     const filing = confirmations.find((f) => !used.has(f.id) && f.periodEnd >= reviewStart && f.periodEnd <= reviewEnd);
     if (filing) used.add(filing.id);
     const madeUpTo = filing?.periodEnd ?? reviewEnd;
-    const due = confirmationStatementDue(madeUpTo);
-    push({ kind: 'confirmation', period: { start: reviewStart, end: madeUpTo }, due, title: `Confirmation statement made up to ${formatDate(madeUpTo)}`, to: 'Companies House', rule: 'CA 2006 s853A', ...(filing ? { filing } : {}) });
+    // Due 14 days after the review period ends (s853A(1)), even for one made up early.
+    const due = confirmationStatementDue(reviewEnd);
+    push({ kind: 'confirmation', period: { start: reviewStart, end: madeUpTo }, due, title: `Confirmation statement made up to ${formatDate(madeUpTo)}`, to: 'Companies House', rule: 'CA 2006 s853A(1)', ...(filing ? { filing } : {}) });
     if (!filing && due >= today) break;
     reviewStart = addDays(madeUpTo, 1);
     reviewEnd = nextReviewEnd(reviewStart);
@@ -395,6 +411,9 @@ export function booksProblems(books: CompanyBooksSetup & { filings?: readonly Co
   periodsProblems(books.periods, 'The accounting period', ACCOUNTING_PERIOD_RULES.maxMonths, 'CA 2006 s392(5)');
   periodsProblems(books.ctPeriods, 'The Corporation Tax period', CT_PERIOD_RULES.maxMonths, 'CTA 2009 s10(1)(a)');
   if (books.tradeStartedOn && books.tradeStartedOn < inc) out.push(`Trade started on ${day(books.tradeStartedOn)}, before the company was incorporated (${day(inc)}).`);
+  if (books.withinChargeFrom && books.withinChargeFrom < inc) out.push(`It came within the charge to Corporation Tax on ${day(books.withinChargeFrom)}, before it was incorporated (${day(inc)}).`);
+  if (books.tradeStartedOn && books.withinChargeFrom && books.tradeStartedOn < books.withinChargeFrom) out.push(`Trade started on ${day(books.tradeStartedOn)}, before it came within the charge to Corporation Tax (${day(books.withinChargeFrom)}): trading brings a company within the charge (CTA 2009 s9(2)).`);
+  if (books.tradeStartedOn && books.withinChargeFrom === null) out.push('It trades, so it is not dormant for Corporation Tax: give the day it came within the charge (CTA 2009 s9).');
   if (books.confirmationStatement && books.confirmationStatement.nextMadeUpTo <= inc) out.push(`The next confirmation statement's made-up date (${day(books.confirmationStatement.nextMadeUpTo)}) is not after incorporation.`);
   if (books.paye) {
     if (books.paye.from < inc) out.push(`The PAYE scheme starts on ${day(books.paye.from)}, before the company was incorporated.`);
@@ -430,4 +449,13 @@ export function booksProblems(books: CompanyBooksSetup & { filings?: readonly Co
     }
   }
   return out;
+}
+
+/**
+ * The problems `after` has that `before` did not (`booksProblems`): what a write adds. A problem a hand
+ * edit left is not the write's, so the app can fix one at a time.
+ */
+export function addedBooksProblems(before: (CompanyBooksSetup & { filings?: readonly CompanyFiling[] }) | undefined, after: CompanyBooksSetup & { filings?: readonly CompanyFiling[] }): string[] {
+  const had = new Set(before ? booksProblems(before) : []);
+  return booksProblems(after).filter((p) => !had.has(p));
 }
