@@ -453,13 +453,15 @@ describe('company accounts never touch a personal figure', () => {
         const up = await req('/api/imports', { method: 'POST', headers: { 'x-finance-csrf': '1' }, body: form });
         expect(up.status).toBe(201);
         const id = ((await up.json()) as { results: { id: string }[] }).results[0]!.id;
-        type Draft = { status: string; draft?: { sections: { target: { accountId?: string }; transactions: { category?: string; categorisedBy?: string; transferMatch?: string }[] }[] } };
+        type Draft = { status: string; draft?: { notes: string[]; sections: { target: { accountId?: string }; transactions: { category?: string; categorisedBy?: string; transferMatch?: string }[] }[] } };
         const rec = await waitFor(async () => {
           const r = (await (await req(`/api/imports/${id}`)).json()) as Draft;
           return r.status === 'review' ? r : undefined;
         });
         const [section] = rec.draft!.sections;
         expect(section!.target.accountId).toBe(accountId);
+        // The pending row Tide's export lists is left out, and the review page says so.
+        if (file === 'tide.csv') expect(rec.draft!.notes).toContainEqual(expect.stringContaining('1 row left out: Status is "Pending"'));
         // Nothing of yours names its rows (your rules, the bank's categories), and no row of yours is
         // their other leg: the only category is a transfer's, with the company's other account.
         for (const t of section!.transactions) {

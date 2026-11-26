@@ -305,6 +305,11 @@ export function filterTransactions(ctx: Pick<AppContext, 'store'>, q: Record<str
 export function dataRoutes(ctx: AppContext): Hono {
   const app = new Hono();
   const { store } = ctx;
+  /** Your categories are for your rows: a company's row takes none (docs/INGESTION.md, "Company accounts"). */
+  const refuseCompanyCategory = (accountId: string) => {
+    const account = store.account(accountId);
+    if (account?.companyId) throw new StoreError(`${account.name} is a company’s own account: its rows take no category of yours.`);
+  };
 
   app.get('/bootstrap', (c) => {
     const body: BootstrapResponse = {
@@ -337,7 +342,7 @@ export function dataRoutes(ctx: AppContext): Hono {
     let institutionId = body.institutionId;
     if (!institutionId && body.institutionName) {
       const cat = findInstitution(body.institutionName);
-      institutionId = cat?.id ?? slugify(body.institutionName, store.institutionIds());
+      institutionId = cat?.id ?? store.institutionNamed(body.institutionName)?.id ?? slugify(body.institutionName, store.institutionIds());
     }
     if (institutionId && !store.institution(institutionId)) {
       const cat = catalogInstitution(institutionId);
@@ -437,14 +442,35 @@ export function dataRoutes(ctx: AppContext): Hono {
     }
     if (institutionName && !body.institutionId) {
       const cat = findInstitution(institutionName);
-      const instId = cat?.id ?? slugify(institutionName, store.institutionIds());
+      const instId = cat?.id ?? store.institutionNamed(institutionName)?.id ?? slugify(institutionName, store.institutionIds());
       if (!store.institution(instId)) await store.upsertInstitution({ id: instId, name: cat?.name ?? institutionName, kind: cat?.kind ?? 'bank', ...(cat?.fscsGroup ? { fscsGroup: cat.fscsGroup } : {}) });
       merged.institutionId = instId;
     }
     await store.upsertAccount(merged as Account);
     // Given to a company, or back to you: its rows are worked out again as their new side's, and
-    // any transfer linking them across the line is unlinked (enrich.ts, separateSides).
-    if (sideOf(merged) !== sideOf(account)) await separateSides(store, account.id);
+    // any transfer linking them across the line is unlinked (enrich.ts, separateSides). Part of the
+    // same request: if that fails, the account goes back to its side and its rows with it, and the
+    // request says so, so it is never left on one side with its rows worked out for the other.
+    if (sideOf(merged) !== sideOf(account)) {
+      try {
+        await separateSides(store, account.id);
+      } catch (err) {
+        const why = (err as Error).message;
+        let back = true;
+        try {
+          await store.upsertAccount({ ...account }, `account: ${account.name} kept as it was (its rows could not be worked out again)`);
+          await separateSides(store, account.id);
+        } catch {
+          back = false;
+        }
+        throw new StoreError(
+          back
+            ? `${account.name} was not moved: its rows could not be worked out again for its new side (${why}). It is as it was.`
+            : `${account.name} could not be moved, nor put back as it was (${why}). Open it and choose whose it is again.`,
+          500,
+        );
+      }
+    }
     return c.json(store.account(account.id));
   });
 
@@ -549,6 +575,7 @@ export function dataRoutes(ctx: AppContext): Hono {
     const body = await readJson(c, NewTx);
     const account = store.account(body.accountId);
     if (!account) throw new StoreError('Unknown account', 404);
+    if (body.category) refuseCompanyCategory(account.id);
     let occurrence = 0;
     let id = transactionId(account.id, body.date, body.amount, body.description, occurrence);
     while (store.transaction(id)) id = transactionId(account.id, body.date, body.amount, body.description, ++occurrence);
@@ -574,6 +601,7 @@ export function dataRoutes(ctx: AppContext): Hono {
     const { correctionNote, ...body } = await readJson(c, TxPatch);
     const current = store.transaction(c.req.param('id'));
     if (!current) throw new StoreError('Unknown transaction', 404);
+    if (body.category || body.splits) refuseCompanyCategory(current.accountId);
     const patch = applyNulls(body) as Partial<Transaction>;
     if (body.tags) patch.tags = body.tags.length ? addTags([], body.tags) : undefined;
     if (body.splits) checkSplits(body.splits, body.amount ?? current.amount, current, new CategoryIndex(store.categories));
@@ -609,6 +637,7 @@ export function dataRoutes(ctx: AppContext): Hono {
     const updates = body.ids.map((id) => {
       const t = store.transaction(id);
       if (!t) throw new StoreError(`Unknown transaction ${id}`, 404);
+      if (body.category) refuseCompanyCategory(t.accountId);
       const patch: Partial<Transaction> = {};
       if (body.category !== undefined) {
         patch.category = body.category ?? undefined;
@@ -769,6 +798,10 @@ export function dataRoutes(ctx: AppContext): Hono {
    */
   app.post('/enrich/preview', async (c) => {
     const result = await enrich(store, { dryRun: true, detail: true });
+    // Your rows only: a company's rows are worked out by re-applying too, but they take no category
+    // of yours, so nothing of theirs is offered here to decide, skip or make a rule from.
+    const yours = new Set(store.accounts.map((a) => a.id));
+    result.changes = (result.changes ?? []).filter((ch) => yours.has(ch.accountId));
     const groups = new Map<string, { group: EnrichGroup; byPayee: Map<string, Transaction[]> }>();
     let payeesTidied = 0;
     const named = new Set(result.accountPayees ?? []);
@@ -834,7 +867,9 @@ export function dataRoutes(ctx: AppContext): Hono {
     const cats = new CategoryIndex(store.categories);
     for (const d of body.decisions) {
       if (!cats.get(d.category)) throw new StoreError(`Unknown category "${d.category}".`);
-      if (!store.transaction(d.id)) throw new StoreError(`Unknown transaction ${d.id}`, 404);
+      const t = store.transaction(d.id);
+      if (!t) throw new StoreError(`Unknown transaction ${d.id}`, 404);
+      refuseCompanyCategory(t.accountId);
     }
     if (body.rule && !cats.get(body.rule.category)) throw new StoreError(`Unknown category "${body.rule.category}".`);
     const person = body.person ? await savePerson(body.person) : undefined;

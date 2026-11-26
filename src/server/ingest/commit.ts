@@ -108,7 +108,7 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
     let institutionId = input.institutionId;
     if (!institutionId && input.institutionName) {
       const cat = findInstitution(input.institutionName);
-      institutionId = cat?.id ?? slugify(input.institutionName, store.institutionIds());
+      institutionId = cat?.id ?? store.institutionNamed(input.institutionName)?.id ?? slugify(input.institutionName, store.institutionIds());
     }
     let institution: (typeof toCreate)[number]['institution'];
     if (institutionId && !store.institution(institutionId)) {
@@ -194,19 +194,25 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
         const other = store.account(match.accountId);
         const payee = other ? linkedPayee(tx, other, store.accountsBeside(account.id)) : undefined;
         if (payee) tx.payee = payee;
+        // A company's leg takes the transfer category, whatever the review page said.
+        if (side && other) {
+          tx.category = transferLegCategory(account.type, other.type, tx.amount);
+          tx.categorisedBy = 'transfer';
+          delete tx.ruleId;
+        }
       }
       if (!tx.transferGroup) {
         const counterparty = tx.counterpartyAccountId ? store.account(tx.counterpartyAccountId) : undefined;
         const across = counterparty !== undefined && sideOf(counterparty) !== side;
-        // A company's row keeps no category of yours (only one you gave); no row keeps a link across
-        // the line, nor the transfer category that came with it.
-        const bare = tx.categorisedBy !== 'user' && (side !== '' || (across && tx.categorisedBy === 'transfer'));
+        // A company's row keeps no category of yours, not even one given on the review page; no row
+        // keeps a link across the line, nor the transfer category that came with it.
+        const bare = side !== '' || (across && tx.categorisedBy === 'transfer');
         if (bare) {
           delete tx.category;
           delete tx.categorisedBy;
           delete tx.ruleId;
         }
-        if (across || (side && tx.categorisedBy !== 'user')) delete tx.counterpartyAccountId;
+        if (across || side) delete tx.counterpartyAccountId;
       }
       if (row.pendingLink && row.pendingLink.importId !== record.id) heldForLink.add(id);
       byKey.set(row.key, { tx, row, account });
@@ -229,7 +235,8 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
       a.tx.counterpartyAccountId = b.account.id;
       const payee = linkedPayee(a.tx, b.account, [...store.accountsBeside(a.account.id), ...toCreate.map((x) => x.account)]);
       if (payee) a.tx.payee = payee;
-      if (a.row.categorisedBy !== 'user') {
+      // A category you set stays on your rows; a company's leg takes the transfer category.
+      if (a.row.categorisedBy !== 'user' || a.account.companyId) {
         a.tx.category = transferLegCategory(a.account.type, b.account.type, a.tx.amount);
         a.tx.categorisedBy = 'transfer';
         delete a.tx.ruleId;
@@ -511,7 +518,7 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
         const other = store.transaction(otherId)!;
         const otherAccount = store.account(other.accountId)!;
         const patch: Partial<Transaction> = { transferGroup: transferGroupId(newId, otherId), counterpartyAccountId: account.id };
-        if (other.categorisedBy !== 'user') {
+        if (other.categorisedBy !== 'user' || otherAccount.companyId) {
           patch.category = transferLegCategory(otherAccount.type, account.type, other.amount);
           patch.categorisedBy = 'transfer';
         }

@@ -15,6 +15,7 @@ import type { z } from 'zod';
 import type { ChangeDiff } from '../shared/audit';
 import { sideOf } from '../shared/accounts';
 import { defaultCategories } from '../shared/categories';
+import { earmarkAccountIds } from '../shared/earmarks';
 import { sectionSpan } from '../shared/coverage';
 import {
   AccountSchema,
@@ -533,6 +534,8 @@ export class Store extends EventEmitter {
     for (const c of next.companies) {
       if (c.accountId && accountsById.get(c.accountId)?.companyId) issues.push({ file: 'companies.json', severity: 'warning', message: `Company "${c.id}" carries your shares on "${c.accountId}", which is a company's own account` });
     }
+    const theirs = new Set(next.accounts.filter((a) => a.companyId).map((a) => a.id));
+    for (const n of theirs.size ? recordsNaming(next, theirs) : []) issues.push({ file: n.file, severity: 'warning', message: `${n.what} names a company's own account (${n.accountId}): your records name only accounts of yours, so it is left out of your figures` });
     if (next.meta.version > FORMAT_VERSION) {
       issues.push({ file: 'meta.json', severity: 'error', message: `Data format v${next.meta.version} is newer than this app understands (v${FORMAT_VERSION}). Update the app before editing.` });
     }
@@ -660,6 +663,14 @@ export class Store extends EventEmitter {
   /** Every provider, a company's accounts' too: for infrastructure only (ESLint's allowlist). */
   get allInstitutions(): Institution[] {
     return this.state.institutions;
+  }
+  /**
+   * A provider by its name (any case), whoever's accounts are at it: a provider typed by name is
+   * the one already there, not a second of the same name (a company's provider is not among yours).
+   */
+  institutionNamed(name: string): Institution | undefined {
+    const key = name.trim().toLowerCase();
+    return key ? this.state.institutions.find((i) => i.name.trim().toLowerCase() === key) : undefined;
   }
   /** Every provider's id: the ids a new one's must differ from. */
   institutionIds(): string[] {
@@ -930,12 +941,12 @@ export class Store extends EventEmitter {
   allBalances(): BalanceSnapshot[] {
     return this.rowsOf(this.state.balances, () => true);
   }
-  /** A balance by its id, whoever's account it is of. */
   /** One account's figures, whoever's account it is. */
   figuresOf(accountId: string): Figure[] {
     return this.state.figures.filter((f) => f.accountId === accountId);
   }
 
+  /** A balance by its id, whoever's account it is of. */
   balance(id: string): BalanceSnapshot | undefined {
     for (const list of this.state.balances.values()) {
       const found = list.find((b) => b.id === id);
@@ -1006,7 +1017,7 @@ export class Store extends EventEmitter {
     return this.exclusive(async () => {
       const next = change(this.state.earmarks);
       const e = next ? EarmarksSchema.parse(next) : null;
-      const named = (x: Earmarks | null) => (x ? [...x.everyday, ...x.setAside, ...x.pots.flatMap((p) => p.rules.flatMap((r) => [...(r.accountIds ?? []), ...(r.counterpartyAccountId ? [r.counterpartyAccountId] : [])]))] : []);
+      const named = (x: Earmarks | null) => (x ? earmarkAccountIds(x) : []);
       const was = new Set(named(this.state.earmarks));
       if (e) this.refuseCompanyAccounts(named(e).filter((id) => !was.has(id)), 'Money set aside');
       if (e) await this.writeJson('earmarks.json', e);
@@ -1043,7 +1054,18 @@ export class Store extends EventEmitter {
       const before = this.state[name] as unknown[];
       const after = (items as unknown[]).map((i) => (def.schema as z.ZodType<unknown>).parse(i));
       // Company accounts stay apart from yours: refused before anything is written.
-      if (name === 'accounts') checkCompanyAccounts(after as Account[], before as Account[], this.state.companies);
+      if (name === 'accounts') {
+        checkCompanyAccounts(after as Account[], before as Account[], this.state.companies);
+        // An account that changes side may not leave your records naming it (a goal reading a
+        // company's rows by id): refused, with the records to change first.
+        const was = new Map((before as Account[]).map((a) => [a.id, a]));
+        for (const a of after as Account[]) {
+          const prior = was.get(a.id);
+          if (!prior || sideOf(prior) === sideOf(a)) continue;
+          const naming = recordsNaming(this.state, new Set([a.id]));
+          if (naming.length) throw new StoreError(`${a.name} cannot ${a.companyId ? 'become a company’s account' : 'become yours again'} while ${naming.map((n) => n.what).join(', ')} ${naming.length === 1 ? 'names' : 'name'} it: change ${naming.length === 1 ? 'that' : 'those'} first.`);
+        }
+      }
       if (name === 'companies') checkCompanyEstateAccounts(after as Company[], before as Company[], this.state.accounts);
       // Only what this write adds or changes: one stored before (a hand edit) does not block the rest.
       const fresh = <T extends { id: string }>(list: T[]) => {
@@ -1052,7 +1074,7 @@ export class Store extends EventEmitter {
       };
       if (name === 'goals') for (const g of fresh(after as Goal[])) this.refuseCompanyAccounts(g.accountIds, `The goal "${g.name}"`);
       if (name === 'agreements') for (const a of fresh(after as Agreement[])) this.refuseCompanyAccounts(a.accountId ? [a.accountId] : [], `The agreement "${a.name}"`);
-      if (name === 'rules') for (const r of fresh(after as Rule[])) this.refuseCompanyAccounts(r.set.counterpartyAccountId ? [r.set.counterpartyAccountId] : [], `The rule "${r.name ?? r.match.value}"`);
+      if (name === 'rules') for (const r of fresh(after as Rule[])) this.refuseCompanyAccounts(ruleAccountIds(r), `The rule "${r.name ?? r.match.value}"`);
       const file = await this.writeArrayFile(name, items);
       (this.state as unknown as Record<string, unknown>)[name] = after;
       this.changed(message, [file], diffById(before, after));
@@ -1598,6 +1620,29 @@ export class Store extends EventEmitter {
       this.changed(message, [rel], { added: 1, items: [{ id: p.id, op: 'added', label: `${p.status} ${p.title}`.slice(0, 160) }] });
     });
   }
+}
+
+/** The accounts a rule names: those it is limited to, and the one it sends money to. */
+function ruleAccountIds(r: Rule): string[] {
+  return [...(r.match.accountIds ?? []), ...(r.set.counterpartyAccountId ? [r.set.counterpartyAccountId] : [])];
+}
+
+/**
+ * Your records that name one of `ids`: goals, agreements, rules and money set aside. A company's
+ * account must never be among them (a goal would read its rows by id), so an account named here
+ * cannot change side, and one found on load is reported.
+ */
+export function recordsNaming(state: Pick<State, 'goals' | 'agreements' | 'rules' | 'earmarks'>, ids: ReadonlySet<string>): { file: string; what: string; accountId: string }[] {
+  const out: { file: string; what: string; accountId: string }[] = [];
+  const hit = (file: string, what: string, named: readonly string[]) => {
+    const accountId = named.find((id) => ids.has(id));
+    if (accountId) out.push({ file, what, accountId });
+  };
+  for (const g of state.goals) hit('goals.json', `the goal "${g.name}"`, g.accountIds);
+  for (const a of state.agreements) hit('agreements.json', `the agreement "${a.name}"`, a.accountId ? [a.accountId] : []);
+  for (const r of state.rules) hit('rules.json', `the rule "${r.name ?? r.match.value}"`, ruleAccountIds(r));
+  if (state.earmarks) hit('earmarks.json', 'money set aside', earmarkAccountIds(state.earmarks));
+  return out;
 }
 
 /**

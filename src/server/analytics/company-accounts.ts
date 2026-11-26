@@ -49,7 +49,10 @@ export function companyAccountGroups(store: Store, engineOf: (companyId: string)
     .map((id) => {
       const company = store.company(id);
       const engine = engineOf(id);
-      const accounts: AccountSummary[] = store.companyAccounts(id).map((a) => accountSummary(store, engine, a, on));
-      return { company: { id, name: company?.name ?? id, known: Boolean(company) }, accounts };
+      const records = store.companyAccounts(id);
+      const accounts: AccountSummary[] = records.map((a) => accountSummary(store, engine, a, on));
+      const providerIds = new Set(records.flatMap((a) => (a.institutionId ? [a.institutionId] : [])));
+      const providers = store.allInstitutions.filter((i) => providerIds.has(i.id));
+      return { company: { id, name: company?.name ?? id, known: Boolean(company) }, accounts, records, providers };
     });
 }

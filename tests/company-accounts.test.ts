@@ -7,7 +7,7 @@
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AccountDetailResponse, AccountSummary, CompanyAccountsGroup, TransactionsResponse } from '../src/shared/api';
 import type { Account, ProposalInput, Transaction } from '../src/shared/schema';
 import { createApp, type App } from '../src/server/app';
@@ -160,7 +160,7 @@ describe("a company's accounts", () => {
           // Your rule's words, a merchant the app knows, and the bank's category: none of them applies.
           tx('studio-card', '2026-03-12', -24.99, 'EXAMPLE HOSTING LTD', { category: 'software', categorisedBy: 'rule', ruleId: 'rule_hosting' }),
           tx('studio-current', '2026-03-13', -9.5, 'TESCO STORES 3297', { bankCategory: 'Groceries' }),
-          // A row you categorised on a company's account stays yours.
+          // A category of yours on a company's row is in the wrong place, whoever set it.
           tx('studio-current', '2026-03-14', -15, 'EXAMPLE STATIONERS', { category: 'professional-fees', categorisedBy: 'user' }),
           // Your money to the company and the company's to you: the same amount, the same day, each
           // naming the other side. Not a transfer between accounts of one side.
@@ -178,7 +178,7 @@ describe("a company's accounts", () => {
       expect([hosting.category, hosting.categorisedBy, hosting.ruleId]).toEqual([undefined, undefined, undefined]);
       expect(hosting.payee).toBe('Example Hosting Ltd');
       expect(of('studio-current', -9.5).category).toBeUndefined();
-      expect(of('studio-current', -15)).toMatchObject({ category: 'professional-fees', categorisedBy: 'user' });
+      expect([of('studio-current', -15).category, of('studio-current', -15).categorisedBy]).toEqual([undefined, undefined]);
       for (const t of [of('current', -500), of('studio-current', 500)]) {
         expect(t.transferGroup).toBeUndefined();
         expect(t.counterpartyAccountId).toBeUndefined();
@@ -254,9 +254,129 @@ describe("a company's accounts", () => {
       // Not among your accounts; in the company's own group.
       expect(((await (await req('/api/accounts')).json()) as AccountSummary[]).map((a) => a.id)).toEqual(['current', 'card', 'shares']);
       const groups = (await (await req('/api/company-accounts')).json()) as CompanyAccountsGroup[];
-      expect(groups).toEqual([{ company: { id: COMPANY, name: 'EXAMPLE STUDIO LTD', known: true }, accounts: [expect.objectContaining({ id: 'studio-current', balance: 1175.01 }), expect.objectContaining({ id: 'studio-card' })] }]);
+      expect(groups).toEqual([
+        {
+          company: { id: COMPANY, name: 'EXAMPLE STUDIO LTD', known: true },
+          accounts: [expect.objectContaining({ id: 'studio-current', balance: 1175.01 }), expect.objectContaining({ id: 'studio-card' })],
+          // As stored, for the import review's "Import into" and the account form.
+          records: [expect.objectContaining({ id: 'studio-current', type: 'current', companyId: COMPANY }), expect.objectContaining({ id: 'studio-card', type: 'credit_card' })],
+          providers: [expect.objectContaining({ id: 'capital-on-tap' }), expect.objectContaining({ id: 'example-bank' })],
+        },
+      ]);
       const summary = (await (await req('/api/summary')).json()) as { estate: { value: number } };
       expect(summary.estate.value).toBe(0);
+    });
+  });
+
+  describe('review fixes', () => {
+    it('a provider only a company account is at keeps its id when the account is saved by name', async () => {
+      await store.upsertInstitution({ id: 'studio-bank', name: 'Studio Bank', kind: 'bank' });
+      await store.upsertAccount({ ...store.account('studio-current')!, institutionId: 'studio-bank' });
+      expect(store.institutions.some((i) => i.id === 'studio-bank')).toBe(false);
+      // The form sends the provider by name when it cannot find it among yours.
+      expect((await send('PATCH', '/api/accounts/studio-current', { institutionName: 'Studio Bank' })).status).toBe(200);
+      expect(store.account('studio-current')!.institutionId).toBe('studio-bank');
+      const made = await send('POST', '/api/accounts', { name: 'Studio saver', type: 'savings', companyId: COMPANY, institutionName: 'studio bank' });
+      expect(made.body.institutionId).toBe('studio-bank');
+      expect(store.allInstitutions.filter((i) => i.name === 'Studio Bank')).toHaveLength(1);
+    });
+
+    it('an account cannot change side while your records name it: each kind, listed', async () => {
+      await store.upsertAccount(acct('saver', 'Rainy Day', 'savings'));
+      const move = () => send('PATCH', '/api/accounts/saver', { companyId: COMPANY, includeInNetWorth: false });
+      const cases: [string, () => Promise<unknown>, RegExp][] = [
+        ['goal', () => store.setGoals([{ id: 'g', name: 'Buffer', accountIds: ['saver'], createdAt: stamp, updatedAt: stamp }]), /the goal "Buffer"/],
+        ['agreement', () => store.upsertAgreement({ id: 'loan', name: 'Lending', counterparty: 'Example', names: [], direction: 'in', category: 'salary', accountId: 'saver', from: '2026-01-01', payments: [{ due: '2026-02-01', amount: 100 }], details: [], source: {}, createdBy: 'owner', createdAt: stamp, updatedAt: stamp }), /the agreement "Lending"/],
+        ['rule limited to it', () => store.setRules([{ id: 'rule_only', name: 'Only there', enabled: true, priority: 100, match: { field: 'description', op: 'contains', value: 'X', caseSensitive: false, accountIds: ['saver'] }, set: { category: 'software' }, createdAt: stamp, updatedAt: stamp }]), /the rule "Only there"/],
+        ['rule sending money to it', () => store.setRules([{ id: 'rule_to', name: 'To it', enabled: true, priority: 100, match: { field: 'description', op: 'contains', value: 'Y', caseSensitive: false }, set: { counterpartyAccountId: 'saver' }, createdAt: stamp, updatedAt: stamp }]), /the rule "To it"/],
+        ['set aside, everyday', () => store.setEarmarks({ everyday: ['saver'], setAside: [], pots: [{ id: 'tax', name: 'Tax', start: '2026-01-01', opening: 0, rules: [], checks: [] }], decisions: {}, updatedAt: stamp }), /money set aside/],
+        ['set aside, a pot rule’s accounts', () => store.setEarmarks({ everyday: ['current'], setAside: [], pots: [{ id: 'tax', name: 'Tax', start: '2026-01-01', opening: 0, rules: [{ id: 'r', name: 'There', effect: 'source', accountIds: ['saver'] }], checks: [] }], decisions: {}, updatedAt: stamp }), /money set aside/],
+        ['set aside, a pot rule’s counterparty', () => store.setEarmarks({ everyday: ['current'], setAside: [], pots: [{ id: 'tax', name: 'Tax', start: '2026-01-01', opening: 0, rules: [{ id: 'r', name: 'To it', effect: 'source', counterpartyAccountId: 'saver' }], checks: [] }], decisions: {}, updatedAt: stamp }), /money set aside/],
+      ];
+      for (const [what, make, named] of cases) {
+        await make();
+        const refused = await move();
+        expect(refused.status, what).toBe(400);
+        expect(refused.body.error, what).toMatch(named);
+        expect(store.account('saver')!.companyId, what).toBeUndefined();
+        await store.setGoals([]);
+        await store.setAgreements([]);
+        await store.setRules([]);
+        await store.setEarmarks(null);
+      }
+      expect((await move()).status).toBe(200);
+    });
+
+    it('a hand edit leaving one of your records naming a company account is reported when the data is read', async () => {
+      const file = path.join(dir, 'data', 'goals.json');
+      await writeFile(file, JSON.stringify({ goals: [{ id: 'g', name: 'Buffer', accountIds: ['studio-current'], createdAt: stamp, updatedAt: stamp }] }));
+      await store.load();
+      expect(store.issues.map((i) => i.message)).toContainEqual(expect.stringContaining('the goal "Buffer" names a company\'s own account (studio-current)'));
+    });
+
+    it('re-applying shows and decides your rows only', async () => {
+      await store.addTransactions([tx('studio-current', '2026-03-12', -24.99, 'EXAMPLE HOSTING LTD', { category: 'software', categorisedBy: 'rule' }), tx('current', '2026-03-12', -12.5, 'TESCO STORES 3297')], 'test');
+      const preview = (await (await req('/api/enrich/preview', { method: 'POST', headers: CSRF, body: '{}' })).json()) as { recategorised: number; groups: { payees: { rows: { accountId: string }[] }[] }[] };
+      const rows = preview.groups.flatMap((g) => g.payees.flatMap((p) => p.rows));
+      expect(rows.map((r) => r.accountId)).toEqual(['current']);
+      expect(preview.recategorised).toBe(1);
+      const company = store.transactions('studio-current')[0]!;
+      const refused = await send('POST', '/api/enrich', { decided: [{ id: company.id, category: 'software' }] });
+      expect(refused.status).toBe(400);
+      expect(refused.body.error).toMatch(/company's own account/);
+      // Nor by hand, one by one or together, nor from the To categorise page.
+      expect((await send('PATCH', `/api/transactions/${company.id}`, { category: 'software' })).status).toBe(400);
+      expect((await send('POST', '/api/transactions/bulk', { ids: [company.id], category: 'software' })).status).toBe(400);
+      expect((await send('POST', '/api/categorise/decisions', { decisions: [{ id: company.id, category: 'software' }] })).status).toBe(400);
+      // Notes and tags are not categories.
+      expect((await send('PATCH', `/api/transactions/${company.id}`, { notes: 'servers' })).status).toBe(200);
+    });
+
+    it('a proposal setting money aside that names a company account in a pot rule is refused before it is applied', async () => {
+      const agent = `Bearer ${(await app.ctx.tokens.create({ name: 'Test agent', scopes: ['records'], days: 1 })).token}`;
+      for (const rule of [{ accountIds: ['studio-current'] }, { counterpartyAccountId: 'studio-current' }]) {
+        const proposal: ProposalInput = {
+          title: 'Set aside',
+          summary: 'A pot.',
+          provenance: { model: 'test-model' },
+          changes: [{ key: 'a', kind: 'set_earmarks', why: 'Tax.', was: null, setup: { everyday: ['current'], setAside: [], pots: [{ id: 'tax', name: 'Tax', start: '2026-01-01', opening: 0, rules: [{ id: 'r', name: 'Studio', effect: 'source', ...rule }] }] } }],
+        };
+        const res = await req('/api/proposals', { method: 'POST', headers: { ...CSRF, authorization: agent }, body: JSON.stringify(proposal) });
+        expect(res.status).toBe(422);
+        expect(((await res.json()) as { problems: { problem: string }[] }).problems[0]!.problem).toMatch(/own account, not yours/);
+      }
+      expect(store.earmarks).toBeNull();
+    });
+
+    it('a linked company leg keeps no category of yours: it takes the transfer category', async () => {
+      await store.addTransactions([tx('studio-current', '2026-07-01', -80, 'CAPITAL ON TAP', { category: 'software', categorisedBy: 'rule', ruleId: 'rule_x' }), tx('studio-card', '2026-07-02', 80, 'PAYMENT RECEIVED', { category: 'refunds', categorisedBy: 'user' })], 'test');
+      const [out] = store.transactions('studio-current');
+      const [into] = store.transactions('studio-card');
+      await store.updateTransactions(
+        [
+          { id: out!.id, patch: { transferGroup: 'tg_00000000000000a1', counterpartyAccountId: 'studio-card' } },
+          { id: into!.id, patch: { transferGroup: 'tg_00000000000000a1', counterpartyAccountId: 'studio-current' } },
+        ],
+        'test: linked before',
+      );
+      await enrich(store);
+      expect(store.transaction(out!.id)).toMatchObject({ category: 'credit-card-payment', categorisedBy: 'transfer' });
+      expect(store.transaction(out!.id)!.ruleId).toBeUndefined();
+      expect(store.transaction(into!.id)).toMatchObject({ categorisedBy: 'transfer', transferGroup: 'tg_00000000000000a1' });
+      expect((await enrich(store, { dryRun: true, detail: true })).changes).toEqual([]);
+    });
+
+    it('moving an account to a company is undone, and said, when its rows cannot be worked out again', async () => {
+      await store.addTransactions([tx('card', '2026-05-03', -12.5, 'TESCO STORES 3297')], 'test');
+      await enrich(store);
+      const spy = vi.spyOn(store, 'updateTransactions').mockRejectedValueOnce(new Error('disk full'));
+      const res = await send('PATCH', '/api/accounts/card', { companyId: COMPANY, includeInNetWorth: false });
+      spy.mockRestore();
+      expect(res.status).toBe(500);
+      expect(res.body.error).toMatch(/was not moved.*disk full.*It is as it was/);
+      expect(store.account('card')).toMatchObject({ includeInNetWorth: true });
+      expect(store.account('card')!.companyId).toBeUndefined();
+      expect(store.transactions('card')[0]!.category).toBe('groceries');
     });
   });
 });

@@ -166,11 +166,14 @@ export async function enrich(store: Store, opts: { accountIds?: string[]; rows?:
   const crossing = crossingRows(store);
   const seen = (raw: Transaction) => (crossing.has(raw.id) ? withoutLink(raw) : raw);
   const seed = (raw: Transaction): Partial<Transaction> => (crossing.has(raw.id) ? { transferGroup: undefined, counterpartyAccountId: undefined } : {});
-  const note = (raw: Transaction, patch: Partial<Transaction>) => {
+  // The counts are of your rows: a company's rows are worked out too, but never counted as yours.
+  let companyChanged = 0;
+  const note = (raw: Transaction, patch: Partial<Transaction>, company = false) => {
     const all = { ...seed(raw), ...patch };
     if (!Object.keys(all).length) return;
     patches.set(raw.id, all);
-    if ('category' in patch && patch.category !== raw.category) recategorised++;
+    if (company) companyChanged++;
+    else if ('category' in patch && patch.category !== raw.category) recategorised++;
   };
 
   // Your rows.
@@ -217,20 +220,7 @@ export async function enrich(store: Store, opts: { accountIds?: string[]; rows?:
     for (const raw of store.companyTransactions(companyId)) {
       if (!inScope(raw) || skipped(raw)) continue;
       const t = seen(raw);
-      if (t.transferGroup) {
-        const other = t.counterpartyAccountId ? store.account(t.counterpartyAccountId) : undefined;
-        const payee = other ? linkedPayee(t, other, accounts) : undefined;
-        if (payee) {
-          note(raw, { payee });
-          accountPayees.add(t.id);
-        } else note(raw, {});
-        continue;
-      }
-      if (t.categorisedBy === 'user') {
-        note(raw, {});
-        continue;
-      }
-      note(raw, companyRowPatch(raw, t));
+      note(raw, companyRowPatch(raw, t, (id) => store.account(id), accounts), true);
     }
   }
 
@@ -238,9 +228,10 @@ export async function enrich(store: Store, opts: { accountIds?: string[]; rows?:
   // company's), where at least one side already looks like a transfer (or names the other account).
   const view = (raw: Transaction): Transaction => ({ ...seen(raw), ...(patches.get(raw.id) ?? {}) });
   let transfersLinked = 0;
-  const sides: [Transaction[], ReturnType<typeof transferReader>, readonly Account[]][] = [[store.transactions(), transferReader(store, categoriser), store.accounts]];
-  for (const [companyId, accounts] of companies) sides.push([store.companyTransactions(companyId), companyTransferReader(store, accounts), accounts]);
-  for (const [rows, reader, accounts] of sides) {
+  let companyLinked = 0;
+  const sides: [Transaction[], ReturnType<typeof transferReader>, readonly Account[], boolean][] = [[store.transactions(), transferReader(store, categoriser), store.accounts, false]];
+  for (const [companyId, accounts] of companies) sides.push([store.companyTransactions(companyId), companyTransferReader(store, accounts), accounts, true]);
+  for (const [rows, reader, accounts, company] of sides) {
     const viewed = rows.map(view);
     const candidates = viewed.filter((t) => !t.transferGroup && !skipped(t) && inScope(t));
     const byAmount = new Map<number, Transaction[]>();
@@ -253,18 +244,20 @@ export async function enrich(store: Store, opts: { accountIds?: string[]; rows?:
     for (const [t, other, acc] of pairs.legs) {
       const raw = store.transaction(t.id)!;
       const patch = { ...seed(raw), ...(patches.get(t.id) ?? {}), transferGroup: pairs.groupOf.get(t.id)!, counterpartyAccountId: other.id } as Partial<Transaction>;
-      if (t.categorisedBy !== 'user') {
+      if (t.categorisedBy !== 'user' || company) {
         patch.category = transferLegCategory(acc.type, other.type, t.amount);
         patch.categorisedBy = 'transfer';
+        if (company && raw.ruleId !== undefined) patch.ruleId = undefined;
       }
       const payee = linkedPayee(t, other, accounts);
       if (payee) {
         patch.payee = payee;
-        accountPayees.add(t.id);
+        if (!company) accountPayees.add(t.id);
       }
       patches.set(t.id, patch);
     }
-    transfersLinked += pairs.count;
+    if (company) companyLinked += pairs.count;
+    else transfersLinked += pairs.count;
   }
 
   // What changes, against the rows as they are before anything is written.
@@ -284,7 +277,7 @@ export async function enrich(store: Store, opts: { accountIds?: string[]; rows?:
   if (!opts.dryRun && patches.size) {
     await store.updateTransactions(
       [...patches.entries()].map(([id, patch]) => ({ id, patch })),
-      `enrich: ${recategorised} recategorised, ${transfersLinked} transfers linked`,
+      `enrich: ${recategorised} recategorised, ${transfersLinked} transfers linked${companyChanged || companyLinked ? `; company rows: ${companyChanged} worked out, ${companyLinked} transfers linked` : ''}`,
     );
   }
   const named = accountPayees.size ? { accountPayees: [...accountPayees] } : {};
@@ -293,16 +286,32 @@ export async function enrich(store: Store, opts: { accountIds?: string[]; rows?:
 }
 
 /**
- * What enrichment makes of a company's row that is not a transfer between its accounts and that you
- * did not categorise: its tidy address, the payee its source names (or one cut from its
- * description), and nothing else. A category, rule or counterparty it carries (from before its
- * account was a company's) is taken away. `t` is the row as seen (`raw` without a link across the
- * line); the patch is against `raw`, as stored.
+ * What enrichment makes of a company's row (docs/INGESTION.md, "Company accounts"). `t` is the row as
+ * seen (`raw` without a link across the line); the patch is against `raw`, as stored.
+ * - A leg of a transfer between two of its company's accounts: the transfer category for its leg
+ *   (`transferLegCategory`, by `transfer`), and the other account's name as its payee where the
+ *   payee named a third account of the company.
+ * - Any other row: its tidy address, the payee its source names (or one cut from its description),
+ *   and no category at all. A category, rule or counterparty it carries is taken away, whoever set
+ *   it: a category is one of yours, so on a company's row it is in the wrong place (from before its
+ *   account was a company's, or set by hand). Company coding is separate, and comes later.
+ * A payee you set stays.
  */
-export function companyRowPatch(raw: Transaction, t: Transaction = raw): Partial<Transaction> {
+export function companyRowPatch(raw: Transaction, t: Transaction, accountOf: (id: string) => Account | undefined, accounts: readonly Account[]): Partial<Transaction> {
   const patch: Partial<Transaction> = {};
   const place = tidyPlace(t.merchant);
   if (place !== raw.place) patch.place = place;
+  const self = accountOf(t.accountId);
+  const other = t.transferGroup && t.counterpartyAccountId ? accountOf(t.counterpartyAccountId) : undefined;
+  if (t.transferGroup && self && other) {
+    const category = transferLegCategory(self.type, other.type, t.amount);
+    if (raw.category !== category) patch.category = category;
+    if (raw.categorisedBy !== 'transfer') patch.categorisedBy = 'transfer';
+    if (raw.ruleId !== undefined) patch.ruleId = undefined;
+    const payee = linkedPayee(t, other, accounts);
+    if (payee) patch.payee = payee;
+    return patch;
+  }
   const input = categoriseInputOf(t);
   const payee = nextPayee(t, input, { payee: fallbackPayeeOf(input) });
   if (payee !== raw.payee) patch.payee = payee;
@@ -350,6 +359,8 @@ export async function reapply(store: Store, choices: ReapplyChoices = {}): Promi
     known(d.category);
     const t = store.transaction(d.id);
     if (!t) throw new StoreError(`Unknown transaction ${d.id}`, 404);
+    // Your categories are for your rows: a company's row takes none.
+    if (store.account(t.accountId)?.companyId) throw new StoreError(`${formatMoney(t.amount)} on ${formatDate(t.date)} is on a company's own account: it takes no category of yours.`);
     if (t.transferGroup && cats.kindOf(d.category) !== 'transfer') {
       throw new StoreError(`${formatMoney(t.amount)} on ${formatDate(t.date)} is linked as a transfer between your accounts: unlink it on the Transactions page before putting it in ${cats.name(d.category)}.`);
     }
@@ -601,7 +612,8 @@ export async function linkTransfers(store: Store, ids: string[], message: string
         patch: {
           transferGroup: pairs.groupOf.get(t.id)!,
           counterpartyAccountId: other.id,
-          ...(t.categorisedBy !== 'user' ? { category: transferLegCategory(acc.type, other.type, t.amount), categorisedBy: 'transfer' as const } : {}),
+          // A category you set stays on your rows; a company's row takes none of yours (companyRowPatch).
+          ...(t.categorisedBy !== 'user' || side ? { category: transferLegCategory(acc.type, other.type, t.amount), categorisedBy: 'transfer' as const, ruleId: undefined } : {}),
           ...(payee ? { payee } : {}),
         },
       });

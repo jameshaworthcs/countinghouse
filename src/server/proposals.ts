@@ -29,7 +29,7 @@ import { AccountSchema, AgreementSchema, BalanceSnapshotSchema, CompanySchema, E
 import { paidToText } from './analytics/agreements';
 import { BalanceEngine, type BalanceSource } from './analytics/balances';
 import { decisionProblem, earmarkFigures, setupProblem, withSetup } from './analytics/earmarks';
-import { EFFECT_WORDS } from '../shared/earmarks';
+import { earmarkAccountIds, EFFECT_WORDS } from '../shared/earmarks';
 import { taxReturn } from './analytics/taxreturn';
 import { runAs } from './audit';
 import { categoriseInputOf, categoriserFor, ruleCatches } from './categoriser';
@@ -140,7 +140,8 @@ export function companyRecordIn(store: Store, c: ProposedChange): string | undef
     ...(c.kind === 'link_accounts' ? [c.continues] : []),
     ...(c.kind === 'move_balance' ? [c.to, ...(store.balance(c.balance) ? [store.balance(c.balance)!.accountId] : [])] : []),
     ...(c.kind === 'add_agreement' && c.agreement.accountId ? [c.agreement.accountId] : []),
-    ...(c.kind === 'set_earmarks' ? [...c.setup.everyday, ...c.setup.setAside] : []),
+    // The same list the store refuses on writing set aside, so a proposal never half-applies.
+    ...(c.kind === 'set_earmarks' ? earmarkAccountIds(c.setup) : []),
   ];
   const theirs = accounts.map((id) => store.account(id)).find((a) => a?.companyId);
   if (!theirs) return undefined;
@@ -235,7 +236,8 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
   const groups = new Map<string, string[]>();
   for (const t of store.transactions()) if (t.transferGroup) (groups.get(t.transferGroup) ?? groups.set(t.transferGroup, []).get(t.transferGroup)!).push(t.id);
   const row = (id: string): Transaction | undefined => (rows.has(id) ? (rows.get(id) ?? undefined) : store.transaction(id));
-  const account = (id: string): Account | undefined => out.accounts.get(id) ?? store.account(id);
+  // Your accounts only (a company's is never one a proposal works on; `companyRecordIn` says why).
+  const account = (id: string): Account | undefined => out.accounts.get(id) ?? store.accounts.find((a) => a.id === id);
   const patch = (t: Transaction, p: Partial<Transaction>) => {
     if (!out.touchedRows.has(t.id)) out.touchedRows.set(t.id, store.transaction(t.id)!);
     out.patches.set(t.id, { ...(out.patches.get(t.id) ?? {}), ...p });

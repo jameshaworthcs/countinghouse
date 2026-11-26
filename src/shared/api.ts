@@ -87,6 +87,10 @@ export interface AccountSummary {
 export interface CompanyAccountsGroup {
   company: { id: string; name: string; known: boolean };
   accounts: AccountSummary[];
+  /** The same accounts as stored (dates, type, provider), for the forms and the import review. */
+  records: Account[];
+  /** The providers its accounts are at (one only a company's accounts are at is not among yours). */
+  providers: Institution[];
 }
 
 /** A live feed's reading standing for an account's value today, beside the recorded one. */
