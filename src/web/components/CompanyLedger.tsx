@@ -232,7 +232,7 @@ function RowsCard({ view, companyId }: { view: CompanyCodingResponse; companyId:
           <EmptyState title="No rows in these dates">Its accounts’ rows, and your rows marked as paid for it, are listed here.</EmptyState>
         </div>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="relative overflow-x-auto">
           <table className={tableClasses.table}>
             <thead>
               <tr>
@@ -240,7 +240,7 @@ function RowsCard({ view, companyId }: { view: CompanyCodingResponse; companyId:
                 <th className={tableClasses.th}>Payment</th>
                 <th className={cn(tableClasses.th, 'hidden md:table-cell')}>Coded as</th>
                 <th className={cn(tableClasses.th, tableClasses.num)}>Amount</th>
-                <th className={tableClasses.th}>
+                <th className={cn(tableClasses.th, 'hidden sm:table-cell')}>
                   <span className="sr-only">Code</span>
                 </th>
               </tr>
@@ -255,6 +255,14 @@ function RowsCard({ view, companyId }: { view: CompanyCodingResponse; companyId:
                     <div className="mt-1 text-[12px] md:hidden">
                       <CodedAs r={r} />
                     </div>
+                    {/* On a phone its button sits under it. */}
+                    {!r.linked && (
+                      <div className="mt-1.5 sm:hidden">
+                        <Button size="sm" onClick={() => setEditing(r)}>
+                          {r.books ? 'Change' : 'Code'}
+                        </Button>
+                      </div>
+                    )}
                   </td>
                   <td className={cn(tableClasses.td, 'hidden md:table-cell')}>
                     <CodedAs r={r} />
@@ -262,7 +270,7 @@ function RowsCard({ view, companyId }: { view: CompanyCodingResponse; companyId:
                   <td className={cn(tableClasses.td, tableClasses.num)}>
                     <Money value={r.amount} className="sensitive" />
                   </td>
-                  <td className={cn(tableClasses.td, 'text-right')}>
+                  <td className={cn(tableClasses.td, 'hidden text-right sm:table-cell')}>
                     {!r.linked && (
                       <Button size="sm" onClick={() => setEditing(r)}>
                         {r.books ? 'Change' : 'Code'}
@@ -555,7 +563,7 @@ function BookRulesCard({ view, companyId }: { view: CompanyCodingResponse; compa
             ))}
           </ul>
         )}
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-[1fr_10rem_1fr_10rem_7rem_auto] lg:items-end">
+        <div className="grid gap-2 sm:grid-cols-2">
           <Field label="When the description holds">
             <Input value={words} onChange={(e) => setWords(e.target.value)} placeholder="EXAMPLE HOSTING" />
           </Field>
@@ -582,9 +590,11 @@ function BookRulesCard({ view, companyId }: { view: CompanyCodingResponse; compa
           <Field label="Covers months">
             <NumberInput value={months} onValue={setMonths} className="tabular" />
           </Field>
-          <Button icon={<Plus className="size-3.5" />} disabled={!words.trim() || !ledger} loading={add.isPending} onClick={() => add.mutate(undefined)}>
-            Make the rule
-          </Button>
+          <div className="sm:col-span-2">
+            <Button icon={<Plus className="size-3.5" />} disabled={!words.trim() || !ledger} loading={add.isPending} onClick={() => add.mutate(undefined)}>
+              Make the rule
+            </Button>
+          </div>
         </div>
       </div>
     </Card>
@@ -598,6 +608,7 @@ const CHECK_TITLES: Record<LedgerCheck['kind'], string> = {
   'coding-invalid': 'Coded where it does not fit',
   'bank-not-imported': 'A loan of yours with no company row: posted against the company’s bank not imported',
   'transfer-unmatched': 'One leg of a transfer between its accounts, the other not there',
+  'foreign-currency': 'In another currency: the books are kept in pounds, so it is not posted',
   'possible-double-count': 'Maybe the same money twice: a loan of yours and a company row on the loan, not linked',
   'link-invalid': 'A link that does not fit',
   'journal-invalid': 'A journal that does not fit',
@@ -611,9 +622,10 @@ function checkLine(c: LedgerCheck): ReactNode {
     case 'coding-invalid':
     case 'bank-not-imported':
     case 'transfer-unmatched':
+    case 'foreign-currency':
       return (
         <>
-          {formatDate(c.date)} · <span className="sensitive">{c.description}</span> · <Money value={c.amount} className="sensitive" />
+          {formatDate(c.date)} · <span className="sensitive">{c.description}</span> · <Money value={c.amount} currency={c.kind === 'foreign-currency' ? c.currency : 'GBP'} className="sensitive" />
           {c.kind === 'coding-invalid' && <span className="text-ink-3"> · {c.problem}</span>}
         </>
       );
@@ -678,7 +690,7 @@ function PostingsCard({ ledger }: { ledger: CompanyLedgerResponse }) {
         </div>
       ) : (
         <>
-          <div className="overflow-x-auto">
+          <div className="relative overflow-x-auto">
             <table className={tableClasses.table}>
               <thead>
                 <tr>
@@ -716,7 +728,7 @@ function PostingsCard({ ledger }: { ledger: CompanyLedgerResponse }) {
         </>
       )}
       {ledger.totals.length > 0 && (
-        <div className="overflow-x-auto border-t border-line">
+        <div className="relative overflow-x-auto border-t border-line">
           <table className={tableClasses.table}>
             <caption className="px-3 pt-3 text-left text-[12px] font-medium text-ink-3">By ledger, in these dates</caption>
             <thead>
