@@ -57,6 +57,8 @@ export const INSTITUTION_CATALOG: CatalogInstitution[] = [
   I('tesco-bank', 'Tesco Bank', 'bank', '\\btesco\\s*bank\\b'),
   I('marcus', 'Marcus by Goldman Sachs', 'bank', '\\bmarcus\\b', 'goldman-sachs-intl-bank'),
   I('kroo', 'Kroo', 'bank', '\\bkroo\\b', undefined, true),
+  // A business account; "tide" is an everyday word too.
+  I('tide', 'Tide', 'bank', '\\btide\\b', undefined, true),
   I('atom', 'Atom bank', 'bank', '\\batom\\s*bank\\b'),
   I('zopa', 'Zopa', 'bank', '\\bzopa\\b'),
   I('aldermore', 'Aldermore', 'bank', '\\baldermore\\b'),
@@ -65,6 +67,7 @@ export const INSTITUTION_CATALOG: CatalogInstitution[] = [
   I('shawbrook', 'Shawbrook Bank', 'bank', '\\bshawbrook\\b'),
   I('amex', 'American Express', 'card_issuer', 'american\\s*express|\\bamex\\b'),
   I('capital-one', 'Capital One', 'card_issuer', '\\bcapital\\s*one\\b'),
+  I('capital-on-tap', 'Capital on Tap', 'card_issuer', '\\bcapital\\s*on\\s*tap\\b'),
   // Narrow on purpose: "PAYPAL *SHOP" on a bank statement is a purchase, not a payment to your
   // PayPal Credit account; "AQUA" alone is a restaurant as often as a card. Santander
   // prints the card's direct debit as "AQUA CREDIT CARD".

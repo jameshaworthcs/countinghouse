@@ -1,0 +1,6 @@
+Clearance Date,Authorisation Date,Description,Amount,Original Amount,Original Currency,Merchant Name,Card Ending,Cardholder Name,Card Name,Transaction Type,Category,Has Receipts,Note
+01/10/2026,29/09/2026,PAYMENT RECEIVED - THANK YOU,-250.00,,,,,,,Other,,No,
+25/09/2026,24/09/2026,EXAMPLE CLOUD INC,18.42,21.00, USD,Example Cloud Inc,4321,A Example,Main card,Online,Software,Yes,Monthly servers
+18/09/2026,17/09/2026,EXAMPLE STATIONERS,12.50,12.50,GBP,Example Stationers,4321,A Example,Main card,Contactless,Office supplies,No,
+12/09/2026,10/09/2026,EXAMPLE STATIONERS,-3.00,,,Example Stationers,4321,A Example,Main card,Contactless,Office supplies,No,Returned item
+04/09/2026,03/09/2026,EXAMPLE TRAINS LTD,46.80,46.80,,Example Trains Ltd,4321,A Example,Main card,Online,Travel,Yes,

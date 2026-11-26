@@ -142,6 +142,54 @@ describe('CSV bank formats', () => {
     ]);
   });
 
+  it('Tide: money in and out in two columns, its own row ids, the time from the date, cleared rows only', () => {
+    const { match, result } = parseCsvFixture('tide.csv');
+    expect(match.profile.id).toBe('tide');
+    const [acc] = result.extraction.accounts;
+    expect(acc!.institutionName).toBe('Tide');
+    expect(acc!.accountType).toBe('current');
+    // Newest first in the file, oldest first once read; the pending card payment is left out.
+    expect(acc!.transactions.map((t) => [t.date, t.time, t.amount, t.description, t.type, t.sourceId])).toEqual([
+      ['2026-09-01', '00:01:00', -9.99, 'Monthly plan fee · September', 'Fee', 'tide-txn-0001'],
+      ['2026-09-02', '09:00:00', 500, 'Top up · From savings', 'TopUp', 'tide-txn-0002'],
+      ['2026-09-05', '10:15:00', -24.99, 'Example Hosting Ltd', 'CardPaymentOut', 'tide-txn-0003'],
+      ['2026-09-10', '12:00:00', 1200, 'Example Client Ltd · INV-0042', 'FasterPaymentIn', 'tide-txn-0004'],
+      ['2026-09-15', '08:30:00', -32, 'Example Broadband · EXB-55120', 'DirectDebit', 'tide-txn-0005'],
+      ['2026-09-20', '14:22:05', 4.99, 'Example Hosting Ltd · Refund', 'CardRefund', 'tide-txn-0006'],
+      ['2026-09-22', '07:15:30', 1.2, 'Cashback · September', 'Reward', 'tide-txn-0007'],
+      ['2026-09-26', '09:00:00', 312.45, 'Example Payments Ltd settlement · Batch 4471', 'AcquirerSettlement', 'tide-txn-0008'],
+      ['2026-09-29', '16:02:11', -250, 'Capital on Tap · Card repayment', 'FasterPaymentOut', 'tide-txn-0010'],
+    ]);
+    expect(result.skipped).toBe(1);
+    const fee = acc!.transactions[0]!;
+    expect(fee).toMatchObject({ reference: 'September', bankCategory: 'Bank fees' });
+    // The row as the file gave it, From and To and who started it included.
+    expect(fee.raw).toMatchObject({ From: 'Example Studio Ltd', To: 'Tide', Status: 'Cleared' });
+  });
+
+  it('Capital on Tap: purchases positive and repayments negative in the file, the other way round once read; the clearance date is the date', () => {
+    const { match, result } = parseCsvFixture('capital-on-tap.csv');
+    expect(match.profile.id).toBe('capital-on-tap');
+    const [acc] = result.extraction.accounts;
+    expect(acc!.institutionName).toBe('Capital on Tap');
+    expect(acc!.accountType).toBe('credit_card');
+    // The card's last 4 digits, and never more.
+    expect(acc!.last4).toBe('4321');
+    expect(acc!.transactions.map((t) => [t.date, t.transactionDate, t.amount, t.description, t.payee, t.type])).toEqual([
+      ['2026-09-04', '2026-09-03', -46.8, 'EXAMPLE TRAINS LTD', 'Example Trains Ltd', 'Online'],
+      ['2026-09-12', '2026-09-10', 3, 'EXAMPLE STATIONERS', 'Example Stationers', 'Contactless'],
+      ['2026-09-18', '2026-09-17', -12.5, 'EXAMPLE STATIONERS', 'Example Stationers', 'Contactless'],
+      ['2026-09-25', '2026-09-24', -18.42, 'EXAMPLE CLOUD INC', 'Example Cloud Inc', 'Online'],
+      ['2026-10-01', '2026-09-29', 250, 'PAYMENT RECEIVED - THANK YOU', null, 'Other'],
+    ]);
+    // A payment in another currency keeps what it was there ("USD", padded with a space in the file);
+    // one in pounds, or with the currency left blank, has none.
+    const cloud = acc!.transactions[3]!;
+    expect([cloud.originalAmount, cloud.originalCurrency]).toEqual([21, 'USD']);
+    expect(acc!.transactions.filter((t) => t.originalCurrency !== null)).toHaveLength(1);
+    expect(cloud.bankCategory).toBe('Software');
+  });
+
   it('Revolut: completed only, fee applied, split by product and currency', () => {
     const { result } = parseCsvFixture('revolut.csv');
     const accounts = result.extraction.accounts;

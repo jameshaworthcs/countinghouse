@@ -136,6 +136,29 @@ export const BUILTIN_CSV_PROFILES: CsvProfile[] = [
       accountNumber: 'Account Number',
     },
   }),
+  // Tide's business account export: money in and out in two columns of positive amounts, a date and
+  // time in one column, its own id for each row. Only cleared rows are money that moved: any other
+  // status (pending, declined) is left out, and counted among the rows skipped.
+  P({
+    id: 'tide',
+    name: 'Tide',
+    institutionId: 'tide',
+    accountType: 'current',
+    dateOrder: 'YMD',
+    headerSignature: ['date', 'transaction id', 'transaction description', 'reference', 'paid in', 'paid out', 'transaction type', 'status'],
+    columns: {
+      id: 'Transaction ID',
+      date: 'Date',
+      time: 'Date',
+      description: ['Transaction description', 'Reference'],
+      reference: 'Reference',
+      type: 'Transaction type',
+      category: 'Category name',
+      credit: 'Paid in',
+      debit: 'Paid out',
+    },
+    filter: { column: 'Status', values: ['Cleared'] },
+  }),
   P({
     id: 'nationwide-current',
     name: 'Nationwide (current account)',
@@ -222,6 +245,29 @@ export const BUILTIN_CSV_PROFILES: CsvProfile[] = [
     amountSign: 'inverted',
     negativeWhen: { column: 'Debit/Credit Flag', values: ['Debit'] },
     positiveWhen: { column: 'Debit/Credit Flag', values: ['Credit'] },
+  }),
+  // Capital on Tap's card export: purchases positive, repayments negative. The day it cleared is the
+  // date, as for the other cards (Tesco Bank's posting date); the day it was authorised is kept beside
+  // it. "Card Ending" is the card's last 4 digits; the cardholder's name stays only in the row as read.
+  P({
+    id: 'capital-on-tap',
+    name: 'Capital on Tap',
+    institutionId: 'capital-on-tap',
+    accountType: 'credit_card',
+    amountSign: 'inverted',
+    headerSignature: ['clearance date', 'authorisation date', 'description', 'amount', 'original amount', 'original currency', 'merchant name', 'card ending', 'transaction type'],
+    columns: {
+      date: 'Clearance Date',
+      transactionDate: 'Authorisation Date',
+      description: ['Description'],
+      payee: 'Merchant Name',
+      amount: 'Amount',
+      localAmount: 'Original Amount',
+      localCurrency: 'Original Currency',
+      type: 'Transaction Type',
+      category: 'Category',
+      accountNumber: 'Card Ending',
+    },
   }),
   P({
     id: 'paypal-credit',
