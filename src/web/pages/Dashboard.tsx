@@ -1,9 +1,9 @@
 import { LiveAt } from '../components/LiveFeed';
-import { ArrowRight, CircleAlert, Info, ListChecks, TriangleAlert, Upload } from 'lucide-react';
+import { ListChecks, TriangleAlert, Upload } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { WRAPPER_GROUP_LABELS, WRAPPER_GROUPS } from '../../shared/accounts';
-import type { AccountSummary, AllowancesResponse, EstateSeriesResponse, MonthlyChecklistResponse, SummaryResponse, TransactionsResponse } from '../../shared/api';
+import type { AccountSummary, Alert, AllowancesResponse, EstateSeriesResponse, MonthlyChecklistResponse, SummaryResponse, TransactionsResponse } from '../../shared/api';
 import { addMonths, formatDate, today } from '../../shared/dates';
 import { Meter, Sparkline } from '../components/charts/bars';
 import { ChartFrame, type LegendItem } from '../components/charts/common';
@@ -14,6 +14,7 @@ import { GoalsPanel } from '../components/Goals';
 import { EarmarksPanel } from '../components/Earmarks';
 import { InsightsPanel } from '../components/Intel';
 import { MonthReviewCard } from '../components/MonthReview';
+import { AlertList } from '../components/Alerts';
 import { DropZone } from '../components/Upload';
 import { qs, useApi } from '../lib/api';
 import { useAppData } from '../lib/data';
@@ -301,11 +302,11 @@ function OwedLine({ owed }: { owed: NonNullable<SummaryResponse['owed']> }) {
   );
 }
 
-const ALERT_ICON = { info: Info, warning: TriangleAlert, critical: CircleAlert };
-
 export default function Dashboard() {
   const q = useApi<SummaryResponse>(['summary'], '/summary');
   const recent = useApi<TransactionsResponse>(['transactions', 'recent'], `/transactions${qs({ limit: 8, transfers: 'exclude' })}`);
+  // A company's deadlines due soon or overdue, with the same thresholds as Self Assessment's.
+  const companyAlerts = useApi<{ alerts: Alert[] }>(['company-alerts'], '/company-alerts');
   const { data } = useAppData();
   const s = q.data;
   const groups = useMemo(() => (s ? [...s.groups].sort((a, b) => WRAPPER_GROUPS.indexOf(a.id) - WRAPPER_GROUPS.indexOf(b.id)) : []), [s]);
@@ -320,27 +321,8 @@ export default function Dashboard() {
         <Onboarding />
       ) : (
         <div className="flex flex-col gap-5">
-          {s.alerts.length > 0 && (
-            <ul className="flex flex-col gap-2">
-              {s.alerts.map((a) => {
-                const Icon = ALERT_ICON[a.level];
-                return (
-                  <li key={a.id} className={cn('flex items-center gap-3 rounded-lg border px-3.5 py-2.5 text-[13px]', a.level === 'critical' ? 'border-transparent bg-bad-soft' : a.level === 'warning' ? 'border-transparent bg-warn-soft' : 'border-line bg-panel')}>
-                    <Icon className={cn('size-4 shrink-0', a.level === 'critical' ? 'text-bad-ink' : a.level === 'warning' ? 'text-warn-ink' : 'text-accent')} />
-                    <div className="min-w-0 flex-1">
-                      <span className="font-medium text-ink">{a.title}</span>
-                      {a.detail && <span className="ml-2 text-ink-3">{a.detail}</span>}
-                    </div>
-                    {a.action && (
-                      <Link to={a.action.href} className="inline-flex shrink-0 items-center gap-1 font-medium text-accent hover:underline">
-                        {a.action.label} <ArrowRight className="size-3.5" />
-                      </Link>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
+          {/* Yours, then a company's deadlines from its own route (never among yours: DECISIONS 2026-11-26). */}
+          <AlertList alerts={[...s.alerts, ...(companyAlerts.data?.alerts ?? [])]} />
 
           <section className="grid gap-5 xl:grid-cols-[minmax(260px,320px)_1fr]">
             <div className="flex flex-col justify-center rounded-xl border border-line bg-panel px-6 py-5 shadow-card">

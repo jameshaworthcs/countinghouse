@@ -1,7 +1,7 @@
-import { ArrowLeftRight, ChartPie, Eye, EyeOff, HandCoins, Landmark, LayoutDashboard, Library, LogOut, Menu, MessageCircleQuestion, Monitor, Moon, ScrollText, Settings, Sun, Telescope, TrendingUp, Upload, Wallet, X } from 'lucide-react';
+import { ArrowLeftRight, Building2, ChartPie, Eye, EyeOff, HandCoins, Landmark, LayoutDashboard, Library, LogOut, Menu, MessageCircleQuestion, Monitor, Moon, ScrollText, Settings, Sun, Telescope, TrendingUp, Upload, Wallet, X } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router';
-import type { ImportListResponse } from '../../shared/api';
+import type { CompanyBooksListItem, ImportListResponse } from '../../shared/api';
 import { api, useApi } from '../lib/api';
 import { useAppData, useLiveUpdates } from '../lib/data';
 import { useFeedWatch } from './LiveFeed';
@@ -17,6 +17,8 @@ const NAV: { to: string; label: string; icon: ReactNode; end?: boolean }[] = [
   { to: '/accounts', label: 'Accounts', icon: <Wallet className="size-[18px]" /> },
   /** Only when something is set aside (earmarks.json). */
   { to: '/earmarks', label: 'Set aside', icon: <HandCoins className="size-[18px]" /> },
+  /** Only when a company's books are kept here: "Company", or its name when there is one (the company's own routes). */
+  { to: '/company', label: 'Company', icon: <Building2 className="size-[18px]" /> },
   { to: '/transactions', label: 'Transactions', icon: <ArrowLeftRight className="size-[18px]" /> },
   { to: '/spending', label: 'Spending', icon: <ChartPie className="size-[18px]" /> },
   { to: '/projections', label: 'Projections', icon: <Telescope className="size-[18px]" /> },
@@ -52,11 +54,17 @@ function PrivacyButton() {
 function NavList({ reviewCount, running, onNavigate }: { reviewCount: number; running: number; onNavigate?: () => void }) {
   const { pathname } = useLocation();
   const { data } = useAppData();
+  // Companies whose books are kept here, from their own route: never part of your bootstrap.
+  const books = useApi<CompanyBooksListItem[]>(['company-books'], '/company-books');
+  const kept = books.data ?? [];
+  const items = NAV.filter((n) => (n.to !== '/earmarks' || data.earmarks.length > 0) && (n.to !== '/company' || kept.length > 0)).map((n) =>
+    n.to === '/company' ? { ...n, to: `/company/${kept[0]!.id}`, label: kept.length === 1 ? kept[0]!.name : 'Company', match: '/company/' } : { ...n, match: n.to },
+  );
   return (
     <nav aria-label="Main" className="flex flex-col gap-0.5">
-      {NAV.filter((n) => n.to !== '/earmarks' || data.earmarks.length > 0).map((n) => (
+      {items.map((n) => (
         <NavLink
-          key={n.to}
+          key={n.match}
           to={n.to}
           end={n.end ?? false}
           onClick={(e) => {
@@ -68,11 +76,16 @@ function NavList({ reviewCount, running, onNavigate }: { reviewCount: number; ru
             onNavigate?.();
           }}
           className={({ isActive }) =>
-            cn('flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13.5px] font-medium transition-colors', isActive ? 'bg-panel text-ink shadow-sm ring-1 ring-line' : 'text-ink-2 hover:bg-panel-2 hover:text-ink')
+            cn('flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13.5px] font-medium transition-colors', isActive || (n.match === '/company/' && pathname.startsWith('/company/')) ? 'bg-panel text-ink shadow-sm ring-1 ring-line' : 'text-ink-2 hover:bg-panel-2 hover:text-ink')
           }
         >
           <span className="text-ink-3">{n.icon}</span>
-          <span className="flex-1">{n.label}</span>
+          <span className="min-w-0 flex-1 truncate">{n.label}</span>
+          {n.match === '/company/' && kept.some((c) => c.overdue > 0) && (
+            <span className="rounded-full bg-bad-soft px-1.5 text-[11px] leading-5 font-semibold text-bad-ink" title="Company deadlines overdue">
+              {kept.reduce((x, c) => x + c.overdue, 0)}
+            </span>
+          )}
           {n.to === '/import' && reviewCount > 0 && <span className="rounded-full bg-accent px-1.5 text-[11px] leading-5 font-semibold text-white">{reviewCount}</span>}
           {n.to === '/sessions' && running > 0 && (
             <span className="flex items-center gap-1 text-[11.5px] text-ink-3" title={`${running} agent session${running === 1 ? '' : 's'} running`}>

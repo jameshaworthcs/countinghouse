@@ -3,7 +3,8 @@ import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { ACCOUNT_TYPE_META, balanceModeOf } from '../../shared/accounts';
 import { formatMonth, today } from '../../shared/dates';
-import type { AccountDetailResponse, CompanyView, CoverageResponse, DirectorLoanView, PensionArrangementsResponse, TransactionsResponse } from '../../shared/api';
+import type { AccountDetailResponse, CompanyBooksListItem, CompanyView, CoverageResponse, DirectorLoanView, PensionArrangementsResponse, TransactionsResponse } from '../../shared/api';
+import { KeepBooks } from '../components/KeepBooks';
 import { DIRECTOR_LOAN_KIND_LABELS } from '../../shared/company';
 import { AccountDialog, BalanceDialog } from '../components/AccountForms';
 import { ChartFrame } from '../components/charts/common';
@@ -215,9 +216,13 @@ function MovementsTable({ view }: { view: DirectorLoanView }) {
 /** The company whose shares this account holds: the holding, how it is valued, and its dividends. */
 function CompanyCard({ accountId }: { accountId: string }) {
   const q = useApi<CompanyView[]>(['companies'], '/companies');
+  // Whether its books are kept here: from the company's own route, never from this personal view.
+  const books = useApi<CompanyBooksListItem[]>(['company-books'], '/company-books');
+  const [keeping, setKeeping] = useState(false);
   const v = q.data?.find((x) => x.company.accountId === accountId);
   if (!v) return null;
   const c = v.company;
+  const kept = books.data?.find((b) => b.id === c.id);
   return (
     <Card className="mb-5" title={c.name} description={[c.number ? `Company ${c.number}` : '', 'shares you hold'].filter(Boolean).join(' · ')}>
       <div className="flex flex-col gap-1.5 text-[13px] text-ink-2">
@@ -245,6 +250,27 @@ function CompanyCard({ accountId }: { accountId: string }) {
           </div>
         )}
         <DirectorLoanLine view={v} />
+        {books.data &&
+          (kept ? (
+            <div>
+              Its books are kept here:{' '}
+              <Link to={`/company/${c.id}`} className="text-accent hover:underline">
+                its deadlines and records
+              </Link>
+              {kept.overdue > 0 ? `, ${kept.overdue} overdue` : kept.dueSoon > 0 ? `, ${kept.dueSoon} due soon` : ''}.
+            </div>
+          ) : keeping ? (
+            <div className="mt-1">
+              <KeepBooks companyId={c.id} companyName={c.name} />
+            </div>
+          ) : (
+            <div>
+              <Button size="sm" onClick={() => setKeeping(true)}>
+                Keep its books here
+              </Button>
+              <span className="ml-2 text-ink-3">If you run it: its accounts, confirmation statements, Corporation Tax and VAT deadlines.</span>
+            </div>
+          ))}
         {c.employmentId && (
           <div>
             You also work for it: its pay is on the{' '}
