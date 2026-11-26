@@ -1,9 +1,11 @@
-import { ArrowLeftRight, ExternalLink, FilePlus2, FileText, History, Link2, PencilLine, StickyNote, Tag, Wand2 } from 'lucide-react';
+import { ArrowLeftRight, Building2, ExternalLink, FilePlus2, FileText, History, Link2, PencilLine, StickyNote, Tag, Wand2 } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
+import type { CompanyView } from '../../shared/api';
+import { COMPANY_MARK_LABELS, movesDirectorLoan } from '../../shared/company';
 import { describeDifference, fieldsInWords } from '../../shared/detail';
 import { parseAmount } from '../../shared/money';
-import type { Rule, Transaction } from '../../shared/schema';
+import { COMPANY_MARKS, type CompanyMarkKind, type Rule, type Transaction } from '../../shared/schema';
 import { api, useApi, useApiMutation } from '../lib/api';
 import { useAppData } from '../lib/data';
 import { cn, formatDate, money } from '../lib/format';
@@ -74,12 +76,51 @@ export function moneyBackHint(cats: ReturnType<typeof useAppData>['cats'], amoun
 }
 
 export function categoryBadge(t: Transaction, name: string): ReactNode {
+  // Paid for your company, or lent to it or repaid by it: not your spending or income, whatever its category.
+  if (movesDirectorLoan(t)) return <Badge tone="accent" icon={<Building2 className="size-3" />}>{COMPANY_MARK_LABELS[t.company!.as]}</Badge>;
   if (t.splits?.length && !t.transferGroup) return <Badge tone="neutral">Split: {t.splits.length} categories</Badge>;
   if (!t.category) return <Badge tone="warn">Uncategorised</Badge>;
   return (
     <Badge tone={t.transferGroup ? 'accent' : 'neutral'} icon={t.transferGroup ? <ArrowLeftRight className="size-3" /> : undefined}>
       {name}
     </Badge>
+  );
+}
+
+/** The companies you hold shares in (companies.json): what a payment of yours can be marked as money with. */
+export function useCompanies() {
+  return useApi<CompanyView[]>(['companies'], '/companies');
+}
+
+/** A mark's value in a select: `<company>|<as>`, or '' for none. */
+export const markValue = (m: { id: string; as: CompanyMarkKind } | undefined | null) => (m ? `${m.id}|${m.as}` : '');
+export const parseMark = (v: string): { id: string; as: CompanyMarkKind } | null => {
+  const [id, as] = v.split('|');
+  return id && as && (COMPANY_MARKS as readonly string[]).includes(as) ? { id, as: as as CompanyMarkKind } : null;
+};
+
+/** What it says, beside the choice: paid for and loans are not spending or income; pay and dividends are. */
+export const COMPANY_MARK_HINT = 'Paid for the company, or lent to it or paid back by it: not your spending or income, it moves your director’s loan. Pay and dividends stay your income.';
+
+/**
+ * Choose what a payment was to a company of yours. Pay and dividends are offered only for money in
+ * (`amount` > 0); `amount` undefined offers every one (several payments at once).
+ */
+export function CompanyMarkSelect({ value, onChange, amount, companies, id, placeholder = 'Not with a company of yours', ariaLabel, only }: { value: string; onChange: (v: string) => void; amount: number | undefined; companies: CompanyView[]; id?: string; placeholder?: string; ariaLabel?: string; only?: readonly CompanyMarkKind[] }) {
+  const kinds = COMPANY_MARKS.filter((k) => (amount === undefined || amount > 0 || (k !== 'pay' && k !== 'dividend')) && (!only || only.includes(k)));
+  return (
+    <Select id={id} value={value} onChange={(e) => onChange(e.target.value)} aria-label={ariaLabel}>
+      <option value="">{placeholder}</option>
+      {companies.map((c) => (
+        <optgroup key={c.company.id} label={c.company.name}>
+          {kinds.map((k) => (
+            <option key={k} value={markValue({ id: c.company.id, as: k })}>
+              {COMPANY_MARK_LABELS[k]}
+            </option>
+          ))}
+        </optgroup>
+      ))}
+    </Select>
   );
 }
 
@@ -201,7 +242,7 @@ export function TransactionList({ items, compact = false, showAccount = true }: 
                 <div className="truncate text-[13.5px] font-medium text-ink">{t.payee ?? t.description}</div>
                 <div className="truncate text-[12px] text-ink-3">
                   {showAccount && <span>{accountName(t.accountId)} · </span>}
-                  {cats.name(t.category)}
+                  {movesDirectorLoan(t) ? COMPANY_MARK_LABELS[t.company!.as] : cats.name(t.category)}
                   {t.notes && <StickyNote className="ml-1 inline size-3" aria-label="Has notes" />}
                 </div>
               </div>
@@ -262,8 +303,12 @@ function RuleFromTransaction({ tx, category, onDone }: { tx: Transaction; catego
 export function TransactionDrawer({ tx, onClose }: { tx: Transaction; onClose: () => void }) {
   const { cats, accountName, accountsById } = useAppData();
   const toast = useToast();
+  const companies = useCompanies();
   const [payee, setPayee] = useState(tx.payee ?? '');
   const [category, setCategory] = useState(tx.category);
+  const [mark, setMark] = useState(markValue(tx.company));
+  const chosen = parseMark(mark);
+  const movesLoan = chosen?.as === 'paid-for' || chosen?.as === 'loan';
   const [notes, setNotes] = useState(tx.notes ?? '');
   const [tags, setTags] = useState((tx.tags ?? []).join(', '));
   const [showRule, setShowRule] = useState(false);
@@ -276,6 +321,8 @@ export function TransactionDrawer({ tx, onClose }: { tx: Transaction; onClose: (
           // Only a changed payee is sent: sending it marks it as yours, and enrichment then leaves it alone.
           ...(payee.trim() !== (tx.payee ?? '') ? { payee: payee.trim() || null } : {}),
           ...(category !== tx.category ? { category: category ?? null } : {}),
+          // Only a changed mark is sent: it becomes yours.
+          ...(mark !== markValue(tx.company) ? { company: parseMark(mark) } : {}),
           notes: notes.trim() || null,
           tags: tags
             .split(',')
@@ -328,9 +375,15 @@ export function TransactionDrawer({ tx, onClose }: { tx: Transaction; onClose: (
           <Field label="Payee" hint={tx.payeeSetBy === 'user' ? 'Set by you: rules and re-running enrichment leave it alone.' : undefined}>
             <Input value={payee} onChange={(e) => setPayee(e.target.value)} />
           </Field>
-          <Field label="Category" hint={moneyBackHint(cats, tx.amount, category)}>
+          <Field label="Category" hint={movesLoan ? 'Kept for the company’s books later; while it is marked as money with your company it counts in none of your spending or income.' : moneyBackHint(cats, tx.amount, category)}>
             <CategorySelect value={category} onChange={setCategory} direction={tx.amount > 0 ? 'in' : 'out'} />
           </Field>
+          {/* Your own rows only (a company's own account's rows are its own), and never a transfer between your accounts. */}
+          {accountsById.has(tx.accountId) && (companies.data?.length || tx.company) ? (
+            <Field label="Your company" hint={tx.transferGroup ? 'Linked as a transfer between your accounts: unlink it before marking it as money with your company.' : tx.company?.setBy === 'agent' ? `${COMPANY_MARK_HINT} Marked by a proposal you applied; saving a change makes it yours.` : COMPANY_MARK_HINT}>
+              <CompanyMarkSelect value={mark} onChange={setMark} amount={tx.amount} companies={companies.data ?? []} ariaLabel="Your company" />
+            </Field>
+          ) : null}
           <Field label="Notes" hint={NOTES_HINT}>
             <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} placeholder="e.g. Dinner with Sam; they paid me back half" />
           </Field>

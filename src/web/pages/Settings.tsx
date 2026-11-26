@@ -1158,7 +1158,7 @@ function Health() {
   if (!h) return <Loading />;
   const clean =
     !h.remotes &&
-    !h.issues.length && !h.gaps.length && !h.noBalance.length && !h.stale.length && !h.coverageGaps?.some((g) => g.evidence.status === 'unexplained') && !h.handovers?.some((x) => x.status === 'unexplained') && !h.closedHolding?.length;
+    !h.issues.length && !h.gaps.length && !h.noBalance.length && !h.stale.length && !h.coverageGaps?.some((g) => g.evidence.status === 'unexplained') && !h.handovers?.some((x) => x.status === 'unexplained') && !h.closedHolding?.length && !h.directorLoans?.length;
   const cov = h.coverage;
   return (
     <div className="flex flex-col gap-5">
@@ -1237,6 +1237,22 @@ function Health() {
                 </Link>
               </li>
             ))}
+          </ul>
+        </Card>
+      )}
+      {(h.directorLoans?.length ?? 0) > 0 && (
+        <Card title="Director’s loans" description="What the rules on loans between you and your company say about yours today. Worked out from the payments you marked and the balances you recorded: check them against the company’s accounts.">
+          <ul className="flex flex-col gap-3 text-[13px]">
+            {h.directorLoans!.map((d) =>
+              d.warnings.map((w) => (
+                <li key={`${d.accountId}-${w.kind}`}>
+                  <Link to={`/accounts/${d.accountId}`} className="font-medium text-accent hover:underline">
+                    {w.title}
+                  </Link>
+                  <div className="text-ink-2">{w.detail}</div>
+                </li>
+              )),
+            )}
           </ul>
         </Card>
       )}

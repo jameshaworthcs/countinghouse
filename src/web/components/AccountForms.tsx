@@ -187,7 +187,9 @@ export function AccountDialog({ open, onOpenChange, account, institutionName }: 
         <Field label="Notes" className="sm:col-span-2">
           <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
         </Field>
-        {(companies.data?.length ?? 0) > 0 || companyId ? (
+        {meta.derived && !companyId ? (
+          <p className="text-[12.5px] text-ink-3 sm:col-span-2">A director’s loan is yours: what a company owes you. Its movements are the payments you mark as paid for or lent to the company; link it from the company (its shares account’s page), or add it there in one step.</p>
+        ) : (companies.data?.length ?? 0) > 0 || companyId ? (
           <Field label="Whose it is" hint={companyId ? 'A company’s own account: its money is the company’s, so it is never in your estate, your spending or any other figure of yours' : 'An account of a company you run (its bank account, its card) belongs to the company'} className="sm:col-span-2">
             <Select
               value={companyId}

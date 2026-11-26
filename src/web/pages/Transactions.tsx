@@ -7,7 +7,7 @@ import { addDays, addMonths, endOfMonth, startOfMonth, today } from '../../share
 import type { Transaction } from '../../shared/schema';
 import { formatSortParam, parseSortParam, type SortDir } from '../../shared/sort';
 import { taxYearOf } from '../../shared/uk';
-import { CategorySelect, NoteDialog, SelectionBar, TAG_LIST_ID, TagOptions, TAGS_HINT, TransactionDrawer } from '../components/TransactionList';
+import { CategorySelect, COMPANY_MARK_HINT, CompanyMarkSelect, NoteDialog, parseMark, SelectionBar, TAG_LIST_ID, TagOptions, TAGS_HINT, TransactionDrawer, useCompanies } from '../components/TransactionList';
 import { Button, Checkbox, EmptyState, ErrorNote, Input, Loading, Money, PageHeader, Select, SortHeader, useDebounced, useToast } from '../components/ui';
 import { api, qs, useApi, useApiMutation } from '../lib/api';
 import { useAppData } from '../lib/data';
@@ -61,6 +61,9 @@ export default function Transactions() {
   const [noteFor, setNoteFor] = useState<Transaction[] | null>(null);
   const [bulkCategory, setBulkCategory] = useState<string | undefined>();
   const [bulkTag, setBulkTag] = useState('');
+  // Mark the selection as money with a company of yours ('none' takes marks away).
+  const companies = useCompanies();
+  const [bulkMark, setBulkMark] = useState('');
   const set = (key: string, value: string | undefined) => {
     const next = new URLSearchParams(params);
     if (value) next.set(key, value);
@@ -292,6 +295,21 @@ export default function Transactions() {
         <Button size="sm" icon={<StickyNote className="size-3.5" />} onClick={() => setNoteFor(selectedItems)}>
           Note
         </Button>
+        {(companies.data?.length ?? 0) > 0 && (
+          <span className="flex items-center gap-1.5" title={COMPANY_MARK_HINT}>
+            <span className="w-52">
+              <CompanyMarkSelect value={bulkMark} onChange={setBulkMark} amount={selectedItems.every((t) => t.amount > 0) ? 1 : -1} companies={companies.data ?? []} placeholder="Your company…" ariaLabel="Mark as money with your company" />
+            </span>
+            <Button size="sm" disabled={!bulkMark} loading={bulk.isPending} onClick={() => bulk.mutate({ ids: [...selected], company: parseMark(bulkMark) })}>
+              Mark
+            </Button>
+            {selectedItems.some((t) => t.company) && (
+              <Button size="sm" variant="ghost" onClick={() => bulk.mutate({ ids: [...selected], company: null })}>
+                Unmark
+              </Button>
+            )}
+          </span>
+        )}
       </SelectionBar>
       <TagOptions />
       {noteFor && <NoteDialog txs={noteFor} onClose={() => setNoteFor(null)} onDone={() => noteFor.length > 1 && clearSelection()} />}

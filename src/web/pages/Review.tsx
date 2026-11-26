@@ -459,7 +459,8 @@ function SectionEditor({ section, index, total, latest, periodFromRows, onChange
             >
               <optgroup label="Your accounts">
                 {data.accounts
-                  .filter((a) => a.status === 'open')
+                  // A director's loan takes no document: its movements are the payments you mark.
+                  .filter((a) => a.status === 'open' && !ACCOUNT_TYPE_META[a.type].derived)
                   .map((a) => (
                     <option key={a.id} value={a.id}>
                       {a.name}
@@ -469,7 +470,7 @@ function SectionEditor({ section, index, total, latest, periodFromRows, onChange
               {data.accounts.some((a) => a.status === 'closed') && (
                 <optgroup label="Closed accounts (for their old statements)">
                   {data.accounts
-                    .filter((a) => a.status === 'closed')
+                    .filter((a) => a.status === 'closed' && !ACCOUNT_TYPE_META[a.type].derived)
                     .map((a) => (
                       <option key={a.id} value={a.id}>
                         {a.name}

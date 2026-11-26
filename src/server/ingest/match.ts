@@ -130,6 +130,8 @@ export function matchAccount(detected: Detected, accounts: Account[], institutio
   // A scrolled screen may name only the provider: being your only open account there is evidence.
   const atProvider = inst ? accounts.filter((a) => a.status !== 'closed' && a.institutionId === inst.id).length : 0;
   for (const a of accounts) {
+    // A director's loan takes no document: its movements are the payments you mark.
+    if (ACCOUNT_TYPE_META[a.type].derived) continue;
     let score = 0;
     const reasons: string[] = [];
     // A closed account still takes its old statements, but an open one wins a tie.

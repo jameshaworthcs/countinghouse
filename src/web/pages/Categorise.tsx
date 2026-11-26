@@ -8,7 +8,7 @@ import { Link } from 'react-router';
 import type { CategoriseQueue, GuessGroup, PayeeGroup, PersonGroup, PersonRow, QueueExample, RuleMove, RuleSuggestion } from '../../shared/api';
 import { addMonths, formatDate, startOfMonth, today } from '../../shared/dates';
 import type { Person, Rule } from '../../shared/schema';
-import { CategorySelect } from '../components/TransactionList';
+import { CategorySelect, CompanyMarkSelect, parseMark, useCompanies } from '../components/TransactionList';
 import { Badge, Button, Callout, Card, Checkbox, EmptyState, Field, Input, Loading, Money, PageHeader, Segmented, Select, Tabs, useToast } from '../components/ui';
 import { api, qs, useApi, useApiMutation } from '../lib/api';
 import { useAppData } from '../lib/data';
@@ -559,6 +559,29 @@ function Examples({ items, more }: { items: QueueExample[]; more: number }) {
   );
 }
 
+/**
+ * Or the payments were money with your company: paid for it, or lent to it or paid back by it. Marked,
+ * they need no category of yours and leave the queue (pay and dividends are income: categorise them).
+ */
+function MarkForCompany({ ids, direction }: { ids: string[]; direction: 'in' | 'out' | undefined }) {
+  const companies = useCompanies();
+  const toast = useToast();
+  const [mark, setMark] = useState('');
+  const save = useApiMutation(() => api<{ updated: number }>('/transactions/bulk', { body: { ids, company: parseMark(mark) } }), { onSuccess: (r) => toast({ tone: 'good', text: `${plural(r.updated, 'payment')} marked as money with your company` }) });
+  if (!companies.data?.length) return null;
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 pl-[1.375rem]">
+      <span className="w-full sm:w-64">
+        <CompanyMarkSelect value={mark} onChange={setMark} amount={direction === 'in' ? 1 : -1} companies={companies.data} only={['paid-for', 'loan']} placeholder="Or: money with your company…" ariaLabel="Money with your company" />
+      </span>
+      <Button size="sm" disabled={!mark} loading={save.isPending} onClick={() => save.mutate(undefined)}>
+        Mark {ids.length}
+      </Button>
+      {save.error && <span className="text-[12px] text-bad-ink">{save.error.message}</span>}
+    </div>
+  );
+}
+
 // ─── What's left, by payee ───────────────────────────────────────────────────────────────────────
 
 function PayeesTab({ groups }: { groups: PayeeGroup[] }) {
@@ -623,6 +646,7 @@ function PayeeRow({ group }: { group: PayeeGroup }) {
           Categorise {group.count}
         </Button>
       </div>
+      <MarkForCompany ids={group.ids} direction={group.direction} />
       {save.error && <div className="mt-2 pl-[1.375rem] text-[12px] text-bad-ink">{save.error.message}</div>}
     </li>
   );
@@ -711,6 +735,7 @@ function GuessRow({ group }: { group: GuessGroup }) {
           {same ? `Right: confirm ${group.count}` : `Categorise ${group.count}`}
         </Button>
       </div>
+      <MarkForCompany ids={group.ids} direction={group.direction} />
       {save.error && <div className="mt-2 pl-[1.375rem] text-[12px] text-bad-ink">{save.error.message}</div>}
     </li>
   );

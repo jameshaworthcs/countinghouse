@@ -3,7 +3,8 @@ import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { ACCOUNT_TYPE_META, balanceModeOf } from '../../shared/accounts';
 import { formatMonth, today } from '../../shared/dates';
-import type { AccountDetailResponse, CompanyView, CoverageResponse, PensionArrangementsResponse, TransactionsResponse } from '../../shared/api';
+import type { AccountDetailResponse, CompanyView, CoverageResponse, DirectorLoanView, PensionArrangementsResponse, TransactionsResponse } from '../../shared/api';
+import { DIRECTOR_LOAN_KIND_LABELS } from '../../shared/company';
 import { AccountDialog, BalanceDialog } from '../components/AccountForms';
 import { ChartFrame } from '../components/charts/common';
 import { TimeChart } from '../components/charts/TimeChart';
@@ -12,7 +13,7 @@ import { LinkedAccounts } from '../components/Handover';
 import { InsightsPanel } from '../components/Intel';
 import { TermsCard } from '../components/Terms';
 import { TransactionList } from '../components/TransactionList';
-import { Badge, Button, Callout, Card, EmptyState, ErrorNote, Loading, Money, PageHeader, SortHeader, Stat, Tabs, tableClasses, useToast } from '../components/ui';
+import { Badge, Button, Callout, Card, EmptyState, ErrorNote, Loading, Money, PageHeader, Select, SortHeader, Stat, Tabs, tableClasses, useToast } from '../components/ui';
 import { FilePickerButton } from '../components/Upload';
 import { api, qs, useApi, useApiMutation } from '../lib/api';
 import { cn, formatDate, money, pct, timeAgo } from '../lib/format';
@@ -71,6 +72,146 @@ function CompanyBadge({ companyId }: { companyId: string }) {
   );
 }
 
+/** Your director's loan with a company: what it owes you, linked to its account; or a way to add one. */
+function DirectorLoanLine({ view }: { view: CompanyView }) {
+  const toast = useToast();
+  const navigate = useNavigate();
+  const add = useApiMutation(() => api<{ account: { id: string } }>(`/companies/${view.company.id}/director-loan`, { body: {} }), {
+    onSuccess: (r) => {
+      toast({ tone: 'good', text: 'Director’s loan account added' });
+      void navigate(`/accounts/${r.account.id}`);
+    },
+  });
+  const d = view.directorLoan;
+  if (d)
+    return (
+      <div className="sensitive">
+        <Link to={`/accounts/${d.accountId}`} className="text-accent hover:underline">
+          Director’s loan
+        </Link>
+        :{' '}
+        {d.balance === null ? (
+          'no balance yet'
+        ) : d.balance >= 0 ? (
+          <>
+            it owes you <Money value={d.balance} />
+          </>
+        ) : (
+          <>
+            you owe it <Money value={-d.balance} />
+          </>
+        )}
+        {d.asOf ? <span className="text-ink-3"> (as of {formatDate(d.asOf)}{d.estimated ? ', estimated' : ''})</span> : null}.
+      </div>
+    );
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="text-ink-3">No director’s loan account yet: it would hold what the company owes you, from the payments you mark as paid for it or lent to it.</span>
+      <Button size="sm" icon={<Plus className="size-3.5" />} loading={add.isPending} onClick={() => add.mutate(undefined)}>
+        Add the director’s loan account for {view.company.name}
+      </Button>
+      {add.error && <span className="text-[12px] text-bad-ink">{add.error.message}</span>}
+    </div>
+  );
+}
+
+/**
+ * A director's loan account (docs/FORMULAS.md §9, "A director's loan"): whose it is, what it means, and
+ * the warnings when you owe the company. Its movements are listed in their tab below.
+ */
+function DirectorLoanCard({ view, accountId }: { view: DirectorLoanView; accountId: string }) {
+  if (!view.company) return <LinkDirectorLoan accountId={accountId} />;
+  return (
+    <>
+      {view.warnings.map((w) => (
+        <Callout key={w.kind} tone="warn" className="mb-5" title={w.title}>
+          {w.detail}
+        </Callout>
+      ))}
+      <Card className="mb-5" title={`Your director’s loan with ${view.company.name}`} description="What the company owes you; below nothing, what you owe it.">
+        <p className="text-[13px] text-ink-2">
+          It moves with the payments of yours you mark as paid for the company (a cost of its you paid, or its refund to you) or lent to it (or paid back by it): each one, the other way round. Those payments stay in their own accounts and count in none of your spending or income, so nothing is counted twice. Record a balance (the director’s loan figure in the company’s filed accounts) and it is worked out from there, as a statement anchors a bank account.{' '}
+          <Link to="/transactions" className="text-accent hover:underline" title="Open a payment and choose ‘Your company’">
+            Mark a payment
+          </Link>
+          .
+        </p>
+        <p className="mt-1 text-[12px] text-ink-3">
+          {view.movements.length ? `${view.movements.length} movement${view.movements.length === 1 ? '' : 's'}, from ${formatDate(view.movements.at(-1)!.date)}.` : 'No payments marked yet.'}
+        </p>
+      </Card>
+    </>
+  );
+}
+
+/** A director's loan account no company names: link it to one that has none (PUT /api/companies/:id). */
+function LinkDirectorLoan({ accountId }: { accountId: string }) {
+  const toast = useToast();
+  const q = useApi<CompanyView[]>(['companies'], '/companies');
+  const free = (q.data ?? []).filter((c) => !c.directorLoan);
+  const [choice, setChoice] = useState('');
+  const link = useApiMutation(() => api(`/companies/${choice}`, { method: 'PUT', body: { directorLoanAccountId: accountId } }), { onSuccess: () => toast({ tone: 'good', text: 'Linked' }) });
+  return (
+    <Callout tone="warn" className="mb-5" title="No company names this director’s loan account">
+      Its movements are the payments you mark as paid for a company or lent to it, so it moves only once a company names it as your director’s loan.
+      {free.length > 0 ? (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <Select value={choice} onChange={(e) => setChoice(e.target.value)} aria-label="Company" className="w-64">
+            <option value="">Choose the company…</option>
+            {free.map((c) => (
+              <option key={c.company.id} value={c.company.id}>
+                {c.company.name}
+              </option>
+            ))}
+          </Select>
+          <Button size="sm" variant="primary" disabled={!choice} loading={link.isPending} onClick={() => link.mutate(undefined)}>
+            Link
+          </Button>
+          {link.error && <span className="text-[12px] text-bad-ink">{link.error.message}</span>}
+        </div>
+      ) : (
+        ' Every company you hold shares in has one already, or there is none yet.'
+      )}
+    </Callout>
+  );
+}
+
+/** A director's loan's movements, newest first: what each was, the payment it comes from, and its account. */
+function MovementsTable({ view }: { view: DirectorLoanView }) {
+  if (!view.movements.length) return <EmptyState title="No movements yet">Mark a payment of yours as paid for the company or lent to it: open it on the Transactions page and choose “Your company”.</EmptyState>;
+  return (
+    <div className="overflow-x-auto">
+      <table className={tableClasses.table}>
+        <thead>
+          <tr>
+            <th className={tableClasses.th}>Date</th>
+            <th className={tableClasses.th}>What</th>
+            <th className={tableClasses.th}>Payment</th>
+            <th className={cn(tableClasses.th, tableClasses.num)}>Owed to you</th>
+          </tr>
+        </thead>
+        <tbody>
+          {view.movements.map((m) => (
+            <tr key={m.id}>
+              <td className={tableClasses.td}>{formatDate(m.date)}</td>
+              <td className={tableClasses.td}>{DIRECTOR_LOAN_KIND_LABELS[m.kind]}</td>
+              <td className={tableClasses.td}>
+                <Link to={`/transactions?accounts=${m.accountId}&period=custom&from=${m.date}&to=${m.date}`} className="text-accent hover:underline">
+                  {m.payee ?? m.description}
+                </Link>
+                <div className="text-[12px] text-ink-3">{m.accountName}</div>
+              </td>
+              <td className={cn(tableClasses.td, tableClasses.num)}>
+                <Money value={m.amount} />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 /** The company whose shares this account holds: the holding, how it is valued, and its dividends. */
 function CompanyCard({ accountId }: { accountId: string }) {
   const q = useApi<CompanyView[]>(['companies'], '/companies');
@@ -103,6 +244,7 @@ function CompanyCard({ accountId }: { accountId: string }) {
             .
           </div>
         )}
+        <DirectorLoanLine view={v} />
         {c.employmentId && (
           <div>
             You also work for it: its pay is on the{' '}
@@ -164,11 +306,13 @@ export default function AccountDetail() {
   const coverage = q.data.coverage ?? cov.data;
   const meta = ACCOUNT_TYPE_META[account.type];
   const market = balanceModeOf(account) === 'market';
+  // A director's loan: no rows of its own, its movements worked out from the payments you mark.
+  const loan = q.data.directorLoan;
   const latestHoldings = holdings[holdings.length - 1];
   const lastBal = balances[balances.length - 1];
   const points = series.filter((p) => p.value !== null);
   const snapshotDates = new Set(balances.map((b) => b.date));
-  const empty = !summary.transactionCount && !balances.length;
+  const empty = !summary.transactionCount && !balances.length && !loan?.movements.length;
 
   return (
     <div>
@@ -183,9 +327,11 @@ export default function AccountDetail() {
         }
         actions={
           <>
-            <FilePickerButton accountId={account.id} icon={<Upload className="size-4" />}>
-              Upload for this account
-            </FilePickerButton>
+            {!meta.derived && (
+              <FilePickerButton accountId={account.id} icon={<Upload className="size-4" />}>
+                Upload for this account
+              </FilePickerButton>
+            )}
             <Button icon={<Plus className="size-4" />} onClick={() => setRecording(true)}>
               {market ? 'Record value' : 'Record balance'}
             </Button>
@@ -204,6 +350,8 @@ export default function AccountDetail() {
         <Stat label="Last updated" value={summary.asOf ? timeAgo(summary.asOf) : '—'} sub={summary.stale ? <span className="inline-flex items-center gap-1 text-warn-ink"><TriangleAlert className="size-3.5" /> needs new data</span> : 'up to date'} />
         {market && paidIn ? (
           <Stat label="Paid in" value={<Money value={paidIn.amount} />} sub={summary.balance !== null ? <span>growth {money(summary.balance - paidIn.amount - (lastBal?.bonusToDate ?? 0))} ({pct((summary.balance - paidIn.amount - (lastBal?.bonusToDate ?? 0)) / Math.max(1, paidIn.amount + (lastBal?.bonusToDate ?? 0)))})</span> : undefined} />
+        ) : loan ? (
+          <Stat label="Movements" value={loan.movements.length.toLocaleString()} sub={loan.movements[0] ? `latest ${formatDate(loan.movements[0].date)}` : 'none marked yet'} />
         ) : (
           <Stat label="Transactions" value={summary.transactionCount.toLocaleString()} sub={summary.lastTransaction ? `latest ${formatDate(summary.lastTransaction)}` : undefined} />
         )}
@@ -230,11 +378,12 @@ export default function AccountDetail() {
         </Callout>
       )}
 
+      {loan && <DirectorLoanCard view={loan} accountId={account.id} />}
       <CompanyCard accountId={account.id} />
       {ACCOUNT_TYPE_META[account.type].pension && <ArrangementsCard accountId={account.id} />}
       <TermsCard account={account} />
 
-      {empty ? (
+      {empty && loan ? null : empty ? (
         <Card>
           <EmptyState icon={<Upload className="size-8" />} title="No data for this account yet" action={<FilePickerButton accountId={account.id} variant="primary">Upload a statement or screenshot</FilePickerButton>}>
             Upload a statement, export or screenshot and it will be matched to this account.
@@ -245,7 +394,7 @@ export default function AccountDetail() {
           <ChartFrame
             className="mb-5"
             title={market ? 'Value over time' : 'Balance over time'}
-            subtitle={market ? 'Dots are recorded valuations; between them, contributions are added' : 'Rebuilt from statements and transactions'}
+            subtitle={market ? 'Dots are recorded valuations; between them, contributions are added' : loan ? 'Worked out from the payments you marked and the balances you recorded' : 'Rebuilt from statements and transactions'}
             table={{ columns: ['Date', 'Balance'], rows: [...points].reverse().map((p) => [formatDate(p.date), money(p.value)]) }}
           >
             <TimeChart
@@ -279,13 +428,18 @@ export default function AccountDetail() {
         value={tab}
         onChange={setTab}
         tabs={[
-          { value: 'transactions', label: 'Transactions', count: summary.transactionCount },
+          { value: 'transactions', label: loan ? 'Movements' : 'Transactions', count: loan ? loan.movements.length : summary.transactionCount },
           { value: 'balances', label: market ? 'Valuations' : 'Balances', count: balances.length },
           ...(holdings.length ? [{ value: 'holdings' as Tab, label: 'Holdings' }] : []),
           { value: 'documents', label: 'Documents', count: imports.length },
         ]}
       />
-      {tab === 'transactions' && (
+      {tab === 'transactions' && loan && (
+        <Card padded={false}>
+          <MovementsTable view={loan} />
+        </Card>
+      )}
+      {tab === 'transactions' && !loan && (
         <Card padded={false}>
           {txs.data?.items.length ? (
             <>
