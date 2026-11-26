@@ -375,7 +375,7 @@ interface Linking {
 }
 
 function SectionEditor({ section, index, total, latest, periodFromRows, onChange, linking }: { section: DraftSection; index: number; total: number; latest: string; periodFromRows: boolean; onChange: (s: DraftSection) => void; linking: Linking }) {
-  const { data } = useAppData();
+  const { data, anyAccount, companyAccounts } = useAppData();
   const [showDupes, setShowDupes] = useState(false);
   const set = (patch: Partial<DraftSection>) => onChange({ ...section, ...patch });
   const setTx = (key: string, patch: Partial<DraftTransaction>) => set({ transactions: section.transactions.map((t) => (t.key === key ? { ...t, ...patch } : t)) });
@@ -413,7 +413,9 @@ function SectionEditor({ section, index, total, latest, periodFromRows, onChange
       }),
     });
   };
-  const type = target.mode === 'existing' ? data.accounts.find((a) => a.id === target.accountId)?.type : target.mode === 'new' ? target.account.type : undefined;
+  // The account chosen, yours or a company's (a company's own accounts are not among `data.accounts`).
+  const chosen = target.mode === 'existing' ? anyAccount(target.accountId) : undefined;
+  const type = target.mode === 'existing' ? chosen?.type : target.mode === 'new' ? target.account.type : undefined;
   const market = type ? ACCOUNT_TYPE_META[type].balanceMode === 'market' : false;
   const d = section.detected;
   // A document that does not print its period (an export, a screenshot of a list) covers its rows'
@@ -422,8 +424,9 @@ function SectionEditor({ section, index, total, latest, periodFromRows, onChange
   const [rowsFrom, rowsTo] = [rowDates[0] ?? '', rowDates.at(-1) ?? ''];
   // An investment account's list is offered only when the draft proposed its days: then they show, to change.
   const coverable = (!market || section.coversFrom !== undefined || section.coversTo !== undefined) && !section.fromSchedule && rowDates.length > 0 && (periodFromRows || !section.periodStart);
-  const suggested = section.suggestedAccountId ? data.accounts.find((a) => a.id === section.suggestedAccountId) : undefined;
-  const into = target.mode === 'existing' ? data.accounts.find((a) => a.id === target.accountId) : target.mode === 'new' ? target.account : undefined;
+  const suggested = section.suggestedAccountId ? anyAccount(section.suggestedAccountId) : undefined;
+  const into = target.mode === 'existing' ? chosen : target.mode === 'new' ? target.account : undefined;
+  const chosenCompany = chosen?.companyId ? (companyAccounts?.find((g) => g.company.id === chosen.companyId)?.company.name ?? chosen.companyId) : undefined;
   const checks = target.mode === 'skip' ? [] : sectionChecks(section, { accountType: type, latest, periodFromRows, openedOn: into?.openedOn, closedOn: into?.closedOn });
   // Rows a check is about carry its title, so the problem is visible where it is.
   const flags = new Map<string, string[]>();
@@ -449,7 +452,7 @@ function SectionEditor({ section, index, total, latest, periodFromRows, onChange
                 else if (v === '__new')
                   retarget({
                     mode: 'new',
-                    account: target.mode === 'new' ? target.account : { id: slugify(`${d.institutionName ?? ''} ${d.accountName ?? 'account'}`, data.accounts.map((a) => a.id)), name: d.accountName ?? 'New account', type: d.accountType ?? 'current', currency: section.currency, ...(d.last4 ? { last4: d.last4 } : {}), ...(d.institutionName ? { institutionName: d.institutionName } : {}) },
+                    account: target.mode === 'new' ? target.account : { id: slugify(`${d.institutionName ?? ''} ${d.accountName ?? 'account'}`, [...data.accounts, ...(companyAccounts ?? []).flatMap((g) => g.accounts)].map((a) => a.id)), name: d.accountName ?? 'New account', type: d.accountType ?? 'current', currency: section.currency, ...(d.last4 ? { last4: d.last4 } : {}), ...(d.institutionName ? { institutionName: d.institutionName } : {}) },
                   });
                 else retarget({ mode: 'existing', accountId: v });
               }}
@@ -475,9 +478,24 @@ function SectionEditor({ section, index, total, latest, periodFromRows, onChange
                     ))}
                 </optgroup>
               )}
+              {/* A company's own accounts, each under its company: its money, not yours. */}
+              {(companyAccounts ?? []).map((g) => (
+                <optgroup key={g.company.id} label={`${g.company.name}’s accounts (the company’s, not yours)`}>
+                  {g.accounts.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name}
+                      {a.status === 'closed' ? ' (closed)' : ''}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+              {/* Never shown as another account: an account chosen that is in neither list says so. */}
+              {target.mode === 'existing' && !chosen && <option value={target.accountId}>{companyAccounts === null ? `Loading… (${target.accountId})` : `Account not found: ${target.accountId}`}</option>}
               <option value="__new">+ Create a new account</option>
               <option value="__skip">Don’t import this account</option>
             </Select>
+            {chosenCompany && <div className="mt-1 text-[12.5px] text-ink-3">A company’s own account ({chosenCompany}): its rows get no category of yours and count in no figure of yours.</div>}
+            {target.mode === 'existing' && !chosen && companyAccounts !== null && <div className="mt-1 text-[12.5px] text-bad-ink">This account is not in your data: choose where these rows go.</div>}
           </Field>
           {target.mode === 'skip' && suggested && (
             <Button size="sm" variant="primary" onClick={() => retarget({ mode: 'existing', accountId: suggested.id })}>

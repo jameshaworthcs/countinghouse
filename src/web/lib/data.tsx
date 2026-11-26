@@ -4,14 +4,27 @@ import { useQueryClient } from '@tanstack/react-query';
 import { createContext, useContext, useEffect, useMemo, type ReactNode } from 'react';
 import type { BootstrapResponse, CompanyAccountsGroup } from '../../shared/api';
 import { CategoryIndex } from '../../shared/categories';
-import type { Account } from '../../shared/schema';
+import type { Account, Institution } from '../../shared/schema';
 import { useApi } from './api';
 
 interface AppData {
   data: BootstrapResponse;
   cats: CategoryIndex;
+  /** Your accounts only: pickers and totals of yours read this. */
   accountsById: Map<string, Account>;
   accountName: (id: string | undefined) => string;
+  /**
+   * Each company's own accounts, as stored; `null` until they have loaded. Only where an account of
+   * either side must be chosen or shown (the import review's "Import into"), never for a figure.
+   */
+  companyAccounts: { company: { id: string; name: string }; accounts: Account[] }[] | null;
+  /** An account of yours or a company's, by id. */
+  anyAccount: (id: string | undefined) => Account | undefined;
+  /**
+   * Every provider: yours (`data.institutions`), then those only a company's accounts are at, each
+   * once. For choosing and naming a provider, never for a figure.
+   */
+  allInstitutions: (Institution & { company?: true })[];
 }
 
 const DataContext = createContext<AppData | null>(null);
@@ -24,12 +37,18 @@ export function DataProvider({ children, fallback }: { children: ReactNode; fall
   const value = useMemo<AppData | null>(() => {
     if (!q.data) return null;
     const accountsById = new Map(q.data.accounts.map((a) => [a.id, a]));
-    const companyNames = new Map((companies.data ?? []).flatMap((g) => g.accounts.map((a) => [a.id, a.name] as const)));
+    const companyRecords = new Map((companies.data ?? []).flatMap((g) => g.records.map((a) => [a.id, a] as const)));
     return {
       data: q.data,
       cats: new CategoryIndex(q.data.categories),
       accountsById,
-      accountName: (id) => (id ? (accountsById.get(id)?.name ?? companyNames.get(id) ?? id) : ''),
+      accountName: (id) => (id ? (accountsById.get(id)?.name ?? companyRecords.get(id)?.name ?? id) : ''),
+      companyAccounts: companies.data ? companies.data.map((g) => ({ company: { id: g.company.id, name: g.company.name }, accounts: g.records })) : null,
+      anyAccount: (id) => (id ? (accountsById.get(id) ?? companyRecords.get(id)) : undefined),
+      allInstitutions: [
+        ...q.data.institutions,
+        ...[...new Map((companies.data ?? []).flatMap((g) => g.providers).filter((i) => !q.data.institutions.some((x) => x.id === i.id)).map((i) => [i.id, { ...i, company: true as const }])).values()],
+      ],
     };
   }, [q.data, companies.data]);
   if (!value) return <>{q.error ? <div className="p-6 text-sm text-bad-ink">{q.error.message}</div> : fallback}</>;

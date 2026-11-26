@@ -1099,16 +1099,20 @@ function DataAndGit() {
 }
 
 function InstitutionsCard() {
-  const { data } = useAppData();
+  // Yours, then those only a company's accounts are at (marked): each can be given its group here.
+  const { allInstitutions } = useAppData();
   const update = useApiMutation((v: { id: string; fscsGroup: string }) => api(`/institutions/${v.id}`, { method: 'PATCH', body: { fscsGroup: v.fscsGroup || null } }));
-  if (!data.institutions.length) return null;
+  if (!allInstitutions.length) return null;
   return (
     <Card title="Providers and FSCS groups" description="Brands that share a banking licence share one FSCS limit. Give them the same group name." padded={false}>
       <table className={tableClasses.table}>
         <tbody>
-          {data.institutions.map((i) => (
+          {allInstitutions.map((i) => (
             <tr key={i.id}>
-              <td className={tableClasses.td}>{i.name}</td>
+              <td className={tableClasses.td}>
+                {i.name}
+                {i.company && <span className="ml-2 text-[12px] text-ink-3">a company’s accounts only</span>}
+              </td>
               <td className={cn(tableClasses.td, 'text-ink-3')}>{i.kind.replace(/_/g, ' ')}</td>
               <td className={cn(tableClasses.td, 'w-56')}>
                 <Input defaultValue={i.fscsGroup ?? ''} placeholder={i.id} className="h-8" onBlur={(e) => e.target.value !== (i.fscsGroup ?? '') && update.mutate({ id: i.id, fscsGroup: e.target.value.trim() })} aria-label={`FSCS group for ${i.name}`} />

@@ -25,13 +25,13 @@ export function AccountTypeSelect({ value, onChange }: { value: AccountType; onC
  * provider only a company's accounts are at (it is not among yours).
  */
 export function AccountDialog({ open, onOpenChange, account, institutionName }: { open: boolean; onOpenChange: (o: boolean) => void; account?: Account; institutionName?: string | undefined }) {
-  const { data } = useAppData();
+  const { data, allInstitutions } = useAppData();
   const toast = useToast();
   const companies = useApi<CompanyView[]>(['companies'], '/companies');
   const companyAccounts = useApi<CompanyAccountsGroup[]>(['company-accounts'], '/company-accounts');
   const [name, setName] = useState(account?.name ?? '');
   const [type, setType] = useState<AccountType>(account?.type ?? 'current');
-  const [institution, setInstitution] = useState(account?.institutionId ? (data.institutions.find((i) => i.id === account.institutionId)?.name ?? institutionName ?? INSTITUTION_CATALOG.find((i) => i.id === account.institutionId)?.name ?? '') : '');
+  const [institution, setInstitution] = useState(account?.institutionId ? (allInstitutions.find((i) => i.id === account.institutionId)?.name ?? institutionName ?? INSTITUTION_CATALOG.find((i) => i.id === account.institutionId)?.name ?? '') : '');
   // Whose it is: yours (""), or a company's (docs/DATA_FORMAT.md, accounts.json).
   const [companyId, setCompanyId] = useState(account?.companyId ?? '');
   const [last4, setLast4] = useState(account?.last4 ?? '');
@@ -55,7 +55,7 @@ export function AccountDialog({ open, onOpenChange, account, institutionName }: 
   const beside = companyId ? (companyAccounts.data?.find((g) => g.company.id === companyId)?.accounts ?? []) : data.accounts;
   const save = useApiMutation(
     () => {
-      const inst = INSTITUTION_CATALOG.find((i) => i.name.toLowerCase() === institution.trim().toLowerCase()) ?? data.institutions.find((i) => i.name.toLowerCase() === institution.trim().toLowerCase());
+      const inst = INSTITUTION_CATALOG.find((i) => i.name.toLowerCase() === institution.trim().toLowerCase()) ?? allInstitutions.find((i) => i.name.toLowerCase() === institution.trim().toLowerCase());
       const body: Record<string, unknown> = {
         name: name.trim(),
         type,
@@ -115,7 +115,7 @@ export function AccountDialog({ open, onOpenChange, account, institutionName }: 
         <Field label="Provider">
           <Input value={institution} onChange={(e) => setInstitution(e.target.value)} list="institution-list" placeholder="e.g. Monzo" />
           <datalist id="institution-list">
-            {[...new Set([...data.institutions.map((i) => i.name), ...INSTITUTION_CATALOG.map((i) => i.name)])].map((n) => (
+            {[...new Set([...allInstitutions.map((i) => i.name), ...INSTITUTION_CATALOG.map((i) => i.name)])].map((n) => (
               <option key={n} value={n} />
             ))}
           </datalist>
