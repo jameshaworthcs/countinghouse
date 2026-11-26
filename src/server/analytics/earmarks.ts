@@ -7,7 +7,7 @@ import { CategoryIndex } from '../../shared/categories';
 import { Categoriser } from '../../shared/categorise';
 import { addDays, diffDays, today as todayOf, type ISODate } from '../../shared/dates';
 import { formatMoney, fromMinor, toMinor } from '../../shared/money';
-import { EARMARK_EFFECTS, POT_EFFECTS, type Account, type Category, type EarmarkEffect, type EarmarkPot, type EarmarkRule, type Earmarks, type Rule, type Transaction } from '../../shared/schema';
+import { EARMARK_EFFECTS, POT_EFFECTS, type EarmarkSetup, type Account, type Category, type EarmarkEffect, type EarmarkPot, type EarmarkRule, type Earmarks, type Rule, type Transaction } from '../../shared/schema';
 import { ruleCatches } from '../categoriser';
 
 export const EARMARK_RULES = {
@@ -465,6 +465,45 @@ export function computeEarmarks(input: EarmarksInput): EarmarksResponse {
 }
 
 
+/**
+ * Why a setup can't be used (null: it can): every account is yours and in pounds, every category and
+ * account a rule names is there, its patterns work, and no pot starts in the future.
+ */
+export function setupProblem(setup: EarmarkSetup, accountOf: (id: string) => Account | undefined, hasCategory: (id: string) => boolean, on: ISODate = todayOf()): string | null {
+  for (const id of [...setup.everyday, ...setup.setAside]) {
+    const a = accountOf(id);
+    if (!a) return `There is no account "${id}".`;
+    if (a.currency !== 'GBP') return `${a.name} is in ${a.currency}: only accounts in pounds can be counted.`;
+  }
+  for (const pot of setup.pots) {
+    if (pot.start > on) return `${pot.name} starts on ${pot.start}, in the future.`;
+    for (const r of pot.rules) {
+      if (r.category && !hasCategory(r.category)) return `Rule "${r.name}" names no category of yours ("${r.category}").`;
+      if (r.counterpartyAccountId && !accountOf(r.counterpartyAccountId)) return `Rule "${r.name}" names no account of yours ("${r.counterpartyAccountId}").`;
+      if (r.text?.op === 'regex') {
+        try {
+          new RegExp(r.text.value);
+        } catch {
+          return `Rule "${r.name}": "${r.text.value}" is not a pattern that works.`;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+/** A setup made the one in use: your decisions and checks stay, and a pot taken away takes its decisions with it. */
+export function withSetup(current: Earmarks | null, setup: EarmarkSetup, updatedAt: string): Earmarks {
+  const potIds = new Set(setup.pots.map((p) => p.id));
+  return {
+    everyday: setup.everyday,
+    setAside: setup.setAside,
+    pots: setup.pots.map((p) => ({ ...p, checks: current?.pots.find((x) => x.id === p.id)?.checks ?? [] })),
+    decisions: Object.fromEntries(Object.entries(current?.decisions ?? {}).filter(([, d]) => potIds.has(d.pot))),
+    updatedAt,
+  };
+}
+
 /** Which effects a payment in or out can have in a pot. */
 export const EFFECTS_IN: readonly EarmarkEffect[] = ['source', 'use', 'from-pot', 'own-back', 'own'];
 export const EFFECTS_OUT: readonly EarmarkEffect[] = ['source', 'use', 'to-pot', 'topped-up', 'own'];
@@ -512,8 +551,13 @@ export function earmarkFigures(
 }
 
 /** The pots worked out from the store: each account to its own latest day. */
-export function earmarks(store: Pick<import('../store').Store, 'earmarks' | 'accounts' | 'categories' | 'transactions'>, engine: Pick<import('./balances').BalanceEngine, 'balanceOn' | 'lastDataDate' | 'firstDataDate'>, on: ISODate = todayOf()): EarmarksResponse {
-  const setup = store.earmarks;
+export function earmarks(
+  store: Pick<import('../store').Store, 'earmarks' | 'accounts' | 'categories' | 'transactions'>,
+  engine: Pick<import('./balances').BalanceEngine, 'balanceOn' | 'lastDataDate' | 'firstDataDate'>,
+  on: ISODate = todayOf(),
+  /** A setup to work out instead of the one in use (a preview while editing it). */
+  setup: Earmarks | null = store.earmarks,
+): EarmarksResponse {
   if (!setup) return { setup: null, result: null, problems: [] };
   return computeEarmarks({
     setup,

@@ -335,4 +335,32 @@ describe('set aside: in the app, by proposals', () => {
     // Taking a decision away (none left now) is refused for a payment before the new start.
     expect((await asOwner('/api/earmarks/decisions', { decisions: [{ pot: 'student-money', transaction: toSaver.id, parts: null }] })).status).toBe(422);
   });
+
+  it('the owner sets it up, changes and removes it by hand; a stale change and a token are refused', async () => {
+    const send = (method: string, p: string, body?: unknown) => req(p, { method, headers: CSRF, ...(body ? { body: JSON.stringify(body) } : {}) });
+    const preview = (await (await owner('/api/earmarks/setup/preview', { setup: setup() })).json()) as EarmarksResponse;
+    expect(preview.result!.pots[0]!.setAside).toBe(600);
+    expect(app.ctx.store.earmarks).toBeNull();
+    // A rule naming a category you don't have is refused, with why.
+    const bad = { ...setup(), pots: [{ ...setup().pots[0]!, rules: [{ id: 'x', name: 'X', effect: 'source', category: 'no-such-category' }] }] };
+    expect(((await (await owner('/api/earmarks/setup/preview', { setup: bad })).json()) as EarmarksResponse).problems[0]).toMatch(/no category/);
+    expect((await send('PUT', '/api/earmarks/setup', { setup: bad, was: null })).status).toBe(422);
+    const tokenPut = await req('/api/earmarks/setup', { method: 'PUT', headers: { ...CSRF, authorization: agent }, body: JSON.stringify({ setup: setup(), was: null }) });
+    expect(tokenPut.status).toBe(403);
+    const made = await send('PUT', '/api/earmarks/setup', { setup: setup(), was: null });
+    expect(made.status).toBe(200);
+    expect((await get<BootstrapResponse>('/api/bootstrap')).earmarks).toEqual([{ id: 'student-money', name: 'Student money' }]);
+    // A decision stays when the setup changes.
+    await owner('/api/earmarks/decisions', { decisions: [{ pot: 'student-money', transaction: toSaver.id, parts: [{ effect: 'topped-up', amount: 200 }] }] });
+    const was = app.ctx.store.earmarks!.updatedAt;
+    const changed = { ...setup(), pots: [{ ...setup().pots[0]!, name: 'Loan for rent' }] };
+    expect((await send('PUT', '/api/earmarks/setup', { setup: changed, was: '2020-01-01T00:00:00+00:00' })).status).toBe(409);
+    expect((await send('PUT', '/api/earmarks/setup', { setup: changed, was })).status).toBe(200);
+    expect(app.ctx.store.earmarks!.pots[0]!.name).toBe('Loan for rent');
+    expect(Object.keys(app.ctx.store.earmarks!.decisions)).toEqual([toSaver.id]);
+    expect((await req('/api/earmarks', { method: 'DELETE', headers: { ...CSRF, authorization: agent } })).status).toBe(403);
+    expect((await send('DELETE', '/api/earmarks')).status).toBe(200);
+    expect(app.ctx.store.earmarks).toBeNull();
+    expect((await get<BootstrapResponse>('/api/bootstrap')).earmarks).toEqual([]);
+  });
 });

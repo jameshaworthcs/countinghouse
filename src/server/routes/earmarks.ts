@@ -6,8 +6,8 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { addDays, today } from '../../shared/dates';
 import { fromMinor, toMinor } from '../../shared/money';
-import { EARMARK_EFFECTS, MoneySchema, POT_EFFECTS, SlugSchema, type EarmarkDecision, type Earmarks, type Transaction } from '../../shared/schema';
-import { decisionProblem, earmarkFigures } from '../analytics/earmarks';
+import { EARMARK_EFFECTS, EarmarkSetupSchema, MoneySchema, POT_EFFECTS, SlugSchema, TimestampSchema, type EarmarkDecision, type Earmarks, type Transaction } from '../../shared/schema';
+import { decisionProblem, earmarkFigures, earmarks, setupProblem, withSetup } from '../analytics/earmarks';
 import { agentTokenOf as tokenOf, readJson, type AppContext } from '../context';
 import { nowISO } from '../fsutil';
 import { StoreError } from '../store';
@@ -28,6 +28,7 @@ const Decide = z.object({
     .max(200),
 });
 const PotBody = z.object({ pot: SlugSchema });
+const SetupBody = z.object({ setup: EarmarkSetupSchema, was: TimestampSchema.nullable().optional() });
 
 /** Decisions as they would be with these changes, each checked; throws with every problem. */
 function withDecisions(setup: Earmarks, txById: (id: string) => Transaction | undefined, changes: z.infer<typeof Decide>['decisions']): Earmarks {
@@ -59,6 +60,34 @@ export function earmarkRoutes(ctx: AppContext): Hono {
   };
 
   app.get('/', (c) => c.json(ctx.analytics.earmarks()));
+
+  /** What a setup being edited would give, without saving it. */
+  app.post('/setup/preview', async (c) => {
+    ownerOnly(c);
+    const { setup } = await readJson(c, SetupBody);
+    const problem = setupProblem(setup, (id) => store.account(id), (id) => store.categories.some((x) => x.id === id));
+    if (problem) return c.json({ setup: null, result: null, problems: [problem] });
+    return c.json(earmarks(store, ctx.analytics.engine, today(), withSetup(store.earmarks, setup, nowISO())));
+  });
+
+  /** Set it up, or change its accounts, pots and rules: your decisions and checks stay. */
+  app.put('/setup', async (c) => {
+    ownerOnly(c);
+    const { setup, was } = await readJson(c, SetupBody);
+    const now = store.earmarks?.updatedAt ?? null;
+    if (was !== undefined && was !== now) throw new StoreError('Set aside changed since you opened it (an applied proposal, or another tab): reload it and make your change again.', 409);
+    const problem = setupProblem(setup, (id) => store.account(id), (id) => store.categories.some((x) => x.id === id));
+    if (problem) throw new StoreError(problem, 422);
+    await store.setEarmarks(withSetup(store.earmarks, setup, nowISO()), store.earmarks ? 'set aside: change the setup' : 'set aside: set up');
+    return c.json(ctx.analytics.earmarks());
+  });
+
+  /** Stop using it: the file goes (your data's history keeps it), and nothing about it shows. */
+  app.delete('/', (c) => {
+    ownerOnly(c);
+    setupOrThrow();
+    return store.setEarmarks(null, 'set aside: removed').then(() => c.json({ ok: true }));
+  });
 
   /** What deciding these would do to the figures, without saving anything. */
   app.post('/preview', async (c) => {

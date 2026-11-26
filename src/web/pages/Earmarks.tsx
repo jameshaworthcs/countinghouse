@@ -4,10 +4,11 @@
 
 import { ChevronRight, CircleCheck, HandCoins, Pencil, RotateCcw, TriangleAlert } from 'lucide-react';
 import { createContext, useContext, useState } from 'react';
-import { Link } from 'react-router';
+import { Link, useLocation, useNavigate } from 'react-router';
 import type { EarmarkLine, EarmarkPotResult, EarmarkRow, EarmarksResult } from '../../shared/api';
 import { EARMARK_EFFECTS, POT_EFFECTS, type EarmarkEffect, type Earmarks } from '../../shared/schema';
 import { DecisionDialog, useEarmarks, type DecidePayment } from '../components/Earmarks';
+import { EarmarkSetupForm } from '../components/EarmarkSetup';
 import { earmarkRuleWords, proposedBy, useProposals } from '../components/Proposals';
 import { Badge, Button, Callout, Card, Dialog, EmptyState, ErrorNote, IconButton, Loading, Money, PageHeader, Stat, useToast } from '../components/ui';
 import { api, useApiMutation } from '../lib/api';
@@ -18,12 +19,24 @@ import { cn, formatDate, money, plural } from '../lib/format';
 export default function EarmarksPage() {
   const { data } = useAppData();
   const q = useEarmarks();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const editing = location.hash === '#setup';
+  const setEditing = (on: boolean) => navigate({ hash: on ? 'setup' : '' }, { replace: true });
+  if (editing && (!data.earmarks.length || q.data)) {
+    return (
+      <div className="mx-auto max-w-6xl">
+        <PageHeader title={data.earmarks.length ? 'Change Set aside' : 'Set up Set aside'} subtitle="Which accounts are everyday and which hold set-aside money, and the rules that say what each payment does. An agent can propose the same for you to apply." />
+        <EarmarkSetupForm current={q.data?.setup ?? null} onDone={() => setEditing(false)} />
+      </div>
+    );
+  }
   if (!data.earmarks.length) {
     return (
       <div className="mx-auto max-w-5xl">
         <PageHeader title="Set aside" />
-        <EmptyState icon={<HandCoins className="size-6" />} title="Nothing is set aside">
-          Set aside is for money already in your everyday accounts that’s spoken for: tax to pay, money you hold for someone, a loan meant for rent. Goals are for saving towards something. An agent can propose setting it up; you apply it on the Import page.
+        <EmptyState icon={<HandCoins className="size-6" />} title="Nothing is set aside" action={<Button variant="primary" onClick={() => setEditing(true)}>Set one up</Button>}>
+          Set aside is for money already in your everyday accounts that’s spoken for: tax to pay, money you hold for someone, a loan meant for rent. Goals are for saving towards something. Set it up here, or an agent can propose it for you to apply on the Import page.
         </EmptyState>
       </div>
     );
@@ -33,7 +46,15 @@ export default function EarmarksPage() {
   const { setup, result, problems } = q.data;
   return (
     <div className="mx-auto max-w-5xl">
-      <PageHeader title="Set aside" subtitle="Money in your everyday accounts that’s spoken for, and what’s yours to spend. Worked out from your payments and balances." />
+      <PageHeader
+        title="Set aside"
+        subtitle="Money in your everyday accounts that’s spoken for, and what’s yours to spend. Worked out from your payments and balances."
+        actions={
+          <Button icon={<Pencil className="size-4" />} onClick={() => setEditing(true)}>
+            Change the setup
+          </Button>
+        }
+      />
       <Pending />
       {problems.length > 0 && (
         <Callout tone="warn" className="mb-5" title="The figure can’t be worked out">
@@ -381,7 +402,7 @@ function HowItsWorkedOut({ setup, result }: { setup: Earmarks; result: EarmarksR
   const [restarting, setRestarting] = useState<string | null>(null);
   const decisions = Object.entries(setup.decisions).sort(([, a], [, b]) => a.seen.date.localeCompare(b.seen.date));
   return (
-    <Card title="How it’s worked out" description="Changes come as proposals you apply. Every payment in an everyday account counts as your own money unless a rule or your decision says otherwise; money to or from a set-aside account is put back into, or borrowed from, the pot.">
+    <Card title="How it’s worked out" description="Change it with “Change the setup”, or an agent can propose changes for you to apply. Every payment in an everyday account counts as your own money unless a rule or your decision says otherwise; money to or from a set-aside account is put back into, or borrowed from, the pot.">
       <div className="grid gap-4 text-[13px]">
         <div className="text-ink-2">
           <div>

@@ -412,8 +412,8 @@ against the year's return when set: only a box or question it has, with a value 
 
 Money set aside inside the accounts you spend from, and what is yours to spend
 ([FORMULAS.md](FORMULAS.md) §21). Optional: without the file nothing is worked out or shown. It is
-written when you apply a proposal that sets it up (`set_earmarks`) or decides a payment
-(`decide_earmark_flow`).
+written when you set it up or decide a payment on the Set aside page, or apply a proposal that does
+(`set_earmarks`, `decide_earmark_flow`). Removing it on the page deletes the file (git keeps it).
 
 | Field | Notes |
 |---|---|

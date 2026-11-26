@@ -2851,5 +2851,11 @@ value grown from the account's first flow is never below nothing, as rolled-back
   routes (`/api/earmarks/decisions`, `preview`, `checks`, `restart`) are closed to every token:
   agents propose instead. A transfer to a set-aside account while the pot holds nothing counts as
   you topping it up without asking (asking each month about a regular saving was noise).
-- **Later slices:** setup without agents, a chart, an Ask tool, and an agent job (off by default)
-  that proposes decisions.
+- **Setup by hand (third slice):** Set aside → Change the setup (and Settings → Set aside, its only
+  trace until it is set up): each account everyday, set aside or not counted; pots; rules in order,
+  each with what it catches, and the figure worked out as you change them before anything is
+  saved. Saving names the setup it started from, so an applied proposal or another tab in between
+  is not overwritten. Removing it deletes the file. A new editor, not the rules editor's: that one
+  has no payee, amount, account or category conditions to reuse.
+- **Later slices:** a chart, an Ask tool, and an agent job (off by default) that proposes
+  decisions.

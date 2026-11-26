@@ -112,6 +112,7 @@ async function main() {
     ['reviews', '/reviews'],
     ['accounts', '/accounts'],
     ['earmarks', '/earmarks'],
+    ['earmarks-setup', '/earmarks#setup'],
     ...accountPage('account-current', 'current'),
     ...accountPage('account-savings', 'savings'),
     ...accountPage('account-isa', 'stocks_isa'),

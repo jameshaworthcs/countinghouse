@@ -28,7 +28,7 @@ import { sameTerms, type TermsContent } from '../shared/terms';
 import { AccountSchema, AgreementSchema, BalanceSnapshotSchema, CompanySchema, EarmarkSetupSchema, EmploymentSchema, POT_EFFECTS, ProposalSchema, TermsSchema, type Earmarks, type Account, type Agreement, type BalanceSnapshot, type Category, type Company, type Terms, type Employment, type PensionArrangement, type Proposal, type ProposalInput, type ProposalStatus, type ProposedChange, type Provenance, type ReturnEntry, type Rule, type Transaction } from '../shared/schema';
 import { paidToText } from './analytics/agreements';
 import { BalanceEngine, type BalanceSource } from './analytics/balances';
-import { decisionProblem, earmarkFigures } from './analytics/earmarks';
+import { decisionProblem, earmarkFigures, setupProblem, withSetup } from './analytics/earmarks';
 import { EFFECT_WORDS } from '../shared/earmarks';
 import { taxReturn } from './analytics/taxreturn';
 import { runAs } from './audit';
@@ -565,34 +565,9 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
       case 'set_earmarks': {
         const was = store.earmarks?.updatedAt ?? null;
         if (c.was !== was) return { problem: was ? `Set aside was changed on ${formatDate(was.slice(0, 10))}, after this was proposed: propose against it as it is now.` : 'Set aside is not set up now: propose it with was: null.' };
-        for (const id of [...c.setup.everyday, ...c.setup.setAside]) {
-          const a = account(id);
-          if (!a) return { problem: `There is no account "${id}".` };
-          if (a.currency !== 'GBP') return { problem: `${a.name} is in ${a.currency}: only accounts in pounds can be counted.` };
-        }
-        for (const pot of c.setup.pots) {
-          if (pot.start > today()) return { problem: `${pot.name} starts on ${formatDate(pot.start)}, in the future.` };
-          for (const r of pot.rules) {
-            if (r.category && !cats.get(r.category)) return { problem: `Rule "${r.name}" names no category of yours ("${r.category}").` };
-            if (r.counterpartyAccountId && !account(r.counterpartyAccountId)) return { problem: `Rule "${r.name}" names no account of yours ("${r.counterpartyAccountId}").` };
-            if (r.text?.op === 'regex') {
-              try {
-                new RegExp(r.text.value);
-              } catch {
-                return { problem: `Rule "${r.name}": "${r.text.value}" is not a pattern that works.` };
-              }
-            }
-          }
-        }
-        const potIds = new Set(c.setup.pots.map((p) => p.id));
-        const next: Earmarks = {
-          everyday: c.setup.everyday,
-          setAside: c.setup.setAside,
-          pots: c.setup.pots.map((p) => ({ ...p, checks: setup?.pots.find((x) => x.id === p.id)?.checks ?? [] })),
-          // A pot taken away takes its decisions with it (git keeps them).
-          decisions: Object.fromEntries(Object.entries(setup?.decisions ?? {}).filter(([, d]) => potIds.has(d.pot))),
-          updatedAt: setup?.updatedAt ?? nowISO(),
-        };
+        const misfit = setupProblem(c.setup, account, (id) => Boolean(cats.get(id)));
+        if (misfit) return { problem: misfit };
+        const next = withSetup(setup, c.setup, setup?.updatedAt ?? nowISO());
         if (setup && setupKey(setup) === setupKey(next)) return { alreadySo: true };
         const dropped = Object.keys(setup?.decisions ?? {}).length - Object.keys(next.decisions).length;
         setup = next;

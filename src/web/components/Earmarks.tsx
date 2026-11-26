@@ -260,3 +260,21 @@ export function EarmarkSection({ tx }: { tx: Transaction }) {
     </section>
   );
 }
+
+/** Settings → Set aside: optional, and the only trace of it until it is set up. */
+export function EarmarksSettings() {
+  const { data } = useAppData();
+  return (
+    <Card title={<span className="inline-flex items-center gap-2">Set aside <span className="rounded-full bg-panel-2 px-2 text-[11.5px] font-medium text-ink-3">optional</span></span>}>
+      <div className="grid gap-3 text-[13.5px] text-ink-2">
+        <p>For money already in your everyday accounts that’s spoken for: tax to pay, money you hold for someone, a loan meant for rent. It works out how much of those accounts is yours to spend, with every payment behind the figure, from rules and your decisions; nothing is written on your payments. Goals are for saving towards something.</p>
+        <p>{data.earmarks.length ? `Set up: ${data.earmarks.map((e) => e.name).join(', ')}.` : 'Not set up: nothing about it is worked out or shown.'}</p>
+        <div>
+          <Link to={data.earmarks.length ? '/earmarks' : '/earmarks#setup'} className="text-[13.5px] font-medium text-accent hover:underline">
+            {data.earmarks.length ? 'Open Set aside' : 'Set one up'}
+          </Link>
+        </div>
+      </div>
+    </Card>
+  );
+}
