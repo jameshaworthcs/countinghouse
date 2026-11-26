@@ -60,6 +60,17 @@ function ArrangementsCard({ accountId }: { accountId: string }) {
   );
 }
 
+/** A company's own account: whose it is, and that it counts in nothing of yours. */
+function CompanyBadge({ companyId }: { companyId: string }) {
+  const q = useApi<CompanyView[]>(['companies'], '/companies');
+  const name = q.data?.find((x) => x.company.id === companyId)?.company.name ?? companyId;
+  return (
+    <span title="The company’s own account: its money is the company’s, so it is never in your estate or any figure of yours">
+      <Badge tone="muted">{name}’s account</Badge>
+    </span>
+  );
+}
+
 /** The company whose shares this account holds: the holding, how it is valued, and its dividends. */
 function CompanyCard({ accountId }: { accountId: string }) {
   const q = useApi<CompanyView[]>(['companies'], '/companies');
@@ -149,6 +160,8 @@ export default function AccountDetail() {
   if (q.error) return <ErrorNote error={q.error} />;
   if (!q.data) return <Loading />;
   const { account, summary, balances, holdings, series, gaps, imports, paidIn } = q.data;
+  // A company's account has its own coverage grid; yours are in GET /coverage.
+  const coverage = q.data.coverage ?? cov.data;
   const meta = ACCOUNT_TYPE_META[account.type];
   const market = balanceModeOf(account) === 'market';
   const latestHoldings = holdings[holdings.length - 1];
@@ -165,7 +178,7 @@ export default function AccountDetail() {
           <span className="inline-flex flex-wrap items-center gap-2">
             {[summary.institutionName, meta.label, account.last4 ? `•••• ${account.last4}` : null].filter(Boolean).join(' · ')}
             {account.status === 'closed' && <Badge tone="muted">closed</Badge>}
-            {!account.includeInNetWorth && <Badge tone="muted">not in estate value</Badge>}
+            {account.companyId ? <CompanyBadge companyId={account.companyId} /> : !account.includeInNetWorth && <Badge tone="muted">not in estate value</Badge>}
           </span>
         }
         actions={
@@ -248,17 +261,17 @@ export default function AccountDetail() {
         )
       )}
 
-      {cov.data && !empty && cov.data.accounts.some((a) => a.accountId === id && a.source !== 'none') && (
+      {coverage && !empty && coverage.accounts.some((a) => a.accountId === id && a.source !== 'none') && (
         <Card
           className="mb-5"
           title="Data coverage"
           description={(() => {
-            const row = cov.data.accounts.find((a) => a.accountId === id)!;
+            const row = coverage.accounts.find((a) => a.accountId === id)!;
             const span = row.from && row.to ? `${formatDate(row.from)} to ${formatDate(row.to)}` : 'no dates yet';
             return `Days with transaction data in each of the last 13 months (${row.source === 'imports' ? 'from the periods your statements cover' : 'from the first to the last transaction'}; ${span}). Months without data are left out of averages rather than counted as no spending.`;
           })()}
         >
-          <CoverageGrid cov={cov.data} only={id} />
+          <CoverageGrid cov={coverage} only={id} />
         </Card>
       )}
 
@@ -423,7 +436,7 @@ export default function AccountDetail() {
         )}
         {delAccount.error && <span className="text-[13px] text-bad-ink">{delAccount.error.message}</span>}
       </div>
-      {editing && <AccountDialog open onOpenChange={setEditing} account={account} />}
+      {editing && <AccountDialog open onOpenChange={setEditing} account={account} institutionName={summary.institutionName} />}
       {recording && <BalanceDialog open onOpenChange={setRecording} account={account} />}
     </div>
   );

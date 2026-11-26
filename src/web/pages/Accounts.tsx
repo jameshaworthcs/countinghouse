@@ -1,9 +1,9 @@
 import { LiveAt } from '../components/LiveFeed';
-import { Plus, ShieldAlert, TriangleAlert } from 'lucide-react';
+import { Building2, Plus, ShieldAlert, TriangleAlert } from 'lucide-react';
 import { useState } from 'react';
 import { Link } from 'react-router';
 import { WRAPPER_GROUP_LABELS, WRAPPER_GROUPS } from '../../shared/accounts';
-import type { AccountSummary, DataHealthResponse } from '../../shared/api';
+import type { AccountSummary, CompanyAccountsGroup, DataHealthResponse } from '../../shared/api';
 import { AccountDialog } from '../components/AccountForms';
 import { Sparkline } from '../components/charts/bars';
 import { Badge, Button, Callout, Card, EmptyState, Loading, Money, PageHeader } from '../components/ui';
@@ -18,7 +18,7 @@ function Row({ a }: { a: AccountSummary }) {
       <div className="min-w-0">
         <div className="flex items-center gap-2">
           <span className="truncate text-[14px] font-medium text-ink">{a.name}</span>
-          {!a.includeInNetWorth && <Badge tone="muted">not in estate</Badge>}
+          {!a.includeInNetWorth && !a.companyId && <Badge tone="muted">not in estate</Badge>}
           {a.status === 'closed' && <Badge tone="muted">closed</Badge>}
         </div>
         <div className="truncate text-[12.5px] text-ink-3">
@@ -62,6 +62,8 @@ function Row({ a }: { a: AccountSummary }) {
 export default function Accounts() {
   const q = useApi<AccountSummary[]>(['accounts'], '/accounts');
   const health = useApi<DataHealthResponse>(['data-health'], '/data-health');
+  // A company's own accounts: listed apart, under the company, never in a total of yours.
+  const companies = useApi<CompanyAccountsGroup[]>(['company-accounts'], '/company-accounts');
   const [adding, setAdding] = useState(false);
   if (!q.data) return <Loading />;
   const open = q.data.filter((a) => a.status === 'open');
@@ -77,7 +79,7 @@ export default function Accounts() {
           {money(f.total, { decimals: 0 })} is held with {f.institutions.join(' / ')}, which share one banking licence. Deposits are protected up to {money(f.limit, { decimals: 0 })} per person per licence.
         </Callout>
       ))}
-      {q.data.length === 0 ? (
+      {q.data.length === 0 && !companies.data?.length ? (
         <Card>
           <EmptyState title="No accounts yet" action={<Button variant="primary" onClick={() => setAdding(true)}>Add an account</Button>}>
             Accounts are created for you when you import a statement or screenshot. You can also add one by hand.
@@ -100,6 +102,26 @@ export default function Accounts() {
             >
               <div className="divide-y divide-line border-t border-line">
                 {g.items.map((a) => (
+                  <Row key={a.id} a={a} />
+                ))}
+              </div>
+            </Card>
+          ))}
+          {(companies.data ?? []).map((g) => (
+            <Card
+              key={g.company.id}
+              padded={false}
+              title={
+                <span className="inline-flex flex-wrap items-center gap-2">
+                  <Building2 className="size-4 text-ink-3" aria-hidden />
+                  {g.company.name}
+                  <Badge tone="muted">company</Badge>
+                </span>
+              }
+              description="The company’s own accounts: its money, not yours. They count in no figure of yours."
+            >
+              <div className="divide-y divide-line border-t border-line">
+                {g.accounts.map((a) => (
                   <Row key={a.id} a={a} />
                 ))}
               </div>

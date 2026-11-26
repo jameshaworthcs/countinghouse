@@ -32,7 +32,7 @@ const DEFAULT_SORT = 'date_desc';
 
 export default function Transactions() {
   const [params, setParams] = useSearchParams();
-  const { data, cats, accountName } = useAppData();
+  const { data, cats, accountName, accountsById } = useAppData();
   const toast = useToast();
   const [search, setSearch] = useState(params.get('q') ?? '');
   const q = useDebounced(search);
@@ -139,6 +139,8 @@ export default function Transactions() {
               {a.name}
             </option>
           ))}
+          {/* A company's account, opened from its own page: never among yours, but named here. */}
+          {filters.accounts && !filters.accounts.includes(',') && !accountsById.has(filters.accounts) && <option value={filters.accounts}>{accountName(filters.accounts)}</option>}
         </Select>
         <div className="w-52">
           <CategorySelect value={filters.categories} onChange={(v) => set('categories', v)} placeholder="All categories" />

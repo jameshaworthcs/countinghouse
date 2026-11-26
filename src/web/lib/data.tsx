@@ -2,7 +2,7 @@
 
 import { useQueryClient } from '@tanstack/react-query';
 import { createContext, useContext, useEffect, useMemo, type ReactNode } from 'react';
-import type { BootstrapResponse } from '../../shared/api';
+import type { BootstrapResponse, CompanyAccountsGroup } from '../../shared/api';
 import { CategoryIndex } from '../../shared/categories';
 import type { Account } from '../../shared/schema';
 import { useApi } from './api';
@@ -18,16 +18,20 @@ const DataContext = createContext<AppData | null>(null);
 
 export function DataProvider({ children, fallback }: { children: ReactNode; fallback: ReactNode }) {
   const q = useApi<BootstrapResponse>(['bootstrap'], '/bootstrap');
+  // A company's own accounts are not among yours (`data.accounts`): only their names, so a company
+  // account's rows and page can say whose they are.
+  const companies = useApi<CompanyAccountsGroup[]>(['company-accounts'], '/company-accounts');
   const value = useMemo<AppData | null>(() => {
     if (!q.data) return null;
     const accountsById = new Map(q.data.accounts.map((a) => [a.id, a]));
+    const companyNames = new Map((companies.data ?? []).flatMap((g) => g.accounts.map((a) => [a.id, a.name] as const)));
     return {
       data: q.data,
       cats: new CategoryIndex(q.data.categories),
       accountsById,
-      accountName: (id) => (id ? (accountsById.get(id)?.name ?? id) : ''),
+      accountName: (id) => (id ? (accountsById.get(id)?.name ?? companyNames.get(id) ?? id) : ''),
     };
-  }, [q.data]);
+  }, [q.data, companies.data]);
   if (!value) return <>{q.error ? <div className="p-6 text-sm text-bad-ink">{q.error.message}</div> : fallback}</>;
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>;
 }

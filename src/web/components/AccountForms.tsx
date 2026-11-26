@@ -2,8 +2,9 @@ import { useState } from 'react';
 import { ACCOUNT_TYPE_META, ACCOUNT_TYPE_ORDER } from '../../shared/accounts';
 import { today } from '../../shared/dates';
 import { INSTITUTION_CATALOG } from '../../shared/institutions';
+import type { CompanyAccountsGroup, CompanyView } from '../../shared/api';
 import type { Account, AccountType } from '../../shared/schema';
-import { api, useApiMutation } from '../lib/api';
+import { api, useApi, useApiMutation } from '../lib/api';
 import { useAppData } from '../lib/data';
 import { AmountInput, Button, Callout, Checkbox, Dialog, Field, Input, Select, Textarea, useToast } from './ui';
 
@@ -19,12 +20,20 @@ export function AccountTypeSelect({ value, onChange }: { value: AccountType; onC
   );
 }
 
-export function AccountDialog({ open, onOpenChange, account }: { open: boolean; onOpenChange: (o: boolean) => void; account?: Account }) {
+/**
+ * `institutionName`: the provider's name as the account's summary gives it, for an account at a
+ * provider only a company's accounts are at (it is not among yours).
+ */
+export function AccountDialog({ open, onOpenChange, account, institutionName }: { open: boolean; onOpenChange: (o: boolean) => void; account?: Account; institutionName?: string | undefined }) {
   const { data } = useAppData();
   const toast = useToast();
+  const companies = useApi<CompanyView[]>(['companies'], '/companies');
+  const companyAccounts = useApi<CompanyAccountsGroup[]>(['company-accounts'], '/company-accounts');
   const [name, setName] = useState(account?.name ?? '');
   const [type, setType] = useState<AccountType>(account?.type ?? 'current');
-  const [institution, setInstitution] = useState(account?.institutionId ? (data.institutions.find((i) => i.id === account.institutionId)?.name ?? '') : '');
+  const [institution, setInstitution] = useState(account?.institutionId ? (data.institutions.find((i) => i.id === account.institutionId)?.name ?? institutionName ?? INSTITUTION_CATALOG.find((i) => i.id === account.institutionId)?.name ?? '') : '');
+  // Whose it is: yours (""), or a company's (docs/DATA_FORMAT.md, accounts.json).
+  const [companyId, setCompanyId] = useState(account?.companyId ?? '');
   const [last4, setLast4] = useState(account?.last4 ?? '');
   const [currency, setCurrency] = useState(account?.currency ?? 'GBP');
   const [aliases, setAliases] = useState((account?.aliases ?? []).join(', '));
@@ -40,6 +49,10 @@ export function AccountDialog({ open, onOpenChange, account }: { open: boolean; 
   const [balance, setBalance] = useState('');
   const [balanceDate, setBalanceDate] = useState(today());
   const meta = ACCOUNT_TYPE_META[type];
+  // A company's money is never in your estate: the box is unticked and cannot be ticked.
+  const counts = include && !companyId;
+  // It carries on only from an account on its own side: yours, or the same company's.
+  const beside = companyId ? (companyAccounts.data?.find((g) => g.company.id === companyId)?.accounts ?? []) : data.accounts;
   const save = useApiMutation(
     () => {
       const inst = INSTITUTION_CATALOG.find((i) => i.name.toLowerCase() === institution.trim().toLowerCase()) ?? data.institutions.find((i) => i.name.toLowerCase() === institution.trim().toLowerCase());
@@ -47,7 +60,8 @@ export function AccountDialog({ open, onOpenChange, account }: { open: boolean; 
         name: name.trim(),
         type,
         currency: currency.trim().toUpperCase() || 'GBP',
-        includeInNetWorth: include,
+        includeInNetWorth: counts,
+        ...(companyId ? { companyId } : account?.companyId ? { companyId: null } : {}),
         aliases: aliases
           .split(',')
           .map((a) => a.trim())
@@ -133,7 +147,7 @@ export function AccountDialog({ open, onOpenChange, account }: { open: boolean; 
             <Field label="Carries on from" hint="Another account it continues under the same number, as a fixed rate that matures into easy access: a statement that runs across the day is split between them">
               <Select value={continuesFrom} onChange={(e) => setContinuesFrom(e.target.value)}>
                 <option value="">None</option>
-                {data.accounts
+                {beside
                   .filter((a) => a.id !== account.id)
                   .map((a) => (
                     <option key={a.id} value={a.id}>
@@ -173,8 +187,29 @@ export function AccountDialog({ open, onOpenChange, account }: { open: boolean; 
         <Field label="Notes" className="sm:col-span-2">
           <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
         </Field>
+        {(companies.data?.length ?? 0) > 0 || companyId ? (
+          <Field label="Whose it is" hint={companyId ? 'A company’s own account: its money is the company’s, so it is never in your estate, your spending or any other figure of yours' : 'An account of a company you run (its bank account, its card) belongs to the company'} className="sm:col-span-2">
+            <Select
+              value={companyId}
+              onChange={(e) => {
+                setCompanyId(e.target.value);
+                // Back to you: counted in your estate as its kind usually is.
+                if (!e.target.value) setInclude(ACCOUNT_TYPE_META[type].defaultInNetWorth);
+                if (e.target.value !== (account?.companyId ?? '')) setContinuesFrom('');
+              }}
+            >
+              <option value="">Yours</option>
+              {(companies.data ?? []).map((c) => (
+                <option key={c.company.id} value={c.company.id} disabled={c.company.accountId === account?.id}>
+                  {c.company.name}
+                </option>
+              ))}
+              {companyId && !companies.data?.some((c) => c.company.id === companyId) && <option value={companyId}>{companyId}</option>}
+            </Select>
+          </Field>
+        ) : null}
         <div className="flex flex-col gap-2 sm:col-span-2">
-          <Checkbox checked={include} onChange={setInclude} label="Include in estate value" />
+          <Checkbox checked={counts} disabled={Boolean(companyId)} onChange={setInclude} label={companyId ? 'Include in estate value (never, for a company’s account)' : 'Include in estate value'} />
           {meta.isa && type !== 'lisa' && <Checkbox checked={flexible} onChange={setFlexible} label="Flexible ISA (withdrawals can be replaced in the same tax year)" />}
         </div>
       </div>
