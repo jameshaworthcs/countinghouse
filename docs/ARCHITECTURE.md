@@ -151,7 +151,8 @@ the store's default, not by a filter in each loop (DECISIONS 2026-11-26):
   `balance(id)`, `figuresOf`, `coverageConfirmationsOf`, `transactionsOf(ids)`): a lookup is not a
   total. Personal code that takes ids from elsewhere (Ask's arguments, set aside's accounts, an agent's
   proposal) checks them against your accounts, and the store refuses your records (goals,
-  agreements, rules, set aside) that name a company's account. `accountsBeside(id)` and
+  agreements, rules, set aside) that name a company's account, and an account changing side while
+  one of them names it (`recordsNaming`). `accountsBeside(id)` and
   `transactionsBeside(id)` give the accounts or rows on the same side as one account: its own page,
   "similar payments", the import page's link candidates.
 - **Infrastructure asks by name**: `allAccounts`, `allTransactions()`, `allBalances()`,
@@ -167,9 +168,12 @@ the store's default, not by a filter in each loop (DECISIONS 2026-11-26):
   - `src/server/analytics/company-accounts.ts`: each company's accounts on their own, with a balance
     engine of their own, for their page and their group on the Accounts page
     (`GET /api/company-accounts`).
-  Ids a new account or provider must differ from are `accountIds()` and `institutionIds()`.
+  Ids a new account or provider must differ from are `accountIds()` and `institutionIds()`; a
+  provider typed by name is the one already there (`institutionNamed`), even one only a company's
+  accounts are at.
 - **On the web**, the Accounts page lists them under their company with a badge, apart from your
-  groups and in none of their totals; the account form says whose an account is ("Whose it is");
+  groups and in none of their totals; the import review's "Import into" lists them under their
+  company; Settings → Providers lists their providers too, marked; the account form says whose an account is ("Whose it is");
   a company account's own page shows its rows (`GET /api/transactions?accounts=<id>`, named
   explicitly), balance and its own coverage grid. The Transactions page with no account chosen shows
   yours only.

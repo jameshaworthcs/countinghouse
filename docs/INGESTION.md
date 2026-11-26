@@ -767,8 +767,16 @@ dates ("Proposed: …"), and keeps it when you change them.
   - No category of yours applies to them: not your rules, the app's merchant list or patterns, the
     bank's category, Claude's or the local model's suggestion, an agreement of yours, your payroll
     numbers or your name. Each keeps the payee its source names (or one cut from its description)
-    and a tidy address; a category you give one yourself stays. Company coding is separate, and
-    later.
+    and a tidy address, and no category at all (`companyRowPatch`). A category is one of yours, so
+    on a company's row it is in the wrong place whoever set it: re-applying takes away one it
+    carries (from before its account was a company's, or a hand edit), commit keeps none given on
+    the review page, and setting one by hand (a row, several at once, the To categorise page,
+    re-applying's "decided", an agent's proposal) is refused. Company coding is separate, and later.
+  - The one exception: each leg of a transfer between two of the company's accounts has the transfer
+    category for its leg (`credit-card-payment`, `transfers`…, by `transfer`), whatever it had
+    before, so linking, unlinking and re-applying work as for yours.
+  - The rows a layout's filter leaves out (Tide's rows that are not "Cleared") are said in the
+    import's notes, with the value that left them out, and counted among the rows skipped.
   - A transfer is linked only between two of the same company's accounts (its bank account paying
     its card), by the same evidence as yours, reading only that company's accounts' names, numbers
     and providers (not your name). Never between your account and a company's, nor two companies':
@@ -777,11 +785,15 @@ dates ("Proposed: …"), and keeps it when you change them.
     hand (refused), and a company's account's names are not evidence for your rows, nor yours for
     its.
   - An account given to a company (or back to you) has its rows worked out again as its new side's,
-    and any link across the line is taken away on both legs (`separateSides`); start-up does the
-    same for a link a hand edit left.
+    and any link across the line is taken away on both legs (`separateSides`), in the same request:
+    if that fails, the account is put back as it was and the request says so. Start-up does the
+    same for a link a hand edit left. It cannot change side while a goal, an agreement, a rule
+    (limited to it, or sending money to it) or money set aside names it: the refusal lists them.
   - None of this is personal: its rows are in no figure, check or queue of yours (the To categorise
-    page, people, novelty against your accounts, coverage, data health, the agents' digest, Ask).
-    Its own page shows its rows, balance and coverage. An import of a company's accounts alone
+    page, people, novelty against your accounts, coverage, data health, the agents' digest, Ask,
+    re-applying's preview, which shows and counts your rows only). Its own page shows its rows,
+    balance and coverage. On the review page, "Import into" lists each company's accounts under the
+    company, and an account it cannot find is said, never shown as another. An import of a company's accounts alone
     starts no insights job; naming the document (`label-imports`) is about the document, and runs
     as for any import.
   - Not company specific: a Tide or Capital on Tap export goes into whichever account you upload it

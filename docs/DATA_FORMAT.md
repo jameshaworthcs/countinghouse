@@ -82,11 +82,13 @@ data/
 the API, an import, a proposal); a new one is out of the estate by default. It must name a company in
 companies.json, and cannot be the account that carries your shares in a company (`Company.accountId`,
 which is yours). Nothing of yours names one: a goal's accounts, an agreement's account, a rule's
-counterparty and money set aside are refused when they would. Its rows get no category of yours (a
-transfer between two of its company's accounts is linked, as yours are), and it counts in no
+accounts or counterparty and money set aside (its accounts, and its pots' rules' accounts and
+counterparties) are refused when they would, and an account cannot change side while one of them
+names it. Its rows get no category of yours, not even one set by hand (each leg of a transfer
+between two of its company's accounts has the transfer category), and it counts in no
 personal figure ([FORMULAS.md §9](FORMULAS.md), [ARCHITECTURE.md](ARCHITECTURE.md), "Company
 accounts"). Reading the data warns of one naming a company that is not there, one that says it counts
-in the estate, and a link carrying on across the line. Adding the field needed no format change: an
+in the estate, a link carrying on across the line, and a record of yours that names one. Adding the field needed no format change: an
 account without it is yours, as every account was.
 
 ## transactions/&lt;account&gt;/&lt;yyyy&gt;.jsonl

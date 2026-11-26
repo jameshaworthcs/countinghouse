@@ -2958,8 +2958,10 @@ digest or Ask. An account now says whose it is (`companyId`, additive, no format
   not silently changed, so a write never says one thing and stores another.
 - **Enrichment works the two sides apart.** The owner's rows exactly as before; a company's rows get a
   payee and a tidy address and no category of the owner's (company coding comes later, apart from
-  `category`), except the transfer category on a transfer between two of the company's own accounts,
-  which keeps the transfer machinery (linking, unlinking, re-applying) as it is. A transfer is never
+  `category`), not even one the owner set by hand (a personal category in the wrong place; setting
+  one is refused), except the transfer category on each leg of a transfer between two of the
+  company's own accounts, which keeps the transfer machinery (linking, unlinking, re-applying) as it
+  is. A transfer is never
   linked across the line: money between the owner and the company is not money moving between one
   owner's accounts, and a later slice records what it is (paid for the company, a loan, pay, a
   dividend). An account given to a company has its rows worked out again, and links across the line
