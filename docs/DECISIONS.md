@@ -2933,3 +2933,47 @@ row, yet covered no new days. And a list of payments recorded already could be d
   on the order a day's balances were kept; rows recorded could outweigh a different number; the
   reason was cleared when one date was changed, and could name a date it did not set; the evidence
   and each account's coverage were worked out more than once.
+
+## 2026-11-26: A company's own accounts are kept out by the store's default, not by filters
+
+The owner runs a small limited company. Its bank account and card are worth keeping beside the
+owner's own, for its books later (paying it, a director's loan, VAT, Corporation Tax), but its money
+is never the owner's: not in the estate, spending, income, tax pages, coverage, alerts, the agents'
+digest or Ask. An account now says whose it is (`companyId`, additive, no format change).
+
+- **Personal by default, in the store.** `store.accounts`, `transactions()`, `balances()`,
+  `holdings()`, `figures`, `terms()`, `coverageConfirmations`, `institutions` and
+  `transactionCount()` give the owner's data only. The alternative, a filter in each of the hundred or
+  so loops that read accounts and transactions, would be correct only until the next loop forgot
+  one, and every new page, analytic and agent input would have to remember. With the default, a
+  page that forgets is still right. Infrastructure that must see everything (drafting, enrichment,
+  the company accounts' own page) asks by name (`allAccounts`…, `companyAccounts`…), and ESLint
+  allows those names only in a listed handful of files, each with its reason
+  (`eslint.config.js`, ARCHITECTURE.md "Company accounts").
+- **A lookup by id is not a total**: it finds any record. Where personal code takes ids from outside
+  (Ask's arguments, set aside, goals, agreements, rules, agents' proposals), they are checked against
+  the owner's accounts, and the store refuses an owner's record that names a company's account.
+- **Never in the estate, on every write path**: the store refuses `includeInNetWorth: true` on a
+  company's account (a 400 the owner sees), whoever writes; a new one is out by default. Refused,
+  not silently changed, so a write never says one thing and stores another.
+- **Enrichment works the two sides apart.** The owner's rows exactly as before; a company's rows get a
+  payee and a tidy address and no category of the owner's (company coding comes later, apart from
+  `category`), except the transfer category on a transfer between two of the company's own accounts,
+  which keeps the transfer machinery (linking, unlinking, re-applying) as it is. A transfer is never
+  linked across the line: money between the owner and the company is not money moving between one
+  owner's accounts, and a later slice records what it is (paid for the company, a loan, pay, a
+  dividend). An account given to a company has its rows worked out again, and links across the line
+  come off both legs.
+- **Proven by a metamorphic test** (`tests/company-scope.test.ts`): every GET route of the app, read
+  from its router, answers the same for a personal store and for that store with a company's data
+  beside it, drawn from the same words, amounts, dates and banks; a test-only switch that turns the
+  scope off makes it fail. Routes allowed to differ, each with its reason: the company accounts'
+  own list, the import history (documents, a company's statements among them) and the audit log of
+  the run.
+- **Two business exports built in**, not company specific: Tide's account export and Capital on
+  Tap's card export (INGESTION.md).
+- Considered: a separate data directory per company (the owner's view of both at once, and links
+  later between a personal payment and the company, would need two stores); a flag on each
+  transaction (company money is a property of the account, and a flag per row could disagree with
+  it); excluding company accounts with `includeInNetWorth: false` alone (spending, income, the tax
+  pages and the checks do not read it).

@@ -56,7 +56,7 @@ Source layout:
 | `src/shared/` | Isomorphic code: schemas (`schema.ts`), money, dates, UK rules, account-type metadata, categories, merchants, categoriser, who a payment is with when a person and what it looks like (`people.ts`), which payments an agreement schedules (`agreements.ts`), an account's terms as a reading gives them (`terms.ts`), reconciliation, what a document adds to a recorded payment (`detail.ts`), identifiers kept out of the data (`privacy.ts`), API types |
 | `src/server/` | Store, git, auth, security, migrations, enrichment, routes, app composition; `employments.ts` matches a document's employer to one of your jobs |
 | `src/server/ingest/` | Everything from bytes to committed records; `govuk.ts` reads HMRC's gov.uk pages and `payslips.ts` known payslip layouts from their text, on this machine; `pension-csv.ts` a pension or fund provider's trade histories and contribution summaries; `schedules.ts` drafts a document's schedules of payments as agreements (and student finance's as its student loan's movements) |
-| `src/server/analytics/` | Read-only computations over the store; `model.ts` is pure (no store access); `sources.ts` decides which document's figure counts when several state one job's year; `taxreturn.ts` is a year's Self Assessment return box by box, worked out by `shared/taxcalc.ts` on the forms of `shared/saforms.ts`; `payslips.ts` reads payslips in full (their year to date, gaps, employer costs); `taxdocuments.ts` is Settings → Tax documents; `companies.ts` is your shares in companies; `arrangements.ts` checks what employers set up to pay into your pensions; `payroll-pensions.ts` pairs a pension's rows with the payslips whose money they are; `agreements.ts` checks an agreement's schedule against your payments; `terms.ts` is an account's terms over time and what ends soon; `queue.ts` is the To categorise page (people's payments and cash and cheques paid in, rules your decisions point to, what's left by payee, the categories the app guessed); `month.ts` is a month's figures, for the Overview's month card and the month in review's digest alike; `prices.ts` is published prices and what they say an account of investments was worth between its valuations (its holdings path, or a price index) |
+| `src/server/analytics/` | Read-only computations over the store; `company-accounts.ts` is a company's own accounts on their own ("Company accounts", below); `model.ts` is pure (no store access); `sources.ts` decides which document's figure counts when several state one job's year; `taxreturn.ts` is a year's Self Assessment return box by box, worked out by `shared/taxcalc.ts` on the forms of `shared/saforms.ts`; `payslips.ts` reads payslips in full (their year to date, gaps, employer costs); `taxdocuments.ts` is Settings → Tax documents; `companies.ts` is your shares in companies; `arrangements.ts` checks what employers set up to pay into your pensions; `payroll-pensions.ts` pairs a pension's rows with the payslips whose money they are; `agreements.ts` checks an agreement's schedule against your payments; `terms.ts` is an account's terms over time and what ends soon; `queue.ts` is the To categorise page (people's payments and cash and cheques paid in, rules your decisions point to, what's left by payee, the categories the app guessed); `month.ts` is a month's figures, for the Overview's month card and the month in review's digest alike; `prices.ts` is published prices and what they say an account of investments was worth between its valuations (its holdings path, or a price index) |
 | `src/server/agents/` | Agent jobs: the CLI runner, job kinds and prompts, the digest, the queue |
 | `src/server/records.ts` | The validated write path for agent-maintained records |
 | `src/server/audit.ts` | The audit log: who is acting (carried through async work), the request middleware, the hash-chained log, search and the chain check; `auditdiff.ts` says what a write changed, record by record |
@@ -135,6 +135,50 @@ The equations are in [FORMULAS.md](FORMULAS.md); the rules for writing these rec
   plus content hashes of the app's own writes, and trigger a reload.
 - Each mutation emits a `change` event, which feeds the audit log (with what it changed, record by
   record), git auto-commit and the browser's live-update stream.
+
+## Company accounts
+
+An account with a `companyId` is a company's own (its bank account, its card: DATA_FORMAT.md,
+accounts.json). Its money is the company's, so it must never reach a personal figure. That is kept by
+the store's default, not by a filter in each loop (DECISIONS 2026-11-26):
+
+- **The store lists your data only.** `accounts`, `transactions()`, `balances()`, `holdings()`,
+  `figures`, `terms()`, `coverageConfirmations`, `institutions` (a provider only a company's accounts
+  are at is left out) and `transactionCount()` leave company accounts and everything of theirs out.
+  Every analytic, page, check, agent digest and Ask tool is built on them, so each is personal
+  without a filter of its own.
+- **A lookup by id finds any record** (`account(id)`, `transaction(id)`, `transactions(accountId)`,
+  `balance(id)`, `figuresOf`, `coverageConfirmationsOf`, `transactionsOf(ids)`): a lookup is not a
+  total. Personal code that takes ids from elsewhere (Ask's arguments, set aside's accounts, an agent's
+  proposal) checks them against your accounts, and the store refuses your records (goals,
+  agreements, rules, set aside) that name a company's account. `accountsBeside(id)` and
+  `transactionsBeside(id)` give the accounts or rows on the same side as one account: its own page,
+  "similar payments", the import page's link candidates.
+- **Infrastructure asks by name**: `allAccounts`, `allTransactions()`, `allBalances()`,
+  `allHoldings()`, `allFigures`, `allCoverageConfirmations`, `allInstitutions`, and for one company
+  `companyAccounts(id)`, `companyTransactions(id)`. ESLint allows these only in the files listed in
+  `eslint.config.js` (`SCOPE_ALLOWLIST`), each with its reason:
+  - `src/server/store.ts`: defines them;
+  - `src/server/enrich.ts`: tidy addresses for every row; your rows and each company's worked out
+    apart; transfers paired within one side, and links across the line taken away (`separateSides`);
+  - `src/server/ingest/draft.ts`: which account a document is of is for it to say, a company's too
+    (by account details, providers and the rows already recorded); a row's transfer match is looked
+    for on its own side only;
+  - `src/server/analytics/company-accounts.ts`: each company's accounts on their own, with a balance
+    engine of their own, for their page and their group on the Accounts page
+    (`GET /api/company-accounts`).
+  Ids a new account or provider must differ from are `accountIds()` and `institutionIds()`.
+- **On the web**, the Accounts page lists them under their company with a badge, apart from your
+  groups and in none of their totals; the account form says whose an account is ("Whose it is");
+  a company account's own page shows its rows (`GET /api/transactions?accounts=<id>`, named
+  explicitly), balance and its own coverage grid. The Transactions page with no account chosen shows
+  yours only.
+- **Writes are whole-file safe.** A write is never built from a scoped list: accounts are written one
+  at a time (`upsertAccount`), coverage confirmations are added and removed by id.
+- **Tests only** can widen the scope (`widenScopeForTest`, refused outside Vitest and by ESLint
+  outside `tests/`): the canary of `tests/company-scope.test.ts`, which calls every GET route of the
+  app, read from its router, over a personal store and over the same store with a company's data
+  beside it (drawn from the same words, amounts, dates and banks), and checks they answer the same.
 
 ## Audit log
 
@@ -499,7 +543,8 @@ Per account:
   statement: the strong ones, and each screenshot or mid-day balance that adds up exactly. They
   are surfaced in Data health.
 
-The estate value on a date is the sum of included accounts, converted to GBP (manual FX rates).
+The estate value on a date is the sum of included accounts, converted to GBP (manual FX rates). A
+company's own account is never one ("Company accounts", above).
 Groups are assigned by the sign of the balance, so an overdrawn current account counts as a debt
 and a card in credit counts as cash.
 

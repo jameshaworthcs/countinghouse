@@ -33,6 +33,8 @@ The same file twice (by SHA-256) is recognised as already imported.
 | Amex CSV | `amex` | Positive = charge (signs inverted); merchant address; reference as id |
 | Aqua CSV | `aqua` | Positive = charge (signs inverted); the Note column, what the statement shows, as the reference |
 | PayPal Credit CSV | `paypal-credit` | Positive = charge (signs inverted); `date,id,amount,description`, amounts as `£3.49` |
+| Tide CSV (business account) | `tide` | Money in and out in two columns ("Paid in", "Paid out", both positive), date and time in one "Date" column (`YYYY-MM-DD HH:MM:SS`), Tide's "Transaction ID" as the row's id, "Transaction type" (FasterPaymentIn, CardPaymentOut, DirectDebit, Fee…) kept as the type, "Category name" as the bank's category, the description and reference joined. Only rows with Status "Cleared": any other (pending, declined) is left out and counted among the rows skipped. From, To and "Initiated by" stay in the row as read. Current account by default; any account you upload it to |
+| Capital on Tap CSV (business card) | `capital-on-tap` | Purchases positive and repayments negative (signs inverted); the clearance date is the date, as the posting date is for other cards, with the authorisation date kept as the transaction date (a row not yet cleared has no date, and is skipped with a note). "Merchant Name" is the payee, "Original Amount" and "Original Currency" a payment's amount abroad (blank or padded currencies tolerated), "Card Ending" the card's last 4 digits; the cardholder's name stays only in the row as read |
 | Tesco Bank credit card CSV | `tesco-bank-card` | Sign from `Debit/Credit Flag` (a payment is `-£9.99`, `Credit`); posting date is the date, transaction date kept; Windows-1252 |
 | HSBC CSV (no header) | `hsbc` | Matched by the shape of the first row |
 | first direct and other Date/Description/Amount CSVs | `date-description-amount` | Names no bank, so says nothing about signs: a file for a credit card is read card style on the same rule as an auto-detected mapping (below), with the same warning, and the review page can change the signs back |
@@ -757,6 +759,33 @@ dates ("Proposed: …"), and keeps it when you change them.
     `contribution`. A commit also links its new rows to other legs already stored (the other
     account's statement committed earlier), without recategorising anything else. Links already
     made are not changed: an agent proposes fixing a wrong one ([AGENTS.md §5](AGENTS.md)).
+  - Only between two accounts on one side: yours with yours, or one company's with its own
+    ("Company accounts", below).
+- **Company accounts** (`Account.companyId`, [DATA_FORMAT.md](DATA_FORMAT.md)). A company's own
+  account (its bank account, its card) is matched to a document like any other: by its number,
+  provider, type and name, and the rows it has recorded. Its rows are its company's, so:
+  - No category of yours applies to them: not your rules, the app's merchant list or patterns, the
+    bank's category, Claude's or the local model's suggestion, an agreement of yours, your payroll
+    numbers or your name. Each keeps the payee its source names (or one cut from its description)
+    and a tidy address; a category you give one yourself stays. Company coding is separate, and
+    later.
+  - A transfer is linked only between two of the same company's accounts (its bank account paying
+    its card), by the same evidence as yours, reading only that company's accounts' names, numbers
+    and providers (not your name). Never between your account and a company's, nor two companies':
+    money between you and the company is not money moving between accounts of one owner. A row of
+    yours is never the other leg of a company's row, at drafting, commit, re-applying, or a link by
+    hand (refused), and a company's account's names are not evidence for your rows, nor yours for
+    its.
+  - An account given to a company (or back to you) has its rows worked out again as its new side's,
+    and any link across the line is taken away on both legs (`separateSides`); start-up does the
+    same for a link a hand edit left.
+  - None of this is personal: its rows are in no figure, check or queue of yours (the To categorise
+    page, people, novelty against your accounts, coverage, data health, the agents' digest, Ask).
+    Its own page shows its rows, balance and coverage. An import of a company's accounts alone
+    starts no insights job; naming the document (`label-imports`) is about the document, and runs
+    as for any import.
+  - Not company specific: a Tide or Capital on Tap export goes into whichever account you upload it
+    to.
 - **Linking transfers before commit** (`src/server/ingest/links.ts`). A row's link button on the
   review page links it as the other leg of a transfer, by hand, to:
   - a row of another import waiting for review, or another account's row in the same document;

@@ -527,11 +527,20 @@ out; an "other asset" is valued yearly, so it asks for a newer one after 400 day
 - **Yours** (`yours`): a value you give.
 - **Its dividends**: each voucher (a `dividends_paid` figure naming it) with the bank credit that
   paid it (the same amount to the penny, within 10 days, naming it; the rule of §11), then its
-  dividend credits no voucher accounts for.
+  dividend credits no voucher accounts for. Only credits into your own accounts: a payment out of
+  the company's own account is the company's.
+
+**A company's own accounts** (`Account.companyId`: its bank account, its card) are never in the
+estate, nor in any other figure of yours (§14, the tax pages, coverage, staleness, FSCS): their money
+is the company's. Such an account never has `includeInNetWorth` (every write refuses it), and the
+store leaves company accounts and their rows out of everything it lists for you (ARCHITECTURE.md,
+"Company accounts"). The shares you hold in the company are yours, on their own account, as above.
+A company account's balance is worked out by the same rules, over its company's accounts alone, for
+its own page (`analytics/company-accounts.ts`).
 
 **Estate value on D:**
 
-- Σ over included accounts of balance(D) in GBP (manual FX).
+- Σ over included accounts of balance(D) in GBP (manual FX). Included accounts are yours only.
 - A balance's sign decides assets or liabilities: an overdraft is a debt; a card in credit is cash.
 - Before an account's first data it adds nothing, so a total on D can leave accounts out.
 - **Pay owed is never in it.** Pay earned on timesheets and not yet in the bank (§17, "Earned
@@ -1166,6 +1175,12 @@ A warning holds an import back from bulk commit:
 Warnings from reading the document (rows dropped as unreadable) also hold an import back.
 
 ## 14. Income and spending
+
+Only your own accounts' transactions count: a company's account's rows (`Account.companyId`) are
+never income, spending or a transfer of yours. A transfer is linked only between two accounts on
+one side of the line between your money and a company's (yours with yours, or one company's with
+its own: INGESTION.md, "Company accounts"), so money between you and a company is never left out as
+a transfer either: a payment of yours to the company stays in your figures as what it is.
 
 A transaction counts as follows (`classifyFlow`):
 

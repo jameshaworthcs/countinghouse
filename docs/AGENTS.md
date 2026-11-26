@@ -74,6 +74,11 @@ The digest holds:
 It leaves out identifiers the analysis does not need: PAYE references, payroll numbers and account
 numbers.
 
+The digest, Ask's tools and every figure in them are the owner's own: a company's own accounts
+(`Account.companyId`) and their rows are never in them (ARCHITECTURE.md, "Company accounts"). An
+import's part for a company's account is left out of the digest's imports, and an import of a
+company's accounts alone starts no `insights-after-import` job.
+
 **The live app's API** is open to an agent that holds a token the owner made (SELF_HOSTING.md, "Agent
 access"): `npm run -s api -- GET /imports`.
 - It is how an agent does upkeep on imports waiting for review. It can read a document again, draft
@@ -202,6 +207,8 @@ account's dates), an agent does not change it. It **proposes a fix**, and the ow
 dismisses it on the Import page, under "Proposed fixes", change by change. The code is
 `src/server/proposals.ts`.
 
+- **Only the owner's data.** A change that names a company's own account, one of its rows or
+  balances (`Account.companyId`), is refused as a problem: a proposal changes only the owner's data.
 - **How.** `POST /api/proposals` with a token that has the `records` scope (`npm run -s api --
   POST /proposals @proposal.json`), or, in an in-app job, `ctx.proposals.create(input, provenance)`
   from the job's `apply`, with the provenance it is given. Both are checked the same way.

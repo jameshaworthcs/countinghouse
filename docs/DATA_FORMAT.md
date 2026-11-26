@@ -74,7 +74,20 @@ data/
 | `balanceMode` | `ledger` \| `market`? | overrides the type default (see ARCHITECTURE.md) |
 | `includeInNetWorth` | boolean | the estate value includes it |
 | `flexibleIsa`, `interestRate`, `maturesOn`, `pension{employer,method}`, `notes`, `attributes` | optional | |
-| `continues` | `{accountId, from}`? | the account this one carries on from, from that day: a product change under one account number (a fixed rate maturing into easy access). A statement that runs across the day is split between the two ([INGESTION.md](INGESTION.md), "Linked accounts") |
+| `continues` | `{accountId, from}`? | the account this one carries on from, from that day: a product change under one account number (a fixed rate maturing into easy access). A statement that runs across the day is split between the two ([INGESTION.md](INGESTION.md), "Linked accounts"). Only between two accounts on one side (both yours, or both one company's) |
+| `companyId` | slug? | → companies.json. A company's own account (its bank account, its card), not yours: its money is the company's. Absent: yours |
+
+**A company's own account** (`companyId` set) is never in your estate: `includeInNetWorth` is always
+`false`. Every write that would make it `true` is refused (a 400), whoever writes (the Accounts page,
+the API, an import, a proposal); a new one is out of the estate by default. It must name a company in
+companies.json, and cannot be the account that carries your shares in a company (`Company.accountId`,
+which is yours). Nothing of yours names one: a goal's accounts, an agreement's account, a rule's
+counterparty and money set aside are refused when they would. Its rows get no category of yours (a
+transfer between two of its company's accounts is linked, as yours are), and it counts in no
+personal figure ([FORMULAS.md §9](FORMULAS.md), [ARCHITECTURE.md](ARCHITECTURE.md), "Company
+accounts"). Reading the data warns of one naming a company that is not there, one that says it counts
+in the estate, and a link carrying on across the line. Adding the field needed no format change: an
+account without it is yours, as every account was.
 
 ## transactions/&lt;account&gt;/&lt;yyyy&gt;.jsonl
 
@@ -311,8 +324,11 @@ notes?, createdBy, createdAt, updatedAt}`:
   `net-assets` (book value: its net assets × your shares ÷ its shares) or `yours`. Each is recorded
   as a balance of its account (`balanceId`), its note saying how it was worked out
   ([FORMULAS.md §9](FORMULAS.md), "Shares in a company").
-- `accountId`: the "other asset" account that carries its value in your estate. `employmentId`:
-  your job there, when you work for it.
+- `accountId`: the "other asset" account that carries its value in your estate (yours: never one
+  of the company's own accounts). `employmentId`: your job there, when you work for it.
+
+The company's own accounts, when you keep them here, are accounts with its `companyId`
+(accounts.json): listed under it on the Accounts page, apart from yours.
 - `createdBy`: `owner`, or `agent` when a proposal you applied added it.
 
 An agent proposes a company from its documents (`add_company`); you change one with
