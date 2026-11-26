@@ -84,6 +84,37 @@ function tx(accountId: string, date: string, amount: number, description: string
   txs.push({ id: transactionId(accountId, date, amount, description, n), accountId, date, amount: roundMoney(amount), currency: 'GBP', description, source: {}, createdAt: stamp, ...extra });
 }
 
+/**
+ * The company's own current account (Account.companyId): its money is the company's, so nothing on it
+ * counts in any figure of Jo's. Its rows are written last and draw nothing from the random sequence, so
+ * every personal figure is the same as without it. They look like Jo's on purpose: pay from Acme, an
+ * HMRC payment, and the dividend that Jo's account received, paid out the same day for the same amount.
+ */
+async function demoCompanyAccount(store: Store, dividendDay: string): Promise<void> {
+  await store.upsertAccount(acct('studio-current', 'Example Studio business account', 'current', 'example-bank', { last4: '2468', companyId: 'example-studio', includeInNetWorth: false }));
+  const rows: Transaction[] = [];
+  const row = (date: string, amount: number, description: string) => {
+    if (date <= END) rows.push({ id: transactionId('studio-current', date, amount, description, 0), accountId: 'studio-current', date, amount, currency: 'GBP', description, source: {}, createdAt: stamp });
+  };
+  for (let k = -4; k <= 0; k++) {
+    const m = startOfMonth(addMonths(END, k));
+    row(addDays(m, 4), 2_400 + 150 * (k + 4), 'EXAMPLE CLIENT LTD INV');
+    row(addDays(m, 9), -24.99, 'EXAMPLE HOSTING LTD');
+    row(addDays(m, 24), 1_150, 'ACME ANALYTICS LTD SALARY');
+    row(addDays(m, 27), -1_200, 'J BLOGGS SALARY');
+  }
+  row(addDays(startOfMonth(addMonths(END, -2)), 18), -1_312.4, 'HMRC CORPORATION TAX');
+  row(dividendDay, -480, 'DIVIDEND J BLOGGS');
+  if (!rows.length) return;
+  await store.addTransactions(rows, 'demo: the company’s own account');
+  let balance = 6_500;
+  const snaps: BalanceSnapshot[] = [];
+  for (const r of [...rows].sort((a, b) => (a.date < b.date ? -1 : 1))) balance = roundMoney(balance + r.amount);
+  const last = rows.reduce((m, r) => (r.date > m ? r.date : m), rows[0]!.date);
+  snaps.push({ id: balanceId('studio-current', last, balance, 'statement'), accountId: 'studio-current', date: last, balance, currency: 'GBP', kind: 'statement', dateSource: 'document', source: {}, createdAt: stamp });
+  await store.addBalances(snaps, 'demo: the company’s balance');
+}
+
 async function main() {
   await rm(DIR, { recursive: true, force: true });
   await rm(WORK, { recursive: true, force: true });
@@ -115,7 +146,8 @@ async function main() {
     acct('sipp', 'Example Pensions SIPP', 'sipp', 'example-pensions', { pension: { method: 'relief_at_source' } }),
     acct('state-pension', 'State Pension forecast', 'state_pension', 'dwp'),
     acct('student-loan', 'Student loan (Plan 2)', 'student_loan', 'slc'),
-    // Shares in a friend's small company (companies.json).
+    // Shares in a friend's small company (companies.json), whose books Jo keeps: its own account is
+    // added with the company (demoCompanyAccount).
     ...(SPARSE ? [] : [acct('studio-shares', 'Example Studio Ltd shares', 'other_asset', undefined)]),
   ]);
 
@@ -528,6 +560,7 @@ async function main() {
     );
     const day = `${thisYear.startYear}-06-15`;
     if (day <= END) await store.addFigures([{ id: figureId('dividends_paid', 480, thisYear.label, 'Example Studio Ltd', 'Dividend'), kind: 'dividends_paid', label: 'Dividend', amount: 480, currency: 'GBP', taxYear: thisYear.label, periodEnd: day, date: day, payer: 'Example Studio Ltd', source: {}, createdAt: stamp }], 'demo: dividend voucher');
+    await demoCompanyAccount(store, day);
   }
   // The flat's tenancy (agreements.json): a year's rent on the 1st of each month, from six months ago.
   if (!SPARSE) {
