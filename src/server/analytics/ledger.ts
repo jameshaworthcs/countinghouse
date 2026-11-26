@@ -121,8 +121,13 @@ export function companyLedger(src: LedgerSource, companyId: string): Ledger {
   for (const t of rows) {
     const account = src.account(t.accountId)!;
     const other = t.transferGroup && t.counterpartyAccountId ? src.account(t.counterpartyAccountId) : undefined;
-    if (other && ownIds.has(other.id)) {
+    if (other && ownIds.has(other.id) && t.currency === 'GBP') {
       (transfers.get(t.transferGroup!) ?? transfers.set(t.transferGroup!, []).get(t.transferGroup!)!).push(t);
+      continue;
+    }
+    // The books are in pounds: a row in another currency is not posted until it is in pounds (a check).
+    if (t.currency !== 'GBP') {
+      checks.push({ kind: 'foreign-currency', transactionId: t.id, accountId: t.accountId, date: t.date, amount: t.amount, description: t.description, currency: t.currency });
       continue;
     }
     const source = { kind: 'row' as const, id: t.id };
@@ -201,7 +206,8 @@ export function companyLedger(src: LedgerSource, companyId: string): Ledger {
 
   // Maybe the same money twice: a loan of yours with no company row linked, and a company row coded to the
   // director's loan with no row of yours linked, the same amount the other way within 10 days.
-  const dlRows = rows.filter((t) => !linkedCompany.has(t.id) && t.books?.ledger === 'directors-loan' && !t.books.lines?.length && !codingProblems(t.amount, t.books, 'company').length);
+  // A company row you said is linked to none of yours (an empty link) is not asked about.
+  const dlRows = rows.filter((t) => !linkedCompany.has(t.id) && !t.companyLink && t.books?.ledger === 'directors-loan' && !t.books.lines?.length && !codingProblems(t.amount, t.books, 'company').length);
   for (const p of unlinkedLoans) {
     for (const c of dlRows) {
       if (toMinor(p.amount) + toMinor(c.amount) !== 0 || Math.abs(diffDays(p.date, c.date)) > DOUBLE_COUNT_DAYS) continue;
@@ -213,7 +219,12 @@ export function companyLedger(src: LedgerSource, companyId: string): Ledger {
   const vat = company?.books?.vat;
   const vatSources = new Map<string, LedgerPosting>();
   for (const p of postings) if (p.vat?.part === 'tax' && (!vat || p.date < vat.registeredFrom || (vat.deregisteredOn && p.date > vat.deregisteredOn))) vatSources.set(`${p.source.kind}:${p.source.id}`, p);
-  for (const p of vatSources.values()) checks.push({ kind: 'vat-unregistered', source: { kind: p.source.kind, id: p.source.id }, date: p.date, amount: fromMinor(postings.filter((x) => x.source.id === p.source.id && x.vat?.part === 'tax').reduce((s, x) => s + Math.abs(x.amount), 0)) });
+  for (const p of vatSources.values()) {
+    // The VAT it carries: a reverse charge posts it both ways, so the larger side, not the two added.
+    const tax = postings.filter((x) => x.source.kind === p.source.kind && x.source.id === p.source.id && x.vat?.part === 'tax');
+    const [debits, credits] = [tax.reduce((s, x) => s + Math.max(0, x.amount), 0), tax.reduce((s, x) => s - Math.min(0, x.amount), 0)];
+    checks.push({ kind: 'vat-unregistered', source: { kind: p.source.kind, id: p.source.id }, date: p.date, amount: fromMinor(Math.max(debits, credits)) });
+  }
 
   // Every source adds up to nothing: by construction, so this never fires; it is here to say so if it did.
   const sums = new Map<string, { source: LedgerPosting['source']; minor: number }>();
@@ -380,7 +391,8 @@ export function codingView(src: LedgerSource, company: Company, from?: ISODate, 
   });
 
   // Loans of yours with no company row linked, and the company rows that could be their other side.
-  const free = src.companyTransactions(company.id).filter((t) => !linkOf.has(t.id) && !t.companyLink && linkable(src, t, ownIds));
+  // Your "not linked" stops the app linking a row, not you: it is still offered here.
+  const free = src.companyTransactions(company.id).filter((t) => !linkOf.has(t.id) && !isLinked(t) && linkable(src, t, ownIds));
   const suggestions: LinkSuggestion[] = [];
   for (const p of src.transactions()) {
     if (p.company?.id !== company.id || p.company.as !== 'loan' || !markCounts(p, src) || linkedPersonal.has(p.id)) continue;

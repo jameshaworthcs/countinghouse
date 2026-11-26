@@ -1628,6 +1628,7 @@ export type LedgerCheck =
   | { kind: 'coding-invalid'; transactionId: string; accountId: string; date: string; amount: number; description: string; problem: string }
   | { kind: 'bank-not-imported'; transactionId: string; accountId: string; date: string; amount: number; description: string }
   | { kind: 'transfer-unmatched'; transactionId: string; accountId: string; date: string; amount: number; description: string }
+  | { kind: 'foreign-currency'; transactionId: string; accountId: string; date: string; amount: number; description: string; currency: string }
   | { kind: 'possible-double-count'; personalId: string; companyRowId: string; date: string; amount: number; description: string }
   | { kind: 'link-invalid'; companyRowIds: string[]; personalIds: string[]; problem: string }
   | { kind: 'journal-invalid'; journalId: string; date: string; memo: string; problem: string }

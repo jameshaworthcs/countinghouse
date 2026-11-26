@@ -2142,7 +2142,7 @@ months beginning with it. A row a rule coded that none matches now loses its cod
 is made, changed or removed, and whenever rows are worked out.
 
 **Checks** (`LedgerCheck`), across the whole ledger: a row not coded (posted to suspense); a coding
-that does not fit; a loan of yours with no company row (posted to the bank not imported); a transfer leg
+that does not fit; a company row in another currency (the books are in pounds, so it is not posted); a loan of yours with no company row (posted to the bank not imported); a transfer leg
 whose other leg is not there; **maybe the same money twice**: a loan of yours not linked and a company
 row coded to the director's loan not linked, the same amount the other way within 10 days (both would
 move the loan); a link or a journal that does not fit; VAT on a posting before the company registered

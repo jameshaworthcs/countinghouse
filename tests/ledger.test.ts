@@ -341,7 +341,19 @@ describe('the postings', () => {
     expect(res.checks).toContainEqual(expect.objectContaining({ kind: 'journal-invalid', journalId: badJournal.id }));
     expect(res.postings.some((p) => p.source.id === badJournal.id)).toBe(false);
     expect(res.checks).toContainEqual(expect.objectContaining({ kind: 'link-invalid', companyRowIds: [badLink.id] }));
-    expect(res.checks).toContainEqual(expect.objectContaining({ kind: 'vat-unregistered', date: early.date }));
+    expect(res.checks).toContainEqual(expect.objectContaining({ kind: 'vat-unregistered', date: early.date, amount: 2 }));
+  });
+
+  it('posts nothing in another currency: the books are in pounds', () => {
+    const dollars = { ...tx('studio-card', '2025-05-23', -40, 'EXAMPLE CLOUD INC'), currency: 'USD' };
+    const res = companyLedger(memory([...rows, dollars], { journals: [shares, pay] }), CO);
+    expect(res.postings.some((p) => p.source.id === dollars.id)).toBe(false);
+    expect(res.checks).toContainEqual(expect.objectContaining({ kind: 'foreign-currency', transactionId: dollars.id, currency: 'USD' }));
+  });
+
+  it('says a reverse charge’s VAT once when the company was not registered', () => {
+    const early = tx('studio-card', '2024-03-10', -36, 'EXAMPLE CLOUD INC', { books: coded('software-hosting', { vat: { amount: -7.2, treatment: 'reverse-charge' } }) });
+    expect(companyLedger(memory([early]), CO).checks).toContainEqual(expect.objectContaining({ kind: 'vat-unregistered', amount: 7.2 }));
   });
 });
 

@@ -280,7 +280,7 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
   const companyOf = (id: string) => companyNow.get(id) ?? out.companies.get(id) ?? store.company(id);
   const booksOp = (id: string) => out.books.get(id) ?? out.books.set(id, { filings: [] }).get(id)!;
   /** Your rules as the changes so far leave them: those removed gone, those made added. */
-  const rulesNow = () => [...store.rules.filter((r) => !out.removedRules.has(r.id)), ...out.rules];
+  const rulesNow = () => [...store.rules.filter((r) => !out.removedRules.has(r.id)), ...out.rules.filter((r) => !r.match.company)];
   const balanceById = new Map(store.balances().map((b) => [b.id, b]));
   // Rows as the changes so far leave them (null: removed), and transfer pairs likewise.
   const rows = new Map<string, Transaction | null>();

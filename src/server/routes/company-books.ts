@@ -232,7 +232,8 @@ export function companyBookRoutes(ctx: AppContext): Hono {
     const was = store.journal(c.req.param('jid'));
     if (!was || was.companyId !== company.id) throw new StoreError('No such journal', 404);
     const body = await readJson(c, JournalBody);
-    const saved = await store.putJournal({ ...was, ...body.journal, createdBy: 'owner', updatedAt: nowAfter(was.updatedAt) }, `books: ${company.name} journal ${body.journal.memo}`, body.was ? { was: body.was } : {});
+    // What the form gives, whole (evidence it leaves out is taken away), on the journal's own id and company.
+    const saved = await store.putJournal({ ...body.journal, id: was.id, companyId: was.companyId, createdBy: 'owner', createdAt: was.createdAt, updatedAt: nowAfter(was.updatedAt) }, `books: ${company.name} journal ${body.journal.memo}`, body.was ? { was: body.was } : {});
     return c.json(saved);
   });
 

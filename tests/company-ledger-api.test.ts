@@ -112,8 +112,9 @@ describe('a company’s general ledger through the app', () => {
     expect((await send('PUT', `/api/companies/${CO}/rows/${arrived.id}/link`, { rows: [] })).status).toBe(200);
     await enrich(store);
     expect(store.transaction(arrived.id)?.companyLink).toEqual({ rows: [], setBy: 'user' });
+    // You can still link it by hand: it is offered, exact.
     const coding = await json<CompanyCodingResponse>(`/api/companies/${CO}/coding`);
-    expect(coding.suggestions.find((s) => s.personal.id === lent.id)?.candidates).toEqual([]);
+    expect(coding.suggestions.find((s) => s.personal.id === lent.id)?.candidates).toEqual([expect.objectContaining({ id: arrived.id, exact: true, fee: 0 })]);
   });
 
   it('serves the postings and checks, and moves the director’s loan by the books once they are kept', async () => {
@@ -164,7 +165,10 @@ describe('a company’s general ledger through the app', () => {
     const j = add.body as unknown as Journal;
     expect((await send('POST', `/api/companies/${CO}/journals`, { journal: { date: '2024-02-01', memo: 'Off', lines: [{ ledger: 'share-capital-unpaid', amount: 100 }, { ledger: 'share-capital', amount: -99 }] } })).status).toBe(422);
     expect((await send('PUT', `/api/companies/${CO}/journals/${j.id}`, { journal: { ...j, memo: 'Shares issued' }, was: '2020-01-01T00:00:00+00:00' })).status).toBe(409);
-    expect((await send('PUT', `/api/companies/${CO}/journals/${j.id}`, { journal: { date: j.date, memo: 'Shares issued', lines: j.lines }, was: j.updatedAt })).status).toBe(200);
+    expect((await send('PUT', `/api/companies/${CO}/journals/${j.id}`, { journal: { date: j.date, memo: 'Shares issued', lines: j.lines, evidence: 'Certificate' }, was: j.updatedAt })).status).toBe(200);
+    // Saved again without its evidence, it has none.
+    expect((await send('PUT', `/api/companies/${CO}/journals/${j.id}`, { journal: { date: j.date, memo: 'Shares issued', lines: j.lines } })).status).toBe(200);
+    expect(store.journal(j.id)?.evidence).toBeUndefined();
     expect((await json<CompanyCodingResponse>(`/api/companies/${CO}/coding`)).journals.map((x) => x.memo)).toEqual(['Shares issued']);
     expect((await send('POST', `/api/companies/${CO}/journals`, { journal: { date: '2024-02-01', memo: 'x', lines: j.lines } }, agent)).status).toBe(403);
     expect((await send('DELETE', `/api/companies/${CO}/journals/${j.id}`)).status).toBe(200);
