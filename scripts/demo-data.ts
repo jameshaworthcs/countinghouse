@@ -105,6 +105,8 @@ async function demoCompanyAccount(store: Store, dividendDay: string): Promise<vo
   }
   row(addDays(startOfMonth(addMonths(END, -2)), 18), -1_312.4, 'HMRC CORPORATION TAX');
   row(dividendDay, -480, 'DIVIDEND J BLOGGS');
+  // The other side of Jo's loan to it, and of what it paid back (STUDIO_MONEY).
+  for (const r of STUDIO_MONEY.filter((x) => x.as === 'loan')) row(r.date, -r.amount, r.amount < 0 ? 'J BLOGGS DIRECTOR LOAN' : 'J BLOGGS LOAN REPAYMENT');
   if (!rows.length) return;
   await store.addTransactions(rows, 'demo: the company’s own account');
   let balance = 6_500;
@@ -113,6 +115,24 @@ async function demoCompanyAccount(store: Store, dividendDay: string): Promise<vo
   const last = rows.reduce((m, r) => (r.date > m ? r.date : m), rows[0]!.date);
   snaps.push({ id: balanceId('studio-current', last, balance, 'statement'), accountId: 'studio-current', date: last, balance, currency: 'GBP', kind: 'statement', dateSource: 'document', source: {}, createdAt: stamp });
   await store.addBalances(snaps, 'demo: the company’s balance');
+}
+
+/** Jo's payments with the studio: each is marked (Transaction.company) as what it was. */
+const STUDIO_MONEY: { accountId: string; date: string; amount: number; description: string; payee: string; as: 'paid-for' | 'loan' }[] = SPARSE
+  ? []
+  : [
+      { accountId: 'rewards-card', date: addDays(startOfMonth(addMonths(END, -4)), 11), amount: -59.99, description: 'EXAMPLE HOSTING LTD ANNUAL PLAN', payee: 'Example Hosting Ltd', as: 'paid-for' },
+      { accountId: 'current-account', date: addDays(startOfMonth(addMonths(END, -3)), 19), amount: -1_500, description: 'TRANSFER TO EXAMPLE STUDIO LTD', payee: 'Example Studio Ltd', as: 'loan' },
+      { accountId: 'current-account', date: addDays(startOfMonth(addMonths(END, -1)), 7), amount: 500, description: 'EXAMPLE STUDIO LTD LOAN REPAYMENT', payee: 'Example Studio Ltd', as: 'loan' },
+    ];
+
+/** Mark Jo's payments with the studio (STUDIO_MONEY) as what they were, once the company is in the data. */
+async function studioMarks(store: Store): Promise<void> {
+  const updates = STUDIO_MONEY.flatMap((r) => {
+    const t = store.transactions(r.accountId).find((x) => x.date === r.date && x.description === r.description);
+    return t ? [{ id: t.id, patch: { company: { id: 'example-studio', as: r.as, setBy: 'user' as const } } }] : [];
+  });
+  if (updates.length) await store.updateTransactions(updates, 'demo: money with the studio');
 }
 
 async function main() {
@@ -149,6 +169,9 @@ async function main() {
     // Shares in a friend's small company (companies.json), whose books Jo keeps: its own account is
     // added with the company (demoCompanyAccount).
     ...(SPARSE ? [] : [acct('studio-shares', 'Example Studio Ltd shares', 'other_asset', undefined)]),
+    // Jo's director's loan with the studio (Company.directorLoanAccountId): what it owes Jo, from the
+    // payments marked as paid for it or lent to it, and the figure in its last accounts.
+    ...(SPARSE ? [] : [acct('studio-loan', 'Director’s loan: Example Studio Ltd', 'director_loan', undefined)]),
   ]);
 
   // ── Everyday banking ──
@@ -355,6 +378,10 @@ async function main() {
       cashIn(`${ym}-19`, 60);
     }
   }
+  // Money with the studio, marked once the company is there (studioMarks, below): a year's hosting paid
+  // on Jo's own card, money lent to it from the current account, and part of that paid back. None draws
+  // from the random sequence.
+  for (const r of STUDIO_MONEY) tx(r.accountId, r.date, r.amount, r.description, { payee: r.payee });
   // The card: the monthly direct debit arrives on it.
   for (const t of txs.filter((x) => x.accountId === 'current-account' && x.description === 'EXAMPLE CARDS DD')) tx('rewards-card', t.date, -t.amount, 'PAYMENT RECEIVED - THANK YOU');
 
@@ -551,6 +578,7 @@ async function main() {
           holdings: [{ shareClass: 'B ordinary', shares: 2, totalShares: 20, certificate: '3', acquiredOn: '2023-05-02', source: {} }],
           valuations: [{ asOf: '2025-12-31', method: 'net-assets', netAssets: 96_000, value: 9_600, note: valued.note, balanceId: valued.id, source: {} }],
           accountId: 'studio-shares',
+          directorLoanAccountId: 'studio-loan',
           createdBy: 'owner',
           createdAt: stamp,
           updatedAt: stamp,
@@ -561,6 +589,9 @@ async function main() {
     const day = `${thisYear.startYear}-06-15`;
     if (day <= END) await store.addFigures([{ id: figureId('dividends_paid', 480, thisYear.label, 'Example Studio Ltd', 'Dividend'), kind: 'dividends_paid', label: 'Dividend', amount: 480, currency: 'GBP', taxYear: thisYear.label, periodEnd: day, date: day, payer: 'Example Studio Ltd', source: {}, createdAt: stamp }], 'demo: dividend voucher');
     await demoCompanyAccount(store, day);
+    await studioMarks(store);
+    // The director's loan in its accounts to 31 Dec 2025: what it owed Jo then, its first balance.
+    await store.addBalances([{ id: balanceId('studio-loan', '2025-12-31', 350, 'manual'), accountId: 'studio-loan', date: '2025-12-31', balance: 350, currency: 'GBP', kind: 'manual', dateSource: 'document', note: 'Director’s loan owed to Jo in the accounts to 31 Dec 2025.', source: {}, createdAt: stamp }], 'demo: director’s loan');
   }
   // The flat's tenancy (agreements.json): a year's rent on the 1st of each month, from six months ago.
   if (!SPARSE) {

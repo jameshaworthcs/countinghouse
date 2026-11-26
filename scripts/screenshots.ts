@@ -122,6 +122,7 @@ async function main() {
     ...accountPage('account-isa', 'stocks_isa'),
     ...accountPage('account-asset', 'other_asset'),
     ...accountPage('account-pension', 'workplace_pension'),
+    ...accountPage('account-director-loan', 'director_loan'),
     ...companyAccountPage,
     ['transactions', '/transactions'],
     ['spending', '/spending'],
