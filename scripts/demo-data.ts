@@ -13,7 +13,7 @@ import { loadConfig, PROJECT_ROOT } from '../src/server/config';
 import { enrich } from '../src/server/enrich';
 import sharp from 'sharp';
 import { nowISO, sha256 } from '../src/server/fsutil';
-import { balanceId, documentId, figureId, hmrcId, holdingsId, payslipId, termsId, transactionId } from '../src/server/ids';
+import { balanceId, documentId, figureId, filingId, hmrcId, holdingsId, payslipId, termsId, transactionId } from '../src/server/ids';
 import { GOVUK_ENGINE_VERSION, readGovUkPage } from '../src/server/ingest/govuk';
 import { PAYSLIP_ENGINE_VERSION, readUkPayslip } from '../src/server/ingest/payslips';
 import { ImportService } from '../src/server/ingest/service';
@@ -25,7 +25,8 @@ import { addDays, addMonths, endOfMonth, formatMonth, startOfMonth, today, weekd
 import { roundMoney } from '../src/shared/money';
 import { employeeNi, parseTaxCode, payeTax, taxMonth } from '../src/shared/paye';
 import { taxYearOf } from '../src/shared/uk';
-import { EmploymentSchema, ExtractionSchema, HmrcRecordSchema, PayslipRecordSchema, type Account, type BalanceSnapshot, type Employment, type ExtractedHmrc, type ExtractedPayslip, type Figure, type HmrcRecord, type HoldingsSnapshot, type ImportRecord, type PayslipRecord, type Transaction } from '../src/shared/schema';
+import { companyDeadlines, type CompanyDeadline } from '../src/shared/company-books';
+import { CompanyBooksSchema, EmploymentSchema, ExtractionSchema, HmrcRecordSchema, PayslipRecordSchema, type Account, type BalanceSnapshot, type CompanyFiling, type Employment, type ExtractedHmrc, type ExtractedPayslip, type Figure, type HmrcRecord, type HoldingsSnapshot, type ImportRecord, type MicroEntityLines, type PayslipRecord, type Transaction } from '../src/shared/schema';
 // A PDF with a text layer, as a saved gov.uk page has (the tests' helper).
 import { textPdf } from '../tests/pdf';
 
@@ -115,6 +116,69 @@ async function demoCompanyAccount(store: Store, dividendDay: string): Promise<vo
   const last = rows.reduce((m, r) => (r.date > m ? r.date : m), rows[0]!.date);
   snaps.push({ id: balanceId('studio-current', last, balance, 'statement'), accountId: 'studio-current', date: last, balance, currency: 'GBP', kind: 'statement', dateSource: 'document', source: {}, createdAt: stamp });
   await store.addBalances(snaps, 'demo: the company’s balance');
+}
+
+/**
+ * Example Studio's books (companies.json, `books`): Jo runs it and keeps its records here. Incorporated
+ * on 2 May 2023, its year to 31 December, trading from June, registered for VAT from April 2024 with
+ * quarters to March, June, September and December. What fell due before today is filed (the second VAT
+ * return 9 days late), and last year's accounts and CT600 went in together; the rest is still to come.
+ * Worked out from its own deadlines, and drawing nothing from the random sequence.
+ */
+async function demoCompanyBooks(store: Store): Promise<void> {
+  const company = store.company('example-studio');
+  if (!company) return;
+  const books = CompanyBooksSchema.parse({
+    incorporatedOn: '2023-05-02',
+    accountingReferenceDate: '12-31',
+    tradeStartedOn: '2023-06-01',
+    vat: { registeredFrom: '2024-04-01', scheme: 'cash', schedule: [{ from: '2024-04-01', stagger: 'quarterly-1' }] },
+    paye: { from: '2023-07-01' },
+    updatedAt: stamp,
+  });
+  const deadlines = companyDeadlines({ books }, END);
+  // Its balance sheets, micro-entity lines (net assets of £96,000 at 31 December 2025, as its valuation says), and its Corporation Tax.
+  const sheets: Record<string, MicroEntityLines> = {
+    '2023': { B: 1215, C: 18493, E: 6375, F: 12118, G: 13333, K: 13333 },
+    '2024': { B: 2380, C: 61247, E: 7102, F: 54145, G: 56525, K: 56525 },
+    '2025': { B: 3150, C: 101284, E: 8434, F: 92850, G: 96000, K: 96000 },
+  };
+  const tax: Record<string, number> = { '2023': 2533.25, '2024': 9981.5, '2025': 12474.25 };
+  // Last year's accounts: the latest year ended (filed, with its CT600, even before they fall due).
+  const lastAccounts = deadlines.filter((d) => d.kind === 'accounts' && d.period.end < END).at(-1);
+  const vats = deadlines.filter((d) => d.kind === 'vat');
+  const filedOnOf = (d: CompanyDeadline, i: number) => {
+    const ahead = d === vats[1] ? -9 : 6 + ((i * 7) % 24);
+    const day = addDays(d.due, -ahead);
+    return day <= d.period.end ? addDays(d.period.end, 3) : day > END ? END : day;
+  };
+  const accountsFiled = lastAccounts ? filedOnOf(lastAccounts, 0) : undefined;
+  const filings: CompanyFiling[] = deadlines.flatMap((d, i): CompanyFiling[] => {
+    const withAccounts = accountsFiled !== undefined && (d === lastAccounts || (d.kind === 'ct600' && d.period.end === lastAccounts?.period.end));
+    if (d.period.end >= END || (d.due >= END && !withAccounts)) return [];
+    const filedOn = withAccounts ? accountsFiled : filedOnOf(d, i);
+    const year = d.period.end.slice(0, 4);
+    const base = { id: filingId('example-studio', d.kind, d.period.end), addedBy: 'owner' as const, periodEnd: d.period.end, filedOn, ...(d.kind !== 'confirmation' && d.period.start ? { periodStart: d.period.start } : {}) };
+    switch (d.kind) {
+      case 'accounts':
+        return [{ ...base, kind: 'accounts', ...(sheets[year] ? { figures: sheets[year] } : {}) }];
+      case 'ct600':
+        return [{ ...base, kind: 'ct600', ...(tax[year] !== undefined ? { figures: { taxPayable: tax[year] } } : {}) }];
+      case 'ct-payment':
+        return [{ ...base, kind: 'ct-payment', ...(tax[year] !== undefined ? { figures: { amount: tax[year] } } : {}) }];
+      case 'confirmation':
+        return [{ ...base, kind: 'confirmation' }];
+      case 'vat': {
+        const sales = 9000 + ((i * 1373) % 6000);
+        const purchases = 1200 + ((i * 421) % 1500);
+        const due = roundMoney(sales * 0.2);
+        const reclaimed = roundMoney(purchases * 0.2);
+        const figures = { vatDueSales: due, vatDueAcquisitions: 0, totalVatDue: due, vatReclaimedCurrPeriod: reclaimed, netVatDue: roundMoney(Math.abs(due - reclaimed)), totalValueSalesExVAT: sales, totalValuePurchasesExVAT: purchases, totalValueGoodsSuppliedExVAT: 0, totalAcquisitionsExVAT: 0 };
+        return [{ ...base, kind: 'vat', reference: String(400_000_000 + i * 7919), figures }];
+      }
+    }
+  });
+  await store.upsertCompany({ ...company, books: { ...books, filings }, updatedAt: stamp }, 'demo: the studio’s books');
 }
 
 /** Jo's payments with the studio: each is marked (Transaction.company) as what it was. */
@@ -589,6 +653,7 @@ async function main() {
     const day = `${thisYear.startYear}-06-15`;
     if (day <= END) await store.addFigures([{ id: figureId('dividends_paid', 480, thisYear.label, 'Example Studio Ltd', 'Dividend'), kind: 'dividends_paid', label: 'Dividend', amount: 480, currency: 'GBP', taxYear: thisYear.label, periodEnd: day, date: day, payer: 'Example Studio Ltd', source: {}, createdAt: stamp }], 'demo: dividend voucher');
     await demoCompanyAccount(store, day);
+    await demoCompanyBooks(store);
     await studioMarks(store);
     // The director's loan in its accounts to 31 Dec 2025: what it owed Jo then, its first balance.
     await store.addBalances([{ id: balanceId('studio-loan', '2025-12-31', 350, 'manual'), accountId: 'studio-loan', date: '2025-12-31', balance: 350, currency: 'GBP', kind: 'manual', dateSource: 'document', note: 'Director’s loan owed to Jo in the accounts to 31 Dec 2025.', source: {}, createdAt: stamp }], 'demo: director’s loan');

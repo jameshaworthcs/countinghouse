@@ -117,6 +117,9 @@ async function main() {
     ['accounts', '/accounts'],
     ['earmarks', '/earmarks'],
     ['earmarks-setup', '/earmarks#setup'],
+    // A company whose books Jo keeps (the company's own routes): its deadlines and cash, and its records.
+    ['company', '/company/example-studio'],
+    ['company-settings', '/company/example-studio/settings'],
     ...accountPage('account-current', 'current'),
     ...accountPage('account-savings', 'savings'),
     ...accountPage('account-isa', 'stocks_isa'),
