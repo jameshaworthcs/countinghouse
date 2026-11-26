@@ -16,6 +16,7 @@ import type { ChangeDiff } from '../shared/audit';
 import { ACCOUNT_TYPE_META, balanceModeOf, sideOf } from '../shared/accounts';
 import { companyMarkProblem, markMisfit } from '../shared/company';
 import { addedBooksProblems } from '../shared/company-books';
+import { codingPlace, codingProblems, companyLinkProblem, isBookRule, journalProblems, linkGroups, ruleBooksProblems } from '../shared/ledger';
 import { defaultCategories } from '../shared/categories';
 import { earmarkAccountIds } from '../shared/earmarks';
 import { sectionSpan } from '../shared/coverage';
@@ -33,6 +34,7 @@ import {
   TaxReturnSchema,
   EarmarksSchema,
   HmrcRecordSchema,
+  JournalSchema,
   PayslipRecordSchema,
   TermsSchema,
   CsvProfileSchema,
@@ -67,6 +69,7 @@ import {
   type Person,
   type TaxReturn,
   type HmrcRecord,
+  type Journal,
   type PayslipRecord,
   type Terms,
   type CsvProfile,
@@ -185,6 +188,8 @@ const JSONL_FILES = {
   hmrc: { file: 'hmrc.jsonl', schema: HmrcRecordSchema },
   payslips: { file: 'payslips.jsonl', schema: PayslipRecordSchema },
   terms: { file: 'terms.jsonl', schema: TermsSchema },
+  /** A company's journals: its books' entries that are not payments (optional: no file, none). */
+  journals: { file: 'journals.jsonl', schema: JournalSchema },
 } as const;
 
 interface State {
@@ -224,6 +229,8 @@ interface State {
   hmrc: HmrcRecord[];
   payslips: PayslipRecord[];
   terms: Terms[];
+  /** Companies' journals (journals.jsonl): company data, never listed for you. */
+  journals: Journal[];
   transactions: Map<string, Transaction[]>;
   balances: Map<string, BalanceSnapshot[]>;
   holdings: Map<string, HoldingsSnapshot[]>;
@@ -263,6 +270,7 @@ function emptyState(): State {
     hmrc: [],
     payslips: [],
     terms: [],
+    journals: [],
     transactions: new Map(),
     balances: new Map(),
     holdings: new Map(),
@@ -286,6 +294,8 @@ export class Store extends EventEmitter {
   private state: State = emptyState();
   private readonly mutex = new Mutex();
   private txById = new Map<string, Transaction>();
+  /** A row of yours → the company rows whose link names it (`companyLink`). */
+  private linkedBy = new Map<string, string[]>();
   /** Raw lines / items that failed validation, keyed by relative file path. */
   private quarantine = new Map<string, unknown[]>();
   /** Hash of the last content this process wrote, per relative path. */
@@ -551,6 +561,33 @@ export class Store extends EventEmitter {
     }
     const theirs = new Set(next.accounts.filter((a) => a.companyId).map((a) => a.id));
     for (const n of theirs.size ? recordsNaming(next, theirs) : []) issues.push({ file: n.file, severity: 'warning', message: `${n.what} names a company's own account (${n.accountId}): your records name only accounts of yours, so it is left out of your figures` });
+    // A company's books (docs/DATA_FORMAT.md): codings, links, book rules and journals a hand edit got wrong.
+    const marks = { account: (id: string) => accountsById.get(id), company: (id: string | undefined) => next.companies.find((c) => c.id === id) };
+    const rowsById = new Map([...next.transactions.values()].flat().map((t) => [t.id, t]));
+    for (const list of next.transactions.values()) {
+      for (const t of list) {
+        if (!t.books) continue;
+        const place = codingPlace(t, marks);
+        const problem = 'problem' in place ? place.problem : codingProblems(t.amount, t.books, place.row)[0];
+        if (problem) issues.push({ file: `transactions/${t.accountId}`, severity: 'warning', message: `Transaction ${t.id} is coded where it does not fit (${problem}): its coding counts for nothing until it is put right` });
+      }
+    }
+    for (const c of next.companies) {
+      const own = new Set(next.accounts.filter((a) => a.companyId === c.id).map((a) => a.id));
+      const rows = [...own].flatMap((id) => next.transactions.get(id) ?? []);
+      for (const g of linkGroups(rows)) {
+        const problem = companyLinkProblem(g, (id) => rowsById.get(id), marks);
+        if (problem) issues.push({ file: `transactions/${rowsById.get(g.companyIds[0]!)?.accountId ?? ''}`, severity: 'warning', message: `Transaction ${g.companyIds.join(', ')} is linked to rows of yours where it does not fit (${problem}): the link counts for nothing` });
+      }
+    }
+    for (const r of next.rules.filter(isBookRule)) {
+      const problem = [...ruleBooksProblems(r), ...bookRuleAccountProblems(r, (id) => accountsById.get(id), (id) => companyIds.has(id))][0];
+      if (problem) issues.push({ file: 'rules.json', severity: 'warning', message: `The rule "${r.name ?? r.match.value}" codes a company's rows but does not fit (${problem}): it codes nothing` });
+    }
+    for (const j of next.journals) {
+      const problem = !next.companies.some((c) => c.id === j.companyId) ? `there is no company "${j.companyId}"` : journalProblems(j, (id) => accountsById.get(id)?.companyId === j.companyId)[0];
+      if (problem) issues.push({ file: 'journals.jsonl', severity: 'warning', message: `Journal ${j.id} does not fit (${problem}): it is left out of the company's books` });
+    }
     if (next.meta.version > FORMAT_VERSION) {
       issues.push({ file: 'meta.json', severity: 'error', message: `Data format v${next.meta.version} is newer than this app understands (v${FORMAT_VERSION}). Update the app before editing.` });
     }
@@ -565,6 +602,7 @@ export class Store extends EventEmitter {
 
     this.state = next;
     this.txById = txById;
+    this.indexLinks();
     this.issues = issues;
     this.quarantine = quarantine;
     this.version++;
@@ -772,8 +810,13 @@ export class Store extends EventEmitter {
   get categories(): Category[] {
     return this.state.categories;
   }
+  /** Your rules: those that categorise your rows (not a company's book rules). */
   get rules(): Rule[] {
-    return this.state.rules;
+    return this.state.rules.filter((r) => !isBookRule(r));
+  }
+  /** A company's book rules (`set.books`), or every company's: company data, for its own pages and enrichment. */
+  bookRules(companyId?: string): Rule[] {
+    return this.state.rules.filter((r) => isBookRule(r) && (!companyId || r.match.company?.id === companyId));
   }
   get goals(): Goal[] {
     return this.state.goals;
@@ -876,6 +919,18 @@ export class Store extends EventEmitter {
   /** Receipts attached to transactions. */
   get receipts(): Receipt[] {
     return this.state.receipts;
+  }
+  /** One company's journals (journals.jsonl), by date: company data, for its books only (ESLint's allowlist). */
+  companyJournals(companyId: string): Journal[] {
+    return sortByDate(this.state.journals.filter((j) => j.companyId === companyId));
+  }
+  /** A journal by its id, whichever company's it is. */
+  journal(id: string): Journal | undefined {
+    return this.state.journals.find((j) => j.id === id);
+  }
+  /** The company rows whose link names a row of yours (`companyLink`): a lookup by the row's id. */
+  companyLinksTo(transactionId: string): Transaction[] {
+    return (this.linkedBy.get(transactionId) ?? []).map((id) => this.txById.get(id)).filter((t): t is Transaction => t !== undefined);
   }
   get imports(): ImportSummary[] {
     return this.state.imports;
@@ -1081,7 +1136,7 @@ export class Store extends EventEmitter {
       for (const a of after as Account[]) {
         const prior = was.get(a.id);
         if (!prior || sideOf(prior) === sideOf(a)) continue;
-        const naming = recordsNaming(this.state, new Set([a.id]));
+        const naming = recordsNaming(this.state, new Set([a.id]), { bookRules: true });
         if (naming.length) throw new StoreError(`${a.name} cannot ${a.companyId ? 'become a company’s account' : 'become yours again'} while ${naming.map((n) => n.what).join(', ')} ${naming.length === 1 ? 'names' : 'name'} it: change ${naming.length === 1 ? 'that' : 'those'} first.`);
       }
     }
@@ -1101,7 +1156,15 @@ export class Store extends EventEmitter {
     };
     if (name === 'goals') for (const g of fresh(after as Goal[])) this.refuseCompanyAccounts(g.accountIds, `The goal "${g.name}"`);
     if (name === 'agreements') for (const a of fresh(after as Agreement[])) this.refuseCompanyAccounts(a.accountId ? [a.accountId] : [], `The agreement "${a.name}"`);
-    if (name === 'rules') for (const r of fresh(after as Rule[])) this.refuseCompanyAccounts(ruleAccountIds(r), `The rule "${r.name ?? r.match.value}"`);
+    if (name === 'rules') {
+      for (const r of fresh(after as Rule[])) {
+        if (!isBookRule(r)) this.refuseCompanyAccounts(ruleAccountIds(r), `The rule "${r.name ?? r.match.value}"`);
+        else {
+          const problem = [...ruleBooksProblems(r), ...bookRuleAccountProblems(r, (id) => this.state.accounts.find((a) => a.id === id), (id) => this.state.companies.some((x) => x.id === id))][0];
+          if (problem) throw new StoreError(`The rule "${r.name ?? r.match.value}": ${problem}`);
+        }
+      }
+    }
     const file = await this.writeArrayFile(name, items);
     (this.state as unknown as Record<string, unknown>)[name] = after;
     this.changed(message, [file], diffById(before, after));
@@ -1110,8 +1173,19 @@ export class Store extends EventEmitter {
   setCategories(list: Category[], message = 'categories: update'): Promise<void> {
     return this.setArray('categories', list, message);
   }
+  /** Replace your rules; companies' book rules stay as they are (they are written with `setBookRules`). */
   setRules(list: Rule[], message = 'rules: update'): Promise<void> {
-    return this.setArray('rules', list, message);
+    return this.exclusive(() => {
+      if (list.some(isBookRule)) throw new StoreError('A rule that codes a company’s rows is kept on the company’s page.');
+      return this.writeArray('rules', [...list, ...this.state.rules.filter(isBookRule)], message);
+    });
+  }
+  /** Replace one company's book rules; yours and other companies' stay as they are. */
+  setBookRules(companyId: string, list: Rule[], message = 'book rules: update'): Promise<void> {
+    return this.exclusive(() => {
+      if (list.some((r) => r.match.company?.id !== companyId || !r.set.books)) throw new StoreError('A company’s book rules name it and code its rows.');
+      return this.writeArray('rules', [...this.state.rules.filter((r) => !isBookRule(r) || r.match.company?.id !== companyId), ...list], message);
+    });
   }
   setGoals(list: Goal[], message = 'goals: update'): Promise<void> {
     return this.setArray('goals', list, message);
@@ -1276,6 +1350,51 @@ export class Store extends EventEmitter {
     });
   }
 
+  // ─── Writes: a company's journals (journals.jsonl) ──────────────────────────────────────────────
+
+  /**
+   * Add or replace a company's journal, checked against the chart and its company's own accounts
+   * (shared/ledger.ts, `journalProblems`). `was`: the journal's `updatedAt` the change was made against
+   * (an edit), so a change made meanwhile is not lost.
+   */
+  putJournal(journal: Journal, message: string, opts: { was?: string } = {}): Promise<Journal> {
+    return this.exclusive(async () => {
+      const j = JournalSchema.parse(journal);
+      if (!this.state.companies.some((c) => c.id === j.companyId)) throw new StoreError(`There is no company "${j.companyId}" in your data.`, 404);
+      const problems = journalProblems(j, (id) => this.state.accounts.find((a) => a.id === id)?.companyId === j.companyId);
+      if (problems.length) throw new StoreError(problems.join(' '), 422);
+      const list = [...this.state.journals];
+      const i = list.findIndex((x) => x.id === j.id);
+      if (i >= 0 && list[i]!.companyId !== j.companyId) throw new StoreError('That journal is another company’s.', 409);
+      if (opts.was !== undefined && (i < 0 || list[i]!.updatedAt !== opts.was)) throw new StoreError('The journal changed since you opened it: reload and make your change again.', 409);
+      const diff = new DiffCollector();
+      if (i >= 0) {
+        diff.changed(list[i]!, j);
+        list[i] = j;
+      } else {
+        diff.op('added', j);
+        list.push(j);
+      }
+      await this.writeJsonl(JSONL_FILES.journals.file, list);
+      this.state.journals = list;
+      this.changed(message, [JSONL_FILES.journals.file], diff.result());
+      return j;
+    });
+  }
+
+  /** Take a journal away. */
+  deleteJournal(id: string, message: string): Promise<Journal> {
+    return this.exclusive(async () => {
+      const gone = this.state.journals.find((j) => j.id === id);
+      if (!gone) throw new StoreError('No such journal', 404);
+      const list = this.state.journals.filter((j) => j.id !== id);
+      await this.writeJsonl(JSONL_FILES.journals.file, list);
+      this.state.journals = list;
+      this.changed(message, [JSONL_FILES.journals.file], listed('removed', [gone]));
+      return gone;
+    });
+  }
+
   async upsertInstitution(inst: Institution): Promise<void> {
     const list = this.state.institutions.filter((i) => i.id !== inst.id);
     list.push(inst);
@@ -1340,10 +1459,12 @@ export class Store extends EventEmitter {
       const fresh: Transaction[] = [];
       for (const raw of txs) {
         const t = TransactionSchema.parse(raw);
-        if (this.txById.has(t.id)) continue;
+        if (this.txById.has(t.id) || fresh.some((x) => x.id === t.id)) continue;
         this.checkRow(t, undefined);
         fresh.push(t);
       }
+      // A new company row that names rows of yours must make a link that fits (none is dropped: nothing changed under it).
+      if (fresh.some((t) => t.companyLink)) this.linkUpkeep(new Map(fresh.map((t) => [t.id, t])));
       for (const t of fresh) {
         if (this.txById.has(t.id)) continue;
         diff.op('added', t);
@@ -1359,7 +1480,10 @@ export class Store extends EventEmitter {
         this.state.transactions.set(accountId, sortByDate(this.state.transactions.get(accountId) ?? []));
         paths.push(...(await this.writeTransactionYears(accountId, years)));
       }
-      if (added) this.changed(message, paths, diff.result());
+      if (added) {
+        this.indexLinks();
+        this.changed(message, paths, diff.result());
+      }
       return added;
     });
   }
@@ -1387,6 +1511,13 @@ export class Store extends EventEmitter {
         staged.set(id, next);
         plan.push({ id, current, next });
       }
+      // Links between the company's rows and yours still fit, or an automatic one broken by this write goes with it.
+      for (const next of this.linkUpkeep(staged)) {
+        const current = staged.get(next.id) ?? this.txById.get(next.id)!;
+        const stamped = { ...next, updatedAt: stamp };
+        staged.set(next.id, stamped);
+        plan.push({ id: next.id, current, next: stamped });
+      }
       for (const { id, current, next } of plan) {
         diff.changed(current, next);
         const list = this.state.transactions.get(current.accountId)!;
@@ -1402,7 +1533,10 @@ export class Store extends EventEmitter {
         this.state.transactions.set(accountId, sortByDate(this.state.transactions.get(accountId) ?? []));
         paths.push(...(await this.writeTransactionYears(accountId, years)));
       }
-      if (out.length) this.changed(message, paths, diff.result());
+      if (out.length) {
+        this.indexLinks();
+        this.changed(message, paths, diff.result());
+      }
       return out;
     });
   }
@@ -1416,11 +1550,95 @@ export class Store extends EventEmitter {
   private checkRow(next: Transaction, current: Transaction | undefined): void {
     const account = this.state.accounts.find((a) => a.id === next.accountId);
     if (!current && account && ACCOUNT_TYPE_META[account.type].derived) throw new StoreError(`${account.name} is a director’s loan account: its movements are the payments you mark as paid for or lent to its company, never rows of its own.`);
-    if (!next.company) return;
-    const same = current && JSON.stringify([current.company, current.transferGroup, current.amount, current.currency, current.splits]) === JSON.stringify([next.company, next.transferGroup, next.amount, next.currency, next.splits]);
-    if (same) return;
-    const problem = companyMarkProblem(next, next.company, { account, company: this.company(next.company.id), companyName: (id) => this.company(id)?.name });
-    if (problem) throw new StoreError(problem);
+    const changed = (keys: readonly (keyof Transaction)[]) => !current || keys.some((k) => JSON.stringify(current[k]) !== JSON.stringify(next[k]));
+    if (next.company && changed(['company', 'transferGroup', 'amount', 'currency', 'splits'])) {
+      const problem = companyMarkProblem(next, next.company, { account, company: this.company(next.company.id), companyName: (id) => this.company(id)?.name });
+      if (problem) throw new StoreError(problem);
+    }
+    // A coding only where it applies (shared/ledger.ts, `codingPlace`), and only one that fits its row.
+    if (next.books && changed(['books', 'amount', 'currency', 'company', 'transferGroup', 'counterpartyAccountId', 'splits'])) {
+      const place = codingPlace(next, this.markContext());
+      if ('problem' in place) throw new StoreError(place.problem);
+      const problems = codingProblems(next.amount, next.books, place.row);
+      if (problems.length) throw new StoreError(problems.join(' '), 422);
+    }
+    // A link is on a company account's row, naming each row of yours once; the group it makes is checked whole (`linkUpkeep`).
+    if (next.companyLink && changed(['companyLink'])) {
+      if (!account?.companyId) throw new StoreError('A link to rows of yours is on a company account’s row.');
+      if (new Set(next.companyLink.rows).size !== next.companyLink.rows.length) throw new StoreError('A link names each row of yours once.');
+    }
+  }
+
+  /** Where a mark or a coding is judged: any account by id, and the companies in your data. */
+  private markContext() {
+    return { account: (id: string) => this.state.accounts.find((a) => a.id === id), company: (id: string | undefined) => this.company(id) };
+  }
+
+  /** Each row of yours that a company row's link names → those company rows. */
+  private indexLinks(): void {
+    const by = new Map<string, string[]>();
+    for (const t of this.txById.values()) for (const id of t.companyLink?.rows ?? []) (by.get(id) ?? by.set(id, []).get(id)!).push(t.id);
+    this.linkedBy = by;
+  }
+
+  /**
+   * The links a write touches (shared/ledger.ts, `companyLinkProblem`), with `staged` the rows it writes
+   * (null: removed). A link the write sets must fit, or the write is refused. One that a change to a row
+   * breaks (a mark taken away, an amount corrected, a row removed) goes with the change when the app made
+   * it (`auto`, worked out again with the rows); one you or a proposal made refuses the change, which
+   * says to unlink it first. Returns the company rows whose automatic links go.
+   */
+  private linkUpkeep(staged: ReadonlyMap<string, Transaction | null>): Transaction[] {
+    const companyOf = (accountId: string) => this.state.accounts.find((a) => a.id === accountId)?.companyId;
+    const row = (id: string) => (staged.has(id) ? (staged.get(id) ?? undefined) : this.txById.get(id));
+    const differs = (a: Transaction | undefined | null, b: Transaction | undefined | null, keys: readonly (keyof Transaction)[]) => !a || !b || keys.some((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k]));
+    const companies = new Set<string>();
+    const touched = new Set<string>();
+    const setting = new Set<string>();
+    for (const [id, next] of staged) {
+      const prev = this.txById.get(id);
+      const t = next ?? prev;
+      if (!t) continue;
+      const companyId = companyOf(t.accountId);
+      if (companyId) {
+        if ((prev?.companyLink || next?.companyLink) && differs(prev, next, ['companyLink', 'amount', 'date', 'books', 'transferGroup', 'counterpartyAccountId'])) {
+          companies.add(companyId);
+          touched.add(id);
+        }
+        if (next?.companyLink && JSON.stringify(prev?.companyLink) !== JSON.stringify(next.companyLink)) setting.add(id);
+      } else {
+        const by = this.linkedBy.get(id) ?? [];
+        if (!by.length || !differs(prev, next, ['company', 'amount', 'currency', 'date', 'transferGroup', 'splits'])) continue;
+        touched.add(id);
+        for (const c of by) {
+          const ct = this.txById.get(c);
+          const cid = ct ? companyOf(ct.accountId) : undefined;
+          if (cid) companies.add(cid);
+        }
+      }
+    }
+    const drops: Transaction[] = [];
+    const ctx = this.markContext();
+    for (const companyId of companies) {
+      const ids = new Set(this.state.accounts.filter((a) => a.companyId === companyId).map((a) => a.id));
+      const rows: Transaction[] = [];
+      for (const accountId of ids) for (const t of this.state.transactions.get(accountId) ?? []) if (row(t.id)) rows.push(row(t.id)!);
+      for (const [id, t] of staged) if (t && ids.has(t.accountId) && !this.txById.has(id)) rows.push(t);
+      for (const g of linkGroups(rows)) {
+        if (![...g.companyIds, ...g.personalIds].some((id) => touched.has(id))) continue;
+        const problem = companyLinkProblem(g, row, ctx);
+        if (!problem) continue;
+        if (g.companyIds.some((id) => setting.has(id))) throw new StoreError(problem, 422);
+        const linkedRows = g.companyIds.map((id) => row(id)!);
+        if (linkedRows.every((t) => t.companyLink?.setBy === 'auto')) {
+          for (const t of linkedRows) {
+            const { companyLink: _l, ...rest } = t;
+            drops.push(rest);
+          }
+        } else throw new StoreError(`${problem} The company’s row is linked to it by hand: unlink them on the company’s Books tab first.`, 409);
+      }
+    }
+    return drops;
   }
 
   deleteTransactions(ids: string[], message: string): Promise<number> {
@@ -1428,6 +1646,19 @@ export class Store extends EventEmitter {
       const touched = new Map<string, Set<string>>();
       let removed = 0;
       const diff = new DiffCollector();
+      // A row of yours a company row's link names: an automatic link goes with it, one made by hand refuses it.
+      const drops = this.linkUpkeep(new Map(ids.filter((id) => this.txById.has(id)).map((id) => [id, null])));
+      const stamp = nowISO();
+      for (const next of drops) {
+        if (ids.includes(next.id)) continue;
+        const current = this.txById.get(next.id)!;
+        const stamped = { ...next, updatedAt: stamp };
+        diff.changed(current, stamped);
+        const list = this.state.transactions.get(current.accountId)!;
+        list[list.indexOf(current)] = stamped;
+        this.txById.set(next.id, stamped);
+        (touched.get(current.accountId) ?? touched.set(current.accountId, new Set()).get(current.accountId)!).add(current.date.slice(0, 4));
+      }
       for (const id of ids) {
         const t = this.txById.get(id);
         if (!t) continue;
@@ -1440,7 +1671,10 @@ export class Store extends EventEmitter {
       }
       const paths: string[] = [];
       for (const [accountId, years] of touched) paths.push(...(await this.writeTransactionYears(accountId, years)));
-      if (removed) this.changed(message, paths, diff.result());
+      if (removed) {
+        this.indexLinks();
+        this.changed(message, paths, diff.result());
+      }
       return removed;
     });
   }
@@ -1700,11 +1934,28 @@ function ruleAccountIds(r: Rule): string[] {
 }
 
 /**
+ * The accounts a book rule is limited to are those whose rows it codes: its company's own (rows `own`),
+ * yours (rows of yours `paid-for`), or either (`both`); its company is in your data. Problems in words.
+ */
+export function bookRuleAccountProblems(r: Rule, account: (id: string) => Account | undefined, companyKnown: (id: string) => boolean): string[] {
+  const c = r.match.company;
+  if (!c) return [];
+  const out: string[] = [];
+  if (!companyKnown(c.id)) out.push(`there is no company "${c.id}" in your data.`);
+  for (const id of r.match.accountIds ?? []) {
+    const a = account(id);
+    if (!a) out.push(`there is no account "${id}".`);
+    else if (a.companyId ? a.companyId !== c.id || c.rows === 'paid-for' : c.rows === 'own') out.push(`${a.name} is not an account whose rows it codes (${c.rows === 'own' ? 'the company’s own' : c.rows === 'paid-for' ? 'yours' : 'the company’s own or yours'}).`);
+  }
+  return out;
+}
+
+/**
  * Your records that name one of `ids`: goals, agreements, rules and money set aside. A company's
  * account must never be among them (a goal would read its rows by id), so an account named here
  * cannot change side, and one found on load is reported.
  */
-export function recordsNaming(state: Pick<State, 'goals' | 'agreements' | 'rules' | 'earmarks'>, ids: ReadonlySet<string>): { file: string; what: string; accountId: string }[] {
+export function recordsNaming(state: Pick<State, 'goals' | 'agreements' | 'rules' | 'earmarks'>, ids: ReadonlySet<string>, opts: { bookRules?: boolean } = {}): { file: string; what: string; accountId: string }[] {
   const out: { file: string; what: string; accountId: string }[] = [];
   const hit = (file: string, what: string, named: readonly string[]) => {
     const accountId = named.find((id) => ids.has(id));
@@ -1712,7 +1963,8 @@ export function recordsNaming(state: Pick<State, 'goals' | 'agreements' | 'rules
   };
   for (const g of state.goals) hit('goals.json', `the goal "${g.name}"`, g.accountIds);
   for (const a of state.agreements) hit('agreements.json', `the agreement "${a.name}"`, a.accountId ? [a.accountId] : []);
-  for (const r of state.rules) hit('rules.json', `the rule "${r.name ?? r.match.value}"`, ruleAccountIds(r));
+  // A company's book rule names its accounts by design: only an account changing side asks about it (`bookRules`).
+  for (const r of state.rules) if (opts.bookRules || !isBookRule(r)) hit('rules.json', `the rule "${r.name ?? r.match.value}"`, ruleAccountIds(r));
   if (state.earmarks) hit('earmarks.json', 'money set aside', earmarkAccountIds(state.earmarks));
   return out;
 }

@@ -11,7 +11,7 @@ import type { Store } from '../store';
 import { lastUpdated, type BalanceEngine } from './balances';
 import { companyMarkProblem, markCounts } from '../../shared/company';
 import { classifyFlow } from './cashflow';
-import { directorLoanMovements, directorLoanWarnings, loanDays, owedLots, owedMostInTaxYear } from './director-loan';
+import { directorLoanWarnings, loanDays, loanMovements, owedLots, owedMostInTaxYear } from './director-loan';
 
 const DEPOSIT_TYPES = new Set(['current', 'savings', 'cash_isa']);
 
@@ -84,7 +84,7 @@ export function directorLoanChecks(store: Store, engine: BalanceEngine, on: stri
     const a = c.directorLoanAccountId ? store.accounts.find((x) => x.id === c.directorLoanAccountId) : undefined;
     if (!a || a.status !== 'open') continue;
     const balance = engine.balanceOn(a.id, on)?.value ?? null;
-    const lots = balance !== null && balance < 0 ? owedLots(engine, a.id, loanDays(store, a.id, directorLoanMovements(store, c.id)), on) : [];
+    const lots = balance !== null && balance < 0 ? owedLots(engine, a.id, loanDays(store, a.id, loanMovements(store, c)), on) : [];
     const warnings = directorLoanWarnings(c.name, balance, owedMostInTaxYear(engine, a.id, on), on, lots);
     if (warnings.length) out.push({ accountId: a.id, name: a.name, companyName: c.name, balance, warnings });
   }

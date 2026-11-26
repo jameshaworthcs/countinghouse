@@ -11,6 +11,7 @@ import { FEED_IDS } from './feeds';
 import { z } from 'zod';
 import { ACTION_KEY, ACTION_PAGE_IDS } from './actions';
 import { isISODate } from './dates';
+import { FIXED_ASSET_CLASSES } from './ledger';
 import { isMoney } from './money';
 import { TASK_KINDS, TaskChoiceSchema } from './tasks';
 import { VAT_STAGGERS } from './uk';
@@ -251,6 +252,71 @@ export const CompanyMarkSchema = z.object({
 });
 export type CompanyMark = z.infer<typeof CompanyMarkSchema>;
 
+// ─── A company's books: coding a payment, linking money with you, journals (shared/ledger.ts) ────
+
+/** A ledger code of the chart (shared/ledger.ts, `LEDGER_CODES`), or one of the company's own accounts (`bank:<accountId>`); checked against the chart on every write. */
+export const LedgerCodeSchema = z
+  .string()
+  .max(100)
+  .regex(/^[a-z][a-z0-9-]*(?::[a-z0-9-]+){0,2}$/, 'A ledger code of the chart, such as "software-hosting" or "fixed-assets:computer:cost"')
+  .meta({ description: 'A ledger code of the chart (src/shared/ledger.ts)' });
+
+/** How VAT treats a supply: the standard or reduced rate, zero rate, exempt, outside the scope, or a reverse charge (the buyer accounts for it). */
+export const VAT_TREATMENTS = ['standard', 'reduced', 'zero', 'exempt', 'outside', 'reverse-charge'] as const;
+export type VatTreatment = (typeof VAT_TREATMENTS)[number];
+
+/**
+ * The VAT in a coded amount: how much (signed like the amount, part of it; for a reverse charge the
+ * notional VAT on an amount that does not include it) and its treatment.
+ */
+export const BooksVatSchema = z.object({ amount: MoneySchema, treatment: z.enum(VAT_TREATMENTS) });
+/** The period a cost or income is for (a year's subscription), so it can be spread over it. */
+export const CoversSchema = z.object({ from: ISODateSchema, to: ISODateSchema });
+/** A fixed asset: its class, and its life in whole months when known. */
+export const BooksAssetSchema = z.object({ class: z.enum(FIXED_ASSET_CLASSES), months: z.number().int().min(1).max(600).optional() });
+
+/** One line of a coded payment split across ledgers: its amount (signed like the payment, VAT included), its ledger and the rest. */
+export const BooksLineSchema = z.object({
+  ledger: LedgerCodeSchema,
+  amount: MoneySchema,
+  vat: BooksVatSchema.optional(),
+  covers: CoversSchema.optional(),
+  asset: BooksAssetSchema.optional(),
+});
+export type BooksLine = z.infer<typeof BooksLineSchema>;
+
+/**
+ * What a payment means to its company (docs/DATA_FORMAT.md, transactions `books`): on a company
+ * account's row, or on a row of yours paid for the company (its cost to the company). One ledger (with
+ * its VAT, the period it covers and the fixed asset it is), or two or more lines adding up to the row.
+ * Who set it: `user` (nothing else changes it), `rule` (a book rule, `ruleId`), `agent` (a proposal you
+ * applied).
+ */
+export const BooksCodingSchema = z.object({
+  ledger: LedgerCodeSchema.optional(),
+  vat: BooksVatSchema.optional(),
+  covers: CoversSchema.optional(),
+  asset: BooksAssetSchema.optional(),
+  lines: z.array(BooksLineSchema).max(30).optional(),
+  setBy: z.enum(['user', 'rule', 'agent']),
+  /** The book rule that set it (`setBy: rule`). */
+  ruleId: z.string().regex(/^rule_[0-9a-z]+$/).optional(),
+});
+export type BooksCoding = z.infer<typeof BooksCodingSchema>;
+
+/**
+ * On a company account's row: the rows of yours marked as a loan with that company that are the same
+ * money (you lent it, it paid you back), and who linked them. `auto`: linked by the app, worked out
+ * again whenever rows are; `user`: you (no rows: you said it is linked to none); `agent`: a proposal
+ * you applied.
+ */
+export const CompanyLinkSchema = z.object({
+  /** Empty: you said this row is not the other side of any of yours (`setBy: user`), so the app links it to none. */
+  rows: z.array(z.string().regex(/^tx_[0-9a-f]{16}$/)).max(30),
+  setBy: z.enum(['auto', 'user', 'agent']),
+});
+export type CompanyLink = z.infer<typeof CompanyLinkSchema>;
+
 export const TransactionSchema = z.object({
   id: z.string().regex(/^tx_[0-9a-f]{16}$/),
   accountId: SlugSchema,
@@ -338,6 +404,13 @@ export const TransactionSchema = z.object({
    * between your accounts. Re-working rows out never changes it.
    */
   company: CompanyMarkSchema.optional(),
+  /**
+   * What the payment means to its company (`BooksCodingSchema`): on a company account's row, or on a
+   * row of yours marked as paid for the company; never on any other. A coding you set stays.
+   */
+  books: BooksCodingSchema.optional(),
+  /** On a company account's row: the rows of yours lent to it or repaid by it that are the same money (`CompanyLinkSchema`). */
+  companyLink: CompanyLinkSchema.optional(),
   notes: z.string().optional(),
   tags: z.array(z.string()).optional(),
 
@@ -832,6 +905,43 @@ export const CompanySchema = z.object({
 });
 export type Company = z.infer<typeof CompanySchema>;
 
+/**
+ * A line of a journal: its ledger and amount, inside the company's books, so **debits are positive and
+ * credits negative** (not signed from your point of view: DECISIONS 2026-11-26), with the VAT
+ * treatment it is (a tag for the VAT return), the period it covers and the fixed asset it is.
+ */
+export const JournalLineSchema = z.object({
+  ledger: LedgerCodeSchema,
+  amount: MoneySchema,
+  vat: z.object({ treatment: z.enum(VAT_TREATMENTS) }).optional(),
+  covers: CoversSchema.optional(),
+  asset: BooksAssetSchema.optional(),
+});
+export type JournalLine = z.infer<typeof JournalLineSchema>;
+
+/** A journal as it is given (the owner's form, an agent's proposal): its day, memo, lines and evidence. */
+export const JournalInputSchema = z.object({
+  date: ISODateSchema,
+  memo: z.string().trim().min(1).max(300),
+  lines: z.array(JournalLineSchema).min(2).max(40),
+  /** What shows it: the document, the payroll summary, the board minute. */
+  evidence: z.string().trim().min(1).max(500).optional(),
+});
+export type JournalInput = z.infer<typeof JournalInputSchema>;
+
+/**
+ * An entry in a company's books that is not a payment (journals.jsonl, docs/DATA_FORMAT.md): share
+ * capital at incorporation, a month's pay and its PAYE, a dividend declared. Its lines add up to nothing.
+ */
+export const JournalSchema = JournalInputSchema.extend({
+  id: z.string().regex(/^jnl_[0-9a-f]{12}$/),
+  companyId: SlugSchema,
+  createdBy: z.enum(['owner', 'agent']),
+  createdAt: TimestampSchema,
+  updatedAt: TimestampSchema,
+});
+export type Journal = z.infer<typeof JournalSchema>;
+
 /** A payment's state as its document gives it: paid, due (or ready to be paid), expected, awaiting confirmation, or cancelled. */
 export const AGREEMENT_PAYMENT_STATUSES = ['paid', 'due', 'scheduled', 'awaiting', 'cancelled'] as const;
 export type AgreementPaymentStatus = (typeof AGREEMENT_PAYMENT_STATUSES)[number];
@@ -1170,12 +1280,31 @@ export const RuleSchema = z.object({
     amountMin: MoneySchema.optional(),
     amountMax: MoneySchema.optional(),
     direction: z.enum(['in', 'out']).optional(),
+    /**
+     * A book rule's company (docs/DATA_FORMAT.md, rules.json): the rows it codes are that company's
+     * own accounts' (`own`), the rows of yours paid for it (`paid-for`), or both. Only a rule that sets
+     * `books` has one, and only such a rule touches those rows.
+     */
+    company: z.object({ id: SlugSchema, rows: z.enum(['own', 'paid-for', 'both']).default('own') }).optional(),
   }),
   set: z.object({
     category: z.string().optional(),
     payee: z.string().optional(),
     tags: z.array(z.string()).optional(),
     counterpartyAccountId: SlugSchema.optional(),
+    /**
+     * A book rule's coding (shared/ledger.ts): the ledger, the VAT treatment (its amount worked out
+     * from the rate on each row's day), the fixed asset class, and the months a payment covers from its
+     * day (a year's subscription: 12).
+     */
+    books: z
+      .object({
+        ledger: LedgerCodeSchema,
+        vat: z.object({ treatment: z.enum(VAT_TREATMENTS) }).optional(),
+        asset: BooksAssetSchema.optional(),
+        coversMonths: z.number().int().min(1).max(120).optional(),
+      })
+      .optional(),
   }),
   createdAt: TimestampSchema,
   updatedAt: TimestampSchema,
@@ -2364,7 +2493,13 @@ const changeUnion = <K extends z.ZodType<string | undefined>>(key: K) =>
      * Make a rule, as you would in Settings → Rules: the payments it matches take its category, now
      * and as they come. Yours are left as they are.
      */
-    z.object({ key, kind: z.literal('add_rule'), why: ChangeWhySchema, rule: z.object({ name: z.string().trim().min(1).max(120).optional(), match: RuleSchema.shape.match, category: z.string().min(1).max(64) }) }),
+    z.object({
+      key,
+      kind: z.literal('add_rule'),
+      why: ChangeWhySchema,
+      // A category for your rows, or a book rule's coding (`books`, with `match.company`) for a company's.
+      rule: z.object({ name: z.string().trim().min(1).max(120).optional(), match: RuleSchema.shape.match, category: z.string().min(1).max(64).optional(), books: RuleSchema.shape.set.shape.books }),
+    }),
     /** Remove one of your rules: what it categorised goes back to what the app makes of it without it (yours stay yours). */
     z.object({ key, kind: z.literal('remove_rule'), why: ChangeWhySchema, rule: z.string().regex(/^rule_[0-9a-z]+$/) }),
     /** Add a group to your categories, or a category to one of the groups (`parent`). */
@@ -2475,6 +2610,14 @@ const changeUnion = <K extends z.ZodType<string | undefined>>(key: K) =>
     z.object({ key, kind: z.literal('set_company_books'), why: ChangeWhySchema, company: SlugSchema, books: CompanyBooksSetupSchema, was: TimestampSchema.nullable() }),
     /** Record one filing of a company whose books are kept here, from its document; never a second for the same kind and period. */
     z.object({ key, kind: z.literal('add_filing'), why: ChangeWhySchema, company: SlugSchema, filing: CompanyFilingInputSchema }),
+    /** Code a payment in a company's books (a company account's row, or a row of yours paid for it), or take an agent's coding away (null); never over yours. */
+    z.object({ key, kind: z.literal('set_books'), why: ChangeWhySchema, transaction: TransactionIdSchema, books: BooksCodingSchema.omit({ setBy: true, ruleId: true }).nullable() }),
+    /** Link a company account's row to the rows of yours lent to it or repaid by it that are the same money, or unlink it (null); never over your own link. */
+    z.object({ key, kind: z.literal('link_company'), why: ChangeWhySchema, transaction: TransactionIdSchema, rows: z.array(TransactionIdSchema).min(1).max(30).nullable() }),
+    /** Write a journal in the books of a company whose books are kept here. */
+    z.object({ key, kind: z.literal('add_journal'), why: ChangeWhySchema, company: SlugSchema, journal: JournalInputSchema }),
+    /** Take away a journal an agent's proposal wrote (never one of yours). */
+    z.object({ key, kind: z.literal('remove_journal'), why: ChangeWhySchema, journal: z.string().regex(/^jnl_[0-9a-f]{12}$/) }),
   ]);
 
 export const ProposedChangeSchema = changeUnion(ChangeKeySchema);
@@ -2498,7 +2641,7 @@ export const ProposalSchema = z.object({
   /** Why it was dismissed, if you said. */
   dismissedReason: z.string().max(1000).optional(),
   /** The rows, accounts, balances, categories, rules and companies the applied changes touched, as they were before: the audit trail. */
-  before: z.object({ transactions: z.array(TransactionSchema), accounts: z.array(AccountSchema), balances: z.array(BalanceSnapshotSchema).optional(), terms: z.array(TermsSchema).optional(), categories: z.array(CategorySchema).optional(), rules: z.array(RuleSchema).optional(), earmarks: EarmarksSchema.nullable().optional(), companies: z.array(CompanySchema).optional() }).optional(),
+  before: z.object({ transactions: z.array(TransactionSchema), accounts: z.array(AccountSchema), balances: z.array(BalanceSnapshotSchema).optional(), terms: z.array(TermsSchema).optional(), categories: z.array(CategorySchema).optional(), rules: z.array(RuleSchema).optional(), earmarks: EarmarksSchema.nullable().optional(), companies: z.array(CompanySchema).optional(), journals: z.array(JournalSchema).optional() }).optional(),
 });
 export type Proposal = z.infer<typeof ProposalSchema>;
 

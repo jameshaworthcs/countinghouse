@@ -10,6 +10,8 @@ import { cleanPayee } from '../shared/merchants';
 import { formatMoney, toMinor } from '../shared/money';
 import { tidyPlace } from '../shared/places';
 import type { Account, Rule, Transaction } from '../shared/schema';
+import { codingPlace } from '../shared/ledger';
+import { autoLinkPatches, bookRulePatches, type LedgerSource } from './analytics/ledger';
 import { categoriseInputOf, categoriserFor } from './categoriser';
 import { nowISO } from './fsutil';
 import { ruleId, transferGroupId } from './ids';
@@ -235,10 +237,11 @@ export async function enrich(store: Store, opts: { accountIds?: string[]; rows?:
     const viewed = rows.map(view);
     // A row marked as money with a company of yours (shared/company.ts) is never a transfer between
     // your accounts: it is neither linked nor a partner for another row.
-    const candidates = viewed.filter((t) => !t.transferGroup && !t.company && !skipped(t) && inScope(t));
+    // Nor is a company row linked to money with you, or one you coded in its books: you said what it is.
+    const candidates = viewed.filter((t) => !t.transferGroup && !t.company && !t.companyLink?.rows.length && t.books?.setBy !== 'user' && !skipped(t) && inScope(t));
     const byAmount = new Map<number, Transaction[]>();
     for (const t of viewed) {
-      if (t.transferGroup || t.company || skipped(t)) continue;
+      if (t.transferGroup || t.company || t.companyLink?.rows.length || t.books?.setBy === 'user' || skipped(t)) continue;
       const k = toMinor(t.amount);
       (byAmount.get(k) ?? byAmount.set(k, []).get(k)!).push(t);
     }
@@ -262,6 +265,41 @@ export async function enrich(store: Store, opts: { accountIds?: string[]; rows?:
     else transfersLinked += pairs.count;
   }
 
+  // A company's books (docs/FORMULAS.md §22): with the rows as linked above, a coding or a link left where
+  // it does not apply goes (a hand edit, a mark taken away, a row now a leg of a company transfer); then
+  // each company's book rules code what they match (never a coding you or a proposal set); then the app's
+  // own links between a company's rows and your loans are worked out again. Your rows' categories are
+  // untouched by any of it.
+  let booksChanged = 0;
+  const stage = (id: string, p: Partial<Transaction>) => {
+    const raw = store.transaction(id);
+    if (!raw || !inScope(raw) || skipped(raw)) return;
+    patches.set(id, { ...seed(raw), ...(patches.get(id) ?? {}), ...p });
+    booksChanged++;
+  };
+  const overlay: LedgerSource = {
+    account: (id) => store.account(id),
+    company: (id) => store.company(id),
+    transaction: (id) => {
+      const raw = store.transaction(id);
+      return raw ? view(raw) : undefined;
+    },
+    transactions: (accountId) => store.transactions(accountId).map(view),
+    companyAccounts: (id) => store.companyAccounts(id),
+    companyTransactions: (id) => store.companyTransactions(id).map(view),
+    companyJournals: (id) => store.companyJournals(id),
+    bookRules: (id) => store.bookRules(id),
+  };
+  for (const raw of [...store.transactions(), ...[...companies.keys()].flatMap((id) => store.companyTransactions(id))]) {
+    const t = view(raw);
+    if (t.books && 'problem' in codingPlace(t, overlay)) stage(t.id, { books: undefined });
+    if (t.companyLink && !store.account(t.accountId)?.companyId) stage(t.id, { companyLink: undefined });
+  }
+  for (const c of store.companies) {
+    for (const { id, patch } of bookRulePatches(overlay, c.id)) stage(id, patch);
+    if (companies.has(c.id)) for (const { id, patch } of autoLinkPatches(overlay, c.id)) stage(id, patch);
+  }
+
   // What changes, against the rows as they are before anything is written.
   const changes: EnrichChange[] = [];
   if (opts.detail) {
@@ -279,7 +317,7 @@ export async function enrich(store: Store, opts: { accountIds?: string[]; rows?:
   if (!opts.dryRun && patches.size) {
     await store.updateTransactions(
       [...patches.entries()].map(([id, patch]) => ({ id, patch })),
-      `enrich: ${recategorised} recategorised, ${transfersLinked} transfers linked${companyChanged || companyLinked ? `; company rows: ${companyChanged} worked out, ${companyLinked} transfers linked` : ''}`,
+      `enrich: ${recategorised} recategorised, ${transfersLinked} transfers linked${companyChanged || companyLinked ? `; company rows: ${companyChanged} worked out, ${companyLinked} transfers linked` : ''}${booksChanged ? `; ${booksChanged} coded or linked in a company’s books` : ''}`,
     );
   }
   const named = accountPayees.size ? { accountPayees: [...accountPayees] } : {};
@@ -606,7 +644,7 @@ export async function linkTransfers(store: Store, ids: string[], message: string
     const want = new Set(wanted);
     const accounts = side ? store.companyAccounts(side) : store.accounts;
     // A row marked as money with a company of yours is never a transfer between your accounts.
-    const all = (side ? store.companyTransactions(side) : store.transactions()).filter((t) => !t.transferGroup && !t.company);
+    const all = (side ? store.companyTransactions(side) : store.transactions()).filter((t) => !t.transferGroup && !t.company && !t.companyLink?.rows.length && t.books?.setBy !== 'user');
     const byAmount = new Map<number, Transaction[]>();
     for (const t of all) (byAmount.get(toMinor(t.amount)) ?? byAmount.set(toMinor(t.amount), []).get(toMinor(t.amount))!).push(t);
     const pairs = pairTransfers(store, all.filter((t) => want.has(t.id)), byAmount, side ? companyTransferReader(store, accounts) : transferReader(store));

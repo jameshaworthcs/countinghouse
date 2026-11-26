@@ -16,11 +16,13 @@ import type {
   TermsRateApplies,
   BalanceSnapshot,
   Category,
+  BooksCoding,
   Company,
   CompanyBooks,
   CsvProfile,
   Figure,
   Goal,
+  Journal,
   PensionArrangement,
   Budget,
   HoldingsSnapshot,
@@ -39,7 +41,9 @@ import type {
   ReviewAction,
   EarmarkEffect,
   Earmarks,
+  VatTreatment,
 } from './schema';
+import type { FixedAssetClass } from './ledger';
 import type { TaxBand } from './uk';
 
 export interface Alert {
@@ -990,15 +994,25 @@ export interface ImportHistoryResponse {
 /** A transaction a proposed change is about, as it is now (or was, for a decided proposal). */
 /** One movement of a director's loan (analytics/director-loan.ts), from the row of yours it comes from. */
 export interface DirectorLoanMovement {
-  /** `dlm_` and the source row's own hex: the same every time it is worked out. */
+  /** `dlm_` and its source's own id (a row's hex, a journal's id): the same every time it is worked out. */
   id: string;
-  /** The row of yours it comes from, and its account. */
-  transactionId: string;
-  accountId: string;
+  /**
+   * Where it comes from: a row of yours you marked (`mark`); or, once the company's books are kept here
+   * (FORMULAS.md §22), a company account's own row coded to the director's loan or linked to a loan of
+   * yours (`company-row`), a journal's lines on it (`journal`), or the fee a link's two sides differ by
+   * (`link-fee`).
+   */
+  source: 'mark' | 'company-row' | 'journal' | 'link-fee';
+  /** The row it comes from (yours, or the company's), and its account; none for a journal. */
+  transactionId?: string;
+  accountId?: string;
+  /** A journal's. */
+  journalId?: string;
   date: string;
-  /** Signed from your side: positive grows what the company owes you. The source row's amount, negated. */
+  /** Signed from your side: positive grows what the company owes you. A row of yours: its amount, negated. */
   amount: number;
-  as: 'paid-for' | 'loan';
+  /** A row of yours: its mark. */
+  as?: 'paid-for' | 'loan';
   kind: DirectorLoanKind;
   description: string;
   payee?: string;
@@ -1580,6 +1594,103 @@ export interface CompanyBooksResponse {
   withinCharge: { from: string | null; assumed: boolean } | null;
   /** Your director's loan with it: what it owes you now (your own account). */
   directorLoan?: CompanyView['directorLoan'];
+}
+
+/**
+ * A posting of a company's general ledger (FORMULAS.md §22, "The general ledger"): one side of what a
+ * source means to the company, in integer pence, debits positive. The postings of one source add up to
+ * nothing.
+ */
+export interface LedgerPosting {
+  /** `<source kind>:<source id>:<n>`: the same every time it is worked out. */
+  id: string;
+  date: string;
+  ledger: string;
+  /** Pence, debit positive. */
+  amount: number;
+  /**
+   * What it comes from: a company account's row (`row`); a row of yours paid for the company or lent to
+   * it (`personal`); a journal (`journal`, with its `line`); a transfer between two of the company's own
+   * accounts (`transfer`, the group's id); the fee a link's two sides differ by (`link`, its row of yours).
+   * `line`: the coding's or journal's line.
+   */
+  source: { kind: 'row' | 'personal' | 'journal' | 'transfer' | 'link'; id: string; line?: number };
+  /** Its VAT: the treatment, input (reclaimed) or output (charged), and whether this is the net amount or the tax. */
+  vat?: { treatment: VatTreatment; side: 'input' | 'output'; part: 'net' | 'tax' };
+  covers?: { from: string; to: string };
+  asset?: { class: FixedAssetClass; months?: number };
+  memo: string;
+}
+
+/** What the ledger asks of you: a row to code, a missing side, a link that does not fit, money maybe counted twice. */
+export type LedgerCheck =
+  | { kind: 'uncoded'; transactionId: string; accountId: string; date: string; amount: number; description: string; side: 'company' | 'paid-for' }
+  | { kind: 'coding-invalid'; transactionId: string; accountId: string; date: string; amount: number; description: string; problem: string }
+  | { kind: 'bank-not-imported'; transactionId: string; accountId: string; date: string; amount: number; description: string }
+  | { kind: 'transfer-unmatched'; transactionId: string; accountId: string; date: string; amount: number; description: string }
+  | { kind: 'possible-double-count'; personalId: string; companyRowId: string; date: string; amount: number; description: string }
+  | { kind: 'link-invalid'; companyRowIds: string[]; personalIds: string[]; problem: string }
+  | { kind: 'journal-invalid'; journalId: string; date: string; memo: string; problem: string }
+  | { kind: 'vat-unregistered'; source: LedgerPosting['source']; date: string; amount: number }
+  | { kind: 'unbalanced'; source: LedgerPosting['source']; amount: number };
+
+/** GET /companies/:id/ledger: a company's postings in a date range, what is posted to each ledger there, and the ledger's checks. */
+export interface CompanyLedgerResponse {
+  company: { id: string; name: string };
+  from: string | null;
+  to: string | null;
+  postings: LedgerPosting[];
+  /** By ledger, the postings in the range added up (pence, debit positive). */
+  totals: { ledger: string; debit: number; credit: number; net: number }[];
+  checks: LedgerCheck[];
+  /** The company's own accounts, with the ledger each posts to. */
+  accounts: { id: string; name: string; ledger: string }[];
+}
+
+/** A row that takes a coding in a company's books (shared/ledger.ts, `codingPlace`), as the Books tab lists it. */
+export interface BooksRowView {
+  id: string;
+  accountId: string;
+  accountName: string;
+  date: string;
+  amount: number;
+  description: string;
+  payee?: string;
+  side: 'company' | 'paid-for';
+  books?: BooksCoding;
+  /** A coding a hand edit left that does not fit: it counts for nothing. */
+  problem?: string;
+  /** A company row linked to rows of yours: the director's loan, needing no coding. */
+  linked?: { personalIds: string[]; setBy: 'auto' | 'user' | 'agent' };
+}
+
+/** A link between a company row and rows of yours lent to it or repaid by it, as the Books tab lists it. */
+export interface LinkView {
+  companyRows: { id: string; accountId: string; accountName: string; date: string; amount: number; description: string }[];
+  personalRows: { id: string; accountId: string; accountName: string; date: string; amount: number; description: string }[];
+  setBy: 'auto' | 'user' | 'agent';
+  /** Pence: what was sent less what arrived (a fee the company bears). */
+  fee: number;
+  problem?: string;
+}
+
+/** A row of yours marked as a loan with no company row linked, and the company rows that could be its other side. */
+export interface LinkSuggestion {
+  personal: { id: string; accountId: string; accountName: string; date: string; amount: number; description: string };
+  candidates: { id: string; accountId: string; accountName: string; date: string; amount: number; description: string; days: number; fee: number; exact: boolean }[];
+}
+
+/** GET /companies/:id/coding: the rows to code (uncoded first), the links and what could be linked, its journals and book rules. */
+export interface CompanyCodingResponse {
+  company: { id: string; name: string };
+  rows: BooksRowView[];
+  links: LinkView[];
+  suggestions: LinkSuggestion[];
+  journals: Journal[];
+  rules: Rule[];
+  accounts: { id: string; name: string; ledger: string }[];
+  /** Its VAT registration, so the coding editor offers VAT only when it is registered. */
+  vat?: { registeredFrom: string; deregisteredOn?: string };
 }
 
 /** GET /company-books: the companies whose books are kept here, with how many of their deadlines need you. */

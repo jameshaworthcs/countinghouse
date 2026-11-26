@@ -131,7 +131,7 @@ function DirectorLoanCard({ view, accountId }: { view: DirectorLoanView; account
       ))}
       <Card className="mb-5" title={`Your director’s loan with ${view.company.name}`} description="What the company owes you; below nothing, what you owe it.">
         <p className="text-[13px] text-ink-2">
-          It moves with the payments of yours you mark as paid for the company (a cost of its you paid, or its refund to you) or lent to it (or paid back by it): each one, the other way round. Those payments stay in their own accounts and count in none of your spending or income, so nothing is counted twice. Record a balance (the director’s loan figure in the company’s filed accounts) and it is worked out from there, as a statement anchors a bank account.{' '}
+          It moves with the payments of yours you mark as paid for the company (a cost of its you paid, or its refund to you) or lent to it (or paid back by it): each one, the other way round. Those payments stay in their own accounts and count in none of your spending or income, so nothing is counted twice. When you keep the company’s books here, it moves with what its books post to the director’s loan instead: the same payments of yours (or the company’s own rows linked to them), and what only the books know, such as a journal. Record a balance (the director’s loan figure in the company’s filed accounts) and it is worked out from there, as a statement anchors a bank account.{' '}
           <Link to="/transactions" className="text-accent hover:underline" title="Open a payment and choose ‘Your company’">
             Mark a payment
           </Link>
@@ -197,10 +197,14 @@ function MovementsTable({ view }: { view: DirectorLoanView }) {
               <td className={tableClasses.td}>{formatDate(m.date)}</td>
               <td className={tableClasses.td}>{DIRECTOR_LOAN_KIND_LABELS[m.kind]}</td>
               <td className={tableClasses.td}>
-                <Link to={`/transactions?accounts=${m.accountId}&period=custom&from=${m.date}&to=${m.date}`} className="text-accent hover:underline">
-                  {m.payee ?? m.description}
-                </Link>
-                <div className="text-[12px] text-ink-3">{m.accountName}</div>
+                {m.accountId ? (
+                  <Link to={`/transactions?accounts=${m.accountId}&period=custom&from=${m.date}&to=${m.date}`} className="text-accent hover:underline">
+                    {m.payee ?? m.description}
+                  </Link>
+                ) : (
+                  <span className="text-ink">{m.description}</span>
+                )}
+                <div className="text-[12px] text-ink-3">{m.source === 'mark' ? m.accountName : m.source === 'journal' ? 'A journal in the company’s books' : `${m.accountName}, from the company’s books`}</div>
               </td>
               <td className={cn(tableClasses.td, tableClasses.num)}>
                 <Money value={m.amount} />

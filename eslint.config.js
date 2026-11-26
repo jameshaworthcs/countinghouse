@@ -5,7 +5,7 @@ import reactHooks from 'eslint-plugin-react-hooks';
 import globals from 'globals';
 
 /** Store accessors that reach a company's data (src/server/store.ts, "Scope"). */
-const COMPANY_SCOPE = ['allAccounts', 'allTransactions', 'allBalances', 'allHoldings', 'allFigures', 'allCoverageConfirmations', 'allInstitutions', 'companyAccounts', 'companyTransactions'];
+const COMPANY_SCOPE = ['allAccounts', 'allTransactions', 'allBalances', 'allHoldings', 'allFigures', 'allCoverageConfirmations', 'allInstitutions', 'companyAccounts', 'companyTransactions', 'companyJournals', 'bookRules'];
 /** The canary of tests/company-scope.test.ts: never outside tests/. */
 const TEST_ONLY = 'widenScopeForTest';
 const restricted = (property) => ({
@@ -24,6 +24,10 @@ const SCOPE_ALLOWLIST = {
   'src/server/ingest/draft.ts': 'matches a document to any account',
   // A company's own accounts on their own: their balance engine, their group on the Accounts page.
   'src/server/analytics/company-accounts.ts': 'company accounts, each company alone',
+  // A company's books: its general ledger from its own rows, the rows of yours paid for or lent to it,
+  // its journals and book rules, one company at a time. Your director's loan reads its postings to the
+  // loan once the company keeps books here (director-loan.ts): the one way company data reaches you.
+  'src/server/analytics/ledger.ts': "a company's books, one company at a time",
 };
 
 export default tseslint.config(

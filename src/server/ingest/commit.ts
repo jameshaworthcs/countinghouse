@@ -187,7 +187,7 @@ export async function commitDraft(store: Store, input: CommitInput): Promise<Imp
       // Not one another transfer has taken since the draft was made, nor one across the line.
       const match = row.transferMatch ? store.transaction(row.transferMatch) : undefined;
       const matchSide = match ? sideOf(store.account(match.accountId)) : undefined;
-      if (match && matchSide === side && !match.transferGroup && !match.company && match.accountId !== account.id && !transferLinks.some((l) => l.otherId === match.id)) {
+      if (match && matchSide === side && !match.transferGroup && !match.company && !match.companyLink?.rows.length && match.accountId !== account.id && !transferLinks.some((l) => l.otherId === match.id)) {
         tx.transferGroup = transferGroupId(id, match.id);
         transferLinks.push({ newId: id, otherId: match.id, account });
         // A payee naming another account of yours than the one it is linked with takes that one's name.

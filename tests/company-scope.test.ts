@@ -1,11 +1,21 @@
 // Company accounts never touch a personal figure (docs/ARCHITECTURE.md, "Company accounts").
 //
 // The metamorphic property: for a personal store S and a company's own data C (its accounts, rows,
-// balances, figures, imports, terms and confirmations, and its books with their filings), every GET route of the API answers the same
-// for S and for S ∪ C. C is drawn from the same pools as S — pay, dividends, interest, HMRC, child
+// balances, figures, imports, terms and confirmations, its books with their filings, and its general
+// ledger: codings, book rules, journals and links to S's rows), every GET route of the API answers the
+// same for S and for S ∪ C. C is drawn from the same pools as S — pay, dividends, interest, HMRC, child
 // benefit, your own name, your accounts' names and numbers, amounts and days that would pair as
 // transfers with S's rows, the same banks — so a filter missed anywhere changes a figure. The routes
 // are read from the app's own router: a new route is covered without being listed here.
+//
+// One thing of yours changes by design (DECISIONS 2026-11-26, "The ledger is the director's loan's
+// source once books are kept"): once the company keeps its books here, your director's loan moves by
+// its books' postings to the loan, so what only the books know (a journal on the loan, a company row
+// coded to it) and the company's own day for money linked to yours move it. That is encoded exactly,
+// not allowed broadly: while the books say what your marks say, nothing at all differs, the loan
+// included; with what only the books know, every account but the loan is the same on every day, the
+// loan differs by exactly what the books add (worked out here from C), and the estate by exactly the
+// loan's difference; and with the loan taken away from the company, nothing at all differs again.
 //
 // A canary turns the store's scope off (a test-only hook) and checks that the property then fails:
 // the test can catch a leak. Every name and figure is invented.
@@ -19,8 +29,11 @@ import { createApp, type App } from '../src/server/app';
 import { loadConfig } from '../src/server/config';
 import { balanceId, figureId, filingId, termsId, transactionId } from '../src/server/ids';
 import { Store } from '../src/server/store';
-import { addDays, addMonths, addYears, endOfMonth, startOfMonth, today } from '../src/shared/dates';
+import { addDays, addMonths, addYears, eachDay, endOfMonth, startOfMonth, today } from '../src/shared/dates';
+import { vatInGross } from '../src/shared/ledger';
+import { toMinor } from '../src/shared/money';
 import { taxYearOf } from '../src/shared/uk';
+import { estateOn } from '../src/server/analytics/estate';
 import type { AccountDetailResponse, CompanyBooksResponse } from '../src/shared/api';
 import type { Account, BalanceSnapshot, CategorisedBy, Figure, ImportRecord, Transaction } from '../src/shared/schema';
 
@@ -127,9 +140,11 @@ function rows(draws: readonly RowDraw[], accounts: readonly Account[], kept: (a:
     const n = occ.get(key) ?? 0;
     occ.set(key, n + 1);
     const by = p.category ? BY[d.by] : undefined;
-    // Your rows with the company are marked as what they were (never a company's own row).
+    // Your rows with the company are marked as what they were (never a company's own row), and half of
+    // those paid for it are coded in its books by you (the rest by the book rule for them, below).
     const mark = p.company && !account.companyId ? { company: { id: COMPANY, as: p.company, setBy: 'user' as const } } : {};
-    return { id: transactionId(account.id, date, amount, p.description, n), accountId: account.id, date, amount, currency: 'GBP', description: p.description, source: {}, createdAt: stamp, ...(p.category && by !== undefined ? { category: p.category, categorisedBy: by } : {}), ...mark };
+    const coding = p.company === 'paid-for' && !account.companyId && d.by % 2 === 0 ? { books: { ledger: 'software-hosting', vat: { amount: vatInGross(amount, date, 'standard'), treatment: 'standard' as const }, setBy: 'user' as const } } : {};
+    return { id: transactionId(account.id, date, amount, p.description, n), accountId: account.id, date, amount, currency: 'GBP', description: p.description, source: {}, createdAt: stamp, ...(p.category && by !== undefined ? { category: p.category, categorisedBy: by } : {}), ...mark, ...coding };
   });
 }
 
@@ -169,6 +184,8 @@ async function writePersonal(dir: string, w: World, extra: { date: string; amoun
   await store.setEmployments([{ id: 'studio-job', employer: 'EXAMPLE STUDIO LTD', aliases: [], payrollNumbers: ['ES12345'], owed: [], pensionArrangements: [], createdBy: 'owner', createdAt: stamp, updatedAt: stamp }]);
   await store.setCompanies([{ id: COMPANY, name: 'EXAMPLE STUDIO LTD', number: '12345678', holdings: [{ shareClass: 'Ordinary', shares: 100, totalShares: 100, acquiredOn: '2024-05-14', source: {} }], valuations: [], accountId: 'shares', directorLoanAccountId: 'studio-loan', employmentId: 'studio-job', createdBy: 'owner', createdAt: stamp, updatedAt: stamp }]);
   await store.setRules([{ id: 'rule_hosting', name: 'Hosting', enabled: true, priority: 100, match: { field: 'description', op: 'contains', value: 'EXAMPLE HOSTING', caseSensitive: false }, set: { category: 'software' }, createdAt: stamp, updatedAt: stamp }]);
+  // A book rule for the rows of yours paid for the company: about your rows, so it is yours, in S.
+  await store.setBookRules(COMPANY, [{ id: 'rule_paidhosting', name: 'Hosting you paid', enabled: true, priority: 100, match: { field: 'description', op: 'contains', value: 'EXAMPLE HOSTING', caseSensitive: false, company: { id: COMPANY, rows: 'paid-for' } }, set: { books: { ledger: 'software-hosting', vat: { treatment: 'standard' } } }, createdAt: stamp, updatedAt: stamp }]);
   await store.setGoals([{ id: 'rainy-day', name: 'Rainy day', kind: 'savings', targetAmount: 10_000, accountIds: ['saver'], createdAt: stamp, updatedAt: stamp }]);
   const txs = [...rows(w.personal, PERSONAL, (a) => ['current', 'saver', 'card'].includes(a.id)), ...extra.map((x, i) => ({ id: transactionId('current', x.date, x.amount, x.description, 900 + i), accountId: 'current', currency: 'GBP', source: {}, createdAt: stamp, ...x }))];
   await store.addTransactions(txs, 'test: your rows');
@@ -196,7 +213,8 @@ async function writePersonal(dir: string, w: World, extra: { date: string; amoun
 async function writeCompany(dir: string, w: World, personalTx: readonly Transaction[]): Promise<void> {
   const store = await Store.open(dir);
   for (const a of COMPANY_ACCOUNTS) await store.upsertAccount(a);
-  const own = rows(w.company, COMPANY_ACCOUNTS, () => true);
+  // Its rows, every other one coded in its books (sales for money in, expenses for money out).
+  const own = rows(w.company, COMPANY_ACCOUNTS, () => true).map((t, i) => (i % 2 ? t : { ...t, books: { ledger: t.amount > 0 ? 'turnover' : 'general-expenses', setBy: 'user' as const } }));
   // Rows that mirror yours: the other leg of a transfer, if the line were not there.
   const linkable = personalTx.filter((t) => ['current', 'saver', 'card'].includes(t.accountId));
   const mirrors = w.mirrors.map((m, i) => {
@@ -242,7 +260,58 @@ async function writeCompany(dir: string, w: World, personalTx: readonly Transact
     },
     updatedAt: stamp,
   });
+  // Its book rule for its own rows, named like your rules' words, and a journal that is not about your loan.
+  await store.setBookRules(COMPANY, [...store.bookRules(COMPANY), { id: 'rule_studiotax', name: 'Corporation Tax', enabled: true, priority: 100, match: { field: 'description', op: 'contains', value: 'HMRC CORPORATION TAX', caseSensitive: false, company: { id: COMPANY, rows: 'own' } }, set: { books: { ledger: 'corporation-tax' } }, createdAt: stamp, updatedAt: stamp }]);
+  await store.putJournal({ id: 'jnl_0000000000a1', companyId: COMPANY, date: inc, memo: 'Shares issued at incorporation', lines: [{ ledger: 'share-capital-unpaid', amount: 100 }, { ledger: 'share-capital', amount: -100 }], createdBy: 'owner', createdAt: stamp, updatedAt: stamp }, 'test: journal');
   store.stopWatching();
+}
+
+/** A movement of your director's loan, from your side, in pence: what the books add to it, or where they put it on another day. */
+interface LoanChange {
+  date: string;
+  minor: number;
+}
+
+/**
+ * What only the books know about your loan, added to C through the running app: a dividend declared and
+ * credited to the loan (a journal), the company paying something of yours (its row coded to the loan),
+ * and a company row you linked to a loan of yours two days after it. Returns each change to your loan
+ * from your side: the journal and the coded row as they are, and the linked loan as taken off its own
+ * day and put on the company row's.
+ */
+async function addLoanBooks(store: Store): Promise<LoanChange[]> {
+  const out: LoanChange[] = [];
+  const dividend = { date: `${MONTH_LIST[7]}-15`, amount: 612.34 };
+  await store.putJournal({ id: 'jnl_0000000000a2', companyId: COMPANY, date: dividend.date, memo: 'Dividend declared, credited to the director’s loan', lines: [{ ledger: 'dividends', amount: dividend.amount }, { ledger: 'directors-loan', amount: -dividend.amount }], createdBy: 'owner', createdAt: stamp, updatedAt: stamp }, 'test: dividend');
+  out.push({ date: dividend.date, minor: toMinor(dividend.amount) });
+  // More than any row of yours, so nothing links it.
+  const paid = { date: `${MONTH_LIST[9]}-12`, amount: -4321.09 };
+  await store.addTransactions([{ id: transactionId('studio-current', paid.date, paid.amount, 'PAID FOR J BLOGGS', 0), accountId: 'studio-current', date: paid.date, amount: paid.amount, currency: 'GBP', description: 'PAID FOR J BLOGGS', source: {}, createdAt: stamp, books: { ledger: 'directors-loan', setBy: 'user' } }], 'test: paid for you');
+  out.push({ date: paid.date, minor: toMinor(paid.amount) });
+  const loan = store.transactions().find((t) => t.company?.as === 'loan');
+  if (loan) {
+    const date = addDays(loan.date, 2) > TODAY ? loan.date : addDays(loan.date, 2);
+    await store.addTransactions([{ id: transactionId('studio-current', date, -loan.amount, 'J BLOGGS LOAN', 0), accountId: 'studio-current', date, amount: -loan.amount, currency: 'GBP', description: 'J BLOGGS LOAN', source: {}, createdAt: stamp, companyLink: { rows: [loan.id], setBy: 'user' } }], 'test: linked');
+    out.push({ date: loan.date, minor: toMinor(loan.amount) }, { date, minor: -toMinor(loan.amount) });
+  }
+  return out;
+}
+
+/**
+ * The links the app made by itself (auto), each checked to be exact and within 4 days, as changes to
+ * your loan's days: off your row's day, onto the company row's.
+ */
+function autoLinkShifts(store: Store): LoanChange[] {
+  const out: LoanChange[] = [];
+  for (const c of store.companyTransactions(COMPANY)) {
+    if (c.companyLink?.setBy !== 'auto') continue;
+    const [p] = c.companyLink.rows.map((id) => store.transaction(id)!);
+    expect(c.companyLink.rows).toHaveLength(1);
+    expect(toMinor(p!.amount) + toMinor(c.amount)).toBe(0);
+    expect(Math.abs(Date.parse(p!.date) - Date.parse(c.date)) / 86_400_000).toBeLessThanOrEqual(4);
+    out.push({ date: p!.date, minor: toMinor(p!.amount) }, { date: c.date, minor: -toMinor(p!.amount) });
+  }
+  return out;
 }
 
 // ─── The comparison ───────────────────────────────────────────────────────────────────────────────
@@ -256,6 +325,8 @@ const DIFFERENT: Record<string, string> = {
   '/api/company-books': "the companies whose books are kept here, with their deadlines: the company's records",
   '/api/company-alerts': "the company's deadlines due soon or overdue: the company's, shown beside your alerts, never among them",
   '/api/companies/:id/books': "a company's own records and the deadlines worked out from them: that is what it serves",
+  '/api/companies/:id/ledger': "a company's general ledger: its postings and checks",
+  '/api/companies/:id/coding': "a company's rows to code, its links, journals and book rules",
   '/api/imports/history': 'every committed document, a company account’s statements too (no figure; an account’s own page lists its own)',
   '/api/audit': 'the log of this process: its own times and hashes',
   '/api/audit/export': 'the log of this process: its own times and hashes',
@@ -427,6 +498,43 @@ async function differences(p: Pair): Promise<string[]> {
   return out;
 }
 
+/** The day your director's loan's recorded balance anchors it (S's own: a balance on the loan). */
+const LOAN_ANCHOR = endOfMonth(`${MONTH_LIST[5]}-01`);
+
+/**
+ * The one difference by design, exactly: on every day from before the data to today, every account of
+ * yours but the director's loan has the same balance in S and S ∪ C; the loan differs by exactly what
+ * `changes` say, as its anchor reads movements (after it, those since; before it, those up to it, the
+ * other way), on each day it has a balance on both sides; and the estate differs by exactly the loan's
+ * difference.
+ */
+function expectOnlyTheLoan(p: Pair, changes: readonly LoanChange[]): void {
+  const [s, b] = [p.personal.app.ctx, p.both.app.ctx];
+  const [eS, eB] = [s.analytics.engine, b.analytics.engine];
+  const ids = s.store.accounts.map((a) => a.id);
+  expect(b.store.accounts.map((a) => a.id)).toEqual(ids);
+  const moved = (d: string) => (d >= LOAN_ANCHOR ? changes.filter((c) => c.date > LOAN_ANCHOR && c.date <= d) : changes.filter((c) => c.date > d && c.date <= LOAN_ANCHOR).map((c) => ({ ...c, minor: -c.minor }))).reduce((sum, c) => sum + c.minor, 0);
+  const minor = (v: number | null | undefined) => toMinor(v ?? 0);
+  for (const d of eachDay(addDays(FIRST, -1), TODAY)) {
+    for (const id of ids) if (id !== 'studio-loan') expect(eB.balanceOn(id, d), `${id} on ${d}`).toEqual(eS.balanceOn(id, d));
+    const [lb, ls] = [eB.balanceOn('studio-loan', d), eS.balanceOn('studio-loan', d)];
+    const loan = minor(lb?.value) - minor(ls?.value);
+    // Before a loan's first movement it has no balance at all (an account adds nothing before its data):
+    // a day the books' first movement comes later, or sooner, than your marks' has a balance on one side only.
+    if (lb && ls) expect(loan, `the loan on ${d}`).toBe(moved(d));
+    expect(minor(estateOn(b.store, eB, d).total) - minor(estateOn(s.store, eS, d).total), `the estate on ${d}`).toBe(loan);
+  }
+}
+
+/** Take your director's loan away from the company in both (null), or give it back. */
+async function setLoan(p: Pair, accountId: string | null): Promise<void> {
+  for (const app of [p.personal.app, p.both.app]) {
+    const company = app.ctx.store.company(COMPANY)!;
+    const { directorLoanAccountId: _l, ...rest } = company;
+    await app.ctx.store.upsertCompany(accountId ? { ...rest, directorLoanAccountId: accountId } : rest);
+  }
+}
+
 /** Re-apply categorisation and link transfers on both: what enrichment makes of S must not change with C beside it. */
 async function enrichBoth(p: Pair): Promise<void> {
   for (const app of [p.personal.app, p.both.app]) {
@@ -438,14 +546,24 @@ async function enrichBoth(p: Pair): Promise<void> {
 const RUN = { seed: 20261126, numRuns: 4, endOnFailure: true } as const;
 
 describe('company accounts never touch a personal figure', () => {
-  it('every GET route answers the same for your data alone and with a company’s beside it, before and after re-applying categorisation', async () => {
+  it('every GET route answers the same for your data alone and with a company’s beside it, before and after re-applying categorisation, but for your director’s loan by exactly what its books add', async () => {
     await fc.assert(
       fc.asyncProperty(world, async (w) => {
         const p = await pairFor(w);
         try {
+          // Its books kept here, and saying what your marks say: nothing at all differs, your loan included.
+          expect(await differences(p)).toEqual([]);
+          // What only its books know moves your loan, and through it the estate: by exactly that.
+          const changes = await addLoanBooks(p.both.app.ctx.store);
+          expectOnlyTheLoan(p, changes);
+          // With your loan taken away from the company, nothing at all differs, before and after re-working rows out.
+          await setLoan(p, null);
           expect(await differences(p)).toEqual([]);
           await enrichBoth(p);
           expect(await differences(p)).toEqual([]);
+          // Given back, with the links the app made by itself: by exactly what the books add, again.
+          await setLoan(p, 'studio-loan');
+          expectOnlyTheLoan(p, [...changes, ...autoLinkShifts(p.both.app.ctx.store)]);
           // The company's rows are there, and enrichment left them uncategorised but for transfers
           // between its own two accounts, and never linked one of them with one of yours.
           const { store } = p.both.app.ctx;
@@ -461,7 +579,11 @@ describe('company accounts never touch a personal figure', () => {
           // The director's loan was there to be changed, and re-working rows out kept every mark.
           const loan = (await (await p.both.app.app.request('http://localhost/api/accounts/studio-loan', { headers: { host: 'localhost' } })).json()) as AccountDetailResponse;
           expect(loan.directorLoan?.movements.length).toBeGreaterThan(0);
-          expect(loan.directorLoan?.movements.length).toBe(store.transactions().filter((t) => t.company?.as === 'paid-for' || t.company?.as === 'loan').length);
+          // Each row of yours paid for it or lent to it, or the company row linked to it; and what only the books know.
+          expect(loan.directorLoan?.movements.filter((m) => m.source === 'mark' || m.source === 'company-row').reduce((sum, m) => sum + toMinor(m.amount), 0)).toBe(store.transactions().filter((t) => t.company?.as === 'paid-for' || t.company?.as === 'loan').reduce((sum, t) => sum - toMinor(t.amount), 0) + toMinor(-4321.09));
+          expect(loan.directorLoan?.movements.filter((m) => m.source === 'journal').map((m) => m.amount)).toEqual([612.34]);
+          // Every row of yours paid for it is coded: by you, or by the book rule for them.
+          for (const t of store.transactions()) if (t.company?.as === 'paid-for') expect(t.books?.ledger).toBe('software-hosting');
           for (const t of store.transactions()) if (t.company) expect(t.transferGroup).toBeUndefined();
           // The company's books were there, and their own routes serve them (the routes left out above).
           const books = async (a: App) => (await (await a.app.request(`http://localhost/api/companies/${COMPANY}/books`, { headers: { host: 'localhost' } })).json()) as CompanyBooksResponse;

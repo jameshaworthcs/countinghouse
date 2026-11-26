@@ -167,7 +167,7 @@ function findTransferMatch(row: TransferSide & { date: string; amount: number },
   let best: { t: Transaction; score: number; days: number } | undefined;
   const want = -toMinor(row.amount);
   for (const t of others) {
-    if (t.accountId === row.accountId || t.transferGroup || t.company || taken.has(t.id)) continue;
+    if (t.accountId === row.accountId || t.transferGroup || t.company || t.companyLink?.rows.length || taken.has(t.id)) continue;
     if (toMinor(t.amount) !== want) continue;
     const days = Math.abs(diffDays(t.date, row.date));
     if (days > 4) continue;

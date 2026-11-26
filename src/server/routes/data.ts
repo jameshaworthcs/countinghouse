@@ -613,6 +613,8 @@ export function dataRoutes(ctx: AppContext): Hono {
     if (body.tags) patch.tags = body.tags.length ? addTags([], body.tags) : undefined;
     // A mark you set or take away is yours: the store checks it fits the row (shared/company.ts).
     if (body.company !== undefined) patch.company = body.company ? { id: body.company.id, as: body.company.as, setBy: 'user' } : undefined;
+    // A coding in a company's books is for a row paid for that company: a mark changed otherwise takes it away (docs/DATA_FORMAT.md).
+    if (body.company !== undefined && current.books && !(body.company?.as === 'paid-for' && body.company.id === current.company?.id)) patch.books = undefined;
     if (body.splits) checkSplits(body.splits, body.amount ?? current.amount, { transferGroup: current.transferGroup, company: 'company' in patch ? patch.company : current.company }, new CategoryIndex(store.categories));
     // A corrected amount the lines no longer add up to takes the split away: split it again.
     if (body.amount !== undefined && body.splits === undefined && current.splits && current.splits.reduce((s, l) => s + toMinor(l.amount), 0) !== toMinor(body.amount)) patch.splits = undefined;
@@ -661,6 +663,7 @@ export function dataRoutes(ctx: AppContext): Hono {
       }
       if (body.notes !== undefined) patch.notes = body.notes.trim() || undefined;
       if (body.company !== undefined) patch.company = body.company ? { id: body.company.id, as: body.company.as, setBy: 'user' } : undefined;
+      if (body.company !== undefined && t.books && !(body.company?.as === 'paid-for' && body.company.id === t.company?.id)) patch.books = undefined;
       if (body.appendNotes !== undefined) {
         const notes = appendNote(t.notes, body.appendNotes);
         if (notes.length > 4000) throw new StoreError(`The notes on ${t.description} would be too long: shorten them first.`);

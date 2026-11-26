@@ -24,12 +24,14 @@ import { CategoryIndex } from '../shared/categories';
 import { COMPANY_MARK_LABELS, companyMarkProblem, sameMark } from '../shared/company';
 import { Categoriser, isWrapperAccount, linkedPayee, transferLegCategory } from '../shared/categorise';
 import { addedBooksProblems, booksProblems, FILING_KIND_LABELS } from '../shared/company-books';
+import { codingPlace, codingProblems, companyLinkProblem, journalProblems, ledgerName, linkableCoding, ruleBooksProblems, VAT_TREATMENT_LABELS } from '../shared/ledger';
 import { addDays, diffDays, formatDate, formatSpan, today } from '../shared/dates';
 import { formatMoney, fromMinor, isMoney, toMinor } from '../shared/money';
 import { sameTerms, type TermsContent } from '../shared/terms';
-import { AccountSchema, AgreementSchema, BalanceSnapshotSchema, CompanyBooksSchema, CompanyBooksSetupSchema, CompanyFilingSchema, CompanySchema, EarmarkSetupSchema, EmploymentSchema, POT_EFFECTS, ProposalSchema, TermsSchema, type Earmarks, type Account, type Agreement, type BalanceSnapshot, type Category, type Company, type CompanyBooks, type CompanyFiling, type Terms, type Employment, type PensionArrangement, type Proposal, type ProposalInput, type ProposalStatus, type ProposedChange, type Provenance, type ReturnEntry, type Rule, type Transaction } from '../shared/schema';
+import { AccountSchema, AgreementSchema, BalanceSnapshotSchema, CompanyBooksSchema, CompanyBooksSetupSchema, CompanyFilingSchema, CompanySchema, EarmarkSetupSchema, EmploymentSchema, JournalSchema, POT_EFFECTS, ProposalSchema, TermsSchema, type BooksCoding, type Journal, type Earmarks, type Account, type Agreement, type BalanceSnapshot, type Category, type Company, type CompanyBooks, type CompanyFiling, type Terms, type Employment, type PensionArrangement, type Proposal, type ProposalInput, type ProposalStatus, type ProposedChange, type Provenance, type ReturnEntry, type Rule, type Transaction } from '../shared/schema';
 import { paidToText } from './analytics/agreements';
 import { BalanceEngine, type BalanceSource } from './analytics/balances';
+import { bookRulePatches, codingKey, companyBookRules, linkNeighbours, sameJournal } from './analytics/ledger';
 import { decisionProblem, earmarkFigures, setupProblem, withSetup } from './analytics/earmarks';
 import { earmarkAccountIds, EFFECT_WORDS } from '../shared/earmarks';
 import { taxReturn } from './analytics/taxreturn';
@@ -38,7 +40,7 @@ import { categoriseInputOf, categoriserFor, ruleCatches } from './categoriser';
 import { nextPayee } from './enrich';
 import { atomicWrite, Mutex, nowAfter, nowISO } from './fsutil';
 import { balanceId, filingId, proposalId, termsId, transferGroupId } from './ids';
-import { StoreError, type DecidedProposalSummary, type Store } from './store';
+import { bookRuleAccountProblems, StoreError, type DecidedProposalSummary, type Store } from './store';
 
 /** Days apart the two rows of a proposed transfer may be: a card payment can take a few days. */
 const LINK_DAYS = 10;
@@ -133,6 +135,9 @@ interface Outcome {
   returns: Map<string, Record<string, ReturnEntry>>;
   /** Set aside as the changes leave it, when one changes it (null: none). */
   earmarks?: Earmarks | null;
+  /** Journals to write, and agents' journals to take away (as they are now). */
+  journals: Map<string, Journal>;
+  journalsRemoved: Map<string, Journal>;
 }
 
 /** A setup's accounts, pots and rules, read the same way whatever order of keys or defaults: two that say the same compare equal. */
@@ -152,6 +157,8 @@ const filingKey = (f: CompanyFiling) => {
  * "Scope"), as the problem to give; undefined when it names none.
  */
 export function companyRecordIn(store: Store, c: ProposedChange): string | undefined {
+  // A company's books are the company's: these changes are about its rows, and checked as such.
+  if (COMPANY_BOOKS_KINDS.has(c.kind)) return undefined;
   const rows = [...('transaction' in c ? [c.transaction] : []), ...(c.kind === 'link_transfer' ? [c.from, c.to] : []), ...(c.kind === 'remove_duplicate' ? c.sameAs : []), ...(c.kind === 'remove_wrong_sign' ? c.recordedAs : [])];
   const accounts = [
     ...rows.flatMap((id) => {
@@ -169,6 +176,24 @@ export function companyRecordIn(store: Store, c: ProposedChange): string | undef
   if (!theirs) return undefined;
   const name = store.company(theirs.companyId)?.name ?? theirs.companyId;
   return `${theirs.name} is ${name}'s own account, not yours: a proposal changes only your own data.`;
+}
+
+/** Changes to a company's books (shared/ledger.ts): about its own rows, journals and book rules, and the rows of yours paid for or lent to it. */
+const COMPANY_BOOKS_KINDS: ReadonlySet<ProposedChange['kind']> = new Set(['set_books', 'link_company', 'add_journal', 'remove_journal']);
+
+/** Two book rules' codings that say the same, whatever the order of their keys. */
+const sameRuleBooks = (a: Rule['set']['books'], b: Rule['set']['books']) => {
+  const key = (x: Rule['set']['books']) => JSON.stringify(x ? [x.ledger, x.vat?.treatment ?? null, x.asset?.class ?? null, x.asset?.months ?? null, x.coversMonths ?? null] : null);
+  return key(a) === key(b);
+};
+
+/** A proposed journal's id: the same each time the proposal is checked, shown and applied. */
+const proposedJournalId = (proposalId: string, key: string) => `jnl_${createHash('sha256').update(`${proposalId}:${key}`).digest('hex').slice(0, 12)}`;
+
+/** A coding in words: its ledger (or lines), and its VAT. */
+function codingWords(b: Pick<BooksCoding, 'ledger' | 'lines' | 'vat'>): string {
+  if (b.lines?.length) return b.lines.map((l) => `${ledgerName(l.ledger)} ${formatMoney(l.amount)}`).join(', ');
+  return `${ledgerName(b.ledger ?? '')}${b.vat ? `, ${VAT_TREATMENT_LABELS[b.vat.treatment].toLowerCase()}${b.vat.amount ? ` (VAT ${formatMoney(b.vat.amount)})` : ''}` : ''}`;
 }
 
 /** Set aside as it would be written, without the times it was changed and decided. */
@@ -239,7 +264,7 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
   const accountName = (id: string) => store.account(id)?.name ?? id;
   let categoriserMemo: Categoriser | undefined;
   const categoriser = () => (categoriserMemo ??= categoriserFor(store));
-  const out: Outcome = { results: new Map(), patches: new Map(), removed: new Map(), accounts: new Map(), touchedRows: new Map(), touchedAccounts: new Map(), moves: new Map(), companies: new Map(), books: new Map(), jobs: new Map(), balances: [], agreements: new Map(), terms: new Map(), termsRemoved: new Map(), rules: [], removedRules: new Map(), categoriesBefore: new Map(), returns: new Map() };
+  const out: Outcome = { results: new Map(), patches: new Map(), removed: new Map(), accounts: new Map(), touchedRows: new Map(), touchedAccounts: new Map(), moves: new Map(), companies: new Map(), books: new Map(), jobs: new Map(), balances: [], agreements: new Map(), terms: new Map(), termsRemoved: new Map(), rules: [], removedRules: new Map(), categoriesBefore: new Map(), returns: new Map(), journals: new Map(), journalsRemoved: new Map() };
   /** Change a category, or add one (`was` undefined), in the list the next changes see. */
   const putCategory = (next: Category, was: Category | undefined) => {
     const original = was ? store.categories.find((x) => x.id === was.id) : undefined;
@@ -282,8 +307,8 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
   };
   const gone = (id: string) => `Transaction ${id} is no longer in your data.`;
   /** What you added to a row beyond a category or payee, which taking it away would lose. */
-  const keptByYou = (t: Transaction) => Boolean(t.notes || t.tags?.length || t.splits?.length || t.corrections?.length || t.seenIn?.length || t.company?.setBy === 'user') || receiptsOn.has(t.id);
-  const KEPT_BY_YOU = 'It has something of yours on it (a note, tag, split, correction, receipt, set-aside decision, a mark of money with your company or details you added from another document), so a proposal leaves it to you.';
+  const keptByYou = (t: Transaction) => Boolean(t.notes || t.tags?.length || t.splits?.length || t.corrections?.length || t.seenIn?.length || t.company?.setBy === 'user' || t.books?.setBy === 'user') || receiptsOn.has(t.id) || store.companyLinksTo(t.id).some((c) => c.companyLink?.setBy !== 'auto');
+  const KEPT_BY_YOU = 'It has something of yours on it (a note, tag, split, correction, receipt, set-aside decision, a mark of money with your company, a coding in its books, a link to the company’s row or details you added from another document), so a proposal leaves it to you.';
   const remove = (t: Transaction) => {
     if (!out.touchedRows.has(t.id)) out.touchedRows.set(t.id, store.transaction(t.id)!);
     out.patches.delete(t.id);
@@ -367,6 +392,11 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
         // Yours wins: a mark you set is not changed or taken away by a proposal.
         const was = store.transaction(t.id)?.company;
         if (was?.setBy === 'user') return { problem: `You marked it yourself (${markName(was)}), so a proposal leaves it to you: change it on the Transactions page if you want to.` };
+        // A coding in the company's books is for a row paid for it: one of yours stays (so the mark does), an agent's goes with the mark.
+        const uncode = t.books && !(c.company?.as === 'paid-for' && c.company.id === t.company?.id);
+        if (uncode && t.books?.setBy === 'user') return { problem: `You coded it in the company’s books yourself, so a proposal leaves its mark to you.` };
+        if (store.companyLinksTo(t.id).some((x) => x.companyLink?.setBy !== 'auto')) return { problem: `${brief(t, accountName)} is linked by hand to the company’s own row, so a proposal leaves its mark to you.` };
+        if (uncode) patch(t, { books: undefined });
         if (c.company === null) {
           patch(t, { company: undefined });
           return { mark: { ...(t.company ? { was: markName(t.company) } : {}) } };
@@ -710,7 +740,102 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
         companyNow.set(company.id, { ...company, books });
         return { books: { what: `${label} for ${c.filing.periodStart ? formatSpan(c.filing.periodStart, c.filing.periodEnd) : `the period to ${formatDate(c.filing.periodEnd)}`}, filed on ${formatDate(c.filing.filedOn)}${c.filing.reference ? `, reference ${c.filing.reference}` : ''}.` } };
       }
+      case 'set_books': {
+        const t = row(c.transaction);
+        if (!t) return { problem: gone(c.transaction) };
+        // Yours wins: a coding you set is not changed or taken away by a proposal.
+        const was = store.transaction(t.id)?.books;
+        if (was?.setBy === 'user') return { problem: `You coded it yourself (${codingWords(was)}), so a proposal leaves it to you: change it on the company’s Books tab if you want to.` };
+        if (c.books === null) {
+          if (!t.books) return { alreadySo: true };
+          patch(t, { books: undefined });
+          return { books: { what: `Takes away its coding (${codingWords(t.books)}).` } };
+        }
+        const next: BooksCoding = { ...c.books, setBy: 'agent' };
+        if (t.books && codingKey(t.books) === codingKey(next)) return { alreadySo: true };
+        const marks = { account: (id: string) => store.account(id), company: (id: string | undefined) => store.company(id) };
+        const place = codingPlace(t, marks);
+        if ('problem' in place) return { problem: place.problem };
+        const problems = codingProblems(t.amount, next, place.row);
+        if (problems.length) return { problem: problems.join(' ') };
+        if (t.companyLink?.rows.length && !linkableCoding(next)) return { problem: `${brief(t, accountName)} is linked to money between you and the company: it is the director’s loan, so it takes no other coding. Unlink it first.` };
+        patch(t, { books: next });
+        return { books: { what: `Codes ${brief(t, accountName)} in ${store.company(place.companyId)?.name ?? place.companyId}’s books: ${codingWords(next)}.` } };
+      }
+      case 'link_company': {
+        const t = row(c.transaction);
+        if (!t) return { problem: gone(c.transaction) };
+        const own = store.account(t.accountId);
+        if (!own?.companyId) return { problem: `${brief(t, accountName)} is not a company account’s row: a link is set on the company’s row, naming the rows of yours that are the same money.` };
+        const was = store.transaction(t.id)?.companyLink;
+        if (was && was.setBy === 'user') return { problem: `You linked it yourself, so a proposal leaves it to you: change it on the company’s Books tab if you want to.` };
+        if (c.rows === null) {
+          if (!t.companyLink) return { alreadySo: true };
+          patch(t, { companyLink: undefined });
+          return { books: { what: `Unlinks ${brief(t, accountName)} from the rows of yours it named.` } };
+        }
+        const wanted = [...c.rows].sort();
+        if (t.companyLink && JSON.stringify([...t.companyLink.rows].sort()) === JSON.stringify(wanted)) return { alreadySo: true };
+        if (new Set(wanted).size !== wanted.length) return { problem: 'A link names each row of yours once.' };
+        // The group it would make: this row, and every company row naming one of the same rows of yours.
+        const next = { ...t, companyLink: { rows: c.rows, setBy: 'agent' as const } };
+        const others = linkNeighbours(store, own.companyId, c.rows).filter((x) => x.id !== t.id).map((x) => row(x.id) ?? x);
+        const personalIds = [...new Set([...c.rows, ...others.flatMap((x) => x.companyLink?.rows ?? [])])].sort();
+        const lookup = (id: string) => (id === t.id ? next : row(id));
+        const problem = companyLinkProblem({ companyIds: [t.id, ...others.map((x) => x.id)].sort(), personalIds }, lookup, { account: (id) => store.account(id), company: (id) => store.company(id) });
+        if (problem) return { problem };
+        patch(t, { companyLink: next.companyLink });
+        return { books: { what: `Links ${brief(t, accountName)} to ${c.rows.map((id) => (row(id) ? brief(row(id)!, accountName) : id)).join(', ')}: the same money, so it posts once, to your director’s loan.` } };
+      }
+      case 'add_journal': {
+        const company = companyOf(c.company);
+        if (!company) return { problem: `There is no company "${c.company}" in your data.` };
+        if (!company.books) return { problem: `${company.name}’s books are not kept here: set them up first.` };
+        if (sameJournal(store, company.id, c.journal) || [...out.journals.values()].some((j) => j.companyId === company.id && j.date === c.journal.date && j.memo === c.journal.memo)) return { alreadySo: true };
+        if (c.journal.date > today()) return { problem: `${formatDate(c.journal.date)} is in the future.` };
+        const problems = journalProblems(c.journal, (id) => store.account(id)?.companyId === company.id);
+        if (problems.length) return { problem: problems.join(' ') };
+        const stamp = nowISO();
+        const journal = JournalSchema.parse({ ...c.journal, id: proposedJournalId(forProposal, c.key), companyId: company.id, createdBy: 'agent', createdAt: stamp, updatedAt: stamp });
+        out.journals.set(journal.id, journal);
+        return { books: { what: `A journal in ${company.name}’s books on ${formatDate(journal.date)}: ${journal.memo} (${journal.lines.map((l) => `${ledgerName(l.ledger)} ${formatMoney(l.amount)}`).join(', ')}).` } };
+      }
+      case 'remove_journal': {
+        const j = store.journal(c.journal);
+        if (!j || out.journalsRemoved.has(j.id)) return { alreadySo: true };
+        if (j.createdBy === 'owner') return { problem: `You wrote that journal (${j.memo}): a proposal leaves it to you.` };
+        out.journalsRemoved.set(j.id, j);
+        return { books: { what: `Takes away the journal of ${formatDate(j.date)}: ${j.memo}.` } };
+      }
       case 'add_rule': {
+        if (c.rule.books) {
+          const stamp = nowISO();
+          const companyId = c.rule.match.company?.id;
+          const rule: Rule = { id: proposedRuleId(forProposal, c.key), name: c.rule.name ?? `${c.rule.match.value} → ${ledgerName(c.rule.books.ledger)}`, enabled: true, priority: 100, match: c.rule.match, set: { books: c.rule.books }, createdAt: stamp, updatedAt: stamp };
+          if (c.rule.category) return { problem: 'A rule codes a company’s rows or categorises yours, not both.' };
+          const problem = [...ruleBooksProblems(rule), ...bookRuleAccountProblems(rule, (id) => store.account(id), (id) => Boolean(store.company(id)))][0];
+          if (problem || !companyId) return { problem: problem ?? 'A book rule names its company.' };
+          const company = companyOf(companyId)!;
+          if (!company.books) return { problem: `${company.name}’s books are not kept here: set them up first.` };
+          // The company's rules as the changes so far leave them, this one among them: the rows it now codes.
+          const existing = [...companyBookRules(store, companyId), ...out.rules.filter((r) => r.match.company?.id === companyId)];
+          const there = existing.find((r) => r.enabled && sameMatch(r.match, rule.match));
+          if (there) return sameRuleBooks(there.set.books, c.rule.books) ? { alreadySo: true } : { problem: `The rule “${there.name ?? there.match.value}” catches the same rows already: change it on ${company.name}’s Books tab instead.` };
+          out.rules.push(rule);
+          const coded: Transaction[] = [];
+          for (const { id, patch: p, ruleId: by } of bookRulePatches(store, companyId, { rules: [...existing, rule] })) {
+            if (by !== rule.id) continue;
+            const t = row(id);
+            if (!t) continue;
+            patch(t, p);
+            coded.push(t);
+          }
+          coded.sort((a, b) => b.date.localeCompare(a.date));
+          const examples: ProposalRuleExample[] = coded.slice(0, RULE_EXAMPLES).map((t) => ({ id: t.id, accountId: t.accountId, date: t.date, amount: t.amount, description: t.description }));
+          return { rule: { count: coded.length, amount: fromMinor(coded.reduce((sum, t) => sum + toMinor(t.amount), 0)), examples, settles: 0, yours: 0 }, books: { what: `Codes ${company.name}’s rows it matches: ${codingWords({ ledger: rule.set.books!.ledger })}.` } };
+        }
+        if (!c.rule.category) return { problem: 'A rule for your rows sets a category.' };
+        if (c.rule.match.company) return { problem: 'A rule that names a company codes its rows (`books`), not a category of yours.' };
         const cat = cats.get(c.rule.category);
         if (!cat) return { problem: `There is no category "${c.rule.category}".` };
         if (c.rule.match.op === 'regex') {
@@ -724,7 +849,7 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
         const there = rulesNow().find((r) => r.enabled && sameMatch(r.match, c.rule.match));
         if (there) return there.set.category === c.rule.category ? { alreadySo: true } : { problem: `Your rule “${there.name ?? there.match.value}” catches the same payments and puts them in ${cats.name(there.set.category)}: change that rule in Settings → Rules instead.` };
         const stamp = nowISO();
-        const rule: Rule = { id: proposedRuleId(forProposal, c.key), name: c.rule.name ?? `${c.rule.match.value} → ${cat.name}`, enabled: true, priority: 100, match: c.rule.match, set: { category: c.rule.category }, createdAt: stamp, updatedAt: stamp };
+        const rule: Rule = { id: proposedRuleId(forProposal, c.key), name: c.rule.name ?? `${c.rule.match.value} → ${cat.name}`, enabled: true, priority: 100, match: c.rule.match, set: { category: cat.id }, createdAt: stamp, updatedAt: stamp };
         out.rules.push(rule);
         // The payments it catches, categorised as the categoriser would with it (a rule of yours that
         // comes first still wins), as applying a rule does: yours and linked transfers are left.
@@ -901,7 +1026,7 @@ export function sourceAsLeft(store: Store, row: (id: string) => Transaction | un
 function changesNothing(store: Store, o: Outcome): boolean {
   if (o.returns.size) return false;
   if (o.earmarks !== undefined && earmarksKey(o.earmarks) !== earmarksKey(store.earmarks)) return false;
-  if (o.removed.size || o.companies.size || o.books.size || o.balances.length || o.jobs.size || o.agreements.size || o.terms.size || o.termsRemoved.size || o.rules.length || o.removedRules.size || o.categories) return false;
+  if (o.removed.size || o.companies.size || o.books.size || o.balances.length || o.jobs.size || o.agreements.size || o.terms.size || o.termsRemoved.size || o.rules.length || o.removedRules.size || o.categories || o.journals.size || o.journalsRemoved.size) return false;
   if ([...o.moves.values()].some((m) => m.to !== m.balance.accountId)) return false;
   for (const [id, patch] of o.patches) {
     const t = store.transaction(id) as Record<string, unknown> | undefined;
@@ -941,7 +1066,10 @@ function namedRows(c: ProposedChange): string[] {
       return [c.transaction, ...c.recordedAs];
     case 'remove_internal_move':
     case 'decide_earmark_flow':
+    case 'set_books':
       return [c.transaction];
+    case 'link_company':
+      return [c.transaction, ...(c.rows ?? [])];
     case 'set_earmarks':
     case 'set_account_dates':
     case 'link_accounts':
@@ -958,6 +1086,8 @@ function namedRows(c: ProposedChange): string[] {
     case 'set_return_entry':
     case 'set_company_books':
     case 'add_filing':
+    case 'add_journal':
+    case 'remove_journal':
       return [];
   }
 }
@@ -1149,7 +1279,12 @@ export class ProposalService extends EventEmitter {
       }
       // Categories first, then rules: the rows after them use both.
       if (outcome.categories) await this.store.setCategories(outcome.categories, message);
-      if (outcome.rules.length || outcome.removedRules.size) await this.store.setRules([...this.store.rules.filter((r) => !outcome.removedRules.has(r.id)), ...outcome.rules], message);
+      const personalRules = outcome.rules.filter((r) => !r.match.company);
+      if (personalRules.length || outcome.removedRules.size) await this.store.setRules([...this.store.rules.filter((r) => !outcome.removedRules.has(r.id)), ...personalRules], message);
+      // A book rule joins its company's own; they are company data, written apart from yours.
+      for (const companyId of new Set(outcome.rules.flatMap((r) => (r.match.company ? [r.match.company.id] : [])))) {
+        await this.store.setBookRules(companyId, [...companyBookRules(this.store, companyId), ...outcome.rules.filter((r) => r.match.company?.id === companyId)], message);
+      }
       if (outcome.patches.size) await this.store.updateTransactions([...outcome.patches].map(([tid, patch]) => ({ id: tid, patch })), message);
       if (outcome.removed.size) await this.store.deleteTransactions([...outcome.removed.keys()], message);
       for (const account of outcome.accounts.values()) await this.store.upsertAccount(account, message);
@@ -1183,6 +1318,8 @@ export class ProposalService extends EventEmitter {
           message,
         );
       }
+      for (const journal of outcome.journals.values()) await this.store.putJournal(journal, message);
+      for (const id of outcome.journalsRemoved.keys()) await this.store.deleteJournal(id, message);
       for (const job of outcome.jobs.values()) await this.store.upsertEmployment(job, message);
       for (const agreement of outcome.agreements.values()) await this.store.upsertAgreement(agreement, message);
       const termsGone = [...outcome.termsRemoved.keys()].filter((tid) => !outcome.terms.has(tid));
@@ -1197,7 +1334,8 @@ export class ProposalService extends EventEmitter {
       const termsBefore = [...outcome.termsRemoved.values()];
       const categoriesBefore = [...outcome.categoriesBefore.values()];
       const rulesBefore = [...outcome.removedRules.values()];
-      const before = { transactions: [...outcome.touchedRows.values()], accounts: [...outcome.touchedAccounts.values()], ...(balances.length ? { balances } : {}), ...(termsBefore.length ? { terms: termsBefore } : {}), ...(categoriesBefore.length ? { categories: categoriesBefore } : {}), ...(rulesBefore.length ? { rules: rulesBefore } : {}), ...(earmarksBefore !== undefined ? { earmarks: earmarksBefore } : {}), ...(companiesBefore.length ? { companies: companiesBefore } : {}) };
+      const journalsBefore = [...outcome.journalsRemoved.values()];
+      const before = { transactions: [...outcome.touchedRows.values()], accounts: [...outcome.touchedAccounts.values()], ...(balances.length ? { balances } : {}), ...(termsBefore.length ? { terms: termsBefore } : {}), ...(categoriesBefore.length ? { categories: categoriesBefore } : {}), ...(rulesBefore.length ? { rules: rulesBefore } : {}), ...(earmarksBefore !== undefined ? { earmarks: earmarksBefore } : {}), ...(companiesBefore.length ? { companies: companiesBefore } : {}), ...(journalsBefore.length ? { journals: journalsBefore } : {}) };
       const decided = await this.decide(p, { status: 'applied', applied: doing.map((c) => c.key), before }, message);
       await this.commit();
       // Another proposal it has left with nothing to do closes now, in a commit of its own.

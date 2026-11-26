@@ -306,10 +306,11 @@ export function classifyDuplicates(incoming: DedupCandidate[], existing: Transac
 /**
  * Something of yours is on this transaction, or it is linked to another: a category, payee, note,
  * tag or split you set, a correction, a receipt, details another document filled in when you
- * committed it, a transfer link, a mark of money with a company. Such a copy is never taken away.
+ * committed it, a transfer link, a mark of money with a company, a coding in its books you set, or a
+ * link of a company row to yours. Such a copy is never taken away.
  */
 export function hasYourChanges(t: Transaction, withReceipts: Set<string>): boolean {
-  return t.categorisedBy === 'user' || t.payeeSetBy === 'user' || Boolean(t.notes || t.tags?.length || t.splits?.length || t.corrections?.length || t.seenIn?.length || t.transferGroup || t.company) || withReceipts.has(t.id);
+  return t.categorisedBy === 'user' || t.payeeSetBy === 'user' || Boolean(t.notes || t.tags?.length || t.splits?.length || t.corrections?.length || t.seenIn?.length || t.transferGroup || t.company || t.companyLink?.setBy === 'user' || t.books?.setBy === 'user') || withReceipts.has(t.id);
 }
 
 /** How far from the copy a statement matched another copy of it may be dated (`storedTwice`, nearby). */

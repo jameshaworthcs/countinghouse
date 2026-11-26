@@ -177,7 +177,7 @@ export function linkCandidates(store: Store, pending: readonly ImportRecord[], s
   const recorded: LinkCandidate[] = [];
   // Rows on its own side only: yours for a row of yours, its company's for a company's.
   for (const t of mine.id ? store.transactionsBeside(mine.id) : store.transactions()) {
-    if (t.transferGroup || t.company || !near(t.date, t.amount) || sameAccount(mine, { id: t.accountId }) || t.id === found.row.duplicateOf) continue;
+    if (t.transferGroup || t.company || t.companyLink?.rows.length || !near(t.date, t.amount) || sameAccount(mine, { id: t.accountId }) || t.id === found.row.duplicateOf) continue;
     recorded.push({ kind: 'recorded', transactionId: t.id, accountName: store.account(t.accountId)?.name ?? t.accountId, date: t.date, amount: t.amount, description: t.payee ?? t.description, days: days(t.date, found.row.date) });
   }
   const byNearest = (a: LinkCandidate, b: LinkCandidate) => a.days - b.days || a.date.localeCompare(b.date);

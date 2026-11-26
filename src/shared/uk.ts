@@ -888,6 +888,20 @@ export const VAT_RETURN_RULES: readonly { from: ISODate; electronicDays: number;
   { from: '2019-04-01', electronicDays: 7, annualMonths: 2, annualShortMonths: 1, annualShortUnderMonths: 4 },
 ];
 
+/**
+ * VAT rates, by the day a supply is made (docs/UK_RULES.md, "VAT rates"): the standard rate (VATA 1994
+ * s2(1), 20% from 4 January 2011 by Finance (No. 2) Act 2010 s3) and the reduced rate (s29A, 5%). The
+ * temporary rates for hospitality and tourism (5% from 15 July 2020, 12.5% from 1 October 2021 to
+ * 31 March 2022) were special rates for those supplies, not changes to these. Earlier rates are not
+ * covered: a supply before the first row takes it.
+ */
+export const VAT_RATES: readonly { from: ISODate; standard: number; reduced: number }[] = [{ from: '2011-01-04', standard: 0.2, reduced: 0.05 }];
+
+/** The VAT rate of a kind in force on a day (`VAT_RATES`). */
+export function vatRateOn(date: ISODate, rate: 'standard' | 'reduced'): number {
+  return ruleOn(VAT_RATES, date)[rate];
+}
+
 /** The last day of the VAT period in a stagger that contains `date` (monthly or quarterly). */
 export function vatPeriodEnd(stagger: Exclude<VatStagger, 'annual'>, date: ISODate): ISODate {
   if (stagger === 'monthly') return endOfMonth(date);

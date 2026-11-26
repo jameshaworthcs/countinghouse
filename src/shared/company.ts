@@ -23,10 +23,12 @@ export const COMPANY_MARK_LABELS: Record<CompanyMarkKind, string> = {
 export const DIRECTOR_LOAN_MARKS: ReadonlySet<CompanyMarkKind> = new Set(['paid-for', 'loan']);
 
 /**
- * What a marked row did to the director's loan, in words: you paid a cost of the company's (or it was
- * refunded to you), you lent it money, or it paid you back. Only for marks that move the loan.
+ * What a movement did to the director's loan, in words: you paid a cost of the company's (or it was
+ * refunded to you), you lent it money, or it paid you back (a row of yours, or its company row linked
+ * to it); once its books are kept here, also money into or out of the company's account coded to the
+ * loan, a journal, and the fee a link's two sides differ by. `directorLoanKind` is for marked rows.
  */
-export type DirectorLoanKind = 'paid-for' | 'refund' | 'lent' | 'repaid';
+export type DirectorLoanKind = 'paid-for' | 'refund' | 'lent' | 'repaid' | 'received' | 'paid-out' | 'journal' | 'fee';
 export function directorLoanKind(as: CompanyMarkKind, amount: number): DirectorLoanKind | undefined {
   if (as === 'paid-for') return amount < 0 ? 'paid-for' : 'refund';
   if (as === 'loan') return amount < 0 ? 'lent' : 'repaid';
@@ -38,6 +40,10 @@ export const DIRECTOR_LOAN_KIND_LABELS: Record<DirectorLoanKind, string> = {
   refund: 'Refund of a cost you paid for it',
   lent: 'Lent to the company',
   repaid: 'Paid back to you',
+  received: 'Into the company’s account',
+  'paid-out': 'Out of the company’s account',
+  journal: 'Journal',
+  fee: 'Fee taken on the way',
 };
 
 /** Why a mark does not fit its row, as a code (`markMisfit`): cheap enough to ask of every row. */

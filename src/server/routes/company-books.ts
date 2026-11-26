@@ -3,21 +3,32 @@
 // routes, apart from every personal one: no personal route carries a company's books or deadlines
 // (DECISIONS 2026-11-26), and tests/company-scope.test.ts lists these as answering for the company.
 //
+// Its general ledger too (analytics/ledger.ts, FORMULAS.md §22): its postings and checks, the rows to
+// code with the links between its rows and yours, its journals and its book rules.
+//
 // Only the owner changes the books: no agent token may use the routes that change them (tokens.ts
-// lists none of them); an agent proposes instead (`set_company_books`, `add_filing`).
+// lists none of them); an agent proposes instead (`set_company_books`, `add_filing`, `set_books`,
+// `link_company`, `add_journal`, `remove_journal`, `add_rule` with `books`).
 
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import type { CompanyBooksListItem, CompanyBooksResponse } from '../../shared/api';
 import { accountingPeriodsOf, addedBooksProblems, booksProblems, companyDeadlineAlerts, companyDeadlines, ctPeriodsOf, FILING_KIND_LABELS, vatPeriodsOf, withinChargeAssumed, withinChargeFrom } from '../../shared/company-books';
 import { formatDate, today } from '../../shared/dates';
-import { CompanyBooksSchema, CompanyBooksSetupSchema, CompanyFilingInputSchema, CompanyFilingSchema, CompanySchema, SlugSchema, TimestampSchema, type Company } from '../../shared/schema';
+import { BooksCodingSchema, CompanyBooksSchema, CompanyBooksSetupSchema, CompanyFilingInputSchema, CompanyFilingSchema, CompanySchema, JournalInputSchema, RuleSchema, SlugSchema, TimestampSchema, type Company, type Journal, type Rule, type Transaction } from '../../shared/schema';
+import { codingPlace, isLinked } from '../../shared/ledger';
+import { autoLinkPatches, bookRulePatches, codingView, companyBookRules, ledgerView } from '../analytics/ledger';
 import { defaultAccountingReferenceDate } from '../../shared/uk';
 import { companyView } from '../analytics/companies';
-import { agentTokenOf, readJson, type AppContext } from '../context';
-import { nowAfter, nowISO } from '../fsutil';
-import { filingId } from '../ids';
+import { agentTokenOf, queryDate, readJson, type AppContext } from '../context';
+import { nowAfter, nowISO, randomHex } from '../fsutil';
+import { filingId, ruleId } from '../ids';
 import { StoreError } from '../store';
+
+const CodingBody = z.object({ books: BooksCodingSchema.omit({ setBy: true, ruleId: true }).nullable() });
+const LinkBody = z.object({ /** The rows of yours it is the other side of; [] says it is linked to none; null takes the link away. */ rows: z.array(z.string().regex(/^tx_[0-9a-f]{16}$/)).max(30).nullable() });
+const JournalBody = z.object({ journal: JournalInputSchema, /** An edit: the journal's `updatedAt` it was made against. */ was: TimestampSchema.optional() });
+const BookRuleBody = RuleSchema.omit({ id: true, createdAt: true, updatedAt: true });
 
 const SetupBody = z.object({ books: CompanyBooksSetupSchema, was: TimestampSchema.nullable().optional(), /** The company the page was showing: refused when it is not this one. */ company: SlugSchema.optional() });
 
@@ -144,6 +155,139 @@ export function companyBookRoutes(ctx: AppContext): Hono {
       `company: ${name} filing ${fid} removed`,
     );
     return c.json({ ok: true });
+  });
+
+  // ─── The general ledger (FORMULAS.md §22, "The general ledger") ──────────────────────────────────
+
+  const keptOr404 = (id: string): Company => {
+    const company = companyOr404(id);
+    booksOr404(company);
+    return company;
+  };
+
+  /** Its postings in a date range, what they add up to by ledger, and the ledger's checks. */
+  app.get('/companies/:id/ledger', (c) => c.json(ledgerView(store, keptOr404(c.req.param('id')), queryDate(c.req.query('from')), queryDate(c.req.query('to')))));
+
+  /** The rows to code (uncoded first), the links between its rows and yours and what could be linked, its journals and book rules. */
+  app.get('/companies/:id/coding', (c) => c.json(codingView(store, keptOr404(c.req.param('id')), queryDate(c.req.query('from')), queryDate(c.req.query('to')))));
+
+  /** A row of this company's books: one of its own accounts' rows, or a row of yours paid for or lent to it. */
+  const rowOf = (company: Company, txId: string): Transaction => {
+    const t = store.transaction(txId);
+    const account = t ? store.account(t.accountId) : undefined;
+    if (!t || !account || (account.companyId ? account.companyId !== company.id : t.company?.id !== company.id)) throw new StoreError(`No such row in ${company.name}’s books.`, 404);
+    return t;
+  };
+
+  /** Code a row (null takes its coding away): yours, so nothing else changes it. */
+  app.put('/companies/:id/rows/:txId/books', async (c) => {
+    ownerOnly(c);
+    const company = keptOr404(c.req.param('id'));
+    const t = rowOf(company, c.req.param('txId'));
+    const { books } = await readJson(c, CodingBody);
+    if (books) {
+      const place = codingPlace(t, { account: (id) => store.account(id), company: (id) => store.company(id) });
+      if ('problem' in place) throw new StoreError(place.problem, 422);
+      if (isLinked(t) && !(books.ledger === 'directors-loan' && !books.lines?.length && !books.vat)) throw new StoreError('It is linked to money between you and the company, so it is the director’s loan: unlink it first to code it otherwise.', 422);
+    }
+    const [updated] = await store.updateTransactions([{ id: t.id, patch: { books: books ? { ...books, setBy: 'user' } : undefined } }], `books: ${company.name} ${books ? 'code' : 'uncode'} ${t.id}`);
+    return c.json(updated);
+  });
+
+  /** Link a company row to rows of yours lent to it or repaid by it (null: take the link away; []: linked to none). */
+  app.put('/companies/:id/rows/:txId/link', async (c) => {
+    ownerOnly(c);
+    const company = keptOr404(c.req.param('id'));
+    const t = rowOf(company, c.req.param('txId'));
+    if (!store.account(t.accountId)?.companyId) throw new StoreError('A link is set on the company’s row, naming the rows of yours that are the same money.', 422);
+    const { rows } = await readJson(c, LinkBody);
+    for (const id of rows ?? []) rowOf(company, id);
+    const [updated] = await store.updateTransactions([{ id: t.id, patch: { companyLink: rows === null ? undefined : { rows, setBy: 'user' } } }], `books: ${company.name} ${rows?.length ? 'link' : 'unlink'} ${t.id}`);
+    return c.json(updated);
+  });
+
+  /** Link what the app would link by itself now (exact, unique, within 4 days), without re-working every row. */
+  app.post('/companies/:id/links/auto', async (c) => {
+    ownerOnly(c);
+    const company = keptOr404(c.req.param('id'));
+    const patches = autoLinkPatches(store, company.id);
+    if (patches.length) await store.updateTransactions(patches, `books: ${company.name} links worked out (${patches.length})`);
+    return c.json({ changed: patches.length });
+  });
+
+  /** Write a journal. */
+  app.post('/companies/:id/journals', async (c) => {
+    ownerOnly(c);
+    const company = keptOr404(c.req.param('id'));
+    const { journal } = await readJson(c, JournalBody);
+    const stamp = nowISO();
+    const saved = await store.putJournal({ ...journal, id: `jnl_${randomHex(6)}`, companyId: company.id, createdBy: 'owner', createdAt: stamp, updatedAt: stamp } satisfies Journal, `books: ${company.name} journal ${journal.memo}`);
+    return c.json(saved, 201);
+  });
+
+  /** Change a journal (yours from then on). */
+  app.put('/companies/:id/journals/:jid', async (c) => {
+    ownerOnly(c);
+    const company = keptOr404(c.req.param('id'));
+    const was = store.journal(c.req.param('jid'));
+    if (!was || was.companyId !== company.id) throw new StoreError('No such journal', 404);
+    const body = await readJson(c, JournalBody);
+    const saved = await store.putJournal({ ...was, ...body.journal, createdBy: 'owner', updatedAt: nowAfter(was.updatedAt) }, `books: ${company.name} journal ${body.journal.memo}`, body.was ? { was: body.was } : {});
+    return c.json(saved);
+  });
+
+  app.delete('/companies/:id/journals/:jid', async (c) => {
+    ownerOnly(c);
+    const company = keptOr404(c.req.param('id'));
+    const was = store.journal(c.req.param('jid'));
+    if (!was || was.companyId !== company.id) throw new StoreError('No such journal', 404);
+    await store.deleteJournal(was.id, `books: ${company.name} journal removed ${was.memo}`);
+    return c.json({ ok: true });
+  });
+
+  /** A company's book rules applied to its rows now: each row they reach takes what they make of it. */
+  const applyBookRules = async (company: Company, label: string) => {
+    const patches = bookRulePatches(store, company.id);
+    if (patches.length) await store.updateTransactions(patches.map(({ id, patch }) => ({ id, patch })), `books: ${company.name} rule ${label} (${patches.length} coded)`);
+    return patches.length;
+  };
+
+  /** Add a book rule, and code the rows it matches. */
+  app.post('/companies/:id/book-rules', async (c) => {
+    ownerOnly(c);
+    const company = keptOr404(c.req.param('id'));
+    const body = await readJson(c, BookRuleBody);
+    if (body.match.company?.id !== company.id) throw new StoreError(`A book rule here names ${company.name}.`, 422);
+    const stamp = nowISO();
+    const rule: Rule = { ...body, id: ruleId(), createdAt: stamp, updatedAt: stamp };
+    await store.setBookRules(company.id, [...companyBookRules(store, company.id), rule], `books: ${company.name} rule ${rule.name ?? rule.match.value}`);
+    const coded = await applyBookRules(company, rule.name ?? rule.match.value);
+    return c.json({ rule, coded }, 201);
+  });
+
+  app.put('/companies/:id/book-rules/:ruleId', async (c) => {
+    ownerOnly(c);
+    const company = keptOr404(c.req.param('id'));
+    const rules = companyBookRules(store, company.id);
+    const was = rules.find((r) => r.id === c.req.param('ruleId'));
+    if (!was) throw new StoreError('No such rule', 404);
+    const body = await readJson(c, BookRuleBody);
+    if (body.match.company?.id !== company.id) throw new StoreError(`A book rule here names ${company.name}.`, 422);
+    const next = RuleSchema.parse({ ...body, id: was.id, createdAt: was.createdAt, updatedAt: nowISO() });
+    await store.setBookRules(company.id, rules.map((r) => (r.id === was.id ? next : r)), `books: ${company.name} rule ${next.name ?? next.match.value}`);
+    const coded = await applyBookRules(company, next.name ?? next.match.value);
+    return c.json({ rule: next, coded });
+  });
+
+  app.delete('/companies/:id/book-rules/:ruleId', async (c) => {
+    ownerOnly(c);
+    const company = keptOr404(c.req.param('id'));
+    const rules = companyBookRules(store, company.id);
+    const was = rules.find((r) => r.id === c.req.param('ruleId'));
+    if (!was) throw new StoreError('No such rule', 404);
+    await store.setBookRules(company.id, rules.filter((r) => r.id !== was.id), `books: ${company.name} rule removed ${was.name ?? was.match.value}`);
+    const coded = await applyBookRules(company, `${was.name ?? was.match.value} (removed)`);
+    return c.json({ ok: true, coded });
   });
 
   return app;

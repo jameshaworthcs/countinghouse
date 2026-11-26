@@ -1,7 +1,7 @@
 // Proposed fixes: what an agent proposes changing in your data, each change with its reason and the
 // rows it is about, waiting for you on the Import page (src/server/proposals.ts).
 
-import { ArrowDown, ArrowRight, ArrowRightLeft, ArrowUpDown, Building2, CalendarDays, HandCoins, ChevronRight, CircleCheck, CircleSlash, CopyX, FileText, FolderPen, FolderPlus, Handshake, Link2, Percent, NotebookPen, PiggyBank, Sparkles, Tag, Trash2, Unlink, Wand2, X } from 'lucide-react';
+import { ArrowDown, ArrowRight, ArrowRightLeft, ArrowUpDown, BookOpen, Building2, CalendarDays, HandCoins, ChevronRight, CircleCheck, CircleSlash, CopyX, FileText, FolderPen, FolderPlus, Handshake, Link2, Percent, NotebookPen, PiggyBank, Sparkles, Tag, Trash2, Unlink, Wand2, X } from 'lucide-react';
 import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import type { ProposalBalance, ProposalListResponse, ProposalRow, ProposalSummary, ProposalView } from '../../shared/api';
@@ -12,6 +12,7 @@ import { cn, formatDate, matchWords, money, plural, timeAgo } from '../lib/forma
 import { RATE_NAMES } from '../../shared/terms';
 import { COMPANY_MARK_LABELS } from '../../shared/company';
 import { FILING_KIND_LABELS, VAT_STAGGER_LABELS, formatMonthDay } from '../../shared/company-books';
+import { ledgerName } from '../../shared/ledger';
 import { limitName, RatesList, rateText } from './Terms';
 import { Badge, Button, Card, IconButton, StatusBadge } from './ui';
 import { EFFECT_WORDS } from '../lib/earmarks';
@@ -61,6 +62,10 @@ export const CHANGE_LABELS: Record<ProposedChangeKind, { title: string; count: (
   decide_earmark_flow: { title: 'Decide what a payment did to a pot', count: (n) => `${plural(n, 'payment')} decided for set aside`, icon: <HandCoins className="size-4" aria-hidden /> },
   set_company_books: { title: 'Keep a company’s books', count: (n) => (n === 1 ? 'a company’s books' : `${n} companies’ books`), icon: <Building2 className="size-4" aria-hidden /> },
   add_filing: { title: 'Record a company’s filing', count: (n) => plural(n, 'filing'), icon: <FileText className="size-4" aria-hidden /> },
+  set_books: { title: 'Code a payment in a company’s books', count: (n) => `${plural(n, 'payment')} coded in a company’s books`, icon: <BookOpen className="size-4" aria-hidden /> },
+  link_company: { title: 'Link a company’s row to yours', count: (n) => plural(n, 'company row link'), icon: <Link2 className="size-4" aria-hidden /> },
+  add_journal: { title: 'Write a journal in a company’s books', count: (n) => plural(n, 'journal'), icon: <BookOpen className="size-4" aria-hidden /> },
+  remove_journal: { title: 'Take away a journal', count: (n) => `${plural(n, 'journal')} taken away`, icon: <Trash2 className="size-4" aria-hidden /> },
 };
 
 /** "5 transfers linked, 2 transfer links undone, 1 category" */
@@ -315,17 +320,17 @@ export function ChangeBody({ change, view }: { change: ProposedChange; view: Pro
       return (
         <div className="grid gap-1.5 rounded-lg border border-line bg-panel px-3 py-2 text-[13px]">
           <div className="text-ink">
-            When {matchWords(change.rule.match)}: <Badge tone="accent">{cats.path(change.rule.category)}</Badge>
+            When {matchWords(change.rule.match)}: <Badge tone="accent">{change.rule.books ? `${ledgerName(change.rule.books.ledger)} in the company’s books` : cats.path(change.rule.category ?? '')}</Badge>
           </div>
           {reach && (
             <div className="text-[12.5px] text-ink-3">
               {reach.count ? (
                 <>
                   It categorises {plural(reach.count, 'payment')} now (<span className="sensitive">{money(Math.abs(reach.amount))}</span>)
-                  {reach.settles > 0 ? `, settles ${plural(reach.settles, 'guess', 'guesses')} already in ${cats.name(change.rule.category)},` : ''} and the next ones as they come.
+                  {reach.settles > 0 ? `, settles ${plural(reach.settles, 'guess', 'guesses')} already in ${cats.name(change.rule.category ?? '')},` : ''} and the next ones as they come.
                 </>
               ) : reach.settles > 0 ? (
-                `It settles ${plural(reach.settles, 'payment')} a guess put in ${cats.name(change.rule.category)} already, and categorises the next ones as they come.`
+                `It settles ${plural(reach.settles, 'payment')} a guess put in ${cats.name(change.rule.category ?? '')} already, and categorises the next ones as they come.`
               ) : (
                 'Nothing to categorise now: it is for the next ones as they come.'
               )}
@@ -769,6 +774,22 @@ export function ChangeBody({ change, view }: { change: ProposedChange; view: Pro
               <span className="text-ink-3">Corporation Tax periods set:</span> {b.ctPeriods.map((p) => `${formatDate(p.start)} – ${formatDate(p.end)}`).join('; ')}
             </div>
           )}
+        </div>
+      );
+    }
+    case 'set_books':
+    case 'link_company':
+    case 'add_journal':
+    case 'remove_journal': {
+      // What it does in the company's books, in words (worked out by the server, as applying would), with the rows it names.
+      const what = view.changes.find((x) => x.change.key === change.key)?.books?.what;
+      const ids = change.kind === 'set_books' ? [change.transaction] : change.kind === 'link_company' ? [change.transaction, ...(change.rows ?? [])] : [];
+      return (
+        <div className="grid gap-2">
+          {ids.map((id) => (
+            <TxLine key={id} row={row(id)} view={view} />
+          ))}
+          <div className="rounded-lg border border-line bg-panel px-3 py-2 text-[13px] text-ink-2">{what ?? CHANGE_LABELS[change.kind].title}</div>
         </div>
       );
     }

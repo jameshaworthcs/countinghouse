@@ -12,8 +12,10 @@
 // neither spending nor income (cashflow.ts) and stays in its own account's balance, so marking a row
 // moves value between two of your accounts and never makes or loses any.
 //
-// A later source (the company's own books' postings to the director's loan) will join these here,
-// with the two matched so nothing counts twice.
+// Once the company keeps its books here (`Company.books`), the movements come from its books instead
+// (ledger.ts, `ledgerDirectorLoanMovements`): its postings to the director's loan, which are your marked
+// rows (or the company rows linked to them) and what only the books know (a journal, a company row coded
+// to the loan). Without books, nothing changes.
 
 import { ACCOUNT_TYPE_META } from '../../shared/accounts';
 import type { DirectorLoanMovement, DirectorLoanView, DirectorLoanWarning } from '../../shared/api';
@@ -24,6 +26,7 @@ import type { Account, Company, Transaction } from '../../shared/schema';
 import { beneficialLoanThreshold, S455_DUE_MONTHS, S455_REBORROWING, s455Rate, s455RateHistory, taxYearOf } from '../../shared/uk';
 import type { Store } from '../store';
 import type { BalanceEngine } from './balances';
+import { isLedgerSource, ledgerDirectorLoanMovements } from './ledger';
 
 export type { DirectorLoanMovement, DirectorLoanWarning } from '../../shared/api';
 
@@ -40,9 +43,10 @@ export function directorLoanMovements(store: { transactions(accountId?: string):
   const out: DirectorLoanMovement[] = [];
   for (const t of store.transactions()) {
     if (t.company?.id !== companyId || !movesDirectorLoan(t, store)) continue;
-    const as = t.company.as as DirectorLoanMovement['as'];
+    const as = t.company.as as 'paid-for' | 'loan';
     out.push({
       id: movementId(t.id),
+      source: 'mark',
       transactionId: t.id,
       accountId: t.accountId,
       date: t.date,
@@ -54,6 +58,15 @@ export function directorLoanMovements(store: { transactions(accountId?: string):
     });
   }
   return out;
+}
+
+/**
+ * A company's director's loan's movements, from its source (FORMULAS.md §22, "The director's loan from
+ * the books"): with its books kept here and a source that can give them (the store), its books' postings
+ * to the director's loan; otherwise, the marks on your rows (`directorLoanMovements`).
+ */
+export function loanMovements(store: { transactions(accountId?: string): Transaction[] } & MarkContext, company: Pick<Company, 'id' | 'books'>): DirectorLoanMovement[] {
+  return company.books && isLedgerSource(store) ? ledgerDirectorLoanMovements(store, company.id) : directorLoanMovements(store, company.id);
 }
 
 /** The company whose director's loan an account is, if it is one that a company names. */
@@ -69,9 +82,12 @@ export function directorLoanRows(store: { transactions(accountId?: string): Tran
   if (!ACCOUNT_TYPE_META[account.type].derived) return [];
   const company = directorLoanCompany(store.companies, account.id);
   if (!company) return [];
-  // The engine's own accounts and companies judge the marks, as the store does.
-  const marks: MarkContext = { account: (id) => store.accounts.find((a) => a.id === id), company: (id) => store.companies?.find((c) => c.id === id) };
-  return directorLoanMovements({ transactions: (id?: string) => store.transactions(id), ...marks }, company.id).map((m) => ({ id: m.id, accountId: account.id, date: m.date, amount: m.amount, currency: account.currency, description: m.description, source: {} }));
+  // With its books kept here, from them (the store gives them); otherwise from the marks, which the
+  // engine's own accounts and companies judge, as the store does.
+  const movements = company.books && isLedgerSource(store)
+    ? ledgerDirectorLoanMovements(store, company.id)
+    : directorLoanMovements({ transactions: (id?: string) => store.transactions(id), account: (id) => store.accounts.find((a) => a.id === id), company: (id) => store.companies?.find((c) => c.id === id) }, company.id);
+  return movements.map((m) => ({ id: m.id, accountId: account.id, date: m.date, amount: m.amount, currency: account.currency, description: m.description, source: {} }));
 }
 
 const pct = (r: number) => `${(Math.round(r * 10_000) / 100).toString()}%`;
@@ -195,8 +211,8 @@ export function owedMostInTaxYear(engine: Pick<BalanceEngine, 'balanceOn'>, acco
 export function directorLoanView(store: Pick<Store, 'companies' | 'transactions' | 'account' | 'company' | 'balances'>, engine: Pick<BalanceEngine, 'balanceOn'>, account: Account, on: ISODate): DirectorLoanView {
   const company = directorLoanCompany(store.companies, account.id);
   if (!company) return { movements: [], warnings: [] };
-  const movements = directorLoanMovements(store, company.id)
-    .map((m) => ({ ...m, accountName: store.account(m.accountId)?.name ?? m.accountId }))
+  const movements = loanMovements(store, company)
+    .map((m) => ({ ...m, accountName: m.accountId ? (store.account(m.accountId)?.name ?? m.accountId) : 'Journal' }))
     .reverse();
   const balance = engine.balanceOn(account.id, on)?.value ?? null;
   const owedMost = owedMostInTaxYear(engine, account.id, on);
