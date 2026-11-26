@@ -90,6 +90,16 @@ export class Limiter {
   }
 }
 
+/**
+ * Now, as `nowISO` gives it, but always after `prev` (a second on from it when now is the same second
+ * or earlier): a record's `updatedAt` that something checks against (`was`) changes with every write.
+ */
+export function nowAfter(prev: string | undefined): string {
+  const now = Math.floor(Date.now() / 1000) * 1000;
+  const was = prev ? Date.parse(prev) : NaN;
+  return nowISO(new Date(Number.isFinite(was) && was >= now ? was + 1000 : now));
+}
+
 /** Timestamp in ISO 8601 with the local offset, e.g. 2026-09-28T20:15:00+01:00. */
 export function nowISO(date: Date = new Date()): string {
   const off = -date.getTimezoneOffset();

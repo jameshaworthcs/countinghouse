@@ -15,6 +15,7 @@ import type { z } from 'zod';
 import type { ChangeDiff } from '../shared/audit';
 import { ACCOUNT_TYPE_META, balanceModeOf, sideOf } from '../shared/accounts';
 import { companyMarkProblem, markMisfit } from '../shared/company';
+import { booksProblems } from '../shared/company-books';
 import { defaultCategories } from '../shared/categories';
 import { earmarkAccountIds } from '../shared/earmarks';
 import { sectionSpan } from '../shared/coverage';
@@ -1087,6 +1088,7 @@ export class Store extends EventEmitter {
       if (name === 'companies') {
         checkCompanyEstateAccounts(after as Company[], before as Company[], this.state.accounts);
         checkDirectorLoanLinks(after as Company[], before as Company[], this.state.accounts);
+        checkCompanyBooks(after as Company[], before as Company[]);
       }
       // Only what this write adds or changes: one stored before (a hand edit) does not block the rest.
       const fresh = <T extends { id: string }>(list: T[]) => {
@@ -1794,6 +1796,20 @@ export function checkDirectorLoanLinks(companies: readonly Company[], before: re
     if (was.get(c.id) === JSON.stringify(c)) continue;
     const problem = directorLoanLinkProblem(c, companies, accounts);
     if (problem) throw new StoreError(`${c.name}: ${problem}`);
+  }
+}
+
+/**
+ * For each company a write adds or changes: its books fit (`booksProblems`: periods within the Acts'
+ * limits, in order, filings once each and after their periods). One a hand edit left is listed on its
+ * page, not refused here. Throws a 422.
+ */
+export function checkCompanyBooks(companies: readonly Company[], before: readonly Company[]): void {
+  const was = new Map(before.map((c) => [c.id, JSON.stringify(c.books ?? null)]));
+  for (const c of companies) {
+    if (!c.books || was.get(c.id) === JSON.stringify(c.books)) continue;
+    const problems = booksProblems(c.books);
+    if (problems.length) throw new StoreError(`${c.name}: ${problems.join(' ')}`, 422);
   }
 }
 

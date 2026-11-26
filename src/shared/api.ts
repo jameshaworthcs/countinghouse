@@ -1,5 +1,6 @@
 // Response shapes of the HTTP API, shared by the server and the web app.
 
+import type { BooksPeriod, CompanyDeadline, CtPeriod, VatPeriod } from './company-books';
 import type { AccessGroup, WrapperGroup } from './accounts';
 import type { ActionState } from './actions';
 import type { DirectorLoanKind } from './company';
@@ -16,6 +17,7 @@ import type {
   BalanceSnapshot,
   Category,
   Company,
+  CompanyBooks,
   CsvProfile,
   Figure,
   Goal,
@@ -1071,6 +1073,8 @@ export interface ProposalChangeView {
   earmark?: { what: string; replaces?: string };
   /** A mark set or taken away: the company's name, and the mark it replaces, in words. */
   mark?: { company?: string; was?: string };
+  /** A company's books set up, or a filing recorded: what the change does, in words. */
+  books?: { what: string };
 }
 
 /** Set aside's figures, for a proposal's effect: before it and as it would leave them. */
@@ -1541,7 +1545,8 @@ export interface TaxDocumentsResponse {
 
 /** A company you hold shares in, with what it is worth and the dividends it paid you. */
 export interface CompanyView {
-  company: Company;
+  /** The company as you hold it: never its books (its own records, served by its own routes). */
+  company: Omit<Company, 'books'>;
   /** Its value now: the latest balance on its account (each valuation is recorded as one). */
   value?: { amount: number; date: string; approximate: boolean };
   /** The latest valuation, and how it was worked out. */
@@ -1551,6 +1556,35 @@ export interface CompanyView {
   dividendsTotal: number;
   /** Your director's loan with it (`directorLoanAccountId`): what it owes you now (negative: you owe it). */
   directorLoan?: { accountId: string; name: string; balance: number | null; asOf: string | null; estimated: boolean };
+}
+
+/**
+ * GET /companies/:id/books: a company's own records, its periods and deadlines (FORMULAS.md §22). The
+ * company's, served apart from every personal route.
+ */
+export interface CompanyBooksResponse {
+  company: { id: string; name: string; number?: string };
+  /** Its books: null until you keep them here. */
+  books: CompanyBooks | null;
+  /** The accounting reference date the periods are worked out from, and whether it is the default (CA 2006 s391(4)). */
+  accountingReferenceDate: { value: string; isDefault: boolean } | null;
+  /** Its periods, as worked out up to the ones containing today. */
+  periods: { accounts: BooksPeriod[]; ct: CtPeriod[]; vat: Omit<VatPeriod, 'filing'>[] };
+  deadlines: CompanyDeadline[];
+  /** What is wrong with its books (a hand edit), in words. */
+  problems: string[];
+  /** Your director's loan with it: what it owes you now (your own account). */
+  directorLoan?: CompanyView['directorLoan'];
+}
+
+/** GET /company-books: the companies whose books are kept here, with how many of their deadlines need you. */
+export interface CompanyBooksListItem {
+  id: string;
+  name: string;
+  overdue: number;
+  dueSoon: number;
+  /** The next deadline not done. */
+  next?: CompanyDeadline;
 }
 
 /** Where one part of an account's terms is from: the latest document that gives it. */

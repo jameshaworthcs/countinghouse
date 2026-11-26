@@ -92,3 +92,8 @@ export function ruleId(): string {
 export function transferGroupId(a: string, b: string): string {
   return `tg_${shortHash('tg', ...[a, b].sort())}`;
 }
+
+/** A company's filing: one per company, kind and period's end, so the same filing recorded twice has one id. */
+export function filingId(companyId: string, kind: string, periodEnd: string): string {
+  return `fil_${shortHash('fil', companyId, kind, periodEnd).slice(0, 12)}`;
+}

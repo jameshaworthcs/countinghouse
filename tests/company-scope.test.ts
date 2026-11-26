@@ -1,7 +1,7 @@
 // Company accounts never touch a personal figure (docs/ARCHITECTURE.md, "Company accounts").
 //
 // The metamorphic property: for a personal store S and a company's own data C (its accounts, rows,
-// balances, figures, imports, terms and confirmations), every GET route of the API answers the same
+// balances, figures, imports, terms and confirmations, and its books with their filings), every GET route of the API answers the same
 // for S and for S ∪ C. C is drawn from the same pools as S — pay, dividends, interest, HMRC, child
 // benefit, your own name, your accounts' names and numbers, amounts and days that would pair as
 // transfers with S's rows, the same banks — so a filter missed anywhere changes a figure. The routes
@@ -17,11 +17,11 @@ import fc from 'fast-check';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp, type App } from '../src/server/app';
 import { loadConfig } from '../src/server/config';
-import { balanceId, figureId, termsId, transactionId } from '../src/server/ids';
+import { balanceId, figureId, filingId, termsId, transactionId } from '../src/server/ids';
 import { Store } from '../src/server/store';
-import { addDays, addMonths, endOfMonth, startOfMonth, today } from '../src/shared/dates';
+import { addDays, addMonths, addYears, endOfMonth, startOfMonth, today } from '../src/shared/dates';
 import { taxYearOf } from '../src/shared/uk';
-import type { AccountDetailResponse } from '../src/shared/api';
+import type { AccountDetailResponse, CompanyBooksResponse } from '../src/shared/api';
 import type { Account, BalanceSnapshot, CategorisedBy, Figure, ImportRecord, Transaction } from '../src/shared/schema';
 
 const stamp = '2026-01-01T00:00:00+00:00';
@@ -216,6 +216,32 @@ async function writeCompany(dir: string, w: World, personalTx: readonly Transact
   await store.saveImport(statement('studio-card', MONTH_LIST[1]!, n++), 'test: company statement');
   await store.addCoverageConfirmations([{ id: 'cov_00000000c0de', accountId: 'studio-card', from: `${MONTH_LIST[2]}-01`, to: endOfMonth(`${MONTH_LIST[3]}-01`), confirmedAt: stamp }]);
   await store.upsertRecords('terms', [{ id: termsId('studio-card', TODAY, {}), accountId: 'studio-card', asOf: TODAY, rates: [{ applies: 'purchases', rate: 24.9 }], limit: 5000, source: {}, createdAt: stamp }], 'test: company terms');
+  // Its books: its dates, VAT, PAYE and filings, some overdue and due soon, so its deadlines are there
+  // to leak (and named like your Self Assessment's: tax, a return, HMRC, 31 January).
+  const company = store.company(COMPANY)!;
+  const inc = addMonths(FIRST, -20);
+  const quarter = (n: number) => endOfMonth(addMonths(FIRST, 3 * n + 2));
+  await store.upsertCompany({
+    ...company,
+    books: {
+      incorporatedOn: inc,
+      accountingReferenceDate: '01-31',
+      periods: [],
+      ctPeriods: [],
+      tradeStartedOn: addDays(inc, 30),
+      vat: { registeredFrom: FIRST, scheme: 'cash', schedule: [{ from: FIRST, stagger: 'quarterly-1' }] },
+      paye: { from: addDays(inc, 40) },
+      deadlinesFrom: addDays(inc, 1),
+      filings: [
+        { id: filingId(COMPANY, 'vat', quarter(0)), kind: 'vat', periodStart: FIRST, periodEnd: quarter(0), filedOn: addDays(quarter(0), 45), reference: '975318642', figures: { vatDueSales: 2412.6, vatDueAcquisitions: 0, totalVatDue: 2412.6, vatReclaimedCurrPeriod: 318.45, netVatDue: 2094.15, totalValueSalesExVAT: 12063, totalValuePurchasesExVAT: 1592, totalValueGoodsSuppliedExVAT: 0, totalAcquisitionsExVAT: 0 }, addedBy: 'owner' },
+        { id: filingId(COMPANY, 'confirmation', addDays(addYears(inc, 1), -1)), kind: 'confirmation', periodEnd: addDays(addYears(inc, 1), -1), filedOn: addYears(inc, 1), addedBy: 'agent' },
+        { id: filingId(COMPANY, 'accounts', endOfMonth(addYears(inc, 1))), kind: 'accounts', periodStart: inc, periodEnd: endOfMonth(addYears(inc, 1)), filedOn: addMonths(endOfMonth(addYears(inc, 1)), 8), figures: { B: 1873, C: 9412, E: -2317, F: 7095, G: 8968, K: 8968 }, addedBy: 'owner' },
+      ],
+      setBy: 'owner',
+      updatedAt: stamp,
+    },
+    updatedAt: stamp,
+  });
   store.stopWatching();
 }
 
@@ -227,6 +253,9 @@ async function writeCompany(dir: string, w: World, personalTx: readonly Transact
  */
 const DIFFERENT: Record<string, string> = {
   '/api/company-accounts': "the company's own accounts: that is what it lists",
+  '/api/company-books': "the companies whose books are kept here, with their deadlines: the company's records",
+  '/api/company-alerts': "the company's deadlines due soon or overdue: the company's, shown beside your alerts, never among them",
+  '/api/companies/:id/books': "a company's own records and the deadlines worked out from them: that is what it serves",
   '/api/imports/history': 'every committed document, a company account’s statements too (no figure; an account’s own page lists its own)',
   '/api/audit': 'the log of this process: its own times and hashes',
   '/api/audit/export': 'the log of this process: its own times and hashes',
@@ -434,6 +463,13 @@ describe('company accounts never touch a personal figure', () => {
           expect(loan.directorLoan?.movements.length).toBeGreaterThan(0);
           expect(loan.directorLoan?.movements.length).toBe(store.transactions().filter((t) => t.company?.as === 'paid-for' || t.company?.as === 'loan').length);
           for (const t of store.transactions()) if (t.company) expect(t.transferGroup).toBeUndefined();
+          // The company's books were there, and their own routes serve them (the routes left out above).
+          const books = async (a: App) => (await (await a.app.request(`http://localhost/api/companies/${COMPANY}/books`, { headers: { host: 'localhost' } })).json()) as CompanyBooksResponse;
+          expect((await books(p.personal.app)).books).toBeNull();
+          const theirs = await books(p.both.app);
+          expect(theirs.books?.filings).toHaveLength(3);
+          expect(theirs.deadlines.some((d) => d.status === 'overdue' || d.status === 'due-soon')).toBe(true);
+          expect(theirs.problems).toEqual([]);
         } finally {
           await closePair(p);
         }

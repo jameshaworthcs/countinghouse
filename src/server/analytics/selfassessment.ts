@@ -3,6 +3,7 @@
 // tax advice; every figure must be checked against your own records before you submit.
 
 import { movesDirectorLoan } from '../../shared/company';
+import { DEADLINE_LEAD_DAYS, DEADLINE_WARN_DAYS } from '../../shared/deadlines';
 import type { Alert, MissingDaysView, SaEmployment, SaItem, SaPaymentLink, SaSection, SaSource, SelfAssessmentResponse } from '../../shared/api';
 import { diffDays, formatDate, formatSpan, today, type ISODate } from '../../shared/dates';
 import { formatMoney, fromMinor, toMinor } from '../../shared/money';
@@ -442,10 +443,9 @@ export function deadlineDone(kind: SaDeadline['kind'], owner: OwnerStatus): bool
   return false;
 }
 
-/** An alert shows from this many days before its deadline. */
-const ALERT_LEAD_DAYS = 60;
-/** …and is a warning from this many days before it, and after it. */
-const ALERT_WARN_DAYS = 14;
+/** An alert shows from this many days before its deadline, and is a warning from 14 before it (shared/deadlines.ts). */
+const ALERT_LEAD_DAYS = DEADLINE_LEAD_DAYS;
+const ALERT_WARN_DAYS = DEADLINE_WARN_DAYS;
 
 /**
  * The Overview's alerts for a tax year's Self Assessment, from its computed position and what you told

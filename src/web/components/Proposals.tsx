@@ -11,6 +11,7 @@ import { useAppData } from '../lib/data';
 import { cn, formatDate, matchWords, money, plural, timeAgo } from '../lib/format';
 import { RATE_NAMES } from '../../shared/terms';
 import { COMPANY_MARK_LABELS } from '../../shared/company';
+import { FILING_KIND_LABELS, VAT_STAGGER_LABELS, formatMonthDay } from '../../shared/company-books';
 import { limitName, RatesList, rateText } from './Terms';
 import { Badge, Button, Card, IconButton, StatusBadge } from './ui';
 import { EFFECT_WORDS } from '../lib/earmarks';
@@ -58,6 +59,8 @@ export const CHANGE_LABELS: Record<ProposedChangeKind, { title: string; count: (
   set_return_entry: { title: 'Answer on your Self Assessment return', count: (n) => plural(n, 'return answer'), icon: <FileText className="size-4" aria-hidden /> },
   set_earmarks: { title: 'Set up money set aside', count: (n) => (n === 1 ? 'set aside set up' : `${n} set-aside setups`), icon: <HandCoins className="size-4" aria-hidden /> },
   decide_earmark_flow: { title: 'Decide what a payment did to a pot', count: (n) => `${plural(n, 'payment')} decided for set aside`, icon: <HandCoins className="size-4" aria-hidden /> },
+  set_company_books: { title: 'Keep a company’s books', count: (n) => (n === 1 ? 'a company’s books' : `${n} companies’ books`), icon: <Building2 className="size-4" aria-hidden /> },
+  add_filing: { title: 'Record a company’s filing', count: (n) => plural(n, 'filing'), icon: <FileText className="size-4" aria-hidden /> },
 };
 
 /** "5 transfers linked, 2 transfer links undone, 1 category" */
@@ -725,6 +728,56 @@ export function ChangeBody({ change, view }: { change: ProposedChange; view: Pro
             {change.taxYear} return · {r?.what ?? change.entry}
           </div>
           <div className="font-medium text-ink">{r?.value ?? (change.value === null ? 'None' : String(change.value))}</div>
+        </div>
+      );
+    }
+    case 'set_company_books': {
+      const b = change.books;
+      const what = view.changes.find((x) => x.change.key === change.key)?.books?.what;
+      return (
+        <div className="grid gap-1 rounded-lg border border-line bg-panel px-3 py-2 text-[13px] text-ink-2">
+          {what && <div className="text-ink">{what}</div>}
+          <div>
+            <span className="text-ink-3">Accounting reference date:</span> {b.accountingReferenceDate ? formatMonthDay(b.accountingReferenceDate) : 'the default (the last day of the month of its anniversary)'}
+          </div>
+          {b.periods.length > 0 && (
+            <div>
+              <span className="text-ink-3">Accounting periods set:</span> {b.periods.map((p) => `${formatDate(p.start)} – ${formatDate(p.end)}`).join('; ')}
+            </div>
+          )}
+          {b.tradeStartedOn !== undefined && (
+            <div>
+              <span className="text-ink-3">Trade started:</span> {b.tradeStartedOn ? formatDate(b.tradeStartedOn) : 'not yet'}
+            </div>
+          )}
+          {b.vat && (
+            <div>
+              <span className="text-ink-3">VAT:</span> registered {formatDate(b.vat.registeredFrom)}, cash accounting, {b.vat.schedule.map((e) => `${VAT_STAGGER_LABELS[e.stagger].toLowerCase()} from ${formatDate(e.from)}`).join(', then ')}
+              {b.vat.deregisteredOn ? `, deregistered ${formatDate(b.vat.deregisteredOn)}` : ''}
+            </div>
+          )}
+          {b.confirmationStatement && (
+            <div>
+              <span className="text-ink-3">Next confirmation statement made up to:</span> {formatDate(b.confirmationStatement.nextMadeUpTo)}
+            </div>
+          )}
+          {b.ctPeriods.length > 0 && (
+            <div>
+              <span className="text-ink-3">Corporation Tax periods set:</span> {b.ctPeriods.map((p) => `${formatDate(p.start)} – ${formatDate(p.end)}`).join('; ')}
+            </div>
+          )}
+        </div>
+      );
+    }
+    case 'add_filing': {
+      const f = change.filing;
+      const what = view.changes.find((x) => x.change.key === change.key)?.books?.what;
+      return (
+        <div className="grid gap-1 rounded-lg border border-line bg-panel px-3 py-2 text-[13px] text-ink-2">
+          <div className="text-ink">{what ?? `${FILING_KIND_LABELS[f.kind]} to ${formatDate(f.periodEnd)}, filed ${formatDate(f.filedOn)}`}</div>
+          {f.kind === 'vat' && f.figures && <div className="sensitive tabular-nums">Box 5, net VAT: {money(f.figures.netVatDue)}</div>}
+          {f.kind === 'ct600' && f.figures && <div className="sensitive tabular-nums">Tax payable: {money(f.figures.taxPayable)}</div>}
+          {f.kind === 'ct-payment' && f.figures && <div className="sensitive tabular-nums">Paid: {money(f.figures.amount)}</div>}
         </div>
       );
     }

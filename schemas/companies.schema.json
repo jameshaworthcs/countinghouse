@@ -170,6 +170,568 @@
             "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
             "description": "Stable, human-readable identifier (lowercase-hyphenated)"
           },
+          "books": {
+            "type": "object",
+            "properties": {
+              "incorporatedOn": {
+                "type": "string",
+                "description": "Calendar date, YYYY-MM-DD"
+              },
+              "accountingReferenceDate": {
+                "type": "string",
+                "pattern": "^(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01])$",
+                "description": "A day of the year, \"MM-DD\""
+              },
+              "periods": {
+                "default": [],
+                "maxItems": 60,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "start": {
+                      "type": "string",
+                      "description": "Calendar date, YYYY-MM-DD"
+                    },
+                    "end": {
+                      "type": "string",
+                      "description": "Calendar date, YYYY-MM-DD"
+                    }
+                  },
+                  "required": [
+                    "start",
+                    "end"
+                  ]
+                }
+              },
+              "vat": {
+                "type": "object",
+                "properties": {
+                  "registeredFrom": {
+                    "type": "string",
+                    "description": "Calendar date, YYYY-MM-DD"
+                  },
+                  "scheme": {
+                    "type": "string",
+                    "const": "cash"
+                  },
+                  "schedule": {
+                    "minItems": 1,
+                    "maxItems": 20,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "from": {
+                          "type": "string",
+                          "description": "Calendar date, YYYY-MM-DD"
+                        },
+                        "stagger": {
+                          "type": "string",
+                          "enum": [
+                            "monthly",
+                            "quarterly-1",
+                            "quarterly-2",
+                            "quarterly-3",
+                            "annual"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "from",
+                        "stagger"
+                      ]
+                    }
+                  },
+                  "firstPeriodEnd": {
+                    "type": "string",
+                    "description": "Calendar date, YYYY-MM-DD"
+                  },
+                  "deregisteredOn": {
+                    "type": "string",
+                    "description": "Calendar date, YYYY-MM-DD"
+                  }
+                },
+                "required": [
+                  "registeredFrom",
+                  "scheme",
+                  "schedule"
+                ]
+              },
+              "paye": {
+                "type": "object",
+                "properties": {
+                  "from": {
+                    "type": "string",
+                    "description": "Calendar date, YYYY-MM-DD"
+                  },
+                  "closedOn": {
+                    "type": "string",
+                    "description": "Calendar date, YYYY-MM-DD"
+                  }
+                },
+                "required": [
+                  "from"
+                ]
+              },
+              "confirmationStatement": {
+                "type": "object",
+                "properties": {
+                  "nextMadeUpTo": {
+                    "type": "string",
+                    "description": "Calendar date, YYYY-MM-DD"
+                  }
+                },
+                "required": [
+                  "nextMadeUpTo"
+                ]
+              },
+              "tradeStartedOn": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "Calendar date, YYYY-MM-DD"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "ctPeriods": {
+                "default": [],
+                "maxItems": 60,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "start": {
+                      "type": "string",
+                      "description": "Calendar date, YYYY-MM-DD"
+                    },
+                    "end": {
+                      "type": "string",
+                      "description": "Calendar date, YYYY-MM-DD"
+                    }
+                  },
+                  "required": [
+                    "start",
+                    "end"
+                  ]
+                }
+              },
+              "deadlinesFrom": {
+                "type": "string",
+                "description": "Calendar date, YYYY-MM-DD"
+              },
+              "filings": {
+                "default": [],
+                "maxItems": 1000,
+                "type": "array",
+                "items": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "pattern": "^fil_[0-9a-f]{12}$"
+                        },
+                        "addedBy": {
+                          "default": "owner",
+                          "type": "string",
+                          "enum": [
+                            "owner",
+                            "agent"
+                          ]
+                        },
+                        "kind": {
+                          "type": "string",
+                          "const": "accounts"
+                        },
+                        "periodStart": {
+                          "type": "string",
+                          "description": "Calendar date, YYYY-MM-DD"
+                        },
+                        "periodEnd": {
+                          "type": "string",
+                          "description": "Calendar date, YYYY-MM-DD"
+                        },
+                        "filedOn": {
+                          "type": "string",
+                          "description": "Calendar date, YYYY-MM-DD"
+                        },
+                        "reference": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 60
+                        },
+                        "note": {
+                          "type": "string",
+                          "maxLength": 300
+                        },
+                        "figures": {
+                          "type": "object",
+                          "properties": {
+                            "A": {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            },
+                            "B": {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            },
+                            "C": {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            },
+                            "D": {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            },
+                            "E": {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            },
+                            "F": {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            },
+                            "G": {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            },
+                            "H": {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            },
+                            "I": {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            },
+                            "J": {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            },
+                            "K": {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            }
+                          }
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "kind",
+                        "periodEnd",
+                        "filedOn"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "pattern": "^fil_[0-9a-f]{12}$"
+                        },
+                        "addedBy": {
+                          "default": "owner",
+                          "type": "string",
+                          "enum": [
+                            "owner",
+                            "agent"
+                          ]
+                        },
+                        "kind": {
+                          "type": "string",
+                          "const": "ct600"
+                        },
+                        "periodStart": {
+                          "type": "string",
+                          "description": "Calendar date, YYYY-MM-DD"
+                        },
+                        "periodEnd": {
+                          "type": "string",
+                          "description": "Calendar date, YYYY-MM-DD"
+                        },
+                        "filedOn": {
+                          "type": "string",
+                          "description": "Calendar date, YYYY-MM-DD"
+                        },
+                        "reference": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 60
+                        },
+                        "note": {
+                          "type": "string",
+                          "maxLength": 300
+                        },
+                        "figures": {
+                          "type": "object",
+                          "properties": {
+                            "taxPayable": {
+                              "type": "number",
+                              "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                            }
+                          },
+                          "required": [
+                            "taxPayable"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "kind",
+                        "periodEnd",
+                        "filedOn"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "pattern": "^fil_[0-9a-f]{12}$"
+                        },
+                        "addedBy": {
+                          "default": "owner",
+                          "type": "string",
+                          "enum": [
+                            "owner",
+                            "agent"
+                          ]
+                        },
+                        "kind": {
+                          "type": "string",
+                          "const": "ct-payment"
+                        },
+                        "periodStart": {
+                          "type": "string",
+                          "description": "Calendar date, YYYY-MM-DD"
+                        },
+                        "periodEnd": {
+                          "type": "string",
+                          "description": "Calendar date, YYYY-MM-DD"
+                        },
+                        "filedOn": {
+                          "type": "string",
+                          "description": "Calendar date, YYYY-MM-DD"
+                        },
+                        "reference": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 60
+                        },
+                        "note": {
+                          "type": "string",
+                          "maxLength": 300
+                        },
+                        "figures": {
+                          "type": "object",
+                          "properties": {
+                            "amount": {
+                              "type": "number",
+                              "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                            }
+                          },
+                          "required": [
+                            "amount"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "kind",
+                        "periodEnd",
+                        "filedOn"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "pattern": "^fil_[0-9a-f]{12}$"
+                        },
+                        "addedBy": {
+                          "default": "owner",
+                          "type": "string",
+                          "enum": [
+                            "owner",
+                            "agent"
+                          ]
+                        },
+                        "kind": {
+                          "type": "string",
+                          "const": "vat"
+                        },
+                        "periodStart": {
+                          "type": "string",
+                          "description": "Calendar date, YYYY-MM-DD"
+                        },
+                        "periodEnd": {
+                          "type": "string",
+                          "description": "Calendar date, YYYY-MM-DD"
+                        },
+                        "filedOn": {
+                          "type": "string",
+                          "description": "Calendar date, YYYY-MM-DD"
+                        },
+                        "reference": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 60
+                        },
+                        "note": {
+                          "type": "string",
+                          "maxLength": 300
+                        },
+                        "figures": {
+                          "type": "object",
+                          "properties": {
+                            "vatDueSales": {
+                              "type": "number",
+                              "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                            },
+                            "vatDueAcquisitions": {
+                              "type": "number",
+                              "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                            },
+                            "totalVatDue": {
+                              "type": "number",
+                              "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                            },
+                            "vatReclaimedCurrPeriod": {
+                              "type": "number",
+                              "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                            },
+                            "netVatDue": {
+                              "type": "number",
+                              "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                            },
+                            "totalValueSalesExVAT": {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            },
+                            "totalValuePurchasesExVAT": {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            },
+                            "totalValueGoodsSuppliedExVAT": {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            },
+                            "totalAcquisitionsExVAT": {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            }
+                          },
+                          "required": [
+                            "vatDueSales",
+                            "vatDueAcquisitions",
+                            "totalVatDue",
+                            "vatReclaimedCurrPeriod",
+                            "netVatDue",
+                            "totalValueSalesExVAT",
+                            "totalValuePurchasesExVAT",
+                            "totalValueGoodsSuppliedExVAT",
+                            "totalAcquisitionsExVAT"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "kind",
+                        "periodEnd",
+                        "filedOn"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "pattern": "^fil_[0-9a-f]{12}$"
+                        },
+                        "addedBy": {
+                          "default": "owner",
+                          "type": "string",
+                          "enum": [
+                            "owner",
+                            "agent"
+                          ]
+                        },
+                        "kind": {
+                          "type": "string",
+                          "const": "confirmation"
+                        },
+                        "periodStart": {
+                          "type": "string",
+                          "description": "Calendar date, YYYY-MM-DD"
+                        },
+                        "periodEnd": {
+                          "type": "string",
+                          "description": "Calendar date, YYYY-MM-DD"
+                        },
+                        "filedOn": {
+                          "type": "string",
+                          "description": "Calendar date, YYYY-MM-DD"
+                        },
+                        "reference": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 60
+                        },
+                        "note": {
+                          "type": "string",
+                          "maxLength": 300
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "kind",
+                        "periodEnd",
+                        "filedOn"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "setBy": {
+                "default": "owner",
+                "type": "string",
+                "enum": [
+                  "owner",
+                  "agent"
+                ]
+              },
+              "updatedAt": {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                "description": "ISO 8601 timestamp"
+              }
+            },
+            "required": [
+              "incorporatedOn",
+              "updatedAt"
+            ]
+          },
           "notes": {
             "type": "string",
             "maxLength": 2000

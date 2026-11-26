@@ -48,8 +48,10 @@ export function companyView(store: Store, c: Company, engine: BalanceEngine = ne
   // Your director's loan with it: its balance today, from the balance engine (FORMULAS.md §9).
   const loanAccount = c.directorLoanAccountId ? store.accounts.find((a) => a.id === c.directorLoanAccountId) : undefined;
   const loanNow = loanAccount ? engine.latest(loanAccount.id, today()) : null;
+  // Its books are the company's own records, never part of this personal view (routes/company-books.ts serves them).
+  const { books: _books, ...company } = c;
   return {
-    company: c,
+    company,
     ...(loanAccount ? { directorLoan: { accountId: loanAccount.id, name: loanAccount.name, balance: loanNow?.value ?? null, asOf: engine.lastDataDate(loanAccount.id), estimated: loanNow?.estimated ?? false } } : {}),
     ...(latest ? { value: { amount: latest.balance, date: latest.date, approximate: Boolean(latest.approximate) } } : {}),
     ...(valuation ? { valuation } : {}),

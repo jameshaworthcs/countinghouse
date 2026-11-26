@@ -13,6 +13,7 @@ import { ACTION_KEY, ACTION_PAGE_IDS } from './actions';
 import { isISODate } from './dates';
 import { isMoney } from './money';
 import { TASK_KINDS, TaskChoiceSchema } from './tasks';
+import { VAT_STAGGERS } from './uk';
 
 // ─── Primitives ──────────────────────────────────────────────────────────────────────────────────
 
@@ -664,6 +665,135 @@ const CompanyValuationSchema = z.object({
   balanceId: z.string().regex(/^bal_[0-9a-f]{16}$/).optional(),
   source: SourceRefSchema.default({}),
 });
+// ─── A company's own records: its books (docs/DATA_FORMAT.md, companies.json, `books`) ──────────
+
+/** An accounting reference date: a day of the year, "MM-DD" (CA 2006 s391). The last day of February is "02-28" or "02-29", the 29th in a leap year. */
+export const MonthDaySchema = z
+  .string()
+  .regex(/^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/, 'A day of the year, "MM-DD"')
+  .refine((md) => Number(md.slice(3)) <= [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][Number(md.slice(0, 2)) - 1]!, { message: 'No such day of the year' })
+  .meta({ description: 'A day of the year, "MM-DD"' });
+
+/** A period, its first and last days. */
+const BooksPeriodSchema = z.object({ start: ISODateSchema, end: ISODateSchema });
+
+/** What each filing is: accounts, a Corporation Tax return or payment, a VAT return, a confirmation statement. */
+export const COMPANY_FILING_KINDS = ['accounts', 'ct600', 'ct-payment', 'vat', 'confirmation'] as const;
+export type CompanyFilingKind = (typeof COMPANY_FILING_KINDS)[number];
+
+/**
+ * A VAT return's nine boxes, as filed (HMRC's VAT return; the field names of its Making Tax Digital
+ * API). Boxes 1–5 in pounds and pence, box 5 never negative; boxes 6–9 in whole pounds. The figures as
+ * the return gives them, not signed from your point of view.
+ */
+export const VatBoxesSchema = z.object({
+  /** Box 1: VAT due on sales and other outputs. */
+  vatDueSales: MoneySchema,
+  /** Box 2: VAT due on acquisitions (from EU member states, now Northern Ireland's goods only). */
+  vatDueAcquisitions: MoneySchema,
+  /** Box 3: boxes 1 and 2 together. */
+  totalVatDue: MoneySchema,
+  /** Box 4: VAT reclaimed on purchases and other inputs. */
+  vatReclaimedCurrPeriod: MoneySchema,
+  /** Box 5: the net VAT to pay or reclaim, the difference of boxes 3 and 4. */
+  netVatDue: MoneySchema.refine((v) => v >= 0, { message: 'Box 5 is never negative' }),
+  /** Box 6: sales and other outputs, before VAT. */
+  totalValueSalesExVAT: z.number().int(),
+  /** Box 7: purchases and other inputs, before VAT. */
+  totalValuePurchasesExVAT: z.number().int(),
+  /** Box 8: supplies of goods to EU member states, before VAT. */
+  totalValueGoodsSuppliedExVAT: z.number().int(),
+  /** Box 9: acquisitions of goods from EU member states, before VAT. */
+  totalAcquisitionsExVAT: z.number().int(),
+});
+export type VatBoxes = z.infer<typeof VatBoxesSchema>;
+
+/** A micro-entity's balance sheet lines (Small Companies Regulations 2008, Sch 1 Part 1 Section C, format 1), in whole pounds. */
+export const MICRO_ENTITY_LINES = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K'] as const;
+export const MicroEntityLinesSchema = z.object(Object.fromEntries(MICRO_ENTITY_LINES.map((l) => [l, z.number().int().optional()])) as Record<(typeof MICRO_ENTITY_LINES)[number], z.ZodOptional<z.ZodNumber>>);
+export type MicroEntityLines = z.infer<typeof MicroEntityLinesSchema>;
+
+/** What every filing records: the period it is for, the day it was filed (or paid), and its reference. */
+const filingBase = {
+  /** The period's first day: a VAT return's, a CT600's; absent for a confirmation statement. */
+  periodStart: ISODateSchema.optional(),
+  /** The period's last day: the balance sheet date, a CT or VAT period's end, a confirmation statement's made-up date. */
+  periodEnd: ISODateSchema,
+  /** The day it was filed (a payment: the day it was paid). */
+  filedOn: ISODateSchema,
+  /** Its reference: a submission's receipt, a payment's reference. */
+  reference: z.string().trim().min(1).max(60).optional(),
+  note: z.string().max(300).optional(),
+};
+const filingKinds = <T extends z.ZodRawShape>(extra: T) =>
+  [
+    z.object({ ...extra, kind: z.literal('accounts'), ...filingBase, figures: MicroEntityLinesSchema.optional() }),
+    z.object({ ...extra, kind: z.literal('ct600'), ...filingBase, figures: z.object({ taxPayable: MoneySchema.refine((v) => v >= 0, { message: 'Tax payable is not negative' }) }).optional() }),
+    z.object({ ...extra, kind: z.literal('ct-payment'), ...filingBase, figures: z.object({ amount: MoneySchema.refine((v) => v > 0, { message: 'A payment is more than £0' }) }).optional() }),
+    z.object({ ...extra, kind: z.literal('vat'), ...filingBase, figures: VatBoxesSchema.optional() }),
+    z.object({ ...extra, kind: z.literal('confirmation'), ...filingBase }),
+  ] as const;
+
+/** A filing as it is given (a form, an agent's proposal): without its id and who added it. */
+export const CompanyFilingInputSchema = z.discriminatedUnion('kind', filingKinds({}));
+export type CompanyFilingInput = z.infer<typeof CompanyFilingInputSchema>;
+/**
+ * A filing recorded: something the company filed or paid, by its kind and period. Its id never
+ * changes (`fil_` + 12 hex of its company, kind and period's end); one per kind and period's end.
+ */
+export const CompanyFilingSchema = z.discriminatedUnion('kind', filingKinds({ id: z.string().regex(/^fil_[0-9a-f]{12}$/), addedBy: z.enum(['owner', 'agent']).default('owner') }));
+export type CompanyFiling = z.infer<typeof CompanyFilingSchema>;
+
+/**
+ * A company's VAT registration: from when, its accounting scheme (the cash scheme only, for now), and
+ * how often it makes returns, which can change from a date (`schedule`). The VAT number is not kept.
+ */
+export const CompanyVatSchema = z.object({
+  registeredFrom: ISODateSchema,
+  scheme: z.literal('cash', { error: (iss) => (iss.input === 'accrual' || iss.input === 'flat-rate' ? 'Accrual and flat rate VAT are not supported yet: only the cash accounting scheme is.' : 'The VAT accounting scheme is "cash".') }),
+  /** How often it makes returns, from a date: the first from registration, a later one when HMRC changed it. */
+  schedule: z.array(z.object({ from: ISODateSchema, stagger: z.enum(VAT_STAGGERS) })).min(1).max(20),
+  /** The end of its first VAT period, when HMRC set one other than its stagger's. */
+  firstPeriodEnd: ISODateSchema.optional(),
+  deregisteredOn: ISODateSchema.optional(),
+});
+
+const companyBooksShape = {
+  /** The day Companies House incorporated it. */
+  incorporatedOn: ISODateSchema,
+  /** Its accounting reference date from incorporation (absent: the default, CA 2006 s391(4)); a later change is a period below. */
+  accountingReferenceDate: MonthDaySchema.optional(),
+  /** Accounting reference periods other than the default: one shortened or extended (s392), never over 18 months. */
+  periods: z.array(BooksPeriodSchema).max(60).default([]),
+  vat: CompanyVatSchema.optional(),
+  /** Its PAYE scheme: a record only, for now. */
+  paye: z.object({ from: ISODateSchema, closedOn: ISODateSchema.optional() }).optional(),
+  /** The next confirmation statement's made-up date, as Companies House shows it (absent: worked out). */
+  confirmationStatement: z.object({ nextMadeUpTo: ISODateSchema }).optional(),
+  /** The day it started to trade (null: not yet, so no Corporation Tax periods; absent: from incorporation). */
+  tradeStartedOn: ISODateSchema.nullable().optional(),
+  /** Corporation Tax accounting periods other than the worked-out ones (HMRC's notice sets them in practice). */
+  ctPeriods: z.array(BooksPeriodSchema).max(60).default([]),
+  /** Deadlines due before this day are not listed: settled before the books were kept here. */
+  deadlinesFrom: ISODateSchema.optional(),
+};
+/** A company's books without its filings and who set them: what the owner edits and an agent proposes (`set_company_books`). */
+export const CompanyBooksSetupSchema = z.object(companyBooksShape);
+export type CompanyBooksSetup = z.infer<typeof CompanyBooksSetupSchema>;
+/**
+ * The records of a company you run, kept here (docs/DATA_FORMAT.md, companies.json `books`): its dates,
+ * VAT and PAYE registrations, and what it has filed. Its deadlines are worked out from them
+ * (shared/company-books.ts, FORMULAS.md §22) and served apart from everything personal.
+ */
+export const CompanyBooksSchema = z.object({
+  ...companyBooksShape,
+  filings: z.array(CompanyFilingSchema).max(1000).default([]),
+  /** Who set it up last: you, or an agent's proposal you applied (a proposal never changes yours). */
+  setBy: z.enum(['owner', 'agent']).default('owner'),
+  updatedAt: TimestampSchema,
+});
+export type CompanyBooks = z.infer<typeof CompanyBooksSchema>;
+
 export const CompanySchema = z.object({
   id: SlugSchema,
   name: z.string().min(1).max(200),
@@ -682,6 +812,11 @@ export const CompanySchema = z.object({
    * company's own): what it owes you, worked out from the payments you mark (FORMULAS.md §9).
    */
   directorLoanAccountId: SlugSchema.optional(),
+  /**
+   * Its own records, when it is a company you run and keep the books of here (`CompanyBooksSchema`):
+   * never part of any personal figure or route.
+   */
+  books: CompanyBooksSchema.optional(),
   notes: z.string().max(2000).optional(),
   createdBy: z.enum(['owner', 'agent']).default('owner'),
   createdAt: TimestampSchema,
@@ -2323,6 +2458,15 @@ const changeUnion = <K extends z.ZodType<string | undefined>>(key: K) =>
       parts: z.array(z.object({ effect: z.enum(EARMARK_EFFECTS), amount: MoneySchema.refine((v) => v > 0, { message: 'A part is more than £0' }) })).min(1).max(5).nullable(),
       was: TimestampSchema.nullable(),
     }),
+    /**
+     * Set up the books of a company you run (companies.json, `books`), from its documents: its dates,
+     * registrations and periods, without filings (those stay). `was` is when its books were last set
+     * (null: there are none), so a change made since stops it fitting; books you set yourself are never
+     * replaced.
+     */
+    z.object({ key, kind: z.literal('set_company_books'), why: ChangeWhySchema, company: SlugSchema, books: CompanyBooksSetupSchema, was: TimestampSchema.nullable() }),
+    /** Record one filing of a company whose books are kept here, from its document; never a second for the same kind and period. */
+    z.object({ key, kind: z.literal('add_filing'), why: ChangeWhySchema, company: SlugSchema, filing: CompanyFilingInputSchema }),
   ]);
 
 export const ProposedChangeSchema = changeUnion(ChangeKeySchema);
@@ -2345,8 +2489,8 @@ export const ProposalSchema = z.object({
   applied: z.array(z.string()).optional(),
   /** Why it was dismissed, if you said. */
   dismissedReason: z.string().max(1000).optional(),
-  /** The rows, accounts, balances, categories and rules the applied changes touched, as they were before: the audit trail. */
-  before: z.object({ transactions: z.array(TransactionSchema), accounts: z.array(AccountSchema), balances: z.array(BalanceSnapshotSchema).optional(), terms: z.array(TermsSchema).optional(), categories: z.array(CategorySchema).optional(), rules: z.array(RuleSchema).optional(), earmarks: EarmarksSchema.nullable().optional() }).optional(),
+  /** The rows, accounts, balances, categories, rules and companies the applied changes touched, as they were before: the audit trail. */
+  before: z.object({ transactions: z.array(TransactionSchema), accounts: z.array(AccountSchema), balances: z.array(BalanceSnapshotSchema).optional(), terms: z.array(TermsSchema).optional(), categories: z.array(CategorySchema).optional(), rules: z.array(RuleSchema).optional(), earmarks: EarmarksSchema.nullable().optional(), companies: z.array(CompanySchema).optional() }).optional(),
 });
 export type Proposal = z.infer<typeof ProposalSchema>;
 

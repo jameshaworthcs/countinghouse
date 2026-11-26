@@ -4,7 +4,7 @@
 // through the codebase. Sources and caveats: docs/UK_RULES.md. When adding a year, add a row to
 // TAX_YEAR_PARAMS with only the fields that changed; later years inherit earlier values.
 
-import { addMonths, addYears, makeDate, type ISODate } from './dates';
+import { addDays, addMonths, addYears, endOfMonth, makeDate, startOfMonth, weekday, type ISODate } from './dates';
 
 export interface TaxYear {
   /** "2026/27" */
@@ -647,4 +647,275 @@ export function beneficialLoanThreshold(ty: TaxYear): number {
   let limit = BENEFICIAL_LOAN_THRESHOLDS[0]!.limit;
   for (const row of BENEFICIAL_LOAN_THRESHOLDS) if (ty.start >= row.from) limit = row.limit;
   return limit;
+}
+
+// ─── Companies: periods and deadlines (docs/UK_RULES.md, "Companies") ───────────────────────────
+//
+// What a private limited company must file and pay, and by when: its accounts and confirmation
+// statement at Companies House, its Corporation Tax return and payment, and its VAT returns. Pure
+// functions of dates; `shared/company-books.ts` puts them together for a company's own record. Months
+// are calendar months, counted as the Acts count them (`monthsAfter`, `lastDayOfMonths`).
+
+/** Whether a date is the last day of its month. */
+export function isMonthEnd(date: ISODate): boolean {
+  return addDays(date, 1).slice(8) === '01';
+}
+
+/**
+ * The day `months` calendar months after `date`, as CA 2006 s443 counts a period "after" a date: the
+ * corresponding day of the month `months` on (s443(2)); the last day of that month when `date` is the
+ * last day of its month (s443(3)) or the corresponding day does not exist, such as the 30th of February
+ * (s443(4)). HMRC count Corporation Tax's months the same way (CTM01800: a period ending on 28 February
+ * in a leap year pays on 29 November; on 28 February in any other year, the month's last day, on
+ * 1 December).
+ */
+export function monthsAfter(date: ISODate, months: number): ISODate {
+  return isMonthEnd(date) ? endOfMonth(addMonths(startOfMonth(date), months)) : addMonths(date, months);
+}
+
+/**
+ * The last day of a period of `months` calendar months beginning with `start` (CA 2006 s853A(5)'s
+ * review period of "12 months beginning with" incorporation; CTA 2009 s10(1)(a)'s "12 months from the
+ * beginning" of an accounting period; FA 1998 Sch 18 para 14(1)(c)'s "30 months from the beginning"):
+ * the day before the corresponding day `months` on, or the last day of that month when there is no
+ * corresponding day (12 months beginning with 29 February 2024 end on 28 February 2025).
+ */
+export function lastDayOfMonths(start: ISODate, months: number): ISODate {
+  const target = addMonths(startOfMonth(start), months);
+  const day = Number(start.slice(8));
+  if (day === 1) return addDays(target, -1);
+  const lastDay = Number(endOfMonth(target).slice(8));
+  return day > lastDay ? endOfMonth(target) : addDays(`${target.slice(0, 8)}${start.slice(8)}`, -1);
+}
+
+/** An accounting reference date: a day of the year, "MM-DD" (CA 2006 s391). */
+export type MonthDay = string;
+
+/**
+ * Whether an accounting reference date means the last day of its month. The last day of February is
+ * written "02-28" or "02-29" and means the 29th in a leap year: the default reference date of a company
+ * incorporated in February is "the last day of the month" (s391(4)).
+ */
+export function monthDayIsMonthEnd(md: MonthDay): boolean {
+  const [m, d] = md.split('-').map(Number) as [number, number];
+  return m === 2 ? d >= 28 : d === Number(endOfMonth(`2001-${md.slice(0, 2)}-01`).slice(8));
+}
+
+/** The accounting reference date in `year`. */
+export function monthDayIn(md: MonthDay, year: number): ISODate {
+  const first = `${String(year).padStart(4, '0')}-${md.slice(0, 2)}-01`;
+  return monthDayIsMonthEnd(md) ? endOfMonth(first) : `${first.slice(0, 8)}${md.slice(3)}`;
+}
+
+/** The first `md` on or after `date`. */
+export function nextMonthDay(md: MonthDay, date: ISODate): ISODate {
+  const year = Number(date.slice(0, 4));
+  const thisYear = monthDayIn(md, year);
+  return thisYear >= date ? thisYear : monthDayIn(md, year + 1);
+}
+
+/**
+ * Accounting reference periods (CA 2006 ss391–392). The default reference date is the last day of the
+ * month in which the anniversary of incorporation falls (s391(4), for a company incorporated in Great
+ * Britain from 1 April 1996, or after the Act's commencement). The first period begins on the day of
+ * incorporation and is more than 6 months and not more than 18 months long, ending on the reference
+ * date (s391(5)); each later one is 12 months (s391(6)). A notice under s392 shortens or extends one,
+ * but never past 18 months (s392(5)); an extension is not allowed again within 5 years of an earlier
+ * one (s392(3)), which the app does not check.
+ */
+export const ACCOUNTING_PERIOD_RULES = { firstMoreThanMonths: 6, maxMonths: 18 } as const;
+
+/** A company's default accounting reference date (s391(4)). */
+export function defaultAccountingReferenceDate(incorporatedOn: ISODate): MonthDay {
+  const mm = incorporatedOn.slice(5, 7);
+  return mm === '02' ? '02-28' : `${mm}-${endOfMonth(`2001-${mm}-01`).slice(8)}`;
+}
+
+/** Is a period longer than `months` months (it ends after the last day of `months` months beginning with its start)? */
+export function longerThanMonths(start: ISODate, end: ISODate, months: number): boolean {
+  return end > lastDayOfMonths(start, months);
+}
+
+/** The end of a company's first accounting reference period with reference date `ard`: its first occurrence making the period more than 6 months (s391(5)). */
+export function firstAccountingPeriodEnd(incorporatedOn: ISODate, ard: MonthDay): ISODate {
+  let end = nextMonthDay(ard, incorporatedOn);
+  while (!longerThanMonths(incorporatedOn, end, ACCOUNTING_PERIOD_RULES.firstMoreThanMonths)) end = nextMonthDay(ard, addDays(end, 1));
+  return end;
+}
+
+/**
+ * The next 12-month accounting reference period's end after one ending `end` (s391(6)): the same day a
+ * year on, the last day of the month when `end` is one (a period to 28 February 2027 is followed by one
+ * to 29 February 2028).
+ */
+export function nextAccountingPeriodEnd(end: ISODate): ISODate {
+  return monthsAfter(end, 12);
+}
+
+/**
+ * Accounts of a private company are delivered to Companies House within 9 months after the end of the
+ * accounting reference period (CA 2006 s442(2)(a)). A first period longer than 12 months has until the
+ * later of 9 months from the first anniversary of incorporation and 3 months from the period's end
+ * (s442(3)). A shortened period has until 3 months from the notice if that is later (s442(4)), and the
+ * Secretary of State can extend the period (s442(5)): neither is worked out here.
+ */
+export const ACCOUNTS_FILING_RULES = { privateMonths: 9, firstLongMonthsFromAnniversary: 9, firstLongMonthsFromEnd: 3 } as const;
+
+/**
+ * When a private company's accounts for `period` are due at Companies House: s442(2)(a), or s442(3) for
+ * a first period longer than 12 months. The first anniversary of a 29 February incorporation is taken
+ * as 28 February.
+ */
+export function accountsFilingDeadline(period: { start: ISODate; end: ISODate }, incorporatedOn: ISODate): ISODate {
+  const r = ACCOUNTS_FILING_RULES;
+  if (period.start === incorporatedOn && longerThanMonths(period.start, period.end, 12)) {
+    const a = monthsAfter(addYears(incorporatedOn, 1), r.firstLongMonthsFromAnniversary);
+    const b = monthsAfter(period.end, r.firstLongMonthsFromEnd);
+    return a > b ? a : b;
+  }
+  return monthsAfter(period.end, r.privateMonths);
+}
+
+/**
+ * A company's confirmation statement (CA 2006 s853A): each review period is 12 months, the first
+ * beginning with the day of incorporation and each later one with the day after the last (s853A(5));
+ * one made up to an earlier day starts the next review period the day after it (s853A(6)). It is
+ * delivered within 14 days after the end of the review period (s853A(1)), made up to a day no later
+ * than its last (s853A(4)).
+ */
+export const CONFIRMATION_STATEMENT_RULES = { reviewMonths: 12, days: 14 } as const;
+
+/** When a confirmation statement made up to `madeUpTo` is due (s853A(1)). */
+export function confirmationStatementDue(madeUpTo: ISODate): ISODate {
+  return addDays(madeUpTo, CONFIRMATION_STATEMENT_RULES.days);
+}
+
+/**
+ * Corporation Tax accounting periods (CTA 2009 ss9–10). One begins when the company comes within the
+ * charge (for a UK resident company, when it starts to carry on business: s9(2)), and again straight
+ * after one ends while it stays within it (s9(1)(b)). One ends on the first of: 12 months from its
+ * beginning (s10(1)(a)); the company's accounting date, or the end of a period it does not make up
+ * accounts for (s10(1)(b)–(c)); starting or ceasing to trade (s10(1)(d)); and the rest of s10(1),
+ * which the app does not know of (residence, administration, ceasing to be within the charge).
+ */
+export const CT_PERIOD_RULES = { maxMonths: 12 } as const;
+
+/**
+ * Corporation Tax is due on the day after 9 months from the end of the accounting period (TMA 1970
+ * s59D(1)), for a company that does not pay by instalments. Large companies pay by quarterly
+ * instalments (s59E and the Corporation Tax (Instalment Payments) Regulations 1998), which the app does
+ * not work out.
+ */
+export const CT_PAYMENT_RULES = { months: 9, days: 1 } as const;
+
+/** When Corporation Tax for an accounting period ending `end` is due, outside instalments (TMA 1970 s59D(1); HMRC's CTM01800). */
+export function ctPaymentDue(end: ISODate): ISODate {
+  return addDays(monthsAfter(end, CT_PAYMENT_RULES.months), CT_PAYMENT_RULES.days);
+}
+
+/**
+ * A company tax return (CT600) is due on the last day of the latest of (FA 1998 Sch 18 para 14(1)):
+ * 12 months from the end of its accounting period; 12 months from the end of the period of account the
+ * accounting period's last day falls in, if that is not longer than 18 months, or 30 months from its
+ * beginning if it is; and 3 months from HMRC's notice to deliver it (para 14(1)(d)), which the app does
+ * not know and does not work out. So both returns for a 15-month period of account are due 12 months
+ * after it ends (HMRC's CTM93050, example 3).
+ */
+export const CT_RETURN_RULES = { monthsFromEnd: 12, longPeriodOfAccountMonths: 18, longMonthsFromStart: 30 } as const;
+
+/** When the CT600 for accounting period `ap`, whose last day falls in period of account `poa`, is due (without the notice's 3 months). */
+export function ct600Due(ap: { end: ISODate }, poa: { start: ISODate; end: ISODate }): ISODate {
+  const r = CT_RETURN_RULES;
+  const own = monthsAfter(ap.end, r.monthsFromEnd);
+  const ofAccount = longerThanMonths(poa.start, poa.end, r.longPeriodOfAccountMonths) ? lastDayOfMonths(poa.start, r.longMonthsFromStart) : monthsAfter(poa.end, r.monthsFromEnd);
+  return own > ofAccount ? own : ofAccount;
+}
+
+/** How often a VAT-registered company makes returns, as HMRC set it: monthly, quarterly in one of three staggers, or yearly under annual accounting. */
+export const VAT_STAGGERS = ['monthly', 'quarterly-1', 'quarterly-2', 'quarterly-3', 'annual'] as const;
+export type VatStagger = (typeof VAT_STAGGERS)[number];
+
+/**
+ * The months HMRC's quarterly staggers end in (HMRC's DMBM530020): stagger 1 March, June, September and
+ * December; stagger 2 April, July, October and January; stagger 3 May, August, November and February.
+ * Returns are for quarters ending on the dates HMRC set (VAT Regulations 1995 reg 25(1)).
+ */
+export const VAT_QUARTER_END_MONTHS: Record<Exclude<VatStagger, 'monthly' | 'annual'>, readonly number[]> = {
+  'quarterly-1': [3, 6, 9, 12],
+  'quarterly-2': [1, 4, 7, 10],
+  'quarterly-3': [2, 5, 8, 11],
+};
+
+/**
+ * When VAT returns are due. A return is due by the end of the month after its period (VAT Regulations
+ * 1995 reg 25(1)), and HMRC allow 7 days more for one made online and paid electronically (reg
+ * 25A(20), by direction: VAT Notice 700/12; under Making Tax Digital every return is made online), so
+ * 1 calendar month and 7 days after the period, whatever day of the week that is. Under annual
+ * accounting the return for the year is due by the last working day of the second month after it (reg
+ * 50(2)(b)); for an accounting period shorter than 4 months, 1 month after it (GOV.UK, "VAT Annual
+ * Accounting Scheme: return and payment deadlines"). The payment is due by the same day; annual
+ * accounting's advance payments are not worked out.
+ */
+export const VAT_RETURN_RULES = { months: 1, days: 7, annualMonths: 2, annualShortMonths: 1, annualShortUnderMonths: 4 } as const;
+
+/** The last day of the VAT period in a stagger that contains `date` (monthly or quarterly). */
+export function vatPeriodEnd(stagger: Exclude<VatStagger, 'annual'>, date: ISODate): ISODate {
+  if (stagger === 'monthly') return endOfMonth(date);
+  const months = VAT_QUARTER_END_MONTHS[stagger];
+  let d = startOfMonth(date);
+  while (!months.includes(Number(d.slice(5, 7)))) d = addMonths(d, 1);
+  return endOfMonth(d);
+}
+
+/** When the VAT return for `period` is due, under `stagger` (`VAT_RETURN_RULES`). */
+export function vatReturnDue(period: { start: ISODate; end: ISODate }, stagger: VatStagger): ISODate {
+  const r = VAT_RETURN_RULES;
+  if (stagger !== 'annual') return addDays(monthsAfter(period.end, r.months), r.days);
+  // Shorter than 4 months: it ends before the last day of 4 months beginning with its start.
+  if (period.end < lastDayOfMonths(period.start, r.annualShortUnderMonths)) return monthsAfter(period.end, r.annualShortMonths);
+  return lastWorkingDayOfMonth(addMonths(startOfMonth(period.end), r.annualMonths));
+}
+
+/** Easter Sunday in a year (the anonymous Gregorian algorithm). */
+export function easterSunday(year: number): ISODate {
+  const a = year % 19;
+  const b = Math.floor(year / 100);
+  const c = year % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31);
+  const day = ((h + l - 7 * m + 114) % 31) + 1;
+  return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+/**
+ * Whether a day is a working day: not a Saturday or Sunday, and not one of England and Wales's bank
+ * holidays that can fall on the last day of a month (Banking and Financial Dealings Act 1971 Sch 1, and
+ * Good Friday): Good Friday, Easter Monday, and the last Mondays of May and August. Others never end a
+ * month, which is all this is used for (`lastWorkingDayOfMonth`); a holiday moved by proclamation is
+ * not known.
+ */
+export function isMonthEndWorkingDay(date: ISODate): boolean {
+  const wd = weekday(date);
+  if (wd === 0 || wd === 6) return false;
+  const easter = easterSunday(Number(date.slice(0, 4)));
+  if (date === addDays(easter, -2) || date === addDays(easter, 1)) return false;
+  const mm = date.slice(5, 7);
+  // The last Monday of May or August: a Monday within its month's last 7 days.
+  if ((mm === '05' || mm === '08') && wd === 1 && addDays(date, 7).slice(5, 7) !== mm) return false;
+  return true;
+}
+
+/** The last working day of the month `date` is in (`isMonthEndWorkingDay`). */
+export function lastWorkingDayOfMonth(date: ISODate): ISODate {
+  let d = endOfMonth(date);
+  while (!isMonthEndWorkingDay(d)) d = addDays(d, -1);
+  return d;
 }
