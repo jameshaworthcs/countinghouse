@@ -29,6 +29,7 @@ your university or college
 
 # Well-known payment brands the code names.
 GrabPay
+src/shared/merchants.ts:LinkedIn
 
 # A city as card terminals print it.
 London LND

@@ -117,7 +117,7 @@ describe('an investment account’s activity list', () => {
 });
 
 describe('screens that show part of an account’s holdings', () => {
-  const detail = { documentType: 'holding_detail_screenshot', accounts: [{ accountName: 'Robo revolution', closingBalance: 1845.76, contributionsToDate: 1302.55, gainLoss: 543.21, holdings: [{ name: 'iShares Automation & Robotics UCITS ETF USD (Acc) GBP', units: 112, price: 16.48, value: 1845.76, costBasis: 1302.55, gain: 543.21 }] }] };
+  const detail = { documentType: 'holding_detail_screenshot', accounts: [{ accountName: 'Robots theme', closingBalance: 1721.44, contributionsToDate: 1302.55, gainLoss: 418.89, holdings: [{ name: 'iShares Automation & Robotics UCITS ETF USD (Acc) GBP', units: 112, price: 15.37, value: 1721.44, costBasis: 1302.55, gain: 418.89 }] }] };
 
   it('one fund’s own page is a holding, not an account worth that fund', () => {
     // Nothing on it names an account, and none holds the fund yet: you choose, nothing is created.
@@ -125,7 +125,7 @@ describe('screens that show part of an account’s holdings', () => {
     expect(d.sections[0]!).toMatchObject({ target: { mode: 'skip' }, holdingsPartial: true, recordBalance: false });
     expect(d.sections[0]!.balance).toBeUndefined();
     expect(d.sections[0]!.contributions).toBeUndefined();
-    expect(d.sections[0]!.holdings[0]).toMatchObject({ units: 112, costBasis: 1302.55, gain: 543.21 });
+    expect(d.sections[0]!.holdings[0]).toMatchObject({ units: 112, costBasis: 1302.55, gain: 418.89 });
     expect(draftIsClean(d).reasons).toContain('an account to choose or a section left out');
     // Uploaded onto the account (from its page or the capture list), it goes there.
     d = draftOf(detail, 'lisa');
@@ -186,7 +186,7 @@ describe('screens that show part of an account’s holdings', () => {
     // The fund's own page first, then the list in two parts, then the overview with the total.
     await commit([section([{ name: 'Tech Index Fund Accumulation', value: 5874.62, units: 2041.517, costBasis: 4408.9, currency: 'GBP' }])]);
     await commit([section([{ name: 'World Fund', value: 1876.4, currency: 'GBP' }, { name: 'UK Fund', value: 1288.15, currency: 'GBP' }])]);
-    await commit([section([{ name: 'Tech Index Fund Accumulation', value: 5874.62, currency: 'GBP' }, { name: 'Robotics ETF', value: 1845.76, currency: 'GBP' }])]);
+    await commit([section([{ name: 'Tech Index Fund Accumulation', value: 5874.62, currency: 'GBP' }, { name: 'Robotics ETF', value: 1721.44, currency: 'GBP' }])]);
     await commit([section([{ name: 'Tech Index Fund', value: 5874.62, currency: 'GBP' }], { balance: 15000, cash: 1251.55 })]);
     const snaps = store.holdings('lisa');
     expect(snaps).toHaveLength(1);
