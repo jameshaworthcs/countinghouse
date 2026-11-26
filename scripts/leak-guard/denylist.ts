@@ -10,7 +10,7 @@ import path from 'node:path';
 import { tokenKey } from './text.ts';
 
 /** Bump when the build changes what it collects, so caches are rebuilt. */
-const BUILDER_VERSION = 10;
+const BUILDER_VERSION = 11;
 
 export interface Denylist {
   version: number;
@@ -276,6 +276,32 @@ function proposalFilings(proposals: unknown[]): Json[] {
   return out;
 }
 
+/**
+ * A company's general ledger (journals.jsonl, its own accounts' rows): every money figure in it at a
+ * small company's threshold (`distinctiveCompanyAmount`), as a VAT box is: a company's £262 hosting bill
+ * or a journal's £612 dividend is as telling as its filings' figures. Nested values too (a row's coding
+ * and its lines, a journal's lines).
+ */
+function collectCompanyAmounts(value: unknown, into: Set<string>): void {
+  for (const obj of objects(value)) {
+    for (const [k, v] of Object.entries(obj)) {
+      if (typeof v !== 'number' || !MONEY_KEYS.has(k)) continue;
+      const a = distinctiveCompanyAmount(v);
+      if (a) into.add(a);
+    }
+  }
+}
+
+/** The journals in decided proposals: those an `add_journal` change writes, and those a removal kept (`before.journals`). */
+function proposalJournals(proposals: unknown[]): Json[] {
+  const out: Json[] = [];
+  for (const p of proposals.filter(isObject)) {
+    for (const c of Array.isArray(p.changes) ? p.changes.filter(isObject) : []) if (c.kind === 'add_journal' && isObject(c.journal)) out.push(c.journal);
+    if (isObject(p.before) && Array.isArray(p.before.journals)) out.push(...p.before.journals.filter(isObject));
+  }
+  return out;
+}
+
 function collectAmounts(value: unknown, into: Set<string>, units: Set<string>): void {
   for (const obj of objects(value)) {
     for (const [k, v] of Object.entries(obj)) {
@@ -498,7 +524,23 @@ export async function buildDenylist(dataDir: string): Promise<{ denylist: Denyli
     if (ref && (ref.match(/\d/g) ?? []).length >= 4 && ref.replace(/\W/g, '').length >= 5) add('filing-reference', ref, { min: 5, generic: false });
   };
   collectFilings(booksFilings(companies), addReference, amounts);
-  collectFilings(proposalFilings(listFiles(file('proposals'), (n) => n.endsWith('.json')).map(readJson)), addReference, amounts);
+  const decided = listFiles(file('proposals'), (n) => n.endsWith('.json')).map(readJson);
+  collectFilings(proposalFilings(decided), addReference, amounts);
+  // A company's general ledger: its own accounts' rows and its journals, at the small-company threshold,
+  // and each journal's own words (its memo and evidence, which name who and what it was).
+  const companyAccounts = new Set(list(readJson(file('accounts.json')), 'accounts').flatMap((a) => (str(a.companyId) ? [str(a.id)!] : [])));
+  collectCompanyAmounts(
+    txs.filter((t) => companyAccounts.has(str(t.accountId) ?? '')),
+    amounts,
+  );
+  const journals = [...readJsonl(file('journals.jsonl')).filter(isObject), ...proposalJournals(decided)];
+  collectCompanyAmounts(journals, amounts);
+  for (const j of journals) {
+    add('journal', str(j.memo), { min: 10, generic: 'words' });
+    addWords('journal', str(j.memo));
+    add('journal', str(j.evidence), { min: 10, generic: 'words' });
+    addIdentifier(str(j.evidence));
+  }
   for (const a of publicAmounts()) amounts.delete(a);
   stats.amount = amounts.size;
   stats.last4 = last4.size;

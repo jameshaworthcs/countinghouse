@@ -30,6 +30,8 @@ const AMOUNT = 3141.59;
 const LAST4 = '8' + '264';
 const FILING_REF = 'VR' + '5530917';
 const PROPOSED_REF = 'PAY' + '8812046';
+const JOURNAL_WORD = 'Wrenfield';
+const JOURNAL_EVIDENCE = 'WR' + '-55821';
 
 /** Every value the persona would not want published. */
 const SECRETS = [OWNER, 'Penhallow', FRIEND, 'T KERRIDGE', EMPLOYER, PAYE, PAYROLL, COMPANY_NO, PAYEE, '3141.59', LAST4, '1991-03-07', FILING_REF, PROPOSED_REF];
@@ -49,8 +51,13 @@ function writePersona(dir: string): void {
     accounts: [
       { id: 'joint', name: 'Monzo Current Account', type: 'current', last4: LAST4, aliases: ['Penhallow Household Pot'], createdAt: stamp, updatedAt: stamp },
       { id: 'saver', name: 'Chase Saver', type: 'savings', aliases: [], createdAt: stamp, updatedAt: stamp },
+      { id: 'bw-bank', name: 'Business Account', type: 'current', companyId: 'bw', includeInNetWorth: false, aliases: [], createdAt: stamp, updatedAt: stamp },
     ],
   });
+  // The company's own rows and journals: small figures a general amount would leave out, and a journal's words.
+  w('transactions/bw-bank/2025.jsonl', `${JSON.stringify({ id: 'tx_00000000000000b1', accountId: 'bw-bank', date: '2025-06-03', amount: -316, currency: 'GBP', description: 'HOSTING', source: {}, books: { lines: [{ ledger: 'software-hosting', amount: -271 }, { ledger: 'vat', amount: -45 }], setBy: 'user' } })}\n`);
+  w('journals.jsonl', `${JSON.stringify({ id: 'jnl_0000000000b1', companyId: 'bw', date: '2025-06-30', memo: `${JOURNAL_WORD} retainer accrued`, evidence: `Invoice ${JOURNAL_EVIDENCE}`, lines: [{ ledger: 'accrued-income', amount: 612 }, { ledger: 'turnover', amount: -612 }], createdBy: 'owner', createdAt: stamp, updatedAt: stamp })}\n`);
+  w('proposals/2025/prop_20250701_120000_ab13.json', { id: 'prop_20250701_120000_ab13', status: 'applied', changes: [{ key: 'a', kind: 'add_journal', why: 'Payroll.', company: 'bw', journal: { date: '2025-06-30', memo: 'June pay', lines: [{ ledger: 'directors-salaries', amount: 433 }, { ledger: 'paye', amount: -433 }] } }] });
   w('employments.json', { employments: [{ id: 'qf', employer: EMPLOYER, aliases: ['QUILLFEATHER'], payeReference: PAYE, payrollNumbers: [PAYROLL], createdAt: stamp, updatedAt: stamp }] });
   w('companies.json', {
     companies: [
@@ -229,6 +236,15 @@ describe('the denylist', () => {
     expect(denylist.amounts).toEqual(expect.arrayContaining(['1287.35', '1863.00']));
     const found = new Scanner({ denylist, allow: new Allowlist('') }).scanText('src/x.ts', `const lineB = 637;\nconst ref = '${FILING_REF}';\n`);
     expect(found.map((f) => `${f.line}:${f.rule}`)).toEqual(['1:amount', '2:filing-reference']);
+  });
+
+  it('collects a company’s ledger: its own rows’ figures and journals’ at a small company’s threshold, and a journal’s words', () => {
+    expect(denylist.amounts).toEqual(expect.arrayContaining(['316.00', '271.00', '612.00', '433.00']));
+    // A row of yours that small is not telling, nor a round company figure.
+    expect(denylist.amounts).not.toContain('45.00');
+    expect(has(JOURNAL_WORD)).toBe('journal');
+    expect(has(`Invoice ${JOURNAL_EVIDENCE}`)).toBe('journal');
+    expect(has('June pay')).toBeUndefined();
   });
 
   it('keeps distinctive amounts only', () => {

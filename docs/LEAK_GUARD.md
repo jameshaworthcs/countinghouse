@@ -29,6 +29,10 @@ logs and Claude transcripts stay clean.
      and every figure its filings hold (VAT boxes, micro-entity lines A–K, Corporation Tax) at a
      small company's threshold: £100 or more with pence, or £250 or more in whole pounds that is
      not a multiple of £10 or a year, and not a placeholder. The VAT number is not stored;
+   - from a company's general ledger: every money figure of its own accounts' rows (their amounts,
+     codings and split lines) and of its journals (`journals.jsonl`, and those decided proposals wrote
+     or kept), at the same small company's threshold; and each journal's memo and evidence when they
+     are more than common words, the memo's own distinctive words, and an evidence's reference;
    - from transactions: payees that are not on the public lists (`src/shared/merchants.ts` and
      `src/shared/institutions.ts`) and not plain bank wording, with their places; and, for a payee
      seen at most three times, its descriptions and references;
