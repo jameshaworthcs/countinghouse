@@ -308,7 +308,8 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
   - A company's books (`set_company_books`, DATA_FORMAT.md, companies.json `books`) are for a
     company in the owner's data: its dates, registrations and period overrides from its documents
     (the certificate of incorporation, a VAT registration certificate, Companies House's page,
-    HMRC's notice of its accounting periods), without filings, which stay as they are. They pass the
+    HMRC's notice of its accounting periods), without filings, which stay as they are, as do the
+    average employees and accounts notes the owner confirmed (the owner's alone to set). They pass the
     same checks as the owner's own (no accounting period over 18 months, no Corporation Tax period
     over 12, in order, only the cash VAT scheme). `withinChargeFrom` is the day it came within the
     charge to Corporation Tax (business or income, interest included), not the day it started to

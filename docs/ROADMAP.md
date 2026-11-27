@@ -45,12 +45,14 @@ system as built, and [DECISIONS.md](DECISIONS.md) records why it is the way it i
   an account in another currency takes one manual rate (Settings).
 - **Open Banking** read-only feeds, in place of exports.
 - **A household mode:** joint accounts and split ownership.
-- **A company's tax and filing:** its general ledger, its accounts for each period and its VAT returns
-  are built (FORMULAS.md §22: depreciation, prepayments and accruals, the micro-entity lines exact and in
-  whole pounds, the bank reconciled, a filed period locked; the nine boxes under cash accounting, returns
-  filed against the books, error corrections, penalty points and thresholds as information); its
-  Corporation Tax computation (capital allowances, the charge on line G), accrual and flat rate VAT, and
-  prior-period adjustments are next.
+- **A company's tax and filing:** its general ledger, its accounts for each period, its VAT returns, its
+  Corporation Tax computation and its micro-entity accounts as it files them are built (FORMULAS.md §22:
+  depreciation, prepayments and accruals, the micro-entity lines exact and in whole pounds, the bank
+  reconciled, a filed period locked; the nine boxes under cash accounting, returns filed against the
+  books, error corrections, penalty points and thresholds as information; the CT600's boxes; the filing
+  sheet with its notes, statements and eligibility, prepared to file by hand). Accrual and flat rate VAT,
+  prior-period adjustments, small (not micro) company accounts, and filing through software (iXBRL, which
+  Companies House requires from April 2028) are not built.
 
 ## Worth revisiting
 

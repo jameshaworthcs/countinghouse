@@ -3459,3 +3459,65 @@ s45A and s459/460/463G, the CT600 labels and box 315 in whole pounds. What chang
   telling HMRC within 3 months, iXBRL filing since HMRC's free service closed on 31 March 2026), and the
   rule text built from the tables (the hybrid rates, the small pools limit, the marginal relief
   fraction). The small profits rate is set by FA 2021 s7, s18A providing for it.
+
+## 2026-11-27: Filing a company's micro-entity accounts
+
+Slice 7, the last of the company books: one period's micro-entity accounts as the company files them at
+Companies House, prepared here and filed by hand (FORMULAS.md §22, "Filing the accounts"; UK_RULES.md,
+"Filing the accounts"). Each rule was read on legislation.gov.uk, the FRC's FRS 105 and Companies House's
+guidance for this change. What was decided:
+
+- **The form's order, the format's words where its help has none.** WebFiling's micro-entity help gives
+  the balance sheet's headings in order but is old (it predates the employees note) and shows no line for
+  total assets less current liabilities or the profit and loss reserve; the live form was not seen. The
+  sheet follows the help's order and words, adds G and the profit and loss account in the format's
+  words, and says so. The earlier note that the form "has no boxes for F, G and K" is corrected to what
+  the help says: it lists net current assets and total net assets as headings. The whole-pound figures
+  are unchanged.
+- **Statements in Companies House's words**, "year" made "period" for a period that is not 12 months
+  (s475(2) asks for a statement "to that effect"), the day written in full. The four WebFiling asks to
+  accept: audit exemption (s477), the members not requiring an audit (s476), the directors'
+  responsibilities (s475(3)), and Companies House's combined micro-entity statement (prepared under the
+  micro-entity provisions, s414(3)(a); delivered under the small companies regime, s444(5)). No statement
+  that the profit and loss account is not delivered: s444(5C) spares a micro-entity it.
+- **Four notes, as FRS 105 para 6.2 lists them**: average employees (s411(1), which applies to every
+  company), directors' advances, credits and guarantees (s413), commitments (Sch 1 para 57, the note
+  reg 5A keeps) and arrangements off the balance sheet (s410A). The Act puts only the second and third at
+  the foot of the balance sheet (s472(1A)); FRS 105 puts all four there, and the sheet follows it.
+- **Advances from the loan, day by day.** What the director owes, max(0, −balance), at each day's end:
+  increases are advances, decreases repayments, and a credit balance (money the director lent) is never
+  an advance, so a loan in credit throughout gives "None" with the reason. Interest, conditions and
+  amounts written off or waived are the owner's; so is anything the books cannot see (another director,
+  a guarantee).
+- **Employees are never worked out.** A hint from payroll (months with staff costs, and what one person
+  in them would average) is shown, labelled, never stored: the count turns on contracts of service, which
+  the books do not hold.
+- **The size test.** The decided period's row of limits applies to every earlier year (SI 2024/1303 reg
+  3: exact from 6 April 2025, and the micro-entity limits did not change from 2013 to 2025). Turnover
+  pro-rated by days over the 12 months beginning with the period's first day ("proportionately adjusted"
+  says no more). The balance sheet total is A + B + C + D as shown: filed lines where recorded, else the
+  books. A year before the books with no lines filed is unknown; where that leaves the result open, the
+  owner says whether it qualified then, and that answer is used only where it settles it. A company that
+  qualifies as a micro-entity is taken to qualify as small when the small test alone cannot tell
+  (within the micro limits is within the small ones, so the two-year rule cannot separate them that way).
+  Exclusions (ss384, 384A(8), 384B, 476, 478) are listed for the owner to confirm none applied.
+- **Ready to file, recorded only on a click.** Ended, accounts ready, employees given, notes confirmed,
+  qualifying with no exclusion. Recording it (once submitted) records the lines the books give at that
+  moment, which must be the lines the owner saw (else 409), with the approval day and the signing
+  director's name: the only name kept, on the filing alone, and collected by the leak guard. It locks the
+  books, as any accounts filing does.
+- **The book value of the shares is the owner's, on a click.** K in whole pounds (as filed, else the
+  books) × shares ÷ issued shares, never below nothing, as a `net-assets` valuation and a balance of the
+  shares' account: the one company route that writes a personal figure, and only on request, so company
+  data alone still changes nothing personal (the filing route is a GET listed with the company's routes).
+- **Filing channel dated**: WebFiling until 31 March 2028, software (iXBRL) only from 1 April 2028, with a
+  strengthened audit exemption statement then (ECCTA 2023 s57, not in force); the profit and loss filing
+  requirement for micro-entities paused (Companies House, 23 October 2026).
+- **The demo**: Example Studio's latest year is ready to file (its employees, notes and eligibility
+  confirmed) and no longer filed early with its CT600; the year before its books, filed with its lines,
+  locks the books through that year's end and is the sheet's comparative "as filed". Jo records the
+  latest filing from the sheet.
+- **Two fixes from earlier slices**: a filed VAT return whose net VAT equals the books' (only boxes 1, 4,
+  6 or 7 apart) says "Boxes differ", not "Differs from the books"; the threshold card's month-by-month
+  toggle moves below what it explains, worded as what it shows, so it no longer reads as a label of the
+  turnover figure.

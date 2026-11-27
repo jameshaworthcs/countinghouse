@@ -524,12 +524,135 @@ Micro-entities Regime (the Financial Reporting Council; paragraphs as in its Sep
   (ss836–838). The books check each dividend against the profit and loss reserve on the day it is paid,
   a practical test that leaves unrealised profits and interim accounts to you.
 - **Whole pounds**: Companies House's online filing of micro-entity accounts takes the figures in whole
-  pounds and works out every total (it has no boxes for net current assets, total assets less current
-  liabilities or net assets, and totals fixed assets, current assets and capital and reserves from their
-  sub-lines when a breakdown is entered), so the totals are worked out from the rounded figures here
-  too, and the rounding difference sits in the profit and loss reserve.
+  pounds, and a total on the accounts is the total of what they show (its WebFiling help lists net
+  current assets and total net assets with what they are made of, has no line for total assets less
+  current liabilities, and takes a breakdown of fixed assets, current assets and capital and reserves
+  without asking for one), so the totals are worked out from the rounded figures here too, and the
+  rounding difference sits in the profit and loss reserve.
 - Capital allowances for the tax computation are below ("Corporation Tax"); a car's own rules and the
   intangibles regime (CTA 2009 Part 8) are not worked out.
+
+### Filing the accounts (a company's books)
+
+The micro-entity accounts as a company files them at Companies House (FORMULAS.md §22, "Filing the
+accounts"; `src/shared/uk.ts`, "Companies: the size of a company"; `shared/accounts-filing.ts`). The
+app prepares them; you file them, by hand: nothing calls Companies House.
+
+- **Qualifying as a micro-entity** ([CA 2006 s384A](https://www.legislation.gov.uk/ukpga/2006/46/section/384A)).
+  A company qualifies in its first financial year if it meets the qualifying conditions in that year
+  (s384A(1)); in a later year, if it meets them in that year (s384A(2)), but meeting or ceasing to meet
+  them on its balance sheet date "affects its qualification as a micro-entity only if it occurs in two
+  consecutive financial years" (s384A(3)). It meets them when it satisfies **two or more** of: turnover
+  not more than the limit, balance sheet total not more than the limit, and average number of employees
+  not more than 10 (s384A(4)). The turnover limit is "proportionately adjusted" for a financial year
+  that is not in fact a year (s384A(5): only turnover; the app adjusts by days over the days of the 12
+  months beginning with its first, a judgment); the balance sheet total is "the aggregate of the amounts
+  shown as assets in the company's balance sheet" (s384A(6): A + B + C + D of format 1); employees are
+  the monthly numbers of persons employed under contracts of service, added and divided by the months
+  of the year (s384A(7)). A parent company qualifies only if its group qualifies as small (s384A(8)).
+- **The limits** (`COMPANY_SIZE_RULES`, by the first day of the financial year): **£632,000 turnover,
+  £316,000 balance sheet total, 10 employees** for financial years beginning before 6 April 2025; **£1
+  million, £500,000 and 10** for those beginning on or after it
+  ([SI 2024/1303](https://www.legislation.gov.uk/uksi/2024/1303)
+  [reg 2(2)](https://www.legislation.gov.uk/uksi/2024/1303/regulation/2/made) and
+  [reg 9](https://www.legislation.gov.uk/uksi/2024/1303/regulation/9/made); in force 6 April 2025).
+  Deciding a year beginning on or after 6 April 2025, a company is treated as having met the conditions,
+  and qualified, in any earlier year in which it would have under the new limits
+  ([reg 3(2)–(3)](https://www.legislation.gov.uk/uksi/2024/1303/regulation/3/made)), so the earlier
+  years are judged by the new limits; the app applies the decided year's row to the years before
+  throughout (exact for the micro-entity limits, unchanged from 2013 to 2025). Years beginning before 1
+  January 2016 are not covered. Companies House's guidance says the same ("Preparing and filing
+  Companies House accounts", §§9.1 and 9.3).
+- **The small companies regime** ([s382](https://www.legislation.gov.uk/ukpga/2006/46/section/382), the
+  same rules; [s383](https://www.legislation.gov.uk/ukpga/2006/46/section/383) for a small group): **£10.2
+  million, £5.1 million and 50** for financial years beginning on or after 1 January 2016 (SI 2015/980),
+  **£15 million, £7.5 million and 50** from 6 April 2025 (SI 2024/1303 reg 9). Audit exemption depends on
+  qualifying as small ([s477](https://www.legislation.gov.uk/ukpga/2006/46/section/477), decided under
+  s382(1)–(6)).
+- **Excluded** (none may apply at any time in the year; you confirm it): a company excluded from the
+  small companies regime ([s384](https://www.legislation.gov.uk/ukpga/2006/46/section/384): a public
+  company; an authorised insurance company, banking company, e-money issuer, MiFID investment firm or
+  UCITS management company, insurance market activity, a Master Trust scheme funder; a member of an
+  ineligible group); an investment undertaking or financial holding undertaking, a credit institution
+  (CRR firm) or insurance undertaking, or a charity
+  ([s384B(1)](https://www.legislation.gov.uk/ukpga/2006/46/section/384B)); a parent company preparing
+  group accounts under s399(4), or a company whose accounts are included in consolidated group accounts
+  (s384B(2)). Audit exemption is lost too where members holding 10% or more ask for an audit
+  ([s476](https://www.legislation.gov.uk/ukpga/2006/46/section/476)) or the company is excluded by
+  [s478](https://www.legislation.gov.uk/ukpga/2006/46/section/478).
+- **The notes a micro-entity gives** (FRS 105 para 6.2, at the foot of the balance sheet):
+  - the **average number of persons employed** in the year
+    ([s411(1)](https://www.legislation.gov.uk/ukpga/2006/46/section/411), which applies to every company;
+    the average by months of persons employed under contracts of service, s411(3)–(4); FRS 105 para 6A.2);
+  - **advances and credits granted to directors and guarantees entered into on their behalf**
+    ([s413](https://www.legislation.gov.uk/ukpga/2006/46/section/413)): of an advance or credit, its
+    amount, an indication of the interest rate, its main conditions, and any amounts repaid, written off
+    and waived (s413(3)); of a guarantee, its main terms, the most the company may have to pay and anything
+    paid (s413(4)); the totals (s413(5)); every advance subsisting at any time in the year, whenever made
+    (s413(7)). Money a director lent the company is not an advance granted to the director;
+  - the **total of financial commitments, guarantees and contingencies not included in the balance
+    sheet**, with the nature and form of any valuable security given, pension commitments apart, and
+    commitments to group undertakings apart
+    ([SI 2008/409 Sch 1 para 57](https://www.legislation.gov.uk/uksi/2008/409/schedule/1/paragraph/57)),
+    the one note [reg 5A](https://www.legislation.gov.uk/uksi/2008/409/regulation/5A) keeps for a
+    micro-entity;
+  - **arrangements not reflected in the balance sheet**, their nature and business purpose
+    ([s410A](https://www.legislation.gov.uk/ukpga/2006/46/section/410A); FRS 105 para 6A.1).
+
+  The s413 and para 57 notes go at the foot of the balance sheet
+  ([s472(1A)](https://www.legislation.gov.uk/ukpga/2006/46/section/472)). Accounting policies are not
+  required (FRS 105 para 6.1 permits more than it asks, and more is given with regard to FRS 102 Section
+  1A, para 1.3; WebFiling's help: "not required for micro accounts"): the app offers them in words, never
+  adds them by itself. The micro-entity minimum accounting items are presumed in law to give a true and
+  fair view ([s396(2A)](https://www.legislation.gov.uk/ukpga/2006/46/section/396)). The accounts state the
+  rounding used (FRS 105 para 3.13(d)), and the particulars of s396(A1) (the part of the UK it is
+  registered in, its number, that it is private and limited, its registered office), which the app does
+  not hold: check them on the form.
+- **The statements on the balance sheet**, above the director's signature: that the company was
+  entitled to exemption from audit ([s475(2)](https://www.legislation.gov.uk/ukpga/2006/46/section/475),
+  s477); that the members have not required an audit under s476, and that the directors acknowledge their
+  responsibilities for accounting records and the preparation of accounts (s475(3)), above the signature
+  (s475(4)); that the accounts are prepared in accordance with the micro-entity provisions
+  ([s414(3)(a)](https://www.legislation.gov.uk/ukpga/2006/46/section/414)); and, filed without the profit
+  and loss account, that they are delivered in accordance with the provisions applicable to companies
+  subject to the small companies regime ([s444(5)](https://www.legislation.gov.uk/ukpga/2006/46/section/444));
+  a micro-entity need not also disclose that the profit and loss account is not delivered (s444(5A) does
+  not apply to it, s444(5C)). The words are Companies House's
+  ([Preparing and filing Companies House accounts](https://www.gov.uk/government/publications/filing-your-companies-house-accounts/life-of-a-company-part-1-accounts),
+  §9.4 for the micro-entity statement, §11.1 for audit exemption; the same on GOV.UK's
+  [Audit exemption for private limited companies](https://www.gov.uk/audit-exemptions-for-private-limited-companies)).
+  The balance sheet is approved by the board and signed on its behalf by a director, named (s414(1)–(2));
+  WebFiling asks for the day of approval ("on or after the balance sheet date and must not be a date in
+  the future") and the approving director's name, and that its statements be accepted
+  ([WebFiling micro-entity accounts help](https://ewf.companieshouse.gov.uk/help/en/stdwf/microAccountsHelp.html)).
+- **The form.** WebFiling's micro-entity help gives, in order: called up share capital not paid; fixed
+  assets, with an optional breakdown into intangible assets, tangible assets and investments; current
+  assets, with an optional breakdown into stocks, debtors, investments and cash at bank and in hand;
+  prepayments and accrued income; creditors due within one year; net current assets (liabilities);
+  creditors due after more than one year; provisions for liabilities; accruals and deferred income; total
+  net assets (liabilities); capital and reserves (called up share capital, share premium account,
+  revaluation reserve, other reserves, each "need not be disclosed separately"); the notes on guarantees
+  and on advances and credits to directors; and comparatives, required "unless there is no prior
+  accounting period". Its words for net current assets ("Total current assets less prepayments and
+  accrued income…") read as an error: format 1 adds prepayments (C + D − E), as its abbreviated accounts
+  help does. The help predates the requirement to give the average number of employees and shows no line
+  for total assets less current liabilities (G of the format) or the profit and loss reserve: the sheet
+  gives them, in the format's words. The live form was not seen.
+- **How accounts are filed** (`ACCOUNTS_FILING_CHANNEL_RULES`, by the day of filing): WebFiling (and
+  paper) take a micro-entity's accounts until **31 March 2028**; from **1 April 2028** every company files
+  its accounts through commercial software, in iXBRL, the web and paper services closed for accounts, and
+  a company claiming audit exemption gives a strengthened statement identifying the exemption and
+  confirming it qualifies (Companies House,
+  [update to accounts filing from April 2028](https://www.gov.uk/government/news/companies-house-update-to-accounts-filing-from-april-2028),
+  23 October 2026; the statement is the new s475(2) of the
+  [Economic Crime and Corporate Transparency Act 2023 s57](https://www.legislation.gov.uk/ukpga/2023/56/section/57),
+  not in force when checked). The same announcement paused the requirement for small companies and
+  micro-entities to file a profit and loss account (ECCTA 2023
+  [s53](https://www.legislation.gov.uk/ukpga/2023/56/section/53) and
+  [s54](https://www.legislation.gov.uk/ukpga/2023/56/section/54), not commenced) and kept filleted and
+  abridged accounts. The joint HMRC and Companies House service for accounts and the Company Tax Return
+  closed on 31 March 2026
+  ([closure](https://www.gov.uk/guidance/closure-of-the-service-to-file-your-company-accounts-and-tax-return)).
 
 ### Corporation Tax (a company's books)
 
@@ -855,7 +978,16 @@ Checked 27 November 2026 (companies: a period's accounts):
 
 - The Financial Reporting Council, [FRS 105, September 2024](https://media.frc.org.uk/documents/FRS_105_September_2024_Redacted_edition_zZFkzvN.pdf): para 2.24 (the accrual basis), paras 3.7, 3.10 and 3.13(d) (comparatives; the level of rounding stated), Section 8 paras 8.11–8.13 (changes in estimate) and 8.16–8.17 (prior period errors), Section 12 paras 12.14–12.21 and 12.26–12.27 (property, plant and equipment: components, depreciation, changes in estimate, derecognition), Section 13 paras 13.4–13.13 (intangible assets: internally generated, useful life, amortisation), para 14.2 (goodwill), Sections 16 and 22 (provisions; impairment)
 - legislation.gov.uk, [CA 2006 s830](https://www.legislation.gov.uk/ukpga/2006/46/section/830) (distributions out of profits available), [ss836–838](https://www.legislation.gov.uk/ukpga/2006/46/section/836) (the relevant accounts), [s454](https://www.legislation.gov.uk/ukpga/2006/46/section/454) (voluntary revision of defective accounts), [s610](https://www.legislation.gov.uk/ukpga/2006/46/section/610) (share premium)
-- Companies House's online filing of micro-entity accounts in whole pounds, its totals worked out from what is entered: as an accountant's review of this slice confirmed (no boxes for F, G and K; B, C and capital and reserves totalled from a breakdown), not fetched here
+- Companies House's online filing of micro-entity accounts in whole pounds, its totals worked out from what is entered: as an accountant's review of this slice confirmed, not fetched then; its WebFiling help, read on 27 November 2026 (filing the accounts, below), lists net current assets and total net assets as headings and no line for total assets less current liabilities
+
+Checked 27 November 2026 (companies: filing the accounts), each link in "Filing the accounts (a
+company's books)" above: legislation.gov.uk's revised text of CA 2006 ss382–384B, 396, 410A, 411, 413,
+414, 444, 472, 475–478 (up to date to 25 November 2026), SI 2008/409 reg 5A and Sch 1 para 57, SI
+2024/1303 as made (regs 1–3 and 9), and ECCTA 2023 ss53–57 (prospective but for regulation-making
+powers); FRS 105 (September 2024) paras 1.3, 3.2, 3.7, 3.10, 3.13–3.14, 6.1–6.2 and 6A.1–6A.5; Companies
+House's WebFiling micro-entity accounts help, "Preparing and filing Companies House accounts" (updated 23
+October 2026, §§9.1–9.4, 10, 11 and 11.1) and its news of 23 October 2026; GOV.UK's "Audit exemption for
+private limited companies" and the closure of the joint filing service.
 
 Checked 26 November 2026 (companies: a director's loan):
 

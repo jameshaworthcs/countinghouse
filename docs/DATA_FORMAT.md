@@ -425,9 +425,11 @@ directorLoanAccountId?, books?, notes?, createdBy, createdAt, updatedAt}`:
 - `holdings`: `[{shareClass, shares, totalShares?, certificate?, acquiredOn?, source}]`, your
   shares by class, with the shares of every class it has issued when known.
 - `valuations`: `[{asOf, method, netAssets?, value, note?, balanceId?, source}]`. `method` is
-  `net-assets` (book value: its net assets × your shares ÷ its shares) or `yours`. Each is recorded
-  as a balance of its account (`balanceId`), its note saying how it was worked out
-  ([FORMULAS.md §9](FORMULAS.md), "Shares in a company").
+  `net-assets` (book value: its net assets × your shares ÷ its shares, never below nothing) or `yours`.
+  Each is recorded as a balance of its account (`balanceId`), its note saying how it was worked out
+  ([FORMULAS.md §9](FORMULAS.md), "Shares in a company"). For a company whose books are kept here, its
+  filing sheet offers one at a period's end from its net assets (K), recorded only on your click
+  (`POST /api/companies/:id/accounts/book-value`, `{periodEnd}`), one per day.
 - `accountId`: the "other asset" account that carries its value in your estate (yours: never one
   of the company's own accounts). `employmentId`: your job there, when you work for it.
 - `directorLoanAccountId`: your director's loan account with it (accounts.json, `director_loan`):
@@ -449,7 +451,7 @@ which its deadlines are worked out ([FORMULAS.md §22](FORMULAS.md)). They are t
 yours: `GET /api/companies` leaves them out, and only the company's own routes serve them
 (`GET /api/companies/:id/books`, `/api/company-books`, `/api/company-alerts`). Optional and additive
 (no format version). `{incorporatedOn, accountingReferenceDate?, periods, vat?, paye?,
-confirmationStatement?, tradeStartedOn?, ctPeriods, associatedCompanies?, aiaAllocated?, closeInvestmentHolding?, taxBroughtForward?, deadlinesFrom?, ledgerFrom?, policies?, depreciationMonths?, lockedThrough?, filings, setBy, updatedAt}`:
+confirmationStatement?, tradeStartedOn?, ctPeriods, associatedCompanies?, aiaAllocated?, closeInvestmentHolding?, taxBroughtForward?, deadlinesFrom?, ledgerFrom?, policies?, depreciationMonths?, lockedThrough?, filings, employees?, accountsNotes?, setBy, updatedAt}`:
 
 - `incorporatedOn`: the day Companies House incorporated it.
 - `accountingReferenceDate`: `"MM-DD"`, its reference date from incorporation. Absent, the default:
@@ -532,6 +534,11 @@ confirmationStatement?, tradeStartedOn?, ctPeriods, associatedCompanies?, aiaAll
     `ct600`, `{taxPayable}` (0 says there is nothing to pay, which does the payment too); for
     `ct-payment`, `{amount}`, never negative: `0` records that there is no Corporation Tax to pay for
     the period ("Nothing to pay" on the payment's deadline, or an agent's `add_filing`).
+  - On an `accounts` filing, optionally, the approval as filed (CA 2006 s414): `approvedOn`, the day the
+    board approved the accounts (on or after the balance sheet date, not after `filedOn`), and
+    `approvedBy`, the director who signed them (at most 120 characters: the only name kept, and only
+    here). The filing sheet's `POST /api/companies/:id/accounts/filed` records both, with lines `A`–`K`
+    as the books give them. Optional and additive.
   - On a `vat` filing, optionally, what was done about errors (VAT Notice 700/45; FORMULAS.md §22,
     "VAT returns"): `corrections`, `[{periodEnd, amount}]`, the errors on earlier returns this return
     corrected (method 1), each the earlier period's last day (before this one's) and the net VAT in
@@ -540,14 +547,34 @@ confirmationStatement?, tradeStartedOn?, ctPeriods, associatedCompanies?, aiaAll
     return's own errors reported to HMRC separately (method 2), on or after the day it was filed. The
     figures stay as filed. Set with `PUT /api/companies/:id/filings/:filingId/vat-corrections`
     (`{corrections?, disclosed?}`, each `null` to take it away). Optional and additive.
+- `employees`: `[{periodEnd, average}]`, the average number of persons employed under contracts of
+  service in each accounting period, by its last day (0 to 100,000, at most two decimal places; CA 2006
+  s411(1), (3)–(4)): yours to give, one per period, never worked out (FORMULAS.md §22, "Filing the
+  accounts"). Optional and additive.
+- `accountsNotes`: `[{periodEnd, offBalanceSheet?, commitments?, directors?, advances?, notExcluded?,
+  previousQualified?}]`, what you confirm for a period's micro-entity accounts before filing them, one
+  per period: `offBalanceSheet` (arrangements not on the balance sheet, s410A), `commitments`
+  (financial commitments, guarantees and contingencies not on it, SI 2008/409 Sch 1 para 57) and
+  `directors` (advances, credits and guarantees for directors that the books do not hold, s413) are
+  each `{none: true}` or `{text, amount?}` (text up to 2,000 characters, `amount` its total in pounds,
+  not negative); `advances` is `{interest, conditions, writtenOff?, waived?}`, what the books cannot say
+  of an advance on the director's loan they hold (s413(3)); `notExcluded`, that none of the exclusions
+  from the micro-entity provisions and audit exemption applied (ss384, 384A(8), 384B, 476, 478);
+  `previousQualified`, whether it qualified as a micro-entity for the period before, where the books
+  cannot tell. Optional and additive.
+- `employees` and `accountsNotes` are kept whoever sets the books up again (your form, an applied
+  proposal), as the filings are, and set with `PUT /api/companies/:id/accounts-notes` (`{periodEnd,
+  employees?, notes?}`: each `null` takes it away, `notes` is replaced whole); no agent token may use it.
 - `setBy`: `owner`, or `agent` when a proposal you applied set them; `updatedAt` changes with every
-  change to the books other than a filing.
+  change to the books other than a filing, the employees and the notes.
 
 You keep them with `PUT /api/companies/:id/books` (`{books, was, company}`; the filings stay;
 `company`, the page's, must be this one) and record or
 remove a filing with `POST /api/companies/:id/filings` and `DELETE
 /api/companies/:id/filings/:filingId`, and say what was done about a VAT return's errors with `PUT
-/api/companies/:id/filings/:filingId/vat-corrections`. No agent token may use these; an agent proposes
+/api/companies/:id/filings/:filingId/vat-corrections`, what you confirm for a period's accounts with
+`PUT /api/companies/:id/accounts-notes`, and record the accounts as filed from the filing sheet with
+`POST /api/companies/:id/accounts/filed`. No agent token may use these; an agent proposes
 (`set_company_books`, `add_filing`). Every write is built on the company as it is at that moment
 (`Store.updateCompany`), so two at once never lose one another. The store refuses a write that adds a
 problem to the books; problems already there (a hand edit) do not block one, so they can be put right
