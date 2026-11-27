@@ -810,6 +810,53 @@ export function confirmationStatementDue(reviewEnd: ISODate): ISODate {
   return addDays(reviewEnd, ruleOn(CONFIRMATION_STATEMENT_RULES, reviewEnd).days);
 }
 
+// ─── Companies: the size of a company, for its accounts (docs/UK_RULES.md, "Filing the accounts") ─────
+
+/** The limits a size test measures a financial year against: turnover and balance sheet total in pounds, and the average number of employees. */
+export interface SizeLimits {
+  turnover: number;
+  balanceSheet: number;
+  employees: number;
+}
+
+/**
+ * The size limits for the micro-entity provisions (CA 2006 s384A(4)) and the small companies regime
+ * (s382(3)): a company meets a size's qualifying conditions in a year when it satisfies two or more of
+ * them, its turnover no more than the limit (pro-rated for a period other than a year, s384A(5) and
+ * s382(4)), its balance sheet total (the aggregate of the amounts shown as assets) no more than the limit
+ * and its average number of employees no more than the limit. By the first day of the financial year
+ * being decided: £632,000 / £316,000 / 10 and £10.2 million / £5.1 million / 50 for financial years
+ * beginning on or after 1 January 2016 (the micro-entity figures from SI 2013/3008, the small ones from
+ * SI 2015/980); £1 million / £500,000 / 10 and £15 million / £7.5 million / 50 for financial years
+ * beginning on or after 6 April 2025 (SI 2024/1303 regs 2(2) and 9). Deciding a year from 6 April 2025,
+ * the earlier years are judged by the new limits too (SI 2024/1303 reg 3(2)–(3)); the app does the same
+ * for earlier rows. Years beginning before 1 January 2016 are not covered (`covered: false`).
+ */
+export const COMPANY_SIZE_RULES: readonly { from: ISODate; covered: boolean; micro: SizeLimits; small: SizeLimits }[] = [
+  { from: '2016-01-01', covered: true, micro: { turnover: 632_000, balanceSheet: 316_000, employees: 10 }, small: { turnover: 10_200_000, balanceSheet: 5_100_000, employees: 50 } },
+  { from: '2025-04-06', covered: true, micro: { turnover: 1_000_000, balanceSheet: 500_000, employees: 10 }, small: { turnover: 15_000_000, balanceSheet: 7_500_000, employees: 50 } },
+];
+
+/** The size limits for a financial year beginning on `start` (and, by SI 2024/1303 reg 3, for the years before it when deciding it). */
+export function companySizeRulesFor(start: ISODate): { from: ISODate; covered: boolean; micro: SizeLimits; small: SizeLimits } {
+  const r = ruleOn(COMPANY_SIZE_RULES, start);
+  return start < r.from ? { ...r, covered: false } : r;
+}
+
+/**
+ * How the accounts reach Companies House, by the day they are filed: WebFiling and paper take a
+ * micro-entity's accounts until 31 March 2028; from 1 April 2028 every company files its accounts through
+ * commercial software in iXBRL, the web and paper services closed for accounts, and a company claiming
+ * audit exemption gives a strengthened statement (Companies House, "Companies House update to accounts
+ * filing from April 2028", 23 October 2026; the statement is the new CA 2006 s475(2) of the Economic Crime
+ * and Corporate Transparency Act 2023 s57, not yet in force when this was written). The requirement for
+ * micro-entities to file a profit and loss account (ECCTA 2023 ss53–54) was paused on the same day.
+ */
+export const ACCOUNTS_FILING_CHANNEL_RULES: readonly { from: ISODate; webFiling: boolean; enhancedAuditStatement: boolean }[] = [
+  { from: '2008-04-06', webFiling: true, enhancedAuditStatement: false },
+  { from: '2028-04-01', webFiling: false, enhancedAuditStatement: true },
+];
+
 /**
  * Corporation Tax accounting periods (CTA 2009 ss9–10). One begins when the company comes within the
  * charge (s9(1)(a)): when it starts to carry on business (s9(2)) or has a source of income, such as

@@ -5,8 +5,10 @@
 //
 // Its general ledger too (analytics/ledger.ts, FORMULAS.md §22): its postings and checks, the rows to
 // code with the links between its rows and yours, its journals and its book rules; and its accounts for
-// each accounting period (analytics/period-accounts.ts); its VAT returns (analytics/vat-return.ts) and
-// Corporation Tax computations (analytics/corporation-tax.ts).
+// each accounting period (analytics/period-accounts.ts); its VAT returns (analytics/vat-return.ts),
+// Corporation Tax computations (analytics/corporation-tax.ts) and its accounts as it files them at
+// Companies House (analytics/accounts-filing.ts). One write here reaches a figure of yours: the book
+// value of your shares at a period's end, recorded only when you choose to (`accounts/book-value`).
 //
 // Only the owner changes the books: no agent token may use the routes that change them (tokens.ts
 // lists none of them); an agent proposes instead (`set_company_books`, `add_filing`, `set_books`,
@@ -15,19 +17,21 @@
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import type { CompanyBooksListItem, CompanyBooksResponse } from '../../shared/api';
-import { accountingPeriodsOf, addedBooksProblems, booksProblems, lockAfterFiling, companyDeadlineAlerts, companyDeadlines, ctPeriodsOf, FILING_KIND_LABELS, vatPeriodsOf, withinChargeAssumed, withinChargeFrom } from '../../shared/company-books';
+import { accountingPeriodsOf, addedBooksProblems, booksProblems, keptWithBooks, lockAfterFiling, companyDeadlineAlerts, companyDeadlines, ctPeriodsOf, FILING_KIND_LABELS, vatPeriodsOf, withinChargeAssumed, withinChargeFrom } from '../../shared/company-books';
 import { formatDate, today } from '../../shared/dates';
-import { BooksCodingSchema, CompanyBooksSchema, CompanyBooksSetupSchema, CompanyFilingInputSchema, CompanyFilingSchema, CompanySchema, JournalInputSchema, RuleSchema, SlugSchema, TimestampSchema, VatCorrectionSchema, VatDisclosureSchema, type Company, type Journal, type Rule, type Transaction } from '../../shared/schema';
+import { AccountsNotesSchema, BalanceSnapshotSchema, BooksCodingSchema, BooksEmployeesSchema, CompanyBooksSchema, CompanyBooksSetupSchema, CompanyFilingInputSchema, CompanyFilingSchema, CompanySchema, ISODateSchema, JournalInputSchema, MICRO_ENTITY_LINES, RuleSchema, SlugSchema, TimestampSchema, VatCorrectionSchema, VatDisclosureSchema, type Company, type CompanyFiling, type Journal, type Rule, type Transaction } from '../../shared/schema';
 import { codingPlace, isLinked } from '../../shared/ledger';
 import { autoLinkPatches, bookRulePatches, codingView, companyBookRules, ledgerView } from '../analytics/ledger';
 import { periodAccounts } from '../analytics/period-accounts';
 import { companyVat, vatReturnCsv } from '../analytics/vat-return';
 import { companyCorporationTax, ctComputationCsv } from '../analytics/corporation-tax';
+import { companyFiling, filingCsv, filingJson } from '../analytics/accounts-filing';
+import { formatMoney } from '../../shared/money';
 import { defaultAccountingReferenceDate } from '../../shared/uk';
 import { companyView } from '../analytics/companies';
 import { agentTokenOf, csvCell, queryDate, readJson, type AppContext } from '../context';
 import { nowAfter, nowISO, randomHex } from '../fsutil';
-import { filingId, ruleId } from '../ids';
+import { balanceId, filingId, ruleId } from '../ids';
 import { StoreError } from '../store';
 
 const CodingBody = z.object({
@@ -46,6 +50,22 @@ const BookRuleBody = RuleSchema.omit({ id: true, createdAt: true, updatedAt: tru
 
 /** The errors a VAT return corrected (method 1) and its own errors reported separately (method 2): each null takes it away. */
 const VatCorrectionsBody = z.object({ corrections: z.array(VatCorrectionSchema).max(40).nullable().optional(), disclosed: VatDisclosureSchema.nullable().optional() });
+
+/** What you confirm for one period's accounts: its average number employed, and its notes (each null: take it away). */
+const AccountsNotesBody = z.object({
+  periodEnd: ISODateSchema,
+  employees: BooksEmployeesSchema.shape.average.nullable().optional(),
+  notes: AccountsNotesSchema.omit({ periodEnd: true }).nullable().optional(),
+});
+/** The accounts recorded as filed: the lines you saw, the day and reference, the approval as filed. */
+const AccountsFiledBody = z.object({
+  periodEnd: ISODateSchema,
+  filedOn: ISODateSchema,
+  reference: z.string().trim().min(1).max(60).optional(),
+  approvedOn: ISODateSchema,
+  approvedBy: z.string().trim().min(1).max(120),
+  lines: z.object(Object.fromEntries(MICRO_ENTITY_LINES.map((l) => [l, z.number().int()])) as Record<(typeof MICRO_ENTITY_LINES)[number], z.ZodNumber>),
+});
 
 const SetupBody = z.object({ books: CompanyBooksSetupSchema, was: TimestampSchema.nullable().optional(), /** The company the page was showing: refused when it is not this one. */ company: SlugSchema.optional() });
 
@@ -119,7 +139,7 @@ export function companyBookRoutes(ctx: AppContext): Hono {
       (company) => {
         if (!company) throw new StoreError('No such company', 404);
         if (was !== undefined && was !== (company.books?.updatedAt ?? null)) throw new StoreError(`${company.name}’s books changed since you opened them (an applied proposal, or another tab): reload and make your change again.`, 409);
-        const next = CompanyBooksSchema.parse({ ...books, filings: company.books?.filings ?? [], setBy: 'owner', updatedAt: nowAfter(company.books?.updatedAt) });
+        const next = CompanyBooksSchema.parse({ ...books, ...keptWithBooks(company.books), setBy: 'owner', updatedAt: nowAfter(company.books?.updatedAt) });
         // Only problems this change adds: one a hand edit left can be put right a step at a time.
         const added = addedBooksProblems(company.books, next);
         if (added.length) throw new StoreError(added.join(' '), 422);
@@ -131,6 +151,25 @@ export function companyBookRoutes(ctx: AppContext): Hono {
     return c.json({ ok: true, updatedAt });
   });
 
+  /** Write a filing to a company's books: one per kind and period's end; accounts lock the books through their period's end. */
+  const recordFiling = async (id: string, filing: CompanyFiling) => {
+    const name = companyOr404(id).name;
+    await store.updateCompany(
+      id,
+      (company) => {
+        if (!company) throw new StoreError('No such company', 404);
+        const books = booksOr404(company);
+        if (books.filings.some((f) => f.kind === filing.kind && f.periodEnd === filing.periodEnd)) throw new StoreError(`${FILING_KIND_LABELS[filing.kind]} for the period to ${formatDate(filing.periodEnd)} is recorded already: remove it first to record it again.`, 409);
+        // Accounts recorded as filed lock the books through their period's end.
+        const next = { ...books, filings: [...books.filings, filing], ...lockAfterFiling(books, filing) };
+        const added = addedBooksProblems(books, next);
+        if (added.length) throw new StoreError(added.join(' '), 422);
+        return CompanySchema.parse({ ...company, books: next, updatedAt: nowISO() });
+      },
+      `company: ${name} ${FILING_KIND_LABELS[filing.kind].toLowerCase()} to ${filing.periodEnd}`,
+    );
+  };
+
   /** Record a filing (or a payment of Corporation Tax): one per kind and period's end. */
   app.post('/companies/:id/filings', async (c) => {
     ownerOnly(c);
@@ -138,22 +177,9 @@ export function companyBookRoutes(ctx: AppContext): Hono {
     const input = await readJson(c, CompanyFilingInputSchema);
     if (input.filedOn > today()) throw new StoreError(`${formatDate(input.filedOn)} is in the future.`, 422);
     if (input.kind === 'vat' && input.disclosed && input.disclosed.on > today()) throw new StoreError(`${formatDate(input.disclosed.on)} is in the future.`, 422);
+    if (input.kind === 'accounts' && input.approvedOn && (input.approvedOn < input.periodEnd || input.approvedOn > input.filedOn)) throw new StoreError('The accounts are approved on or after the balance sheet date, and before they are filed.', 422);
     const filing = CompanyFilingSchema.parse({ ...input, id: filingId(id, input.kind, input.periodEnd), addedBy: 'owner' });
-    const name = companyOr404(id).name;
-    await store.updateCompany(
-      id,
-      (company) => {
-        if (!company) throw new StoreError('No such company', 404);
-        const books = booksOr404(company);
-        if (books.filings.some((f) => f.kind === input.kind && f.periodEnd === input.periodEnd)) throw new StoreError(`${FILING_KIND_LABELS[input.kind]} for the period to ${formatDate(input.periodEnd)} is recorded already: remove it first to record it again.`, 409);
-        // Accounts recorded as filed lock the books through their period's end.
-        const next = { ...books, filings: [...books.filings, filing], ...lockAfterFiling(books, filing) };
-        const added = addedBooksProblems(books, next);
-        if (added.length) throw new StoreError(added.join(' '), 422);
-        return CompanySchema.parse({ ...company, books: next, updatedAt: nowISO() });
-      },
-      `company: ${name} ${FILING_KIND_LABELS[input.kind].toLowerCase()} to ${input.periodEnd}`,
-    );
+    await recordFiling(id, filing);
     return c.json(filing, 201);
   });
 
@@ -277,6 +303,128 @@ export function companyBookRoutes(ctx: AppContext): Hono {
     return new Response(ctComputationCsv(company, { form: body.form, disclaimer: body.disclaimer, computation: body.computation }, csvCell), {
       headers: { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="corporation-tax-${company.id}-${body.computation.period.end}.csv"` },
     });
+  });
+
+  // ─── Filing the accounts (analytics/accounts-filing.ts, FORMULAS.md §22, "Filing the accounts") ────
+
+  /** A period's filing sheet, from its accounts and what you confirmed for it (`?period=<its last day>`). */
+  const filingOf = (company: Company, period: string | undefined) => {
+    const body = companyFiling({ src: store, company, engine: ctx.analytics.companyEngine(company.id), today: today(), period });
+    if (!body) throw new StoreError(period ? `${company.name} has no accounting period ending on ${formatDate(period)} in its books.` : `${company.name}’s books reach no accounting period yet.`, 404);
+    return body;
+  };
+
+  /**
+   * Its micro-entity accounts as it files them (`?period=<its last day>`; absent: the latest ended, or
+   * the current one): the balance sheet in the form's order and words with the period before, the notes,
+   * the statements, eligibility and what must be done before filing. `format=csv` or `format=json`: the
+   * figures to file, ending with the disclaimer. Nothing is sent to Companies House.
+   */
+  app.get('/companies/:id/filing', (c) => {
+    const company = keptOr404(c.req.param('id'));
+    const wanted = c.req.query('period');
+    const period = queryDate(wanted);
+    if (wanted && !period) throw new StoreError('A period is given by its last day, YYYY-MM-DD.', 400);
+    const body = filingOf(company, period);
+    const format = c.req.query('format');
+    const name = `accounts-${company.id}-${body.period.end}`;
+    if (format === 'csv') return new Response(filingCsv(company, body, csvCell), { headers: { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="${name}.csv"` } });
+    if (format === 'json') return new Response(JSON.stringify(filingJson(company, body), null, 2) + '\n', { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Content-Disposition': `attachment; filename="${name}.json"` } });
+    return c.json(body);
+  });
+
+  /**
+   * What you confirm for a period's accounts: the average number employed (`employees`: a number, or null
+   * to take it away) and the notes the books cannot work out (`notes`: replaced whole; null takes them
+   * away). Yours alone: no agent token reaches it. Nothing that posts changes, so a locked period's notes
+   * can still be put right.
+   */
+  app.put('/companies/:id/accounts-notes', async (c) => {
+    ownerOnly(c);
+    const id = c.req.param('id');
+    const body = await readJson(c, AccountsNotesBody);
+    const name = companyOr404(id).name;
+    await store.updateCompany(
+      id,
+      (company) => {
+        if (!company) throw new StoreError('No such company', 404);
+        const books = booksOr404(company);
+        if (!accountingPeriodsOf(books, today()).some((p) => p.end === body.periodEnd)) throw new StoreError(`${company.name} has no accounting period ending on ${formatDate(body.periodEnd)}.`, 422);
+        const others = <T extends { periodEnd: string }>(list: readonly T[] | undefined) => (list ?? []).filter((x) => x.periodEnd !== body.periodEnd);
+        const employees = body.employees === undefined ? books.employees : [...others(books.employees), ...(body.employees === null ? [] : [{ periodEnd: body.periodEnd, average: body.employees }])].sort((a, b) => a.periodEnd.localeCompare(b.periodEnd));
+        const notes = body.notes === undefined ? books.accountsNotes : [...others(books.accountsNotes), ...(body.notes === null ? [] : [{ ...body.notes, periodEnd: body.periodEnd }])].sort((a, b) => a.periodEnd.localeCompare(b.periodEnd));
+        const { employees: _e, accountsNotes: _n, ...rest } = books;
+        return CompanySchema.parse({ ...company, books: { ...rest, ...(employees?.length ? { employees } : {}), ...(notes?.length ? { accountsNotes: notes } : {}) }, updatedAt: nowISO() });
+      },
+      `company: ${name} accounts notes to ${body.periodEnd}`,
+    );
+    return c.json({ ok: true });
+  });
+
+  /**
+   * Record the period's accounts as filed, once you have submitted them: lines A–K as the sheet works
+   * them out now (the lines you saw must still be them), the day filed and its reference, and the
+   * approval (day and director) as filed. Only when the sheet is ready; it locks the books through the
+   * period's end. Never done by itself.
+   */
+  app.post('/companies/:id/accounts/filed', async (c) => {
+    ownerOnly(c);
+    const id = c.req.param('id');
+    const body = await readJson(c, AccountsFiledBody);
+    const company = keptOr404(id);
+    const sheet = filingOf(company, body.periodEnd);
+    if (sheet.filing) throw new StoreError(`The accounts for the period to ${formatDate(body.periodEnd)} are recorded as filed already.`, 409);
+    if (!sheet.ready) throw new StoreError(`Not ready to record as filed: ${sheet.gate.filter((g) => !g.ok).map((g) => g.label.toLowerCase()).join('; ')}.`, 422);
+    const moved = MICRO_ENTITY_LINES.filter((l) => body.lines[l] !== sheet.lines[l]);
+    if (moved.length) throw new StoreError(`The books have changed since you opened the sheet (line${moved.length === 1 ? '' : 's'} ${moved.join(', ')}): reload it and check what you filed.`, 409);
+    const now = today();
+    if (body.filedOn > now) throw new StoreError(`${formatDate(body.filedOn)} is in the future.`, 422);
+    if (body.approvedOn < body.periodEnd) throw new StoreError('The accounts are approved on or after the balance sheet date.', 422);
+    if (body.approvedOn > body.filedOn) throw new StoreError('The accounts are approved before they are filed.', 422);
+    const filing = CompanyFilingSchema.parse({ kind: 'accounts', periodStart: sheet.period.start, periodEnd: body.periodEnd, filedOn: body.filedOn, ...(body.reference ? { reference: body.reference } : {}), figures: sheet.lines, approvedOn: body.approvedOn, approvedBy: body.approvedBy, id: filingId(id, 'accounts', body.periodEnd), addedBy: 'owner' });
+    await recordFiling(id, filing);
+    return c.json(filing, 201);
+  });
+
+  /**
+   * Record the book value of your shares at a period's end (FORMULAS.md §9, "Shares in a company"): its
+   * net assets (K, as filed or as the books give it) × your shares ÷ the shares it has issued, never below
+   * nothing, as a valuation of the account that carries them and a balance on it. The one write here that
+   * reaches a figure of yours, and only on your click.
+   */
+  app.post('/companies/:id/accounts/book-value', async (c) => {
+    ownerOnly(c);
+    const id = c.req.param('id');
+    const { periodEnd } = await readJson(c, z.object({ periodEnd: ISODateSchema }));
+    const company = keptOr404(id);
+    const sheet = filingOf(company, periodEnd);
+    const bv = sheet.bookValue;
+    if (bv.why || bv.value === undefined) throw new StoreError(bv.why ?? 'There is no book value to record.', 422);
+    if (bv.recorded) throw new StoreError(`A book value at ${formatDate(periodEnd)} is recorded already (${formatMoney(bv.recorded.value)}).`, 409);
+    const account = store.account(company.accountId!);
+    if (!account) throw new StoreError('The account that carries your shares is no longer in your data.', 422);
+    const pounds = (n: number) => `£${n.toLocaleString('en-GB')}`;
+    const note = bv.netAssets > 0 ? `Book value: net assets ${pounds(bv.netAssets)} × ${bv.shares} of its ${bv.totalShares} shares, from its accounts to ${formatDate(periodEnd)}.` : `Book value: nothing. Its accounts to ${formatDate(periodEnd)} show ${bv.netAssets < 0 ? `net liabilities of ${pounds(-bv.netAssets)}` : 'no net assets'}; shares are never valued below nothing.`;
+    const stamp = nowISO();
+    const balance = BalanceSnapshotSchema.parse({ id: balanceId(account.id, periodEnd, bv.value, 'manual'), accountId: account.id, date: periodEnd, balance: bv.value, currency: 'GBP', kind: 'manual', dateSource: 'document', note, source: {}, createdAt: stamp });
+    // A balance there already (the same value on the same day) is the valuation's: it is never taken away below.
+    const existed = store.balances(account.id).some((b) => b.id === balance.id);
+    await store.addBalances([balance], `balance: ${account.name} book value at ${periodEnd}`);
+    try {
+      await store.updateCompany(
+        id,
+        (current) => {
+          if (!current) throw new StoreError('No such company', 404);
+          if (current.valuations.some((v) => v.asOf === periodEnd && v.method === 'net-assets')) throw new StoreError(`A book value at ${formatDate(periodEnd)} is recorded already.`, 409);
+          return CompanySchema.parse({ ...current, valuations: [...current.valuations, { asOf: periodEnd, method: 'net-assets', netAssets: bv.netAssets, value: bv.value, note, balanceId: balance.id, source: {} }], updatedAt: stamp });
+        },
+        `company: ${company.name} book value at ${periodEnd}`,
+      );
+    } catch (err) {
+      if (!existed) await store.deleteBalance(balance.id, `balance: ${account.name} book value at ${periodEnd} not kept`);
+      throw err;
+    }
+    return c.json({ ok: true, value: bv.value, balanceId: balance.id }, 201);
   });
 
   /** The rows to code (uncoded first), the links between its rows and yours and what could be linked, its journals and book rules. */

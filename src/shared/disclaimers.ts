@@ -1,5 +1,6 @@
 // The "check everything yourself" disclaimers every return the app prepares carries (CLAUDE.md,
-// "Invariants"): Self Assessment for you, and a company's VAT return and Corporation Tax return. Shared by the server (its CSV
+// "Invariants"): Self Assessment for you, and a company's VAT return, Corporation Tax return and
+// accounts filed at Companies House. Shared by the server (its CSV
 // exports, its responses) and the web app (`components/CheckEverything.tsx`).
 
 /** The heading the disclaimer is shown under. */
@@ -13,3 +14,6 @@ export const VAT_RETURN_DISCLAIMER =
 
 export const CT_DISCLAIMER =
   'This computation and these CT600 boxes are worked out from the company’s books to help you prepare its Company Tax Return. They are not tax advice and can be incomplete or wrong: they are only as good as the coding of every payment, they make the default choices described (claims the company may make differently), and much of Corporation Tax is not covered here (cars, intangible assets, chargeable gains, group relief, s455 tax on loans to participators, qualifying donations, R&D and other reliefs). Nothing here is sent to HMRC. Check every figure against the company’s accounts and records, and the computation your filing software or accountant produces, before you submit. The company is responsible for its return.';
+
+export const FILING_DISCLAIMER =
+  'This sheet is worked out from the company’s books, and the notes and answers you give, to help you prepare its micro-entity accounts for Companies House. It is not accounting or legal advice and can be incomplete or wrong: it is only as good as the coding of every payment, it cannot know of directors, guarantees, commitments or arrangements outside these books, and whether the company qualifies turns on facts only you know. Nothing here is sent to Companies House. Check every figure, note and statement against the company’s records before the directors approve the accounts and you file them. The directors are responsible for the accounts.';

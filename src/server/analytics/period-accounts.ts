@@ -224,6 +224,17 @@ export function periodAccounts({ src, company, engine, today, period: wanted, le
     for (const l of balanceSheet.lines) {
       const v = priorLine(l.line);
       if (v !== undefined) l.prior = v;
+      // B's and C's sub-lines before: as worked out, where the line is (a filing records the lines, not their sub-lines).
+      const wasLine = was.balanceSheet.lines.find((x) => x.line === l.line);
+      if (l.parts && wasLine && (!figures || (figures as Record<string, number | undefined>)[l.line] === undefined))
+        for (const label of PARTS[l.line as 'B' | 'C']) {
+          const before = wasLine.parts?.find((x) => x.label === label);
+          const part = l.parts.find((x) => x.label === label);
+          if (part) part.prior = before?.whole ?? 0;
+          // A sub-line held before and not now is shown too, at nothing now.
+          else if (before) l.parts.push({ label, codes: [], exact: 0, whole: 0, prior: before.whole });
+        }
+      if (l.parts) l.parts.sort((a, b) => PARTS[l.line as 'B' | 'C'].indexOf(a.label) - PARTS[l.line as 'B' | 'C'].indexOf(b.label));
     }
     const cap = balanceSheet.capital;
     const wasCap = was.balanceSheet.capital;

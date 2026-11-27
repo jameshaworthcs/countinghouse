@@ -43,9 +43,13 @@ import type {
   Earmarks,
   VatTreatment,
   VatBoxes,
+  AccountsNotes,
+  MicroEntityLines,
+  OwnerNote,
 } from './schema';
+import type { BalanceSheetStatement, DirectorAdvances, QualificationRule, SizeTest } from './accounts-filing';
 import type { AssetRegisterClass, ProfitLine, SheetLine } from './ledger';
-import type { TaxBand, VatFrequency, VatStagger } from './uk';
+import type { SizeLimits, TaxBand, VatFrequency, VatStagger } from './uk';
 
 export interface Alert {
   id: string;
@@ -1760,7 +1764,7 @@ export interface BalanceSheet {
     label: string;
     codes: ReportCode[];
     /** B and C: the sub-lines Companies House's form totals them from when a breakdown is entered, each rounded, the line their sum in whole pounds. */
-    parts?: ({ label: string; codes: ReportCode[] } & SheetFigure)[];
+    parts?: ({ label: string; codes: ReportCode[]; /** At the end of the period before, in whole pounds, where it is worked out (never from a filing, which records only the lines). */ prior?: number } & SheetFigure)[];
     /** The line at the end of the period before, in whole pounds (as filed, or worked out). */
     prior?: number;
   } & SheetFigure)[];
@@ -1874,6 +1878,95 @@ export interface CompanyAccountsResponse {
   ready: boolean;
   /** The accounts filed for it: the lines filed against those worked out now. */
   filing?: { filedOn: string; reference?: string; lines: { line: string; filed: number; computed: number }[]; matches: boolean };
+}
+
+// ─── Filing a company's accounts (analytics/accounts-filing.ts, FORMULAS.md §22, "Filing the accounts") ──
+
+/** A line of the filing sheet, in the order and words of Companies House's micro-entity form (whole pounds). */
+export interface FilingSheetLine {
+  /** `A`–`K`, `B:<sub-line>`, `C:<sub-line>`, or a capital and reserves item. */
+  key: string;
+  /** Its micro-entity balance sheet line, for A–K and their sub-lines. */
+  line?: string;
+  label: string;
+  whole: number;
+  /** Pence: the exact figure it is rounded from (a total: worked out from the exact lines). */
+  exact: number;
+  /** At the end of the period before, in whole pounds (as filed or worked out); absent when not known. */
+  prior?: number;
+  /** A sub-line of the line after it: the form takes a breakdown but does not ask for one. */
+  sub?: boolean;
+  /** Worked out from the lines entered, never entered itself (F, G, K, shareholders' funds). */
+  total?: boolean;
+  working?: string;
+  note?: string;
+  /** The codes it comes from, with their exact balances (pence). */
+  trace: ReportCode[];
+}
+
+/** Whether a company qualifies for one size of company in the period (micro-entity: CA 2006 s384A; small: s382), with each year's test. */
+export interface EligibilityView {
+  kind: 'micro' | 'small';
+  limits: SizeLimits;
+  qualifies?: boolean;
+  rule: QualificationRule;
+  years: SizeTest[];
+}
+
+export type FilingGateKey = 'ended' | 'accounts' | 'employees' | 'notes' | 'eligibility';
+export interface FilingGateItem {
+  key: FilingGateKey;
+  ok: boolean;
+  label: string;
+  detail: string;
+}
+
+/** One accounting period's micro-entity accounts as the company files them (FORMULAS.md §22, "Filing the accounts"). */
+export interface CompanyFilingResponse {
+  company: { id: string; name: string; number?: string };
+  periods: AccountsPeriodChoice[];
+  period: AccountsPeriodChoice & { first: boolean };
+  /** How accounts reach Companies House on the day: WebFiling until software-only filing begins (`ACCOUNTS_FILING_CHANNEL_RULES`). */
+  channel: { webFiling: boolean; softwareOnlyFrom: string; enhancedAuditStatement: boolean };
+  accounts: { ready: boolean; checks: number; lockedThrough?: string };
+  comparative?: { start: string; end: string; sheet: 'filed' | 'computed' };
+  /** Lines A–K and the sub-lines of B and C, in the form's order. */
+  sheet: FilingSheetLine[];
+  capital: FilingSheetLine[];
+  /** Lines A–K in whole pounds, as a filing records them. */
+  lines: Required<MicroEntityLines>;
+  rounding: string;
+  notes: {
+    offBalanceSheet: OwnerNote | null;
+    commitments: OwnerNote | null;
+    directors: OwnerNote | null;
+    employees: { average: number | null; hint?: { paye: boolean; months: number; payrollMonths: number; staffCosts: number; onePerson: number } };
+    advances: DirectorAdvances & { loan: boolean; given: NonNullable<AccountsNotes['advances']> | null };
+  };
+  statements: BalanceSheetStatement[];
+  approval: { line: string };
+  /** Accounting policies in words from the books: optional for a micro-entity. */
+  policies: string[];
+  eligibility: {
+    /** The limits' row, by the period's first day; `covered`: false before the first row. */
+    from: string;
+    covered: boolean;
+    micro: EligibilityView;
+    small: EligibilityView;
+    notExcluded: boolean | null;
+    previousQualified: boolean | null;
+    /** Whether to ask you if it qualified for the period before: the books cannot settle it. */
+    askPrevious: boolean;
+    previousUnknown?: true;
+    exclusions: { key: string; text: string; source: string }[];
+  };
+  gate: FilingGateItem[];
+  /** Every item of the gate is done, and the accounts are not recorded as filed. */
+  ready: boolean;
+  filing?: { filedOn: string; reference?: string; approvedOn?: string; approvedBy?: string; lines: { line: string; filed: number; computed: number }[]; matches: boolean };
+  /** The book value of your shares at the period's end (FORMULAS.md §9): offered, never recorded by itself. */
+  bookValue: { asOf: string; netAssets: number; why?: string; shares?: number; totalShares?: number; value?: number; recorded?: { value: number; netAssets?: number } };
+  disclaimer: string;
 }
 
 // ─── A company's VAT returns (analytics/vat-return.ts, FORMULAS.md §22, "VAT returns") ──────────────
