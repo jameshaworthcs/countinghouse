@@ -11,7 +11,7 @@ import { FEED_IDS } from './feeds';
 import { z } from 'zod';
 import { ACTION_KEY, ACTION_PAGE_IDS } from './actions';
 import { isISODate } from './dates';
-import { FIXED_ASSET_CLASSES } from './ledger';
+import { ASSET_REGISTER_CLASSES } from './ledger';
 import { isMoney } from './money';
 import { TASK_KINDS, TaskChoiceSchema } from './tasks';
 import { VAT_STAGGERS } from './uk';
@@ -277,12 +277,21 @@ export const BooksVatSchema = z.object({
 });
 /** The period a cost or income is for (a year's subscription), so it can be spread over it. */
 export const CoversSchema = z.object({ from: ISODateSchema, to: ISODateSchema });
-/** A fixed asset: its class, and its life in whole months when known. */
+/**
+ * A fixed asset (or an intangible one) on the company's register: its class, its life in whole months
+ * (absent: the company's policy for the class, `books.policies`), and the day it left the company.
+ */
 export const BooksAssetSchema = z.object({
-  class: z.enum(FIXED_ASSET_CLASSES),
+  class: z.enum(ASSET_REGISTER_CLASSES),
   months: z.number().int().min(1).max(600).optional(),
   /** Bought from a connected person (a director, a company they control): no annual investment allowance, and its qualifying cost capped (CAA 2001 ss214–218). */
   connected: z.boolean().optional(),
+  /**
+   * The day it was sold, scrapped or given away: depreciation runs to the end of that month, then its
+   * cost and depreciation leave the books, the rest to `disposals` (what it fetched is coded to
+   * `disposals` on the row it came in on). docs/FORMULAS.md §22, "Disposals".
+   */
+  disposedOn: ISODateSchema.optional(),
 });
 
 /** One line of a coded payment split across ledgers: its amount (signed like the payment, VAT included), its ledger and the rest. */
@@ -878,6 +887,14 @@ const companyBooksShape = {
    * marked `opening` (its opening balances). Absent: from its first record.
    */
   ledgerFrom: ISODateSchema.optional(),
+  /**
+   * Its depreciation policies: the life, in whole months, of each class of asset whose own coding gives
+   * none (straight line, docs/FORMULAS.md §22, "Depreciation"). One per class.
+   */
+  policies: z
+    .array(z.object({ class: z.enum(ASSET_REGISTER_CLASSES), months: z.number().int().min(1).max(600) }))
+    .max(ASSET_REGISTER_CLASSES.length)
+    .optional(),
 };
 /** A company's books without its filings and who set them: what the owner edits and an agent proposes (`set_company_books`). */
 export const CompanyBooksSetupSchema = z.object(companyBooksShape);

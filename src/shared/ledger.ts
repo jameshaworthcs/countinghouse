@@ -34,6 +34,33 @@ export type SheetLine = 'A' | 'B' | 'C' | 'D' | 'E' | 'H' | 'I' | 'J' | 'K';
  */
 export type ProfitLine = 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G';
 
+/** What each line of the micro-entity balance sheet (format 1) is called, F and G (totals) among them. */
+export const SHEET_LINE_LABELS: Record<SheetLine | 'F' | 'G', string> = {
+  A: 'Called up share capital not paid',
+  B: 'Fixed assets',
+  C: 'Current assets',
+  D: 'Prepayments and accrued income',
+  E: 'Creditors: amounts falling due within one year',
+  F: 'Net current assets (liabilities)',
+  G: 'Total assets less current liabilities',
+  H: 'Creditors: amounts falling due after more than one year',
+  I: 'Provisions for liabilities',
+  J: 'Accruals and deferred income',
+  K: 'Capital and reserves',
+};
+
+/** What each line of the micro-entity profit and loss account is called. */
+export const PROFIT_LINE_LABELS: Record<ProfitLine | 'H', string> = {
+  A: 'Turnover',
+  B: 'Other income',
+  C: 'Cost of raw materials and consumables',
+  D: 'Staff costs',
+  E: 'Depreciation and other amounts written off assets',
+  F: 'Other charges',
+  G: 'Tax',
+  H: 'Profit or loss',
+};
+
 /**
  * How Corporation Tax treats a code, for the tax computation later: trading income, non-trading income
  * (interest received: a loan relationship credit), an allowable or a disallowable expense, a loan
@@ -50,12 +77,19 @@ export type CtTreatment = 'trading-income' | 'non-trading-income' | 'allowable' 
  */
 export const FIXED_ASSET_CLASSES = ['computer', 'office', 'furniture', 'van', 'motor'] as const;
 export type FixedAssetClass = (typeof FIXED_ASSET_CLASSES)[number];
-export const FIXED_ASSET_CLASS_META: Record<FixedAssetClass, { name: string; capitalAllowances: 'supported' | 'not-supported' }> = {
+/**
+ * Every class an asset on the register can be in: the tangible ones above, and intangible assets
+ * (written down by amortisation; for tax the intangibles regime, CTA 2009 Part 8, not capital allowances).
+ */
+export const ASSET_REGISTER_CLASSES = [...FIXED_ASSET_CLASSES, 'intangible'] as const;
+export type AssetRegisterClass = (typeof ASSET_REGISTER_CLASSES)[number];
+export const FIXED_ASSET_CLASS_META: Record<AssetRegisterClass, { name: string; capitalAllowances: 'supported' | 'not-supported' | 'intangibles' }> = {
   computer: { name: 'Computer equipment', capitalAllowances: 'supported' },
   office: { name: 'Office equipment', capitalAllowances: 'supported' },
   furniture: { name: 'Furniture and fittings', capitalAllowances: 'supported' },
   van: { name: 'Vans and commercial vehicles', capitalAllowances: 'supported' },
   motor: { name: 'Cars', capitalAllowances: 'not-supported' },
+  intangible: { name: 'Intangible assets', capitalAllowances: 'intangibles' },
 };
 
 /**
@@ -82,8 +116,8 @@ export interface LedgerCode {
   codable: boolean;
   /** The ledger's own clearing codes: never written by you, and anything on them is a check to clear. */
   clearing?: boolean;
-  /** A fixed asset class's cost or depreciation. */
-  asset?: { class: FixedAssetClass; part: 'cost' | 'depreciation' };
+  /** A fixed asset class's cost or depreciation (for intangible assets, amortisation). */
+  asset?: { class: AssetRegisterClass; part: 'cost' | 'depreciation' };
   /** One of the company's own accounts: `bank:<accountId>`, `card:<accountId>`, `loans:<accountId>`. */
   account?: true;
   /** What goes there, in a few words. */
@@ -100,8 +134,8 @@ const BASE: LedgerCode[] = [
     { code: `fixed-assets:${c}:cost`, name: `${FIXED_ASSET_CLASS_META[c].name}: cost`, kind: 'asset', sheet: both('B'), ct: 'capital', codable: true, asset: { class: c, part: 'cost' }, hint: 'Equipment kept and used for more than a year, capitalised rather than spent.' },
     { code: `fixed-assets:${c}:depreciation`, name: `${FIXED_ASSET_CLASS_META[c].name}: depreciation`, kind: 'asset', sheet: both('B'), ct: 'none', codable: false, asset: { class: c, part: 'depreciation' }, hint: 'What its cost has been written down by (worked out from its life).' },
   ]),
-  { code: 'intangible-assets:cost', name: 'Intangible assets: cost', kind: 'asset', sheet: both('B'), ct: 'capital', codable: true, hint: 'Goodwill, software developed or bought to keep, trade marks (CTA 2009 Part 8 for tax).' },
-  { code: 'intangible-assets:amortisation', name: 'Intangible assets: amortisation', kind: 'asset', sheet: both('B'), ct: 'none', codable: false, hint: 'What their cost has been written down by.' },
+  { code: 'intangible-assets:cost', name: 'Intangible assets: cost', kind: 'asset', sheet: both('B'), ct: 'capital', codable: true, asset: { class: 'intangible', part: 'cost' }, hint: 'Goodwill, software developed or bought to keep, trade marks (CTA 2009 Part 8 for tax).' },
+  { code: 'intangible-assets:amortisation', name: 'Intangible assets: amortisation', kind: 'asset', sheet: both('B'), ct: 'none', codable: false, asset: { class: 'intangible', part: 'depreciation' }, hint: 'What their cost has been written down by (worked out from its life).' },
   { code: 'investments', name: 'Investments', kind: 'asset', sheet: both('B'), ct: 'none', codable: true, hint: 'Shares and other investments held for the long term.' },
   { code: 'stock', name: 'Stock', kind: 'asset', sheet: assetLine('C'), ct: 'none', codable: false, hint: 'Goods held to sell, at the period end (a journal).' },
   { code: 'debtors:trade', name: 'Trade debtors', kind: 'asset', sheet: assetLine('C'), ct: 'none', codable: true, hint: 'Invoices sent and not yet paid.' },
@@ -237,6 +271,9 @@ export function reverseChargeVat(amount: number, date: ISODate): number {
 
 // ─── Coding a payment ────────────────────────────────────────────────────────────────────────────
 
+/** Why money coming in is not a fixed asset's cost on the register. */
+const ASSET_BOUGHT = 'a fixed asset on the register is bought with money going out: what one fetched when it was sold is coded to profit or loss on disposal, and the day it left is set on the asset itself.';
+
 /** A coding's lines, as one list: its own ledger as one line of the whole amount, or its split. */
 export function codingLines(amount: number, books: Pick<BooksCoding, 'ledger' | 'vat' | 'covers' | 'asset' | 'lines' | 'uncoded'>): BooksLine[] {
   if (books.uncoded) return [];
@@ -276,7 +313,8 @@ export function codingPlace(t: Pick<Transaction, 'accountId' | 'amount' | 'curre
  * - VAT signed like its line and no larger than it: none for zero rate, exempt or outside the scope;
  *   some for the standard and reduced rates and a reverse charge (whose VAT is the notional VAT on an
  *   amount that does not include it);
- * - a fixed asset only on a fixed asset's cost, of that class, with a life in whole months;
+ * - a fixed asset only on a fixed (or intangible) asset's cost, of that class, with a life in whole
+ *   months, and on money going out (what one fetched when sold is coded to `disposals`);
  * - a period it covers that does not end before it starts.
  */
 export function codingProblems(amount: number, books: Pick<BooksCoding, 'ledger' | 'vat' | 'covers' | 'asset' | 'lines' | 'uncoded' | 'invoiceToCompany'>, row: CodedRow): string[] {
@@ -310,6 +348,7 @@ export function codingProblems(amount: number, books: Pick<BooksCoding, 'ledger'
     if (l.vat?.claim === 'reg111' && (ledgerCode(l.ledger)?.kind === 'income' || l.vat.treatment === 'reverse-charge' || NO_VAT.has(l.vat.treatment))) out.push(`${where}a claim under reg 111 is input tax charged on a purchase.`);
     if (l.asset && entry.asset?.part !== 'cost') out.push(`${where}a fixed asset is coded to a fixed asset’s cost.`);
     if (l.asset && entry.asset && l.asset.class !== entry.asset.class) out.push(`${where}${entry.name} is for ${FIXED_ASSET_CLASS_META[entry.asset.class].name.toLowerCase()}, not ${FIXED_ASSET_CLASS_META[l.asset.class].name.toLowerCase()}.`);
+    if (l.asset && entry.asset?.part === 'cost' && toMinor(l.amount) > 0) out.push(`${where}${ASSET_BOUGHT}`);
     if (l.covers && l.covers.from > l.covers.to) out.push(`${where}the period it covers ends (${formatDate(l.covers.to)}) before it starts (${formatDate(l.covers.from)}).`);
   }
   return out;
@@ -383,7 +422,7 @@ export function ruleCoding(r: Pick<Rule, 'id' | 'set'>, t: Pick<Transaction, 'am
  * Why a journal does not fit, in words (empty: it fits): two lines or more, none of nothing, adding up
  * to nothing (debits positive, credits negative); each on a code of the chart (an account of the
  * company's own only when it is that company's: `ownAccount`), never the ledger's own clearing codes;
- * a fixed asset only on a fixed asset's cost; periods that do not end before they start.
+ * a fixed asset only on a fixed asset's cost, as a debit; periods that do not end before they start.
  */
 export function journalProblems(j: Pick<Journal, 'lines'>, ownAccount: (accountId: string) => boolean): string[] {
   const out: string[] = [];
@@ -403,6 +442,7 @@ export function journalProblems(j: Pick<Journal, 'lines'>, ownAccount: (accountI
     if (toMinor(l.amount) === 0) out.push(`${where}a line of nothing.`);
     if (l.asset && entry.asset?.part !== 'cost') out.push(`${where}a fixed asset is on a fixed asset’s cost.`);
     if (l.asset && entry.asset && l.asset.class !== entry.asset.class) out.push(`${where}${entry.name} is for ${FIXED_ASSET_CLASS_META[entry.asset.class].name.toLowerCase()}.`);
+    if (l.asset && entry.asset?.part === 'cost' && toMinor(l.amount) < 0) out.push(`${where}a fixed asset on the register is a debit (its cost): one that leaves the company says the day it left (\`disposedOn\`), and the books take its cost and depreciation away.`);
     if (l.covers && l.covers.from > l.covers.to) out.push(`${where}the period it covers ends before it starts.`);
     if (l.vat && !takesVat(l.ledger) && l.ledger !== 'vat') out.push(`${where}${entry.name} takes no VAT: a VAT line is on VAT itself, or on income, an expense or a fixed asset’s cost.`);
     if (l.vat?.claim === 'reg111' && l.vat.side !== 'input') out.push(`${where}a claim under reg 111 is input tax.`);
@@ -539,8 +579,8 @@ export function companyLinkProblem(group: LinkGroup, row: (id: string) => Transa
 
 // ─── VAT before registration (VAT Regulations 1995 reg 111) ─────────────────────────────────────────
 
-/** Codes whose purchases are goods (reg 111(2)(b): within 4 years, still held at registration); the rest are services (reg 111(2)(d): within 6 months). */
-export const reg111Goods = (code: string): boolean => ledgerCode(code)?.asset?.part === 'cost' || code === 'cost-of-sales' || code === 'small-equipment' || code === 'stock';
+/** Codes whose purchases are goods (reg 111(2)(b): within 4 years, still held at registration): a tangible fixed asset's cost, cost of sales, small equipment, stock; the rest (an intangible asset too, a supply of services for VAT) are services (reg 111(2)(d): within 6 months). */
+export const reg111Goods = (code: string): boolean => (ledgerCode(code)?.asset?.part === 'cost' && ledgerCode(code)?.asset?.class !== 'intangible') || code === 'cost-of-sales' || code === 'small-equipment' || code === 'stock';
 
 /**
  * Why a reg 111 claim of input tax on a supply before registration is out of time, or undefined: goods

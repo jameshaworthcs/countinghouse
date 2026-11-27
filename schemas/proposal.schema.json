@@ -280,7 +280,8 @@
                               "office",
                               "furniture",
                               "van",
-                              "motor"
+                              "motor",
+                              "intangible"
                             ]
                           },
                           "months": {
@@ -290,6 +291,10 @@
                           },
                           "connected": {
                             "type": "boolean"
+                          },
+                          "disposedOn": {
+                            "type": "string",
+                            "description": "Calendar date, YYYY-MM-DD"
                           }
                         },
                         "required": [
@@ -2063,6 +2068,35 @@
                   "ledgerFrom": {
                     "type": "string",
                     "description": "Calendar date, YYYY-MM-DD"
+                  },
+                  "policies": {
+                    "maxItems": 6,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "class": {
+                          "type": "string",
+                          "enum": [
+                            "computer",
+                            "office",
+                            "furniture",
+                            "van",
+                            "motor",
+                            "intangible"
+                          ]
+                        },
+                        "months": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 600
+                        }
+                      },
+                      "required": [
+                        "class",
+                        "months"
+                      ]
+                    }
                   }
                 },
                 "required": [
@@ -2529,7 +2563,8 @@
                               "office",
                               "furniture",
                               "van",
-                              "motor"
+                              "motor",
+                              "intangible"
                             ]
                           },
                           "months": {
@@ -2539,6 +2574,10 @@
                           },
                           "connected": {
                             "type": "boolean"
+                          },
+                          "disposedOn": {
+                            "type": "string",
+                            "description": "Calendar date, YYYY-MM-DD"
                           }
                         },
                         "required": [
@@ -2616,7 +2655,8 @@
                                     "office",
                                     "furniture",
                                     "van",
-                                    "motor"
+                                    "motor",
+                                    "intangible"
                                   ]
                                 },
                                 "months": {
@@ -2626,6 +2666,10 @@
                                 },
                                 "connected": {
                                   "type": "boolean"
+                                },
+                                "disposedOn": {
+                                  "type": "string",
+                                  "description": "Calendar date, YYYY-MM-DD"
                                 }
                               },
                               "required": [
@@ -2817,7 +2861,8 @@
                                 "office",
                                 "furniture",
                                 "van",
-                                "motor"
+                                "motor",
+                                "intangible"
                               ]
                             },
                             "months": {
@@ -2827,6 +2872,10 @@
                             },
                             "connected": {
                               "type": "boolean"
+                            },
+                            "disposedOn": {
+                              "type": "string",
+                              "description": "Calendar date, YYYY-MM-DD"
                             }
                           },
                           "required": [
@@ -3361,7 +3410,8 @@
                           "office",
                           "furniture",
                           "van",
-                          "motor"
+                          "motor",
+                          "intangible"
                         ]
                       },
                       "months": {
@@ -3371,6 +3421,10 @@
                       },
                       "connected": {
                         "type": "boolean"
+                      },
+                      "disposedOn": {
+                        "type": "string",
+                        "description": "Calendar date, YYYY-MM-DD"
                       }
                     },
                     "required": [
@@ -3448,7 +3502,8 @@
                                 "office",
                                 "furniture",
                                 "van",
-                                "motor"
+                                "motor",
+                                "intangible"
                               ]
                             },
                             "months": {
@@ -3458,6 +3513,10 @@
                             },
                             "connected": {
                               "type": "boolean"
+                            },
+                            "disposedOn": {
+                              "type": "string",
+                              "description": "Calendar date, YYYY-MM-DD"
                             }
                           },
                           "required": [
@@ -4347,7 +4406,8 @@
                               "office",
                               "furniture",
                               "van",
-                              "motor"
+                              "motor",
+                              "intangible"
                             ]
                           },
                           "months": {
@@ -4357,6 +4417,10 @@
                           },
                           "connected": {
                             "type": "boolean"
+                          },
+                          "disposedOn": {
+                            "type": "string",
+                            "description": "Calendar date, YYYY-MM-DD"
                           }
                         },
                         "required": [
@@ -5119,6 +5183,35 @@
                     "type": "string",
                     "description": "Calendar date, YYYY-MM-DD"
                   },
+                  "policies": {
+                    "maxItems": 6,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "class": {
+                          "type": "string",
+                          "enum": [
+                            "computer",
+                            "office",
+                            "furniture",
+                            "van",
+                            "motor",
+                            "intangible"
+                          ]
+                        },
+                        "months": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 600
+                        }
+                      },
+                      "required": [
+                        "class",
+                        "months"
+                      ]
+                    }
+                  },
                   "filings": {
                     "default": [],
                     "maxItems": 1000,
@@ -5650,7 +5743,8 @@
                             "office",
                             "furniture",
                             "van",
-                            "motor"
+                            "motor",
+                            "intangible"
                           ]
                         },
                         "months": {
@@ -5660,6 +5754,10 @@
                         },
                         "connected": {
                           "type": "boolean"
+                        },
+                        "disposedOn": {
+                          "type": "string",
+                          "description": "Calendar date, YYYY-MM-DD"
                         }
                       },
                       "required": [

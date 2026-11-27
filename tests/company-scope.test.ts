@@ -338,6 +338,7 @@ const DIFFERENT: Record<string, string> = {
   '/api/companies/:id/books': "a company's own records and the deadlines worked out from them: that is what it serves",
   '/api/companies/:id/ledger': "a company's general ledger: its postings and checks",
   '/api/companies/:id/coding': "a company's rows to code, its links, journals and book rules",
+  '/api/companies/:id/accounts': "a company's accounts for a period (trial balance, profit and loss, balance sheet, register, its bank reconciled), from its ledger",
   '/api/imports/history': 'every committed document, a company account’s statements too (no figure; an account’s own page lists its own)',
   '/api/audit': 'the log of this process: its own times and hashes',
   '/api/audit/export': 'the log of this process: its own times and hashes',

@@ -4,7 +4,8 @@
 // (DECISIONS 2026-11-26), and tests/company-scope.test.ts lists these as answering for the company.
 //
 // Its general ledger too (analytics/ledger.ts, FORMULAS.md §22): its postings and checks, the rows to
-// code with the links between its rows and yours, its journals and its book rules.
+// code with the links between its rows and yours, its journals and its book rules; and its accounts for
+// each accounting period (analytics/period-accounts.ts).
 //
 // Only the owner changes the books: no agent token may use the routes that change them (tokens.ts
 // lists none of them); an agent proposes instead (`set_company_books`, `add_filing`, `set_books`,
@@ -18,6 +19,7 @@ import { formatDate, today } from '../../shared/dates';
 import { BooksCodingSchema, CompanyBooksSchema, CompanyBooksSetupSchema, CompanyFilingInputSchema, CompanyFilingSchema, CompanySchema, JournalInputSchema, RuleSchema, SlugSchema, TimestampSchema, type Company, type Journal, type Rule, type Transaction } from '../../shared/schema';
 import { codingPlace, isLinked } from '../../shared/ledger';
 import { autoLinkPatches, bookRulePatches, codingView, companyBookRules, ledgerView } from '../analytics/ledger';
+import { periodAccounts } from '../analytics/period-accounts';
 import { defaultAccountingReferenceDate } from '../../shared/uk';
 import { companyView } from '../analytics/companies';
 import { agentTokenOf, queryDate, readJson, type AppContext } from '../context';
@@ -175,7 +177,22 @@ export function companyBookRoutes(ctx: AppContext): Hono {
   };
 
   /** Its postings in a date range, what they add up to by ledger, and the ledger's checks. */
-  app.get('/companies/:id/ledger', (c) => c.json(ledgerView(store, keptOr404(c.req.param('id')), queryDate(c.req.query('from')), queryDate(c.req.query('to')))));
+  app.get('/companies/:id/ledger', (c) => c.json(ledgerView(store, keptOr404(c.req.param('id')), queryDate(c.req.query('from')), queryDate(c.req.query('to')), today())));
+
+  /**
+   * Its accounts for one accounting period (`?period=<its last day>`; absent: the latest ended, or the
+   * current one): trial balance, profit and loss, balance sheet exact and in whole pounds, the fixed
+   * asset register, the director's loan, the bank reconciled, and what stops it being ready.
+   */
+  app.get('/companies/:id/accounts', (c) => {
+    const company = keptOr404(c.req.param('id'));
+    const wanted = c.req.query('period');
+    const period = queryDate(wanted);
+    if (wanted && !period) throw new StoreError('A period is given by its last day, YYYY-MM-DD.', 400);
+    const body = periodAccounts({ src: store, company, engine: ctx.analytics.companyEngine(company.id), today: today(), period });
+    if (!body) throw new StoreError(period ? `${company.name} has no accounting period ending on ${formatDate(period)} in its books.` : `${company.name}’s books reach no accounting period yet.`, 404);
+    return c.json(body);
+  });
 
   /** The rows to code (uncoded first), the links between its rows and yours and what could be linked, its journals and book rules. */
   app.get('/companies/:id/coding', (c) => c.json(codingView(store, keptOr404(c.req.param('id')), queryDate(c.req.query('from')), queryDate(c.req.query('to')))));

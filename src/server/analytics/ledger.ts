@@ -10,14 +10,16 @@
 // of yours is by design: once the company keeps books here, your director's loan's movements are its
 // postings to the director's loan (director-loan.ts, `loanMovements`), and nothing else.
 
-import type { BooksRowView, CompanyCodingResponse, CompanyLedgerResponse, DirectorLoanMovement, LedgerCheck, LedgerPosting, LinkSuggestion, LinkView } from '../../shared/api';
+import type { BooksRowView, CompanyCodingResponse, CompanyLedgerResponse, DirectorLoanMovement, FixedAsset, LedgerCheck, LedgerPosting, LinkSuggestion, LinkView } from '../../shared/api';
 import { directorLoanKind, markCounts, movesDirectorLoan, type MarkContext } from '../../shared/company';
-import { diffDays, formatDate, type ISODate } from '../../shared/dates';
+import { accountingPeriodsOf, type BooksPeriod } from '../../shared/company-books';
+import { addDays, diffDays, formatDate, type ISODate } from '../../shared/dates';
 import { CategoryIndex } from '../../shared/categories';
 import { Categoriser } from '../../shared/categorise';
 import { accountLedger, AUTO_LINK_DAYS, codingLines, codingPlace, codingProblems, companyLinkProblem, DOUBLE_COUNT_DAYS, isLinked, journalProblems, ledgerCode, linkableCoding, linkFeeMinor, linkGroups, linkTolerance, reg111Problem, REVERSE_CHARGE_TOLERANCE_MINOR, reverseChargeVat, ruleBooksProblems, ruleCoding, type LinkGroup } from '../../shared/ledger';
 import { fromMinor, toMinor } from '../../shared/money';
-import type { Account, BalanceSnapshot, BooksCoding, BooksLine, Company, Journal, Rule, Transaction } from '../../shared/schema';
+import { carriedAt, coverParts, depreciationTo } from '../../shared/period-end';
+import type { Account, BalanceSnapshot, BooksCoding, BooksLine, Company, CompanyBooks, Journal, Rule, Transaction } from '../../shared/schema';
 import { ruleCatches } from '../categoriser';
 
 /** What the ledger reads: any record by id, your rows, and one company's own accounts, rows and journals. */
@@ -45,6 +47,10 @@ export interface Ledger {
   checks: LedgerCheck[];
   /** The link groups that fit, and those that do not (with why). */
   links: { group: LinkGroup; problem?: string }[];
+  /** The fixed asset register (FORMULAS.md §22, "Depreciation"). */
+  assets: FixedAsset[];
+  /** The accounting periods its period-end postings were worked out for: up to the one holding its last posting, a cover's last day, or a disposal. */
+  periods: BooksPeriod[];
 }
 
 const brief = (t: Transaction) => t.payee ?? t.description;
@@ -68,8 +74,11 @@ const brief = (t: Transaction) => t.payee ?? t.description;
  *   moves by your own side. Not linked: m to `directors-loan` and −m to `bank-not-imported` (the
  *   company's bank side is not in its imported accounts).
  * - A journal posts its lines as written. One that does not fit posts nothing, and is a check.
+ * - At each accounting period's end (`periodEnd`): each fixed asset's depreciation, its disposal, and
+ *   the parts of postings with `covers` that belong to other periods, for every period up to the one
+ *   holding its last posting (or `until`, when later: today, for the reports).
  */
-export function companyLedger(src: LedgerSource, companyId: string): Ledger {
+export function companyLedger(src: LedgerSource, companyId: string, opts: { until?: ISODate } = {}): Ledger {
   const company = src.company(companyId);
   const own = src.companyAccounts(companyId);
   const ownIds = new Set(own.map((a) => a.id));
@@ -283,6 +292,9 @@ export function companyLedger(src: LedgerSource, companyId: string): Ledger {
     }
   }
 
+  // At each accounting period's end: depreciation, disposals, prepayments and accruals.
+  const end = books ? periodEnd(src, companyId, books, postings, post, checks, opts.until) : { assets: [], periods: [] };
+
   // Every source adds up to nothing: by construction, so this never fires; it is here to say so if it did.
   const sums = new Map<string, { source: LedgerPosting['source']; minor: number }>();
   for (const p of postings) {
@@ -292,12 +304,133 @@ export function companyLedger(src: LedgerSource, companyId: string): Ledger {
   }
   for (const e of sums.values()) if (e.minor) checks.push({ kind: 'unbalanced', source: e.source, amount: fromMinor(e.minor) });
 
-  return { postings, checks, links };
+  return { postings, checks, links, assets: end.assets, periods: end.periods };
+}
+
+/** A posting's source and line, as one id: `row:tx_…`, `row:tx_…:1`, `journal:jnl_…:0`. */
+export const assetIdOf = (source: LedgerPosting['source']): string => `${source.kind}:${source.id}${source.line !== undefined ? `:${source.line}` : ''}`;
+
+type Post = (source: LedgerPosting['source'], date: ISODate, ledger: string, minor: number, memo: string) => void;
+
+/**
+ * What the books work out at each accounting period's end (FORMULAS.md §22, "At a period's end"),
+ * posted after everything else, from the postings so far:
+ *
+ * - **The register**: each posting to a fixed (or intangible) asset's cost that says it is one (`asset`),
+ *   its cost that posting (net of VAT), its life its own `months` or the company's policy for its class
+ *   (none: a check, and no depreciation). It counts from the day it was posted, or, brought in on an
+ *   opening journal before the ledger's first day (its carrying amount, with its remaining life), from
+ *   that first day.
+ * - **Depreciation** for each period: depreciation to its end less depreciation to the day before it
+ *   starts (`depreciationTo`: straight line by whole months, the month of acquisition in full,
+ *   cumulative rounding), Dr `depreciation`, Cr the class's depreciation (or amortisation) code, on the
+ *   period's last day, or the day it left in the period it left.
+ * - **A disposal** (`disposedOn`), on that day: Cr its cost, Dr its depreciation to then, Dr `disposals`
+ *   with the rest (its net book value; what it fetched is coded to `disposals` on its own row).
+ * - **Covers**: a posting to income or an expense with `covers` is recognised over its days, inclusive
+ *   (`coverParts`; days before the ledger's first day count on it). At the end of each period between
+ *   the one it was posted in and the last it covers, what is due by then less what is posted by then
+ *   (`carriedAt`) moves to the balance sheet, and back the next day: a cost paid ahead to `prepayments`,
+ *   one not yet paid to `accruals`; income received ahead to `deferred-income`, not yet received to
+ *   `accrued-income`.
+ */
+function periodEnd(src: LedgerSource, companyId: string, books: CompanyBooks, postings: readonly LedgerPosting[], post: Post, checks: LedgerCheck[], later?: ISODate): { assets: FixedAsset[]; periods: BooksPeriod[] } {
+  const snapshot = [...postings];
+  const first = books.ledgerFrom ?? books.incorporatedOn;
+  const opening = new Set(src.companyJournals(companyId).filter((j) => j.opening).map((j) => j.id));
+  const policy = new Map((books.policies ?? []).map((p) => [p.class, p.months]));
+  const dates = snapshot.flatMap((p) => [p.date, ...(p.covers ? [p.covers.to] : []), ...(p.asset?.disposedOn ? [p.asset.disposedOn] : [])]);
+  if (!dates.length) return { assets: [], periods: [] };
+  if (later) dates.push(later);
+  const until = dates.reduce((m, d) => (d > m ? d : m));
+  const periods = accountingPeriodsOf(books, until);
+  const periodOf = (d: ISODate) => periods.findIndex((p) => p.start <= d && p.end >= d);
+
+  // The register.
+  const assets: FixedAsset[] = [];
+  for (const p of snapshot) {
+    const entry = ledgerCode(p.ledger);
+    if (entry?.asset?.part === 'depreciation' && p.source.kind === 'journal') {
+      checks.push({ kind: 'fixed-asset-invalid', source: p.source, date: p.date, problem: `A journal writes to ${entry.name.toLowerCase()} by hand: the books work depreciation out from the register, so bring an asset in at its carrying amount with its remaining life, and record one that left by the day it left (impairment is not supported yet).` });
+      continue;
+    }
+    if (entry?.asset?.part !== 'cost') continue;
+    if (!p.asset) {
+      checks.push({ kind: 'fixed-asset-unmarked', source: p.source, date: p.date, ledger: p.ledger, amount: fromMinor(p.amount), memo: p.memo });
+      continue;
+    }
+    if (p.amount <= 0) {
+      checks.push({ kind: 'fixed-asset-invalid', source: p.source, date: p.date, problem: 'A fixed asset on the register is a debit to its cost: this one is a credit, so it is left off the register.' });
+      continue;
+    }
+    const id = assetIdOf(p.source);
+    const from = p.source.kind === 'journal' && opening.has(p.source.id) && books.ledgerFrom && p.date < books.ledgerFrom ? books.ledgerFrom : p.date;
+    let disposedOn = p.asset.disposedOn;
+    if (disposedOn && disposedOn < p.date) {
+      checks.push({ kind: 'fixed-asset-invalid', source: p.source, date: p.date, problem: `It left the company on ${formatDate(disposedOn)}, before it was bought (${formatDate(p.date)}): its disposal is left out until that is put right.` });
+      disposedOn = undefined;
+    }
+    const months = p.asset.months ?? policy.get(entry.asset.class);
+    if (!months) checks.push({ kind: 'no-depreciation-policy', assetId: id, source: p.source, date: p.date, amount: fromMinor(p.amount), class: entry.asset.class, memo: p.memo });
+    const depreciationLedger = entry.asset.class === 'intangible' ? 'intangible-assets:amortisation' : `fixed-assets:${entry.asset.class}:depreciation`;
+    assets.push({ id, source: p.source, ledger: p.ledger, depreciationLedger, class: entry.asset.class, cost: p.amount, acquired: p.date, from, ...(months ? { months } : {}), life: p.asset.months ? 'asset' : months ? 'policy' : 'none', ...(disposedOn ? { disposedOn } : {}), memo: p.memo });
+  }
+
+  // Depreciation for each period, and disposals.
+  for (const a of assets) {
+    const word = a.class === 'intangible' ? 'Amortisation' : 'Depreciation';
+    for (const period of periods) {
+      if (period.end < a.from || (a.disposedOn && period.start > a.disposedOn)) continue;
+      const charge = depreciationTo(a, period.end) - depreciationTo(a, addDays(period.start, -1));
+      const leftHere = a.disposedOn && a.disposedOn <= period.end;
+      const source = { kind: 'depreciation' as const, id: `${a.id}@${period.end}` };
+      post(source, leftHere ? a.disposedOn! : period.end, 'depreciation', charge, `${word}: ${a.memo}`);
+      post(source, leftHere ? a.disposedOn! : period.end, a.depreciationLedger, -charge, `${word}: ${a.memo}`);
+    }
+    if (a.disposedOn) {
+      const toDate = depreciationTo(a, a.disposedOn);
+      const source = { kind: 'disposal' as const, id: a.id };
+      const memo = `Disposal: ${a.memo}`;
+      post(source, a.disposedOn, a.ledger, -a.cost, memo);
+      post(source, a.disposedOn, a.depreciationLedger, toDate, memo);
+      post(source, a.disposedOn, 'disposals', a.cost - toDate, memo);
+    }
+  }
+
+  // Covers: prepayments, accruals, deferred and accrued income.
+  for (const p of snapshot) {
+    if (!p.covers || p.vat?.part === 'tax') continue;
+    const kind = ledgerCode(p.ledger)?.kind;
+    if (kind !== 'income' && kind !== 'expense') {
+      checks.push({ kind: 'covers-not-spread', source: p.source, date: p.date, ledger: p.ledger, amount: fromMinor(p.amount) });
+      continue;
+    }
+    const parts = coverParts(p.amount, p.covers, periods, first);
+    const q = periodOf(p.date);
+    const covered = parts.flatMap((x, i) => (x ? [i] : []));
+    if (q < 0 || !covered.length) continue;
+    const lo = Math.min(q, covered[0]!);
+    const hi = Math.max(q, covered.at(-1)!);
+    for (let k = lo; k < hi; k++) {
+      const carried = carriedAt(k, parts, p.amount, p.date, periods);
+      if (!carried) continue;
+      const paid = p.date <= periods[k]!.end;
+      const sheet = kind === 'expense' ? (paid ? 'prepayments' : 'accruals') : paid ? 'deferred-income' : 'accrued-income';
+      const word = kind === 'expense' ? (paid ? 'Prepaid' : 'Accrued') : paid ? 'Received ahead' : 'Accrued income';
+      const source = { kind: 'deferral' as const, id: `${p.id}@${periods[k]!.end}` };
+      const memo = `${word}: ${p.memo}`;
+      post(source, periods[k]!.end, p.ledger, carried, memo);
+      post(source, periods[k]!.end, sheet, -carried, memo);
+      post(source, addDays(periods[k]!.end, 1), p.ledger, -carried, `${memo} (reversed)`);
+      post(source, addDays(periods[k]!.end, 1), sheet, carried, `${memo} (reversed)`);
+    }
+  }
+  return { assets, periods };
 }
 
 /** The ledger's postings for a company, in a date range (either end open), as served. */
-export function ledgerView(src: LedgerSource, company: Company, from: ISODate | undefined, to: ISODate | undefined): CompanyLedgerResponse {
-  const { postings, checks } = companyLedger(src, company.id);
+export function ledgerView(src: LedgerSource, company: Company, from: ISODate | undefined, to: ISODate | undefined, until?: ISODate): CompanyLedgerResponse {
+  const { postings, checks } = companyLedger(src, company.id, until ? { until } : {});
   const inRange = postings.filter((p) => (!from || p.date >= from) && (!to || p.date <= to));
   const totals = new Map<string, { debit: number; credit: number }>();
   for (const p of inRange) {

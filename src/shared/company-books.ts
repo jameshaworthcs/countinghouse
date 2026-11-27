@@ -8,6 +8,7 @@
 import type { Alert } from './api';
 import { addDays, diffDays, formatDate, formatSpan, type ISODate } from './dates';
 import { DEADLINE_LEAD_DAYS, DEADLINE_WARN_DAYS } from './deadlines';
+import { FIXED_ASSET_CLASS_META } from './ledger';
 import { toMinor } from './money';
 import type { Company, CompanyBooksSetup, CompanyFiling, CompanyFilingKind } from './schema';
 import {
@@ -417,6 +418,8 @@ export function booksProblems(books: CompanyBooksSetup & { filings?: readonly Co
   if (books.withinChargeFrom && books.withinChargeFrom < inc) out.push(`It came within the charge to Corporation Tax on ${day(books.withinChargeFrom)}, before it was incorporated (${day(inc)}).`);
   if (books.tradeStartedOn && books.withinChargeFrom && books.tradeStartedOn < books.withinChargeFrom) out.push(`Trade started on ${day(books.tradeStartedOn)}, before it came within the charge to Corporation Tax (${day(books.withinChargeFrom)}): trading brings a company within the charge (CTA 2009 s9(2)).`);
   if (books.tradeStartedOn && books.withinChargeFrom === null) out.push('It trades, so it is not dormant for Corporation Tax: give the day it came within the charge (CTA 2009 s9).');
+  const classes = (books.policies ?? []).map((p) => p.class);
+  for (const c of new Set(classes.filter((c, i) => classes.indexOf(c) !== i))) out.push(`Two depreciation policies are for ${FIXED_ASSET_CLASS_META[c].name.toLowerCase()}: give one life per class.`);
   if (books.confirmationStatement && books.confirmationStatement.nextMadeUpTo <= inc) out.push(`The next confirmation statement's made-up date (${day(books.confirmationStatement.nextMadeUpTo)}) is not after incorporation.`);
   if (books.paye) {
     if (books.paye.from < inc) out.push(`The PAYE scheme starts on ${day(books.paye.from)}, before the company was incorporated.`);

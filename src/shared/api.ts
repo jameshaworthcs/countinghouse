@@ -43,7 +43,7 @@ import type {
   Earmarks,
   VatTreatment,
 } from './schema';
-import type { FixedAssetClass } from './ledger';
+import type { AssetRegisterClass, ProfitLine, SheetLine } from './ledger';
 import type { TaxBand } from './uk';
 
 export interface Alert {
@@ -1612,13 +1612,40 @@ export interface LedgerPosting {
    * What it comes from: a company account's row (`row`); a row of yours paid for the company or lent to
    * it (`personal`); a journal (`journal`, with its `line`); a transfer between two of the company's own
    * accounts (`transfer`, the group's id); the fee a link's two sides differ by (`link`, its row of yours).
-   * `line`: the coding's or journal's line.
+   * `line`: the coding's or journal's line. Worked out at a period's end (FORMULAS.md §22, "At a
+   * period's end"): a fixed asset's depreciation for the period (`depreciation`, `<asset id>@<period
+   * end>`), its disposal (`disposal`, its asset id), and the part of a posting with `covers` carried to
+   * the balance sheet at a period end and back the next day (`deferral`, `<posting id>@<period end>`).
    */
-  source: { kind: 'row' | 'personal' | 'journal' | 'transfer' | 'link'; id: string; line?: number };
+  source: { kind: 'row' | 'personal' | 'journal' | 'transfer' | 'link' | 'depreciation' | 'disposal' | 'deferral'; id: string; line?: number };
   /** Its VAT: the treatment, input (reclaimed) or output (charged), and whether this is the net amount or the tax. */
   vat?: { treatment: VatTreatment; side: 'input' | 'output'; part: 'net' | 'tax'; claim?: 'reg111' };
   covers?: { from: string; to: string };
-  asset?: { class: FixedAssetClass; months?: number };
+  asset?: { class: AssetRegisterClass; months?: number; connected?: boolean; disposedOn?: string };
+  memo: string;
+}
+
+/**
+ * A fixed (or intangible) asset on a company's register (FORMULAS.md §22, "Depreciation"): one posting
+ * to a fixed asset's cost that says it is one (`asset`), its cost that posting's amount (net of VAT).
+ */
+export interface FixedAsset {
+  /** `<source kind>:<source id>[:<line>]`: the posting's source and line, the same every time. */
+  id: string;
+  source: LedgerPosting['source'];
+  /** The cost code it is on, and its depreciation (or amortisation) code. */
+  ledger: string;
+  depreciationLedger: string;
+  class: AssetRegisterClass;
+  /** Pence, positive. */
+  cost: number;
+  /** The day it was posted (taken in), and the day depreciation counts from: the ledger's first day for one brought in on an opening journal. */
+  acquired: string;
+  from: string;
+  /** Its life in months: its own, or the company's policy for its class; none: no policy (a check), and no depreciation. */
+  months?: number;
+  life: 'asset' | 'policy' | 'none';
+  disposedOn?: string;
   memo: string;
 }
 
@@ -1638,7 +1665,15 @@ export type LedgerCheck =
   | { kind: 'vat-no-invoice'; transactionId: string; accountId: string; date: string; amount: number; description: string }
   | { kind: 'journal-double-count'; journalId: string; personalId: string; date: string; amount: number; description: string }
   | { kind: 'loan-balance-differs'; balanceId: string; date: string; recorded: number; ledger: number; difference: number }
-  | { kind: 'unbalanced'; source: LedgerPosting['source']; amount: number };
+  | { kind: 'unbalanced'; source: LedgerPosting['source']; amount: number }
+  /** A fixed asset with no life of its own and no policy for its class: not depreciated. */
+  | { kind: 'no-depreciation-policy'; assetId: string; source: LedgerPosting['source']; date: string; amount: number; class: AssetRegisterClass; memo: string }
+  /** A posting to a fixed asset's cost that does not say it is one (`asset`): it is not on the register, so never depreciated. */
+  | { kind: 'fixed-asset-unmarked'; source: LedgerPosting['source']; date: string; ledger: string; amount: number; memo: string }
+  /** A fixed asset that does not fit (disposed of before it was bought), or a posting to a depreciation code written by hand. */
+  | { kind: 'fixed-asset-invalid'; source: LedgerPosting['source']; date: string; problem: string }
+  /** A period said on a code that is not income or an expense: it is posted as it is, not spread. */
+  | { kind: 'covers-not-spread'; source: LedgerPosting['source']; date: string; ledger: string; amount: number };
 
 /** GET /companies/:id/ledger: a company's postings in a date range, what is posted to each ledger there, and the ledger's checks. */
 export interface CompanyLedgerResponse {
@@ -1651,6 +1686,148 @@ export interface CompanyLedgerResponse {
   checks: LedgerCheck[];
   /** The company's own accounts, with the ledger each posts to. */
   accounts: { id: string; name: string; ledger: string }[];
+}
+
+// ─── A company's accounts for a period (analytics/period-accounts.ts, FORMULAS.md §22) ───────────
+
+/** A code's figure on a report line, in pence: signed as the line presents it (an asset's debit, a creditor's credit, a P&L line's part of the profit). */
+export interface ReportCode {
+  ledger: string;
+  name: string;
+  amount: number;
+}
+
+/** An accounting period the Accounts tab can show. */
+export interface AccountsPeriodChoice {
+  start: string;
+  end: string;
+  /** Its last day has passed (as on today): a period not ended is shown as at its end, from what is recorded so far. */
+  ended: boolean;
+  /** Its accounts as recorded filed, and whether the filing gives lines to compare. */
+  filed?: { filedOn: string; reference?: string; lines: boolean };
+}
+
+/** The micro-entity profit and loss account for a period (pence: income positive, charges negative, each line's part of the profit). */
+export interface ProfitAndLoss {
+  lines: { line: ProfitLine; label: string; amount: number; codes: ReportCode[] }[];
+  /** Lines A to F together. */
+  profitBeforeTax: number;
+  /** Line G: the Corporation Tax charge posted for the period (a journal: working it out is a later slice). */
+  tax: number;
+  /** H: the profit or loss for the period, after tax. */
+  profit: number;
+}
+
+/** A balance sheet line, exact (pence) and in whole pounds as Companies House takes it. */
+export interface SheetFigure {
+  exact: number;
+  whole: number;
+}
+
+/** The micro-entity balance sheet at a period's end (format 1, lines A to K). */
+export interface BalanceSheet {
+  /**
+   * Lines A to K: A–E and H–J from their codes (an asset line's debit balances, a creditor line's credit
+   * balances, both positive when they are what the line says), each rounded to the pound; F, G and K
+   * worked out from the rounded lines (F = C + D − E, G = A + B + F, K = G − H − I − J).
+   */
+  lines: ({ line: SheetLine | 'F' | 'G'; label: string; codes: ReportCode[] } & SheetFigure)[];
+  /** Capital and reserves: called-up share capital, and the profit and loss reserve (K less the share capital, in whole pounds). */
+  capital: {
+    shareCapital: SheetFigure;
+    reserve: SheetFigure & { opening: number; profit: number; dividends: number; other: number };
+    total: SheetFigure;
+  };
+  /** Net assets (K worked out from the lines) is capital and reserves, to the penny. */
+  balances: boolean;
+}
+
+/** Every code's balance at a period's end, profit and loss codes for the period alone and retained earnings at its start (pence). */
+export interface TrialBalance {
+  rows: { ledger: string; name: string; debit: number; credit: number }[];
+  debit: number;
+  credit: number;
+}
+
+/** A fixed asset on the register at a period's end (pence). */
+export interface RegisterRow extends FixedAsset {
+  /** Depreciation to the period's start, for the period, and to its end (to the day it left, if it left in the period). */
+  before: number;
+  charge: number;
+  toDate: number;
+  /** Cost less depreciation to date; 0 once it has left. */
+  netBookValue: number;
+  /** It left the company in this period: its cost and depreciation were taken away, its net book value then posted to disposals. */
+  disposedInPeriod: boolean;
+}
+
+/** One movement of the director's loan in a period, in your sign (positive: what the company owes you grows). */
+export interface LoanStatementMovement {
+  date: string;
+  description: string;
+  kind: DirectorLoanKind;
+  source: DirectorLoanMovement['source'];
+  amount: number;
+}
+
+/** The director's loan over a period (pence), in your sign, with the books' (debit positive) beside it. */
+export interface LoanStatement {
+  opening: number;
+  closing: number;
+  movements: LoanStatementMovement[];
+  /** The same in the company's books: the loan's balance, debit positive (a credit: it owes you). */
+  books: { opening: number; closing: number };
+}
+
+/** A company account's ledger at a period's end against its balance from the balance engine (pence). */
+export interface BankReconciliation {
+  accountId: string;
+  name: string;
+  ledger: string;
+  /** The ledger's balance (debit positive: what the account holds; a card or loan owed is negative, as on its page). */
+  books: number;
+  /** The balance engine's on the day, from its statements; null when none is known then. */
+  statement: number | null;
+  difference: number | null;
+  /**
+   * reconciled: the same; differs: not; rows-only: no statement balance, so the engine's balance is its
+   * rows alone and says nothing the ledger does not (said, not a block); no-balance: the account has no
+   * data on that day though the books carry a balance; other-currency: not in pounds.
+   */
+  status: 'reconciled' | 'differs' | 'rows-only' | 'no-balance' | 'other-currency';
+  basis?: { date: string; kind: string };
+}
+
+/** What stops a period's accounts being ready. */
+export type AccountsCheck =
+  | { kind: 'not-ended'; end: string }
+  | { kind: 'ledger'; check: LedgerCheck }
+  /** A clearing code (suspense, the bank not imported) with a balance at the period end. */
+  | { kind: 'clearing'; ledger: string; amount: number }
+  | { kind: 'trial-balance'; debit: number; credit: number }
+  | { kind: 'sheet'; netAssets: number; capital: number }
+  | { kind: 'bank'; reconciliation: BankReconciliation }
+  /** The accounts filed for the period give lines that the books no longer work out to. */
+  | { kind: 'drift'; lines: { line: string; filed: number; computed: number }[] };
+
+/** GET /companies/:id/accounts?period=<end>: a company's accounts for one accounting period, worked out from its ledger. */
+export interface CompanyAccountsResponse {
+  company: { id: string; name: string };
+  /** The periods it can show, newest first: those its ledger reaches, up to the one containing today. */
+  periods: AccountsPeriodChoice[];
+  period: AccountsPeriodChoice & { first: boolean };
+  profitAndLoss: ProfitAndLoss;
+  balanceSheet: BalanceSheet;
+  trialBalance: TrialBalance;
+  register: RegisterRow[];
+  /** Your director's loan with it, when the company names one. */
+  directorLoan: LoanStatement | null;
+  reconciliation: BankReconciliation[];
+  /** What stops it being ready; none: ready (and ended). */
+  checks: AccountsCheck[];
+  ready: boolean;
+  /** The accounts filed for it: the lines filed against those worked out now. */
+  filing?: { filedOn: string; reference?: string; lines: { line: string; filed: number; computed: number }[]; matches: boolean };
 }
 
 /** A row that takes a coding in a company's books (shared/ledger.ts, `codingPlace`), as the Books tab lists it. */

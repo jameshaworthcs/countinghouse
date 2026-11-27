@@ -28,6 +28,9 @@ const SCOPE_ALLOWLIST = {
   // its journals and book rules, one company at a time. Your director's loan reads its postings to the
   // loan once the company keeps books here (director-loan.ts): the one way company data reaches you.
   'src/server/analytics/ledger.ts': "a company's books, one company at a time",
+  // A company's accounts for a period (its trial balance, profit and loss, balance sheet, register,
+  // bank reconciliation), from its ledger, one company at a time, served only from its own routes.
+  'src/server/analytics/period-accounts.ts': "a company's period accounts, one company at a time",
 };
 
 export default tseslint.config(

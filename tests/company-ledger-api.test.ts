@@ -8,7 +8,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { AccountDetailResponse, CompanyCodingResponse, CompanyLedgerResponse, DataHealthResponse, ProposalDecision, ProposalView } from '../src/shared/api';
+import type { AccountDetailResponse, CompanyAccountsResponse, CompanyCodingResponse, CompanyLedgerResponse, DataHealthResponse, ProposalDecision, ProposalView } from '../src/shared/api';
 import type { Account, Company, Journal, ProposalInput, Rule, Transaction } from '../src/shared/schema';
 import { createApp, type App } from '../src/server/app';
 import { loadConfig } from '../src/server/config';
@@ -332,5 +332,30 @@ describe('a company’s general ledger through the app', () => {
     // Re-working rows out takes a coding away from a row it does not apply to.
     await enrich(store);
     expect(store.transaction(coffee.id)?.books).toBeUndefined();
+  });
+  it('serves a period’s accounts from the company’s own route, with its depreciation policies from its books', async () => {
+    const laptop = tx('forge-bank', '2025-06-20', -1_200, 'EXAMPLE COMPUTERS LTD');
+    await store.addTransactions([laptop], 'test: a laptop');
+    expect((await send('PUT', `/api/companies/${CO}/rows/${laptop.id}/books`, { books: { ledger: 'fixed-assets:computer:cost', asset: { class: 'computer' } } })).status).toBe(200);
+    // Money in is not a fixed asset bought.
+    expect((await send('PUT', `/api/companies/${CO}/rows/${sale.id}/books`, { books: { ledger: 'fixed-assets:computer:cost', asset: { class: 'computer' } } })).status).toBe(422);
+    // Its year to the last day of February (the default, CA 2006 s391(4)).
+    const first = await json<CompanyAccountsResponse>(`/api/companies/${CO}/accounts?period=2026-02-28`);
+    expect(first.period).toMatchObject({ start: '2025-03-01', end: '2026-02-28' });
+    expect(first.checks.some((c) => c.kind === 'ledger' && c.check.kind === 'no-depreciation-policy')).toBe(true);
+    const books = forge().books!;
+    const setup = { incorporatedOn: books.incorporatedOn, periods: [], ctPeriods: [], vat: books.vat, policies: [{ class: 'computer', months: 36 }] };
+    expect((await send('PUT', `/api/companies/${CO}/books`, { books: setup })).status).toBe(200);
+    expect((await send('PUT', `/api/companies/${CO}/books`, { books: { ...setup, policies: [{ class: 'computer', months: 36 }, { class: 'computer', months: 24 }] } })).status).toBe(422);
+    const r = await json<CompanyAccountsResponse>(`/api/companies/${CO}/accounts?period=2026-02-28`);
+    // June 2025 to February 2026: 9 months of 36 of £1,200.
+    expect(r.register).toEqual([expect.objectContaining({ cost: 120_000, months: 36, life: 'policy', toDate: 30_000 })]);
+    expect(r.balanceSheet.balances).toBe(true);
+    expect(r.trialBalance.debit).toBe(r.trialBalance.credit);
+    expect(r.reconciliation.map((x) => x.accountId).sort()).toEqual(['forge-bank', 'forge-card']);
+    expect((await req(`/api/companies/${CO}/accounts?period=2025-06-30`)).status).toBe(404);
+    expect((await req(`/api/companies/${CO}/accounts?period=June`)).status).toBe(400);
+    // An agent token may read it, as any GET.
+    expect((await req(`/api/companies/${CO}/accounts`, { headers: { authorization: agent } })).status).toBe(200);
   });
 });

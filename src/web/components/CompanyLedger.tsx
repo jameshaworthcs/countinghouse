@@ -7,9 +7,9 @@ import { Link2, Plus, Trash2, Unlink, Wand2 } from 'lucide-react';
 import { useMemo, useState, type ReactNode } from 'react';
 import type { BooksRowView, CompanyCodingResponse, CompanyLedgerResponse, LedgerCheck, LinkSuggestion } from '../../shared/api';
 import { addDays, formatDate, today } from '../../shared/dates';
-import { FIXED_ASSET_CLASS_META, LEDGER_CODES, ledgerCode, ledgerName, reverseChargeVat, vatInGross, VAT_TREATMENT_LABELS, type LedgerKind } from '../../shared/ledger';
+import { FIXED_ASSET_CLASS_META, LEDGER_CODES, ledgerCode, ledgerName, reverseChargeVat, vatInGross, VAT_TREATMENT_LABELS, type AssetRegisterClass, type LedgerKind } from '../../shared/ledger';
 import { fromMinor, toMinor } from '../../shared/money';
-import { VAT_TREATMENTS, type BooksCoding, type BooksLine, type JournalInput, type Rule, type VatTreatment } from '../../shared/schema';
+import { VAT_TREATMENTS, type BooksCoding, type BooksLine, type Journal, type JournalInput, type JournalLine, type Rule, type VatTreatment } from '../../shared/schema';
 import { api, useApi, useApiMutation } from '../lib/api';
 import { cn, matchWords } from '../lib/format';
 import { Badge, Button, Callout, Card, Checkbox, Dialog, EmptyState, ErrorNote, Field, Input, Loading, Money, NumberInput, Select, StatusBadge, tableClasses, useToast } from './ui';
@@ -58,8 +58,9 @@ interface LineDraft {
   months: number | undefined;
   reg111: boolean;
   connected: boolean;
+  disposedOn: string;
 }
-const lineDraft = (l: Partial<BooksLine> = {}): LineDraft => ({ ledger: l.ledger ?? '', amount: l.amount, treatment: l.vat?.treatment ?? '', vat: l.vat?.amount, coversFrom: l.covers?.from ?? '', coversTo: l.covers?.to ?? '', months: l.asset?.months, reg111: l.vat?.claim === 'reg111', connected: l.asset?.connected === true });
+const lineDraft = (l: Partial<BooksLine> = {}): LineDraft => ({ ledger: l.ledger ?? '', amount: l.amount, treatment: l.vat?.treatment ?? '', vat: l.vat?.amount, coversFrom: l.covers?.from ?? '', coversTo: l.covers?.to ?? '', months: l.asset?.months, reg111: l.vat?.claim === 'reg111', connected: l.asset?.connected === true, disposedOn: l.asset?.disposedOn ?? '' });
 const lineOf = (d: LineDraft): BooksLine => {
   const assetClass = ledgerCode(d.ledger)?.asset?.part === 'cost' ? ledgerCode(d.ledger)!.asset!.class : undefined;
   return {
@@ -67,7 +68,7 @@ const lineOf = (d: LineDraft): BooksLine => {
     amount: d.amount ?? 0,
     ...(d.treatment ? { vat: { amount: d.vat ?? 0, treatment: d.treatment, ...(d.reg111 ? { claim: 'reg111' as const } : {}) } } : {}),
     ...(d.coversFrom && d.coversTo ? { covers: { from: d.coversFrom, to: d.coversTo } } : {}),
-    ...(assetClass ? { asset: { class: assetClass, ...(d.months ? { months: d.months } : {}), ...(d.connected ? { connected: true } : {}) } } : {}),
+    ...(assetClass ? { asset: { class: assetClass, ...(d.months ? { months: d.months } : {}), ...(d.connected ? { connected: true } : {}), ...(d.disposedOn ? { disposedOn: d.disposedOn } : {}) } } : {}),
   };
 };
 
@@ -125,13 +126,25 @@ function LineFields({ d, set, row, vatRegistered, vatFrom, showAmount }: { d: Li
       <Field label="Covers (to)">
         <Input type="date" value={d.coversTo} onChange={(e) => set({ coversTo: e.target.value })} />
       </Field>
-      {entry?.asset?.part === 'cost' && (
-        <Field label={`${FIXED_ASSET_CLASS_META[entry.asset.class].name}: life in months`} hint={FIXED_ASSET_CLASS_META[entry.asset.class].capitalAllowances === 'not-supported' ? 'Capital allowances on cars are not worked out here.' : 'Its cost is written down over it.'}>
-          <NumberInput value={d.months} onValue={(months) => set({ months: months === undefined ? undefined : Math.round(months) })} className="tabular" />
-        </Field>
-      )}
-      {entry?.asset?.part === 'cost' && <Checkbox className="sm:col-span-2" checked={d.connected} onChange={(connected) => set({ connected })} label="Bought from a connected person (a director, or a company they control): no annual investment allowance, and its cost capped (CAA 2001 ss214–218)" />}
+      {entry?.asset?.part === 'cost' && <AssetFields d={d} set={set} assetClass={entry.asset.class} />}
+      {entry?.asset?.part === 'cost' && entry.asset.class !== 'intangible' && <Checkbox className="sm:col-span-2" checked={d.connected} onChange={(connected) => set({ connected })} label="Bought from a connected person (a director, or a company they control): no annual investment allowance, and its cost capped (CAA 2001 ss214–218)" />}
     </div>
+  );
+}
+
+/** A fixed asset's life (empty: the company's policy for its class) and the day it left the company. */
+function AssetFields({ d, set, assetClass }: { d: Pick<LineDraft, 'months' | 'disposedOn'>; set: (p: Partial<Pick<LineDraft, 'months' | 'disposedOn'>>) => void; assetClass: AssetRegisterClass }) {
+  const meta = FIXED_ASSET_CLASS_META[assetClass];
+  const tax = meta.capitalAllowances === 'not-supported' ? ' Capital allowances on cars are not worked out here.' : meta.capitalAllowances === 'intangibles' ? ' For tax, the intangibles regime (CTA 2009 Part 8).' : '';
+  return (
+    <>
+      <Field label={`${meta.name}: life in months`} hint={`Its cost is written down over it, straight line, the month it was bought in full. Empty: the company’s policy for the class (Settings).${tax}`}>
+        <NumberInput value={d.months} onValue={(months) => set({ months: months === undefined ? undefined : Math.round(months) })} className="tabular" />
+      </Field>
+      <Field label="Left the company on" hint="Sold, scrapped or given away: depreciation stops at that month, and its cost and depreciation leave the books. Code what it fetched to profit or loss on disposal.">
+        <Input type="date" value={d.disposedOn} onChange={(e) => set({ disposedOn: e.target.value })} />
+      </Field>
+    </>
   );
 }
 
@@ -435,29 +448,48 @@ function Suggestion({ s, onLink, busy }: { s: LinkSuggestion; onLink: (companyRo
 
 // ─── Journals ────────────────────────────────────────────────────────────────────────────────────
 
-/** A journal's lines: debits positive, credits negative, adding up to nothing before it can be saved. */
-function JournalDialog({ companyId, accounts, onClose }: { companyId: string; accounts: CompanyCodingResponse['accounts']; onClose: () => void }) {
+/** A journal line as the form holds it: its ledger and amount, and for a fixed asset's cost, its life and the day it left. */
+interface JournalLineDraft {
+  ledger: string;
+  amount: number | undefined;
+  months: number | undefined;
+  disposedOn: string;
+  /** What the form does not show, kept as it was on an edit: VAT, covers, a connected seller. */
+  rest: Omit<JournalLine, 'ledger' | 'amount' | 'asset'> & { connected?: boolean };
+}
+const journalLineDraft = (l?: JournalLine): JournalLineDraft => {
+  const { ledger = '', amount, asset, ...rest } = l ?? {};
+  return { ledger, amount, months: asset?.months, disposedOn: asset?.disposedOn ?? '', rest: { ...rest, ...(asset?.connected ? { connected: true } : {}) } };
+};
+const journalLineOf = (d: JournalLineDraft): JournalLine => {
+  const assetClass = ledgerCode(d.ledger)?.asset?.part === 'cost' ? ledgerCode(d.ledger)!.asset!.class : undefined;
+  const { connected, ...rest } = d.rest;
+  return { ...rest, ledger: d.ledger, amount: d.amount!, ...(assetClass ? { asset: { class: assetClass, ...(d.months ? { months: d.months } : {}), ...(connected ? { connected } : {}), ...(d.disposedOn ? { disposedOn: d.disposedOn } : {}) } } : {}) };
+};
+
+/** A journal's lines: debits positive, credits negative, adding up to nothing before it can be saved. A journal given is changed in place. */
+function JournalDialog({ companyId, accounts, initial, onClose }: { companyId: string; accounts: CompanyCodingResponse['accounts']; initial?: Journal; onClose: () => void }) {
   const toast = useToast();
-  const [date, setDate] = useState(today());
-  const [memo, setMemo] = useState('');
-  const [evidence, setEvidence] = useState('');
-  const [lines, setLines] = useState<{ ledger: string; amount: number | undefined }[]>([
-    { ledger: '', amount: undefined },
-    { ledger: '', amount: undefined },
-  ]);
+  const [date, setDate] = useState(initial?.date ?? today());
+  const [memo, setMemo] = useState(initial?.memo ?? '');
+  const [evidence, setEvidence] = useState(initial?.evidence ?? '');
+  const [lines, setLines] = useState<JournalLineDraft[]>(initial ? initial.lines.map(journalLineDraft) : [journalLineDraft(), journalLineDraft()]);
   const total = lines.reduce((s, l) => s + toMinor(l.amount ?? 0), 0);
-  const [opening, setOpening] = useState(false);
+  const [opening, setOpening] = useState(initial?.opening === true);
   const ready = memo.trim() && lines.length >= 2 && lines.every((l) => l.ledger && l.amount) && total === 0;
-  const save = useApiMutation((journal: JournalInput) => api(`/companies/${companyId}/journals`, { method: 'POST', body: { journal } }), { onSuccess: () => (toast({ tone: 'good', text: 'Journal written' }), onClose()) });
+  const save = useApiMutation((journal: JournalInput) => (initial ? api(`/companies/${companyId}/journals/${initial.id}`, { method: 'PUT', body: { journal, was: initial.updatedAt } }) : api(`/companies/${companyId}/journals`, { method: 'POST', body: { journal } })), {
+    onSuccess: () => (toast({ tone: 'good', text: initial ? 'Journal changed' : 'Journal written' }), onClose()),
+  });
+  const set = (i: number, p: Partial<JournalLineDraft>) => setLines((ls) => ls.map((x, j) => (j === i ? { ...x, ...p } : x)));
   return (
     <Dialog
       open
       wide
       onOpenChange={(o) => !o && onClose()}
-      title="Write a journal"
-      description="An entry in the company’s books that is not a payment: shares issued at incorporation, a month’s pay and its PAYE, a dividend declared. Debits are positive and credits negative; the lines add up to nothing."
+      title={initial ? 'Change a journal' : 'Write a journal'}
+      description="An entry in the company’s books that is not a payment: shares issued at incorporation, a month’s pay and its PAYE, a dividend declared, a fixed asset brought in at its carrying amount. Debits are positive and credits negative; the lines add up to nothing."
       footer={
-        <Button variant="primary" disabled={!ready} loading={save.isPending} onClick={() => save.mutate({ date, memo: memo.trim(), lines: lines.map((l) => ({ ledger: l.ledger, amount: l.amount! })), ...(evidence.trim() ? { evidence: evidence.trim() } : {}), ...(opening ? { opening } : {}) })}>
+        <Button variant="primary" disabled={!ready} loading={save.isPending} onClick={() => save.mutate({ date, memo: memo.trim(), lines: lines.map(journalLineOf), ...(evidence.trim() ? { evidence: evidence.trim() } : {}), ...(opening ? { opening } : {}) })}>
           Save
         </Button>
       }
@@ -474,22 +506,32 @@ function JournalDialog({ companyId, accounts, onClose }: { companyId: string; ac
         <Field label="What shows it" hint="The document: a payroll summary, a board minute, an invoice.">
           <Input value={evidence} onChange={(e) => setEvidence(e.target.value)} />
         </Field>
-        <Checkbox checked={opening} onChange={setOpening} label="An opening balance: it posts even before the day its books start (Settings)" />
-        {lines.map((l, i) => (
-          <div key={i} className="grid items-end gap-2 sm:grid-cols-[1fr_9rem_auto]">
-            <Field label={`Line ${i + 1}`}>
-              <LedgerSelect value={l.ledger} onChange={(ledger) => setLines((ls) => ls.map((x, j) => (j === i ? { ...x, ledger } : x)))} journal accounts={accounts} label={`Line ${i + 1} ledger`} />
-            </Field>
-            <Field label="Debit + / credit −">
-              <NumberInput value={l.amount} onValue={(amount) => setLines((ls) => ls.map((x, j) => (j === i ? { ...x, amount } : x)))} className="sensitive tabular" signed />
-            </Field>
-            <Button size="sm" variant="ghost" icon={<Trash2 className="size-3.5" />} disabled={lines.length <= 2} onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))}>
-              <span className="sm:sr-only">Remove</span>
-            </Button>
-          </div>
-        ))}
+        <Checkbox checked={opening} onChange={setOpening} label="An opening balance: it posts even before the day its books start (Settings). A fixed asset here is its carrying amount, with its remaining life." />
+        {lines.map((l, i) => {
+          const asset = ledgerCode(l.ledger)?.asset;
+          return (
+            <div key={i} className="grid gap-2">
+              <div className="grid items-end gap-2 sm:grid-cols-[1fr_9rem_auto]">
+                <Field label={`Line ${i + 1}`}>
+                  <LedgerSelect value={l.ledger} onChange={(ledger) => set(i, { ledger })} journal accounts={accounts} label={`Line ${i + 1} ledger`} />
+                </Field>
+                <Field label="Debit + / credit −">
+                  <NumberInput value={l.amount} onValue={(amount) => set(i, { amount })} className="sensitive tabular" signed />
+                </Field>
+                <Button size="sm" variant="ghost" icon={<Trash2 className="size-3.5" />} disabled={lines.length <= 2} onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))}>
+                  <span className="sm:sr-only">Remove</span>
+                </Button>
+              </div>
+              {asset?.part === 'cost' && (
+                <div className="grid gap-2 rounded-lg border border-line p-3 sm:grid-cols-2">
+                  <AssetFields d={l} set={(p) => set(i, p)} assetClass={asset.class} />
+                </div>
+              )}
+            </div>
+          );
+        })}
         <div className="flex flex-wrap items-center gap-3 text-[12.5px]">
-          <Button size="sm" icon={<Plus className="size-3.5" />} onClick={() => setLines((ls) => [...ls, { ledger: '', amount: total ? fromMinor(-total) : undefined }])}>
+          <Button size="sm" icon={<Plus className="size-3.5" />} onClick={() => setLines((ls) => [...ls, { ...journalLineDraft(), amount: total ? fromMinor(-total) : undefined }])}>
             Add a line
           </Button>
           <span className={total ? 'text-warn-ink' : 'text-good-ink'}>{total ? <>Out by {minorText(total)}</> : 'The lines add up to nothing.'}</span>
@@ -503,6 +545,7 @@ function JournalDialog({ companyId, accounts, onClose }: { companyId: string; ac
 function JournalsCard({ view, companyId }: { view: CompanyCodingResponse; companyId: string }) {
   const toast = useToast();
   const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState<Journal | null>(null);
   const remove = useApiMutation((id: string) => api(`/companies/${companyId}/journals/${id}`, { method: 'DELETE' }), { onSuccess: () => toast({ tone: 'good', text: 'Journal taken away' }), onError: (e) => toast({ tone: 'bad', text: e.message }) });
   return (
     <Card
@@ -545,14 +588,20 @@ function JournalsCard({ view, companyId }: { view: CompanyCodingResponse; compan
                 </ul>
                 {j.evidence && <div className="mt-1 text-[12px] text-ink-3">{j.evidence}</div>}
               </div>
-              <Button size="sm" variant="ghost" icon={<Trash2 className="size-3.5" />} loading={remove.isPending} onClick={() => remove.mutate(j.id)}>
-                Take away
-              </Button>
+              <span className="flex gap-1">
+                <Button size="sm" variant="ghost" onClick={() => setEditing(j)}>
+                  Change
+                </Button>
+                <Button size="sm" variant="ghost" icon={<Trash2 className="size-3.5" />} loading={remove.isPending} onClick={() => remove.mutate(j.id)}>
+                  Take away
+                </Button>
+              </span>
             </li>
           ))}
         </ul>
       )}
       {adding && <JournalDialog companyId={companyId} accounts={view.accounts} onClose={() => setAdding(false)} />}
+      {editing && <JournalDialog key={editing.id} companyId={companyId} accounts={view.accounts} initial={editing} onClose={() => setEditing(null)} />}
     </Card>
   );
 }
@@ -640,7 +689,7 @@ function BookRulesCard({ view, companyId }: { view: CompanyCodingResponse; compa
 
 // ─── Checks and postings ─────────────────────────────────────────────────────────────────────────
 
-const CHECK_TITLES: Record<LedgerCheck['kind'], string> = {
+export const CHECK_TITLES: Record<LedgerCheck['kind'], string> = {
   uncoded: 'Not coded yet: posted to suspense',
   'coding-invalid': 'Coded where it does not fit',
   'bank-not-imported': 'A loan of yours with no company row: posted against the company’s bank not imported',
@@ -656,9 +705,13 @@ const CHECK_TITLES: Record<LedgerCheck['kind'], string> = {
   'journal-double-count': 'Maybe the same money twice: a journal on your loan and a row of yours for the same',
   'loan-balance-differs': 'A balance recorded on your director’s loan the books do not add up to',
   unbalanced: 'Postings that do not add up (please report this)',
+  'no-depreciation-policy': 'A fixed asset with no life: give it one, or a depreciation policy for its class (Settings)',
+  'fixed-asset-unmarked': 'Posted to a fixed asset’s cost without saying it is one: not on the register, so never depreciated',
+  'fixed-asset-invalid': 'A fixed asset, or its depreciation, that does not fit',
+  'covers-not-spread': 'A period said on a balance sheet code: posted as it is, not spread over it',
 };
 
-function checkLine(c: LedgerCheck): ReactNode {
+export function checkLine(c: LedgerCheck): ReactNode {
   switch (c.kind) {
     case 'uncoded':
     case 'coding-invalid':
@@ -715,6 +768,26 @@ function checkLine(c: LedgerCheck): ReactNode {
       );
     case 'unbalanced':
       return `${c.source.kind} ${c.source.id}`;
+    case 'no-depreciation-policy':
+      return (
+        <>
+          {formatDate(c.date)} · <span className="sensitive">{c.memo}</span> · <Money value={c.amount} className="sensitive" /> ({FIXED_ASSET_CLASS_META[c.class].name.toLowerCase()})
+        </>
+      );
+    case 'fixed-asset-unmarked':
+      return (
+        <>
+          {formatDate(c.date)} · <span className="sensitive">{c.memo}</span> · <Money value={c.amount} className="sensitive" />: code it again with its life, or to what it is
+        </>
+      );
+    case 'fixed-asset-invalid':
+      return `${formatDate(c.date)}: ${c.problem}`;
+    case 'covers-not-spread':
+      return (
+        <>
+          {formatDate(c.date)} · {ledgerName(c.ledger)} · <Money value={c.amount} className="sensitive" />
+        </>
+      );
   }
 }
 
@@ -746,17 +819,36 @@ function ChecksCard({ checks }: { checks: LedgerCheck[] }) {
   );
 }
 
+/** Postings shown a page at a time. */
+const POSTINGS_PAGE = 50;
+
+/** The postings in the dates, newest first, behind a toggle and a page at a time; what they add up to by ledger beside them. */
 function PostingsCard({ ledger }: { ledger: CompanyLedgerResponse }) {
-  const [all, setAll] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [page, setPage] = useState(0);
   const accountName = (id: string) => ledger.accounts.find((a) => a.id === id)?.name;
-  const shown = all ? ledger.postings : ledger.postings.slice(-200);
+  const newest = useMemo(() => [...ledger.postings].reverse(), [ledger.postings]);
+  const pages = Math.max(1, Math.ceil(newest.length / POSTINGS_PAGE));
+  const at = Math.min(page, pages - 1);
+  const shown = newest.slice(at * POSTINGS_PAGE, (at + 1) * POSTINGS_PAGE);
   return (
-    <Card title="Postings" description="Every posting in these dates: debits and credits, each source adding up to nothing. The trial balance, profit and loss and balance sheet are built from these." padded={false}>
+    <Card
+      title="Postings"
+      description={`Every posting in these dates (${ledger.postings.length}): debits and credits, each source adding up to nothing. The Accounts tab builds the trial balance, profit and loss and balance sheet from them.`}
+      padded={false}
+      actions={
+        ledger.postings.length > 0 ? (
+          <Button size="sm" variant="ghost" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+            {open ? 'Hide them' : 'Show them'}
+          </Button>
+        ) : undefined
+      }
+    >
       {ledger.postings.length === 0 ? (
         <div className="p-5">
           <EmptyState title="No postings in these dates" />
         </div>
-      ) : (
+      ) : !open ? null : (
         <>
           <div className="relative overflow-x-auto">
             <table className={tableClasses.table}>
@@ -786,39 +878,47 @@ function PostingsCard({ ledger }: { ledger: CompanyLedgerResponse }) {
               </tbody>
             </table>
           </div>
-          {ledger.postings.length > shown.length && (
-            <div className="px-3 py-2">
-              <Button size="sm" variant="ghost" onClick={() => setAll(true)}>
-                Show all {ledger.postings.length}
+          {pages > 1 && (
+            <div className="flex flex-wrap items-center gap-2 px-3 py-2 text-[12.5px] text-ink-3">
+              <Button size="sm" variant="ghost" disabled={at === 0} onClick={() => setPage(at - 1)}>
+                Newer
+              </Button>
+              <span>
+                Page {at + 1} of {pages}
+              </span>
+              <Button size="sm" variant="ghost" disabled={at >= pages - 1} onClick={() => setPage(at + 1)}>
+                Older
               </Button>
             </div>
           )}
+          {ledger.totals.length > 0 && (
+            <details className="border-t border-line">
+              <summary className="cursor-pointer px-3 py-2.5 text-[12.5px] font-medium text-ink-2">By ledger, in these dates</summary>
+              <div className="relative overflow-x-auto">
+                <table className={tableClasses.table}>
+                  <thead>
+                    <tr>
+                      <th className={tableClasses.th}>Ledger</th>
+                      <th className={cn(tableClasses.th, tableClasses.num)}>Debit</th>
+                      <th className={cn(tableClasses.th, tableClasses.num)}>Credit</th>
+                      <th className={cn(tableClasses.th, tableClasses.num, 'hidden sm:table-cell')}>Net</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {ledger.totals.map((t) => (
+                      <tr key={t.ledger}>
+                        <td className={tableClasses.td}>{ledgerName(t.ledger, accountName)}</td>
+                        <td className={cn(tableClasses.td, tableClasses.num, 'sensitive')}>{minorText(t.debit)}</td>
+                        <td className={cn(tableClasses.td, tableClasses.num, 'sensitive')}>{minorText(t.credit)}</td>
+                        <td className={cn(tableClasses.td, tableClasses.num, 'sensitive hidden sm:table-cell')}>{minorText(t.net)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </details>
+          )}
         </>
-      )}
-      {ledger.totals.length > 0 && (
-        <div className="relative overflow-x-auto border-t border-line">
-          <table className={tableClasses.table}>
-            <caption className="px-3 pt-3 text-left text-[12px] font-medium text-ink-3">By ledger, in these dates</caption>
-            <thead>
-              <tr>
-                <th className={tableClasses.th}>Ledger</th>
-                <th className={cn(tableClasses.th, tableClasses.num)}>Debit</th>
-                <th className={cn(tableClasses.th, tableClasses.num)}>Credit</th>
-                <th className={cn(tableClasses.th, tableClasses.num, 'hidden sm:table-cell')}>Net</th>
-              </tr>
-            </thead>
-            <tbody>
-              {ledger.totals.map((t) => (
-                <tr key={t.ledger}>
-                  <td className={tableClasses.td}>{ledgerName(t.ledger, accountName)}</td>
-                  <td className={cn(tableClasses.td, tableClasses.num, 'sensitive')}>{minorText(t.debit)}</td>
-                  <td className={cn(tableClasses.td, tableClasses.num, 'sensitive')}>{minorText(t.credit)}</td>
-                  <td className={cn(tableClasses.td, tableClasses.num, 'sensitive hidden sm:table-cell')}>{minorText(t.net)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
       )}
     </Card>
   );
