@@ -2084,13 +2084,14 @@ overdrawn is a creditor (E), the director's loan a debtor (C) when you owe the c
 balance sheet are totals, I (provisions) has no code yet. Each of the company's own accounts posts to a
 ledger of its own (`accountLedger`): a card to `card:<id>`, a loan account to `loans:<id>`, any other
 to `bank:<id>`. A loan account is due after more than a year (H); the part due within a year of a
-period end is moved to `loans-due-within-year` (E) by a journal at that period end (the reports of the
-next slice show it). Shares issued and not paid for are a journal at incorporation (Dr
+period end is moved to `loans-due-within-year` (E) by a journal at that period end (the period's
+accounts show it on E). Shares issued and not paid for are a journal at incorporation (Dr
 `share-capital-unpaid`, Cr `share-capital`); the payment for them, when it comes, is coded to
 `share-capital-unpaid`, which clears it. A payment can be coded only to the codes marked codable; `suspense` and
 `bank-not-imported` are the ledger's own clearing codes, never written by you; depreciation,
-prepayments, accruals, retained earnings and the tax charge are written in journals (and by the later
-slices that work them out).
+prepayments, accruals and deferred and accrued income are worked out at each period's end (below),
+retained earnings are the periods' profits closed into them (the period's accounts), and the tax charge
+is written in a journal until the tax computation (a later slice) works it out.
 
 **Coding a payment** (`books`, DATA_FORMAT.md; `codingProblems`, `codingPlace`). A coding is on a
 company account's row (not a leg of a transfer between two of the company's own accounts), or on a row
@@ -2121,8 +2122,8 @@ VAT-inclusive amount is *g* × *r* ÷ (1 + *r*) to the penny, half a penny away 
   before registration and still held then, or services within 6 months, is claimed in the first return
   (`claim: "reg111"` on the VAT; a journal line says it too). Such a claim is not "VAT before
   registration"; one out of time (or dated on or after registration) is a check (`reg111Problem`;
-  goods are fixed and intangible assets' costs, cost of sales, small equipment and stock, the rest
-  services). Whether goods were still held is yours to say.
+  goods are tangible fixed assets' costs, cost of sales, small equipment and stock, the rest services,
+  an intangible asset among them, which is a supply of services for VAT). Whether goods were still held is yours to say.
 - A journal's VAT line says its side outright (`{treatment, side, claim?}`): never inferred from its
   ledger, so output VAT in a correction (on a disposal, say) is never taken for input VAT.
 
@@ -2143,6 +2144,9 @@ for everything before.
 | A row of yours *m* lent to the company or repaid by it, not linked (`personal`) | *m* to `directors-loan`, −*m* to `bank-not-imported` (the company's bank side is not in its imported accounts) |
 | A row of yours lent or repaid, linked (`link`, its row of yours) | nothing of its own (its company rows post it), but the fee *d* its two sides differ by: +*d* to `bank-charges`, −*d* to `directors-loan`, on the company row's day (the latest of them). A link across a period end leaves money in transit (sent before it, arrived after): an `other debtors` accrual by journal at the period end holds it |
 | A journal (`journal`, with its `line`) | its lines as written |
+| A fixed asset's depreciation for a period (`depreciation`, `<asset id>@<period end>`) | +*c* to `depreciation`, −*c* to its class's depreciation (or amortisation) code, on the period's last day (or the day it left): "At a period's end", below |
+| A fixed asset leaving (`disposal`, its asset id) | −cost to its cost code, +depreciation to date to its depreciation code, +the rest (its net book value) to `disposals`, on the day it left |
+| What a posting with `covers` carries at a period end (`deferral`, `<posting id>@<period end>`) | +*x* to its own code and −*x* to `prepayments`, `accruals`, `deferred-income` or `accrued-income` on the period's last day, and the reverse the next day |
 
 So a sale of £1,200 with £200 VAT is bank +120000, turnover −100000, VAT −20000; a laptop of £1,440
 with £240 VAT capitalised is fixed assets +120000, VAT +24000, bank −144000; a £24 domain you paid for
@@ -2202,8 +2206,149 @@ does not fit; VAT on a posting before the company registered for VAT (or after i
 for a reg 111 claim; a reg 111 claim out of time; a reverse charge whose VAT is not the standard rate on
 the amount; VAT you paid claimed without an invoice addressed to the company; **a balance recorded on
 your director's loan that the books do not add up to on its day** (recorded, the books' figure, and the
-difference: a recorded balance anchors the loan, so it is never passed over in silence); and a source
-whose postings do not add up, which by construction never happens (it is there to say so if it did).
+difference: a recorded balance anchors the loan, so it is never passed over in silence); a fixed asset
+with no life of its own and no policy for its class; a posting to a fixed asset's cost that does not
+say it is one (not on the register, so never depreciated); a fixed asset that left before it was bought,
+a credit with `asset`, or a journal line on a depreciation code (the register works depreciation out);
+a period said on a code that is not income or an expense (posted as it is); and a source whose postings
+do not add up, which by construction never happens (it is there to say so if it did).
+
+### Apportioning (`shared/money.ts`, `apportion`)
+
+An amount of integer pence split by integer weights (days, months) with **cumulative rounding**: with
+*W*ᵢ the sum of the first *i* weights and *W* of them all,
+
+  partᵢ = round(total × *W*ᵢ ÷ *W*) − round(total × *W*ᵢ₋₁ ÷ *W*),
+
+rounded half away from zero, as `toMinor` rounds (`mulDivRound`: exact in BigInt, so no product loses
+precision). The parts add up to the total exactly (the last cumulative figure is the total itself), a
+weight of 0 has a part of 0, every part is signed like the total and within a penny of its exact share,
+and the split of −total is the split of total negated. 100p over three equal days is 33, 34, 33;
+£240.00 over 120 and 245 days is £78.90 and £161.10 (round(24000 × 120 ÷ 365) = 7890). Tested as
+properties over generated totals and weights (`tests/property.test.ts`).
+
+### At a period's end (`analytics/ledger.ts`, `periodEnd`; `shared/period-end.ts`)
+
+After every other posting, the ledger works out what belongs to each accounting period
+(`accountingPeriodsOf`) up to the one holding its last posting, a cover's last day or a disposal, or a
+later day it is given (`until`: today for the Books tab, the end of the latest period offered for the
+accounts), so every period shown holds its own. Pure, in integer pence, posted like any other source
+(each adds up to nothing).
+
+**The register.** Each posting to a fixed (or intangible) asset's cost code that says it is one
+(`asset`) is one asset (`FixedAsset`): its id is its source and line (`row:tx_…`, `row:tx_…:1`,
+`journal:jnl_…:0`), its cost that posting's amount (net of VAT: under cash accounting the VAT is
+reclaimed when paid, so it is never part of a reclaimable cost; a car's blocked VAT is), acquired on its
+day. Its life is its own `months`, else the company's policy for its class (`books.policies`), else
+none: a check, and no depreciation. One brought in on an opening journal dated before `ledgerFrom` is
+its carrying amount then, with its remaining life, and counts from `ledgerFrom`; earlier depreciation is
+not brought in separately (a journal line on a depreciation code is a check), so the sheet's B is the
+same and nothing is written down twice. A posting to a cost code without `asset` is a check (never
+depreciated), and a coding or journal with `asset` on a credit is refused.
+
+**Depreciation** (FRS 105 paras 12.17–12.19 and 13.11–13.12: straight line over the useful life,
+beginning when available for use, ceasing on derecognition). By whole months, the month of acquisition
+in full: with *m*(*d*) the months counted from the month it counts from to *d*'s month inclusive
+(`monthsCounted`, from the date strings),
+
+  depreciation to *d* = round(cost × min(*m*(*d*), life) ÷ life)
+
+(`depreciationTo`; half away from zero; never more than the cost, which it reaches at the end of its
+life). Each period's charge is depreciation to its last day less depreciation to the day before its
+first, posted Dr `depreciation` (P&L line E), Cr `fixed-assets:<class>:depreciation` (or
+`intangible-assets:amortisation`), on the period's last day. Rounding is cumulative per asset, so the
+charges add up to the cost exactly. A laptop of £1,200 (net) bought on 11 August 2024 with a 36-month
+life, years to 31 December: 5 months to the first year end, round(120000 × 5 ÷ 36) = 16667; to the
+second 17 months, 56667, a charge of 40000; then 40000 and 23333; together 120000. A period ending
+mid-month counts that month, so the next period, which starts in it, does not count it again.
+
+**Disposals** (`asset.disposedOn`; FRS 105 paras 12.26–12.27). Depreciation runs to the month it left,
+inclusive, and the charge for that period is posted on the day it left. Then, on that day: Cr its cost
+(the whole cost), Dr its depreciation code with its depreciation to then, Dr `disposals` with the rest
+(its net book value). What it fetched is coded to `disposals` on the row it came in on (output VAT on it
+as on any sale), so `disposals` holds proceeds less net book value: a credit is a profit (P&L line B,
+other income, never turnover), a debit a loss (line F). The laptop above sold on 15 February 2026 for
+£300: depreciation to February, 19 months, is 63333 (charge 6666 for 2026); the disposal posts cost
+−120000, depreciation +63333, disposals +56667, and the £300 coded to disposals leaves a loss of
+£266.67. A disposal before the asset was bought is a check, and left out. A part disposal is not
+supported: dispose of the whole and bring the rest in again.
+
+**Covers** (FRS 105 para 2.24, the accrual basis). A posting to income or an expense with `covers`
+(net of VAT: under cash accounting VAT falls when paid) is recognised over its days, inclusive: its part
+in each period is `apportion`(amount, days of the cover in each period) (`coverParts`); days before the
+books' first day (`ledgerFrom`, else incorporation) count on that day. At the end of each period *k*
+from the earlier of the one it was posted in (*q*) and the first it covers, to the period before the
+later of *q* and the last it covers, what is due to profit and loss by then less what is posted by then
+(`carriedAt`: Σ parts to *k*, less the amount when posted by *k*'s end) is posted to its own code, the
+opposite to the balance sheet, on *k*'s last day, and reversed the next day:
+
+| Case | Balance sheet code | Example (years to 31 December) |
+|---|---|---|
+| A cost paid ahead (paid by *k*'s end, covering later periods) | `prepayments` (D) | £288 with £48 VAT paid 3 September 2024 for a year from that day: 120 days of 365 in 2024, so 2024 bears £78.90 and at 31 December £161.10 is carried: software −16110, prepayments +16110, reversed on 1 January, when 2025 bears it |
+| A cost paid after the period it covers (not paid by *k*'s end) | `accruals` (J) | £360 paid 20 February 2025 for October to December 2024: at 31 December 2024 professional fees +36000, accruals −36000; reversed on 1 January 2025, so the payment in 2025 nets to nothing there |
+| Income received ahead | `deferred-income` (J) | £1,200 received 1 December 2024 for a year: 31 days of 365 (£101.92) is 2024's turnover, £1,098.08 deferred at 31 December |
+| Income received after the period it is for | `accrued-income` (D) | £620 received 15 January 2025 for December 2024: turnover −62000 and accrued income +62000 at 31 December 2024 |
+
+So every period's profit and loss holds exactly its part, the parts add up to the posting, and at each
+period end the balance sheet carries exactly what is posted and not yet due (or due and not yet
+posted). A cover on a balance sheet code says nothing (a check). An accrual already in an opening
+journal is released by a journal when paid (the payment's own `covers` would fall before the books'
+first day and count on it).
+
+### The period's accounts (`analytics/period-accounts.ts`, `periodAccounts`)
+
+`GET /api/companies/:id/accounts?period=<last day>` (absent: the latest period ended, else the
+current one) serves one accounting period's accounts, worked out from the ledger, never stored. The
+periods offered are those ending on or after the books' first day, up to the one containing today,
+newest first; one not yet ended is shown as at its end from what is recorded so far.
+
+With *B*(code, *d*) the sum of its postings to *d* (pence, debit positive), *S* the period's first day
+and *E* its last:
+
+- **Profit and loss** (micro-entity lines A–G): each income and expense code's movement *B*(*E*) −
+  *B*(*S* − 1), on its line (one that can be either, `disposals`, on B as a credit and F as a debit),
+  shown as its part of the profit (income positive, charges negative), the codes beneath. Profit before
+  tax = A to F; H = A to G. G holds only a Corporation Tax charge written in a journal: working the tax
+  out is a later slice.
+- **Retained earnings.** Each period's profit and loss and its dividends close into retained earnings
+  at its end, so the opening reserve is −(retained earnings + every income, expense and dividend
+  posting before *S*), with retained earnings written in the period by an opening journal; the closing
+  reserve = opening + profit − dividends + any other movement on retained earnings in the period (a
+  journal; prior-period adjustments are not supported, so a correction is a journal in a later period).
+- **Trial balance** at *E*: balance sheet codes to date, income, expense and dividend codes for the
+  period, retained earnings as at *S* with its movements. Debits equal credits (a check if not: never,
+  by construction).
+- **Balance sheet** (format 1): each balance sheet code but capital and reserves with a balance at *E*,
+  on the line its sign gives (`sheet.debit` or `sheet.credit`), A–D shown as debit balances and E, H, I,
+  J as credit balances (a code's depreciation reduces B; accruals with a debit balance sit in D).
+  Exactly: F = C + D − E, G = A + B + F, K = G − H − I − J. Capital and reserves = called-up share
+  capital (−*B*(`share-capital`)) + the closing reserve; K equals it to the penny (a check if not).
+- **Whole pounds.** Companies House takes the micro-entity lines in whole pounds and works the totals
+  out from them (WebFiling), so lines A, B, C, D, E, H, I and J are each rounded to the nearest pound,
+  half away from zero (`roundToPounds`), and F, G and K are worked out from the rounded lines, never
+  rounded themselves; called-up share capital is rounded, and the profit and loss reserve is K less it,
+  so capital and reserves is K. With C £48,210.40, D £312.45 and E £6,105.30, F files as
+  48,210 + 312 − 6,105 = 42,417, though the exact F (£42,417.55) would round to 42,418: a total is
+  never the rounding of its exact figure. Both exact and whole-pound figures are shown.
+- **The register** at *E*: each asset acquired by *E* that had not left before *S*: cost, depreciation
+  to *S* − 1, the period's charge, depreciation to *E* (to the day it left), net book value (0 once it
+  has left), its life and where it is from.
+- **The director's loan** over the period: its postings to `directors-loan` before *S* (opening) and
+  to *E* (closing), and each movement in between by source (`ledgerDirectorLoanMovements`), in your sign
+  (owed to you positive), with the books' sign (debit positive) beside it.
+- **Bank reconciliation**: each of the company's own accounts' ledger balance at *E* against its
+  balance from the company's balance engine on *E* (§9): reconciled when the same to the penny; differs
+  (a block) otherwise; with no statement balance (the engine's figure is its rows alone, which says
+  nothing the ledger does not) shown as "rows only", not a block; no balance known on *E* while the books
+  carry one, or an account not in pounds, a block.
+- **Ready** when the period has ended and nothing stops it: no ledger check dated on or before *E* (or
+  undated: every row coded, nothing in suspense, links and journals fit, double counts resolved…), no
+  balance on `suspense` or `bank-not-imported` at *E*, the trial balance and sheet balance, each account
+  reconciles, and no drift.
+- **Locking against filings.** When the period has an `accounts` filing with lines, each line filed is
+  compared with the whole-pound line worked out now; any difference is a drift check naming the lines.
+  The books are never changed to match: a correction after filing goes through a journal in a later
+  period (prior-period adjustments, FRS 105 paras 8.16–8.17, are not supported).
 
 ### The director's loan from the books (`director-loan.ts`, `loanMovements`)
 
@@ -2236,3 +2381,16 @@ properties over generated books (links exact, with a fee, split one way or the o
 for the company coded or not; the company's rows coded or not; transfers; journals), that every source's
 postings and the whole ledger add up to nothing, and that the director's loan from the books is the loan
 from your marks plus what only the books know, on every day outside a link's span.
+
+**Tested** (`tests/period-accounts.test.ts`, `tests/company-ledger-api.test.ts`): months counted,
+depreciation to a day, each period's charge and its sum to the cost, policies and the check without one,
+amortisation, disposals (the charge to the month it left, cost and depreciation taken away, the loss),
+the refusals and checks for fixed assets, an asset on an opening journal; each case of covers with its
+balance sheet code; the period's profit and loss, trial balance, balance sheet (K is capital and
+reserves), retained earnings closed into the next period, the whole-pound derivation, the register, the
+loan statement, reconciliation (reconciled, differs, rows only), what stops "ready" and what does not
+(a check after the period end), drift against a filing, the route; and as properties, that depreciation
+to date never falls and reaches the cost, that charges and disposals add up and the register empties
+when an asset leaves, that each period recognises its part of a cover and each period end carries
+exactly what is not recognised yet, and that over generated rows every period balances and K is capital
+and reserves.

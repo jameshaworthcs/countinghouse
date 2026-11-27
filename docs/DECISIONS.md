@@ -3165,3 +3165,47 @@ director's loan's sign and timing. What changed, and why:
   app's links stay within it. Its fee posts on the company row's day.
 - **A proposal's checks read the loan as the app does**: `sourceAsLeft` is a ledger source, with the
   company's rows and journals as the proposal leaves them.
+
+## 2026-11-27: A company's period-end postings and its accounts for a period
+
+Slice 4b of the company's books: from the ledger's postings to a period's accounts (FORMULAS.md §22,
+"Apportioning", "At a period's end", "The period's accounts").
+
+- **Period-end postings are worked out like any other posting, never stored**, so a coding or journal
+  changed in an old period changes its depreciation and accruals at once. They reach the period holding
+  the last posting (or a cover's last day, or a disposal), and the reports pass the end of the latest
+  period offered, so a running period shows its own. A journal on a depreciation code is a check, not
+  a second source of depreciation.
+- **Depreciation is straight line by whole months, the month of acquisition in full, no residual
+  value, rounded cumulatively** (round(cost × months ÷ life) to each day, charges the differences), so
+  each asset's charges add up to its cost exactly and a period's figure does not depend on how the
+  periods fall. Daily depreciation was considered: exact to the day, but its figures are unlike any
+  small company's accounts and the month convention is a common, permitted policy under FRS 105 paras
+  12.17–12.21. The month an asset leaves counts too (depreciation "to the disposal month").
+- **A disposal is said on the asset (`asset.disposedOn`), and what it fetched is coded to
+  `disposals`**, not a credit to the cost code naming the posting it disposes of. Posting ids are
+  counters within a source, not stable references; a scrapped asset fetches nothing, and a line of
+  nothing is refused; and `disposals` (whose hint already said so) then holds proceeds less net book
+  value, the profit or loss FRS 105 para 12.27 asks for. A part disposal is not supported.
+- **An asset on an opening journal is its carrying amount with its remaining life**, depreciated from
+  the books' first day; earlier depreciation is not brought in separately. The micro-entity balance
+  sheet shows fixed assets net (line B), so nothing filed differs, and no asset is written down twice.
+- **Covers carry what is due less what is posted at each period end, reversed the next day**, to
+  prepayments, accruals, deferred income or accrued income by whether it was paid by then and whether
+  it is income. Days before the books' first day count on it, so nothing is recognised in a period whose
+  balances are an opening journal's.
+- **Whole pounds: lines A–E and H–J are rounded, F, G and K worked out from them**, as Companies House's
+  micro-entity filing does, and the profit and loss reserve is K less the share capital rounded, so the
+  sheet filed always adds up. Rounding F, G and K themselves was rejected: they can differ by a pound
+  from the totals the filing works out.
+- **Prior-period adjustments are not supported.** A filed period whose lines no longer match is a drift
+  check naming them; the correction is a journal in a later period, and retrospective restatement (FRS
+  105 para 8.16) is left to a later slice if it is ever needed.
+- **Intangible assets are on the register** (an `intangible` class, amortised to its own code), and for
+  reg 111 they are services, as for VAT, so the earlier docs' "goods are fixed and intangible assets"
+  is corrected to tangible ones (the code always treated them as services).
+- **The demo company's year ends two months before the demo is made**, so its books hold a whole year
+  ended (ready, filed with the lines its books work out to) whatever day it is generated; its last
+  accounts' opening balances now match the lines filed for them (net assets £96,000, as its valuation
+  says), and its valuation and loan balance are dated at that year end.
+

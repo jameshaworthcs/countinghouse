@@ -369,6 +369,34 @@ client entertaining is not allowable (s1298), formation costs are capital in nat
 received is a non-trading loan relationship credit (Part 5). A car's capital allowances have rules of
 their own (CAA 2001 Part 2 Ch 10A), not worked out.
 
+### A period's accounts (FRS 105)
+
+The period-end postings and the period's accounts (FORMULAS.md §22, "At a period's end" and "The
+period's accounts") follow FRS 105, The Financial Reporting Standard applicable to the Micro-entities
+Regime (the Financial Reporting Council; paragraphs as in its September 2024 edition):
+
+- **The accrual basis** (para 2.24): items are recognised when they meet the definitions, not when cash
+  moves, so a cost or income covering other periods is prepaid, accrued or deferred by its days.
+- **Property, plant and equipment** (Section 12): measured at cost less accumulated depreciation (para
+  12.14); the depreciable amount allocated on a systematic basis over its useful life (12.17), the
+  charge in profit or loss (12.16); depreciation begins when it is available for use and ceases when it
+  is derecognised (12.19); a method that reflects how its benefits are used, straight line among them
+  (12.21). Derecognised on disposal or when no benefits are expected (12.26), the gain or loss in profit
+  or loss, never as turnover (12.27). The app's convention, by whole months with the month of
+  acquisition in full and residual value nil, is a policy within these, the company's to choose
+  (DECISIONS 2026-11-27).
+- **Intangible assets other than goodwill** (Section 13): a finite useful life (13.9), not more than ten
+  years when it cannot be estimated reliably (13.10); amortised on a systematic basis, straight line when
+  the pattern cannot be determined reliably (13.11–13.12), residual value nil (13.13).
+- **Errors** (Section 8): a material prior period error is corrected retrospectively, by restating the
+  comparatives or the opening balances (para 8.16). Not supported here: a correction after filing goes
+  through a journal in a later period, and the period filed shows the drift.
+- **Whole pounds**: Companies House's online filing of micro-entity accounts takes each balance sheet
+  line in whole pounds and works out the totals (net current assets, total assets less current
+  liabilities, net assets) from them, so the totals are worked out from the rounded lines here too.
+- Capital allowances for the tax computation (the annual investment allowance, writing-down
+  allowances, a car's own rules) and the intangibles regime (CTA 2009 Part 8) are not worked out yet.
+
 **These are aids, not advice:** check every date with Companies House and HMRC, whose own records
 (the company's page, its HMRC online account and notices) are the authority.
 
@@ -461,6 +489,11 @@ a check against the current text:
 - legislation.gov.uk, [VATA 1994 s24](https://www.legislation.gov.uk/ukpga/1994/23/section/24) (input tax: supplies to the taxable person), [VAT Regulations 1995 reg 29](https://www.legislation.gov.uk/uksi/1995/2518/regulation/29) (the claim and the VAT invoice) and [reg 111](https://www.legislation.gov.uk/uksi/1995/2518/regulation/111) (VAT before registration and incorporation), [Value Added Tax (Input Tax) Order 1992 arts 5 and 7](https://www.legislation.gov.uk/uksi/1992/3222) (business entertainment; motor cars), [Companies Act 2006 s51](https://www.legislation.gov.uk/ukpga/2006/46/section/51) (pre-incorporation contracts), [CTA 2009 s1303](https://www.legislation.gov.uk/ukpga/2009/4/section/1303) (tax penalties and interest not deductible), [CAA 2001 ss214–218](https://www.legislation.gov.uk/ukpga/2001/2/part/2/chapter/17) (connected persons and plant: no annual investment allowance, qualifying cost capped, s217–218); GOV.UK, VAT Notice 700 (who can reclaim VAT)
 
 - legislation.gov.uk, [VATA 1994 s2](https://www.legislation.gov.uk/ukpga/1994/23/section/2) (the standard rate), [s8](https://www.legislation.gov.uk/ukpga/1994/23/section/8) (the reverse charge on services received from abroad), [s29A](https://www.legislation.gov.uk/ukpga/1994/23/section/29A) and [Sch 7A](https://www.legislation.gov.uk/ukpga/1994/23/schedule/7A) (the reduced rate), [Finance (No. 2) Act 2010 s3](https://www.legislation.gov.uk/ukpga/2010/31/section/3) (20% from 4 January 2011); [SI 2013/3008](https://www.legislation.gov.uk/uksi/2013/3008) (the micro-entity formats inserted into SI 2008/409 Sch 1 Part 1 Section C); [CTA 2009 s53](https://www.legislation.gov.uk/ukpga/2009/4/section/53) (capital expenditure), [s1298](https://www.legislation.gov.uk/ukpga/2009/4/section/1298) (business entertainment); FRS 105 (the Financial Reporting Council's standard for the micro-entities regime); GOV.UK, VAT Notice 741A (place of supply of services)
+
+Checked 27 November 2026 (companies: a period's accounts):
+
+- The Financial Reporting Council, [FRS 105, September 2024](https://media.frc.org.uk/documents/FRS_105_September_2024_Redacted_edition_zZFkzvN.pdf): para 2.24 (the accrual basis), Section 8 paras 8.16–8.17 (prior period errors), Section 12 paras 12.14–12.21 and 12.26–12.27 (property, plant and equipment: depreciation, derecognition), Section 13 paras 13.9–13.13 (intangible assets: useful life, amortisation)
+- Cited, not fetched: Companies House's online filing of micro-entity accounts in whole pounds, its totals worked out from the lines (worth a check against the service when filing)
 
 Checked 26 November 2026 (companies: a director's loan):
 

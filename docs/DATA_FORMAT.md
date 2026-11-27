@@ -175,10 +175,17 @@ general ledger" (`src/shared/ledger.ts`):
   Regulations 1995 reg 111. VAT goes only on income, expenses and a fixed or intangible asset's cost,
   and never on business entertainment or a car, whose input VAT is blocked (FORMULAS.md §22).
 - `covers`: `{from, to}`, the period a cost or income is for (a year's subscription), not ending
-  before it starts.
-- `asset`: `{class, months?, connected?}` on a fixed asset's cost only, of that code's class (`computer`,
-  `office`, `furniture`, `van`, `motor` (cars)), with its life in whole months when known; `connected`
-  when it was bought from a connected person (CAA 2001 ss214–218).
+  before it starts. On income or an expense the books recognise it over those days (FORMULAS.md §22,
+  "Covers"); on any other code it says nothing (a check).
+- `asset`: `{class, months?, connected?, disposedOn?}` on a fixed (or intangible) asset's cost only, of
+  that code's class (`computer`, `office`, `furniture`, `van`, `motor` (cars), or `intangible` on
+  `intangible-assets:cost`), and only on money going out: it puts the asset on the company's register
+  (FORMULAS.md §22, "Depreciation"). `months`: its life in whole months; absent, the company's policy for
+  the class (`books.policies`). `connected` when it was bought from a connected person (CAA 2001
+  ss214–218; never on an intangible). `disposedOn`: the day it was sold, scrapped or given away, on or
+  after the day it was bought: depreciation stops at that month, its cost and depreciation leave the
+  books and the rest goes to `disposals`; what it fetched is coded to `disposals` on the row it came in
+  on. Additive (no format version: `intangible` and `disposedOn` are new, optional values).
 - `lines`: two or more `{ledger, amount, vat?, covers?, asset?}` adding up to the row's amount (an HMRC
   repayment that is part VAT, part interest), in place of `ledger` and the rest beside it.
 - `invoiceToCompany`: on a row of yours paid for the company, that the supply was made to it and its VAT
@@ -420,7 +427,7 @@ which its deadlines are worked out ([FORMULAS.md §22](FORMULAS.md)). They are t
 yours: `GET /api/companies` leaves them out, and only the company's own routes serve them
 (`GET /api/companies/:id/books`, `/api/company-books`, `/api/company-alerts`). Optional and additive
 (no format version). `{incorporatedOn, accountingReferenceDate?, periods, vat?, paye?,
-confirmationStatement?, tradeStartedOn?, ctPeriods, deadlinesFrom?, ledgerFrom?, filings, setBy, updatedAt}`:
+confirmationStatement?, tradeStartedOn?, ctPeriods, deadlinesFrom?, ledgerFrom?, policies?, filings, setBy, updatedAt}`:
 
 - `incorporatedOn`: the day Companies House incorporated it.
 - `accountingReferenceDate`: `"MM-DD"`, its reference date from incorporation. Absent, the default:
@@ -455,6 +462,9 @@ confirmationStatement?, tradeStartedOn?, ctPeriods, deadlinesFrom?, ledgerFrom?,
   settled before the books were kept here).
 - `ledgerFrom`: the day its general ledger starts (books taken over mid-life): nothing dated before it
   posts but journals marked `opening`. Not before incorporation.
+- `policies`: `[{class, months}]`, its depreciation policies: the life in whole months (1 to 600) of
+  each class of asset (`computer`, `office`, `furniture`, `van`, `motor`, `intangible`) whose own coding
+  gives none, one per class (FORMULAS.md §22, "Depreciation"). Optional and additive.
 - `filings`: what the company filed or paid, each `{id, kind, periodStart?, periodEnd, filedOn,
   reference?, note?, figures?, addedBy}`:
   - `kind`: `accounts`, `ct600` (a company tax return), `ct-payment` (Corporation Tax paid;
@@ -820,8 +830,11 @@ a month's pay and its PAYE, a dividend declared), one per line. Optional: no fil
   claim?}`, said outright for the VAT return: `side` is `input` (reclaimed) or `output` (charged), never
   inferred from the ledger, and `claim: "reg111"` a claim of input tax from before registration; a VAT
   line is on `vat` itself, or on income, an expense or an asset's cost. `covers` and `asset` as on a
-  coding.
-- `opening`: an opening balance, which posts even before the books' first day (`books.ledgerFrom`).
+  coding; a line with `asset` is a debit (its cost). The books work depreciation out from the register,
+  so a line on a depreciation or amortisation code is a check.
+- `opening`: an opening balance, which posts even before the books' first day (`books.ledgerFrom`). A
+  fixed asset on an opening journal is its carrying amount then, with its remaining life in `months`:
+  it is depreciated from the books' first day.
 - `memo`: what it is; `evidence`: what shows it (a payroll summary, a board minute).
 - `createdBy`: `owner`, or `agent` when a proposal you applied wrote it.
 
