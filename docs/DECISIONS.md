@@ -3294,3 +3294,41 @@ parts, prepared and checked here, and filed elsewhere (Making Tax Digital softwa
   sales counted as taxable (nothing says otherwise) and disposals left out (Sch 1 para 1(7)).
 - **One shared disclaimer**: `shared/disclaimers.ts` and `components/CheckEverything.tsx`, used by Self
   Assessment and the VAT return (its CSV ends with it).
+
+## 2026-11-27: VAT returns after code and VAT specialist review
+
+A code review and a UK VAT specialist's review of slice 5 were taken in. The specialist confirmed boxes
+6 and 7 (outside-the-scope sales abroad in box 6, the reverse charge in both), the exclusion list,
+leaving the pence out of boxes 6–9, the reverse charge's timing (on reg 82, not Notice 731), reg 111 in
+the first return, the error-correction limits and netting, every penalty points rule (no point for the
+first and final returns: Finance Act 2021 Sch 24 para 2's table) and the thresholds, unchanged from
+April 2026. What changed, and why:
+
+- **A reg 111 claim's purchase is now in box 7 of the first return**, beside its VAT in box 4 (reversing
+  the earlier choice): reg 111(3) treats the VAT as input tax of that return, and boxes 4 and 7 kept
+  consistent are what HMRC's credibility checks compare.
+- **Two treatments outside the scope.** `outside` now means not a supply (no consideration: left out of
+  boxes 6 and 7, Notice 700/12 para 3.8), and a new `abroad` means supplied outside the UK by its place
+  of supply (in box 6 for a sale, box 7 for a purchase such as a hotel abroad). Additive: no data
+  changes, and a sale on `turnover` already coded `outside` (as the app advised) is still read as one
+  abroad, with a note asking for `abroad`, so no return already worked out moves.
+- **The reverse charge cites reg 82 and VATTOS9450**, takes a continuous supply neither paid nor invoiced
+  at the end of the calendar year (Notice 700 para 15.12; in the books, only a journal can be unpaid),
+  and warns when a payment says no period for its service.
+- **A cost a director paid for the company** is timed by the director paying the supplier as the
+  company's agent (reg 57: when payment is made), the company meeting the full cost (VIT13400): stated
+  as a judgment, with the cautious alternative (when the company repays) named.
+- **Each part of an error has its own 4 years** (Notice 700/45 para 4.7), not one limit from the net's
+  sign.
+- **Form VAT652 was withdrawn** (GOV.UK, 8 September 2025): method 2 is online or in writing.
+- **Corrections and disclosures add up**: recording a second part for a period adds to the first, and
+  the form shows what is recorded already; it never replaces it.
+- **New information, as dated data**: the cash accounting scheme's limits (£1.35m to join, £1.6m to
+  leave), with a check stopping returns once taxable supplies reach the leaving limit, since the VAT on
+  everything outstanding is then due and the books do not work it out; late payment penalties (Finance
+  Act 2021 Sch 26) beside a return to pay; the £1,000 limit on a final return's stock and assets.
+- **Wording**: the deregistration test looks ahead (Sch 1 para 4), so past turnover below £88,000 is a
+  hint; registration counts supplies by tax point while the books count payments, which the panel says;
+  interest is never taxable turnover; the penalty table's columns go by the period's length; a filed
+  return with checks left says so; the periods list shows filed and computed net VAT on the same basis;
+  a company deregistered with everything filed shows its last return.

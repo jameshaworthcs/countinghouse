@@ -2098,7 +2098,7 @@ is written in a journal until the tax computation (a later slice) works it out.
 company account's row (not a leg of a transfer between two of the company's own accounts), or on a row
 of yours paid for the company with a mark that counts. Its lines (`codingLines`: its ledger as one line
 of the whole amount, or its split) each have a gross amount *g* signed like the row, and VAT *v* (signed
-like *g*, |*v*| < |*g*|; *v* = 0 for zero rate, exempt and outside the scope; for a reverse charge,
+like *g*, |*v*| < |*g*|; *v* = 0 for zero rate, exempt, outside the scope and supplied outside the UK; for a reverse charge,
 |*v*| ≤ |*g*| is the notional VAT on an amount that does not include it). The VAT helpers: the VAT in a
 VAT-inclusive amount is *g* × *r* ÷ (1 + *r*) to the penny, half a penny away from nothing
 (`vatInGross`); a reverse charge's is *g* × *r* (`reverseChargeVat`), *r* the rate on the row's day
@@ -2110,15 +2110,17 @@ VAT-inclusive amount is *g* × *r* ÷ (1 + *r*) to the penny, half a penny away 
 - Input VAT on business entertainment and on a car is blocked (Input Tax Order 1992, SI 1992/3222,
   arts 5 and 7; `VAT_BLOCKED`): such a coding takes no VAT, its VAT being part of its cost. A van's is
   not blocked (its own class).
-- A reverse charge is the buyer's: never on income (a sale of services to a business abroad is outside
-  the scope). Its notional VAT should be the standard rate on what was paid: more than a penny out is a
+- A reverse charge is the buyer's: never on income (a sale of services to a business abroad is supplied
+  outside the UK, `abroad`). Its notional VAT should be the standard rate on what was paid: more than a penny out is a
   check. On the VAT return its net amount belongs in boxes 6 and 7 as well as its VAT in boxes 1 and 4
   (VAT returns, below); import VAT on goods (postponed VAT accounting) is not covered yet.
 - **VAT you paid for the company** is the company's to reclaim only on a supply made to it, with a VAT
   invoice addressed to it (VATA 1994 s24(1); VAT Regulations 1995 reg 29(2); VAT Notice 700): a
   coding on a row of yours says so (`invoiceToCompany`), and VAT claimed without it is a check. Under
-  cash accounting the claim falls when the company pays or credits you: the credit to your loan on the
-  row's day is that, so the VAT posts on that day.
+  cash accounting the claim falls when payment is made (reg 57): you paid the supplier as the company's
+  agent on the row's day, the company meeting the full cost (VIT13400), so the VAT posts on that day, as
+  the credit to your loan does. A judgment: the cautious alternative is the day the company repays you
+  (VAT returns, below).
 - **Before registration** (VAT Regulations 1995 reg 111): input tax on goods bought within 4 years
   before registration and still held then, or services within 6 months, is claimed in the first return
   (`claim: "reg111"` on the VAT; a journal line says it too). Such a claim is not "VAT before
@@ -2431,12 +2433,12 @@ here.
 
 ### VAT returns (`analytics/vat-return.ts`, `companyVat`)
 
-`GET /api/companies/:id/vat?period=<last day>` (absent: the return to file next) serves a company's VAT
-returns, worked out from its ledger, never stored; `&format=csv` gives one return's nine boxes, ending
-with the "check everything yourself" disclaimer (`shared/disclaimers.ts`). Nothing is sent to HMRC: the
-owner files through Making Tax Digital software and records the filing here. Only the cash accounting
-scheme is covered (accrual and the flat rate scheme are refused when the books are set up). The rules
-and their sources are in UK_RULES.md, "VAT returns".
+`GET /api/companies/:id/vat?period=<last day>` (absent: the return to file next, else the last one)
+serves a company's VAT returns, worked out from its ledger, never stored; `&format=csv` gives one
+return's nine boxes, ending with the "check everything yourself" disclaimer (`shared/disclaimers.ts`).
+Nothing is sent to HMRC: the owner files through Making Tax Digital software and records the filing
+here. Only the cash accounting scheme is covered (accrual and the flat rate scheme are refused when the
+books are set up). The rules and their sources are in UK_RULES.md, "VAT returns".
 
 **Periods** are `vatPeriodsOf` (Deadlines, above), each with its due day (`vatReturnDue`), up to the
 one running.
@@ -2445,15 +2447,26 @@ one running.
 journal, which is balances brought in, nor a period-end posting, which carries no VAT) is in the VAT
 period holding the day its rule gives:
 
-- its own day: under cash accounting the day paid or received (VAT Notice 731 paras 4.4–4.5); a row of
-  yours paid for the company is on its day, when the company credits your director's loan; a source
-  dated before incorporation is on the day of incorporation (The general ledger, Dates);
-- a claim under reg 111 (`claim: "reg111"`): the first period, whatever its day (Notice 731 para 3.2:
-  "on your first VAT Return");
-- a reverse charge: the earlier of its day and the last day of the service it covers (`covers.to`), when
-  the line says one (Notice 700 para 15.12: a single supply's tax point is when it is completed, or paid
-  if earlier; a continuous one's the end of its billing period, or payment if earlier). Its working says
-  so (`counted: tax-point`).
+- its own day: under cash accounting the day paid or received (VAT Regulations 1995 reg 57; VAT Notice
+  731 paras 4.4–4.5); a source dated before incorporation is on the day of incorporation (The general
+  ledger, Dates);
+- a row of yours paid for the company: its own day, when you paid the supplier as the company's agent
+  (reg 57: when payment is made), the supply being the company's because it meets the full cost
+  (HMRC's VIT13400; VAT Notice 700). **A judgment**: the cautious alternative is to claim only when the
+  company actually repays you, which the books do not do (crediting your director's loan is on the same
+  day);
+- a claim under reg 111 (`claim: "reg111"`): the first period, whatever its day: the VAT is treated as
+  input tax of the first return (reg 111(3); Notice 731 para 3.2);
+- a reverse charge: its tax point (`reverseChargeTaxPoint`; VAT Regulations 1995 reg 82; HMRC's
+  VATTOS9450; Notice 700 para 15.12). A service received from abroad is supplied when performed, or when
+  paid if earlier; one supplied over a period, at the end of each period it is paid or invoiced for, or
+  when paid if earlier. So a payment for the period its line covers (`covers`) is at the earlier of the
+  payment and that period's end; a payment whose line says no period is on its day, with a warning (if
+  the service ended before it was paid, the tax point was then, perhaps in an earlier return). With no
+  payment (a journal), the period's end when it was invoiced (`invoicedOn`), else a continuous supply's
+  forced tax point, the end of the calendar year (Notice 700 para 15.12), the whole line at the first
+  one in its period (a line running over more than one year is split by the owner); a journal saying
+  no period, its day. Its working says so (`counted: tax-point`).
 
 A posting on a day in no period (before registration, after deregistration) is in none.
 
@@ -2467,9 +2480,18 @@ VAT, `part: tax`, *n* those that are the amount before it, `part: net`):
 | 3 | box 1 + box 2 |
 | 4 | Σ *t* on the input side: VAT on purchases (a row of yours paid for the company among them), a reverse charge's input tax, reg 111 claims in the first return, a journal's input VAT (a supplier's credit note takes it down) |
 | 5 | \|box 3 − box 4\|, its direction shown apart: to pay when box 3 is more, to reclaim when less, else nil |
-| 6 | −Σ *n* on the output side at the standard, reduced or zero rate or exempt, and outside the scope on `turnover` (a sale whose place of supply is abroad, Notice 741A, which Notice 700/12 para 3.7 puts in box 6); + Σ *n* of reverse charges (Notice 741A para 5.2) |
-| 7 | Σ *n* on the input side at any treatment but outside the scope, reverse charges' among them; not a reg 111 claim's |
+| 6 | −Σ *n* on the output side at the standard, reduced or zero rate, exempt, or supplied outside the UK (`abroad`: Notice 700/12 para 3.7 includes supplies outside the scope of UK VAT under Notice 741A); a sale on `turnover` coded `outside` is read as supplied abroad too (below); + Σ *n* of reverse charges (Notice 741A para 5.2) |
+| 7 | Σ *n* on the input side at any treatment but `outside`: supplied outside the UK (a hotel abroad) included, reverse charges' included, and a reg 111 claim's amount in the first return beside its VAT in box 4 |
 | 8, 9 | 0: Northern Ireland's goods to and from the EU, not supported |
+
+**Two treatments outside the scope.** `outside` is outside the scope as not a supply at all (no
+consideration: a grant, compensation, a donation received or paid), which Notice 700/12 paras 3.7–3.8
+leave out of boxes 6 and 7. `abroad` is a supply outside the scope of UK VAT by its place of supply (a
+service sold to a business abroad, a hotel abroad), which they keep in. `abroad` came after `outside`,
+and the app had told the owner to code a sale of services to a business abroad as outside the scope: so
+a sale on `turnover` coded `outside` is still read as supplied abroad (box 6), and its return says so,
+asking for it to be coded `abroad` (or, if it is not a supply, moved off sales). Existing data stays
+valid and its returns unchanged.
 
 Left out of boxes 6 and 7, each listed in the working with why (`leftOut`):
 
@@ -2477,22 +2499,20 @@ Left out of boxes 6 and 7, each listed in the working with why (`leftOut`):
   `staff-pensions`, `depreciation`, `corporation-tax-charge`, `penalties`, `donations` (`NOT_A_SUPPLY`;
   Notice 700/12 paras 3.7–3.8: wages and salaries, PAYE and National Insurance, and expenditure that is
   not consideration for a supply);
-- **outside the scope** on the purchase side, and on an income code other than `turnover`;
+- **outside the scope** (`outside`) on the purchase side, and on an income code other than `turnover`;
 - **no VAT treatment** said, on a code that takes VAT (income, an expense, a fixed asset's cost): never
   guessed (accounting software leaves its "no VAT" items off the return too), but listed, so the owner
-  can say zero rate, exempt or outside the scope. A warning, not a check;
-- **a reg 111 claim's amount**: its VAT is in box 4 of the first return, but the purchase was made
-  before the period, so it is not one of the period's purchases.
+  can say one. A warning, not a check.
 
 The balance sheet codes take no VAT, so loans, the director's loan, dividends, PAYE, Corporation Tax
 paid, VAT paid to HMRC and transfers are never in a box.
 
-**Pounds and pence.** Boxes 1–5 are exact sums in pounds and pence. Boxes 6–9 are whole pounds, the
-pence left out (`poundsWithoutPence`: towards nothing, never rounded up), each from its exact sum: HMRC's
-Making Tax Digital API takes whole pounds for them, and the paper return said "whole pounds only"; no
-HMRC text says how pence are dropped, and leaving them out never overstates. So £1,439.21 is 1,439 and
-−£100.42 is −100. Each box keeps its postings (`lines`: source, day, ledger, treatment, amount), which add
-up to it (to its exact sum for 6–9).
+**Pounds and pence.** Boxes 1–5 are exact sums in pounds and pence. Boxes 6–9 are whole pounds, a number
+with zero decimals, as HMRC's Making Tax Digital API types them (and the paper return said "whole pounds
+only"): the pence are left out (`poundsWithoutPence`: towards nothing, never rounded up), each from its
+exact sum; no HMRC text says how they are dropped, and leaving them out never overstates. So £1,439.21 is
+1,439 and −£100.42 is −100. Each box keeps its postings (`lines`: source, day, ledger, treatment,
+amount), which add up to it (to its exact sum for 6–9).
 
 **Ready to file** when the period has ended, the books cover it whole, and nothing stops it:
 
@@ -2504,15 +2524,27 @@ up to it (to its exact sum for 6–9).
   reg 111 claim out of time, belong to the first return (after deregistration, to the last);
 - rows posted to suspense in the period, net;
 - books that start after the period does (`ledgerFrom`): what came before is not in them. A period that
-  ends before they start is not worked out at all (before these books).
+  ends before they start is not worked out at all (before these books);
+- **the cash accounting scheme's limit** (`VAT_CASH_ACCOUNTING_RULES`; Notice 731 paras 2.1, 2.5 and
+  6.4): when taxable supplies in the 12 months to a period's end (sales at the standard, reduced or zero
+  rate or with no treatment, the disposal of capital assets included; not services received, nor
+  interest) reach the limit for leaving (£1.6 million), the scheme ends with that period and the VAT on
+  everything outstanding is due then, which the books do not work out: that period and every later one
+  is stopped (`cash-limit`). The supplies the scheme excludes (reg 58(2): payment not due in full within
+  6 months, or an invoice issued before the supply) are not detected.
 
-The final return's VAT on stock and assets held at deregistration (VAT Notice 700/11) is not worked out:
-a note says so.
+Warnings that do not stop it: postings with no treatment; a reverse charge paid with no period said; a
+sale on `turnover` coded `outside`; and the final return's VAT on stock and assets held at
+deregistration, due when over £1,000 (`VAT_DEREGISTRATION_ASSETS_RULES`; Notice 700/11), not worked out.
 
 **State.** Filed (a VAT filing does it), filed late (after its due day); else before these books; else
-open (not ended); else ready or not ready. Overdue: not filed, its due day passed (not one due before
-`deadlinesFrom`). The return to file next is the earliest ended and not filed that the books reach (and
-not settled before `deadlinesFrom`), else the one running.
+open (not ended); else ready or not ready. A filed return whose books have checks left says "Filed; the
+books have checks to clear" (in the CSV too), never "not ready to file". Overdue: not filed, its due day
+passed (not one due before `deadlinesFrom`). The return to file next is the earliest ended and not filed
+that the books reach (and not settled before `deadlinesFrom`), else the one running; with none (a
+company deregistered with everything filed), the last return is shown. The periods list gives each
+period's net VAT for its own period, as the books give it and as filed less the corrections of earlier
+returns the filing included (shown beside it), so the two are on the same basis.
 
 **A return filed, against the books.** For a period the books cover whole whose filing has its nine
 boxes, each box filed (1–5 in pence, 6–9 whole pounds) against the books', with the corrections of
@@ -2533,56 +2565,80 @@ filed − expected, and the filing is never changed. Likely causes, where the fi
 (box 1 filed − corrections in it), input = (box 4 filed − corrections in it) − the books' box 4 (positive:
 input tax claimed too much), error = output + input, as HMRC sees it (positive: VAT the company owes).
 What was corrected since: each later filing's `corrections` naming the period, and the filing's own
-`disclosed`; uncorrected = error − corrected. An error counts unless it is out of time (4 years from the
-end of its period; for input tax under-claimed, error < 0 with input < 0, from its return's due day:
-para 4.7, `vatCorrectionDeadline`; deliberate errors, which have no such limit, the app cannot know) or
-unsettled (its period has a check to clear, so the difference may be the books'). The running total adds
-up the uncorrected errors that count, in period order. Their net *N* may be corrected on the current
-return, the one for the period running today, in which they are found (para 4.4): method 1, in box 1
-when *N* > 0 and box 4 when *N* < 0, when |*N*| ≤ £10,000, or |*N*| ≤ £50,000 and no more than 1% of
-that return's box 6 (para 4.3; box 6 so far, provisional until the period ends). Otherwise, and for
-errors made deliberately, they are reported to HMRC separately (method 2: online, or form VAT652), which
+`disclosed`; uncorrected = error − corrected. **Each part has its own 4 years** (para 4.7,
+`vatCorrectionDeadline`): output tax, and input tax claimed too much (input > 0), from the end of the
+period; input tax under-claimed (input < 0) from the return's due day. What counts is the parts still in
+time less what was corrected (nothing, if that would change its sign), and nothing when every part is
+out of time or the period is unsettled (it has a check to clear, so the difference may be the books');
+deliberate errors, which have no such limit, the app cannot know. The running total adds up what counts,
+in period order. Its net *N* may be corrected on the current return, the one for the period running
+today, in which the errors are found (para 4.4): method 1, in box 1 when *N* > 0 and box 4 when *N* < 0,
+when |*N*| ≤ £10,000, or |*N*| ≤ £50,000 and no more than 1% of that return's box 6 (para 4.3; box 6 so
+far, provisional until the period ends). Otherwise, and for errors made deliberately, they are reported
+to HMRC separately (method 2: online or in writing; form VAT652 was withdrawn in September 2025), which
 may be chosen for an error of any size (`vatCorrectionMethod`, `VAT_ERROR_CORRECTION_RULES`).
 
 The owner records what was done (`PUT /api/companies/:id/filings/:filingId/vat-corrections`): on the
 later return, the earlier periods it corrected and by how much (`corrections`); on the return with the
-error, that it was reported separately (`disclosed`). The figures filed never change.
+error, that it was reported separately (`disclosed`). Recorded again for the same period, the amounts
+add up (`addVatCorrection`, `addVatDisclosure`: a second part never replaces the first; the form shows
+what is recorded already). The figures filed never change.
 
 **Penalty points**, as information, never HMRC's count (`VAT_PENALTY_RULES`). Each return filed after
 its due day, or not filed with its due day passed (not one due before `deadlinesFrom`), under the regime
 of its period: points for periods starting on or after 1 January 2023, the default surcharge before (not
-worked out), and no point for the first return after registration or the final one. Below the
-threshold a point would expire on the last day of the month 24 months after the month the return was
-due, 25 when it was due on a month's last day (`vatPointExpiry`: a return due 7 May 2024 to 31 May 2026,
-one due 31 May 2024 to 30 June 2026); the count not expired by today is indicative only, since at the
-threshold points stop expiring. Shown beside HMRC's thresholds (annual 2, quarterly 4, monthly 5), the
-£200 penalty, what resets points at the threshold (a period of compliance of 24, 12 or 6 months, and
-every return due in the previous 24 months submitted), and the adjustment for a change of frequency
-(annual to quarterly +2, to monthly +3; quarterly to monthly +1, to annual −2; monthly to quarterly −1,
-to annual −3; never below nothing), with each change in the company's schedule since points began.
+worked out), and no point for the first return after registration or the final one (Finance Act 2021
+Sch 24 para 2's table). Below the threshold a point would expire on the last day of the month 24 months
+after the month the return was due, 25 when it was due on a month's last day (`vatPointExpiry`: a
+return due 7 May 2024 to 31 May 2026, one due 31 May 2024 to 30 June 2026); the count not expired by
+today is indicative only, since at the threshold points stop expiring. The threshold goes by the length
+of the period running (`vatFrequencyOfPeriod`: more than 20 weeks 2, more than 8 and up to 20 weeks 4,
+8 weeks or less 5; so a short first period counts by its own length, not its stagger), beside the £200
+penalty, what resets points at the threshold (a period of compliance of 24, 12 or 6 months, and every
+return due in the previous 24 months submitted), and the adjustment for a change of frequency (annual
+to quarterly +2, to monthly +3; quarterly to monthly +1, to annual −2; monthly to quarterly −1, to
+annual −3; never below nothing), with each change in the company's schedule since points began.
+
+**Late payment penalties**, as information beside a return with VAT to pay (`VAT_LATE_PAYMENT_RULES`;
+Finance Act 2021 Sch 26), for periods starting on or after 1 January 2023: were none of box 5 paid by
+the due day, nothing in the first 15 days, then 3% of what is unpaid on day 15 (`atFirst` =
+round(box 5 × 3 ÷ 100)) and a further 3% of what is still unpaid on day 30 (`atSecond` adds the same),
+and from day 31 a second penalty of 10% a year, daily, on what is unpaid; interest besides, not worked
+out. A due day before the rates covered (1 April 2025) is shown without figures.
 
 **Taxable turnover and the thresholds**, as information (`taxableTurnover`,
 `VAT_REGISTRATION_THRESHOLDS`). In the 12 months to today, and to each of the last 12 months' ends: −Σ
 *n* on income codes at the standard, reduced or zero rate, −Σ income postings with no VAT treatment
 (counted as taxable: nothing says they are exempt or outside the scope), and Σ *n* of reverse charges
-(services received from abroad count, Notice 700 para 5.4); not exempt or outside-the-scope sales, nor
-`disposals` (supplies of the business's capital assets, VATA 1994 Sch 1 para 1(7)). By the day paid, as
-the books are kept: a supply not yet paid for is not in it. Set against the registration and
-deregistration thresholds in force on the day (£90,000 and £88,000 from 1 April 2024).
+(services received from abroad count, Notice 700 para 5.4); not exempt sales, interest
+(`interest-receivable`, exempt whatever a coding says), sales outside the scope or supplied outside the
+UK, nor `disposals` (supplies of the business's capital assets, VATA 1994 Sch 1 para 1(7)). The law
+counts supplies by their tax point (Sch 1 para 1); the books count them by the day paid, so sales on
+credit not yet paid are missing and, for a company not registered, the figure can be too low: the panel
+says so. Set against the registration and deregistration thresholds in force on the day (£90,000 and
+£88,000 from 1 April 2024). The deregistration test looks ahead (Sch 1 para 4: supplies in the year
+"then beginning"), so past turnover below £88,000 is shown as a hint, not the test. Beside them, the same
+12 months' taxable supplies with the disposal of capital assets against the cash accounting scheme's
+limits (£1.35 million to join, £1.6 million to leave).
 
 **Tested** (`tests/vat-return.test.ts`, `tests/company-ledger-api.test.ts`): each box at every
-treatment, a sale abroad outside the scope in box 6, exempt interest, a reverse charge in boxes 1, 4, 6
-and 7, credit notes each way, pay and untreated purchases left out, the working adding up to each box,
-the pence of 6–9 left out either way (a negative box 6), cash accounting's days, a row of yours paid for
-the company with and without an invoice to it, reg 111 claims in the first return (and out of time),
-VAT before registration, a reverse charge on its tax point, journals by their side and opening journals
-left out; what stops a return and what does not (a check in another period); the CSV and its disclaimer;
-a filing matching, filed late, leaving out a reverse charge, and rounding its pence; errors corrected
-on a later return or reported separately, unsettled or out of time, the limits at their edges and the
-4 years; penalty regimes, exclusions, overdue returns, expiry and frequency changes; the thresholds by
-date and taxable turnover; the route, its CSV and the corrections it records (owner only); and as
-properties over generated rows, that boxes 3 and 5 follow from 1, 2 and 4 and 6 and 7 from their exact
-sums, and that the returns' net VAT is exactly the VAT ledger's tagged movement from registration on.
+treatment, sales and purchases supplied abroad in boxes 6 and 7, outside the scope left out (but a sale
+on `turnover` read from before), exempt interest, a reverse charge in boxes 1, 4, 6 and 7, credit notes
+each way, pay and untreated purchases left out, the working adding up to each box, the pence of 6–9
+left out either way (a negative box 6), cash accounting's days, a row of yours paid for the company with
+and without an invoice to it, reg 111 claims in the first return with their amounts in box 7 (and out of
+time), VAT before registration, a reverse charge on its tax point (paid, a journal invoiced or not, the
+year's end) and the warning without a period, journals by their side and opening journals left out;
+what stops a return and what does not (a check in another period), the cash accounting limit; the CSV
+and its disclaimer, and a filed return with checks left; a deregistered company's last return; a filing
+matching, filed late, leaving out a reverse charge, rounding its pence, and the filed net on the books'
+basis; errors corrected on a later return or reported separately (in parts that add up), unsettled, each
+part out of time on its own, the limits at their edges; penalty regimes, exclusions, overdue returns,
+expiry, frequency changes and the table's columns by length; late payment penalties; the thresholds by
+date and taxable turnover; the route, its CSV, future days refused, and the corrections it records
+(owner only); and as properties over generated rows, that boxes 3 and 5 follow from 1, 2 and 4 and 6 and
+7 from their exact sums, and that the returns' net VAT is exactly the VAT ledger's tagged movement from
+registration on.
 
 ### The director's loan from the books (`director-loan.ts`, `loanMovements`)
 
