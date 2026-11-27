@@ -458,6 +458,12 @@ export function booksProblems(books: CompanyBooksSetup & { filings?: readonly Co
       if (toMinor(b.totalVatDue) !== toMinor(b.vatDueSales) + toMinor(b.vatDueAcquisitions)) out.push(`${what}: box 3 is not boxes 1 and 2 together.`);
       if (toMinor(b.netVatDue) !== Math.abs(toMinor(b.totalVatDue) - toMinor(b.vatReclaimedCurrPeriod))) out.push(`${what}: box 5 is not the difference of boxes 3 and 4.`);
     }
+    if (f.kind === 'vat') {
+      const corrected = (f.corrections ?? []).map((c) => c.periodEnd);
+      for (const c of f.corrections ?? []) if (c.periodEnd >= (f.periodStart ?? f.periodEnd)) out.push(`${what} corrects the period to ${day(c.periodEnd)}, which is not before it: an error is corrected on a later return.`);
+      for (const d of new Set(corrected.filter((e, i) => corrected.indexOf(e) !== i))) out.push(`${what} corrects the period to ${day(d)} twice: give its net correction once.`);
+      if (f.disclosed && f.disclosed.on < f.filedOn) out.push(`${what}: its errors are reported to HMRC (${day(f.disclosed.on)}) before it was filed.`);
+    }
   }
   return out;
 }

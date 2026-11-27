@@ -4,6 +4,7 @@
 
 import { movesDirectorLoan } from '../../shared/company';
 import { DEADLINE_LEAD_DAYS, DEADLINE_WARN_DAYS } from '../../shared/deadlines';
+import { SA_DISCLAIMER } from '../../shared/disclaimers';
 import type { Alert, MissingDaysView, SaEmployment, SaItem, SaPaymentLink, SaSection, SaSource, SelfAssessmentResponse } from '../../shared/api';
 import { diffDays, formatDate, formatSpan, today, type ISODate } from '../../shared/dates';
 import { formatMoney, fromMinor, toMinor } from '../../shared/money';
@@ -16,8 +17,7 @@ import { employerYears, type PaySource } from './sources';
 import { jobStartedOn } from './pay';
 import { taxReturn } from './taxreturn';
 
-export const SA_DISCLAIMER =
-  'This page gathers figures from your own data to help you fill in your Self Assessment return. It is not tax advice and it can be incomplete or wrong: bank data shows net pay, may miss interest paid into accounts you have not imported, and cannot know which donations were Gift Aided. Check every figure against your P60, P11D, bank interest statements, pension and dividend statements before you submit. You are responsible for your return.';
+export { SA_DISCLAIMER };
 
 const inYear = (d: string | undefined, ty: TaxYear) => Boolean(d && d >= ty.start && d <= ty.end);
 

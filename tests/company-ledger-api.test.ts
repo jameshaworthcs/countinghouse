@@ -8,9 +8,11 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { AccountDetailResponse, CompanyAccountsResponse, CompanyCodingResponse, CompanyLedgerResponse, DataHealthResponse, ProposalDecision, ProposalView } from '../src/shared/api';
+import type { AccountDetailResponse, CompanyAccountsResponse, CompanyCodingResponse, CompanyLedgerResponse, CompanyVatResponse, DataHealthResponse, ProposalDecision, ProposalView } from '../src/shared/api';
+import { VAT_RETURN_DISCLAIMER } from '../src/shared/disclaimers';
 import type { Account, Company, Journal, ProposalInput, Rule, Transaction } from '../src/shared/schema';
 import { createApp, type App } from '../src/server/app';
+import { csvCell } from '../src/server/context';
 import { loadConfig } from '../src/server/config';
 import { BalanceEngine } from '../src/server/analytics/balances';
 import { enrich } from '../src/server/enrich';
@@ -357,6 +359,39 @@ describe('a company’s general ledger through the app', () => {
     expect((await req(`/api/companies/${CO}/accounts?period=June`)).status).toBe(400);
     // An agent token may read it, as any GET.
     expect((await req(`/api/companies/${CO}/accounts`, { headers: { authorization: agent } })).status).toBe(200);
+  });
+  it('serves its VAT returns from the company’s own route, a return as CSV ending with the disclaimer, and records corrections', async () => {
+    expect((await send('PUT', `/api/companies/${CO}/rows/${sale.id}/books`, { books: { ledger: 'turnover', vat: { amount: 300, treatment: 'standard' } } })).status).toBe(200);
+    expect((await send('PUT', `/api/companies/${CO}/rows/${cloud.id}/books`, { books: { ledger: 'software-hosting', vat: { amount: -7.2, treatment: 'reverse-charge' } } })).status).toBe(200);
+    const v = await json<CompanyVatResponse>(`/api/companies/${CO}/vat?period=2025-06-30`);
+    expect(v.ret!.period).toMatchObject({ start: '2025-04-01', end: '2025-06-30', due: '2025-08-07' });
+    expect(Object.fromEntries(v.ret!.boxes.map((b) => [b.box, b.value]))).toMatchObject({ 1: 30_720, 4: 720, 5: 30_000, 6: 1_536, 7: 36 });
+    // The tools paid on your card are not coded yet, and the loan has no company row of its own linked: the return is not ready.
+    expect(v.ret!.ready).toBe(false);
+    expect(v.disclaimer).toBe(VAT_RETURN_DISCLAIMER);
+    const csv = await req(`/api/companies/${CO}/vat?period=2025-06-30&format=csv`);
+    expect(csv.headers.get('content-type')).toMatch(/text\/csv/);
+    const text = await csv.text();
+    expect(text.split('\n')[1]).toBe('1,VAT due on sales and other outputs,307.20');
+    expect(text.trim().split('\n').at(-1)).toBe(csvCell(VAT_RETURN_DISCLAIMER));
+    expect((await req(`/api/companies/${CO}/vat?period=2025-06-29`)).status).toBe(404);
+    expect((await req(`/api/companies/${CO}/vat?period=June`)).status).toBe(400);
+    expect((await req(`/api/companies/${CO}/vat`, { headers: { authorization: agent } })).status).toBe(200);
+    // A filing says which earlier errors it corrected; only the owner says so, and only of a VAT return.
+    const boxes = { vatDueSales: 10, vatDueAcquisitions: 0, totalVatDue: 10, vatReclaimedCurrPeriod: 0, netVatDue: 10, totalValueSalesExVAT: 0, totalValuePurchasesExVAT: 0, totalValueGoodsSuppliedExVAT: 0, totalAcquisitionsExVAT: 0 };
+    const filed = await send('POST', `/api/companies/${CO}/filings`, { kind: 'vat', periodStart: '2025-07-01', periodEnd: '2025-09-30', filedOn: '2025-10-20', figures: boxes });
+    expect(filed.status).toBe(201);
+    const fid = filed.body.id as string;
+    expect((await send('PUT', `/api/companies/${CO}/filings/${fid}/vat-corrections`, { corrections: [{ periodEnd: '2025-06-30', amount: 10 }] }, agent)).status).toBe(403);
+    expect((await send('PUT', `/api/companies/${CO}/filings/${fid}/vat-corrections`, { corrections: [{ periodEnd: '2025-09-30', amount: 10 }] })).status).toBe(422);
+    const ok = await send('PUT', `/api/companies/${CO}/filings/${fid}/vat-corrections`, { corrections: [{ periodEnd: '2025-06-30', amount: 10 }] });
+    expect(ok.status).toBe(200);
+    expect(store.company(CO)!.books!.filings.find((f) => f.id === fid)).toMatchObject({ corrections: [{ periodEnd: '2025-06-30', amount: 10 }], figures: boxes });
+    // null takes it away.
+    expect((await send('PUT', `/api/companies/${CO}/filings/${fid}/vat-corrections`, { corrections: null })).status).toBe(200);
+    expect(store.company(CO)!.books!.filings.find((f) => f.id === fid)).not.toHaveProperty('corrections');
+    const ct = await send('POST', `/api/companies/${CO}/filings`, { kind: 'confirmation', periodEnd: '2025-01-31', filedOn: '2025-02-03' });
+    expect((await send('PUT', `/api/companies/${CO}/filings/${ct.body.id as string}/vat-corrections`, { corrections: [] })).status).toBe(422);
   });
   it('locks the books through the end of a period whose accounts are filed: nothing changes them, but the owner may move the lock', async () => {
     // Before filing: a laptop on the register, and a policy for computers from the start.

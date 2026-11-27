@@ -42,9 +42,10 @@ import type {
   EarmarkEffect,
   Earmarks,
   VatTreatment,
+  VatBoxes,
 } from './schema';
 import type { AssetRegisterClass, ProfitLine, SheetLine } from './ledger';
-import type { TaxBand } from './uk';
+import type { TaxBand, VatFrequency, VatStagger } from './uk';
 
 export interface Alert {
   id: string;
@@ -1867,6 +1868,205 @@ export interface CompanyAccountsResponse {
   ready: boolean;
   /** The accounts filed for it: the lines filed against those worked out now. */
   filing?: { filedOn: string; reference?: string; lines: { line: string; filed: number; computed: number }[]; matches: boolean };
+}
+
+// ─── A company's VAT returns (analytics/vat-return.ts, FORMULAS.md §22, "VAT returns") ──────────────
+
+/** A VAT return's box, by the name HMRC's Making Tax Digital API gives it (`VatBoxes`). */
+export type VatBoxKey = keyof VatBoxes;
+
+/** A posting's part in a box of a VAT return: the working behind the box. */
+export interface VatBoxLine {
+  postingId: string;
+  source: LedgerPosting['source'];
+  /** The posting's own day (its payment's, under cash accounting). */
+  date: string;
+  /**
+   * Why it is in this return though its day is not in the period: a claim of VAT from before
+   * registration (`reg111`, the first return), or a reverse charge's tax point (`tax-point`: the end of
+   * the service it covers, when that comes before it was paid).
+   */
+  counted?: 'reg111' | 'tax-point';
+  ledger: string;
+  treatment?: VatTreatment;
+  /** What it adds to the box, in pence (a refund or a credit note takes away). */
+  amount: number;
+  memo: string;
+}
+
+export interface VatBoxView {
+  /** 1 to 9. */
+  box: number;
+  key: VatBoxKey;
+  label: string;
+  /** Boxes 1–5 in pence; boxes 6–9 in whole pounds, the pence left out. */
+  value: number;
+  /** Boxes 6–9: the exact value in pence, before the pence are left out. */
+  exact?: number;
+  lines: VatBoxLine[];
+  /** Boxes 2, 8 and 9 (goods between Northern Ireland and the EU): not supported, so 0. */
+  unsupported?: true;
+}
+
+/**
+ * A posting to a sales or purchase code left out of boxes 6 and 7: outside the scope (`outside`), not
+ * a supply by its code (`not-a-supply`: wages, pensions, depreciation, Corporation Tax, penalties,
+ * donations), no VAT treatment said (`untreated`), or the value of a purchase from before registration
+ * whose VAT is claimed (`reg111`).
+ */
+export interface VatLeftOut extends VatBoxLine {
+  reason: 'outside' | 'not-a-supply' | 'untreated' | 'reg111';
+  side: 'sales' | 'purchases';
+}
+
+/** What stops a VAT return being ready to file. */
+export type VatReturnCheck =
+  | { kind: 'not-ended'; end: string }
+  /** The books start after the period does: what came before is not in them. */
+  | { kind: 'not-in-books'; ledgerFrom: string }
+  /** A ledger check on something that belongs to this return (an uncoded row, a loan not imported, VAT with no invoice…). */
+  | { kind: 'ledger'; check: LedgerCheck }
+  /** Rows posted to suspense in the period, net (pence): not coded, so their VAT is not known. */
+  | { kind: 'suspense'; amount: number };
+
+/** open: not ended; not-ready: ended, not filed, a check stops it; ready: ended, nothing stops it; filed and filed late: recorded; before-books: not filed and not in the books. */
+export type VatPeriodStatus = 'open' | 'not-ready' | 'ready' | 'filed' | 'filed-late' | 'before-books';
+
+/** One VAT period, as the VAT tab lists it. */
+export interface VatPeriodRow {
+  start: string;
+  end: string;
+  due: string;
+  stagger: VatStagger;
+  status: VatPeriodStatus;
+  /** Not filed, and its due day has passed. */
+  overdue: boolean;
+  /** The first return after registration (reg 111 claims fall in it), and the last before deregistration. */
+  first: boolean;
+  final: boolean;
+  /** The books' net VAT, box 3 less box 4 in pence (positive to pay, negative to reclaim); null when the books do not cover the period. */
+  computed: number | null;
+  /** The return filed: its box 3 less box 4, in pence; null without figures. */
+  filed: number | null;
+  filedOn?: string;
+  reference?: string;
+  /** The filing recorded for it. */
+  filingId?: string;
+  /** The filing's boxes differ from what the books give (with the corrections it included). */
+  differs?: boolean;
+}
+
+/** A return filed, against what the books give for its period. */
+export interface VatFiledComparison {
+  filedOn: string;
+  reference?: string;
+  late: boolean;
+  /** Errors on earlier returns it corrected, in its boxes 1 (positive) and 4 (negative): pence. */
+  corrections: { periodEnd: string; amount: number }[];
+  /** Each box: as filed, as the books give it, as the filing should show with its corrections (`expected`), and filed less expected. Boxes 1–5 pence, 6–9 whole pounds. */
+  boxes: { box: number; key: VatBoxKey; filed: number; computed: number; expected: number; difference: number }[];
+  matches: boolean;
+  /** Likely causes of the differences, where they can be told. */
+  causes: string[];
+}
+
+/** One VAT return worked out from the books (FORMULAS.md §22, "VAT returns"). */
+export interface VatReturnView {
+  period: VatPeriodRow;
+  /** The nine boxes, with their working. */
+  boxes: VatBoxView[];
+  /** Box 5's direction: box 3 more than box 4 is to pay. */
+  direction: 'pay' | 'reclaim' | 'nil';
+  /** Whether the books reach the period at all (a period before them shows only what was filed). */
+  inBooks: boolean;
+  checks: VatReturnCheck[];
+  /** Ended, and nothing stops it. */
+  ready: boolean;
+  leftOut: VatLeftOut[];
+  /** What it does not cover, in words (a final return's stock and assets, say). */
+  notes: string[];
+  filed?: VatFiledComparison;
+}
+
+/** A filed return's error, as the books find it (VAT Notice 700/45). */
+export interface VatErrorRow {
+  start: string;
+  end: string;
+  due: string;
+  /** The net VAT error in pence, as HMRC sees it: positive, the return declared too little. Its parts: output tax (box 1) and input tax (box 4, positive when too much was claimed). */
+  error: number;
+  output: number;
+  input: number;
+  /** Corrected since: on later returns, or reported separately (pence, signed as the error). */
+  correctedBy: ({ kind: 'return'; periodEnd: string; amount: number } | { kind: 'separately'; on: string; amount: number; reference?: string })[];
+  uncorrected: number;
+  /** The uncorrected errors up to and including this one, added up. */
+  runningTotal: number;
+  /** The last day it may be corrected (4 years). */
+  inTimeUntil: string;
+  outOfTime: boolean;
+  /** The books for the period have checks to clear: the difference may be theirs, so it is not counted. */
+  unsettled: boolean;
+}
+
+/** The errors on filed returns, and how they may be corrected (VAT Notice 700/45). */
+export interface VatCorrectionsView {
+  errors: VatErrorRow[];
+  /** The net of the uncorrected errors that count (in time, settled), pence. */
+  net: number;
+  /** The return they would be corrected on: the next to file, with its box 6 (whole pounds; provisional until it ends). */
+  on?: { start: string; end: string; box6: number; provisional: boolean };
+  method: 'next-return' | 'separately' | 'none';
+  limit: 'basic' | 'box6' | 'over' | null;
+  /** The most the net may be for the next return (pence). */
+  maxMinor: number;
+  rules: { from: string; limit: number; upperLimit: number; box6Percent: number; years: number };
+}
+
+/** HMRC's late submission penalty points, for information: the returns filed late, and the rules. */
+export interface VatPenaltyView {
+  from: string;
+  frequency: VatFrequency;
+  rules: { thresholds: Record<VatFrequency, number>; penalty: number; expiryMonths: number; complianceMonths: Record<VatFrequency, number>; outstandingMonths: number; frequencyChange: Record<VatFrequency, Record<VatFrequency, number>> };
+  /** Returns filed late, or not filed and past due: points apply from periods starting on `from`; earlier ones were under the default surcharge. */
+  late: { start: string; end: string; due: string; filedOn: string | null; days: number; expires: string; regime: 'points' | 'surcharge' | 'excluded'; excluded?: 'first' | 'final' }[];
+  /** Points from these late returns that would not have expired by today, were the threshold never reached: indicative only. */
+  live: number;
+  /** Changes of frequency since points began, and HMRC's adjustment for each. */
+  changes: { from: string; was: VatFrequency; to: VatFrequency; adjustment: number }[];
+}
+
+/** Taxable turnover over the last 12 months against the registration thresholds (information). */
+export interface VatThresholdView {
+  /** The 12 months to this day. */
+  from: string;
+  to: string;
+  /** Pence: taxable sales (standard, reduced, zero-rated, or untreated sales), and services received under the reverse charge. */
+  taxable: number;
+  parts: { sales: number; untreated: number; reverseCharge: number };
+  registration: number;
+  deregistration: number;
+  thresholdsFrom: string;
+  /** The rolling 12 months to each month's end, the latest last. */
+  months: { end: string; taxable: number; registration: number; deregistration: number }[];
+  /** The books start within the 12 months: what came before is not in them. */
+  partial: boolean;
+  registered: boolean;
+}
+
+/** GET /companies/:id/vat?period=<end>: a company's VAT returns from its books. */
+export interface CompanyVatResponse {
+  company: { id: string; name: string };
+  registration: { registeredFrom: string; scheme: string; deregisteredOn?: string; stagger: VatStagger } | null;
+  periods: VatPeriodRow[];
+  /** The return to file next: the earliest ended and not filed, else the one running. */
+  next?: string;
+  /** The return shown: the one asked for, else the next. */
+  ret: VatReturnView | null;
+  corrections: VatCorrectionsView;
+  penalties: VatPenaltyView | null;
+  threshold: VatThresholdView;
+  disclaimer: string;
 }
 
 /** A row that takes a coding in a company's books (shared/ledger.ts, `codingPlace`), as the Books tab lists it. */

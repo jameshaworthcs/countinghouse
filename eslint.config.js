@@ -31,6 +31,10 @@ const SCOPE_ALLOWLIST = {
   // A company's accounts for a period (its trial balance, profit and loss, balance sheet, register,
   // bank reconciliation), from its ledger, one company at a time, served only from its own routes.
   'src/server/analytics/period-accounts.ts': "a company's period accounts, one company at a time",
+  // A company's VAT returns (their boxes, the returns filed against them, errors, penalty points and
+  // the thresholds), from its ledger and its opening journals, one company at a time, served only from
+  // its own routes.
+  'src/server/analytics/vat-return.ts': "a company's VAT returns, one company at a time",
 };
 
 export default tseslint.config(

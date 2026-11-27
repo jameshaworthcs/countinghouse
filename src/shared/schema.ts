@@ -829,6 +829,28 @@ export const MICRO_ENTITY_LINES = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 
 export const MicroEntityLinesSchema = z.object(Object.fromEntries(MICRO_ENTITY_LINES.map((l) => [l, z.number().int().optional()])) as Record<(typeof MICRO_ENTITY_LINES)[number], z.ZodOptional<z.ZodNumber>>);
 export type MicroEntityLines = z.infer<typeof MicroEntityLinesSchema>;
 
+/**
+ * An error on an earlier VAT return corrected on this one (VAT Notice 700/45, "method 1"): the earlier
+ * period's last day, and the net VAT corrected, signed as HMRC sees it: positive, VAT the company owed
+ * (added to box 1), negative, VAT due to it (added to box 4).
+ */
+export const VatCorrectionSchema = z.object({
+  periodEnd: ISODateSchema,
+  amount: MoneySchema.refine((v) => v !== 0, { message: 'A correction is not nothing' }),
+});
+export type VatCorrection = z.infer<typeof VatCorrectionSchema>;
+/**
+ * The errors on this VAT return reported to HMRC separately (Notice 700/45, "method 2": online, or by
+ * form VAT652), not on a later return: the day, the net VAT (signed as a correction is), and HMRC's
+ * reference.
+ */
+export const VatDisclosureSchema = z.object({
+  on: ISODateSchema,
+  amount: MoneySchema.refine((v) => v !== 0, { message: 'A correction is not nothing' }),
+  reference: z.string().trim().min(1).max(60).optional(),
+});
+export type VatDisclosure = z.infer<typeof VatDisclosureSchema>;
+
 /** What every filing records: the period it is for, the day it was filed (or paid), and its reference. */
 const filingBase = {
   /** The period's first day: a VAT return's, a CT600's; absent for a confirmation statement. */
@@ -847,7 +869,16 @@ const filingKinds = <T extends z.ZodRawShape>(extra: T) =>
     z.object({ ...extra, kind: z.literal('ct600'), ...filingBase, figures: z.object({ taxPayable: MoneySchema.refine((v) => v >= 0, { message: 'Tax payable is not negative' }) }).optional() }),
     // A payment of £0 says there is no Corporation Tax to pay for the period.
     z.object({ ...extra, kind: z.literal('ct-payment'), ...filingBase, figures: z.object({ amount: MoneySchema.refine((v) => v >= 0, { message: 'A payment is not negative (£0: nothing to pay)' }) }).optional() }),
-    z.object({ ...extra, kind: z.literal('vat'), ...filingBase, figures: VatBoxesSchema.optional() }),
+    z.object({
+      ...extra,
+      kind: z.literal('vat'),
+      ...filingBase,
+      figures: VatBoxesSchema.optional(),
+      /** Errors on earlier returns this one corrected (its boxes 1 and 4 include them). */
+      corrections: z.array(VatCorrectionSchema).max(40).optional(),
+      /** Errors on this return reported to HMRC separately. */
+      disclosed: VatDisclosureSchema.optional(),
+    }),
     z.object({ ...extra, kind: z.literal('confirmation'), ...filingBase }),
   ] as const;
 

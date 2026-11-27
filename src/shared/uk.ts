@@ -964,3 +964,124 @@ export function lastWorkingDayOfMonth(date: ISODate): ISODate {
   while (!isMonthEndWorkingDay(d)) d = addDays(d, -1);
   return d;
 }
+
+// ─── VAT returns from a company's books (docs/UK_RULES.md, "VAT returns") ──────────────────────────
+//
+// What the books' VAT return works with besides the periods and deadlines above: the threshold for
+// correcting errors on a later return, HMRC's late submission penalty points, and the registration and
+// deregistration thresholds. Each a dated row (`ruleOn`), looked up by the date that decides it.
+
+/**
+ * Correcting errors on earlier VAT returns (VAT Notice 700/45 sections 4.2–4.7). The net value of the
+ * errors found on earlier returns (the VAT due to HMRC less that due to the company, across them) may be
+ * corrected on the current return ("method 1", using its boxes 1 and 4: Notice 700/12 para 6.6) when it
+ * is no more than £10,000, or no more than £50,000 and no more than 1% of the box 6 of the return for
+ * the period the errors are found in. Above that, or for errors made deliberately, they are reported to
+ * HMRC separately ("method 2"), which may be chosen for an error of any size. An error is corrected
+ * within 4 years: from the end of the period it was made in for output tax under-declared and input tax
+ * over-claimed, from the return's due date for input tax under-claimed (section 4.7; the limit does not
+ * apply to deliberate errors). By the day the errors are found: these limits from 1 July 2008 (£2,000
+ * before, not covered).
+ */
+export const VAT_ERROR_CORRECTION_RULES: readonly { from: ISODate; limit: number; upperLimit: number; box6Percent: number; years: number }[] = [{ from: '2008-07-01', limit: 10_000, upperLimit: 50_000, box6Percent: 1, years: 4 }];
+
+/** How a net error (pence, either way) may be corrected, found on `day`, `box6` (whole pounds) being the box 6 of the return for that period. */
+export function vatCorrectionMethod(netMinor: number, box6: number, day: ISODate): { method: 'next-return' | 'separately'; limit: 'basic' | 'box6' | 'over'; maxMinor: number } {
+  const r = ruleOn(VAT_ERROR_CORRECTION_RULES, day);
+  const net = Math.abs(netMinor);
+  if (net <= r.limit * 100) return { method: 'next-return', limit: 'basic', maxMinor: r.limit * 100 };
+  // 1% of box 6, in pence: box 6 is whole pounds, so 1% of it is box6 pence.
+  const onePercent = Math.max(0, box6) * r.box6Percent;
+  const upper = Math.min(r.upperLimit * 100, onePercent);
+  if (net <= upper) return { method: 'next-return', limit: 'box6', maxMinor: upper };
+  return { method: 'separately', limit: 'over', maxMinor: Math.max(r.limit * 100, upper) };
+}
+
+/**
+ * The last day an error on a return may be corrected (Notice 700/45 section 4.7): 4 years from the end
+ * of its period, or for input tax under-claimed from the return's due date. Not for deliberate errors.
+ */
+export function vatCorrectionDeadline(periodEnd: ISODate, due: ISODate, underClaimedInput: boolean): ISODate {
+  const r = ruleOn(VAT_ERROR_CORRECTION_RULES, periodEnd);
+  return addYears(underClaimedInput ? due : periodEnd, r.years);
+}
+
+/** How often returns are made, for penalty points: annual accounting, quarterly (any stagger) or monthly. */
+export type VatFrequency = 'annual' | 'quarterly' | 'monthly';
+export const vatFrequencyOf = (stagger: VatStagger): VatFrequency => (stagger === 'annual' ? 'annual' : stagger === 'monthly' ? 'monthly' : 'quarterly');
+
+/**
+ * Late submission penalties for VAT returns (Finance Act 2021 s116 and Sch 24; GOV.UK, "Penalty points
+ * and penalties if you submit your VAT Return late" and "Remove penalty points you've received after
+ * submitting your VAT Return late"), for VAT periods starting on or after 1 January 2023 (default
+ * surcharge before, not covered): a point for each return submitted late, nil and repayment returns
+ * included, but not the first return after registration, the final one after cancellation or a one-off
+ * return. At the threshold for the frequency (annual 2, quarterly 4, monthly 5) a £200 penalty, and
+ * another for each later late return while at it. Below it, a point expires on the last day of the month
+ * 24 months after the month the return was due (25 when it was due on a month's last day); at it, the
+ * points are reset to nothing only after a period of compliance (annual 24 months, quarterly 12, monthly
+ * 6) with every return due in the 24 months before submitted. A change of frequency adjusts the points
+ * (never below nothing). HMRC keep the official count: these are its rules, for information.
+ */
+export const VAT_PENALTY_RULES: readonly {
+  from: ISODate;
+  thresholds: Record<VatFrequency, number>;
+  penalty: number;
+  expiryMonths: number;
+  complianceMonths: Record<VatFrequency, number>;
+  outstandingMonths: number;
+  frequencyChange: Record<VatFrequency, Record<VatFrequency, number>>;
+}[] = [
+  {
+    from: '2023-01-01',
+    thresholds: { annual: 2, quarterly: 4, monthly: 5 },
+    penalty: 200,
+    expiryMonths: 24,
+    complianceMonths: { annual: 24, quarterly: 12, monthly: 6 },
+    outstandingMonths: 24,
+    frequencyChange: {
+      annual: { annual: 0, quarterly: 2, monthly: 3 },
+      quarterly: { annual: -2, quarterly: 0, monthly: 1 },
+      monthly: { annual: -3, quarterly: -1, monthly: 0 },
+    },
+  },
+];
+
+/** The first day of VAT periods penalty points apply to: earlier periods are under the default surcharge. */
+export const VAT_PENALTY_POINTS_FROM = VAT_PENALTY_RULES[0]!.from;
+
+/**
+ * When a penalty point for a return due on `due` expires, below the threshold: the last day of the month
+ * 24 months after the month it was due, or 25 when it was due on a month's last day (GOV.UK, "Remove
+ * penalty points…": the point counts from the month after the failure, the day after the deadline).
+ */
+export function vatPointExpiry(due: ISODate): ISODate {
+  const r = ruleOn(VAT_PENALTY_RULES, due);
+  return endOfMonth(addMonths(startOfMonth(due), r.expiryMonths + (isMonthEnd(due) ? 1 : 0)));
+}
+
+/**
+ * The VAT registration and deregistration thresholds (VATA 1994 Sch 1 paras 1 and 4; VAT Notice 700/1
+ * and its supplement's table of earlier limits): a business must register when its taxable turnover in
+ * the last 12 months goes over the registration threshold (or is expected to in the next 30 days alone),
+ * and may ask to cancel when it falls below the deregistration threshold. Taxable turnover is everything
+ * sold that is not exempt or outside the scope, zero-rated sales included, with services received from
+ * abroad under the reverse charge (Notice 700 para 5.4; Notice 741A para 5.7), and supplies of the
+ * business's capital assets left out (Sch 1 para 1(7)). By the day the test is made.
+ */
+export const VAT_REGISTRATION_THRESHOLDS: readonly { from: ISODate; registration: number; deregistration: number }[] = [
+  { from: '2010-04-01', registration: 70_000, deregistration: 68_000 },
+  { from: '2011-04-01', registration: 73_000, deregistration: 71_000 },
+  { from: '2012-04-01', registration: 77_000, deregistration: 75_000 },
+  { from: '2013-04-01', registration: 79_000, deregistration: 77_000 },
+  { from: '2014-04-01', registration: 81_000, deregistration: 79_000 },
+  { from: '2015-04-01', registration: 82_000, deregistration: 80_000 },
+  { from: '2016-04-01', registration: 83_000, deregistration: 81_000 },
+  { from: '2017-04-01', registration: 85_000, deregistration: 83_000 },
+  { from: '2024-04-01', registration: 90_000, deregistration: 88_000 },
+];
+
+/** The registration and deregistration thresholds in force on a day (`VAT_REGISTRATION_THRESHOLDS`). */
+export function vatThresholdsOn(date: ISODate): { from: ISODate; registration: number; deregistration: number } {
+  return ruleOn(VAT_REGISTRATION_THRESHOLDS, date);
+}

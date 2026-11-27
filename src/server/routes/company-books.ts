@@ -16,13 +16,14 @@ import { z } from 'zod';
 import type { CompanyBooksListItem, CompanyBooksResponse } from '../../shared/api';
 import { accountingPeriodsOf, addedBooksProblems, booksProblems, lockAfterFiling, companyDeadlineAlerts, companyDeadlines, ctPeriodsOf, FILING_KIND_LABELS, vatPeriodsOf, withinChargeAssumed, withinChargeFrom } from '../../shared/company-books';
 import { formatDate, today } from '../../shared/dates';
-import { BooksCodingSchema, CompanyBooksSchema, CompanyBooksSetupSchema, CompanyFilingInputSchema, CompanyFilingSchema, CompanySchema, JournalInputSchema, RuleSchema, SlugSchema, TimestampSchema, type Company, type Journal, type Rule, type Transaction } from '../../shared/schema';
+import { BooksCodingSchema, CompanyBooksSchema, CompanyBooksSetupSchema, CompanyFilingInputSchema, CompanyFilingSchema, CompanySchema, JournalInputSchema, RuleSchema, SlugSchema, TimestampSchema, VatCorrectionSchema, VatDisclosureSchema, type Company, type Journal, type Rule, type Transaction } from '../../shared/schema';
 import { codingPlace, isLinked } from '../../shared/ledger';
 import { autoLinkPatches, bookRulePatches, codingView, companyBookRules, ledgerView } from '../analytics/ledger';
 import { periodAccounts } from '../analytics/period-accounts';
+import { companyVat, vatReturnCsv } from '../analytics/vat-return';
 import { defaultAccountingReferenceDate } from '../../shared/uk';
 import { companyView } from '../analytics/companies';
-import { agentTokenOf, queryDate, readJson, type AppContext } from '../context';
+import { agentTokenOf, csvCell, queryDate, readJson, type AppContext } from '../context';
 import { nowAfter, nowISO, randomHex } from '../fsutil';
 import { filingId, ruleId } from '../ids';
 import { StoreError } from '../store';
@@ -40,6 +41,9 @@ const LinkBody = z.object({
 });
 const JournalBody = z.object({ journal: JournalInputSchema, /** An edit: the journal's `updatedAt` it was made against. */ was: TimestampSchema.optional() });
 const BookRuleBody = RuleSchema.omit({ id: true, createdAt: true, updatedAt: true });
+
+/** The errors a VAT return corrected (method 1) and its own errors reported separately (method 2): each null takes it away. */
+const VatCorrectionsBody = z.object({ corrections: z.array(VatCorrectionSchema).max(40).nullable().optional(), disclosed: VatDisclosureSchema.nullable().optional() });
 
 const SetupBody = z.object({ books: CompanyBooksSetupSchema, was: TimestampSchema.nullable().optional(), /** The company the page was showing: refused when it is not this one. */ company: SlugSchema.optional() });
 
@@ -169,6 +173,42 @@ export function companyBookRoutes(ctx: AppContext): Hono {
     return c.json({ ok: true });
   });
 
+  /**
+   * Say which errors on earlier returns a VAT return corrected (VAT Notice 700/45 method 1: its boxes 1
+   * and 4 include them), or that its own errors were reported to HMRC separately (method 2). The figures
+   * filed stay as they are: this records what was done about them.
+   */
+  app.put('/companies/:id/filings/:filingId/vat-corrections', async (c) => {
+    ownerOnly(c);
+    const id = c.req.param('id');
+    const fid = c.req.param('filingId');
+    const body = await readJson(c, VatCorrectionsBody);
+    if (body.disclosed && body.disclosed.on > today()) throw new StoreError(`${formatDate(body.disclosed.on)} is in the future.`, 422);
+    const name = companyOr404(id).name;
+    let saved: unknown;
+    await store.updateCompany(
+      id,
+      (company) => {
+        if (!company) throw new StoreError('No such company', 404);
+        const books = booksOr404(company);
+        const was = books.filings.find((f) => f.id === fid);
+        if (!was) throw new StoreError('No such filing', 404);
+        if (was.kind !== 'vat') throw new StoreError('Only a VAT return records corrections of VAT errors.', 422);
+        const { corrections: _c, disclosed: _d, ...rest } = was;
+        const corrections = body.corrections === undefined ? was.corrections : (body.corrections ?? undefined);
+        const disclosed = body.disclosed === undefined ? was.disclosed : (body.disclosed ?? undefined);
+        const filing = CompanyFilingSchema.parse({ ...rest, ...(corrections?.length ? { corrections } : {}), ...(disclosed ? { disclosed } : {}) });
+        const next = { ...books, filings: books.filings.map((f) => (f.id === fid ? filing : f)) };
+        const added = addedBooksProblems(books, next);
+        if (added.length) throw new StoreError(added.join(' '), 422);
+        saved = filing;
+        return CompanySchema.parse({ ...company, books: next, updatedAt: nowISO() });
+      },
+      `company: ${name} VAT corrections on ${fid}`,
+    );
+    return c.json(saved);
+  });
+
   // ─── The general ledger (FORMULAS.md §22, "The general ledger") ──────────────────────────────────
 
   const keptOr404 = (id: string): Company => {
@@ -193,6 +233,26 @@ export function companyBookRoutes(ctx: AppContext): Hono {
     const body = periodAccounts({ src: store, company, engine: ctx.analytics.companyEngine(company.id), today: today(), period });
     if (!body) throw new StoreError(period ? `${company.name} has no accounting period ending on ${formatDate(period)} in its books.` : `${company.name}’s books reach no accounting period yet.`, 404);
     return c.json(body);
+  });
+
+  /**
+   * Its VAT returns from the books (`?period=<its last day>`; absent: the next to file): the periods and
+   * their state, the return's nine boxes with their working and checks, the return filed against them,
+   * the errors on returns filed, penalty points information and the thresholds. `format=csv`: the
+   * return's nine boxes, ending with the disclaimer. Nothing is sent to HMRC.
+   */
+  app.get('/companies/:id/vat', (c) => {
+    const company = keptOr404(c.req.param('id'));
+    const wanted = c.req.query('period');
+    const period = queryDate(wanted);
+    if (wanted && !period) throw new StoreError('A VAT period is given by its last day, YYYY-MM-DD.', 400);
+    const body = companyVat({ src: store, company, today: today(), period });
+    if (!body) throw new StoreError(`${company.name} has no VAT period ending on ${formatDate(period ?? '')} in its books.`, 404);
+    if (c.req.query('format') !== 'csv') return c.json(body);
+    if (!body.ret) throw new StoreError(`${company.name} has no VAT return to export: it is not registered for VAT here.`, 404);
+    return new Response(vatReturnCsv(company, body.ret, csvCell), {
+      headers: { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="vat-return-${company.id}-${body.ret.period.end}.csv"` },
+    });
   });
 
   /** The rows to code (uncoded first), the links between its rows and yours and what could be linked, its journals and book rules. */

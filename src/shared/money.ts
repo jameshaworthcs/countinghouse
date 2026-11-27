@@ -86,6 +86,9 @@ export function apportion(total: number, weights: readonly number[]): number[] {
 /** Integer pence to the nearest whole pound, half away from zero (a filing's figures): 150 is 2, −250 is −3. */
 export const roundToPounds = (minor: number): number => mulDivRound(minor, 1, 100);
 
+/** Integer pence in whole pounds with the pence left out (towards nothing, never rounded up): 199 is 1, −199 is −1. A VAT return's boxes 6–9. */
+export const poundsWithoutPence = (minor: number): number => Math.trunc(minor / 100) || 0;
+
 /**
  * True when `amount` is a finite number with no more than 2 decimal places: exactly the double
  * that a 2-dp decimal parses to (what fromMinor produces and JSON.parse reads). An absolute
