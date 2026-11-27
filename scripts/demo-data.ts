@@ -124,12 +124,16 @@ async function demoCompanyAccount(store: Store, dividendDay: string): Promise<vo
     row(addDays(m, 24), 1_150, 'EXAMPLE AGENCY LTD INV');
     row(addDays(m, 27), -1_200, 'J BLOGGS SALARY');
     row(endOfMonth(m), -5, 'EXAMPLE BANK MONTHLY FEE');
+    // Interest on its balance, paid gross each month: a non-trading loan relationship credit for Corporation Tax.
+    row(endOfMonth(m), roundMoney(26.4 + (i % 5) * 1.73), 'EXAMPLE BANK GROSS INTEREST');
   }
   // What its books make something of (demoCompanyLedger): a laptop kept for years, a year's design
   // tools paid up front, and a service bought from abroad (a reverse charge) twice, in a quarter filed
   // (whose return left it out: demoStudioVatFiled) and in the one running.
   row(addDays(startOfMonth(addMonths(END, -5)), 14), -36, 'EXAMPLE CLOUD INC');
   row(addDays(startOfMonth(addMonths(END, -3)), 11), -1_199, 'EXAMPLE COMPUTERS LTD');
+  // A parking fine on a client visit: a fine, not deductible for Corporation Tax.
+  row(addDays(startOfMonth(addMonths(END, -6)), 8), -70, 'EXAMPLE COUNCIL PCN');
   row(addDays(startOfMonth(addMonths(END, -2)), 2), -288, 'EXAMPLE DESIGN TOOLS ANNUAL');
   row(addDays(startOfMonth(addMonths(END, -1)), 14), -36, 'EXAMPLE CLOUD INC');
   // The bookkeeper's fee for the quarter to the year end, paid after it (an accrual at the year end).
@@ -182,6 +186,11 @@ async function demoCompanyBooks(store: Store): Promise<void> {
       { class: 'computer', months: 36 },
       { class: 'office', months: 60 },
     ],
+    // For Corporation Tax: a trading company with no associated companies, and the main pool's written-down
+    // value carried forward from its last computation, before these books (the computer brought in was in it).
+    closeInvestmentHolding: false,
+    associatedCompanies: [{ periodEnd: STUDIO_YEAR_END, count: 0 }],
+    taxBroughtForward: { mainPool: 1_180 },
     updatedAt: stamp,
   });
   if (!accountingPeriodsOf(books, END).some((p) => p.start === STUDIO_LEDGER_FROM && p.end === STUDIO_YEAR_END)) throw new Error(`demo: the studio has no accounting period ${STUDIO_LEDGER_FROM} to ${STUDIO_YEAR_END}`);
@@ -255,6 +264,8 @@ async function demoCompanyLedger(store: Store): Promise<void> {
     if (t.description === 'J BLOGGS SALARY') return { ledger: 'directors-salaries', setBy: 'user' };
     if (t.description === 'HMRC CORPORATION TAX') return { ledger: 'corporation-tax', setBy: 'user' };
     if (t.description === 'DIVIDEND J BLOGGS') return { ledger: 'dividends', setBy: 'user' };
+    if (t.description === 'EXAMPLE BANK GROSS INTEREST') return { ledger: 'interest-receivable', vat: { amount: 0, treatment: 'exempt' }, setBy: 'user' };
+    if (t.description === 'EXAMPLE COUNCIL PCN') return { ledger: 'penalties', setBy: 'user' };
     return undefined;
   };
   const coded = own.flatMap((t) => {
