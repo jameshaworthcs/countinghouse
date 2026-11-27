@@ -10,7 +10,7 @@ import path from 'node:path';
 import { tokenKey } from './text.ts';
 
 /** Bump when the build changes what it collects, so caches are rebuilt. */
-const BUILDER_VERSION = 11;
+const BUILDER_VERSION = 12;
 
 export interface Denylist {
   version: number;
@@ -188,7 +188,7 @@ const MONEY_KEYS = new Set(
     'cashBalance closingBalance contributions contributionsToDate costBasis creditLimit deductions difference ' +
     'estimatedPay fee gain gainLoss governmentBonusToDate grossSalary leavingPay limit minimumPayment moneyIn moneyOut ' +
     'monthly net netAssets ni nonTaxable openingBalance originalAmount outstanding payments pension propertyPrice rate ' +
-    'readBalance statedMoneyIn statedMoneyOut targetAmount tax taxable taxablePay taxYearContributions taxYearInterest total totalValue ' +
+    'readBalance residual statedMoneyIn statedMoneyOut targetAmount tax taxable taxablePay taxYearContributions taxYearInterest total totalValue ' +
     'value voluntaryCost weekly gross niEmployer niablePay pensionEmployer studentLoan ssp smp taxCredit'
   ).split(/\s+/),
 );
