@@ -1216,7 +1216,7 @@ export const PRE_TRADING_YEARS = 7;
  * The deductions allowance (CTA 2010 s269ZR, s269ZW: £5 million a year, reduced for a shorter period and
  * shared within a group): carried-forward losses and deficits beyond it are restricted to half the
  * profits above it (ss269ZB, 269ZD). The allowance is the amount the company specifies in its return (nil
- * if none, s269ZB(7)); the restriction itself is not worked out here (refused as not supported above it).
+ * if none); the restriction itself is not worked out here (refused as not supported above it).
  */
 export const LOSS_DEDUCTIONS_ALLOWANCE = 5_000_000;
 

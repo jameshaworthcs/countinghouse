@@ -183,7 +183,7 @@ general ledger" (`src/shared/ledger.ts`):
   "Covers"); on any other code it says nothing (a check).
 - `invoicedOn`: beside `covers` only, the day the bill or invoice for it was issued: not yet paid at a
   period end it is then a trade creditor (a cost) or debtor (income), not an accrual.
-- `asset`: `{class, months?, connected?, disposedOn?, residual?}` on a fixed (or intangible) asset's
+- `asset`: `{class, months?, connected?, disposedOn?, residual?, marketValue?, proceeds?, pool?, used?, allowance?}` on a fixed (or intangible) asset's
   cost only, of that code's class (`computer`, `office`, `furniture`, `van`, `motor` (cars), or
   `intangible` on `intangible-assets:cost`), and only on money going out (a debit): it puts the asset on
   the company's register (FORMULAS.md §22, "The register"). `months`: its life in whole months; absent,
@@ -194,6 +194,16 @@ general ledger" (`src/shared/ledger.ts`):
   `disposals`; what it fetched is coded to `disposals` on the row it came in on. `residual`: pounds,
   what it is expected to fetch at the end of its life, not negative and at most its cost; only its cost
   less this is written down.
+  For Corporation Tax (FORMULAS.md §22, "Corporation Tax"; none on an intangible asset or a car, each
+  refused where it does not fit): `marketValue`, pounds, beside `connected` only, its market value when
+  bought, which caps its qualifying expenditure (CAA 2001 s218); `proceeds`, pounds net of VAT, beside
+  `disposedOn` only, what it fetched (its disposal value, capped at its cost; absent, what was coded to
+  `disposals` in the Corporation Tax period it left in, when it alone left then); `pool`, `main` or
+  `special` (special rate expenditure: integral features, long-life assets); `used`, not unused or
+  second-hand (no full expensing or 50% allowance); `allowance`, the owner's choice over the default
+  order: `aia`, `first-year` (never with `connected`, nor `first-year` with `used`) or `none`
+  (writing-down allowances only). A book rule never carries `marketValue` or `proceeds`. Optional and
+  additive.
 - `reduces`: on money coming in (a credit) to a fixed asset's cost, without `asset`: the id of the
   asset on the register whose cost it reduces (`row:tx_…`, `row:tx_…:1` for a split's line,
   `personal:tx_…`, `journal:jnl_…:<line>`), a supplier's part refund, say. Additive (no format version:
@@ -439,7 +449,7 @@ which its deadlines are worked out ([FORMULAS.md §22](FORMULAS.md)). They are t
 yours: `GET /api/companies` leaves them out, and only the company's own routes serve them
 (`GET /api/companies/:id/books`, `/api/company-books`, `/api/company-alerts`). Optional and additive
 (no format version). `{incorporatedOn, accountingReferenceDate?, periods, vat?, paye?,
-confirmationStatement?, tradeStartedOn?, ctPeriods, deadlinesFrom?, ledgerFrom?, policies?, depreciationMonths?, lockedThrough?, filings, setBy, updatedAt}`:
+confirmationStatement?, tradeStartedOn?, ctPeriods, associatedCompanies?, aiaAllocated?, closeInvestmentHolding?, taxBroughtForward?, deadlinesFrom?, ledgerFrom?, policies?, depreciationMonths?, lockedThrough?, filings, setBy, updatedAt}`:
 
 - `incorporatedOn`: the day Companies House incorporated it.
 - `accountingReferenceDate`: `"MM-DD"`, its reference date from incorporation. Absent, the default:
@@ -470,6 +480,18 @@ confirmationStatement?, tradeStartedOn?, ctPeriods, deadlinesFrom?, ledgerFrom?,
 - `ctPeriods`: `[{start, end}]`, Corporation Tax accounting periods other than the worked-out ones
   (HMRC's notice sets them in practice): each 12 months at most, in order, none before
   incorporation.
+- For Corporation Tax (FORMULAS.md §22, "Corporation Tax"; optional and additive):
+  - `associatedCompanies`: `[{periodEnd, count}]`, the number of associated companies (0 to 99) in each
+    Corporation Tax period, by its last day, one per period (CTA 2010 s18E); a period with none given is
+    taken as none, and labelled so.
+  - `aiaAllocated`: `[{periodEnd, amount}]`, pounds, the annual investment allowance allocated to this
+    company for a period when it shares one (CAA 2001 ss51B–51N), one per period; absent, the whole limit.
+  - `closeInvestmentHolding`: `true` or `false` as the owner decides it (CTA 2010 s18N: `true` charges the
+    main rate on all profits); `null` or absent, not said.
+  - `taxBroughtForward`: `{mainPool?, specialPool?, tradingLosses?, nonTradingDeficits?, preTradingExpenditure?}`,
+    pounds, each not negative (absent: nil), only with `ledgerFrom`: what the last computation before
+    these books carried forward to the first Corporation Tax period they reach. Present with nothing in
+    it says there is none; absent, the computation asks for it.
 - `deadlinesFrom`: deadlines due before this day that no filing here does are not listed (they were
   settled before the books were kept here).
 - `ledgerFrom`: the day its general ledger starts (books taken over mid-life): nothing dated before it
@@ -532,7 +554,10 @@ Its **general ledger** is not stored: it is worked out from its own accounts' ro
 "The general ledger"). Once the company keeps books here, your director's loan with it moves by the
 ledger's postings to the loan (§22, "The director's loan from the books"). Its VAT returns are not
 stored either: they are worked out from the ledger and served from `GET /api/companies/:id/vat` (§22,
-"VAT returns"); only what was filed is a record.
+"VAT returns"); only what was filed is a record. Nor are its Corporation Tax computations and CT600
+boxes: worked out from the ledger and its accounts, and served from `GET
+/api/companies/:id/corporation-tax` (§22, "Corporation Tax"); the CT600 and the payment filed are
+records (`filings`).
 
 ## agreements.json
 

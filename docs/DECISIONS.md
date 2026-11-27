@@ -3332,3 +3332,81 @@ April 2026. What changed, and why:
   interest is never taxable turnover; the penalty table's columns go by the period's length; a filed
   return with checks left says so; the periods list shows filed and computed net VAT on the same basis;
   a company deregistered with everything filed shows its last return.
+
+## 2026-11-27: A company's Corporation Tax computation from its books
+
+Slice 6 of the company books: each CT period's computation and the CT600's boxes are worked out from
+the ledger and its period accounts, prepared and checked here, and filed through commercial software
+(FORMULAS.md §22, "Corporation Tax"; UK_RULES.md, "Corporation Tax"). Each rule was read on
+legislation.gov.uk and GOV.UK for this change. What was decided:
+
+- **From the period of account to the CT period.** Trading items (dated from the trade's start) are
+  added up by code over the period of account and shared between its trading CT periods by days: CTA
+  2009 s52(3) apportions "by reference to the number of days", and gives no other method (the brief's
+  "unless another method is more just" is not in the Act). Interest received and paid is allocated by
+  its date (as the books recognise it, `covers` included), and so is everything before the trade starts.
+  The alternative for interest, sharing it by days too, differs only where one period of account holds
+  two CT periods; by date follows the books and keeps a deposit's interest in the period it was earned.
+  Capital allowances are worked out per CT period from that period's own expenditure, disposals by
+  their date. A CT period over a period of account's end, or a period of account starting before the
+  books, is refused as not supported.
+- **Before the trade starts.** No trading profit or loss; revenue expenses gather as pre-trading
+  expenditure and are released on the trade's first day as s61 says ("treated as if they were incurred
+  on the start date"): a deduction of the period of account holding that day, shared by days like any
+  other trading item (all in the first trading CT period when it is the only one), those older than 7
+  years lapsing. Plant waits for the first day (CAA 2001 s12). Interest is taxed meanwhile, and the
+  expenses are never set against it: management expenses (s1219) need a company with investment business
+  (s1218B), which HMRC's CTM08070 says cash on deposit pending use does not normally make. Pre-trading
+  loan relationship debits are non-trading (s61(3)); the s330 election is named, not made.
+- **Close investment-holding status is the owner's to say** (`books.closeInvestmentHolding`). The Act
+  (CTA 2010 s18N) is silent on a company that has not started to trade; HMRC accepts a trading purpose
+  without trading only as "exceptional" (CTM60720). So from FY 2023 a pre-trading period with profits
+  and nothing said is not ready (the rate turns on it), and a trading one is taken as not one, with a
+  note. The settings explain the test; the app never decides.
+- **The default allowance is the AIA first** (special rate expenditure, then main rate, by day), then
+  full expensing or 50% on what is left, then the pool, with the owner's choice per asset
+  (`asset.allowance`) over it. A deviation from the brief, which asked for full expensing first on
+  main rate plant: the AIA gives the same 100% for any company spending under £1m, needs no assumption
+  that the plant was unused and not second-hand (full expensing's condition, s45S, which the books
+  cannot know), and leaves a disposal in the pool rather than a balancing charge of the relevant
+  proportion (s59A). Saving the AIA for special rate expenditure (where the alternative is only 50%) is
+  kept by allocating it there first. Small equipment takes the AIA as main pool plant, never a
+  first-year allowance.
+- **Connected persons.** No AIA or first-year allowance (CAA 2001 s217: the brief's s38B "general
+  exclusion" is not where it is); qualifying expenditure capped at the market value given
+  (`asset.marketValue`, s218), else the cost with a note to confirm it. The other caps of s218 (the
+  seller's disposal value or own cost) are for the owner to check, and said.
+- **Claims are elective; the defaults are said.** A loss is carried forward (s45A), the s37 claim
+  named; a non-trading deficit carried forward (s463G), the s459 claim named. Carried-forward trading
+  losses and non-trading deficits are claimed against total profits as far as they go (s45A(4),
+  s463G), with a note that the company may claim less and must specify its deductions allowance in its
+  return (s269ZB, s269ZD); above £5m is refused. Small pools are written off (s56A).
+- **Marginal relief follows HMRC's method.** Years with the same limits are taken together (CTM03640);
+  a short period's limits are reduced by days ÷ 365 (CTM03930, by days rather than months); where the
+  limits differ between the years, each part is a period of its own with the limits by its financial
+  year's days (CTM03955, whose example the tests reproduce). Augmented profits are taken as the profits
+  chargeable: exempt distributions are not tracked, and the period says so.
+- **The CT600 (2026) Version 3**, labels verbatim from its PDF, only the boxes such a company needs.
+  The profit boxes are whole pounds (the form prints ".00"); no HMRC text found says how the pence go,
+  so each figure is rounded to the nearest pound and the totals are the form's sums of the rounded
+  boxes, as the accounts' whole pounds are. The tax is worked out on box 315, in pence. Boxes 695 and
+  705 include the AIA on their pool, as the CT600 guide asks; 327 and 328 replace 326 for a period over
+  two financial years; the final figure is box 528, not 525. The tax reference (box 3) is never kept.
+- **The rules as found, not as briefed.** The main pool's writing-down allowance is 14% for periods
+  from 1 April 2026 (FA 2026 s28), with the Act's hybrid rate rounded up for a period over the change
+  (worked out, as for the special rate in 2019, FA 2019 s31); full expensing was made permanent by FA
+  2024 s1; its disposal rule is s59A (s59B for 50%); the AIA's pro rata rule is s51A(6).
+- **New stored fields, all optional and additive** (no format version): on an asset `marketValue`,
+  `proceeds`, `pool`, `used`, `allowance`; on the books `associatedCompanies` and `aiaAllocated` by CT
+  period, `closeInvestmentHolding`, and `taxBroughtForward` (only with `ledgerFrom`, so books taken over
+  mid-life bring in the pools and losses; without it the first period asks). The leak guard reads the
+  new money fields, the books' at the small-company threshold.
+- **Not supported, and said where it matters** (refused as not ready, or a note): cars and their CO2
+  rules; intangible fixed assets (CTA 2009 Part 8); chargeable gains; balancing allowances on cessation;
+  the AIA's transitional rules over a change of limit; the super-deduction and the 40% allowance (s45U);
+  structures and buildings, short-life assets; s455 tax on loans to participators (a note when the
+  director owes the company at the period's end); qualifying charitable donations; group relief; R&D
+  and other reliefs; losses beyond the deductions allowance; quarterly instalments. Nothing is posted:
+  the tax charge in the accounts is still a journal.
+- **Nothing to pay is offered, never recorded.** When an ended period is ready and the books give no
+  tax, and no payment or CT600 says so, the tab offers the slice-3 £0 payment in one click.

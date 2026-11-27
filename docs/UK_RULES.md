@@ -528,8 +528,176 @@ Micro-entities Regime (the Financial Reporting Council; paragraphs as in its Sep
   liabilities or net assets, and totals fixed assets, current assets and capital and reserves from their
   sub-lines when a breakdown is entered), so the totals are worked out from the rounded figures here
   too, and the rounding difference sits in the profit and loss reserve.
-- Capital allowances for the tax computation (the annual investment allowance, writing-down
-  allowances, a car's own rules) and the intangibles regime (CTA 2009 Part 8) are not worked out yet.
+- Capital allowances for the tax computation are below ("Corporation Tax"); a car's own rules and the
+  intangibles regime (CTA 2009 Part 8) are not worked out yet.
+
+### Corporation Tax (a company's books)
+
+What the Corporation Tax computation worked out from the books follows (FORMULAS.md §22, "Corporation
+Tax"; `analytics/corporation-tax.ts`, `shared/corporation-tax.ts`, `shared/ct600.ts`; the dated rows in
+`src/shared/uk.ts`, "Companies: Corporation Tax"). It is prepared and checked here, and filed through
+commercial software, never from the app. Each rule was read on legislation.gov.uk (the latest revised
+text) or GOV.UK on 27 November 2026; Sources, below.
+
+**Periods and the trading profit**
+
+- A period begins when the company comes within the charge, for a UK resident company when it starts
+  to carry on business ([CTA 2009 s9](https://www.legislation.gov.uk/ukpga/2009/4/section/9); HMRC's
+  [CTM01410](https://www.gov.uk/hmrc-internal-manuals/company-taxation-manual/ctm01410): when it
+  acquires a source of income), and ends on starting or ceasing to trade among other things
+  ([s10(1)](https://www.legislation.gov.uk/ukpga/2009/4/section/10)), so a period with only interest
+  before the trade is one of its own.
+- Where a period of account does not coincide with an accounting period, profits and losses are
+  apportioned "by reference to the number of days in the periods concerned"
+  ([CTA 2009 s52](https://www.legislation.gov.uk/ukpga/2009/4/section/52)(3)). The Act gives no other
+  method.
+- No deduction for items of a capital nature ([s53](https://www.legislation.gov.uk/ukpga/2009/4/section/53)),
+  for expenses not "incurred wholly and exclusively for the purposes of the trade"
+  ([s54](https://www.legislation.gov.uk/ukpga/2009/4/section/54)), for "expenses in providing
+  entertainment or gifts" ([s1298](https://www.legislation.gov.uk/ukpga/2009/4/section/1298)), or for the
+  tax penalties and interest of [s1303](https://www.legislation.gov.uk/ukpga/2009/4/section/1303).
+- **Pre-trading expenses** ([s61](https://www.legislation.gov.uk/ukpga/2009/4/section/61)): incurred
+  within 7 years before the trade starts and deductible had they been incurred then, they are "treated
+  as if they were incurred on the start date"; loan relationship debits are not (s61(3)), but may be
+  treated as trading debits of the period the trade starts in by an election within 2 years
+  ([s330](https://www.legislation.gov.uk/ukpga/2009/4/section/330)), not worked out here.
+- **Management expenses** ([s1219](https://www.legislation.gov.uk/ukpga/2009/4/section/1219)) are only
+  for a "company with investment business", one "whose business consists wholly or partly of making
+  investments" ([s1218B](https://www.legislation.gov.uk/ukpga/2009/4/section/1218B)). HMRC's
+  [CTM08070](https://www.gov.uk/hmrc-internal-manuals/company-taxation-manual/ctm08070): funds on
+  deposit pending use do not normally make one ("the mere provision of cash at the bank pending its
+  subsequent use is not the 'holding' of investments", EYL Trading). So a pre-trading company's
+  expenses wait for the trade under s61, and are never set against its interest.
+- **Loan relationships**: those for the trade give trading credits and debits
+  ([s297](https://www.legislation.gov.uk/ukpga/2009/4/section/297)); the rest a non-trading profit or
+  deficit ([s301](https://www.legislation.gov.uk/ukpga/2009/4/section/301)). A deficit may be claimed
+  against the same period's profits or carried back ([s459](https://www.legislation.gov.uk/ukpga/2009/4/section/459),
+  within 2 years, [s460](https://www.legislation.gov.uk/ukpga/2009/4/section/460)); unrelieved, it is
+  carried forward and may be claimed against total profits of a later period
+  ([s463G](https://www.legislation.gov.uk/ukpga/2009/4/section/463G)), or is set against non-trading
+  profits where s463G is barred ([s463H](https://www.legislation.gov.uk/ukpga/2009/4/section/463H)).
+
+**Rates and marginal relief** ([CTA 2010 Part 3A](https://www.legislation.gov.uk/ukpga/2010/4/part/3A),
+inserted by FA 2021 Sch 1)
+
+- Main rate 20% for FY 2015 and FY 2016, 19% for FY 2017 to FY 2022, 25% from FY 2023 (FA 2021
+  [s6](https://www.legislation.gov.uk/ukpga/2021/26/section/6); FY 2024 to FY 2026 by F(No.2)A 2023 s5,
+  F(No.2)A 2024 s12 and FA 2025 s13); the small profits rate 19% and the marginal relief fraction 3/200
+  from FY 2023 (FA 2021 [s7](https://www.legislation.gov.uk/ukpga/2021/26/section/7); F(No.2)A 2023 s6,
+  F(No.2)A 2024 s13, FA 2025 s14). GOV.UK's [rates and allowances](https://www.gov.uk/government/publications/rates-and-allowances-corporation-tax/rates-and-allowances-corporation-tax)
+  table agrees for FY 2023 to FY 2026. The rows before FY 2023 were taken from the Acts as cited and a
+  search for FY 2015 (FA 2013 s6(1)); worth a check if an old period is ever worked out.
+- The small profits rate applies when augmented profits "do not exceed the lower limit"
+  ([s18A](https://www.legislation.gov.uk/ukpga/2010/4/section/18A)); marginal relief F × (U − A) × N ÷ A
+  when they exceed it but not the upper limit ([s18B](https://www.legislation.gov.uk/ukpga/2010/4/section/18B));
+  both are for a company that is not a close investment-holding company.
+- Limits £50,000 and £250,000, divided by 1 + N associated companies, and for a period of less than 12
+  months "proportionately reduced" ([s18D](https://www.legislation.gov.uk/ukpga/2010/4/section/18D)).
+  HMRC: "strictly the calculation should be carried out by reference to the number of days in the short
+  AP" ([CTM03930](https://www.gov.uk/hmrc-internal-manuals/company-taxation-manual/ctm03930)); the app
+  uses days ÷ 365.
+- A period in two financial years: profits are apportioned between them
+  ([CTA 2009 s8(5)](https://www.legislation.gov.uk/ukpga/2009/4/section/8)) "on a time basis"
+  ([CTA 2010 s1172](https://www.legislation.gov.uk/ukpga/2010/4/section/1172)). Where the limits differ,
+  the parts are treated as separate periods, profits by the period's days and the limits by the days of
+  each financial year ([CTM03640](https://www.gov.uk/hmrc-internal-manuals/company-taxation-manual/ctm03640),
+  [CTM03955](https://www.gov.uk/hmrc-internal-manuals/company-taxation-manual/ctm03955), whose worked
+  example the tests reproduce); where they do not, the period is not split.
+- **Associated companies** ([s18E](https://www.legislation.gov.uk/ukpga/2010/4/section/18E)): associated
+  "for any part of the accounting period" when one controls the other or both are under the same
+  control (control as in [ss450](https://www.legislation.gov.uk/ukpga/2010/4/section/450)–451); one that
+  "has not carried on a trade or business at any time in the accounting period" is left out, as is a
+  passive holding company ([s18F](https://www.legislation.gov.uk/ukpga/2010/4/section/18F)). The CT600
+  guide: box 326 counts companies associated "for any part of the accounting period", not this one.
+- **Augmented profits** ([s18L](https://www.legislation.gov.uk/ukpga/2010/4/section/18L)): taxable total
+  profits plus exempt distributions of a qualifying kind from companies other than 51% group companies.
+  Not tracked: taken as the taxable total profits.
+- **Close investment-holding companies** ([s18N](https://www.legislation.gov.uk/ukpga/2010/4/section/18N)):
+  a close company is one unless "throughout that period" it "exists wholly or mainly for one or more of
+  the permitted purposes" (trading on a commercial basis; letting land to people not connected with it;
+  holding or financing qualifying companies; and the like). The Act says nothing of a company before it
+  trades. HMRC's [CTM60720](https://www.gov.uk/hmrc-internal-manuals/company-taxation-manual/ctm60720):
+  a company "may exist for the purpose of carrying on a trade, even though in a particular accounting
+  period it does not receive any trading income, or, indeed, actually carry on a trade. This would be
+  exceptional", looking at what it actually does ([CTM60730](https://www.gov.uk/hmrc-internal-manuals/company-taxation-manual/ctm60730)).
+  So a pre-trading company with interest only may be one: the app asks, and never decides.
+
+**Capital allowances** ([CAA 2001](https://www.legislation.gov.uk/ukpga/2001/2/contents) Part 2)
+
+- Expenditure by a person about to carry on a qualifying activity is treated as incurred on its first
+  day ([s12](https://www.legislation.gov.uk/ukpga/2001/2/section/12)).
+- **Annual investment allowance**: £1,000,000 ([s51A(5)](https://www.legislation.gov.uk/ukpga/2001/2/section/51A)),
+  "proportionately increased or reduced" for a period longer or shorter than a year (s51A(6)); history:
+  £500,000 from 1 April 2014 ([FA 2014 s10](https://www.legislation.gov.uk/ukpga/2014/26/section/10), Sch 2),
+  £200,000 from 1 January 2016 ([F(No.2)A 2015 s8](https://www.legislation.gov.uk/ukpga/2015/33/section/8)),
+  £1,000,000 from 1 January 2019 ([FA 2019 s32](https://www.legislation.gov.uk/ukpga/2019/1/section/32),
+  Sch 13), permanent from 1 April 2023 ([F(No.2)A 2023 s8](https://www.legislation.gov.uk/ukpga/2023/30/section/8)).
+  The transitional rules for a period over a change are not worked out (refused). One allowance is
+  shared by a group, or by companies under common control that are related
+  ([s51C](https://www.legislation.gov.uk/ukpga/2001/2/section/51C), [s51E](https://www.legislation.gov.uk/ukpga/2001/2/section/51E),
+  [s51G](https://www.legislation.gov.uk/ukpga/2001/2/section/51G)), allocated as they think fit:
+  `books.aiaAllocated`. No AIA on cars ([s38B](https://www.legislation.gov.uk/ukpga/2001/2/section/38B),
+  general exclusion 2).
+- **Full expensing and the 50% allowance** ([s45S](https://www.legislation.gov.uk/ukpga/2001/2/section/45S),
+  inserted by F(No.2)A 2023 s7, made permanent by [FA 2024 s1](https://www.legislation.gov.uk/ukpga/2024/3/section/1)):
+  a company's expenditure from 1 April 2023 on plant "unused and not second-hand", 100% for main rate and
+  50% for special rate ([s52](https://www.legislation.gov.uk/ukpga/2001/2/section/52)'s table), subject
+  to [s46](https://www.legislation.gov.uk/ukpga/2001/2/section/46)'s exclusions (cars, plant for leasing).
+  On a disposal, "the relevant proportion of the disposal value" is a balancing charge, not deducted from
+  the pool ([s59A](https://www.legislation.gov.uk/ukpga/2001/2/section/59A); for 50%,
+  [s59B](https://www.legislation.gov.uk/ukpga/2001/2/section/59B), the expenditure halved; GOV.UK,
+  [disposing of an asset](https://www.gov.uk/guidance/disposing-an-asset-if-you-claimed-full-expensing-or-50-first-year-allowance)).
+  The 40% allowance from 1 January 2026 for cases outside s45S ([s45U](https://www.legislation.gov.uk/ukpga/2001/2/section/45U),
+  [FA 2026 s29](https://www.legislation.gov.uk/ukpga/2026/11/section/29)) and the super-deduction (FA 2021
+  s9) are not covered.
+- **Writing-down allowances**: main rate 18%, 14% for periods beginning on or after 1 April 2026
+  ([s56](https://www.legislation.gov.uk/ukpga/2001/2/section/56)(1), [FA 2026 s28](https://www.legislation.gov.uk/ukpga/2026/11/section/28));
+  special rate 6% from 1 April 2019, 8% before ([s104D](https://www.legislation.gov.uk/ukpga/2001/2/section/104D),
+  [FA 2019 s31](https://www.legislation.gov.uk/ukpga/2019/1/section/31)). A period over the change takes
+  X = 18 × BRD/CP + 14 × ARD/CP (or 8 and 6), "rounded up to the nearest second decimal place". For a
+  period shorter or longer than a year the allowance is proportionately reduced or increased (s56(3)).
+  A pool of £1,000 or less (pro rata) may be written off ([s56A](https://www.legislation.gov.uk/ukpga/2001/2/section/56A)).
+- **Disposals**: the disposal value is "limited to the qualifying expenditure incurred by the person on
+  its provision" ([s62](https://www.legislation.gov.uk/ukpga/2001/2/section/62)); a balancing allowance
+  only in the final chargeable period ([s55(4)](https://www.legislation.gov.uk/ukpga/2001/2/section/55),
+  [s65](https://www.legislation.gov.uk/ukpga/2001/2/section/65)), when the trade is permanently
+  discontinued: not worked out.
+- **Connected persons** ([s214](https://www.legislation.gov.uk/ukpga/2001/2/section/214)): "no annual
+  investment allowance or first-year allowance" on the buyer's expenditure ([s217](https://www.legislation.gov.uk/ukpga/2001/2/section/217)),
+  and its qualifying expenditure capped ([s218](https://www.legislation.gov.uk/ukpga/2001/2/section/218))
+  at the seller's disposal value where the seller brings one in, otherwise the smallest of the market
+  value, the seller's capital expenditure and a connected person's: the app takes the market value given
+  (or the cost, asking for it).
+
+**Losses** ([CTA 2010 Part 4](https://www.legislation.gov.uk/ukpga/2010/4/part/4))
+
+- A loss may be set against total profits of the period and carried back 12 months by claim within 2
+  years ([s37](https://www.legislation.gov.uk/ukpga/2010/4/section/37)): an option, never made here.
+- Losses of periods beginning before 1 April 2017 are carried forward against the same trade's profits
+  automatically ([s45](https://www.legislation.gov.uk/ukpga/2010/4/section/45)); later ones may be
+  claimed against total profits ([s45A](https://www.legislation.gov.uk/ukpga/2010/4/section/45A)), or
+  where s45A is barred are set against the trade's profits ([s45B](https://www.legislation.gov.uk/ukpga/2010/4/section/45B)).
+- Carried-forward losses and deficits are restricted to half the profits above a deductions allowance
+  of £5 million ([s269ZB](https://www.legislation.gov.uk/ukpga/2010/4/section/269ZB),
+  [s269ZD](https://www.legislation.gov.uk/ukpga/2010/4/section/269ZD), [s269ZR](https://www.legislation.gov.uk/ukpga/2010/4/section/269ZR),
+  [s269ZW](https://www.legislation.gov.uk/ukpga/2010/4/section/269ZW)), which is the amount the company
+  specifies in its return, nil if none: the app says so, and refuses losses beyond it.
+
+**The CT600**
+
+- The current form is [Company Tax Return CT600 (2026) Version 3](https://www.gov.uk/government/publications/corporation-tax-company-tax-return-ct600-2015-version-3)
+  (HMRC 04/26, for accounting periods starting on or after 1 April 2015); the box labels in
+  `shared/ct600.ts` are verbatim from its PDF. The [Company Tax Return guide](https://www.gov.uk/guidance/the-company-tax-return-guide)
+  says box 160 is for losses "that can only be set against trading profit", box 285 for carried-forward
+  losses set against total profits, box 263 for carried-forward non-trading deficits from periods from 1
+  April 2017; boxes 695 and 705 "the total allowances, including any Annual Investment Allowance"
+  on each pool; boxes 327 and 328 replace 326 when the period straddles two financial years; box 4 is 0
+  when no type applies (2: a close investment-holding company); box 3 is the 10-digit tax reference.
+- The form prints ".00" against the profit, income and expenditure boxes (whole pounds) and pence
+  against the tax boxes. HMRC's [COM130040](https://www.gov.uk/hmrc-internal-manuals/cotax-manual/com130040)
+  and [CTM93220](https://www.gov.uk/hmrc-internal-manuals/company-taxation-manual/ctm93220) rule out
+  rounding (to thousands) on the form; no text found says how the pence of a whole-pound box go, so the
+  app rounds to the nearest pound and adds the totals from the rounded boxes.
 
 **These are aids, not advice:** check every date with Companies House and HMRC, whose own records
 (the company's page, its HMRC online account and notices) are the authority.
@@ -698,3 +866,9 @@ Earlier:
 - AJ Bell, [HMRC confirms new ISA will replace Lifetime ISA for first-time buyers only](https://www.ajbell.co.uk/group/news/hmrc-confirms-new-isa-will-replace-lifetime-isa-first-time-buyers-only)
 - Fidelity, [2026/2027 tax allowances, what's changed?](https://www.fidelity.co.uk/markets-insights/personal-finance/personal-finance/20262027-tax-allowances-whats-changed/)
 - Historic allowances: HMRC rates and allowances pages for each year
+
+Checked 27 November 2026 (companies: Corporation Tax): each link in "Corporation Tax (a company's
+books)" above, on legislation.gov.uk (the latest revised text), GOV.UK and HMRC's Company Taxation,
+Capital Allowances and Company Tax manuals; the CT600 (2026) Version 3 PDF
+(<https://assets.publishing.service.gov.uk/media/69c543424a06660f085442bd/ct600.pdf>) for the box
+labels.
