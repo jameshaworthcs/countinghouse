@@ -43,6 +43,50 @@ export function subMoney(a: number, b: number): number {
 }
 
 /**
+ * round(a × b ÷ c) for integers, exactly (in BigInt, so no product loses precision), half away from
+ * zero as `toMinor` rounds: 5 × 1 ÷ 2 is 3 and −5 × 1 ÷ 2 is −3. `c` must not be 0.
+ */
+export function mulDivRound(a: number, b: number, c: number): number {
+  if (!Number.isSafeInteger(a) || !Number.isSafeInteger(b) || !Number.isSafeInteger(c) || c === 0) throw new RangeError(`mulDivRound takes safe integers and a divisor that is not 0 (${a}, ${b}, ${c})`);
+  const n = BigInt(a) * BigInt(b);
+  const d = BigInt(c);
+  const negative = n < 0n !== d < 0n;
+  const [an, ad] = [n < 0n ? -n : n, d < 0n ? -d : d];
+  const q = an / ad;
+  const r = an - q * ad;
+  const rounded = 2n * r >= ad ? q + 1n : q;
+  const out = Number(negative ? -rounded : rounded);
+  return Object.is(out, -0) ? 0 : out;
+}
+
+/**
+ * Integer pence split by weights, with cumulative rounding (docs/FORMULAS.md §22, "Apportioning"):
+ * part i = round(total × W_i ÷ W) − round(total × W_{i−1} ÷ W), where W_i is the sum of the first i
+ * weights and W of them all, rounded half away from zero (`mulDivRound`). The parts always add up to
+ * the total exactly, a part with a weight of 0 is 0, and no part is more than a penny from its exact
+ * share. Weights are non-negative integers (days, months), at least one of them more than 0.
+ */
+export function apportion(total: number, weights: readonly number[]): number[] {
+  if (!Number.isSafeInteger(total)) throw new RangeError(`apportion splits integer pence (${total})`);
+  if (weights.some((w) => !Number.isSafeInteger(w) || w < 0)) throw new RangeError('apportion takes weights that are non-negative integers');
+  const whole = weights.reduce((s, w) => s + w, 0);
+  if (whole <= 0 || !Number.isSafeInteger(whole)) throw new RangeError('apportion takes at least one weight more than 0');
+  const out: number[] = [];
+  let cumulative = 0;
+  let before = 0;
+  for (const w of weights) {
+    cumulative += w;
+    const upTo = mulDivRound(total, cumulative, whole);
+    out.push(upTo - before);
+    before = upTo;
+  }
+  return out;
+}
+
+/** Integer pence to the nearest whole pound, half away from zero (a filing's figures): 150 is 2, −250 is −3. */
+export const roundToPounds = (minor: number): number => mulDivRound(minor, 1, 100);
+
+/**
  * True when `amount` is a finite number with no more than 2 decimal places: exactly the double
  * that a 2-dp decimal parses to (what fromMinor produces and JSON.parse reads). An absolute
  * tolerance would wrongly reject large amounts, where doubles are further apart than it.

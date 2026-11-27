@@ -11,7 +11,7 @@ import { BalanceEngine } from '../src/server/analytics/balances';
 import { transactionId } from '../src/server/ids';
 import { Store } from '../src/server/store';
 import { addDays, addMonths, diffDays, fromUTC, isISODate, parseFlexibleDate } from '../src/shared/dates';
-import { addMoney, formatMoney, fromMinor, isMoney, parseAmount, roundMoney, subMoney, sumMoney, toMinor } from '../src/shared/money';
+import { addMoney, apportion, formatMoney, fromMinor, isMoney, mulDivRound, parseAmount, roundMoney, roundToPounds, subMoney, sumMoney, toMinor } from '../src/shared/money';
 import { reconcile } from '../src/shared/reconcile';
 import type { Account, BalanceSnapshot, Transaction } from '../src/shared/schema';
 import { taxYear, taxYearOf } from '../src/shared/uk';
@@ -57,6 +57,50 @@ describe('money', () => {
           parseAmount(`${abs} DR`) === (m === 0 ? 0 : -Math.abs(m)) &&
           parseAmount(`${abs} CR`) === Math.abs(m) &&
           parseAmount(`${abs}-`) === (m === 0 ? 0 : -Math.abs(m))
+        );
+      }),
+      RUNS,
+    );
+  });
+
+  it('rounds a × b ÷ c half away from zero, as toMinor rounds', () => {
+    expect([mulDivRound(5, 1, 2), mulDivRound(-5, 1, 2), mulDivRound(7, 1, 3), mulDivRound(-7, 1, 3), mulDivRound(5, -1, 2), mulDivRound(0, 3, 7)]).toEqual([3, -3, 2, -2, -3, 0]);
+    // Beyond 2^53 in the product, exact all the same.
+    expect(mulDivRound(9_000_000_000_000, 1_000, 3_000)).toBe(3_000_000_000_000);
+    expect([roundToPounds(150), roundToPounds(149), roundToPounds(-150), roundToPounds(-149), roundToPounds(1_234_550)]).toEqual([2, 1, -2, -1, 12_346]);
+    expect(() => mulDivRound(1, 1, 0)).toThrow(RangeError);
+    fc.assert(
+      fc.property(pence, fc.integer({ min: -100_000, max: 100_000 }), fc.integer({ min: 1, max: 100_000 }), (a, b, c) => {
+        const r = mulDivRound(a, b, c);
+        const exact = (a * b) / c;
+        // Within half of one, and on an exact half, away from zero (the symmetry toMinor has).
+        return Math.abs(r - exact) <= 0.5 + 1e-6 * Math.abs(exact) && mulDivRound(-a, b, c) === -r;
+      }),
+      RUNS,
+    );
+  });
+
+  it('apportions pence by weights: the parts add up to the total, each within a penny of its share', () => {
+    // 100p over three equal days: 33, 34, 33 (round(100/3)=33, round(200/3)=67, 100).
+    expect(apportion(100, [1, 1, 1])).toEqual([33, 34, 33]);
+    expect(apportion(-100, [1, 1, 1])).toEqual([-33, -34, -33]);
+    expect(apportion(28_800, [123, 242])).toEqual([9_705, 19_095]);
+    expect(apportion(1, [1, 1])).toEqual([1, 0]);
+    expect(apportion(500, [0, 3, 0, 2])).toEqual([0, 300, 0, 200]);
+    expect(() => apportion(100, [0, 0])).toThrow(RangeError);
+    expect(() => apportion(1.5, [1])).toThrow(RangeError);
+    fc.assert(
+      fc.property(pence, fc.array(fc.integer({ min: 0, max: 400 }), { minLength: 1, maxLength: 40 }), (total, ws) => {
+        fc.pre(ws.some((w) => w > 0));
+        const parts = apportion(total, ws);
+        const whole = ws.reduce((s, w) => s + w, 0);
+        return (
+          parts.length === ws.length &&
+          parts.reduce((s, p) => s + p, 0) === total &&
+          parts.every((p, i) => Number.isInteger(p) && (ws[i] === 0 ? p === 0 : Math.abs(p - (total * ws[i]!) / whole) < 1 + 1e-6 * Math.abs(total))) &&
+          // Signed like the total, and the same split of the negated total negated.
+          parts.every((p) => p === 0 || Math.sign(p) === Math.sign(total)) &&
+          apportion(-total, ws).every((p, i) => p === -parts[i]!)
         );
       }),
       RUNS,
