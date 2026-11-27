@@ -1201,6 +1201,17 @@ export function dataRoutes(ctx: AppContext): Hono {
     }
     return c.json({ account, company: companyView(store, store.company(company.id)!, ctx.analytics.engine) }, 201);
   });
+
+  /**
+   * Move your director's loan account to another company (one added to the wrong company): the first
+   * stops naming it and the other names it, in one write; its balances go with it. Its name follows when
+   * it is still the name it was given when added (`Director’s loan: <company>`); a name of yours stays.
+   */
+  app.post('/companies/:id/director-loan/move', async (c) => {
+    const { to } = await readJson(c, z.object({ to: SlugSchema }));
+    const moved = await store.moveDirectorLoan(c.req.param('id'), to);
+    return c.json({ account: store.account(moved.accountId)!, renamed: moved.renamed, from: companyView(store, store.company(moved.from.id)!, ctx.analytics.engine), to: companyView(store, store.company(moved.to.id)!, ctx.analytics.engine) });
+  });
   // ─── Agreements to pay (agreements.json) ─────────────────────────────────────────────────────
 
   app.get('/agreements', (c) => c.json(agreementsView(store)));

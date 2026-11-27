@@ -400,6 +400,53 @@ describe("money with your company and the director's loan", () => {
       expect(view.directorLoan).toMatchObject({ accountId: id, balance: 750 });
     });
 
+    it('moves to another company with its balances, in one write; its given name follows, a name of yours stays', async () => {
+      const move = (to: unknown, from = COMPANY) => send('POST', `/api/companies/${from}/director-loan/move`, { to });
+      await store.addBalances([anchor('loan', day(1), 420)], 'test');
+      // Refused, writing nothing: to itself, to no company, from one without one, onto one that has one.
+      expect((await move(COMPANY)).body.error).toMatch(/with EXAMPLE STUDIO LTD already/);
+      expect((await move('no-such-co')).status).toBe(404);
+      expect((await move('other-co', 'no-such-co')).status).toBe(404);
+      expect((await move(COMPANY, 'other-co')).status).toBe(409);
+      expect((await move('')).status).toBe(400);
+      expect(store.company(COMPANY)!.directorLoanAccountId).toBe('loan');
+      expect(store.company('other-co')!.directorLoanAccountId).toBeUndefined();
+      // A name of yours stays.
+      const moved = await move('other-co');
+      expect(moved.status).toBe(200);
+      expect(store.company(COMPANY)!.directorLoanAccountId).toBeUndefined();
+      expect(store.company('other-co')!.directorLoanAccountId).toBe('loan');
+      expect(store.account('loan')!.name).toBe('Director’s loan');
+      expect(store.balances('loan').map((b) => b.balance)).toEqual([420]);
+      expect((moved.body.to as CompanyView).directorLoan).toMatchObject({ accountId: 'loan', balance: 420 });
+      expect((moved.body.from as CompanyView).directorLoan).toBeUndefined();
+      // Onto a company that has one: refused; back again works.
+      const added = await send('POST', `/api/companies/${COMPANY}/director-loan`, {});
+      expect((await move(COMPANY, 'other-co')).body.error).toMatch(/EXAMPLE STUDIO LTD has a director’s loan account already/);
+      await send('PUT', `/api/companies/${COMPANY}`, { directorLoanAccountId: null });
+      await send('DELETE', `/api/accounts/${(added.body.account as Account).id}`, {});
+      // The name it was given when added follows the company.
+      await store.upsertAccount({ ...store.account('loan')!, name: 'Director’s loan: OTHER EXAMPLE LTD' });
+      expect((await move(COMPANY, 'other-co')).status).toBe(200);
+      expect(store.account('loan')!.name).toBe('Director’s loan: EXAMPLE STUDIO LTD');
+      expect(store.company(COMPANY)!.directorLoanAccountId).toBe('loan');
+      // Only the owner moves one.
+      expect(requiredScope('POST', `/api/companies/${COMPANY}/director-loan/move`)).toBeNull();
+    });
+
+    it('a move says why it is refused, and brings its balances into the books of a company that keeps them', async () => {
+      const move = (to: string, from = COMPANY) => send('POST', `/api/companies/${from}/director-loan/move`, { to });
+      expect((await move(COMPANY, 'other-co')).body.error).toMatch(/OTHER EXAMPLE LTD has no director’s loan account to move/);
+      // The other company keeps its books here.
+      await store.setCompanies(store.companies.map((c) => (c.id === 'other-co' ? { ...c, books: { incorporatedOn: day(-400), periods: [], ctPeriods: [], filings: [], setBy: 'owner' as const, updatedAt: stamp } } : c)));
+      await store.addBalances([anchor('loan', day(1), 420)], 'test');
+      expect((await move('other-co')).status).toBe(200);
+      expect(store.company('other-co')!.directorLoanAccountId).toBe('loan');
+      // Its balance now anchors the other company's director's loan in its books, which post nothing to it yet.
+      const ledger = await get<{ checks: { kind: string; recorded?: number; ledger?: number }[] }>('/api/companies/other-co/ledger');
+      expect(ledger.checks).toContainEqual(expect.objectContaining({ kind: 'loan-balance-differs', recorded: 420, ledger: 0 }));
+    });
+
     it('an unlinked director’s loan account has no movements', async () => {
       await mark(lent, 'loan');
       await send('PUT', `/api/companies/${COMPANY}`, { directorLoanAccountId: null });

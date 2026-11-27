@@ -107,7 +107,7 @@ function DirectorLoanLine({ view }: { view: CompanyView }) {
     );
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <span className="text-ink-3">No director’s loan account yet: it would hold what the company owes you, from the payments you mark as paid for it or lent to it.</span>
+      <span className="text-ink-3">No director’s loan account yet: if you are one of its directors, it would hold what the company owes you, from the payments you mark as paid for it or lent to it.</span>
       <Button size="sm" icon={<Plus className="size-3.5" />} loading={add.isPending} onClick={() => add.mutate(undefined)}>
         Add the director’s loan account for {view.company.name}
       </Button>
@@ -140,8 +140,48 @@ function DirectorLoanCard({ view, accountId }: { view: DirectorLoanView; account
         <p className="mt-1 text-[12px] text-ink-3">
           {view.movements.length ? `${view.movements.length} movement${view.movements.length === 1 ? '' : 's'}, from ${formatDate(view.movements.at(-1)!.date)}.` : 'No payments marked yet.'}
         </p>
+        <MoveDirectorLoan company={view.company} />
       </Card>
     </>
+  );
+}
+
+/** Added to the wrong company: move it to one that has none (POST /api/companies/:id/director-loan/move). */
+function MoveDirectorLoan({ company }: { company: { id: string; name: string } }) {
+  const toast = useToast();
+  const q = useApi<CompanyView[]>(['companies'], '/companies');
+  const free = (q.data ?? []).filter((c) => !c.directorLoan && c.company.id !== company.id);
+  const [choice, setChoice] = useState('');
+  const move = useApiMutation(() => api<{ to: CompanyView; renamed: boolean }>(`/companies/${company.id}/director-loan/move`, { body: { to: choice } }), {
+    onSuccess: (r) => {
+      setChoice('');
+      toast({ tone: 'good', text: `Moved to ${r.to.company.name}${r.renamed ? ' and renamed' : ''}` });
+    },
+    // Refused: show what is saved now, not the page as it was.
+    onError: () => undefined,
+  });
+  if (!free.length) return null;
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line pt-3 text-[12.5px] text-ink-3">
+      <span>Not your director’s loan with {company.name}? Move it, with its balances, to</span>
+      <Select value={choice} onChange={(e) => setChoice(e.target.value)} aria-label="Company to move it to" className="w-56">
+        <option value="">Choose the company…</option>
+        {free.map((c) => (
+          <option key={c.company.id} value={c.company.id}>
+            {c.company.name}
+          </option>
+        ))}
+      </Select>
+      <Button size="sm" disabled={!choice} loading={move.isPending} onClick={() => move.mutate(undefined)}>
+        Move
+      </Button>
+      {move.error && <span className="text-[12px] text-bad-ink">{move.error.message}</span>}
+      {choice && (
+        <span className="basis-full">
+          It then moves with your money with {free.find((c) => c.company.id === choice)?.company.name}. Payments you marked with {company.name} stay marked with it, and count in no director’s loan of yours until you mark them again.
+        </span>
+      )}
+    </div>
   );
 }
 

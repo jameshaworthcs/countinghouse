@@ -1248,6 +1248,45 @@ export class Store extends EventEmitter {
       await this.writeArray('companies', list, message);
     });
   }
+  /**
+   * Your director's loan account moves from one company to another, under the lock: the first stops
+   * naming it and the second names it, in one write (one added to the wrong company, say). Its balances
+   * go with it. Its name follows, in a second write, when it is still the one it was given when added
+   * (`Director’s loan: <company>`); a name of yours stays, and a rename that fails leaves the move made.
+   * Refused, writing nothing, unless the first names a director's loan account of yours and the second
+   * names none that is in your data.
+   */
+  moveDirectorLoan(fromId: string, toId: string): Promise<{ from: Company; to: Company; accountId: string; renamed: boolean }> {
+    return this.exclusive(async () => {
+      const from = this.state.companies.find((c) => c.id === fromId);
+      const to = this.state.companies.find((c) => c.id === toId);
+      if (!from || !to) throw new StoreError('No such company', 404);
+      if (from.id === to.id) throw new StoreError(`It is your director’s loan with ${from.name} already.`, 400);
+      const accountId = from.directorLoanAccountId;
+      if (!accountId || !this.state.accounts.some((a) => a.id === accountId)) throw new StoreError(`${from.name} has no director’s loan account to move.`, 409);
+      if (to.directorLoanAccountId && this.state.accounts.some((a) => a.id === to.directorLoanAccountId)) throw new StoreError(`${to.name} has a director’s loan account already.`, 409);
+      const stamp = nowISO();
+      const { directorLoanAccountId: _moved, ...rest } = from;
+      const next = { from: { ...rest, updatedAt: stamp } as Company, to: { ...to, directorLoanAccountId: accountId, updatedAt: stamp } };
+      await this.writeArray(
+        'companies',
+        this.state.companies.map((c) => (c.id === from.id ? next.from : c.id === to.id ? next.to : c)),
+        `company: director’s loan moved from ${from.name} to ${to.name}`,
+      );
+      const account = this.state.accounts.find((a) => a.id === accountId)!;
+      let renamed = false;
+      if (account.name === `Director’s loan: ${from.name}`) {
+        const name = `Director’s loan: ${to.name}`;
+        try {
+          await this.writeArray('accounts', this.state.accounts.map((a) => (a.id === accountId ? { ...a, name, updatedAt: stamp } : a)), `account: rename ${account.name} to ${name}`);
+          renamed = true;
+        } catch {
+          // The name only: the move stands, and the account keeps its old name for you to change.
+        }
+      }
+      return { ...next, accountId, renamed };
+    });
+  }
   setAgreements(list: Agreement[], message = 'agreements: update'): Promise<void> {
     return this.setArray('agreements', list, message);
   }

@@ -436,7 +436,11 @@ directorLoanAccountId?, books?, notes?, createdBy, createdAt, updatedAt}`:
 - `directorLoanAccountId`: your director's loan account with it (accounts.json, `director_loan`):
   one of yours, of that type, not its `accountId`, and no other company's. Set or taken away (`null`)
   with `PUT /api/companies/:id`; `POST /api/companies/:id/director-loan` adds the account and links it
-  in one request, with a first balance when you give one.
+  in one request, with a first balance when you give one; `POST /api/companies/:id/director-loan/move`
+  (`{to}`) moves it, with its balances, to a company that has none (one added to the wrong company): one
+  write of companies.json, then a second renaming it when it still has the name it was given when added.
+  Payments marked with the first company stay marked with it, and count in no director's loan until marked
+  again. The account keeps its id.
 
 The company's own accounts, when you keep them here, are accounts with its `companyId`
 (accounts.json): listed under it on the Accounts page, apart from yours.
