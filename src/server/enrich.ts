@@ -64,6 +64,7 @@ export interface EnrichChange {
   description: string;
   payee?: { from: string | null; to: string | null };
   category?: { from: string | null; to: string | null; by: Transaction['categorisedBy'] | null };
+  counterparty?: { from: string | null; to: string | null };
   linked?: boolean;
   /** A link across the line between your money and a company's, taken away. */
   unlinked?: boolean;
@@ -181,6 +182,7 @@ export async function enrich(store: Store, opts: { accountIds?: string[]; rows?:
   };
 
   // Your rows.
+  const cats = new CategoryIndex(store.categories);
   const categoriser = categoriserFor(store);
   for (const raw of store.transactions()) {
     if (!inScope(raw) || skipped(raw)) continue;
@@ -210,7 +212,7 @@ export async function enrich(store: Store, opts: { accountIds?: string[]; rows?:
     if (res.category !== raw.category) patch.category = res.category;
     if (res.categorisedBy !== raw.categorisedBy) patch.categorisedBy = res.categorisedBy;
     if (res.ruleId !== raw.ruleId) patch.ruleId = res.ruleId;
-    if (res.counterpartyAccountId && res.counterpartyAccountId !== raw.counterpartyAccountId) patch.counterpartyAccountId = res.counterpartyAccountId;
+    if (!t.transferGroup && res.counterpartyAccountId !== raw.counterpartyAccountId && (res.counterpartyAccountId || cats.kindOf(res.category) !== 'transfer')) patch.counterpartyAccountId = res.counterpartyAccountId;
     if (res.tags?.length) {
       const tags = [...new Set([...(t.tags ?? []), ...res.tags])];
       if (tags.length !== (t.tags?.length ?? 0)) patch.tags = tags;
@@ -320,9 +322,10 @@ export async function enrich(store: Store, opts: { accountIds?: string[]; rows?:
       const change: EnrichChange = { id, accountId: t.accountId, date: t.date, amount: t.amount, description: t.description };
       if ('payee' in patch && patch.payee !== t.payee) change.payee = { from: t.payee ?? null, to: patch.payee ?? null };
       if ('category' in patch && patch.category !== t.category) change.category = { from: t.category ?? null, to: patch.category ?? null, by: ('categorisedBy' in patch ? patch.categorisedBy : t.categorisedBy) ?? null };
+      if ('counterpartyAccountId' in patch && patch.counterpartyAccountId !== t.counterpartyAccountId) change.counterparty = { from: t.counterpartyAccountId ?? null, to: patch.counterpartyAccountId ?? null };
       if (patch.transferGroup) change.linked = true;
       if ('transferGroup' in patch && !patch.transferGroup && t.transferGroup) change.unlinked = true;
-      if (change.payee || change.category || change.linked || change.unlinked) changes.push(change);
+      if (change.payee || change.category || change.counterparty || change.linked || change.unlinked) changes.push(change);
     }
   }
   if (!opts.dryRun && patches.size) {
@@ -452,6 +455,7 @@ export async function applyRule(store: Store, ruleId: string, opts: { label?: st
   const categoriser = categoriserFor(store);
   const updates: { id: string; patch: Partial<Transaction> }[] = [];
   let recategorised = 0;
+  const cats = new CategoryIndex(store.categories);
   for (const t of store.transactions()) {
     if (t.categorisedBy === 'user' || (t.transferGroup && t.categorisedBy === 'transfer')) continue;
     const input = categoriseInputOf(t);
@@ -466,7 +470,7 @@ export async function applyRule(store: Store, ruleId: string, opts: { label?: st
     if (res.category !== t.category) patch.category = res.category;
     if (res.categorisedBy !== t.categorisedBy) patch.categorisedBy = res.categorisedBy;
     if (res.ruleId !== t.ruleId) patch.ruleId = res.ruleId;
-    if (res.counterpartyAccountId && res.counterpartyAccountId !== t.counterpartyAccountId) patch.counterpartyAccountId = res.counterpartyAccountId;
+    if (!t.transferGroup && res.counterpartyAccountId !== t.counterpartyAccountId && (res.counterpartyAccountId || cats.kindOf(res.category) !== 'transfer')) patch.counterpartyAccountId = res.counterpartyAccountId;
     if (res.tags?.length) {
       const tags = [...new Set([...(t.tags ?? []), ...res.tags])];
       if (tags.length !== (t.tags?.length ?? 0)) patch.tags = tags;

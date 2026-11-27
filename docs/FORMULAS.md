@@ -465,10 +465,11 @@ years), both paths grow at the median:
 
 **Known from its opening** (`confirmedFromOpening`, ledger and valued accounts alike): an account
 opened (`openedOn`) before its first data, with stretches you confirmed nothing is missing from
-(`coverage.json`, §3) covering every day from its opening to the day before its first data, has
-data from its opening. Its balance on those days is rolled back from its first data as above, with
-nothing between: a new account whose first balance is £0 held £0 from its opening. Before its
-opening it adds nothing. A confirmation short of its first data changes nothing.
+(`coverage.json`, §3) — and, for a ledger account, its committed statement periods — covering every
+day from its opening to the day before its first data, has data from its opening. Its balance on
+those days is rolled back from its first data as above, with nothing between: a new account whose
+first balance is £0 held £0 from its opening. Before its opening it adds nothing. Coverage short of
+its first data changes nothing.
 
 **Approximate figures** (a balance you gave roughly, `approximate: true`):
 
@@ -1903,7 +1904,8 @@ set aside as a line from zero and the total dashed, on one axis.
 
 1. more sent to set-aside accounts on a day than the pot held (above);
 2. a transfer naming a set-aside account whose statements cover the day but show no row of the
-   opposite amount within 5 days;
+   opposite amount within 5 days (unless you decided the row is your own money, nothing to or from
+   the pot);
 3. a decision whose payment is gone, changed (its amount or account differ from when it was
    decided), no longer in an everyday account from the start, or whose parts add up to more than
    it (only the payment is counted).
@@ -2021,8 +2023,8 @@ worked out here, so nothing you recorded is hidden.
 |---|---|
 | done | a filing does it; `filedLate` when it was filed after the due day (nothing to pay, by a £0 payment or the CT600, is never late for the payment) |
 | overdue | *d* < 0 |
-| due-soon | 0 ≤ *d* ≤ 60 (`DEADLINE_LEAD_DAYS`) |
-| upcoming | *d* > 60 |
+| due-soon | 0 ≤ *d* ≤ 60 (`DEADLINE_LEAD_DAYS`), and (except for confirmation statements, which can be made up early) after the period ends (`today` > `period.end`) |
+| upcoming | *d* > 60, or the period has not ended yet |
 
 Deadlines due before `deadlinesFrom` that are not done are left out. The list is sorted by due day. An
 unmatched filing's due day is a guess from its own dates, so it is never marked late.

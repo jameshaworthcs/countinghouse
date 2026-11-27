@@ -441,6 +441,26 @@ describe('deadlines and what was filed', () => {
     expect(alerts.find((a) => a.id === 'company-example-studio-ct-payment:2023-12-31')).toMatchObject({ level: 'warning' });
   });
 
+  it('a VAT return is not due soon or alerted on Overview until its period has ended', () => {
+    const monthly = books({
+      incorporatedOn: '2024-01-01',
+      vat: { registeredFrom: '2024-01-01', scheme: 'cash', schedule: [{ from: '2024-01-01', stagger: 'monthly' }] },
+    });
+    // Mid-month and on the last day of the period: still in progress, even though due in < 60 days.
+    for (const on of ['2024-05-15', '2024-05-31'] as const) {
+      const ds = companyDeadlines({ books: monthly }, on);
+      expect(ds.find((x) => x.id === 'vat:2024-05-31')).toMatchObject({ status: 'upcoming', due: '2024-07-07' });
+      expect(companyDeadlineAlerts({ id: 'example-studio', name: 'Example Studio Ltd' }, ds).some((a) => a.id.endsWith('vat:2024-05-31'))).toBe(false);
+    }
+    // The day after the period ends: due soon, with an info alert (warning from 14 days before due).
+    const after = companyDeadlines({ books: monthly }, '2024-06-01');
+    expect(after.find((x) => x.id === 'vat:2024-05-31')).toMatchObject({ status: 'due-soon', due: '2024-07-07', days: 36 });
+    expect(companyDeadlineAlerts({ id: 'example-studio', name: 'Example Studio Ltd' }, after).find((a) => a.id.endsWith('vat:2024-05-31'))).toMatchObject({ level: 'info' });
+    // Quarterly too: not due soon in the final weeks before the quarter closes.
+    const q = companyDeadlines({ books: b }, '2024-09-20');
+    expect(q.find((x) => x.id === 'vat:2024-09-30')).toMatchObject({ status: 'upcoming', due: '2024-11-07' });
+  });
+
   it('a write is refused only for problems it adds, so a hand edit can be put right one problem at a time', () => {
     const two = { ...b, periods: [{ start: '2024-01-01', end: '2025-12-31' }], ctPeriods: [{ start: '2024-01-01', end: '2025-03-31' }] };
     expect(booksProblems(two)).toHaveLength(2);

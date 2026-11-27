@@ -538,7 +538,10 @@ dates ("Proposed: …"), and keeps it when you change them.
      it was open (and up to `CLOSED_POSTING_DAYS` = 7 after, `aliveOn`), and of two accounts a
      number or an alias names (a fixed rate and the easy access it became, under one number), the
      one open that day (`openOnTheDay`). A bank's name alone never chooses between your open
-     accounts there: "To Sam Taylor - Chase" may name the bank only as a reference. Never cash from a machine: "Cash withdrawal, Santander, Faro" names the bank that runs the
+     accounts there: "To Sam Taylor - Chase" may name the bank only as a reference. When a payment
+     names another party and carries a reference ("… TO ACME LTD REFERENCE … Bank Ref"), the
+     sending account's own bank name inside that reference is ignored unless the party is you:
+     trailing reference boilerplate is not another of your accounts at that bank. Never cash from a machine: "Cash withdrawal, Santander, Faro" names the bank that runs the
      machine, not your account there. A row is cash by its words or by the bank's type for it (an
      app lists a withdrawal under the machine's bank, typed "Cash withdrawal"), and a row only its
      type calls cash is categorised as cash;
@@ -735,7 +738,9 @@ dates ("Proposed: …"), and keeps it when you change them.
     card number in a direct debit's reference, "EAV1234567"), which names that one account;
   - otherwise its aliases, or its bank's name. Not by the bank's name alone when the row is
     interest (its type, or the word in it): "Interest earned on Example Saver" names the bank
-    paying it, not another of your accounts there.
+    paying it, not another of your accounts there; nor by the sending account's own bank name
+    inside a third-party payment's reference (unless the other party is you), so bank reference
+    boilerplate is not mistaken for another account at that bank.
 
   Money to or from you by name ("TO SAM TAYLOR", "FROM S TAYLOR"), from the name in your
   profile, is money moving between your accounts: a transfer, not spending or income, even when it

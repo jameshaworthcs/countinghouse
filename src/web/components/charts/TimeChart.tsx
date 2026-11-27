@@ -7,6 +7,7 @@ import { useMemo, useState, type KeyboardEvent, type PointerEvent } from 'react'
 import { formatDate } from '../../../shared/dates';
 import { compact, money } from '../../lib/format';
 import { ChartTooltip, TooltipRow, useWidth } from './common';
+import { placePartialLabels, type PartialBox } from './partial';
 
 export interface TimeSeries {
   id: string;
@@ -265,29 +266,31 @@ export function TimeChart({ dates, series, height = 260, format = (v) => money(v
                 </g>
               );
             })}
-          {partial
-            .filter((p) => p.from <= p.to && !(p.from <= 0 && p.to >= dates.length - 1))
-            .map((p) => {
-              // Over the marks, so what is known still shows through, muted.
-              const x0 = p.from > 0 ? xi(p.from - 1) : 0;
-              const x1 = p.to < dates.length - 1 ? xi(p.to + 1) : innerW;
-              // A stretch from the start keeps its label, as it always had room to run on into the known days.
-              const fits = p.from <= 0 || x1 - x0 >= p.label.length * 6 + 12;
-              return (
-                <g key={`${p.from}-${p.to}`}>
-                  <rect x={x0} y={0} width={x1 - x0} height={innerH} fill="var(--panel)" fillOpacity={0.6}>
-                    <title>{p.label}</title>
-                  </rect>
-                  {p.from > 0 && <line x1={x0} x2={x0} y1={0} y2={innerH} stroke="var(--axis)" strokeWidth={1} strokeDasharray="3 3" />}
-                  {p.to < dates.length - 1 && <line x1={x1} x2={x1} y1={0} y2={innerH} stroke="var(--axis)" strokeWidth={1} strokeDasharray="3 3" />}
-                  {fits && (
-                    <text x={x0 + 6} y={12} style={{ fill: 'var(--ink-3)', fontSize: 11.5 }}>
-                      {p.label}
-                    </text>
-                  )}
-                </g>
-              );
-            })}
+          {(() => {
+            const boxes: PartialBox[] = partial
+              .filter((p) => p.from <= p.to && !(p.from <= 0 && p.to >= dates.length - 1))
+              .map((p) => ({
+                ...p,
+                x0: p.from > 0 ? xi(p.from - 1) : 0,
+                x1: p.to < dates.length - 1 ? xi(p.to + 1) : innerW,
+              }));
+            const shown = placePartialLabels(boxes, innerW);
+            return boxes.map((p, i) => (
+              <g key={`${p.from}-${p.to}`}>
+                {/* Over the marks, so what is known still shows through, muted. */}
+                <rect x={p.x0} y={0} width={p.x1 - p.x0} height={innerH} fill="var(--panel)" fillOpacity={0.6}>
+                  <title>{p.label}</title>
+                </rect>
+                {p.from > 0 && <line x1={p.x0} x2={p.x0} y1={0} y2={innerH} stroke="var(--axis)" strokeWidth={1} strokeDasharray="3 3" />}
+                {p.to < dates.length - 1 && <line x1={p.x1} x2={p.x1} y1={0} y2={innerH} stroke="var(--axis)" strokeWidth={1} strokeDasharray="3 3" />}
+                {shown.has(i) && (
+                  <text x={p.x0 + 6} y={12} style={{ fill: 'var(--ink-3)', fontSize: 11.5 }}>
+                    {p.label}
+                  </text>
+                )}
+              </g>
+            ));
+          })()}
           {endsOk &&
             ends.map((e) => (
               <g key={e.s.id} transform={`translate(${xi(e.idx) + 8},${e.py})`}>

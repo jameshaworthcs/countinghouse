@@ -26,6 +26,7 @@ export function companySource(store: Store, companyId: string): BalanceSource {
     research: store.research,
     figures: store.allFigures.filter((f) => f.accountId !== undefined && ids.has(f.accountId)),
     coverageConfirmations: store.allCoverageConfirmations.filter((c) => ids.has(c.accountId)),
+    imports: store.imports,
   };
 }
 

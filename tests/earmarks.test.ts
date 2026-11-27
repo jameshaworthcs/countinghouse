@@ -480,5 +480,24 @@ describe('set aside: in the app, by proposals', () => {
     const closed = await app.ctx.proposals.closeDone();
     expect(closed.map((p) => [p.id, p.status])).toEqual([[v.proposal.id, 'superseded']]);
   });
+
+  it('deciding a mis-attributed transfer as own money, or recategorising it away from transfers, clears missing-other-side', async () => {
+    const bogus = tx('current', '2026-09-18', -150, 'Third party payment to EXAMPLE STUDIO LTD', { category: 'savings-transfer', categorisedBy: 'transfer', counterpartyAccountId: 'saver' });
+    await app.ctx.store.addTransactions([bogus], 'test');
+    await app.ctx.store.setEarmarks(base());
+    // Before deciding: flagged because saver's statements cover 18 Sep with no +150 row.
+    const before = await get<EarmarksResponse>('/api/earmarks');
+    expect(before.result!.toCheck.some((q) => q.kind === 'missing-other-side' && q.transactionIds.includes(bogus.id))).toBe(true);
+    // Deciding it as own money clears the check.
+    const decided = (await (await owner('/api/earmarks/decisions', { decisions: [{ pot: 'student-money', transaction: bogus.id, parts: [{ effect: 'own', amount: 150 }], reason: 'Not a transfer to the saver' }] })).json()) as EarmarksResponse;
+    expect(decided.result!.toCheck.some((q) => q.kind === 'missing-other-side' && q.transactionIds.includes(bogus.id))).toBe(false);
+    // Taking the decision away brings it back; recategorising the row to a non-transfer category clears counterpartyAccountId and clears it too.
+    await owner('/api/earmarks/decisions', { decisions: [{ pot: 'student-money', transaction: bogus.id, parts: null }] });
+    const patched = await req(`/api/transactions/${bogus.id}`, { method: 'PATCH', headers: CSRF, body: JSON.stringify({ category: 'groceries' }) });
+    expect(patched.status).toBe(200);
+    expect(app.ctx.store.transaction(bogus.id)!.counterpartyAccountId).toBeUndefined();
+    const afterPatch = await get<EarmarksResponse>('/api/earmarks');
+    expect(afterPatch.result!.toCheck.some((q) => q.transactionIds.includes(bogus.id))).toBe(false);
+  });
 });
 

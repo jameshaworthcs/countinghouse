@@ -615,11 +615,18 @@ export function dataRoutes(ctx: AppContext): Hono {
     if (body.company !== undefined) patch.company = body.company ? { id: body.company.id, as: body.company.as, setBy: 'user' } : undefined;
     // A coding in a company's books is for a row paid for that company: a mark changed otherwise takes it away (docs/DATA_FORMAT.md).
     if (body.company !== undefined && current.books && !(body.company?.as === 'paid-for' && body.company.id === current.company?.id)) patch.books = undefined;
-    if (body.splits) checkSplits(body.splits, body.amount ?? current.amount, { transferGroup: current.transferGroup, company: 'company' in patch ? patch.company : current.company }, new CategoryIndex(store.categories));
+    const cats = body.splits || 'category' in body ? new CategoryIndex(store.categories) : undefined;
+    if (body.splits) checkSplits(body.splits, body.amount ?? current.amount, { transferGroup: current.transferGroup, company: 'company' in patch ? patch.company : current.company }, cats!);
     // A corrected amount the lines no longer add up to takes the split away: split it again.
     if (body.amount !== undefined && body.splits === undefined && current.splits && current.splits.reduce((s, l) => s + toMinor(l.amount), 0) !== toMinor(body.amount)) patch.splits = undefined;
-    if ('category' in body) patch.categorisedBy = body.category ? 'user' : undefined;
-    if ('category' in body) patch.ruleId = undefined;
+    if ('category' in body) {
+      patch.categorisedBy = body.category ? 'user' : undefined;
+      patch.ruleId = undefined;
+      // Moving an unlinked row out of transfers stops naming one of your accounts as its other side.
+      if (!current.transferGroup && current.counterpartyAccountId && cats!.kindOf(current.category) === 'transfer' && cats!.kindOf(body.category ?? undefined) !== 'transfer') {
+        patch.counterpartyAccountId = undefined;
+      }
+    }
     if ('payee' in body) patch.payeeSetBy = body.payee ? 'user' : undefined;
     const at = nowISO();
     const corrections = (['date', 'amount', 'description'] as const)

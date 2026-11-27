@@ -33,7 +33,7 @@ import { directorLoanRows } from './director-loan';
 import { covers, holdingsPath, indexNear, PriceBook, type HoldingsPath, type PriceIndex } from './prices';
 
 /** What the engine reads: a store, or a store as a proposal would leave it; holdings and prices when it has them. */
-export type BalanceSource = Pick<Store, 'accounts' | 'transactions' | 'balances' | 'settings'> & Partial<Pick<Store, 'holdings' | 'instruments' | 'research' | 'figures' | 'coverageConfirmations' | 'companies'>>;
+export type BalanceSource = Pick<Store, 'accounts' | 'transactions' | 'balances' | 'settings'> & Partial<Pick<Store, 'holdings' | 'instruments' | 'research' | 'figures' | 'coverageConfirmations' | 'companies' | 'imports'>>;
 
 /**
  * Whether stretches you confirmed nothing is missing from cover every day from `from` to `to`
@@ -400,6 +400,10 @@ export class BalanceEngine {
 
   constructor(private readonly store: BalanceSource) {
     this.prices = store.research && store.instruments && store.holdings ? new PriceBook(store.research) : undefined;
+    const confirmedByAccount = new Map<string, { from: ISODate; to: ISODate }[]>();
+    for (const c of store.coverageConfirmations ?? []) (confirmedByAccount.get(c.accountId) ?? confirmedByAccount.set(c.accountId, []).get(c.accountId)!).push({ from: c.from, to: c.to });
+    const statementsByAccount = new Map<string, { from: ISODate; to: ISODate }[]>();
+    for (const imp of store.imports ?? []) for (const s of imp.sections) (statementsByAccount.get(s.accountId) ?? statementsByAccount.set(s.accountId, []).get(s.accountId)!).push({ from: s.from, to: s.to });
     for (const account of store.accounts) {
       const mode = balanceModeOf(account);
       // A director's loan has no rows of its own: its movements are the payments you marked as paid
@@ -455,10 +459,13 @@ export class BalanceEngine {
       const firstFlow = flows[0]?.date ?? null;
       const candidatesFirst = mode === 'ledger' ? [firstTx, firstAnchor] : [firstAnchor, firstFlow];
       const firstData = candidatesFirst.filter(Boolean).sort()[0] ?? null;
-      // Opened before its data starts, and you confirmed nothing is missing in between: it is known
-      // from its opening, as its first data rolled back over days nothing happened on.
-      const confirmed = (store.coverageConfirmations ?? []).filter((c) => c.accountId === account.id);
-      const confirmedFromOpening = Boolean(firstData && account.openedOn && account.openedOn < firstData && confirmedThrough(confirmed, account.openedOn, addDays(firstData, -1)));
+      // Opened before its data starts, and you confirmed nothing is missing in between (or, for a
+      // ledger account, its committed statement periods and confirmations together cover those
+      // days): it is known from its opening, as its first data rolled back over days nothing
+      // happened on.
+      const confirmed = confirmedByAccount.get(account.id) ?? [];
+      const statements = mode === 'ledger' ? (statementsByAccount.get(account.id) ?? []) : [];
+      const confirmedFromOpening = Boolean(firstData && account.openedOn && account.openedOn < firstData && confirmedThrough([...confirmed, ...statements], account.openedOn, addDays(firstData, -1)));
       const firstDate = confirmedFromOpening ? account.openedOn! : firstData;
       const lastDate = [lastTx, lastSnapshot].filter(Boolean).sort().reverse()[0] ?? null;
       this.data.set(account.id, {

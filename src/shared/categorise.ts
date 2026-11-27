@@ -23,7 +23,7 @@ import { agreementPattern, isScheduledPayment, scheduleFit } from './agreements'
 import { CategoryIndex, mapBankCategory } from './categories';
 import { addDays } from './dates';
 import { INSTITUTION_CATALOG, TRANSFER_WORDS } from './institutions';
-import { cleanPayee, GENERIC_PAYEES, matchMerchant, normaliseDescription, saysNothing } from './merchants';
+import { cleanPayee, GENERIC_PAYEES, matchMerchant, normaliseDescription, paymentParts, saysNothing } from './merchants';
 import type { Account, AccountType, Agreement, CategorisedBy, Institution, Rule, Transaction } from './schema';
 
 export interface CategoriseInput {
@@ -395,7 +395,13 @@ export class Categoriser {
     // Interest names the bank paying or charging it ("Interest earned on Example Saver"), not
     // another account there: only an alias or number makes it a transfer.
     const interest = /\binterest\b/i.test(type ?? '') || /\bINTEREST\b/i.test(text);
-    const byBank = others.filter((m) => !byAlias.includes(m) && useInstitutions && !interest && (!m.ambiguous || transferish) && m.institution.some((re) => re.test(text)));
+    // When a payment names another party and carries a reference ("... TO ACME LTD REFERENCE ...
+    // ExampleBank Ref"), ignore the sending account's own bank name inside the reference unless
+    // the party is you: a bank's own reference boilerplate is not another of your accounts there.
+    const sendingInst = this.accountsById.get(accountId)?.institutionId;
+    const parts = paymentParts(description);
+    const nameOnly = parts?.reference && !this.namesOwner(description) ? normaliseDescription(parts.name) : text;
+    const byBank = others.filter((m) => !byAlias.includes(m) && useInstitutions && !interest && (!m.ambiguous || transferish) && m.institution.some((re) => re.test(m.account.institutionId && m.account.institutionId === sendingInst ? nameOnly : text)));
     return [...openOnTheDay(byAlias.map((m) => m.account), date), ...aliveOn(byBank.map((m) => m.account), date)];
   }
 

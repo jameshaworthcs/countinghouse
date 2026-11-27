@@ -378,7 +378,7 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
         if (was?.categorisedBy === 'user') return { problem: `You set its category yourself (${cats.name(was.category)}), so a proposal leaves it to you: change it on the Transactions page if you want to.` };
         // A row that stops being a transfer stops naming one of your accounts as the other side, and
         // a payee that was one of your accounts' names is worked out again from its words.
-        const untransferred = cat.kind !== 'transfer' && !t.transferGroup;
+        const untransferred = cats.kindOf(t.category) === 'transfer' && cat.kind !== 'transfer' && !t.transferGroup;
         const namedYours = untransferred && t.payeeSetBy !== 'user' && store.accounts.some((a) => a.id !== t.accountId && a.name === t.payee);
         const payee = namedYours ? categoriser().categorise({ ...categoriseInputOf(t), aiCategory: undefined }).payee : undefined;
         patch(t, { category: c.category, categorisedBy: 'user', ...(untransferred && t.counterpartyAccountId ? { counterpartyAccountId: undefined } : {}), ...(payee && payee !== t.payee ? { payee } : {}) });
@@ -882,6 +882,7 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
           if (res.category !== t.category) p.category = res.category;
           if (res.categorisedBy !== t.categorisedBy) p.categorisedBy = res.categorisedBy;
           if (res.ruleId !== t.ruleId) p.ruleId = res.ruleId;
+          if (!t.transferGroup && res.counterpartyAccountId !== t.counterpartyAccountId && (res.counterpartyAccountId || cats.kindOf(res.category) !== 'transfer')) p.counterpartyAccountId = res.counterpartyAccountId;
           if (!Object.keys(p).length) continue;
           patch(t, p);
           if ('category' in p) filled.push(t);
@@ -909,6 +910,7 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
           if (res.category !== t.category) p.category = res.category;
           if (res.categorisedBy !== t.categorisedBy) p.categorisedBy = res.categorisedBy;
           if (res.ruleId !== t.ruleId) p.ruleId = res.ruleId;
+          if (!t.transferGroup && res.counterpartyAccountId !== t.counterpartyAccountId && (res.counterpartyAccountId || cats.kindOf(res.category) !== 'transfer')) p.counterpartyAccountId = res.counterpartyAccountId;
           if (!Object.keys(p).length) continue;
           patch(t, p);
           if ('category' in p) changed.push({ id: t.id, accountId: t.accountId, date: t.date, amount: t.amount, description: t.description, ...(t.category ? { category: t.category } : {}), ...(res.category ? { after: res.category } : {}) });
@@ -1050,6 +1052,8 @@ export function sourceAsLeft(store: Store, row: (id: string) => Transaction | un
     accounts: opts.accounts ?? store.accounts,
     settings: store.settings,
     companies: store.companies,
+    coverageConfirmations: store.coverageConfirmations,
+    imports: store.imports,
     balances,
     transactions: (id) => (id ? store.transactions(id) : store.transactions()).flatMap((t) => row(t.id) ?? []),
   };

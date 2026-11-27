@@ -58,7 +58,7 @@ export interface CompanyDeadline {
   kind: CompanyFilingKind;
   period: { start?: ISODate; end: ISODate };
   due: ISODate;
-  /** done: a filing recorded here does it; overdue: past its day; due-soon: within 60 days (`DEADLINE_LEAD_DAYS`); upcoming: later. */
+  /** done: a filing recorded here does it; overdue: past its day; due-soon: within 60 days (`DEADLINE_LEAD_DAYS`), after the period ends (not confirmation statements); upcoming: later. */
   status: DeadlineStatus;
   /** Days from today to the due day (negative: since). */
   days: number;
@@ -233,11 +233,15 @@ function nextReviewEnd(start: ISODate): ISODate {
 
 const KIND_ORDER: Record<CompanyFilingKind, number> = { accounts: 0, confirmation: 1, ct600: 2, 'ct-payment': 3, vat: 4 };
 
-/** The status of a deadline on `today`. */
-export function deadlineStatus(due: ISODate, today: ISODate, done: boolean): DeadlineStatus {
+/**
+ * The status of a deadline on `today`. When `after` is given (the end of a period that cannot be
+ * filed before it closes), it is not due soon until after that day.
+ */
+export function deadlineStatus(due: ISODate, today: ISODate, done: boolean, after?: ISODate): DeadlineStatus {
   if (done) return 'done';
   const days = diffDays(today, due);
-  return days < 0 ? 'overdue' : days <= DEADLINE_LEAD_DAYS ? 'due-soon' : 'upcoming';
+  if (days < 0) return 'overdue';
+  return days <= DEADLINE_LEAD_DAYS && (!after || today > after) ? 'due-soon' : 'upcoming';
 }
 
 /**
@@ -264,7 +268,7 @@ export function companyDeadlines(company: Pick<Company, 'books'>, today: ISODate
     out.push({
       ...d,
       id: d.id ?? `${d.kind}:${d.period.end}`,
-      status: deadlineStatus(d.due, today, done),
+      status: deadlineStatus(d.due, today, done, d.kind === 'confirmation' ? undefined : d.period.end),
       days: diffDays(today, d.due),
       // Late only against a day worked out for it: an unmatched filing's day is a guess.
       ...(d.filing && !d.nothingToPay && !d.unmatched && d.filing.filedOn > d.due ? { filedLate: true } : {}),

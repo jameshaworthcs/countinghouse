@@ -383,6 +383,8 @@ export function computeEarmarks(input: EarmarksInput): EarmarksResponse {
     for (const c of potCounted) {
       const t = c.t;
       if (t.transferGroup || !t.counterpartyAccountId || !setAsideIds.has(t.counterpartyAccountId)) continue;
+      // A row you decided is your own money (nothing to or from the pot) is not a missing transfer.
+      if (c.by === 'decision' && c.parts.every((p) => p.effect === 'own')) continue;
       const first = input.firstDataOf(t.counterpartyAccountId);
       const last = input.lastDataOf(t.counterpartyAccountId);
       if (!first || !last || t.date < first || t.date > last) continue;

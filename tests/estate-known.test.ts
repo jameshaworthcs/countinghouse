@@ -11,7 +11,7 @@ import { Coverage } from '../src/server/analytics/coverage';
 import { estateKnownOn, estateOn, estateSeries, incompleteStretches } from '../src/server/analytics/estate';
 import { transactionId } from '../src/server/ids';
 import { Store } from '../src/server/store';
-import type { Account, BalanceSnapshot, Transaction } from '../src/shared/schema';
+import type { Account, BalanceSnapshot, ImportRecord, Transaction } from '../src/shared/schema';
 
 const stamp = '2026-01-01T00:00:00+00:00';
 const acct = (id: string, type: Account['type'], extra: Partial<Account> = {}): Account => ({ id, name: `Example ${id}`, type, currency: 'GBP', status: 'open', aliases: [], includeInNetWorth: true, createdAt: stamp, updatedAt: stamp, ...extra });
@@ -81,6 +81,41 @@ describe('an account opened before its data starts', () => {
     const engine = new BalanceEngine(store);
     expect(engine.firstDataDate('new-gia')).toBe('2026-11-06');
     expect(incompleteStretches(store, engine, '2026-10-01', '2026-11-06')).toEqual([{ from: '2026-11-01', to: '2026-11-05', accounts: [{ id: 'new-gia', name: 'Example new-gia' }] }]);
+  });
+  it('a ledger account whose committed statements (and confirmations) cover from opening counts from its opening', async () => {
+    await store.upsertAccount(acct('card', 'credit_card', { openedOn: '2026-01-10' }));
+    await store.addTransactions([tx('card', '2026-01-20', -25, 'EXAMPLE SHOP')], 'card-rows');
+    await store.addBalances([{ ...bal('card', '2026-02-01', -25), kind: 'statement' }], 'card-bal');
+    // Without statement coverage from opening, 10–19 Jan is incomplete.
+    expect(incompleteStretches(store, new BalanceEngine(store), '2026-01-01', '2026-02-01')).toEqual([
+      { from: '2026-01-10', to: '2026-01-19', accounts: [{ id: 'card', name: 'Example card' }] },
+    ]);
+    // A committed statement starting on 12 Jan plus a confirmation for 10–11 Jan covers the whole opening gap.
+    const imp: ImportRecord = {
+      id: 'imp_20260205_100000_abcd',
+      status: 'committed',
+      createdAt: stamp,
+      updatedAt: stamp,
+      origin: 'upload',
+      document: { id: 'doc_0000000000000001', fileName: 'card-jan.pdf', mediaType: 'application/pdf', sha256: 'a'.repeat(64), size: 100 },
+      extraction: { warnings: [] },
+      draft: {
+        documentType: 'credit_card_statement',
+        sections: [{ key: 's0', detected: {}, target: { mode: 'existing', accountId: 'card' }, currency: 'GBP', periodStart: '2026-01-12', periodEnd: '2026-02-01', openingBalance: 0, recordBalance: false, transactions: [], recordHoldings: false, holdings: [] }],
+        figures: [],
+        notes: [],
+      },
+      result: { accountIds: ['card'], accountsCreated: [], transactionsAdded: 0, transactionsSkipped: 0, balancesAdded: 0, holdingsAdded: 0, figuresAdded: 0 },
+    };
+    await store.saveImport(imp, 'card statement');
+    // Still short of 10–11 Jan.
+    expect(new BalanceEngine(store).firstDataDate('card')).toBe('2026-01-20');
+    await store.addCoverageConfirmations([{ id: 'cov_000000000003', accountId: 'card', from: '2026-01-10', to: '2026-01-11', confirmedAt: stamp }]);
+    const engine = new BalanceEngine(store);
+    expect(engine.firstDataDate('card')).toBe('2026-01-10');
+    expect(engine.balanceOn('card', '2026-01-10')?.value).toBe(0);
+    expect(engine.balanceOn('card', '2026-01-09')).toBeNull();
+    expect(incompleteStretches(store, engine, '2026-01-01', '2026-02-01')).toEqual([]);
   });
 });
 

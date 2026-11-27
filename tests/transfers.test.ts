@@ -58,6 +58,30 @@ describe('reading a description for your own accounts', () => {
     expect(ownNamePattern('Cher')).toBeNull();
     expect(new Categoriser([], new CategoryIndex(defaultCategories()), accounts, []).categorise({ accountId: 'bank', description: 'TO SAM TAYLOR', amount: -1 }).category).not.toBe('transfer');
   });
+
+  it('a bank’s name in a third-party reference does not match another of your accounts there', () => {
+    const withSameBank = [...accounts, acct('santander-saver', 'savings', { name: 'Santander Example Saver', institutionId: 'santander', last4: '9911' })];
+    const cc = new Categoriser([], new CategoryIndex(defaultCategories()), withSameBank, [], { ownerName: 'Sam Robin Taylor' });
+    // Sending bank boilerplate ("Santander Ref") in a payment to a third party is not a transfer to your saver.
+    const thirdParty = cc.categorise({ accountId: 'bank', description: 'Third party payment made via Faster Payment to EXAMPLE STUDIO LTD Reference Funding Santander Ref', amount: -250 });
+    expect(thirdParty.counterpartyAccountId).toBeUndefined();
+    expect(thirdParty.category).not.toBe('savings-transfer');
+    // A payment to your own name that names another bank (or the same bank) in its reference still matches.
+    const toSelf = cc.categorise({ accountId: 'bank', description: 'BILL PAYMENT VIA FASTER PAYMENT TO SAM TAYLOR REFERENCE Chase , MANDATE NO 4', amount: -250 });
+    expect(toSelf).toMatchObject({ category: 'savings-transfer', counterpartyAccountId: 'saver' });
+    const toSelfSameBank = cc.categorise({ accountId: 'bank', description: 'BILL PAYMENT VIA FASTER PAYMENT TO SAM TAYLOR REFERENCE Santander saver , MANDATE NO 4', amount: -250 });
+    expect(toSelfSameBank).toMatchObject({ category: 'savings-transfer', counterpartyAccountId: 'santander-saver' });
+    // A third-party/trustee payment naming a different bank in the reference still matches that bank.
+    const toTrustee = cc.categorise({ accountId: 'bank', description: 'Third party payment made via Faster Payment to EXAMPLE CLIENT MONEY Reference Chase saving', amount: -250 });
+    expect(toTrustee).toMatchObject({ category: 'savings-transfer', counterpartyAccountId: 'saver' });
+    // With no owner name configured, references naming a different bank still match.
+    const noOwner = new Categoriser([], new CategoryIndex(defaultCategories()), withSameBank, []);
+    expect(noOwner.categorise({ accountId: 'bank', description: 'To Sam Taylor - Chase', amount: -250 })).toMatchObject({ category: 'savings-transfer', counterpartyAccountId: 'saver' });
+    expect(noOwner.categorise({ accountId: 'bank', description: 'FASTER PAYMENTS RECEIPT REF.Chase FROM S TAYLOR', amount: 250 })).toMatchObject({ category: 'savings-transfer', counterpartyAccountId: 'saver' });
+    // A payment whose payee is the bank itself still matches.
+    const toBank = cc.categorise({ accountId: 'bank', description: 'BILL PAYMENT VIA FASTER PAYMENT TO ALDERMORE BANK REFERENCE Save , MANDATE NO 4', amount: -250 });
+    expect(toBank).toMatchObject({ category: 'savings-transfer', counterpartyAccountId: 'easy' });
+  });
 });
 
 describe('linking transfers', () => {
@@ -190,6 +214,47 @@ describe('linking transfers', () => {
     expect(store.transaction(dd!)).toMatchObject({ category: 'credit-card-payment', counterpartyAccountId: 'tesco' });
     expect(store.transaction(dd!)!.transferGroup).toBeUndefined();
     expect(store.transaction(refund!)!.transferGroup).toBeUndefined();
+  });
+
+  it('re-enriching clears a stale counterparty when a row stops being a transfer, and keeps it when it stays a transfer', async () => {
+    const stale = {
+      id: transactionId('bank', '2026-07-01', -120, 'Third party payment made via Faster Payment to EXAMPLE STUDIO LTD Reference Funding Santander Ref', 0),
+      accountId: 'bank',
+      date: '2026-07-01',
+      amount: -120,
+      currency: 'GBP',
+      description: 'Third party payment made via Faster Payment to EXAMPLE STUDIO LTD Reference Funding Santander Ref',
+      payee: 'Santander Example Saver',
+      category: 'savings-transfer',
+      categorisedBy: 'transfer' as const,
+      counterpartyAccountId: 'saver',
+      source: {},
+      createdAt: stamp,
+    };
+    // An unlinked credit-card payment whose card was recorded on it, with no card named in the text: stays a transfer, so its counterparty stays.
+    const cardPay = {
+      id: transactionId('aqua', '2026-07-02', 80, 'PAYMENT RECEIVED - THANK YOU', 0),
+      accountId: 'aqua',
+      date: '2026-07-02',
+      amount: 80,
+      currency: 'GBP',
+      description: 'PAYMENT RECEIVED - THANK YOU',
+      payee: 'Payment Received - Thank You',
+      category: 'credit-card-payment',
+      categorisedBy: 'builtin' as const,
+      counterpartyAccountId: 'bank',
+      source: {},
+      createdAt: stamp,
+    };
+    await store.addTransactions([stale, cardPay], 'stale');
+    const preview = await enrich(store, { dryRun: true, detail: true });
+    expect(preview.changes?.find((c) => c.id === stale.id)?.counterparty).toEqual({ from: 'saver', to: null });
+    expect(preview.changes?.find((c) => c.id === cardPay.id)).toBeUndefined();
+    await enrich(store);
+    const updated = store.transaction(stale.id)!;
+    expect(updated.counterpartyAccountId).toBeUndefined();
+    expect(updated.category).not.toBe('savings-transfer');
+    expect(store.transaction(cardPay.id)!.counterpartyAccountId).toBe('bank');
   });
 });
 
