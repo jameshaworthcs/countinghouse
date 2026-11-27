@@ -41,7 +41,8 @@ function PeriodStatus({ p }: { p: VatPeriodRow }) {
     <span className="inline-flex flex-wrap items-center gap-1">
       {STATUS[p.status]}
       {p.overdue && <StatusBadge status="bad">Overdue</StatusBadge>}
-      {p.differs && <Badge tone="warn">Differs from the books</Badge>}
+      {/* The net VAT the same, only boxes 1, 4, 6 or 7 apart (a reverse charge left out, say): the boxes differ, not what is due. */}
+      {p.differs && <Badge tone="warn">{p.computed !== null && p.filed !== null && p.computed === p.filed ? 'Boxes differ' : 'Differs from the books'}</Badge>}
     </span>
   );
 }
@@ -606,11 +607,6 @@ function ThresholdCard({ t }: { t: VatThresholdView }) {
     <Card
       title="Taxable turnover and the thresholds"
       description={`Taxable turnover in the 12 months to ${formatDate(t.to)}, from the books, against the VAT registration and deregistration thresholds in force (${pounds(t.registration)} and ${pounds(t.deregistration)} from ${formatDate(t.thresholdsFrom)}). Information only.`}
-      actions={
-        <Button size="sm" variant="ghost" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
-          {open ? 'Hide the months' : 'Each month'}
-        </Button>
-      }
     >
       <div className="flex flex-col gap-2 text-[13px] text-ink-2">
         <div className="text-[22px] font-semibold text-ink">
@@ -635,6 +631,12 @@ function ThresholdCard({ t }: { t: VatThresholdView }) {
             {t.cash.over ? 'Over the limit for leaving: the scheme ends with the current period, and the VAT on everything outstanding is due then.' : 'Within the scheme.'} Supplies the scheme excludes (payment not due within 6 months, or invoiced before the supply: VAT Regulations 1995 reg 58(2)) are not detected.
           </p>
         )}
+        {/* Below what it explains, not in the card's header, where it read as a label of the figure. */}
+        <div className="no-print">
+          <Button size="sm" variant="ghost" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+            {open ? 'Hide the 12 months to each month’s end' : 'Show the 12 months to each month’s end'}
+          </Button>
+        </div>
         {open && (
           <div className="relative overflow-x-auto">
             <table className={tableClasses.table}>
