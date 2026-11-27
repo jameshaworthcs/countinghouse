@@ -371,29 +371,48 @@ their own (CAA 2001 Part 2 Ch 10A), not worked out.
 
 ### A period's accounts (FRS 105)
 
-The period-end postings and the period's accounts (FORMULAS.md §22, "At a period's end" and "The
-period's accounts") follow FRS 105, The Financial Reporting Standard applicable to the Micro-entities
-Regime (the Financial Reporting Council; paragraphs as in its September 2024 edition):
+The period-end postings and the period's accounts (FORMULAS.md §22, "At a period's end", "The period's
+accounts" and "Locking") follow FRS 105, The Financial Reporting Standard applicable to the
+Micro-entities Regime (the Financial Reporting Council; paragraphs as in its September 2024 edition):
 
 - **The accrual basis** (para 2.24): items are recognised when they meet the definitions, not when cash
-  moves, so a cost or income covering other periods is prepaid, accrued or deferred by its days.
+  moves, so a cost or income covering other periods is prepaid, accrued or deferred by its days; one
+  billed or invoiced and not yet paid at a period end is a trade creditor or debtor.
+- **Comparatives** (paras 3.7 and 3.10): the preceding period's amount beside every amount; and the
+  level of rounding used is stated (para 3.13(d)).
 - **Property, plant and equipment** (Section 12): measured at cost less accumulated depreciation (para
-  12.14); the depreciable amount allocated on a systematic basis over its useful life (12.17), the
-  charge in profit or loss (12.16); depreciation begins when it is available for use and ceases when it
-  is derecognised (12.19); a method that reflects how its benefits are used, straight line among them
-  (12.21). Derecognised on disposal or when no benefits are expected (12.26), the gain or loss in profit
-  or loss, never as turnover (12.27). The app's convention, by whole months with the month of
-  acquisition in full and residual value nil, is a policy within these, the company's to choose
-  (DECISIONS 2026-11-27).
-- **Intangible assets other than goodwill** (Section 13): a finite useful life (13.9), not more than ten
-  years when it cannot be estimated reliably (13.10); amortised on a systematic basis, straight line when
-  the pattern cannot be determined reliably (13.11–13.12), residual value nil (13.13).
+  12.14); major components with different patterns of use depreciated separately (12.15: one asset each
+  here, so a component is coded as an asset of its own); the depreciable amount (cost less residual
+  value) allocated on a systematic basis over its useful life (12.17), the charge in profit or loss
+  (12.16); a change of residual value or useful life is a change in an accounting estimate (12.18),
+  recognised prospectively from the period of the change (paras 8.12–8.13); depreciation begins when it
+  is available for use and ceases when it is derecognised (12.19); a method that reflects how its
+  benefits are used, straight line among them (12.21). Derecognised on disposal or when no benefits are
+  expected (12.26), the gain or loss in profit or loss, never as turnover (12.27). The app's convention,
+  by whole months with a full month when bought and none when it leaves (or a full month in each, the
+  company's choice), is a policy within these (DECISIONS 2026-11-27).
+- **Intangible assets other than goodwill** (Section 13): only those acquired separately are recognised;
+  one generated internally is an expense (paras 13.4–13.5); a finite useful life (13.9), not more than
+  ten years when it cannot be estimated reliably (13.10); amortised on a systematic basis, straight line
+  when the pattern cannot be determined reliably (13.11–13.12), residual value nil unless 13.13 applies.
+  **Goodwill** acquired with a trade follows the same (para 14.2, applying 13.9–13.14), at most 10 years
+  when its life cannot be estimated reliably.
+- **Provisions** (Section 16): written in a journal to `provisions` (balance sheet line I).
+- **Impairment** (Section 22): not supported yet; the books refuse a hand-written write-down on a
+  depreciation code.
 - **Errors** (Section 8): a material prior period error is corrected retrospectively, by restating the
-  comparatives or the opening balances (para 8.16). Not supported here: a correction after filing goes
-  through a journal in a later period, and the period filed shows the drift.
-- **Whole pounds**: Companies House's online filing of micro-entity accounts takes each balance sheet
-  line in whole pounds and works out the totals (net current assets, total assets less current
-  liabilities, net assets) from them, so the totals are worked out from the rounded lines here too.
+  comparatives or the opening balances (paras 8.16–8.17), with a note; accounts already delivered that
+  were defective are revised under CA 2006 s454. Neither is supported here: a correction after filing
+  goes through a journal in a later period, and the period filed shows the drift.
+- **Distributions** (CA 2006 s830): a dividend only out of profits available for distribution
+  (accumulated realised profits less accumulated realised losses), justified by the relevant accounts
+  (ss836–838). The books check each dividend against the profit and loss reserve on the day it is paid,
+  a practical test that leaves unrealised profits and interim accounts to you.
+- **Whole pounds**: Companies House's online filing of micro-entity accounts takes the figures in whole
+  pounds and works out every total (it has no boxes for net current assets, total assets less current
+  liabilities or net assets, and totals fixed assets, current assets and capital and reserves from their
+  sub-lines when a breakdown is entered), so the totals are worked out from the rounded figures here
+  too, and the rounding difference sits in the profit and loss reserve.
 - Capital allowances for the tax computation (the annual investment allowance, writing-down
   allowances, a car's own rules) and the intangibles regime (CTA 2009 Part 8) are not worked out yet.
 
@@ -492,8 +511,9 @@ a check against the current text:
 
 Checked 27 November 2026 (companies: a period's accounts):
 
-- The Financial Reporting Council, [FRS 105, September 2024](https://media.frc.org.uk/documents/FRS_105_September_2024_Redacted_edition_zZFkzvN.pdf): para 2.24 (the accrual basis), Section 8 paras 8.16–8.17 (prior period errors), Section 12 paras 12.14–12.21 and 12.26–12.27 (property, plant and equipment: depreciation, derecognition), Section 13 paras 13.9–13.13 (intangible assets: useful life, amortisation)
-- Cited, not fetched: Companies House's online filing of micro-entity accounts in whole pounds, its totals worked out from the lines (worth a check against the service when filing)
+- The Financial Reporting Council, [FRS 105, September 2024](https://media.frc.org.uk/documents/FRS_105_September_2024_Redacted_edition_zZFkzvN.pdf): para 2.24 (the accrual basis), paras 3.7, 3.10 and 3.13(d) (comparatives; the level of rounding stated), Section 8 paras 8.11–8.13 (changes in estimate) and 8.16–8.17 (prior period errors), Section 12 paras 12.14–12.21 and 12.26–12.27 (property, plant and equipment: components, depreciation, changes in estimate, derecognition), Section 13 paras 13.4–13.13 (intangible assets: internally generated, useful life, amortisation), para 14.2 (goodwill), Sections 16 and 22 (provisions; impairment)
+- legislation.gov.uk, [CA 2006 s830](https://www.legislation.gov.uk/ukpga/2006/46/section/830) (distributions out of profits available), [ss836–838](https://www.legislation.gov.uk/ukpga/2006/46/section/836) (the relevant accounts), [s454](https://www.legislation.gov.uk/ukpga/2006/46/section/454) (voluntary revision of defective accounts), [s610](https://www.legislation.gov.uk/ukpga/2006/46/section/610) (share premium)
+- Companies House's online filing of micro-entity accounts in whole pounds, its totals worked out from what is entered: as an accountant's review of this slice confirmed (no boxes for F, G and K; B, C and capital and reserves totalled from a breakdown), not fetched here
 
 Checked 26 November 2026 (companies: a director's loan):
 

@@ -3209,3 +3209,40 @@ Slice 4b of the company's books: from the ledger's postings to a period's accoun
   accounts' opening balances now match the lines filed for them (net assets £96,000, as its valuation
   says), and its valuation and loan balance are dated at that year end.
 
+## 2026-11-27: The period's accounts after code and accounting review
+
+A code review and a UK accountant's review of slice 4b were taken in. The accountant confirmed the
+depreciation maths, the covers algebra, the P&L and balance sheet letters, the two-sided lines, the
+retained earnings roll-forward, the whole-pound derivation (WebFiling's micro form has no boxes for F,
+G and K, and the rounding difference in the profit and loss reserve is usual) and the FRS 105 citations.
+What changed, and why:
+
+- **The default month convention is now a full month when bought and none when it leaves**, the usual
+  pairing; counting the disposal month too (the earlier choice) gave an extra month. The other is a
+  company policy (`books.depreciationMonths: both`). An asset may carry a residual value.
+- **A change of useful life is a change in estimate, applied forward** (FRS 105 12.18, 8.12–8.13): a
+  policy row with `effectiveFrom` spreads what is left of each asset's cost over what is left of the new
+  life from then. Changing an asset's own `months` still rewrites it, but only where unlocked. Cheaper
+  than per-asset life history, and a company's lives are policies in practice.
+- **A credit to a cost code names the asset it reduces** (`reduces`), and the forms put `asset` only on
+  debits, so a refund or a cost moved off an asset is valid again and written down forward like a change
+  in estimate. A credit that names none stays a check rather than being guessed at.
+- **The books lock when accounts are recorded as filed** (`books.lockedThrough`), and the check is by
+  postings, not by row dates: a write is refused when the postings on or before the lock would differ,
+  so an accrual reaching back into a filed period is caught as well as a recoding. Imports are facts and
+  are not refused (the drift check says what they move); enrichment skips locked rows instead of
+  failing. The owner may move the lock, with a warning; a proposal never does.
+- **"Reconciled" needs a statement balance that settles the day** (on it, or the first after with the
+  rows adding up from the one before), and an account that moved or holds a balance without one blocks
+  "ready"; a dormant one at nil does not. Running sums of rows reconciled nothing.
+- **Comparatives are shown** (FRS 105 3.7): the prior balance sheet as filed where its lines are
+  recorded (a blank line as worked out), else computed; its profit and loss only when the books reach it.
+- **B and C are the sums of their rounded sub-lines**, as the form totals a breakdown, and share premium
+  and other reserves are rounded beside share capital, the reserve taking the difference. The accounts
+  must state their rounding (FRS 105 3.13(d), not 3.12(d) as the review had it): the filing slice prints it.
+- **A bill or invoice issued by the period end routes an unpaid cover to trade creditors or debtors**
+  (`invoicedOn`), not accruals; its VAT under cash accounting is left out as immaterial.
+- **Dividends are checked against the reserve on the day paid** (CA 2006 s830), a practical test the
+  docs say is interim. Provisions, share premium and other reserves joined the chart; impairment and
+  prior-period restatement (FRS 105 8.16–8.17, CA 2006 s454) are said to be unsupported.
+

@@ -159,7 +159,7 @@ depend on).
 | `tags` | yours: short labels to group and filter by (up to 20, each up to 40 characters, one spelling per tag whatever the case). Tag Gift Aided donations `gift-aid` |
 | `splits` | yours: `[{amount, category, note?}]`, two or more lines adding up to `amount`, each signed like it, in spending or income categories. Spending, income and budgets count the lines ([FORMULAS.md §14](FORMULAS.md)). A transfer is never split, and correcting the amount so the lines no longer add up removes the split |
 
-**Coding a payment** (`books`): `{ledger?, vat?, covers?, asset?, lines?, invoiceToCompany?, uncoded?, setBy, ruleId?}`, the
+**Coding a payment** (`books`): `{ledger?, vat?, covers?, invoicedOn?, asset?, reduces?, lines?, invoiceToCompany?, uncoded?, setBy, ruleId?}`, the
 company's chart of accounts and what each code means being [FORMULAS.md §22](FORMULAS.md), "The
 general ledger" (`src/shared/ledger.ts`):
 
@@ -177,16 +177,24 @@ general ledger" (`src/shared/ledger.ts`):
 - `covers`: `{from, to}`, the period a cost or income is for (a year's subscription), not ending
   before it starts. On income or an expense the books recognise it over those days (FORMULAS.md §22,
   "Covers"); on any other code it says nothing (a check).
-- `asset`: `{class, months?, connected?, disposedOn?}` on a fixed (or intangible) asset's cost only, of
-  that code's class (`computer`, `office`, `furniture`, `van`, `motor` (cars), or `intangible` on
-  `intangible-assets:cost`), and only on money going out: it puts the asset on the company's register
-  (FORMULAS.md §22, "Depreciation"). `months`: its life in whole months; absent, the company's policy for
-  the class (`books.policies`). `connected` when it was bought from a connected person (CAA 2001
-  ss214–218; never on an intangible). `disposedOn`: the day it was sold, scrapped or given away, on or
-  after the day it was bought: depreciation stops at that month, its cost and depreciation leave the
-  books and the rest goes to `disposals`; what it fetched is coded to `disposals` on the row it came in
-  on. Additive (no format version: `intangible` and `disposedOn` are new, optional values).
-- `lines`: two or more `{ledger, amount, vat?, covers?, asset?}` adding up to the row's amount (an HMRC
+- `invoicedOn`: beside `covers` only, the day the bill or invoice for it was issued: not yet paid at a
+  period end it is then a trade creditor (a cost) or debtor (income), not an accrual.
+- `asset`: `{class, months?, connected?, disposedOn?, residual?}` on a fixed (or intangible) asset's
+  cost only, of that code's class (`computer`, `office`, `furniture`, `van`, `motor` (cars), or
+  `intangible` on `intangible-assets:cost`), and only on money going out (a debit): it puts the asset on
+  the company's register (FORMULAS.md §22, "The register"). `months`: its life in whole months; absent,
+  the company's policy for the class (`books.policies`). `connected` when it was bought from a connected
+  person (CAA 2001 ss214–218; never on an intangible). `disposedOn`: the day it was sold, scrapped or
+  given away, on or after the day it was bought: depreciation stops (the month it left counted as
+  `books.depreciationMonths` says), its cost and depreciation leave the books and the rest goes to
+  `disposals`; what it fetched is coded to `disposals` on the row it came in on. `residual`: pounds,
+  what it is expected to fetch at the end of its life, not negative and at most its cost; only its cost
+  less this is written down.
+- `reduces`: on money coming in (a credit) to a fixed asset's cost, without `asset`: the id of the
+  asset on the register whose cost it reduces (`row:tx_…`, `row:tx_…:1` for a split's line,
+  `personal:tx_…`, `journal:jnl_…:<line>`), a supplier's part refund, say. Additive (no format version:
+  `intangible`, `disposedOn`, `residual`, `reduces` and `invoicedOn` are new, optional values).
+- `lines`: two or more `{ledger, amount, vat?, covers?, invoicedOn?, asset?, reduces?}` adding up to the row's amount (an HMRC
   repayment that is part VAT, part interest), in place of `ledger` and the rest beside it.
 - `invoiceToCompany`: on a row of yours paid for the company, that the supply was made to it and its VAT
   invoice is addressed to it, so it may reclaim the VAT (VATA 1994 s24(1), reg 29(2)); VAT claimed
@@ -427,7 +435,7 @@ which its deadlines are worked out ([FORMULAS.md §22](FORMULAS.md)). They are t
 yours: `GET /api/companies` leaves them out, and only the company's own routes serve them
 (`GET /api/companies/:id/books`, `/api/company-books`, `/api/company-alerts`). Optional and additive
 (no format version). `{incorporatedOn, accountingReferenceDate?, periods, vat?, paye?,
-confirmationStatement?, tradeStartedOn?, ctPeriods, deadlinesFrom?, ledgerFrom?, policies?, filings, setBy, updatedAt}`:
+confirmationStatement?, tradeStartedOn?, ctPeriods, deadlinesFrom?, ledgerFrom?, policies?, depreciationMonths?, lockedThrough?, filings, setBy, updatedAt}`:
 
 - `incorporatedOn`: the day Companies House incorporated it.
 - `accountingReferenceDate`: `"MM-DD"`, its reference date from incorporation. Absent, the default:
@@ -462,9 +470,16 @@ confirmationStatement?, tradeStartedOn?, ctPeriods, deadlinesFrom?, ledgerFrom?,
   settled before the books were kept here).
 - `ledgerFrom`: the day its general ledger starts (books taken over mid-life): nothing dated before it
   posts but journals marked `opening`. Not before incorporation.
-- `policies`: `[{class, months}]`, its depreciation policies: the life in whole months (1 to 600) of
-  each class of asset (`computer`, `office`, `furniture`, `van`, `motor`, `intangible`) whose own coding
-  gives none, one per class (FORMULAS.md §22, "Depreciation"). Optional and additive.
+- `policies`: `[{class, months, effectiveFrom?}]`, its depreciation policies: the life in whole months
+  (1 to 600) of each class of asset (`computer`, `office`, `furniture`, `van`, `motor`, `intangible`)
+  whose own coding gives none, one per class and day. A row with `effectiveFrom` is a change in estimate
+  from that day: what is left of each asset's cost is written down over what is left of the new life,
+  earlier periods untouched (FORMULAS.md §22, "A change in estimate"). Optional and additive.
+- `depreciationMonths`: how months are counted, `acquisition` (absent: the default) a full month when an
+  asset is bought and none when it leaves, or `both`, a full month in each.
+- `lockedThrough`: the books are locked through this day: no write that changes a posting dated on or
+  before it is accepted (FORMULAS.md §22, "Locking"). Set to a period's end when its accounts are recorded
+  as filed (never earlier than it was); only the owner moves it (a proposal keeps it).
 - `filings`: what the company filed or paid, each `{id, kind, periodStart?, periodEnd, filedOn,
   reference?, note?, figures?, addedBy}`:
   - `kind`: `accounts`, `ct600` (a company tax return), `ct-payment` (Corporation Tax paid;
@@ -822,7 +837,7 @@ a month's pay and its PAYE, a dividend declared), one per line. Optional: no fil
 
 - `id`: `jnl_` + 12 hex, set once.
 - `companyId`: a company in companies.json whose books are kept here.
-- `lines`: two or more `{ledger, amount, vat?, covers?, asset?}`. **Inside the company's books, debits
+- `lines`: two or more `{ledger, amount, vat?, covers?, invoicedOn?, asset?, reduces?}`. **Inside the company's books, debits
   are positive and credits negative**, not signed from your point of view (DECISIONS 2026-11-26):
   a journal is written as an accountant writes one. They add up to nothing, none is £0, each `ledger`
   is a code of the chart or one of the company's own accounts (`bank:<accountId>`, an opening balance),
@@ -830,7 +845,7 @@ a month's pay and its PAYE, a dividend declared), one per line. Optional: no fil
   claim?}`, said outright for the VAT return: `side` is `input` (reclaimed) or `output` (charged), never
   inferred from the ledger, and `claim: "reg111"` a claim of input tax from before registration; a VAT
   line is on `vat` itself, or on income, an expense or an asset's cost. `covers` and `asset` as on a
-  coding; a line with `asset` is a debit (its cost). The books work depreciation out from the register,
+  coding; a line with `asset` is a debit (its cost), one with `reduces` a credit to a cost code. The books work depreciation out from the register,
   so a line on a depreciation or amortisation code is a check.
 - `opening`: an opening balance, which posts even before the books' first day (`books.ledgerFrom`). A
   fixed asset on an opening journal is its carrying amount then, with its remaining life in `months`:
@@ -840,7 +855,7 @@ a month's pay and its PAYE, a dividend declared), one per line. Optional: no fil
 
 You write, change and take away journals on the company's Books tab
 (`POST /api/companies/:id/journals`, `PUT` and `DELETE /api/companies/:id/journals/:jid`); no token may.
-The store refuses one that does not fit; one a hand edit left that does not fit is reported and posts
+The store refuses one that does not fit, and one that would change the books on or before `books.lockedThrough`; one a hand edit left that does not fit is reported and posts
 nothing. Adding the file needed no format change.
 
 ## goals.json

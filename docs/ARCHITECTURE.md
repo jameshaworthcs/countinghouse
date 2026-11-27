@@ -271,8 +271,15 @@ The company seen from its own side: its records and deadlines, when you keep its
 - **A period's accounts** (`analytics/period-accounts.ts`, `periodAccounts`; FORMULAS.md §22, "The
   period's accounts") are worked out from the ledger for one accounting period, with the company's own
   balance engine for the bank reconciliation, and served from `GET /api/companies/:id/accounts?period=`.
-  The accounts filed for a period lock it: lines that drift from them are a check, and a correction
-  goes through a journal in a later period. The company's page has an Accounts tab for it.
+  The company's page has an Accounts tab for it.
+- **The lock** (`books.lockedThrough`, FORMULAS.md §22, "Locking"): recording a period's accounts as
+  filed locks the books through its end. The store compares what a write leaves the postings on or
+  before the lock with what they were (`lockedPostingsKey` over `sourceWith`, analytics/ledger.ts) in
+  `updateTransactions`, `putJournal`, `deleteJournal` and `updateCompany`, and refuses one that changes
+  them; enrichment, book rules and automatic links write with `locked: 'skip'`, which leaves rows dated
+  within the lock (or a company's rows whole, when still needed) out of their patches. A proposal's
+  changes are each tried against the lock before anything is written. Lines that drift from the filing
+  stay a check, as the backstop.
 - **Its own routes serve it** (`GET /api/companies/:id/ledger`, `GET /api/companies/:id/coding`), and
   the owner's writes (`PUT /api/companies/:id/rows/:txId/books` and `/link`, `POST
   /api/companies/:id/links/auto`, journals and book rules), which no token may use; an agent proposes
