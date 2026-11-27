@@ -171,8 +171,10 @@ function ReturnCard({ ret, companyId }: { ret: VatReturnView; companyId: string 
             The books start after this period, so its boxes are not worked out here.{p.filedOn ? ' What was filed is recorded below.' : ''}
           </Callout>
         ) : ret.ready ? (
-          <Callout tone="good" title={p.filedOn ? 'Filed' : 'Ready to file'}>
-            The period has ended, every row in it is coded and nothing stops it. Copy the boxes into your Making Tax Digital software, check each, and record the return as filed in Settings → Filings.
+          <Callout tone="good" title={p.filedOn ? `Filed ${formatDate(p.filedOn)}` : 'Ready to file'}>
+            {p.filedOn
+              ? `Every row in the period is coded and nothing in the books stops it${ret.filed ? ': the return filed is set against them below' : ''}.`
+              : 'The period has ended, every row in it is coded and nothing stops it. Copy the boxes into your Making Tax Digital software, check each, and record the return as filed in Settings → Filings.'}
           </Callout>
         ) : (
           <div className="rounded-lg border border-line bg-panel-2 px-4 py-3">
