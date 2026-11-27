@@ -17,6 +17,7 @@ import { ACCOUNT_TYPE_META, balanceModeOf, sideOf } from '../shared/accounts';
 import { companyMarkProblem, markMisfit } from '../shared/company';
 import { addedBooksProblems } from '../shared/company-books';
 import { codingPlace, codingProblems, companyLinkProblem, isBookRule, journalProblems, linkGroups, ruleBooksProblems } from '../shared/ledger';
+import { lockedMessage, lockedPostingsKey, sourceWith } from './analytics/ledger';
 import { defaultCategories } from '../shared/categories';
 import { earmarkAccountIds } from '../shared/earmarks';
 import { sectionSpan } from '../shared/coverage';
@@ -281,6 +282,9 @@ function emptyState(): State {
 }
 
 const byDate = <T extends { date: string }>(a: T, b: T) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+
+/** The fields of a row whose change can move a company's postings: what a lock guards (books.lockedThrough). */
+const POSTING_FIELDS = ['books', 'companyLink', 'company', 'transferGroup', 'counterpartyAccountId', 'amount', 'date', 'currency', 'splits'] as const;
 
 /** Stable sort by date, keeping source order within a day (it matters for running balances). */
 function sortByDate<T extends { date: string }>(list: T[]): T[] {
@@ -1232,7 +1236,14 @@ export class Store extends EventEmitter {
    */
   updateCompany(id: string, change: (current: Company | undefined) => Company, message: string): Promise<void> {
     return this.exclusive(async () => {
-      const next = change(this.state.companies.find((c) => c.id === id));
+      const current = this.state.companies.find((c) => c.id === id);
+      const next = change(current);
+      // The lock (books.lockedThrough): nothing filed moves. The owner may move the lock itself; the
+      // books are compared through the earlier of the lock before and after (none once it is taken away).
+      const was = current?.books?.lockedThrough;
+      const now = next.books?.lockedThrough;
+      const through = was && now ? (was < now ? was : now) : undefined;
+      if (current?.books && next.books && through && lockedPostingsKey(this, id, through) !== lockedPostingsKey(sourceWith(this, { company: next }), id, through)) throw new StoreError(lockedMessage(next, through), 409);
       const list = this.state.companies.some((c) => c.id === id) ? this.state.companies.map((c) => (c.id === id ? next : c)) : [...this.state.companies, next];
       await this.writeArray('companies', list, message);
     });
@@ -1363,6 +1374,7 @@ export class Store extends EventEmitter {
       if (!this.state.companies.some((c) => c.id === j.companyId)) throw new StoreError(`There is no company "${j.companyId}" in your data.`, 404);
       const problems = journalProblems(j, (id) => this.state.accounts.find((a) => a.id === id)?.companyId === j.companyId);
       if (problems.length) throw new StoreError(problems.join(' '), 422);
+      this.checkLock(j.companyId, { journals: { add: [j] } });
       const list = [...this.state.journals];
       const i = list.findIndex((x) => x.id === j.id);
       if (i >= 0 && list[i]!.companyId !== j.companyId) throw new StoreError('That journal is another company’s.', 409);
@@ -1387,6 +1399,7 @@ export class Store extends EventEmitter {
     return this.exclusive(async () => {
       const gone = this.state.journals.find((j) => j.id === id);
       if (!gone) throw new StoreError('No such journal', 404);
+      this.checkLock(gone.companyId, { journals: { remove: new Set([id]) } });
       const list = this.state.journals.filter((j) => j.id !== id);
       await this.writeJsonl(JSONL_FILES.journals.file, list);
       this.state.journals = list;
@@ -1488,8 +1501,13 @@ export class Store extends EventEmitter {
     });
   }
 
-  /** Apply patches to existing transactions (enrichment or corrections). */
-  updateTransactions(updates: { id: string; patch: Partial<Transaction> }[], message: string): Promise<Transaction[]> {
+  /**
+   * Apply patches to existing transactions (enrichment or corrections). A company's lock
+   * (books.lockedThrough) refuses a write that would change its postings on or before it; with
+   * `locked: 'skip'` (enrichment, book rules, automatic links) what would is left out of the patches
+   * instead: rows dated within the lock keep their coding, links, marks and pairing.
+   */
+  updateTransactions(updates: { id: string; patch: Partial<Transaction> }[], message: string, opts: { locked?: 'refuse' | 'skip' } = {}): Promise<Transaction[]> {
     return this.exclusive(async () => {
       const touched = new Map<string, Set<string>>();
       const out: Transaction[] = [];
@@ -1497,27 +1515,42 @@ export class Store extends EventEmitter {
       const diff = new DiffCollector();
       // Every patch is worked out and checked before any is applied: a refused one leaves nothing
       // half-written. A row patched twice takes both, in order.
-      const staged = new Map<string, Transaction>();
-      const plan: { id: string; current: Transaction; next: Transaction }[] = [];
-      for (const { id, patch } of updates) {
-        const current = staged.get(id) ?? this.txById.get(id);
-        if (!current) throw new StoreError(`Unknown transaction ${id}`, 404);
-        const { id: _i, accountId: _a, ...rest } = patch;
-        const merged: Record<string, unknown> = { ...current, ...rest, updatedAt: stamp };
-        // `undefined` in a patch means "clear this field".
-        for (const [k, v] of Object.entries(rest)) if (v === undefined) delete merged[k];
-        const next = TransactionSchema.parse(merged);
-        this.checkRow(next, this.txById.get(id));
-        staged.set(id, next);
-        plan.push({ id, current, next });
+      const stageAll = (list: { id: string; patch: Partial<Transaction> }[]) => {
+        const staged = new Map<string, Transaction>();
+        const plan: { id: string; current: Transaction; next: Transaction }[] = [];
+        for (const { id, patch } of list) {
+          const current = staged.get(id) ?? this.txById.get(id);
+          if (!current) throw new StoreError(`Unknown transaction ${id}`, 404);
+          const { id: _i, accountId: _a, ...rest } = patch;
+          const merged: Record<string, unknown> = { ...current, ...rest, updatedAt: stamp };
+          // `undefined` in a patch means "clear this field".
+          for (const [k, v] of Object.entries(rest)) if (v === undefined) delete merged[k];
+          const next = TransactionSchema.parse(merged);
+          this.checkRow(next, this.txById.get(id));
+          staged.set(id, next);
+          plan.push({ id, current, next });
+        }
+        // Links between the company's rows and yours still fit, or an automatic one broken by this write goes with it.
+        for (const next of this.linkUpkeep(staged)) {
+          const current = staged.get(next.id) ?? this.txById.get(next.id)!;
+          const stamped = { ...next, updatedAt: stamp };
+          staged.set(next.id, stamped);
+          plan.push({ id: next.id, current, next: stamped });
+        }
+        return { staged, plan };
+      };
+      let list = updates;
+      if (opts.locked === 'skip') list = this.unlocked(list, (c) => this.txInLock(c));
+      let { staged, plan } = stageAll(list);
+      let tripped = this.lockTripped(staged);
+      if (tripped.length && opts.locked === 'skip') {
+        // Still moving a locked period (a link to a row of yours within it): leave that company's rows out whole.
+        const blocked = new Set(tripped.map((c) => c.id));
+        list = this.unlocked(list, (t) => this.companiesOfRow(t).some((id) => blocked.has(id)));
+        ({ staged, plan } = stageAll(list));
+        tripped = this.lockTripped(staged);
       }
-      // Links between the company's rows and yours still fit, or an automatic one broken by this write goes with it.
-      for (const next of this.linkUpkeep(staged)) {
-        const current = staged.get(next.id) ?? this.txById.get(next.id)!;
-        const stamped = { ...next, updatedAt: stamp };
-        staged.set(next.id, stamped);
-        plan.push({ id: next.id, current, next: stamped });
-      }
+      if (tripped.length) throw new StoreError(lockedMessage(tripped[0]!, tripped[0]!.books!.lockedThrough!), 409);
       for (const { id, current, next } of plan) {
         diff.changed(current, next);
         const list = this.state.transactions.get(current.accountId)!;
@@ -1567,6 +1600,61 @@ export class Store extends EventEmitter {
       if (!account?.companyId) throw new StoreError('A link to rows of yours is on a company account’s row.');
       if (new Set(next.companyLink.rows).size !== next.companyLink.rows.length) throw new StoreError('A link names each row of yours once.');
     }
+  }
+
+  /** The companies a row is in the books of: its account's, and the one its mark names. */
+  private companiesOfRow(t: Transaction): string[] {
+    const own = this.state.accounts.find((a) => a.id === t.accountId)?.companyId;
+    return [...new Set([own, t.company?.id].filter((x): x is string => Boolean(x)))];
+  }
+
+  /** Whether a row is dated within the lock of a company it is in the books of. */
+  private txInLock(t: Transaction): boolean {
+    return this.companiesOfRow(t).some((id) => {
+      const lock = this.company(id)?.books?.lockedThrough;
+      return lock !== undefined && t.date <= lock;
+    });
+  }
+
+  /**
+   * Patches without what would move a company's postings (`POSTING_FIELDS`) on the rows `skip` says,
+   * before or after the patch: both legs of a pair go together, so a transfer is never half made.
+   */
+  private unlocked(updates: { id: string; patch: Partial<Transaction> }[], skip: (t: Transaction) => boolean): { id: string; patch: Partial<Transaction> }[] {
+    const hit = (id: string, patch: Partial<Transaction>) => {
+      const t = this.txById.get(id);
+      return t !== undefined && (skip(t) || skip({ ...t, ...patch }));
+    };
+    const groups = new Set(updates.filter((u) => u.patch.transferGroup && hit(u.id, u.patch)).map((u) => u.patch.transferGroup!));
+    return updates.map((u) => {
+      if (!hit(u.id, u.patch) && !(u.patch.transferGroup && groups.has(u.patch.transferGroup))) return u;
+      const patch = { ...u.patch };
+      for (const k of POSTING_FIELDS) delete patch[k];
+      return { id: u.id, patch };
+    });
+  }
+
+  /** The locked companies whose postings on or before their lock a staged write would change. */
+  private lockTripped(staged: ReadonlyMap<string, Transaction | null>): Company[] {
+    const out: Company[] = [];
+    for (const c of this.state.companies) {
+      const lock = c.books?.lockedThrough;
+      if (!lock) continue;
+      const relevant = [...staged].some(([id, next]) => {
+        const current = this.txById.get(id);
+        const inBooks = [...(current ? this.companiesOfRow(current) : []), ...(next ? this.companiesOfRow(next) : [])].includes(c.id) || Boolean(current?.companyLink || next?.companyLink);
+        return inBooks && POSTING_FIELDS.some((k) => JSON.stringify(current?.[k]) !== JSON.stringify(next?.[k]));
+      });
+      if (relevant && lockedPostingsKey(this, c.id, lock) !== lockedPostingsKey(sourceWith(this, { rows: staged }), c.id, lock)) out.push(c);
+    }
+    return out;
+  }
+
+  /** Refuse a change to a company's journals that would move its postings on or before its lock. */
+  private checkLock(companyId: string, change: Parameters<typeof sourceWith>[1]): void {
+    const company = this.company(companyId);
+    const lock = company?.books?.lockedThrough;
+    if (company && lock && lockedPostingsKey(this, companyId, lock) !== lockedPostingsKey(sourceWith(this, change), companyId, lock)) throw new StoreError(lockedMessage(company, lock), 409);
   }
 
   /** Where a mark or a coding is judged: any account by id, and the companies in your data. */

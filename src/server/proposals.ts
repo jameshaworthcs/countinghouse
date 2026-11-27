@@ -23,7 +23,7 @@ import { agreementPattern, isScheduledPayment } from '../shared/agreements';
 import { CategoryIndex } from '../shared/categories';
 import { COMPANY_MARK_LABELS, companyMarkProblem, sameMark } from '../shared/company';
 import { Categoriser, isWrapperAccount, linkedPayee, transferLegCategory } from '../shared/categorise';
-import { addedBooksProblems, booksProblems, FILING_KIND_LABELS } from '../shared/company-books';
+import { addedBooksProblems, booksProblems, FILING_KIND_LABELS, lockAfterFiling } from '../shared/company-books';
 import { codingPlace, codingProblems, companyLinkProblem, journalProblems, ledgerName, linkableCoding, ruleBooksProblems, VAT_TREATMENT_LABELS } from '../shared/ledger';
 import { addDays, diffDays, formatDate, formatSpan, today } from '../shared/dates';
 import { formatMoney, fromMinor, isMoney, toMinor } from '../shared/money';
@@ -31,7 +31,7 @@ import { sameTerms, type TermsContent } from '../shared/terms';
 import { AccountSchema, AgreementSchema, BalanceSnapshotSchema, CompanyBooksSchema, CompanyBooksSetupSchema, CompanyFilingSchema, CompanySchema, EarmarkSetupSchema, EmploymentSchema, JournalSchema, POT_EFFECTS, ProposalSchema, TermsSchema, type BooksCoding, type Journal, type Earmarks, type Account, type Agreement, type BalanceSnapshot, type Category, type Company, type CompanyBooks, type CompanyFiling, type Terms, type Employment, type PensionArrangement, type Proposal, type ProposalInput, type ProposalStatus, type ProposedChange, type Provenance, type ReturnEntry, type Rule, type Transaction } from '../shared/schema';
 import { paidToText } from './analytics/agreements';
 import { BalanceEngine, type BalanceSource } from './analytics/balances';
-import { bookRulePatches, codingKey, companyBookRules, ledgerAsLeft, linkNeighbours, sameJournal, type LedgerSource } from './analytics/ledger';
+import { bookRulePatches, codingKey, companyBookRules, ledgerAsLeft, linkNeighbours, lockedMessage, lockedPostingsKey, sameJournal, sourceWith, type LedgerSource } from './analytics/ledger';
 import { decisionProblem, earmarkFigures, setupProblem, withSetup } from './analytics/earmarks';
 import { earmarkAccountIds, EFFECT_WORDS } from '../shared/earmarks';
 import { taxReturn } from './analytics/taxreturn';
@@ -709,7 +709,9 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
         const company = companyOf(c.company);
         if (!company) return { problem: `There is no company "${c.company}" in your data.` };
         const now = company.books;
-        const next = CompanyBooksSchema.parse({ ...c.books, filings: now?.filings ?? [], setBy: 'agent', updatedAt: now?.updatedAt ?? nowISO() });
+        // The lock is the owner's alone: a proposal keeps it as it is.
+        const { lockedThrough: _proposed, ...proposed } = c.books;
+        const next = CompanyBooksSchema.parse({ ...proposed, ...(now?.lockedThrough ? { lockedThrough: now.lockedThrough } : {}), filings: now?.filings ?? [], setBy: 'agent', updatedAt: now?.updatedAt ?? nowISO() });
         // Already so whatever it was proposed against: you (or another proposal) set them so.
         if (now && booksSetupKey(now) === booksSetupKey(next)) return { alreadySo: true };
         if (now?.setBy === 'owner') return { problem: `You set up ${company.name}’s books yourself: change them on its Company page.` };
@@ -733,7 +735,7 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
         const label = c.filing.kind === 'ct-payment' && c.filing.figures?.amount === 0 ? 'No Corporation Tax to pay' : FILING_KIND_LABELS[c.filing.kind];
         if (there) return filingKey(there) === filingKey(filing) ? { alreadySo: true } : { problem: `${label} for the period to ${formatDate(c.filing.periodEnd)} is recorded already, otherwise: change it on ${company.name}’s page.` };
         if (c.filing.filedOn > today()) return { problem: `${formatDate(c.filing.filedOn)} is in the future.` };
-        const books = { ...company.books, filings: [...company.books.filings, filing] };
+        const books = { ...company.books, filings: [...company.books.filings, filing], ...lockAfterFiling(company.books, filing) };
         const problems = booksProblems(books);
         if (problems.length) return { problem: problems.join(' ') };
         booksOp(company.id).filings.push(filing);
@@ -950,6 +952,26 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
   };
 
   for (const c of changes) if (!leaveOut.has(c.key)) out.results.set(c.key, run(c));
+
+  // A company's lock (books.lockedThrough): changes that would move its books on or before it are
+  // refused here, before anything is written: each change is tried on its own against the books as they are.
+  for (const company of store.companies) {
+    const lock = company.books?.lockedThrough;
+    if (!lock) continue;
+    const kept = lockedPostingsKey(store, company.id, lock);
+    const asLeft = (only?: ProposedChange) => {
+      const named = only ? new Set(namedRows(only)) : undefined;
+      const add = [...out.journals.values()].filter((j) => !only || (only.kind === 'add_journal' && j.id === proposedJournalId(forProposal, only.key)));
+      const remove = new Set([...out.journalsRemoved.keys()].filter((id) => !only || (only.kind === 'remove_journal' && only.journal === id)));
+      const books = companyNow.get(company.id);
+      return sourceWith(sourceAsLeft(store, named ? (id) => (named.has(id) ? row(id) : store.transaction(id)) : row, { journals: { add, remove } }), books && (!only || only.kind === 'set_company_books' || only.kind === 'add_filing') ? { company: books } : {});
+    };
+    if (lockedPostingsKey(asLeft(), company.id, lock) === kept) continue;
+    for (const c of changes) {
+      if (leaveOut.has(c.key) || out.results.get(c.key)?.problem || out.results.get(c.key)?.alreadySo) continue;
+      if (lockedPostingsKey(asLeft(c), company.id, lock) !== kept) out.results.set(c.key, { problem: lockedMessage(company, lock) });
+    }
+  }
 
   // A move inside an account left the account's money where it was: without it (and whatever else
   // this proposal takes away), the statement or your own balances either side of it add up.
@@ -1311,14 +1333,15 @@ export class ProposalService extends EventEmitter {
             let books = current.books;
             if (op.setup) {
               if ((books?.updatedAt ?? null) !== op.setup.seen) throw changed();
-              books = { ...op.setup.books, filings: books?.filings ?? [] };
+              const { lockedThrough: _l, ...setup } = op.setup.books;
+              books = { ...setup, ...(books?.lockedThrough ? { lockedThrough: books.lockedThrough } : {}), filings: books?.filings ?? [] };
             }
             if (!books) throw changed();
             for (const f of op.filings) {
               const there = books.filings.find((x) => x.kind === f.kind && x.periodEnd === f.periodEnd);
               if (there && filingKey(there) === filingKey(f)) continue;
               if (there) throw changed();
-              books = { ...books, filings: [...books.filings, f] };
+              books = { ...books, filings: [...books.filings, f], ...lockAfterFiling(books, f) };
             }
             if (addedBooksProblems(current.books, books).length) throw changed();
             // As it was, for the audit trail: not one this proposal added.

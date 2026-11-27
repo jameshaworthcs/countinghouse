@@ -329,6 +329,8 @@ export async function enrich(store: Store, opts: { accountIds?: string[]; rows?:
     await store.updateTransactions(
       [...patches.entries()].map(([id, patch]) => ({ id, patch })),
       `enrich: ${recategorised} recategorised, ${transfersLinked} transfers linked${companyChanged || companyLinked ? `; company rows: ${companyChanged} worked out, ${companyLinked} transfers linked` : ''}${booksChanged ? `; ${booksChanged} coded or linked in a company’s books` : ''}`,
+      // A company's books locked through a day keep their rows as filed: nothing here recodes, links or pairs them.
+      { locked: 'skip' },
     );
   }
   const named = accountPayees.size ? { accountPayees: [...accountPayees] } : {};
@@ -678,6 +680,6 @@ export async function linkTransfers(store: Store, ids: string[], message: string
     }
   }
   if (!count) return 0;
-  await store.updateTransactions(updates, message);
+  await store.updateTransactions(updates, message, { locked: 'skip' });
   return count;
 }

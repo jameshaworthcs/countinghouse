@@ -358,4 +358,39 @@ describe('a company’s general ledger through the app', () => {
     // An agent token may read it, as any GET.
     expect((await req(`/api/companies/${CO}/accounts`, { headers: { authorization: agent } })).status).toBe(200);
   });
+  it('locks the books through the end of a period whose accounts are filed: nothing changes them, but the owner may move the lock', async () => {
+    // Before filing: a laptop on the register, and a policy for computers from the start.
+    const laptop = tx('forge-bank', '2025-06-20', -1_200, 'EXAMPLE COMPUTERS LTD');
+    const after = tx('forge-bank', '2026-03-10', -48, 'EXAMPLE STATIONERS');
+    await store.addTransactions([laptop, after], 'test: rows');
+    expect((await send('PUT', `/api/companies/${CO}/rows/${laptop.id}/books`, { books: { ledger: 'fixed-assets:computer:cost', asset: { class: 'computer' } } })).status).toBe(200);
+    const books = forge().books!;
+    const setup = { incorporatedOn: books.incorporatedOn, periods: [], ctPeriods: [], vat: books.vat, policies: [{ class: 'computer', months: 36 }] };
+    expect((await send('PUT', `/api/companies/${CO}/books`, { books: setup })).status).toBe(200);
+    // Its accounts to 28 February 2026 recorded as filed: the books are locked through that day.
+    expect((await send('POST', `/api/companies/${CO}/filings`, { kind: 'accounts', periodStart: '2025-03-01', periodEnd: '2026-02-28', filedOn: '2026-06-01' })).status).toBe(201);
+    expect(store.company(CO)?.books?.lockedThrough).toBe('2026-02-28');
+    // A coding, a journal, a mark of yours, a policy taking effect within the lock: refused.
+    const recode = await send('PUT', `/api/companies/${CO}/rows/${sale.id}/books`, { books: { ledger: 'turnover' } });
+    expect(recode.status).toBe(409);
+    expect(String(recode.body.error)).toMatch(/locked through 28 Feb 2026/);
+    expect((await send('POST', `/api/companies/${CO}/journals`, { journal: { date: '2025-12-01', memo: 'Late accrual', lines: [{ ledger: 'general-expenses', amount: 10 }, { ledger: 'accruals', amount: -10 }] } })).status).toBe(409);
+    expect((await send('PATCH', `/api/transactions/${tools.id}`, { company: null })).status).toBe(409);
+    expect((await send('PUT', `/api/companies/${CO}/books`, { books: { ...setup, lockedThrough: '2026-02-28', policies: [{ class: 'computer', months: 36 }, { class: 'computer', months: 24, effectiveFrom: '2025-12-01' }] } })).status).toBe(409);
+    // After it: allowed, a change of life from then on too.
+    expect((await send('PUT', `/api/companies/${CO}/rows/${after.id}/books`, { books: { ledger: 'office-costs' } })).status).toBe(200);
+    expect((await send('POST', `/api/companies/${CO}/journals`, { journal: { date: '2026-03-31', memo: 'March accrual', lines: [{ ledger: 'general-expenses', amount: 10 }, { ledger: 'accruals', amount: -10 }] } })).status).toBe(201);
+    expect((await send('PUT', `/api/companies/${CO}/books`, { books: { ...setup, lockedThrough: '2026-02-28', policies: [{ class: 'computer', months: 36 }, { class: 'computer', months: 24, effectiveFrom: '2026-03-01' }] } })).status).toBe(200);
+    // A book rule made now does not recode a row within the lock, and an agent's coding of one is a problem on its proposal.
+    const rule = await send('POST', `/api/companies/${CO}/book-rules`, { enabled: true, priority: 100, match: { field: 'description', op: 'contains', value: 'EXAMPLE CLIENT', caseSensitive: false, company: { id: CO, rows: 'own' } }, set: { books: { ledger: 'turnover' } } });
+    expect(rule.body.coded).toBe(0);
+    expect(store.transaction(sale.id)?.books).toBeUndefined();
+    const res = await propose({ title: 'Code', summary: 'Late.', changes: [{ key: 'a', kind: 'set_books', why: 'An invoice.', transaction: sale.id, books: { ledger: 'turnover' } }] });
+    expect(res.status).toBe(422);
+    expect(res.body.problems?.[0]?.problem).toMatch(/locked through/);
+    // The owner moves the lock back (a filing that was itself wrong): the row can be coded again.
+    expect((await send('PUT', `/api/companies/${CO}/books`, { books: { ...setup, policies: [{ class: 'computer', months: 36 }] } })).status).toBe(200);
+    expect(store.company(CO)?.books?.lockedThrough).toBeUndefined();
+    expect((await send('PUT', `/api/companies/${CO}/rows/${sale.id}/books`, { books: { ledger: 'turnover' } })).status).toBe(200);
+  });
 });

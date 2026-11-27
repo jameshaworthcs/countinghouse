@@ -14,7 +14,7 @@
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import type { CompanyBooksListItem, CompanyBooksResponse } from '../../shared/api';
-import { accountingPeriodsOf, addedBooksProblems, booksProblems, companyDeadlineAlerts, companyDeadlines, ctPeriodsOf, FILING_KIND_LABELS, vatPeriodsOf, withinChargeAssumed, withinChargeFrom } from '../../shared/company-books';
+import { accountingPeriodsOf, addedBooksProblems, booksProblems, lockAfterFiling, companyDeadlineAlerts, companyDeadlines, ctPeriodsOf, FILING_KIND_LABELS, vatPeriodsOf, withinChargeAssumed, withinChargeFrom } from '../../shared/company-books';
 import { formatDate, today } from '../../shared/dates';
 import { BooksCodingSchema, CompanyBooksSchema, CompanyBooksSetupSchema, CompanyFilingInputSchema, CompanyFilingSchema, CompanySchema, JournalInputSchema, RuleSchema, SlugSchema, TimestampSchema, type Company, type Journal, type Rule, type Transaction } from '../../shared/schema';
 import { codingPlace, isLinked } from '../../shared/ledger';
@@ -139,7 +139,8 @@ export function companyBookRoutes(ctx: AppContext): Hono {
         if (!company) throw new StoreError('No such company', 404);
         const books = booksOr404(company);
         if (books.filings.some((f) => f.kind === input.kind && f.periodEnd === input.periodEnd)) throw new StoreError(`${FILING_KIND_LABELS[input.kind]} for the period to ${formatDate(input.periodEnd)} is recorded already: remove it first to record it again.`, 409);
-        const next = { ...books, filings: [...books.filings, filing] };
+        // Accounts recorded as filed lock the books through their period's end.
+        const next = { ...books, filings: [...books.filings, filing], ...lockAfterFiling(books, filing) };
         const added = addedBooksProblems(books, next);
         if (added.length) throw new StoreError(added.join(' '), 422);
         return CompanySchema.parse({ ...company, books: next, updatedAt: nowISO() });
@@ -225,7 +226,7 @@ export function companyBookRoutes(ctx: AppContext): Hono {
     // Back to no coding: the book rules code it again, as they would have.
     if (reset) {
       const patches = bookRulePatches(store, company.id, { only: new Set([t.id]) });
-      if (patches.length) await store.updateTransactions(patches.map(({ id, patch }) => ({ id, patch })), `books: ${company.name} rule codes ${t.id}`);
+      if (patches.length) await store.updateTransactions(patches.map(({ id, patch }) => ({ id, patch })), `books: ${company.name} rule codes ${t.id}`, { locked: 'skip' });
     }
     return c.json(store.transaction(t.id));
   });
@@ -248,7 +249,7 @@ export function companyBookRoutes(ctx: AppContext): Hono {
     ownerOnly(c);
     const company = keptOr404(c.req.param('id'));
     const patches = autoLinkPatches(store, company.id);
-    if (patches.length) await store.updateTransactions(patches, `books: ${company.name} links worked out (${patches.length})`);
+    if (patches.length) await store.updateTransactions(patches, `books: ${company.name} links worked out (${patches.length})`, { locked: 'skip' });
     return c.json({ changed: patches.length });
   });
 
@@ -286,7 +287,7 @@ export function companyBookRoutes(ctx: AppContext): Hono {
   /** A company's book rules applied to its rows now: each row they reach takes what they make of it. */
   const applyBookRules = async (company: Company, label: string) => {
     const patches = bookRulePatches(store, company.id);
-    if (patches.length) await store.updateTransactions(patches.map(({ id, patch }) => ({ id, patch })), `books: ${company.name} rule ${label} (${patches.length} coded)`);
+    if (patches.length) await store.updateTransactions(patches.map(({ id, patch }) => ({ id, patch })), `books: ${company.name} rule ${label} (${patches.length} coded)`, { locked: 'skip' });
     return patches.length;
   };
 
