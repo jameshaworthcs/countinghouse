@@ -453,7 +453,7 @@ export function booksProblems(books: CompanyBooksSetup & { filings?: readonly Co
   const ids = new Set<string>();
   const keys = new Set<string>();
   for (const f of filings) {
-    const what = `The ${FILING_KIND_LABELS[f.kind].replace(/^./, (c) => c.toLowerCase())} for ${f.periodStart ? formatSpan(f.periodStart, f.periodEnd) : day(f.periodEnd)}`;
+    const what = `The ${FILING_KIND_LABELS[f.kind].replace(/^[A-Z](?=[a-z])/, (c) => c.toLowerCase())} for ${f.periodStart ? formatSpan(f.periodStart, f.periodEnd) : day(f.periodEnd)}`;
     if (ids.has(f.id)) out.push(`Two filings have the id ${f.id}.`);
     ids.add(f.id);
     const key = `${f.kind}|${f.periodEnd}`;

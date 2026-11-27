@@ -138,6 +138,10 @@ describe('accounting reference periods (CA 2006 ss391–392)', () => {
     expect(booksProblems(books({ incorporatedOn: '2023-05-02', periods: [{ start: '2024-01-01', end: '2024-12-31' }, { start: '2024-12-01', end: '2025-06-30' }] }))).toEqual([expect.stringContaining('overlap')]);
     expect(booksProblems(books({ incorporatedOn: '2023-05-02', periods: [{ start: '2023-01-01', end: '2023-12-31' }] }))).toEqual([expect.stringContaining('before the company was incorporated')]);
     expect(booksProblems(books({ incorporatedOn: '2023-05-02', ctPeriods: [{ start: '2024-01-01', end: '2025-01-31' }] }))).toEqual([expect.stringContaining('longer than 12 months (CTA 2009 s10(1)(a))')]);
+    // An error on a return is reported after it was filed; a VAT return keeps its capitals in the words.
+    const vat = { id: 'fil_000000000001', addedBy: 'owner' as const, kind: 'vat' as const, periodStart: '2025-03-01', periodEnd: '2025-05-31', filedOn: '2025-07-02' };
+    expect(booksProblems(books({ incorporatedOn: '2023-05-02', filings: [{ ...vat, disclosed: { on: '2025-07-01', amount: -10 } }] }))).toEqual(['The VAT return for 1 Mar – 31 May 2025: its errors are reported to HMRC (1 Jul 2025) before it was filed.']);
+    expect(booksProblems(books({ incorporatedOn: '2023-05-02', filings: [{ ...vat, disclosed: { on: '2025-07-03', amount: -10 } }] }))).toEqual([]);
   });
 });
 
