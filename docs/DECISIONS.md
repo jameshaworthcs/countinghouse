@@ -3246,3 +3246,51 @@ What changed, and why:
   docs say is interim. Provisions, share premium and other reserves joined the chart; impairment and
   prior-period restatement (FRS 105 8.16–8.17, CA 2006 s454) are said to be unsupported.
 
+
+## 2026-11-27: A company's VAT returns from its books
+
+Slice 5 of the company books: the VAT return is worked out from the ledger's postings and their VAT
+parts, prepared and checked here, and filed elsewhere (Making Tax Digital software). What was decided:
+
+- **Which postings go in boxes 6 and 7.** Only the amounts before VAT of real sales and purchases: a
+  posting's net part with a VAT treatment, never the balance sheet (loans, the director's loan,
+  dividends, PAYE, Corporation Tax paid, VAT itself, transfers) nor the period-end postings
+  (depreciation, disposals' book values, prepayments and accruals), which carry no VAT. Box 6 takes
+  sales at every rate and exempt, and sales outside the scope on `turnover`; box 7 purchases at every
+  rate and exempt; both take a reverse charge's value. Three refinements of the brief:
+  - a sale abroad outside the scope **is in box 6**: VAT Notice 700/12 para 3.7 includes "supplies which
+    are outside the scope of UK VAT as described in" Notice 741A, and the app tells the owner to code a
+    sale of services to a business abroad as outside the scope. Outside the scope anywhere else (a
+    purchase, other income) is left out, as "not consideration for a supply";
+  - codes that are never a supply (pay, employer's NI, pensions, depreciation, the Corporation Tax
+    charge, penalties, donations) are left out **whatever treatment a coding gives them**, so a stray
+    "exempt" on pay cannot put wages in box 7;
+  - a posting **with no VAT treatment** on a sales or purchase code is left out, never guessed, and
+    listed in the working (as accounting software leaves "no VAT" items off). Guessing "zero-rated"
+    would put grants, compensation or blocked items in a box; leaving them out and saying so is
+    checkable. It is a warning, not a block: boxes 6 and 7 do not change the VAT due.
+- **Reg 111 claims fall in the first return** whatever their day (Notice 731 para 3.2: "on your first
+  VAT Return"), in box 4; the purchase's amount is not in box 7, since it was not bought in the period
+  (no HMRC text settles this either way; it is said in the working).
+- **A reverse charge's tax point** is the earlier of payment and the end of the service its coding says
+  it covers (Notice 700 para 15.12), else payment. The brief asked for a block on "VAT on a posting dated
+  after the period end that belongs in it"; that VAT is put in the return it belongs in instead, and
+  marked in the working, since a block would never clear. Notice 731 neither excludes services from
+  abroad from cash accounting nor says how to time them: UK_RULES says it is worth confirming.
+- **Boxes 6–9 leave out the pence** (towards nothing, never rounded up). HMRC's Making Tax Digital API
+  takes whole pounds; no current guidance says whether to round, and leaving them out never overstates.
+- **A filing records what was done about errors**, not a separate record: `corrections` on the later
+  return that corrected them (its boxes 1 and 4 include them, so the comparison expects them there),
+  and `disclosed` on the return whose errors were reported separately (method 2 has no later return to
+  hang on). Additive optional fields; the figures filed never change. An error from a period whose books
+  have checks to clear is shown but not counted: the difference may be the books'.
+- **The 1% test uses the box 6 of the return for the period running today** (Notice 700/45 para 4.4:
+  "the current return period during which you discovered the error"), so far, labelled provisional.
+- **Penalty points are information only.** The app lists returns filed late (and overdue) under their
+  period's regime, when each point would expire below the threshold, and HMRC's rules, labelled "check
+  your VAT account for HMRC's figure"; it does not claim HMRC's count, since at the threshold points
+  stop expiring and HMRC's adjustments (frequency changes, appeals) are theirs.
+- **Taxable turnover** for the thresholds is by the day paid, as the books are kept, with untreated
+  sales counted as taxable (nothing says otherwise) and disposals left out (Sch 1 para 1(7)).
+- **One shared disclaimer**: `shared/disclaimers.ts` and `components/CheckEverything.tsx`, used by Self
+  Assessment and the VAT return (its CSV ends with it).

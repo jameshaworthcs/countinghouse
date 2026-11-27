@@ -500,13 +500,22 @@ confirmationStatement?, tradeStartedOn?, ctPeriods, deadlinesFrom?, ledgerFrom?,
     `ct600`, `{taxPayable}` (0 says there is nothing to pay, which does the payment too); for
     `ct-payment`, `{amount}`, never negative: `0` records that there is no Corporation Tax to pay for
     the period ("Nothing to pay" on the payment's deadline, or an agent's `add_filing`).
+  - On a `vat` filing, optionally, what was done about errors (VAT Notice 700/45; FORMULAS.md §22,
+    "VAT returns"): `corrections`, `[{periodEnd, amount}]`, the errors on earlier returns this return
+    corrected (method 1), each the earlier period's last day (before this one's) and the net VAT in
+    pounds and pence, signed as HMRC sees it (positive: VAT the company owed, in this return's box 1;
+    negative: VAT due to it, in box 4), one per period; and `disclosed`, `{on, amount, reference?}`, this
+    return's own errors reported to HMRC separately (method 2), on or after the day it was filed. The
+    figures stay as filed. Set with `PUT /api/companies/:id/filings/:filingId/vat-corrections`
+    (`{corrections?, disclosed?}`, each `null` to take it away). Optional and additive.
 - `setBy`: `owner`, or `agent` when a proposal you applied set them; `updatedAt` changes with every
   change to the books other than a filing.
 
 You keep them with `PUT /api/companies/:id/books` (`{books, was, company}`; the filings stay;
 `company`, the page's, must be this one) and record or
 remove a filing with `POST /api/companies/:id/filings` and `DELETE
-/api/companies/:id/filings/:filingId`. No agent token may use these; an agent proposes
+/api/companies/:id/filings/:filingId`, and say what was done about a VAT return's errors with `PUT
+/api/companies/:id/filings/:filingId/vat-corrections`. No agent token may use these; an agent proposes
 (`set_company_books`, `add_filing`). Every write is built on the company as it is at that moment
 (`Store.updateCompany`), so two at once never lose one another. The store refuses a write that adds a
 problem to the books; problems already there (a hand edit) do not block one, so they can be put right
@@ -517,7 +526,9 @@ Its **general ledger** is not stored: it is worked out from its own accounts' ro
 (`companyLink`), its book rules (rules.json) and its journals (journals.jsonl), and served from
 `GET /api/companies/:id/ledger` and `GET /api/companies/:id/coding` ([FORMULAS.md §22](FORMULAS.md),
 "The general ledger"). Once the company keeps books here, your director's loan with it moves by the
-ledger's postings to the loan (§22, "The director's loan from the books").
+ledger's postings to the loan (§22, "The director's loan from the books"). Its VAT returns are not
+stored either: they are worked out from the ledger and served from `GET /api/companies/:id/vat` (§22,
+"VAT returns"); only what was filed is a record.
 
 ## agreements.json
 

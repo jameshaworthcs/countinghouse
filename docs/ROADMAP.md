@@ -45,11 +45,12 @@ system as built, and [DECISIONS.md](DECISIONS.md) records why it is the way it i
   an account in another currency takes one manual rate (Settings).
 - **Open Banking** read-only feeds, in place of exports.
 - **A household mode:** joint accounts and split ownership.
-- **A company's tax and filing:** its general ledger and its accounts for each period are built
-  (FORMULAS.md §22: depreciation, prepayments and accruals, the micro-entity lines exact and in whole
-  pounds, the bank reconciled, a filed period locked); its Corporation Tax computation (capital
-  allowances, the charge on line G), its VAT return from the ledger, and prior-period adjustments are
-  next.
+- **A company's tax and filing:** its general ledger, its accounts for each period and its VAT returns
+  are built (FORMULAS.md §22: depreciation, prepayments and accruals, the micro-entity lines exact and in
+  whole pounds, the bank reconciled, a filed period locked; the nine boxes under cash accounting, returns
+  filed against the books, error corrections, penalty points and thresholds as information); its
+  Corporation Tax computation (capital allowances, the charge on line G), accrual and flat rate VAT, and
+  prior-period adjustments are next.
 
 ## Worth revisiting
 

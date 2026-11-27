@@ -2442,6 +2442,49 @@
                           "totalValueGoodsSuppliedExVAT",
                           "totalAcquisitionsExVAT"
                         ]
+                      },
+                      "corrections": {
+                        "maxItems": 40,
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "periodEnd": {
+                              "type": "string",
+                              "description": "Calendar date, YYYY-MM-DD"
+                            },
+                            "amount": {
+                              "type": "number",
+                              "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                            }
+                          },
+                          "required": [
+                            "periodEnd",
+                            "amount"
+                          ]
+                        }
+                      },
+                      "disclosed": {
+                        "type": "object",
+                        "properties": {
+                          "on": {
+                            "type": "string",
+                            "description": "Calendar date, YYYY-MM-DD"
+                          },
+                          "amount": {
+                            "type": "number",
+                            "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                          },
+                          "reference": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 60
+                          }
+                        },
+                        "required": [
+                          "on",
+                          "amount"
+                        ]
                       }
                     },
                     "required": [
@@ -5638,6 +5681,49 @@
                                 "totalValuePurchasesExVAT",
                                 "totalValueGoodsSuppliedExVAT",
                                 "totalAcquisitionsExVAT"
+                              ]
+                            },
+                            "corrections": {
+                              "maxItems": 40,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "periodEnd": {
+                                    "type": "string",
+                                    "description": "Calendar date, YYYY-MM-DD"
+                                  },
+                                  "amount": {
+                                    "type": "number",
+                                    "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                                  }
+                                },
+                                "required": [
+                                  "periodEnd",
+                                  "amount"
+                                ]
+                              }
+                            },
+                            "disclosed": {
+                              "type": "object",
+                              "properties": {
+                                "on": {
+                                  "type": "string",
+                                  "description": "Calendar date, YYYY-MM-DD"
+                                },
+                                "amount": {
+                                  "type": "number",
+                                  "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                                },
+                                "reference": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 60
+                                }
+                              },
+                              "required": [
+                                "on",
+                                "amount"
                               ]
                             }
                           },

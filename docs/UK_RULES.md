@@ -345,6 +345,82 @@ What the books let the company claim (FORMULAS.md §22, "What VAT may be claimed
   day of incorporation. Reg 111(2) lets a company claim VAT on goods and services supplied to the person
   who became a member or officer, for its business, before it was incorporated, on the same terms.
 
+### VAT returns (a company's books)
+
+What the VAT return worked out from the books follows (FORMULAS.md §22, "VAT returns";
+`analytics/vat-return.ts`; the dated rows in `src/shared/uk.ts`, "VAT returns from a company's books").
+The return is prepared and checked here; it is filed through Making Tax Digital software, never from
+the app.
+
+- **The boxes** (VAT Notice 700/12 section 3). Box 1 is "the VAT due on all goods and services you
+  supplied in the period", reverse charge VAT included; box 2 VAT on acquisitions, since 1 January 2021
+  only of goods brought into Northern Ireland from the EU (not supported: 0); box 3 boxes 1 and 2; box 4
+  "the total amount of deductible VAT charged on your business purchases", the reverse charge's
+  included; box 5 the difference of boxes 3 and 4, never negative (HMRC repay when box 4 is larger).
+  Box 6 is "the total value of all your business sales and other specific outputs but leave out any
+  VAT": zero-rated, reduced rate and exempt supplies, reverse charge transactions, and supplies outside
+  the scope of UK VAT under the place of supply rules of Notice 741A; not money put in by the owner,
+  loans, dividends, gifts of money or insurance claims. Box 7 is "the total value of your purchases and
+  expenses but leave out any VAT": reverse charge transactions and imports included; not wages and
+  salaries, PAYE and National Insurance, money taken out by the owner, loans, dividends, gifts of money,
+  insurance claims, MOT certificates, vehicle licence duty, local authority rates, or "expenditure that's
+  outside the scope of VAT because it is not consideration for a supply". Boxes 8 and 9 are goods
+  between Northern Ireland and the EU (not supported: 0), also in boxes 6 and 7.
+- **Cash accounting** (VAT Notice 731 paras 4.4–4.7; VAT Regulations 1995 Part VIII): output tax goes on
+  the return for the period in which payment is received, input tax on the one in which payment is
+  made (a card payment on the day of its voucher, a cheque on the later of its date and when it was sent
+  or received, a transfer on the day the account is credited); boxes 6 and 7 are by payments too
+  (Notice 700/12 para 4.2). The books post each payment on its day, which is the return's. VAT on goods
+  and services bought before registration that qualifies is claimed "as though it was input tax on your
+  first VAT Return" (Notice 731 para 3.2; VAT Regulations 1995 reg 111; Notice 700 section 11). The
+  scheme excludes hire purchase and similar agreements, imports and acquisitions, and the domestic
+  reverse charge (para 2.7), none of which the books cover.
+- **The reverse charge** on services bought from abroad (Notice 741A para 5.2): output tax in box 1,
+  input tax in box 4, the full value of the supply in boxes 6 and 7. Its tax point is the general rule's
+  (Notice 700 para 15.12): for a single supply when the service is completed, or paid for if earlier;
+  for a continuous supply the end of each billing period, or payment if earlier. Notice 731 does not
+  exclude it from cash accounting, and does not say how it is timed under the scheme: the books take the
+  earlier of payment and the end of the service the coding says it covers, and payment when it says
+  none. Worth confirming for a service paid for well after it was supplied.
+- **Pence.** Boxes 1–5 are pounds and pence. Boxes 6–9 are whole pounds: HMRC's Making Tax Digital API
+  takes integers for them, and the paper return said "whole pounds only". No current HMRC guidance says
+  whether pence are dropped or rounded; the app leaves them out, which never overstates a box.
+- **Correcting errors** (VAT Notice 700/45 sections 4.2–4.7; Notice 700/12 para 6.6). The net value of
+  errors on earlier returns (the VAT due to HMRC less the VAT due to the business) may be corrected on
+  the current return, "using boxes 1 and 4 of the return for the period of discovery" (method 1), when
+  it is no more than £10,000, or between £10,000 and £50,000 and no more than "1% of the box 6 (net
+  outputs) VAT Return declaration due for the return period in which you discover the errors"
+  (Notice 700/12 para 6.6 says "before correction"). Above that, or for errors made deliberately, they
+  are reported separately (method 2), which may be chosen for errors of any size. Errors are corrected
+  within 4 years: from the end of the period the error was in for output tax and over-claimed input tax,
+  from the return's due date for input tax under-claimed; the limit does not apply to deliberate errors.
+  These limits apply from 1 July 2008 (`VAT_ERROR_CORRECTION_RULES`).
+- **Late submission penalty points** (Finance Act 2021 Sch 24; GOV.UK, "Penalty points and penalties if
+  you submit your VAT Return late" and "Remove penalty points"). For VAT periods starting on or after
+  1 January 2023 (the default surcharge for periods to 31 December 2022): a point for each return
+  submitted late, nil and repayment returns included, but not the first return after registration, the
+  final return after cancellation or a one-off return. Thresholds: annual 2, quarterly 4, monthly 5; at
+  the threshold a £200 penalty, and another for each later late return. Below it a point expires "on the
+  last day of the month, 24 months after" the deadline's month, 25 months when the deadline was a
+  month's last day. At it, points are reset after a period of compliance (annual 24 months, quarterly
+  12, monthly 6) with all returns due in the previous 24 months submitted. Changing frequency adjusts
+  them: annual to quarterly +2, annual to monthly +3, quarterly to annual −2, quarterly to monthly +1,
+  monthly to annual −3, monthly to quarterly −1, never below zero. The app lists returns filed late and
+  shows these rules; HMRC's own count is in the business's VAT account (`VAT_PENALTY_RULES`,
+  `vatPointExpiry`).
+- **Registration and deregistration thresholds** (VATA 1994 Sch 1 paras 1 and 4; VAT Notice 700/1 and
+  its supplement). A business must register when its taxable turnover in the last 12 months goes over
+  the registration threshold (effective from the first day of the second month after), or it expects to
+  go over it in the next 30 days alone; a registered business may ask to cancel when its taxable turnover
+  falls below the deregistration threshold. Taxable turnover is "the total value of everything you sell
+  that is not VAT exempt or 'out of scope'", zero-rated sales included, with services received from
+  abroad under the reverse charge (Notice 700 para 5.4); supplies of the business's capital assets are
+  disregarded (Sch 1 para 1(7)). Registration / deregistration: £70,000 / £68,000 from 1 April 2010;
+  £73,000 / £71,000 from 1 April 2011; £77,000 / £75,000 from 1 April 2012; £79,000 / £77,000 from 1
+  April 2013; £81,000 / £79,000 from 1 April 2014; £82,000 / £80,000 from 1 April 2015; £83,000 / £81,000
+  from 1 April 2016; £85,000 / £83,000 from 1 April 2017; £90,000 / £88,000 from 1 April 2024
+  (`VAT_REGISTRATION_THRESHOLDS`). The books give turnover by the day paid, not by tax point.
+
 ### The micro-entity formats (a company's chart of accounts)
 
 The chart of accounts (`shared/ledger.ts`, FORMULAS.md §22) maps each code to a line of the
@@ -508,6 +584,18 @@ a check against the current text:
 - legislation.gov.uk, [VATA 1994 s24](https://www.legislation.gov.uk/ukpga/1994/23/section/24) (input tax: supplies to the taxable person), [VAT Regulations 1995 reg 29](https://www.legislation.gov.uk/uksi/1995/2518/regulation/29) (the claim and the VAT invoice) and [reg 111](https://www.legislation.gov.uk/uksi/1995/2518/regulation/111) (VAT before registration and incorporation), [Value Added Tax (Input Tax) Order 1992 arts 5 and 7](https://www.legislation.gov.uk/uksi/1992/3222) (business entertainment; motor cars), [Companies Act 2006 s51](https://www.legislation.gov.uk/ukpga/2006/46/section/51) (pre-incorporation contracts), [CTA 2009 s1303](https://www.legislation.gov.uk/ukpga/2009/4/section/1303) (tax penalties and interest not deductible), [CAA 2001 ss214–218](https://www.legislation.gov.uk/ukpga/2001/2/part/2/chapter/17) (connected persons and plant: no annual investment allowance, qualifying cost capped, s217–218); GOV.UK, VAT Notice 700 (who can reclaim VAT)
 
 - legislation.gov.uk, [VATA 1994 s2](https://www.legislation.gov.uk/ukpga/1994/23/section/2) (the standard rate), [s8](https://www.legislation.gov.uk/ukpga/1994/23/section/8) (the reverse charge on services received from abroad), [s29A](https://www.legislation.gov.uk/ukpga/1994/23/section/29A) and [Sch 7A](https://www.legislation.gov.uk/ukpga/1994/23/schedule/7A) (the reduced rate), [Finance (No. 2) Act 2010 s3](https://www.legislation.gov.uk/ukpga/2010/31/section/3) (20% from 4 January 2011); [SI 2013/3008](https://www.legislation.gov.uk/uksi/2013/3008) (the micro-entity formats inserted into SI 2008/409 Sch 1 Part 1 Section C); [CTA 2009 s53](https://www.legislation.gov.uk/ukpga/2009/4/section/53) (capital expenditure), [s1298](https://www.legislation.gov.uk/ukpga/2009/4/section/1298) (business entertainment); FRS 105 (the Financial Reporting Council's standard for the micro-entities regime); GOV.UK, VAT Notice 741A (place of supply of services)
+
+Checked 27 November 2026 (companies: VAT returns):
+
+- GOV.UK, [VAT Notice 700/12: how to fill in and submit your VAT Return](https://www.gov.uk/guidance/how-to-fill-in-and-submit-your-vat-return-vat-notice-70012) (section 3: each box, boxes 6 and 7's inclusions and exclusions, boxes 8 and 9 for Northern Ireland; para 4.2: cash accounting's boxes; para 4.6: reverse charges; para 6.6: correcting errors in boxes 1 and 4)
+- GOV.UK, [VAT Notice 731: cash accounting scheme](https://www.gov.uk/guidance/vat-cash-accounting-scheme-notice-731) (paras 2.7–2.8: what the scheme excludes; para 3.2: VAT from before registration on the first return; paras 4.4–4.7: payments received and made)
+- GOV.UK, [VAT Notice 741A: place of supply of services](https://www.gov.uk/guidance/vat-place-of-supply-of-services-notice-741a) (para 5.2: the reverse charge in boxes 1, 4, 6 and 7; para 5.7: reverse charge services and registration)
+- GOV.UK, [VAT Notice 700: the VAT guide](https://www.gov.uk/guidance/vat-guide-notice-700) (para 5.4: services from abroad count towards taxable turnover; section 11: VAT before registration; para 15.12: the tax point of reverse charge services)
+- GOV.UK, [VAT Notice 700/45: how to correct VAT errors](https://www.gov.uk/guidance/how-to-correct-vat-errors-and-make-adjustments-or-claims-vat-notice-70045) (sections 4.2–4.7: methods 1 and 2, the £10,000 and £50,000 limits and 1% of box 6, net value, deliberate errors, 4 years)
+- GOV.UK, [Penalty points and penalties if you submit your VAT Return late](https://www.gov.uk/guidance/penalty-points-and-penalties-if-you-submit-your-vat-return-late) (periods from 1 January 2023, thresholds, £200, nil and repayment returns, frequency changes, exclusions) and [Remove penalty points you've received after submitting your VAT Return late](https://www.gov.uk/guidance/remove-penalty-points-youve-received-after-submitting-your-vat-return-late) (expiry after 24 or 25 months; periods of compliance)
+- GOV.UK, [VAT registration: when to register](https://www.gov.uk/vat-registration/when-to-register) (the 12-month and 30-day tests; what taxable turnover is), [VAT Notice 700/1 supplement](https://www.gov.uk/government/publications/vat-notice-7001-should-i-be-registered-for-vat/vat-notice-7001-supplement--2) (registration and deregistration limits from 1 April 2010), [Cancel your VAT registration](https://www.gov.uk/register-for-vat/cancel-your-registration) (below £88,000)
+- legislation.gov.uk, [VATA 1994 Sch 1](https://www.legislation.gov.uk/ukpga/1994/23/schedule/1) (registration; para 1(7): capital assets disregarded), [Finance Act 2021 Sch 24](https://www.legislation.gov.uk/ukpga/2021/26/schedule/24) (penalties for failure to make returns), [VAT Regulations 1995 reg 111](https://www.legislation.gov.uk/uksi/1995/2518/regulation/111) (VAT before registration)
+- Not found in HMRC's current guidance: how the pence of boxes 6–9 are dropped (whole pounds are what the Making Tax Digital API takes), and how a reverse charge is timed under cash accounting
 
 Checked 27 November 2026 (companies: a period's accounts):
 

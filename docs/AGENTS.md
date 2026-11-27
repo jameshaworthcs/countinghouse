@@ -321,7 +321,9 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
     same proposal if need be), filed on a day that is not in the future and not before its period
     ends. There is one per kind and period's end: the same filing again is already so, another for
     that period does not fit. Its `why` names the document it is from (the filing history, a
-    submission receipt, a payment confirmation). The owner's own routes for the books
+    submission receipt, a payment confirmation). A VAT return's `corrections` (errors on earlier
+    returns it corrected) and `disclosed` (its own errors reported separately) are proposed only from a
+    document that says so. The owner's own routes for the books
     (`PUT /api/companies/:id/books`, `POST` and `DELETE /api/companies/:id/filings`) are closed to
     tokens.
   - A coding (`set_books`, DATA_FORMAT.md transactions `books`; FORMULAS.md §22) is on a row of a
