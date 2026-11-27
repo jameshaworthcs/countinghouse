@@ -10,7 +10,7 @@ import path from 'node:path';
 import { tokenKey } from './text.ts';
 
 /** Bump when the build changes what it collects, so caches are rebuilt. */
-const BUILDER_VERSION = 16;
+const BUILDER_VERSION = 17;
 
 export interface Denylist {
   version: number;
@@ -254,7 +254,7 @@ export function distinctiveCompanyAmount(n: number): string | undefined {
  * separately (`disclosed`, with HMRC's reference) too; and the director who signed accounts filed
  * (`approvedBy`), a person's name.
  */
-function collectFilings(filings: Json[], addReference: (value: string | undefined) => void, into: Set<string>, addName: (value: string | undefined) => void = () => {}): void {
+function collectFilings(filings: Json[], addReference: (value: string | undefined) => void, into: Set<string>, addName: (value: string | undefined) => void = () => {}, addPlace: (value: string | undefined) => void = () => {}): void {
   const add = (v: unknown) => {
     const a = typeof v === 'number' ? distinctiveCompanyAmount(v) : undefined;
     if (a) into.add(a);
@@ -262,6 +262,7 @@ function collectFilings(filings: Json[], addReference: (value: string | undefine
   for (const f of filings) {
     addReference(str(f.reference));
     addName(str(f.approvedBy));
+    addPlace(str(f.registeredOffice));
     for (const o of objects(f.figures)) for (const v of Object.values(o)) add(v);
     for (const c of Array.isArray(f.corrections) ? f.corrections.filter(isObject) : []) add(c.amount);
     if (isObject(f.disclosed)) {
@@ -543,7 +544,13 @@ export async function buildDenylist(dataDir: string): Promise<{ denylist: Denyli
     const parts = (name ?? '').split(/\s+/);
     if (parts.length > 1) add('person', parts.at(-1), { generic: false });
   };
-  collectFilings(booksFilings(companies), addReference, amounts, addSigner);
+  // The registered office on accounts filed: the whole address, and its distinctive words (a street, a postcode).
+  const addOffice = (office: string | undefined) => {
+    add('place', office, { min: 6, generic: false });
+    for (const part of (office ?? '').split(/,\s*/)) add('place', part.trim(), { min: 6, generic: 'words' });
+    addWords('place', office);
+  };
+  collectFilings(booksFilings(companies), addReference, amounts, addSigner, addOffice);
   // What the owner wrote in a period's accounts notes (a lease, a guarantee, a loan's conditions): the
   // words, as a journal's memo is read. Their totals are read with the books' figures below.
   for (const c of companies) {
@@ -554,7 +561,11 @@ export async function buildDenylist(dataDir: string): Promise<{ denylist: Denyli
         add('filing-note', text, { min: 10, generic: 'words' });
         addWords('filing-note', text);
       }
-      if (isObject(nt.advances)) for (const k of ['interest', 'conditions'] as const) add('filing-note', str(nt.advances[k]), { min: 10, generic: 'words' });
+      if (isObject(nt.advances))
+        for (const k of ['interest', 'conditions'] as const) {
+          add('filing-note', str(nt.advances[k]), { min: 10, generic: 'words' });
+          addWords('filing-note', str(nt.advances[k]));
+        }
     }
   }
   // A company's books' own figures for Corporation Tax (tax brought forward, the AIA allocated to it), at the small-company threshold.
@@ -563,7 +574,7 @@ export async function buildDenylist(dataDir: string): Promise<{ denylist: Denyli
     amounts,
   );
   const decided = listFiles(file('proposals'), (n) => n.endsWith('.json')).map(readJson);
-  collectFilings(proposalFilings(decided), addReference, amounts, addSigner);
+  collectFilings(proposalFilings(decided), addReference, amounts, addSigner, addOffice);
   // A company's general ledger: its own accounts' rows and its journals, at the small-company threshold,
   // and each journal's own words (its memo and evidence, which name who and what it was).
   const companyAccounts = new Set(list(readJson(file('accounts.json')), 'accounts').flatMap((a) => (str(a.companyId) ? [str(a.id)!] : [])));

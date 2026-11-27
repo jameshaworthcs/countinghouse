@@ -35,6 +35,7 @@ const JOURNAL_WORD = 'Wrenfield';
 const JOURNAL_EVIDENCE = 'WR' + '-55821';
 const SIGNER = 'Morwenna Trevaskis';
 const NOTE_WORD = 'Quarrybank';
+const OFFICE = '14 Tolvaddon Row, Penrynvale, DN55 1PT';
 
 /** Every value the persona would not want published. */
 const SECRETS = [OWNER, 'Penhallow', FRIEND, 'T KERRIDGE', EMPLOYER, PAYE, PAYROLL, COMPANY_NO, PAYEE, '3141.59', LAST4, '1991-03-07', FILING_REF, PROPOSED_REF];
@@ -77,10 +78,10 @@ function writePersona(dir: string): void {
           aiaAllocated: [{ periodEnd: '2025-02-28', amount: 7417 }],
           // What the owner confirmed for its accounts: a commitment in words with its total, an advance's terms and what was written off.
           employees: [{ periodEnd: '2025-02-28', average: 3 }],
-          accountsNotes: [{ periodEnd: '2025-02-28', commitments: { text: `A lease of the ${NOTE_WORD} unit to March 2029`, amount: 8423 }, directors: { none: true }, advances: { interest: '2.75% a year on the balance', conditions: 'secured on the director’s boat, repayable by 2027', writtenOff: 517.25 } }],
+          accountsNotes: [{ periodEnd: '2025-02-28', commitments: { text: `A lease of the ${NOTE_WORD} unit to March 2029`, amount: 8423 }, directors: { none: true }, advances: { interest: '2.75% a year on the balance', conditions: 'secured on the director’s Wherrymoor boat, repayable by 2027', writtenOff: 517.25 } }],
           filings: [
             { id: 'fil_000000000001', kind: 'vat', periodStart: '2025-01-01', periodEnd: '2025-03-31', filedOn: '2025-04-20', reference: FILING_REF, figures: { vatDueSales: 813.27, vatDueAcquisitions: 0, totalVatDue: 813.27, vatReclaimedCurrPeriod: 96.4, netVatDue: 716.87, totalValueSalesExVAT: 4066, totalValuePurchasesExVAT: 482, totalValueGoodsSuppliedExVAT: 0, totalAcquisitionsExVAT: 0 }, corrections: [{ periodEnd: '2024-12-31', amount: 286.43 }], disclosed: { on: '2025-05-02', amount: 1371, reference: DISCLOSED_REF } },
-            { id: 'fil_000000000002', kind: 'accounts', periodEnd: '2024-02-29', filedOn: '2024-10-01', figures: { B: 637, C: 2911, E: 450, K: 3098 }, approvedOn: '2024-09-20', approvedBy: SIGNER },
+            { id: 'fil_000000000002', kind: 'accounts', periodEnd: '2024-02-29', filedOn: '2024-10-01', figures: { B: 637, C: 2911, E: 450, K: 3098 }, approvedOn: '2024-09-20', approvedBy: SIGNER, registeredOffice: OFFICE },
             { id: 'fil_000000000003', kind: 'ct600', periodEnd: '2024-02-29', filedOn: '2024-10-01', reference: 'CT600', figures: { taxPayable: 341.75 } },
           ],
           updatedAt: stamp,
@@ -253,7 +254,13 @@ describe('the denylist', () => {
     expect(has('Trevaskis')).toBe('person');
     expect(has(NOTE_WORD)).toBe('filing-note');
     expect(has(`A lease of the ${NOTE_WORD} unit to March 2029`)).toBe('filing-note');
-    expect(has('secured on the director’s boat, repayable by 2027')).toBe('filing-note');
+    expect(has('secured on the director’s Wherrymoor boat, repayable by 2027')).toBe('filing-note');
+    // An advance's conditions word by word, as the other notes are.
+    expect(has('Wherrymoor')).toBe('filing-note');
+    // The registered office on accounts filed: whole, its parts and its own words.
+    expect(has(OFFICE)).toBe('place');
+    expect(has('14 Tolvaddon Row')).toBe('place');
+    expect(has('Tolvaddon')).toBe('place');
     expect(denylist.amounts).toEqual(expect.arrayContaining(['8423.00', '517.25']));
     const found = new Scanner({ denylist, allow: new Allowlist('') }).scanText('src/x.ts', `const lineB = 637;\nconst ref = '${FILING_REF}';\n`);
     expect(found.map((f) => `${f.line}:${f.rule}`)).toEqual(['1:amount', '2:filing-reference']);
