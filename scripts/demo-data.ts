@@ -23,7 +23,7 @@ import { WorkArea } from '../src/server/ingest/workarea';
 import { Store } from '../src/server/store';
 import { addDays, addMonths, endOfMonth, formatDate, formatMonth, startOfMonth, today, weekday } from '../src/shared/dates';
 import { reverseChargeVat, vatInGross } from '../src/shared/ledger';
-import { poundsWithoutPence, roundMoney } from '../src/shared/money';
+import { fromMinor, poundsWithoutPence, roundMoney, toMinor } from '../src/shared/money';
 import { employeeNi, parseTaxCode, payeTax, taxMonth } from '../src/shared/paye';
 import { lastDayOfMonths, monthsAfter, taxYearOf } from '../src/shared/uk';
 import { accountingPeriodsOf, companyDeadlines, type CompanyDeadline } from '../src/shared/company-books';
@@ -325,10 +325,12 @@ async function demoStudioVatFiled(store: Store): Promise<void> {
     if (!f || f.kind !== 'vat' || p.start < STUDIO_LEDGER_FROM) continue;
     const ret = companyVat({ src: store, company, today: END, period: p.end })!.ret!;
     const boxes = vatFigures(ret.boxes);
-    const rc = ret.boxes.find((b) => b.box === 1)!.lines.filter((l) => l.treatment === 'reverse-charge').reduce((s, l) => s + l.amount, 0) / 100;
-    const rcNet = ret.boxes.find((b) => b.box === 6)!.lines.filter((l) => l.treatment === 'reverse-charge').reduce((s, l) => s + l.amount, 0);
+    // The reverse charge left out, in pence: its VAT from boxes 1, 3 and 4, its value from 6 and 7.
+    const reverse = (box: number) => ret.boxes.find((b) => b.box === box)!.lines.filter((l) => l.treatment === 'reverse-charge').reduce((s, l) => s + l.amount, 0);
+    const [rc, rcNet] = [reverse(1), reverse(6)];
+    const less = (key: 'vatDueSales' | 'totalVatDue' | 'vatReclaimedCurrPeriod') => fromMinor(toMinor(boxes[key]) - rc);
     const without = (box: number) => poundsWithoutPence(ret.boxes.find((b) => b.box === box)!.exact! - rcNet);
-    const filed = rc ? { ...boxes, vatDueSales: roundMoney(boxes.vatDueSales - rc), totalVatDue: roundMoney(boxes.totalVatDue - rc), vatReclaimedCurrPeriod: roundMoney(boxes.vatReclaimedCurrPeriod - rc), totalValueSalesExVAT: without(6), totalValuePurchasesExVAT: without(7) } : boxes;
+    const filed = rc ? { ...boxes, vatDueSales: less('vatDueSales'), totalVatDue: less('totalVatDue'), vatReclaimedCurrPeriod: less('vatReclaimedCurrPeriod'), totalValueSalesExVAT: without(6), totalValuePurchasesExVAT: without(7) } : boxes;
     figures.set(f.id, { ...f, figures: filed });
   }
   if (!figures.size) return;
