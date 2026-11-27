@@ -21,13 +21,15 @@ import { applyReviewActions } from '../src/server/actions';
 import { applyRecords, researchIdOf, setOwnerAssumption } from '../src/server/records';
 import { WorkArea } from '../src/server/ingest/workarea';
 import { Store } from '../src/server/store';
-import { addDays, addMonths, endOfMonth, formatMonth, startOfMonth, today, weekday } from '../src/shared/dates';
+import { addDays, addMonths, endOfMonth, formatDate, formatMonth, startOfMonth, today, weekday } from '../src/shared/dates';
 import { reverseChargeVat, vatInGross } from '../src/shared/ledger';
 import { roundMoney } from '../src/shared/money';
 import { employeeNi, parseTaxCode, payeTax, taxMonth } from '../src/shared/paye';
-import { lastDayOfMonths, taxYearOf } from '../src/shared/uk';
-import { companyDeadlines, type CompanyDeadline } from '../src/shared/company-books';
-import { CompanyBooksSchema, EmploymentSchema, ExtractionSchema, HmrcRecordSchema, PayslipRecordSchema, type Account, type BalanceSnapshot, type CompanyFiling, type Employment, type ExtractedHmrc, type ExtractedPayslip, type Figure, type HmrcRecord, type HoldingsSnapshot, type ImportRecord, type MicroEntityLines, type PayslipRecord, type Transaction } from '../src/shared/schema';
+import { lastDayOfMonths, monthsAfter, taxYearOf } from '../src/shared/uk';
+import { accountingPeriodsOf, companyDeadlines, type CompanyDeadline } from '../src/shared/company-books';
+import { companyEngine } from '../src/server/analytics/company-accounts';
+import { periodAccounts } from '../src/server/analytics/period-accounts';
+import { CompanyBooksSchema, EmploymentSchema, MICRO_ENTITY_LINES, ExtractionSchema, HmrcRecordSchema, PayslipRecordSchema, type Account, type BalanceSnapshot, type CompanyFiling, type Employment, type ExtractedHmrc, type ExtractedPayslip, type Figure, type HmrcRecord, type HoldingsSnapshot, type ImportRecord, type MicroEntityLines, type PayslipRecord, type Transaction } from '../src/shared/schema';
 // A PDF with a text layer, as a saved gov.uk page has (the tests' helper).
 import { textPdf } from '../tests/pdf';
 
@@ -61,6 +63,22 @@ const gauss = () => Math.sqrt(-2 * Math.log(rand() || 1e-9)) * Math.cos(2 * Math
 const stamp = nowISO();
 const END = today();
 const START = SPARSE ? startOfMonth(END) : startOfMonth(addMonths(END, -MONTHS));
+/**
+ * Example Studio's latest year end: the end of the month two months before today, so its books hold a
+ * whole year ended (whose accounts are ready, and filed) and the year running, whatever day the demo
+ * is made. Its books start the day after the year end before (the opening balances, its last accounts).
+ */
+const STUDIO_YEAR_END = endOfMonth(addMonths(END, -2));
+const STUDIO_OPENING = monthsAfter(STUDIO_YEAR_END, -12);
+const STUDIO_LEDGER_FROM = addDays(STUDIO_OPENING, 1);
+/** Its balances at the opening, as its last accounts give them (net assets of £96,000): its bank, a computer at its carrying amount, Corporation Tax owed and the loan owed to Jo. */
+const STUDIO_OPENING_LINES: { ledger: string; amount: number; asset?: { class: 'computer'; months: number } }[] = [
+  { ledger: 'bank:studio-current', amount: 94_492.4 },
+  { ledger: 'fixed-assets:computer:cost', amount: 3_150, asset: { class: 'computer', months: 24 } },
+  { ledger: 'corporation-tax', amount: -1_312.4 },
+  { ledger: 'directors-loan', amount: -350 },
+  { ledger: 'retained-earnings', amount: -95_980 },
+];
 
 const acct = (id: string, name: string, type: Account['type'], institutionId: string | undefined, extra: Partial<Account> = {}): Account => ({
   id,
@@ -98,9 +116,9 @@ async function demoCompanyAccount(store: Store, dividendDay: string): Promise<vo
   const row = (date: string, amount: number, description: string) => {
     if (date <= END) rows.push({ id: transactionId('studio-current', date, amount, description, 0), accountId: 'studio-current', date, amount, currency: 'GBP', description, source: {}, createdAt: stamp });
   };
-  for (let k = -4; k <= 0; k++) {
-    const m = startOfMonth(addMonths(END, k));
-    row(addDays(m, 4), 2_400 + 150 * (k + 4), 'EXAMPLE CLIENT LTD INV');
+  // Every month of its books: from the month after its last accounts to this one.
+  for (let m = startOfMonth(STUDIO_LEDGER_FROM), i = 0; m <= END; m = addMonths(m, 1), i++) {
+    row(addDays(m, 4), 1_800 + 75 * i, 'EXAMPLE CLIENT LTD INV');
     row(addDays(m, 9), -24.99, 'EXAMPLE HOSTING LTD');
     row(addDays(m, 24), 1_150, 'EXAMPLE AGENCY LTD INV');
     row(addDays(m, 27), -1_200, 'J BLOGGS SALARY');
@@ -111,6 +129,8 @@ async function demoCompanyAccount(store: Store, dividendDay: string): Promise<vo
   row(addDays(startOfMonth(addMonths(END, -3)), 11), -1_199, 'EXAMPLE COMPUTERS LTD');
   row(addDays(startOfMonth(addMonths(END, -2)), 2), -288, 'EXAMPLE DESIGN TOOLS ANNUAL');
   row(addDays(startOfMonth(addMonths(END, -1)), 14), -36, 'EXAMPLE CLOUD INC');
+  // The bookkeeper's fee for the quarter to the year end, paid after it (an accrual at the year end).
+  row(addDays(startOfMonth(addMonths(END, -1)), 20), -360, 'EXAMPLE BOOKKEEPING LTD');
   // One left for Jo to code, so the Books tab has something to ask.
   row(addDays(startOfMonth(END), 1), -18.4, 'EXAMPLE STATIONERS');
   row(addDays(startOfMonth(addMonths(END, -2)), 18), -1_312.4, 'HMRC CORPORATION TAX');
@@ -119,7 +139,7 @@ async function demoCompanyAccount(store: Store, dividendDay: string): Promise<vo
   for (const r of STUDIO_MONEY.filter((x) => x.as === 'loan')) row(r.date, -r.amount, r.amount < 0 ? 'J BLOGGS DIRECTOR LOAN' : 'J BLOGGS LOAN REPAYMENT');
   if (!rows.length) return;
   await store.addTransactions(rows, 'demo: the company’s own account');
-  let balance = 6_500;
+  let balance = STUDIO_OPENING_LINES.find((l) => l.ledger === 'bank:studio-current')!.amount;
   const snaps: BalanceSnapshot[] = [];
   for (const r of [...rows].sort((a, b) => (a.date < b.date ? -1 : 1))) balance = roundMoney(balance + r.amount);
   const last = rows.reduce((m, r) => (r.date > m ? r.date : m), rows[0]!.date);
@@ -140,24 +160,32 @@ async function demoCompanyBooks(store: Store): Promise<void> {
   if (!company) return;
   const books = CompanyBooksSchema.parse({
     incorporatedOn: '2023-05-02',
-    accountingReferenceDate: '12-31',
+    accountingReferenceDate: STUDIO_YEAR_END.slice(5),
     // Within the charge to Corporation Tax from when it began trading: no interest or business before.
     withinChargeFrom: '2023-06-01',
     tradeStartedOn: '2023-06-01',
     vat: { registeredFrom: '2024-04-01', scheme: 'cash', schedule: [{ from: '2024-04-01', stagger: 'quarterly-1' }] },
     paye: { from: '2023-07-01' },
-    // Its books kept here from this year: what came before is in the opening balances (demoCompanyLedger).
-    ledgerFrom: '2026-01-01',
+    // Its books kept here from the start of its latest year ended: what came before is in the opening balances (demoCompanyLedger).
+    ledgerFrom: STUDIO_LEDGER_FROM,
+    // Computers over three years, unless a coding says otherwise.
+    policies: [
+      { class: 'computer', months: 36 },
+      { class: 'office', months: 60 },
+    ],
     updatedAt: stamp,
   });
+  if (!accountingPeriodsOf(books, END).some((p) => p.start === STUDIO_LEDGER_FROM && p.end === STUDIO_YEAR_END)) throw new Error(`demo: the studio has no accounting period ${STUDIO_LEDGER_FROM} to ${STUDIO_YEAR_END}`);
   const deadlines = companyDeadlines({ books }, END);
   // Its balance sheets, micro-entity lines (net assets of £96,000 at 31 December 2025, as its valuation says), and its Corporation Tax.
-  const sheets: Record<string, MicroEntityLines> = {
-    '2023': { B: 1215, C: 18493, E: 6375, F: 12118, G: 13333, K: 13333 },
-    '2024': { B: 2380, C: 61247, E: 7102, F: 54145, G: 56525, K: 56525 },
-    '2025': { B: 3150, C: 101284, E: 8434, F: 92850, G: 96000, K: 96000 },
+  // The year before its books start is what the opening balances are: whole pounds of them, F, G and K worked out.
+  const opening: MicroEntityLines = { A: 20, B: 3150, C: 94492, E: 1662, F: 92830, G: 96000, K: 96000 };
+  const older: Record<string, MicroEntityLines> = {
+    '2023': { A: 20, B: 1215, C: 18493, E: 6375, F: 12118, G: 13353, K: 13353 },
+    '2024': { A: 20, B: 2380, C: 61247, E: 7102, F: 54145, G: 56545, K: 56545 },
   };
-  const tax: Record<string, number> = { '2023': 2533.25, '2024': 9981.5, '2025': 12474.25 };
+  const sheetFor = (end: string) => (end === STUDIO_OPENING ? opening : end < STUDIO_OPENING ? older[end.slice(0, 4)] : undefined);
+  const taxFor = (end: string) => (end === STUDIO_OPENING ? 1_312.4 : end < STUDIO_OPENING ? ({ '2023': 2533.25, '2024': 9981.5 } as Record<string, number>)[end.slice(0, 4)] : undefined);
   // Last year's accounts: the latest year ended (filed, with its CT600, even before they fall due).
   const lastAccounts = deadlines.filter((d) => d.kind === 'accounts' && d.period.end < END).at(-1);
   const vats = deadlines.filter((d) => d.kind === 'vat');
@@ -171,15 +199,16 @@ async function demoCompanyBooks(store: Store): Promise<void> {
     const withAccounts = accountsFiled !== undefined && (d === lastAccounts || (d.kind === 'ct600' && d.period.end === lastAccounts?.period.end));
     if (d.period.end >= END || (d.due >= END && !withAccounts)) return [];
     const filedOn = withAccounts ? accountsFiled : filedOnOf(d, i);
-    const year = d.period.end.slice(0, 4);
+    const sheet = sheetFor(d.period.end);
+    const taxPaid = taxFor(d.period.end);
     const base = { id: filingId('example-studio', d.kind, d.period.end), addedBy: 'owner' as const, periodEnd: d.period.end, filedOn, ...(d.kind !== 'confirmation' && d.period.start ? { periodStart: d.period.start } : {}) };
     switch (d.kind) {
       case 'accounts':
-        return [{ ...base, kind: 'accounts', ...(sheets[year] ? { figures: sheets[year] } : {}) }];
+        return [{ ...base, kind: 'accounts', ...(sheet ? { figures: sheet } : {}) }];
       case 'ct600':
-        return [{ ...base, kind: 'ct600', ...(tax[year] !== undefined ? { figures: { taxPayable: tax[year] } } : {}) }];
+        return [{ ...base, kind: 'ct600', ...(taxPaid !== undefined ? { figures: { taxPayable: taxPaid } } : {}) }];
       case 'ct-payment':
-        return [{ ...base, kind: 'ct-payment', ...(tax[year] !== undefined ? { figures: { amount: tax[year] } } : {}) }];
+        return [{ ...base, kind: 'ct-payment', ...(taxPaid !== undefined ? { figures: { amount: taxPaid } } : {}) }];
       case 'confirmation':
         return [{ ...base, kind: 'confirmation' }];
       case 'vat': {
@@ -209,7 +238,9 @@ async function demoCompanyLedger(store: Store): Promise<void> {
   const vat = (amount: number, date: string) => ({ amount: vatInGross(amount, date, 'standard'), treatment: 'standard' as const });
   const code = (t: Transaction): Transaction['books'] | undefined => {
     if (/CLIENT LTD INV|AGENCY LTD INV/.test(t.description)) return { ledger: 'turnover', vat: vat(t.amount, t.date), setBy: 'user' };
-    if (t.description === 'EXAMPLE COMPUTERS LTD') return { ledger: 'fixed-assets:computer:cost', vat: vat(t.amount, t.date), asset: { class: 'computer', months: 36 }, setBy: 'user' };
+    // Its life from the company's policy for computers (three years).
+    if (t.description === 'EXAMPLE COMPUTERS LTD') return { ledger: 'fixed-assets:computer:cost', vat: vat(t.amount, t.date), asset: { class: 'computer' }, setBy: 'user' };
+    if (t.description === 'EXAMPLE BOOKKEEPING LTD') return { ledger: 'professional-fees', vat: vat(t.amount, t.date), covers: { from: addDays(monthsAfter(STUDIO_YEAR_END, -3), 1), to: STUDIO_YEAR_END }, setBy: 'user' };
     if (t.description === 'EXAMPLE DESIGN TOOLS ANNUAL') return { ledger: 'software-hosting', vat: vat(t.amount, t.date), covers: { from: t.date, to: lastDayOfMonths(t.date, 12) }, setBy: 'user' };
     if (t.description === 'EXAMPLE CLOUD INC') return { ledger: 'software-hosting', vat: { amount: reverseChargeVat(t.amount, t.date), treatment: 'reverse-charge' }, setBy: 'user' };
     if (t.description === 'J BLOGGS SALARY') return { ledger: 'directors-salaries', setBy: 'user' };
@@ -235,14 +266,35 @@ async function demoCompanyLedger(store: Store): Promise<void> {
     { id: 'rule_demohosting', name: 'Hosting', enabled: true, priority: 100, match: { field: 'description', op: 'contains', value: 'EXAMPLE HOSTING', caseSensitive: false, company: { id: 'example-studio', rows: 'own' } }, set: { books: { ledger: 'software-hosting', vat: { treatment: 'standard' } } }, createdAt: stamp, updatedAt: stamp },
     { id: 'rule_demobankfee', name: 'Bank fees', enabled: true, priority: 100, match: { field: 'description', op: 'contains', value: 'MONTHLY FEE', caseSensitive: false, company: { id: 'example-studio', rows: 'own' } }, set: { books: { ledger: 'bank-charges', vat: { treatment: 'exempt' } } }, createdAt: stamp, updatedAt: stamp },
   ]);
-  const journal = (id: string, date: string, memo: string, lines: [string, number][], evidence: string, opening = false) => ({ id, companyId: 'example-studio', date, memo, lines: lines.map(([ledger, amount]) => ({ ledger, amount })), evidence, ...(opening ? { opening } : {}), createdBy: 'owner' as const, createdAt: stamp, updatedAt: stamp });
-  // Its books start this year: the shares issued at incorporation, and the balances at the end of last
-  // year (its bank, what it owed Jo, as the filed accounts give them), carried in as opening balances.
+  const journal = (id: string, date: string, memo: string, lines: ([string, number] | { ledger: string; amount: number })[], evidence: string, opening = false) => ({ id, companyId: 'example-studio', date, memo, lines: lines.map((l) => (Array.isArray(l) ? { ledger: l[0], amount: l[1] } : l)), evidence, ...(opening ? { opening } : {}), createdBy: 'owner' as const, createdAt: stamp, updatedAt: stamp });
+  // Its books start after its last accounts: the shares issued at incorporation, and the balances then
+  // (its bank, a computer at its carrying amount with its remaining life, Corporation Tax owed, what it
+  // owed Jo, as the filed accounts give them), carried in as opening balances.
   await store.putJournal(journal('jnl_de0000000001', '2023-05-02', 'Shares issued at incorporation, not yet paid for', [['share-capital-unpaid', 20], ['share-capital', -20]], 'Certificate of incorporation: 20 ordinary shares of £1', true), 'demo: the studio’s shares');
-  await store.putJournal(journal('jnl_de0000000002', '2025-12-31', 'Opening balances at 31 Dec 2025', [['bank:studio-current', 6_500], ['directors-loan', -350], ['retained-earnings', -6_150]], 'Accounts to 31 Dec 2025', true), 'demo: the studio’s opening balances');
+  await store.putJournal(journal('jnl_de0000000002', STUDIO_OPENING, `Opening balances at ${formatDate(STUDIO_OPENING)}`, STUDIO_OPENING_LINES, `Accounts to ${formatDate(STUDIO_OPENING)}`, true), 'demo: the studio’s opening balances');
   for (const t of own.filter((x) => x.description === 'J BLOGGS SALARY')) {
     await store.putJournal(journal(`jnl_de${t.date.replace(/-/g, '').padStart(10, '0')}`, t.date, `${formatMonth(t.date)} payroll: tax and National Insurance taken from pay`, [['directors-salaries', 92.4], ['paye', -92.4]], 'Payroll summary'), 'demo: the studio’s payroll');
   }
+}
+
+/**
+ * The studio's accounts for its latest year ended, filed (the deadlines filed them early, with no
+ * lines): their whole-pound lines are the ones its books work out to, once every row is coded and
+ * linked, so the Accounts tab shows a year ready and matching its filing.
+ */
+async function demoStudioAccountsFiled(store: Store): Promise<void> {
+  const company = store.company('example-studio');
+  if (!company?.books) return;
+  const report = periodAccounts({ src: store, company, engine: companyEngine(store, company.id), today: END, period: STUDIO_YEAR_END });
+  if (!report) return;
+  if (!report.ready) console.warn(`demo: the studio's year to ${STUDIO_YEAR_END} is not ready: ${report.checks.map((c) => (c.kind === 'ledger' ? c.check.kind : c.kind)).join(', ')}`);
+  const whole = Object.fromEntries(report.balanceSheet.lines.map((l) => [l.line, l.whole]));
+  const figures = Object.fromEntries(MICRO_ENTITY_LINES.filter((l) => whole[l] !== 0 || ['F', 'G', 'K'].includes(l)).map((l) => [l, whole[l]]));
+  await store.updateCompany(
+    company.id,
+    (c) => (c?.books ? { ...c, books: { ...c.books, filings: c.books.filings.map((f) => (f.kind === 'accounts' && f.periodEnd === STUDIO_YEAR_END ? { ...f, figures } : f)) } } : c!),
+    'demo: the studio’s accounts filed',
+  );
 }
 
 /** Jo's payments with the studio: each is marked (Transaction.company) as what it was. */
@@ -695,7 +747,7 @@ async function main() {
   // The company: the holding, its book value from its accounts (as an estimate on its account), and
   // this year's dividend voucher.
   if (!SPARSE) {
-    const valued = { id: balanceId('studio-shares', '2025-12-31', 9_600, 'manual'), accountId: 'studio-shares', date: '2025-12-31', balance: 9_600, currency: 'GBP', kind: 'manual' as const, note: 'Book value: net assets £96,000 × 2 of its 20 shares, from its accounts to 31 Dec 2025.', source: {}, createdAt: stamp };
+    const valued = { id: balanceId('studio-shares', STUDIO_OPENING, 9_600, 'manual'), accountId: 'studio-shares', date: STUDIO_OPENING, balance: 9_600, currency: 'GBP', kind: 'manual' as const, note: `Book value: net assets £96,000 × 2 of its 20 shares, from its accounts to ${formatDate(STUDIO_OPENING)}.`, source: {}, createdAt: stamp };
     await store.addBalances([valued], 'demo: company valuation');
     await store.setCompanies(
       [
@@ -704,7 +756,7 @@ async function main() {
           name: 'Example Studio Ltd',
           number: '13579246',
           holdings: [{ shareClass: 'B ordinary', shares: 2, totalShares: 20, certificate: '3', acquiredOn: '2023-05-02', source: {} }],
-          valuations: [{ asOf: '2025-12-31', method: 'net-assets', netAssets: 96_000, value: 9_600, note: valued.note, balanceId: valued.id, source: {} }],
+          valuations: [{ asOf: STUDIO_OPENING, method: 'net-assets', netAssets: 96_000, value: 9_600, note: valued.note, balanceId: valued.id, source: {} }],
           accountId: 'studio-shares',
           directorLoanAccountId: 'studio-loan',
           createdBy: 'owner',
@@ -720,8 +772,8 @@ async function main() {
     await demoCompanyBooks(store);
     await studioMarks(store);
     await demoCompanyLedger(store);
-    // The director's loan in its accounts to 31 Dec 2025: what it owed Jo then, its first balance.
-    await store.addBalances([{ id: balanceId('studio-loan', '2025-12-31', 350, 'manual'), accountId: 'studio-loan', date: '2025-12-31', balance: 350, currency: 'GBP', kind: 'manual', dateSource: 'document', note: 'Director’s loan owed to Jo in the accounts to 31 Dec 2025.', source: {}, createdAt: stamp }], 'demo: director’s loan');
+    // The director's loan in its last accounts: what it owed Jo then, its first balance.
+    await store.addBalances([{ id: balanceId('studio-loan', STUDIO_OPENING, 350, 'manual'), accountId: 'studio-loan', date: STUDIO_OPENING, balance: 350, currency: 'GBP', kind: 'manual', dateSource: 'document', note: `Director’s loan owed to Jo in the accounts to ${formatDate(STUDIO_OPENING)}.`, source: {}, createdAt: stamp }], 'demo: director’s loan');
   }
   // The flat's tenancy (agreements.json): a year's rent on the 1st of each month, from six months ago.
   if (!SPARSE) {
@@ -770,6 +822,7 @@ async function main() {
     );
   }
   const res = await enrich(store);
+  if (!SPARSE) await demoStudioAccountsFiled(store);
   console.log(`demo: ${txs.length} transactions, ${snapshots.length} balances; enrich: ${res.recategorised} categorised, ${res.transfersLinked} transfers linked`);
   // Three fares as an older version of the app filed them, for re-applying categorisation to change.
   const stale = store.transactions().filter((t) => t.category === 'public-transport' && t.categorisedBy === 'builtin').slice(-3);
