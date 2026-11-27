@@ -23,12 +23,13 @@ import { WorkArea } from '../src/server/ingest/workarea';
 import { Store } from '../src/server/store';
 import { addDays, addMonths, endOfMonth, formatDate, formatMonth, startOfMonth, today, weekday } from '../src/shared/dates';
 import { reverseChargeVat, vatInGross } from '../src/shared/ledger';
-import { roundMoney } from '../src/shared/money';
+import { poundsWithoutPence, roundMoney } from '../src/shared/money';
 import { employeeNi, parseTaxCode, payeTax, taxMonth } from '../src/shared/paye';
 import { lastDayOfMonths, monthsAfter, taxYearOf } from '../src/shared/uk';
 import { accountingPeriodsOf, companyDeadlines, type CompanyDeadline } from '../src/shared/company-books';
 import { companyEngine } from '../src/server/analytics/company-accounts';
 import { periodAccounts } from '../src/server/analytics/period-accounts';
+import { companyVat, vatFigures } from '../src/server/analytics/vat-return';
 import { CompanyBooksSchema, EmploymentSchema, MICRO_ENTITY_LINES, ExtractionSchema, HmrcRecordSchema, PayslipRecordSchema, type Account, type BalanceSnapshot, type CompanyFiling, type Employment, type ExtractedHmrc, type ExtractedPayslip, type Figure, type HmrcRecord, type HoldingsSnapshot, type ImportRecord, type MicroEntityLines, type PayslipRecord, type Transaction } from '../src/shared/schema';
 // A PDF with a text layer, as a saved gov.uk page has (the tests' helper).
 import { textPdf } from '../tests/pdf';
@@ -125,7 +126,9 @@ async function demoCompanyAccount(store: Store, dividendDay: string): Promise<vo
     row(endOfMonth(m), -5, 'EXAMPLE BANK MONTHLY FEE');
   }
   // What its books make something of (demoCompanyLedger): a laptop kept for years, a year's design
-  // tools paid up front, and a service bought from abroad (a reverse charge).
+  // tools paid up front, and a service bought from abroad (a reverse charge) twice, in a quarter filed
+  // (whose return left it out: demoStudioVatFiled) and in the one running.
+  row(addDays(startOfMonth(addMonths(END, -5)), 14), -36, 'EXAMPLE CLOUD INC');
   row(addDays(startOfMonth(addMonths(END, -3)), 11), -1_199, 'EXAMPLE COMPUTERS LTD');
   row(addDays(startOfMonth(addMonths(END, -2)), 2), -288, 'EXAMPLE DESIGN TOOLS ANNUAL');
   row(addDays(startOfMonth(addMonths(END, -1)), 14), -36, 'EXAMPLE CLOUD INC');
@@ -302,6 +305,34 @@ async function demoStudioAccountsFiled(store: Store): Promise<void> {
     (c) => (c?.books ? { ...c, books: { ...c.books, lockedThrough: STUDIO_YEAR_END, filings: c.books.filings.map((f) => (f.kind === 'accounts' && f.periodEnd === STUDIO_YEAR_END ? { ...f, figures } : f)) } } : c!),
     'demo: the studio’s accounts filed',
   );
+}
+
+/**
+ * The studio's VAT returns filed for the quarters its books cover whole: the boxes its books give
+ * (FORMULAS.md §22, "VAT returns"), but for the quarter with the service from abroad, whose return left
+ * the reverse charge out: boxes 1 and 4 short by its VAT, 6 and 7 by its value, the net the same, so the
+ * VAT tab shows a return differing from the books with nothing to pay. Earlier quarters keep the figures
+ * filed before the books were kept here; the quarter running is open.
+ */
+async function demoStudioVatFiled(store: Store): Promise<void> {
+  const company = store.company('example-studio');
+  if (!company?.books) return;
+  const vat = companyVat({ src: store, company, today: END });
+  if (!vat) return;
+  const figures = new Map<string, CompanyFiling>();
+  for (const p of vat.periods) {
+    const f = company.books.filings.find((x) => x.kind === 'vat' && x.periodEnd === p.end);
+    if (!f || f.kind !== 'vat' || p.start < STUDIO_LEDGER_FROM) continue;
+    const ret = companyVat({ src: store, company, today: END, period: p.end })!.ret!;
+    const boxes = vatFigures(ret.boxes);
+    const rc = ret.boxes.find((b) => b.box === 1)!.lines.filter((l) => l.treatment === 'reverse-charge').reduce((s, l) => s + l.amount, 0) / 100;
+    const rcNet = ret.boxes.find((b) => b.box === 6)!.lines.filter((l) => l.treatment === 'reverse-charge').reduce((s, l) => s + l.amount, 0);
+    const without = (box: number) => poundsWithoutPence(ret.boxes.find((b) => b.box === box)!.exact! - rcNet);
+    const filed = rc ? { ...boxes, vatDueSales: roundMoney(boxes.vatDueSales - rc), totalVatDue: roundMoney(boxes.totalVatDue - rc), vatReclaimedCurrPeriod: roundMoney(boxes.vatReclaimedCurrPeriod - rc), totalValueSalesExVAT: without(6), totalValuePurchasesExVAT: without(7) } : boxes;
+    figures.set(f.id, { ...f, figures: filed });
+  }
+  if (!figures.size) return;
+  await store.updateCompany(company.id, (c) => (c?.books ? { ...c, books: { ...c.books, filings: c.books.filings.map((f) => figures.get(f.id) ?? f) } } : c!), 'demo: the studio’s VAT returns filed');
 }
 
 /** Jo's payments with the studio: each is marked (Transaction.company) as what it was. */
@@ -830,6 +861,7 @@ async function main() {
   }
   const res = await enrich(store);
   if (!SPARSE) await demoStudioAccountsFiled(store);
+  if (!SPARSE) await demoStudioVatFiled(store);
   console.log(`demo: ${txs.length} transactions, ${snapshots.length} balances; enrich: ${res.recategorised} categorised, ${res.transfersLinked} transfers linked`);
   // Three fares as an older version of the app filed them, for re-applying categorisation to change.
   const stale = store.transactions().filter((t) => t.category === 'public-transport' && t.categorisedBy === 'builtin').slice(-3);
