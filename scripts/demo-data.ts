@@ -146,6 +146,8 @@ async function demoCompanyBooks(store: Store): Promise<void> {
     tradeStartedOn: '2023-06-01',
     vat: { registeredFrom: '2024-04-01', scheme: 'cash', schedule: [{ from: '2024-04-01', stagger: 'quarterly-1' }] },
     paye: { from: '2023-07-01' },
+    // Its books kept here from this year: what came before is in the opening balances (demoCompanyLedger).
+    ledgerFrom: '2026-01-01',
     updatedAt: stamp,
   });
   const deadlines = companyDeadlines({ books }, END);
@@ -222,7 +224,7 @@ async function demoCompanyLedger(store: Store): Promise<void> {
   // Jo's hosting plan paid on the card, coded as the studio's cost (over the year it covers).
   const plan = STUDIO_MONEY.find((r) => r.as === 'paid-for');
   const paid = plan ? store.transactions(plan.accountId).find((t) => t.date === plan.date && t.description === plan.description) : undefined;
-  if (paid) coded.push({ id: paid.id, patch: { books: { ledger: 'software-hosting', vat: vat(paid.amount, paid.date), covers: { from: paid.date, to: lastDayOfMonths(paid.date, 12) }, setBy: 'user' } } });
+  if (paid) coded.push({ id: paid.id, patch: { books: { ledger: 'software-hosting', vat: vat(paid.amount, paid.date), covers: { from: paid.date, to: lastDayOfMonths(paid.date, 12) }, invoiceToCompany: true, setBy: 'user' } } });
   // Jo's loan to it, linked to the company's row for the same money.
   const lent = STUDIO_MONEY.find((r) => r.as === 'loan' && r.amount < 0);
   const lentRow = lent ? store.transactions(lent.accountId).find((t) => t.date === lent.date && t.description === lent.description) : undefined;
@@ -233,8 +235,11 @@ async function demoCompanyLedger(store: Store): Promise<void> {
     { id: 'rule_demohosting', name: 'Hosting', enabled: true, priority: 100, match: { field: 'description', op: 'contains', value: 'EXAMPLE HOSTING', caseSensitive: false, company: { id: 'example-studio', rows: 'own' } }, set: { books: { ledger: 'software-hosting', vat: { treatment: 'standard' } } }, createdAt: stamp, updatedAt: stamp },
     { id: 'rule_demobankfee', name: 'Bank fees', enabled: true, priority: 100, match: { field: 'description', op: 'contains', value: 'MONTHLY FEE', caseSensitive: false, company: { id: 'example-studio', rows: 'own' } }, set: { books: { ledger: 'bank-charges', vat: { treatment: 'exempt' } } }, createdAt: stamp, updatedAt: stamp },
   ]);
-  const journal = (id: string, date: string, memo: string, lines: [string, number][], evidence: string) => ({ id, companyId: 'example-studio', date, memo, lines: lines.map(([ledger, amount]) => ({ ledger, amount })), evidence, createdBy: 'owner' as const, createdAt: stamp, updatedAt: stamp });
-  await store.putJournal(journal('jnl_de0000000001', '2023-05-02', 'Shares issued at incorporation, not yet paid for', [['share-capital-unpaid', 20], ['share-capital', -20]], 'Certificate of incorporation: 20 ordinary shares of £1'), 'demo: the studio’s shares');
+  const journal = (id: string, date: string, memo: string, lines: [string, number][], evidence: string, opening = false) => ({ id, companyId: 'example-studio', date, memo, lines: lines.map(([ledger, amount]) => ({ ledger, amount })), evidence, ...(opening ? { opening } : {}), createdBy: 'owner' as const, createdAt: stamp, updatedAt: stamp });
+  // Its books start this year: the shares issued at incorporation, and the balances at the end of last
+  // year (its bank, what it owed Jo, as the filed accounts give them), carried in as opening balances.
+  await store.putJournal(journal('jnl_de0000000001', '2023-05-02', 'Shares issued at incorporation, not yet paid for', [['share-capital-unpaid', 20], ['share-capital', -20]], 'Certificate of incorporation: 20 ordinary shares of £1', true), 'demo: the studio’s shares');
+  await store.putJournal(journal('jnl_de0000000002', '2025-12-31', 'Opening balances at 31 Dec 2025', [['bank:studio-current', 6_500], ['directors-loan', -350], ['retained-earnings', -6_150]], 'Accounts to 31 Dec 2025', true), 'demo: the studio’s opening balances');
   for (const t of own.filter((x) => x.description === 'J BLOGGS SALARY')) {
     await store.putJournal(journal(`jnl_de${t.date.replace(/-/g, '').padStart(10, '0')}`, t.date, `${formatMonth(t.date)} payroll: tax and National Insurance taken from pay`, [['directors-salaries', 92.4], ['paye', -92.4]], 'Payroll summary'), 'demo: the studio’s payroll');
   }
