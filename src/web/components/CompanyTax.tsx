@@ -13,6 +13,7 @@ import type { CompanyCtResponse, CtCapitalAllowances, CtCheck, CtComputationView
 import { formatDate, formatSpan, today } from '../../shared/dates';
 import { ledgerName } from '../../shared/ledger';
 import { fromMinor } from '../../shared/money';
+import { CIHC_TEST } from '../../shared/corporation-tax';
 import { api, useApi, useApiMutation } from '../lib/api';
 import { cn } from '../lib/format';
 import { CheckEverything } from './CheckEverything';
@@ -63,15 +64,17 @@ function checkWords(c: CtCheck, companyId: string): ReactNode {
     case 'income-before-charge':
       return (
         <>
-          Interest of <Pence value={c.amount} /> before it came within the charge to Corporation Tax ({formatDate(c.from)}): income brings a company within the charge (CTA 2009 s9), so check that day in Settings.
+          {ledgerName(c.ledger)} of <Pence value={Math.abs(c.amount)} /> before it came within the charge to Corporation Tax ({formatDate(c.from)}), in no Corporation Tax period: income or business brings a company within the charge (CTA 2009 s9), so check that day in Settings.
         </>
       );
+    case 'opening-journal':
+      return `An opening journal dated ${formatDate(c.date)} brings in a fixed asset, but the books start on ${formatDate(c.ledgerFrom)}: opening balances are dated before then. For tax it is taken as brought in (in the pools brought forward), not bought; date the journal before the books start, or code the purchase if it was bought then.`;
     case 'disposal-proceeds':
       return `${c.count} assets left in the period with nothing said of what each fetched: say it on each asset (what it fetched), so each disposal value is right.`;
     case 'close-investment-holding':
       return (
         <>
-          Say whether it is a close investment-holding company (CTA 2010 s18N) in <Link to={`/company/${companyId}/settings`} className="text-accent-ink hover:underline">Settings</Link>: before it trades, the rate depends on it (below).
+          Say whether it is a close investment-holding company in <Link to={`/company/${companyId}/settings`} className="text-accent-ink hover:underline">Settings</Link>: before it trades, the rate depends on it. {CIHC_TEST}
         </>
       );
     case 'unsupported':
@@ -165,7 +168,7 @@ function ComputationCard({ v, companyId }: { v: CtComputationView; companyId: st
               value={<Pence value={v.accounts.profit} />}
               sub={
                 <>
-                  {v.accounts.lines.some((l) => l.basis === 'days') ? 'Trading items shared out from the period of account by days (CTA 2009 s52); interest by its date. ' : 'By date. '}
+                  {v.accounts.lines.some((l) => l.basis === 'days') ? 'Shared out from the period of account by days (CTA 2009 s52; interest, s307(2A)). ' : 'By date. '}
                   <button type="button" className="no-print text-accent-ink hover:underline" aria-expanded={open} onClick={() => setOpen((x) => !x)}>
                     {open ? 'Hide its lines' : `Its lines (${v.accounts.lines.length})`}
                   </button>
@@ -177,7 +180,7 @@ function ComputationCard({ v, companyId }: { v: CtComputationView; companyId: st
                 v.accounts.lines.map((l) => (
                   <tr key={`${l.ledger}:${l.basis}`} className="text-[12.5px] text-ink-2">
                     <td className={cn(tableClasses.td, 'py-1 pl-8')}>
-                      {ledgerName(l.ledger)} <span className="text-ink-3">· {l.basis === 'days' ? 'by days' : 'by date'}</span>
+                      {ledgerName(l.ledger)} <span className="text-ink-3">· {l.basis === 'days' ? 'by days' : l.basis === 'accrued' ? 'as accrued' : 'by date'}</span>
                     </td>
                     <td className={cn(tableClasses.td, tableClasses.num, 'py-1')}>
                       <Pence value={l.amount} />
@@ -203,6 +206,7 @@ function ComputationCard({ v, companyId }: { v: CtComputationView; companyId: st
             {v.losses.trading.usedAgainstTotal > 0 && <Row indent label="Trading losses carried forward, claimed (CTA 2010 s45A)" value={<Pence value={-v.losses.trading.usedAgainstTotal} />} />}
             {v.losses.nonTrading.used > 0 && <Row indent label="Non-trading deficits carried forward, claimed (CTA 2009 s463G)" value={<Pence value={-v.losses.nonTrading.used} />} />}
             <Row label="Profits chargeable to Corporation Tax" value={<Pounds value={v.chargeable.whole} />} sub={<>exact <Pence value={v.chargeable.exact} />; the CT600 takes whole pounds</>} strong />
+            {v.s455 && <Row label="Tax on loans to participators (CTA 2010 s455; box 480)" value={<Pence value={v.s455.tax} />} sub={<>on <Pence value={v.s455.outstanding} /> lent in the period and owed at its end, less relief for <Pence value={v.s455.relief} /> repaid by {formatDate(v.s455.due)}{v.s455.provisional ? ' (so far)' : ''}: paid with the Corporation Tax</>} />}
           </tbody>
         </table>
       </div>
@@ -314,6 +318,12 @@ function AllowancesCard({ ca, trading }: { ca: CtCapitalAllowances; trading: boo
                     <div className="text-[11.5px] text-ink-3">
                       {formatDate(a.incurred)} · {a.pool === 'special' ? 'special rate' : 'main rate'}
                       {trading && ` · ${TREATMENT[a.treatment]}`}
+                      {trading && a.aia > 0 && a.firstYear > 0 && (
+                        <>
+                          {' '}
+                          · annual investment allowance <Pence value={a.aia} />, first-year <Pence value={a.firstYear} />
+                        </>
+                      )}
                     </div>
                     {a.notes.map((n, i) => (
                       <div key={i} className="text-[11.5px] text-ink-3">
@@ -393,7 +403,16 @@ function AllowancesCard({ ca, trading }: { ca: CtCapitalAllowances; trading: boo
                 <tr key={x.pool}>
                   <td className={tableClasses.td}>
                     {x.pool === 'main' ? 'Main pool' : 'Special rate pool'}
-                    <div className="text-[11.5px] text-ink-3">{x.smallPool ? 'small pool: written off' : `${x.rate}% a year`}{x.balancingCharge ? ' · a balancing charge' : ''}</div>
+                    <div className="text-[11.5px] text-ink-3">
+                      {x.smallPool ? 'small pool: written off' : `${x.rate}% a year`}
+                      {x.balancingCharge ? ' · a balancing charge' : ''}
+                      {x.afterAllowance ? (
+                        <>
+                          {' '}
+                          · <Pence value={x.afterAllowance} /> joins after the allowance (s58)
+                        </>
+                      ) : null}
+                    </div>
                   </td>
                   <td className={cn(tableClasses.td, tableClasses.num, 'hidden sm:table-cell')}>
                     <Pence value={x.broughtForward} />
@@ -625,6 +644,13 @@ export function CorporationTaxTab({ companyId }: { companyId: string }) {
           <BoxesCard boxes={v.boxes} form={view.form} />
         </>
       )}
+      <Card title="Good to know" className="no-print">
+        <ul className="flex list-disc flex-col gap-1.5 pl-5 text-[13px] text-ink-2">
+          {view.guidance.map((g) => (
+            <li key={g}>{g}</li>
+          ))}
+        </ul>
+      </Card>
       <CheckEverything text={view.disclaimer} />
       <PeriodsCard periods={view.periods} current={shown} next={view.next} onPick={setPeriod} />
       <p className="no-print text-[12px] text-ink-3">Worked out from the books on every visit, never stored; nothing is sent to HMRC. A correction is a coding, a journal or a setting, never an edit here. The CT600 and its payment are recorded in Settings → Filings.</p>

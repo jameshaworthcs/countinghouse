@@ -11,7 +11,8 @@ import { formatDate, formatSpan, today } from '../../shared/dates';
 import { DEADLINE_WARN_DAYS } from '../../shared/deadlines';
 import { toMinor, fromMinor } from '../../shared/money';
 import { COMPANY_FILING_KINDS, MICRO_ENTITY_LINES, type CompanyBooks, type CompanyBooksSetup, type CompanyFiling, type CompanyFilingInput, type CompanyFilingKind, type VatBoxes } from '../../shared/schema';
-import { VAT_STAGGERS, type VatStagger } from '../../shared/uk';
+import { financialYearOf, VAT_STAGGERS, type VatStagger } from '../../shared/uk';
+import { ASSOCIATED_TEST, CIHC_TEST } from '../../shared/corporation-tax';
 import { ASSET_REGISTER_CLASSES, FIXED_ASSET_CLASS_META } from '../../shared/ledger';
 import { Badge, Button, Callout, Card, Checkbox, Dialog, EmptyState, ErrorNote, Field, Input, Loading, Money, NumberInput, PageHeader, Select, StatusBadge, Tabs, tableClasses, useToast } from '../components/ui';
 import { api, useApi, useApiMutation } from '../lib/api';
@@ -340,6 +341,7 @@ function draftOf(books: CompanyBooks | null): Draft {
     aiaAllocated: books?.aiaAllocated ?? [],
     ...(books?.closeInvestmentHolding !== undefined ? { closeInvestmentHolding: books.closeInvestmentHolding } : {}),
     ...(books?.taxBroughtForward ? { taxBroughtForward: books.taxBroughtForward } : {}),
+    ...(books?.loanRelationshipBasis ? { loanRelationshipBasis: books.loanRelationshipBasis } : {}),
     within: books?.withinChargeFrom === null ? 'dormant' : books?.withinChargeFrom ? 'on' : 'assumed',
     withinOn: books?.withinChargeFrom ?? '',
     tradeOn: books?.tradeStartedOn ?? '',
@@ -367,6 +369,7 @@ function setupOf(d: Draft): CompanyBooksSetup {
     ...(d.associatedCompanies?.length ? { associatedCompanies: d.associatedCompanies.filter((a) => a.periodEnd) } : {}),
     ...(d.aiaAllocated?.length ? { aiaAllocated: d.aiaAllocated.filter((a) => a.periodEnd) } : {}),
     ...(d.closeInvestmentHolding !== undefined && d.closeInvestmentHolding !== null ? { closeInvestmentHolding: d.closeInvestmentHolding } : {}),
+    ...(d.loanRelationshipBasis ? { loanRelationshipBasis: d.loanRelationshipBasis } : {}),
     ...(d.ledgerFrom && d.taxBroughtForward ? { taxBroughtForward: d.taxBroughtForward } : {}),
     ...(d.within === 'dormant' ? { withinChargeFrom: null } : d.within === 'on' && d.withinOn ? { withinChargeFrom: d.withinOn } : {}),
     ...(d.tradeOn ? { tradeStartedOn: d.tradeOn } : {}),
@@ -377,15 +380,22 @@ type BroughtForward = NonNullable<CompanyBooksSetup['taxBroughtForward']>;
 const BROUGHT_FORWARD: [keyof BroughtForward, string][] = [
   ['mainPool', 'Main pool'],
   ['specialPool', 'Special rate pool'],
-  ['tradingLosses', 'Trading losses'],
-  ['nonTradingDeficits', 'Non-trading deficits'],
   ['preTradingExpenditure', 'Pre-trading expenditure'],
+  ['tradingLosses', 'Trading losses (from 1 April 2017)'],
+  ['nonTradingDeficits', 'Non-trading deficits (from 1 April 2017)'],
+  ['tradingLossesBefore2017', 'Trading losses (before 1 April 2017)'],
+  ['nonTradingDeficitsBefore2017', 'Non-trading deficits (before 1 April 2017)'],
 ];
 
 /** What the Corporation Tax computation needs to know beside the books: close investment-holding status, associated companies and the AIA shared, by CT period, and figures brought forward. */
 function CorporationTaxFields({ d, set, ctPeriods }: { d: Draft; set: (patch: Partial<Draft>) => void; ctPeriods: CompanyBooksResponse['periods']['ct'] }) {
   const ends = [...ctPeriods].reverse().map((p) => p.end);
   const assoc = d.associatedCompanies ?? [];
+  const clampCount = (v: number | undefined) => Math.min(99, Math.max(0, Math.round(v ?? 0)));
+  const straddles = (end: string) => {
+    const p = ctPeriods.find((x) => x.end === end);
+    return Boolean(p && financialYearOf(p.start) !== financialYearOf(p.end));
+  };
   const aia = d.aiaAllocated ?? [];
   const bf = d.taxBroughtForward;
   const periodSelect = (value: string, onChange: (v: string) => void) => (
@@ -404,7 +414,7 @@ function CorporationTaxFields({ d, set, ctPeriods }: { d: Draft; set: (patch: Pa
   return (
     <div className="grid gap-4 border-t border-line pt-4">
       <span className="text-[12.5px] font-medium text-ink-2">Corporation Tax</span>
-      <Field label="Close investment-holding company" className="sm:max-w-xl" hint="A close company (one run by five or fewer people, or by its directors) pays the main rate on all its profits as one (CTA 2010 s18N) unless it exists wholly or mainly for a permitted purpose, such as trading on a commercial basis or letting land to people not connected with it. A trading company is not one. Before it trades, HMRC accepts that a company can exist to trade in a period with no trading income, but says that “would be exceptional” (CTM60720); a company with only interest on its bank account may be one. It is for you to decide.">
+      <Field label="Close investment-holding company" className="sm:max-w-xl" hint={`${CIHC_TEST} A close company is one controlled by five or fewer people, or by its directors. It is for you to decide.`}>
         <Select value={d.closeInvestmentHolding === undefined || d.closeInvestmentHolding === null ? '' : d.closeInvestmentHolding ? 'yes' : 'no'} onChange={(e) => set({ closeInvestmentHolding: e.target.value === '' ? null : e.target.value === 'yes' })}>
           <option value="">Not said</option>
           <option value="no">No: it exists to trade (or another permitted purpose)</option>
@@ -416,7 +426,13 @@ function CorporationTaxFields({ d, set, ctPeriods }: { d: Draft; set: (patch: Pa
         {assoc.map((a, i) => (
           <div key={i} className="flex flex-wrap items-center gap-2">
             {periodSelect(a.periodEnd, (periodEnd) => set({ associatedCompanies: assoc.map((x, j) => (j === i ? { ...x, periodEnd } : x)) }))}
-            <NumberInput aria-label="Number of associated companies" value={a.count} onValue={(v) => set({ associatedCompanies: assoc.map((x, j) => (j === i ? { ...x, count: Math.max(0, Math.round(v ?? 0)) } : x)) })} className="w-20 tabular" />
+            <NumberInput aria-label="Number of associated companies" value={a.count} onValue={(v) => set({ associatedCompanies: assoc.map((x, j) => (j === i ? { ...x, count: clampCount(v) } : x)) })} className="w-20 tabular" />
+            {straddles(a.periodEnd) && (
+              <>
+                <span className="text-[12.5px] text-ink-3">in its first financial year; in its second</span>
+                <NumberInput aria-label="Number in its second financial year (empty: the same)" value={a.secondYear} onValue={(v) => set({ associatedCompanies: assoc.map((x, j) => (j === i ? { periodEnd: x.periodEnd, count: x.count, ...(v === undefined ? {} : { secondYear: clampCount(v) }) } : x)) })} className="w-20 tabular" />
+              </>
+            )}
             <Button size="sm" variant="ghost" icon={<Trash2 className="size-3.5" />} aria-label="Take it away" onClick={() => set({ associatedCompanies: assoc.filter((_, j) => j !== i) })} />
           </div>
         ))}
@@ -425,7 +441,7 @@ function CorporationTaxFields({ d, set, ctPeriods }: { d: Draft; set: (patch: Pa
             Say how many for a period
           </Button>
         </div>
-        <span className="text-[12px] text-ink-3">Another company is associated with this one when one controls the other, or both are under the same control (yours, say), for any part of the period (CTA 2010 s18E; control as in ss450–451). One that carried on no trade or business in the period is left out, and so is a passive holding company (s18F). The small profits limits are divided by one more than the number. A period with none said is taken as none.</span>
+        <span className="text-[12px] text-ink-3">{ASSOCIATED_TEST} The small profits limits are divided by one more than the number. For a period over 1 April, give the second financial year’s number when it differs (a company associated only in one part does not reduce the other’s limits, CTM03640). A period with none said is taken as none.</span>
       </div>
       <div className="flex flex-col gap-1.5">
         <span className="text-[12.5px] font-medium text-ink-2">Annual investment allowance shared</span>
@@ -443,6 +459,12 @@ function CorporationTaxFields({ d, set, ctPeriods }: { d: Draft; set: (patch: Pa
         </div>
         <span className="text-[12px] text-ink-3">A company in a group, or controlled by the same person as a related company (sharing premises or mainly the same activities), shares one annual investment allowance with them, allocated as they choose (CAA 2001 ss51B–51N). Give what is allocated to this one; with none given, it has the whole limit.</span>
       </div>
+      <Field label="Interest between Corporation Tax periods" className="sm:max-w-xl" hint="When a period of account holds two Corporation Tax periods, interest received and paid is shared between them by days (CTA 2009 s307(2A)–(2B)). Where that would work unreasonably or unjustly, it is what accounts drawn up for each period would recognise instead (s307(2C)): each amount over the days it covers, else on its day.">
+        <Select value={d.loanRelationshipBasis ?? 'time'} onChange={(e) => set({ loanRelationshipBasis: e.target.value === 'accrued' ? 'accrued' : undefined })}>
+          <option value="time">By days (the default)</option>
+          <option value="accrued">As accrued to each period (s307(2C))</option>
+        </Select>
+      </Field>
       {d.ledgerFrom && (
         <div className="flex flex-col gap-1.5">
           <Checkbox checked={Boolean(bf)} onChange={(v) => set({ taxBroughtForward: v ? {} : undefined })} label="Give the tax figures carried forward to these books (from its last Corporation Tax computation)" />
@@ -455,7 +477,7 @@ function CorporationTaxFields({ d, set, ctPeriods }: { d: Draft; set: (patch: Pa
               ))}
             </div>
           )}
-          <span className="text-[12px] text-ink-3">Its books start mid-life, so the written-down values of its pools, losses and deficits carried forward, and pre-trading expenditure not yet relieved, come from its last computation (trading losses from 1 April 2017). Empty is nil; ticking with all empty says there are none.</span>
+          <span className="text-[12px] text-ink-3">Its books start mid-life, so the written-down values of its pools, losses and deficits carried forward, and pre-trading expenditure not yet relieved, come from its last computation. Those of periods beginning before 1 April 2017 are relieved more narrowly: trading losses only against the same trade’s profits (CTA 2010 s45), deficits only against non-trading profits (CTA 2009 s457). Empty is nil; ticking with all empty says there are none.</span>
         </div>
       )}
     </div>
