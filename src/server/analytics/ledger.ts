@@ -332,6 +332,19 @@ const lineMeta = (l: Pick<BooksLine, 'covers' | 'asset' | 'reduces' | 'invoicedO
   ...(l.invoicedOn ? { invoicedOn: l.invoicedOn } : {}),
 });
 
+/** An asset's own fields for Corporation Tax, as the register carries them (amounts in pence), when it has any. */
+function taxOf(a: NonNullable<LedgerPosting['asset']>): Pick<FixedAsset, 'tax'> {
+  const tax: NonNullable<FixedAsset['tax']> = {
+    ...(a.connected ? { connected: true as const } : {}),
+    ...(a.marketValue !== undefined ? { marketValue: toMinor(a.marketValue) } : {}),
+    ...(a.proceeds !== undefined ? { proceeds: toMinor(a.proceeds) } : {}),
+    ...(a.pool ? { pool: a.pool } : {}),
+    ...(a.used ? { used: true as const } : {}),
+    ...(a.allowance ? { allowance: a.allowance } : {}),
+  };
+  return Object.keys(tax).length ? { tax } : {};
+}
+
 /** A posting's source and line, as one id: `row:tx_…`, `row:tx_…:1`, `journal:jnl_…:0`. */
 export const assetIdOf = (source: LedgerPosting['source']): string => `${source.kind}:${source.id}${source.line !== undefined ? `:${source.line}` : ''}`;
 
@@ -434,6 +447,8 @@ function periodEnd(src: LedgerSource, companyId: string, books: CompanyBooks, po
       ...(disposedOn ? { disposedOn } : {}),
       convention,
       memo: p.memo,
+      ...(broughtIn ? { broughtIn: true as const } : {}),
+      ...taxOf(p.asset),
     });
   }
   // Credits that reduce an asset's cost (a supplier's part refund, a cost moved off it), on its own cost code, while it is held.

@@ -1622,7 +1622,7 @@ export interface LedgerPosting {
   /** Its VAT: the treatment, input (reclaimed) or output (charged), and whether this is the net amount or the tax. */
   vat?: { treatment: VatTreatment; side: 'input' | 'output'; part: 'net' | 'tax'; claim?: 'reg111' };
   covers?: { from: string; to: string };
-  asset?: { class: AssetRegisterClass; months?: number; connected?: boolean; disposedOn?: string; residual?: number };
+  asset?: { class: AssetRegisterClass; months?: number; connected?: boolean; disposedOn?: string; residual?: number; marketValue?: number; proceeds?: number; pool?: 'main' | 'special'; used?: boolean; allowance?: 'aia' | 'first-year' | 'none' };
   /** On a credit to a fixed asset's cost: the asset on the register whose cost it reduces. */
   reduces?: string;
   /** Beside `covers`: the day it was invoiced (an amount not yet paid at a period end is then a trade creditor or debtor). */
@@ -1660,6 +1660,10 @@ export interface FixedAsset {
   /** How months were counted: a full month on acquisition and none on disposal, or a full month on both (`books.depreciationMonths`). */
   convention: 'acquisition' | 'both';
   memo: string;
+  /** Brought in on an opening journal (books taken over mid-life): for tax, already in the pools brought forward. */
+  broughtIn?: true;
+  /** For Corporation Tax (`asset`'s own fields): bought from a connected person, its market value then and what it fetched when it left (pence), its pool, not new and unused, and the allowance chosen for it. */
+  tax?: { connected?: true; marketValue?: number; proceeds?: number; pool?: 'main' | 'special'; used?: true; allowance?: 'aia' | 'first-year' | 'none' };
 }
 
 /** What the ledger asks of you: a row to code, a missing side, a link that does not fit, money maybe counted twice. */
@@ -2088,6 +2092,229 @@ export interface CompanyVatResponse {
   corrections: VatCorrectionsView;
   penalties: VatPenaltyView | null;
   threshold: VatThresholdView;
+  disclaimer: string;
+}
+
+// ─── A company's Corporation Tax (analytics/corporation-tax.ts, FORMULAS.md §22, "Corporation Tax") ───
+
+/** before-books: a period the books do not reach whole; open: not ended; not-ready / ready: ended, by its checks; filed / filed-late: a CT600 is recorded. */
+export type CtPeriodStatus = 'before-books' | 'open' | 'not-ready' | 'ready' | 'filed' | 'filed-late';
+
+/** A Corporation Tax accounting period, as the Corporation Tax tab lists it (pence). */
+export interface CtPeriodRow {
+  start: string;
+  end: string;
+  /** The period of account (accounting period at Companies House) its last day falls in. */
+  periodOfAccount: { start: string; end: string };
+  /** Before the trade started (pre-trading), or trading. */
+  phase: 'pre-trading' | 'trading';
+  returnDue: string;
+  paymentDue: string;
+  status: CtPeriodStatus;
+  /** Corporation Tax payable worked out from the books (pence); null for a period before them. */
+  payable: number | null;
+  /** What is recorded for it: its CT600 (with the tax it gave, pence) and its payment (pence; 0: nothing to pay). */
+  ct600?: { filedOn: string; reference?: string; taxPayable?: number };
+  payment?: { filedOn: string; amount?: number };
+  /** Ended and ready, nothing to pay, and neither a payment nor its CT600 saying so recorded: the tab offers to record it (never by itself). */
+  offerNothingToPay?: true;
+  /** Its CT600 gives tax payable that differs from the books' figure. */
+  differs?: true;
+}
+
+/** A line of the profit and loss account as allocated to a Corporation Tax period (pence: income positive, charges negative). */
+export interface CtAccountsLine {
+  ledger: string;
+  name: string;
+  amount: number;
+  /** How it is allocated from the period of account: by days (CTA 2009 s52), by its date, or (pre-trading) by its date as well. */
+  basis: 'days' | 'date';
+  treatment: CtTreatmentKey;
+}
+/** A code's Corporation Tax treatment (shared/ledger.ts, `CtTreatment`), as the computation uses it. */
+export type CtTreatmentKey = 'trading-income' | 'non-trading-income' | 'allowable' | 'disallowable' | 'loan-relationship' | 'capital' | 'tax' | 'none';
+
+/** An adjustment from the accounts' profit to the trading result (pence: positive adds to the profit). */
+export interface CtAdjustment {
+  kind: 'disallowable' | 'capital' | 'non-trading' | 'pre-trading' | 'pre-trading-released';
+  ledger?: string;
+  label: string;
+  amount: number;
+  why: string;
+}
+
+/** An item of plant or machinery in a period's capital allowances (pence). */
+export interface CtAssetRow {
+  /** The register's id (`row:tx_…`), or the posting's for small equipment. */
+  id: string;
+  memo: string;
+  class: string;
+  pool: 'main' | 'special';
+  /** The day it was bought, and the day it counts from for capital allowances (the trade's first day for plant bought before it: CAA 2001 s12). */
+  acquired: string;
+  incurred: string;
+  cost: number;
+  /** Its qualifying expenditure: its cost, capped for a connected seller (CAA 2001 s218). */
+  qualifying: number;
+  treatment: 'aia' | 'full-expensing' | 'fya-50' | 'pool';
+  aia: number;
+  firstYear: number;
+  /** What goes into its pool: the rest of its qualifying expenditure. */
+  toPool: number;
+  /** Expensed in the accounts as small equipment (capital for tax: CTA 2009 s53). */
+  smallEquipment?: true;
+  connected?: true;
+  /** Why it was treated so, and anything to confirm. */
+  notes: string[];
+}
+
+/** An asset that left in a period, and its disposal value for capital allowances (pence). */
+export interface CtDisposalRow {
+  id: string;
+  memo: string;
+  date: string;
+  /** What it fetched, as the books or the asset say; its disposal value is that, capped at its qualifying expenditure (CAA 2001 s62). */
+  proceeds: number;
+  disposalValue: number;
+  /** How it was relieved when bought: the pool, or a first-year allowance (whose disposal is a balancing charge). */
+  treatment: 'pool' | 'full-expensing' | 'fya-50';
+  pool: 'main' | 'special';
+  /** Deducted from its pool, and brought in as a balancing charge outside it. */
+  fromPool: number;
+  balancingCharge: number;
+  notes: string[];
+}
+
+/** A pool for one period (pence). */
+export interface CtPoolView {
+  pool: 'main' | 'special';
+  broughtForward: number;
+  additions: number;
+  disposals: number;
+  /** Brought forward + additions − disposals, before writing-down allowances. */
+  available: number;
+  balancingCharge: number;
+  /** The writing-down allowance (or the small pool allowance), its yearly rate (percent) and the period's share of a year. */
+  wda: number;
+  rate: number;
+  smallPool: boolean;
+  carriedForward: number;
+}
+
+/** A period's capital allowances (pence). */
+export interface CtCapitalAllowances {
+  /** The annual investment allowance: the yearly limit (pounds), this period's (pence: pro rata, or what was allocated to it), and what was used. */
+  aiaLimit: { annual: number; period: number; allocated: boolean; used: number };
+  assets: CtAssetRow[];
+  disposals: CtDisposalRow[];
+  pools: CtPoolView[];
+  aia: number;
+  firstYear: number;
+  wda: number;
+  balancingCharges: number;
+  /** Allowances less balancing charges: what the trading result is reduced by. */
+  net: number;
+  /** Plant bought before the trade started, waiting for its first day (CAA 2001 s12). */
+  deferred: CtAssetRow[];
+}
+
+/** One financial year's part of a period's tax (pence, the profit in whole pounds). */
+export interface CtTaxPart {
+  /** The financial year by the year it starts in (FY 2025 runs from 1 April 2025 to 31 March 2026). */
+  fy: number;
+  start: string;
+  end: string;
+  days: number;
+  /** Its share of the profits chargeable, whole pounds (by days). */
+  profit: number;
+  /** The rate charged (percent), and how: the small profits rate, the main rate with marginal relief, the main rate, or the one rate of the year. */
+  rate: number;
+  band: 'small' | 'marginal' | 'main' | 'single';
+  /** The lower and upper limits for this part (pence), after associated companies and the period's length. */
+  lower?: number;
+  upper?: number;
+  /** Tax at the rate, marginal relief, and what is left (pence). */
+  tax: number;
+  marginalRelief: number;
+  net: number;
+}
+
+/** A box of the CT600 as the books give it. */
+export interface Ct600BoxView {
+  box: string;
+  label: string;
+  /** The form's column for boxes printed in pairs ("Capital allowances", "Balancing charges"). */
+  column?: string;
+  /** Whole pounds, pence, a date, a number, text, or an X. */
+  kind: 'pounds' | 'money' | 'date' | 'number' | 'text' | 'x' | 'percent';
+  /** Pounds (whole) for `pounds`; pence for `money`; the day for `date`; null when it is left for you (the tax reference). */
+  value: number | string | boolean | null;
+  section: string;
+  /** How it was worked out, in words. */
+  working: string;
+}
+
+/** What stops a period's computation being ready, or is not supported here. */
+export type CtCheck =
+  | { kind: 'not-ended'; end: string }
+  | { kind: 'accounts-not-ready'; periodOfAccount: { start: string; end: string }; checks: number; ended: boolean }
+  | { kind: 'earlier-not-ready'; end: string }
+  | { kind: 'brought-forward'; ledgerFrom: string }
+  | { kind: 'before-books'; ledgerFrom: string }
+  | { kind: 'sales-before-trade'; amount: number }
+  | { kind: 'income-before-charge'; amount: number; from: string }
+  | { kind: 'disposal-proceeds'; count: number; amount: number }
+  /** A pre-trading period with profits, from FY 2023, not said whether it is a close investment-holding company (CTA 2010 s18N): the rate depends on it. */
+  | { kind: 'close-investment-holding' }
+  | { kind: 'unsupported'; what: string };
+
+/** A note beside the computation: an assumption, an option the company may claim, or something to confirm. */
+export interface CtNote {
+  level: 'info' | 'warn';
+  text: string;
+}
+
+/** A period's computation (pence unless said). */
+export interface CtComputationView {
+  period: CtPeriodRow;
+  days: number;
+  /** The accounts' profit before tax allocated to the period: each code's part, by days or by date. */
+  accounts: { lines: CtAccountsLine[]; profit: number };
+  adjustments: CtAdjustment[];
+  /** The trading result before capital allowances: the accounts' profit with the adjustments. */
+  beforeAllowances: number;
+  capitalAllowances: CtCapitalAllowances;
+  /** The trading result: a profit (positive) or a loss (negative); nothing before the trade starts. */
+  tradingResult: number;
+  preTrading: { broughtForward: number; added: number; released: number; lapsed: number; carriedForward: number; items: { date: string; memo: string; amount: number; ledger: string }[] };
+  nonTrading: { credits: number; debits: number; net: number; items: { date: string; memo: string; ledger: string; amount: number }[] };
+  losses: {
+    trading: { broughtForward: number; usedAgainstTrading: number; usedAgainstTotal: number; arising: number; carriedForward: number };
+    nonTrading: { broughtForward: number; used: number; arising: number; carriedForward: number };
+  };
+  /** Profits before other deductions (trading profits less losses set against them, and non-trading profits), and the profits chargeable (whole pounds as the CT600 takes them; exact beside). */
+  totalProfits: number;
+  chargeable: { exact: number; whole: number };
+  tax: { parts: CtTaxPart[]; atRates: number; marginalRelief: number; chargeable: number };
+  payable: number;
+  carriedForward: { preTrading: number; tradingLosses: number; nonTradingDeficits: number; mainPool: number; specialPool: number };
+  settings: { associatedCompanies: number; associatedSaid: boolean; aiaAllocated: number | null; closeInvestmentHolding: boolean | null };
+  boxes: Ct600BoxView[];
+  checks: CtCheck[];
+  notes: CtNote[];
+  ready: boolean;
+}
+
+/** GET /companies/:id/corporation-tax?period=<end>: a company's Corporation Tax computations from its books. */
+export interface CompanyCtResponse {
+  company: { id: string; name: string };
+  periods: CtPeriodRow[];
+  /** The period to work on next: the earliest ended in the books with no CT600 recorded, else the earliest ended with its tax not recorded as paid, else the one running. */
+  next?: string;
+  computation: CtComputationView | null;
+  /** What the computation reads from the books' settings. */
+  setup: { tradeStartedOn: string | null; withinCharge: { from: string | null; assumed: boolean }; closeInvestmentHolding: boolean | null; ledgerFrom: string | null; broughtForward: boolean };
+  form: { name: string; version: string; url: string };
   disclaimer: string;
 }
 

@@ -13,7 +13,7 @@
 import { markCounts, type MarkContext } from './company';
 import { addMonths, addYears, diffDays, formatDate, type ISODate } from './dates';
 import { formatMoney, fromMinor, toMinor } from './money';
-import type { Account, BooksCoding, BooksLine, Journal, Rule, Transaction, VatTreatment } from './schema';
+import type { Account, BooksAsset, BooksCoding, BooksLine, Journal, Rule, Transaction, VatTreatment } from './schema';
 import { lastDayOfMonths, vatRateOn } from './uk';
 
 export type LedgerKind = 'asset' | 'liability' | 'equity' | 'income' | 'expense';
@@ -300,12 +300,35 @@ export function assetLineProblems(l: Pick<BooksLine, 'ledger' | 'amount' | 'asse
   if (l.asset && cost && !debit) out.push(`${where}${ASSET_BOUGHT}`);
   if (l.asset?.connected && l.asset.class === 'intangible') out.push(`${where}an intangible asset is not plant: bought from a connected person or not, capital allowances do not apply to it (the intangibles regime, CTA 2009 Part 8).`);
   if (l.asset?.residual !== undefined && toMinor(l.asset.residual) > Math.abs(toMinor(l.amount))) out.push(`${where}its residual value (${formatMoney(l.asset.residual)}) is more than its cost.`);
+  out.push(...assetTaxProblems(l.asset, where));
   if (l.reduces) {
     if (!cost) out.push(`${where}only a credit to a fixed asset’s cost reduces an asset on the register.`);
     else if (debit) out.push(`${where}a debit to a fixed asset’s cost adds to the register (say it is an asset, with its life); only a credit reduces one.`);
     if (l.asset) out.push(`${where}a line either is a fixed asset (a debit) or reduces one (a credit), not both.`);
   }
   if (l.invoicedOn && !l.covers) out.push(`${where}the day it was invoiced is said beside the period it covers.`);
+  return out;
+}
+
+/**
+ * Why an asset's fields for Corporation Tax do not fit it, in words (FORMULAS.md §22, "Capital
+ * allowances"): a market value only beside `connected` (the cap of CAA 2001 s218); what it fetched only
+ * beside the day it left; none on an intangible asset (the intangibles regime, CTA 2009 Part 8, not
+ * capital allowances) or a car (not worked out here); and no allowance a connected or second-hand asset
+ * cannot have (no annual investment or first-year allowance on plant bought from a connected person,
+ * CAA 2001 s217; full expensing and the 50% allowance only on plant unused and not second-hand, s45S).
+ */
+export function assetTaxProblems(a: Pick<BooksAsset, 'class' | 'connected' | 'disposedOn' | 'marketValue' | 'proceeds' | 'pool' | 'used' | 'allowance'> | undefined, where = ''): string[] {
+  if (!a) return [];
+  const out: string[] = [];
+  const tax = a.marketValue !== undefined || a.proceeds !== undefined || a.pool !== undefined || a.used !== undefined || a.allowance !== undefined;
+  if (tax && a.class === 'intangible') out.push(`${where}an intangible asset takes no capital allowances (the intangibles regime, CTA 2009 Part 8): its pool, allowance, market value and what it fetched are not said.`);
+  if (tax && a.class === 'motor') out.push(`${where}capital allowances on cars are not worked out here: its pool, allowance, market value and what it fetched are not said.`);
+  if (a.marketValue !== undefined && !a.connected) out.push(`${where}a market value caps the cost of an asset bought from a connected person (CAA 2001 s218): say it was bought from one, or leave the market value out.`);
+  if (a.proceeds !== undefined && !a.disposedOn) out.push(`${where}what it fetched is said beside the day it left the company.`);
+  if (a.allowance === 'aia' && a.connected) out.push(`${where}no annual investment allowance on plant bought from a connected person (CAA 2001 s217).`);
+  if (a.allowance === 'first-year' && a.connected) out.push(`${where}no first-year allowance on plant bought from a connected person (CAA 2001 s217).`);
+  if (a.allowance === 'first-year' && a.used) out.push(`${where}full expensing and the 50% first-year allowance are only for plant that is unused and not second-hand (CAA 2001 s45S).`);
   return out;
 }
 
@@ -422,6 +445,8 @@ export function ruleBooksProblems(r: Pick<Rule, 'match' | 'set'>): string[] {
   if (b.asset && entry?.asset?.part !== 'cost') out.push('A fixed asset is coded to a fixed asset’s cost.');
   if (b.asset && entry?.asset && b.asset.class !== entry.asset.class) out.push(`${entry.name} is not for ${FIXED_ASSET_CLASS_META[b.asset.class].name.toLowerCase()}.`);
   if (b.asset?.connected && b.asset.class === 'intangible') out.push('An intangible asset is not plant: it is never bought from a connected person for capital allowances.');
+  if (b.asset && (b.asset.marketValue !== undefined || b.asset.proceeds !== undefined)) out.push('A book rule codes many rows alike: an asset’s market value and what it fetched are said on its own coding.');
+  out.push(...assetTaxProblems(b.asset).map((p) => p.replace(/^./, (c) => c.toUpperCase())));
   return out;
 }
 

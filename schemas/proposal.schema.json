@@ -300,6 +300,32 @@
                           "residual": {
                             "type": "number",
                             "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                          },
+                          "marketValue": {
+                            "type": "number",
+                            "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                          },
+                          "proceeds": {
+                            "type": "number",
+                            "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                          },
+                          "pool": {
+                            "type": "string",
+                            "enum": [
+                              "main",
+                              "special"
+                            ]
+                          },
+                          "used": {
+                            "type": "boolean"
+                          },
+                          "allowance": {
+                            "type": "string",
+                            "enum": [
+                              "aia",
+                              "first-year",
+                              "none"
+                            ]
                           }
                         },
                         "required": [
@@ -2066,6 +2092,80 @@
                       ]
                     }
                   },
+                  "associatedCompanies": {
+                    "maxItems": 60,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "periodEnd": {
+                          "type": "string",
+                          "description": "Calendar date, YYYY-MM-DD"
+                        },
+                        "count": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 99
+                        }
+                      },
+                      "required": [
+                        "periodEnd",
+                        "count"
+                      ]
+                    }
+                  },
+                  "aiaAllocated": {
+                    "maxItems": 60,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "periodEnd": {
+                          "type": "string",
+                          "description": "Calendar date, YYYY-MM-DD"
+                        },
+                        "amount": {
+                          "type": "number",
+                          "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                        }
+                      },
+                      "required": [
+                        "periodEnd",
+                        "amount"
+                      ]
+                    }
+                  },
+                  "closeInvestmentHolding": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "taxBroughtForward": {
+                    "type": "object",
+                    "properties": {
+                      "mainPool": {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      },
+                      "specialPool": {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      },
+                      "tradingLosses": {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      },
+                      "nonTradingDeficits": {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      },
+                      "preTradingExpenditure": {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      }
+                    }
+                  },
                   "deadlinesFrom": {
                     "type": "string",
                     "description": "Calendar date, YYYY-MM-DD"
@@ -2646,6 +2746,32 @@
                           "residual": {
                             "type": "number",
                             "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                          },
+                          "marketValue": {
+                            "type": "number",
+                            "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                          },
+                          "proceeds": {
+                            "type": "number",
+                            "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                          },
+                          "pool": {
+                            "type": "string",
+                            "enum": [
+                              "main",
+                              "special"
+                            ]
+                          },
+                          "used": {
+                            "type": "boolean"
+                          },
+                          "allowance": {
+                            "type": "string",
+                            "enum": [
+                              "aia",
+                              "first-year",
+                              "none"
+                            ]
                           }
                         },
                         "required": [
@@ -2751,6 +2877,32 @@
                                 "residual": {
                                   "type": "number",
                                   "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                                },
+                                "marketValue": {
+                                  "type": "number",
+                                  "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                                },
+                                "proceeds": {
+                                  "type": "number",
+                                  "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                                },
+                                "pool": {
+                                  "type": "string",
+                                  "enum": [
+                                    "main",
+                                    "special"
+                                  ]
+                                },
+                                "used": {
+                                  "type": "boolean"
+                                },
+                                "allowance": {
+                                  "type": "string",
+                                  "enum": [
+                                    "aia",
+                                    "first-year",
+                                    "none"
+                                  ]
                                 }
                               },
                               "required": [
@@ -2970,6 +3122,32 @@
                             "residual": {
                               "type": "number",
                               "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                            },
+                            "marketValue": {
+                              "type": "number",
+                              "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                            },
+                            "proceeds": {
+                              "type": "number",
+                              "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                            },
+                            "pool": {
+                              "type": "string",
+                              "enum": [
+                                "main",
+                                "special"
+                              ]
+                            },
+                            "used": {
+                              "type": "boolean"
+                            },
+                            "allowance": {
+                              "type": "string",
+                              "enum": [
+                                "aia",
+                                "first-year",
+                                "none"
+                              ]
                             }
                           },
                           "required": [
@@ -3532,6 +3710,32 @@
                       "residual": {
                         "type": "number",
                         "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      },
+                      "marketValue": {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      },
+                      "proceeds": {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      },
+                      "pool": {
+                        "type": "string",
+                        "enum": [
+                          "main",
+                          "special"
+                        ]
+                      },
+                      "used": {
+                        "type": "boolean"
+                      },
+                      "allowance": {
+                        "type": "string",
+                        "enum": [
+                          "aia",
+                          "first-year",
+                          "none"
+                        ]
                       }
                     },
                     "required": [
@@ -3637,6 +3841,32 @@
                             "residual": {
                               "type": "number",
                               "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                            },
+                            "marketValue": {
+                              "type": "number",
+                              "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                            },
+                            "proceeds": {
+                              "type": "number",
+                              "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                            },
+                            "pool": {
+                              "type": "string",
+                              "enum": [
+                                "main",
+                                "special"
+                              ]
+                            },
+                            "used": {
+                              "type": "boolean"
+                            },
+                            "allowance": {
+                              "type": "string",
+                              "enum": [
+                                "aia",
+                                "first-year",
+                                "none"
+                              ]
                             }
                           },
                           "required": [
@@ -4554,6 +4784,32 @@
                           "residual": {
                             "type": "number",
                             "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                          },
+                          "marketValue": {
+                            "type": "number",
+                            "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                          },
+                          "proceeds": {
+                            "type": "number",
+                            "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                          },
+                          "pool": {
+                            "type": "string",
+                            "enum": [
+                              "main",
+                              "special"
+                            ]
+                          },
+                          "used": {
+                            "type": "boolean"
+                          },
+                          "allowance": {
+                            "type": "string",
+                            "enum": [
+                              "aia",
+                              "first-year",
+                              "none"
+                            ]
                           }
                         },
                         "required": [
@@ -5308,6 +5564,80 @@
                       ]
                     }
                   },
+                  "associatedCompanies": {
+                    "maxItems": 60,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "periodEnd": {
+                          "type": "string",
+                          "description": "Calendar date, YYYY-MM-DD"
+                        },
+                        "count": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 99
+                        }
+                      },
+                      "required": [
+                        "periodEnd",
+                        "count"
+                      ]
+                    }
+                  },
+                  "aiaAllocated": {
+                    "maxItems": 60,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "periodEnd": {
+                          "type": "string",
+                          "description": "Calendar date, YYYY-MM-DD"
+                        },
+                        "amount": {
+                          "type": "number",
+                          "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                        }
+                      },
+                      "required": [
+                        "periodEnd",
+                        "amount"
+                      ]
+                    }
+                  },
+                  "closeInvestmentHolding": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "taxBroughtForward": {
+                    "type": "object",
+                    "properties": {
+                      "mainPool": {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      },
+                      "specialPool": {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      },
+                      "tradingLosses": {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      },
+                      "nonTradingDeficits": {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      },
+                      "preTradingExpenditure": {
+                        "type": "number",
+                        "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                      }
+                    }
+                  },
                   "deadlinesFrom": {
                     "type": "string",
                     "description": "Calendar date, YYYY-MM-DD"
@@ -5954,6 +6284,32 @@
                         "residual": {
                           "type": "number",
                           "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                        },
+                        "marketValue": {
+                          "type": "number",
+                          "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                        },
+                        "proceeds": {
+                          "type": "number",
+                          "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                        },
+                        "pool": {
+                          "type": "string",
+                          "enum": [
+                            "main",
+                            "special"
+                          ]
+                        },
+                        "used": {
+                          "type": "boolean"
+                        },
+                        "allowance": {
+                          "type": "string",
+                          "enum": [
+                            "aia",
+                            "first-year",
+                            "none"
+                          ]
                         }
                       },
                       "required": [

@@ -70,6 +70,9 @@ function writePersona(dir: string): void {
         // Its books: a filing's reference and its small figures (VAT boxes, micro-entity lines, tax).
         books: {
           incorporatedOn: '2023-02-06',
+          // Its figures for Corporation Tax: those brought forward and the AIA allocated to it.
+          taxBroughtForward: { mainPool: 412.66, tradingLosses: 563 },
+          aiaAllocated: [{ periodEnd: '2025-02-28', amount: 7417 }],
           filings: [
             { id: 'fil_000000000001', kind: 'vat', periodStart: '2025-01-01', periodEnd: '2025-03-31', filedOn: '2025-04-20', reference: FILING_REF, figures: { vatDueSales: 813.27, vatDueAcquisitions: 0, totalVatDue: 813.27, vatReclaimedCurrPeriod: 96.4, netVatDue: 716.87, totalValueSalesExVAT: 4066, totalValuePurchasesExVAT: 482, totalValueGoodsSuppliedExVAT: 0, totalAcquisitionsExVAT: 0 }, corrections: [{ periodEnd: '2024-12-31', amount: 286.43 }], disclosed: { on: '2025-05-02', amount: 1371, reference: DISCLOSED_REF } },
             { id: 'fil_000000000002', kind: 'accounts', periodEnd: '2024-02-29', filedOn: '2024-10-01', figures: { B: 637, C: 2911, E: 450, K: 3098 } },
@@ -238,6 +241,8 @@ describe('the denylist', () => {
     // A VAT return's corrections of earlier errors, and its errors reported separately with HMRC's reference.
     expect(denylist.amounts).toEqual(expect.arrayContaining(['286.43', '1371.00']));
     expect(has(DISCLOSED_REF)).toBe('filing-reference');
+    // Its books' figures for Corporation Tax, at the same threshold.
+    expect(denylist.amounts).toEqual(expect.arrayContaining(['412.66', '563.00', '7417.00']));
     const found = new Scanner({ denylist, allow: new Allowlist('') }).scanText('src/x.ts', `const lineB = 637;\nconst ref = '${FILING_REF}';\n`);
     expect(found.map((f) => `${f.line}:${f.rule}`)).toEqual(['1:amount', '2:filing-reference']);
   });

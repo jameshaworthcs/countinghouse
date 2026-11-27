@@ -380,6 +380,32 @@
             "residual": {
               "type": "number",
               "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+            },
+            "marketValue": {
+              "type": "number",
+              "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+            },
+            "proceeds": {
+              "type": "number",
+              "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+            },
+            "pool": {
+              "type": "string",
+              "enum": [
+                "main",
+                "special"
+              ]
+            },
+            "used": {
+              "type": "boolean"
+            },
+            "allowance": {
+              "type": "string",
+              "enum": [
+                "aia",
+                "first-year",
+                "none"
+              ]
             }
           },
           "required": [
@@ -485,6 +511,32 @@
                   "residual": {
                     "type": "number",
                     "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                  },
+                  "marketValue": {
+                    "type": "number",
+                    "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                  },
+                  "proceeds": {
+                    "type": "number",
+                    "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                  },
+                  "pool": {
+                    "type": "string",
+                    "enum": [
+                      "main",
+                      "special"
+                    ]
+                  },
+                  "used": {
+                    "type": "boolean"
+                  },
+                  "allowance": {
+                    "type": "string",
+                    "enum": [
+                      "aia",
+                      "first-year",
+                      "none"
+                    ]
                   }
                 },
                 "required": [

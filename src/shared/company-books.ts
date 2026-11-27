@@ -425,6 +425,15 @@ export function booksProblems(books: CompanyBooksSetup & { filings?: readonly Co
   }
   for (const p of books.policies ?? []) if (p.effectiveFrom && p.effectiveFrom < inc) out.push(`A depreciation policy takes effect on ${day(p.effectiveFrom)}, before the company was incorporated.`);
   if (books.lockedThrough && books.lockedThrough < inc) out.push(`Its books are locked through ${day(books.lockedThrough)}, before it was incorporated.`);
+  // For Corporation Tax: one figure per CT period, and figures brought forward only for books that start mid-life.
+  for (const [list, what] of [
+    [books.associatedCompanies, 'associated companies'],
+    [books.aiaAllocated, 'annual investment allowance allocated'],
+  ] as const) {
+    const ends = (list ?? []).map((x) => x.periodEnd);
+    for (const e of new Set(ends.filter((x, i) => ends.indexOf(x) !== i))) out.push(`The ${what} for the Corporation Tax period to ${day(e)} is given twice: give one figure.`);
+  }
+  if (books.taxBroughtForward && !books.ledgerFrom) out.push('Tax figures brought forward are for books that start mid-life: give the day its books here start, or leave them out.');
   if (books.confirmationStatement && books.confirmationStatement.nextMadeUpTo <= inc) out.push(`The next confirmation statement's made-up date (${day(books.confirmationStatement.nextMadeUpTo)}) is not after incorporation.`);
   if (books.paye) {
     if (books.paye.from < inc) out.push(`The PAYE scheme starts on ${day(books.paye.from)}, before the company was incorporated.`);

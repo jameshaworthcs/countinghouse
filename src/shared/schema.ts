@@ -291,7 +291,7 @@ export const CoversSchema = z.object({ from: ISODateSchema, to: ISODateSchema })
 export const BooksAssetSchema = z.object({
   class: z.enum(ASSET_REGISTER_CLASSES),
   months: z.number().int().min(1).max(600).optional(),
-  /** Bought from a connected person (a director, a company they control): no annual investment allowance, and its qualifying cost capped (CAA 2001 ss214–218). */
+  /** Bought from a connected person (a director, a company they control): no annual investment or first-year allowance (CAA 2001 s217), and its qualifying expenditure capped (s218). */
   connected: z.boolean().optional(),
   /**
    * The day it was sold, scrapped or given away: depreciation runs to the end of that month, then its
@@ -301,7 +301,19 @@ export const BooksAssetSchema = z.object({
   disposedOn: ISODateSchema.optional(),
   /** What it is expected to fetch at the end of its life (pounds, not negative, at most its cost): the depreciable amount is its cost less this (FRS 105 para 12.17). Absent: nothing. */
   residual: MoneySchema.refine((v) => v >= 0, { message: 'A residual value is not negative' }).optional(),
+  // For Corporation Tax (docs/FORMULAS.md §22, "Capital allowances"): optional, additive.
+  /** Bought from a connected person: its market value then (pounds), the first of the caps on its qualifying expenditure (CAA 2001 s218). Absent: its cost is used, and the computation asks you to confirm it. */
+  marketValue: MoneySchema.refine((v) => v >= 0, { message: 'A market value is not negative' }).optional(),
+  /** What it fetched when it left (pounds, net of VAT): its disposal value for capital allowances (CAA 2001 s61), at most its cost (s62). Absent: what was coded to profit or loss on disposal in the Corporation Tax period it left in, when it alone left then. */
+  proceeds: MoneySchema.refine((v) => v >= 0, { message: 'What it fetched is not negative' }).optional(),
+  /** Its capital allowance pool: `special` for special rate expenditure (integral features, long-life assets, thermal insulation: CAA 2001 s104A). Absent: the main pool. */
+  pool: z.enum(['main', 'special']).optional(),
+  /** Not unused, or second-hand, when bought: no full expensing or 50% first-year allowance (CAA 2001 s45S). */
+  used: z.boolean().optional(),
+  /** Your choice of allowance for it, over the default (the annual investment allowance first, then full expensing or the 50% first-year allowance, then the pool): `aia`, `first-year`, or `none` (writing-down allowances only). */
+  allowance: z.enum(['aia', 'first-year', 'none']).optional(),
 });
+export type BooksAsset = z.infer<typeof BooksAssetSchema>;
 
 /** A fixed asset on the register, by id: its posting's source and line (`row:tx_…`, `row:tx_…:1`, `personal:tx_…`, `journal:jnl_…:0`). */
 export const AssetIdSchema = z.string().regex(/^(row|personal):tx_[0-9a-f]{16}(:\d{1,2})?$|^journal:jnl_[0-9a-f]{12}:\d{1,2}$/, 'A fixed asset on the register, by id: row:tx_…, personal:tx_… or journal:jnl_…:<line>');
@@ -936,6 +948,45 @@ const companyBooksShape = {
   tradeStartedOn: ISODateSchema.nullable().optional(),
   /** Corporation Tax accounting periods other than the worked-out ones (HMRC's notice sets them in practice). */
   ctPeriods: z.array(BooksPeriodSchema).max(60).default([]),
+  /**
+   * The number of associated companies it had in each Corporation Tax period, by the period's last day
+   * (CTA 2010 s18E: companies under common control at any time in it, dormant ones left out): the small
+   * profits limits are divided by one more than this. Absent for a period: none, and labelled so.
+   */
+  associatedCompanies: z
+    .array(z.object({ periodEnd: ISODateSchema, count: z.number().int().min(0).max(99) }))
+    .max(60)
+    .optional(),
+  /**
+   * The annual investment allowance allocated to it for a Corporation Tax period, by the period's last
+   * day, when it shares one with related companies (CAA 2001 ss51B–51N): at most the period's own limit.
+   * Absent for a period: the whole limit.
+   */
+  aiaAllocated: z
+    .array(z.object({ periodEnd: ISODateSchema, amount: MoneySchema.refine((v) => v >= 0, { message: 'An allowance is not negative' }) }))
+    .max(60)
+    .optional(),
+  /**
+   * Whether it is a close investment-holding company (CTA 2010 s18N), which pays the main rate whatever
+   * its profits: true or false as you decide it; null or absent, not said (the small profits rate and
+   * marginal relief apply, and the Corporation Tax tab explains when it may be one).
+   */
+  closeInvestmentHolding: z.boolean().nullable().optional(),
+  /**
+   * For books that start mid-life (`ledgerFrom`): the tax figures carried forward to the first
+   * Corporation Tax period they reach, as its last computation gives them (pounds, each not negative;
+   * absent: none): the main and special rate pools' written-down values, trading losses (from 1 April
+   * 2017), non-trading loan relationship deficits, and pre-trading expenditure not yet relieved.
+   */
+  taxBroughtForward: z
+    .object({
+      mainPool: MoneySchema.refine((v) => v >= 0, { message: 'A pool is not negative' }).optional(),
+      specialPool: MoneySchema.refine((v) => v >= 0, { message: 'A pool is not negative' }).optional(),
+      tradingLosses: MoneySchema.refine((v) => v >= 0, { message: 'A loss carried forward is given as a positive amount' }).optional(),
+      nonTradingDeficits: MoneySchema.refine((v) => v >= 0, { message: 'A deficit carried forward is given as a positive amount' }).optional(),
+      preTradingExpenditure: MoneySchema.refine((v) => v >= 0, { message: 'Pre-trading expenditure is given as a positive amount' }).optional(),
+    })
+    .optional(),
   /** Deadlines due before this day are not listed: settled before the books were kept here. */
   deadlinesFrom: ISODateSchema.optional(),
   /**
