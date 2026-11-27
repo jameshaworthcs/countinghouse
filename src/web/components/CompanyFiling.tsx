@@ -8,11 +8,11 @@
 
 import { Download, Printer } from 'lucide-react';
 import { Fragment, useState, type ReactNode } from 'react';
-import { type QualificationRule } from '../../shared/accounts-filing';
+import { COMPANY_TYPE_LABELS, REGISTERED_IN_LABELS, type QualificationRule } from '../../shared/accounts-filing';
 import type { CompanyFilingResponse, EligibilityView, FilingSheetLine } from '../../shared/api';
-import { formatDate, formatSpan, today } from '../../shared/dates';
+import { formatDate, formatMonth, formatSpan, today } from '../../shared/dates';
 import { fromMinor } from '../../shared/money';
-import type { OwnerNote } from '../../shared/schema';
+import { COMPANY_TYPES, REGISTERED_IN, type OwnerNote } from '../../shared/schema';
 import { api, useApi, useApiMutation } from '../lib/api';
 import { cn } from '../lib/format';
 import { CheckEverything } from './CheckEverything';
@@ -42,6 +42,9 @@ interface Draft {
   waived: number | undefined;
   notExcluded: boolean;
   previousQualified: boolean | undefined;
+  registeredIn: (typeof REGISTERED_IN)[number] | '';
+  type: (typeof COMPANY_TYPES)[number] | '';
+  notWoundUp: boolean;
 }
 const noteDraft = (n: OwnerNote | null): NoteDraft => (n === null ? { state: 'unset', text: '', amount: undefined } : 'none' in n ? { state: 'none', text: '', amount: undefined } : { state: 'text', text: n.text, amount: n.amount });
 const noteOf = (d: NoteDraft): OwnerNote | undefined => (d.state === 'none' ? { none: true } : d.state === 'text' && d.text.trim() ? { text: d.text.trim(), ...(d.amount !== undefined ? { amount: d.amount } : {}) } : undefined);
@@ -58,6 +61,9 @@ function draftOf(v: CompanyFilingResponse): Draft {
     waived: a?.waived,
     notExcluded: v.eligibility.notExcluded === true,
     previousQualified: v.eligibility.previousQualified ?? undefined,
+    registeredIn: v.particulars?.registeredIn ?? '',
+    type: v.particulars?.type ?? '',
+    notWoundUp: v.particulars?.notWoundUp ?? false,
   };
 }
 function bodyOf(periodEnd: string, d: Draft) {
@@ -68,6 +74,7 @@ function bodyOf(periodEnd: string, d: Draft) {
     ...(d.interest.trim() && d.conditions.trim() ? { advances: { interest: d.interest.trim(), conditions: d.conditions.trim(), ...(d.writtenOff ? { writtenOff: d.writtenOff } : {}), ...(d.waived ? { waived: d.waived } : {}) } } : {}),
     ...(d.notExcluded ? { notExcluded: true } : {}),
     ...(d.previousQualified !== undefined ? { previousQualified: d.previousQualified } : {}),
+    ...(d.registeredIn && d.type && d.notWoundUp ? { particulars: { registeredIn: d.registeredIn, type: d.type, notWoundUp: true } } : {}),
   };
   return { periodEnd, employees: d.employees ?? null, notes: Object.keys(notes).length ? notes : null };
 }
@@ -213,18 +220,33 @@ function SheetCard({ v, companyId }: { v: CompanyFilingResponse; companyId: stri
           <h3 className="font-medium text-ink">Notes (at the foot of the balance sheet)</h3>
           <ol className="mt-1 flex list-decimal flex-col gap-1 pl-5">
             <li>
-              <span className="font-medium">Average number of employees</span> during the period: {v.notes.employees.average === null ? <span className="text-warn-ink">not given yet.</span> : <span className="tabular">{v.notes.employees.average}</span>} <span className="text-ink-3">(CA 2006 s411)</span>
+              <span className="font-medium">Average number of employees</span> during the period: {v.notes.employees.average === null ? <span className="text-warn-ink">not given yet.</span> : <span className="tabular">{v.notes.employees.average}</span>}
+              {v.notes.employees.prior !== undefined && (
+                <>
+                  {' '}
+                  (period before: {v.notes.employees.prior === null ? <span className="text-warn-ink">not given</span> : <span className="tabular">{v.notes.employees.prior}</span>})
+                </>
+              )}{' '}
+              <span className="text-ink-3">(CA 2006 s411)</span>
             </li>
             <li>
               <span className="font-medium">Advances and credits to directors, and guarantees on their behalf</span> <span className="text-ink-3">(s413)</span>: <AdvancesText v={v.notes.advances} /> Others: {noteText(v.notes.directors)}
             </li>
             <li>
               <span className="font-medium">Financial commitments, guarantees and contingencies</span> not in the balance sheet <span className="text-ink-3">(SI 2008/409 Sch 1 para 57)</span>: {noteText(v.notes.commitments)}
+              {v.notes.commitmentsPrior !== undefined && <> Period before: {v.notes.commitmentsPrior === null ? <span className="text-ink-3">not recorded here.</span> : noteText(v.notes.commitmentsPrior)}</>}
             </li>
             <li>
               <span className="font-medium">Arrangements not reflected in the balance sheet</span> <span className="text-ink-3">(s410A; FRS 105 para 6A.1)</span>: {noteText(v.notes.offBalanceSheet)}
             </li>
           </ol>
+        </div>
+        <div>
+          <h3 className="font-medium text-ink">Particulars</h3>
+          <p className="mt-1">
+            {v.company.name}, {v.particulars ? COMPANY_TYPE_LABELS[v.particulars.type] : <span className="text-warn-ink">[its kind of company]</span>}, registered in {v.particulars ? REGISTERED_IN_LABELS[v.particulars.registeredIn] : <span className="text-warn-ink">[the part of the United Kingdom]</span>}, company number {v.company.number ?? <span className="text-warn-ink">[its number]</span>}. Registered office: {v.filing?.registeredOffice ? <span className="sensitive">{v.filing.registeredOffice}</span> : <span className="text-ink-3">as on the register, given when you record the filing.</span>}{' '}
+            <span className="text-[12px] text-ink-3">(CA 2006 s396(A1); FRS 105 para 3.13A)</span>
+          </p>
         </div>
         <div>
           <h3 className="font-medium text-ink">Statements, above the director’s signature</h3>
@@ -237,8 +259,8 @@ function SheetCard({ v, companyId }: { v: CompanyFilingResponse; companyId: stri
           </ul>
           <p className="mt-2">{v.approval.line}</p>
           <p className="mt-1 text-[12px] text-ink-3">
-            The form asks you to accept the four statements, and for the day the board approved the accounts (on or after {formatDate(p.end)}, not in the future) and the director who signed them. A micro-entity need not also say its profit and loss account is not filed (CA 2006 s444(5C)).
-            {v.channel.enhancedAuditStatement && ' From 1 April 2028 a company claiming audit exemption gives a strengthened statement naming the exemption and confirming it qualifies: check the words your software gives.'}
+            The form asks you to accept the four statements, and for the day the board approved the accounts (on or after {formatDate(p.end)}, not in the future) and the director who signed them, named on the copy delivered (CA 2006 ss414(1)–(2), 444(6)). A micro-entity need not also say its profit and loss account is not filed (s444(5C)). A dormant company’s audit exemption (s480) is not covered: these statements are for s477.
+            {v.channel.enhancedAuditStatement && ` From ${formatDate(v.channel.enhancedStatementFrom)} a company claiming audit exemption gives a strengthened statement naming the exemption and confirming it qualifies: check the words your software gives.`}
           </p>
         </div>
       </div>
@@ -319,6 +341,37 @@ function SizeTable({ e }: { e: EligibilityView }) {
   );
 }
 
+/** The average employees of the years before this one: the size test reads them, so they can be given here, each saved on its own. */
+function EarlierEmployees({ v }: { v: CompanyFilingResponse }) {
+  const toast = useToast();
+  const e = v.eligibility;
+  const [values, setValues] = useState<Record<string, number | undefined>>(() => Object.fromEntries(e.earlier.map((y) => [y.end, y.employees ?? undefined])));
+  const changed = e.earlier.filter((y) => (values[y.end] ?? null) !== y.employees);
+  const save = useApiMutation(
+    async () => {
+      for (const y of changed) await api(`/companies/${v.company.id}/accounts-notes`, { method: 'PUT', body: { periodEnd: y.end, employees: values[y.end] ?? null } });
+    },
+    { onSuccess: () => toast({ tone: 'good', text: 'Saved' }) },
+  );
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="font-medium text-ink">Average employees in the years before</p>
+      <p className="text-[12px] text-ink-3">The size test reads them for each year, as this year’s: count as for this year. Turnover before these books is not known; a balance sheet total comes from the lines filed for that year.</p>
+      <div className="flex flex-wrap items-end gap-3">
+        {e.earlier.map((y) => (
+          <Field key={y.end} label={`Year to ${formatDate(y.end)}`}>
+            <NumberInput value={values[y.end]} onValue={(n) => setValues((x) => ({ ...x, [y.end]: n === undefined ? undefined : Math.max(0, Math.round(n * 100) / 100) }))} className="w-28 tabular" aria-label={`Average employees in the year to ${formatDate(y.end)}`} />
+          </Field>
+        ))}
+        <Button size="sm" disabled={!changed.length} loading={save.isPending} onClick={() => save.mutate(undefined)}>
+          Save these
+        </Button>
+      </div>
+      {save.error && <p className="text-[12px] text-bad-ink">{save.error.message}</p>}
+    </div>
+  );
+}
+
 function EligibilityCard({ v, draft, set, dirty, save }: { v: CompanyFilingResponse; draft: Draft; set: (d: Partial<Draft>) => void; dirty: boolean; save: Saver }) {
   const e = v.eligibility;
   const verdict = (x: EligibilityView) => (x.qualifies === undefined ? <Badge tone="neutral">Cannot tell yet</Badge> : x.qualifies ? <StatusBadge status="good">Qualifies</StatusBadge> : <StatusBadge status="bad">Does not qualify</StatusBadge>);
@@ -334,11 +387,12 @@ function EligibilityCard({ v, draft, set, dirty, save }: { v: CompanyFilingRespo
     >
       <div className="flex flex-col gap-4 text-[13px] text-ink-2">
         {save.error && <p className="text-bad-ink">{save.error}</p>}
-        {!e.covered && <Callout tone="warn">Financial years beginning before 1 January 2016 are not covered: decide it yourself.</Callout>}
+        {!e.covered && <Callout tone="warn">Financial years beginning before {formatDate(e.coveredFrom)} are not covered: decide it yourself.</Callout>}
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-medium text-ink">Micro-entity:</span> {verdict(e.micro)} <span className="text-ink-3">{RULE_WORDS[e.micro.rule]}</span>
         </div>
         <SizeTable e={e.micro} />
+        {e.earlier.length > 0 && <EarlierEmployees v={v} />}
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-medium text-ink">Small company</span> (the small companies regime and audit exemption, s382 and s477; limits {pounds(e.small.limits.turnover)}, {pounds(e.small.limits.balanceSheet)}, {e.small.limits.employees}): {verdict(e.small)}
         </div>
@@ -362,6 +416,7 @@ function EligibilityCard({ v, draft, set, dirty, save }: { v: CompanyFilingRespo
           </ul>
           <Checkbox className="mt-2" checked={draft.notExcluded} onChange={(c) => set({ notExcluded: c })} label="I confirm none of these applied to the company at any time in the period" />
         </div>
+        <p className="text-[12px] text-ink-3">Not covered: a dormant company’s accounts and its audit exemption (CA 2006 s480), and small (not micro-entity) accounts.</p>
       </div>
     </Card>
   );
@@ -450,6 +505,33 @@ function ConfirmCard({ v, draft, set, dirty, save }: { v: CompanyFilingResponse;
             </div>
           </div>
         )}
+        <div className="flex flex-col gap-2">
+          <p className="font-medium text-ink-2">Its particulars (CA 2006 s396(A1); FRS 105 para 3.13A)</p>
+          <p className="text-[12px] text-ink-3">The accounts state where it is registered, its number, what kind of company it is and its registered office. Its number is the company’s{v.company.number ? ` (${v.company.number})` : ', not given yet'}; the registered office is asked for when you record the filing, and kept with it.</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Registered in">
+              <Select value={draft.registeredIn} onChange={(e) => set({ registeredIn: e.target.value as Draft['registeredIn'] })}>
+                <option value="">Not said</option>
+                {REGISTERED_IN.map((r) => (
+                  <option key={r} value={r}>
+                    {REGISTERED_IN_LABELS[r]}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Kind of company">
+              <Select value={draft.type} onChange={(e) => set({ type: e.target.value as Draft['type'] })}>
+                <option value="">Not said</option>
+                {COMPANY_TYPES.map((t) => (
+                  <option key={t} value={t}>
+                    {COMPANY_TYPE_LABELS[t].replace(/^a /, '').replace(/^./, (c) => c.toUpperCase())}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          </div>
+          <Checkbox checked={draft.notWoundUp} onChange={(c) => set({ notWoundUp: c })} label="It is not being wound up (accounts of a company being wound up say so: not covered here)" />
+        </div>
         <NoteEditor
           label="Other advances, credits and guarantees for directors"
           hint="Not in these books: another director’s loan, a credit given to a director, a guarantee of a director’s borrowing (s413). For a guarantee: its main terms, the most the company could have to pay, and anything it paid."
@@ -499,7 +581,8 @@ function RecordDialog({ v, companyId, onClose }: { v: CompanyFilingResponse; com
   const [approvedOn, setApprovedOn] = useState(today());
   const [approvedBy, setApprovedBy] = useState('');
   const [reference, setReference] = useState('');
-  const save = useApiMutation(() => api(`/companies/${companyId}/accounts/filed`, { method: 'POST', body: { periodEnd: v.period.end, filedOn, approvedOn, approvedBy: approvedBy.trim(), ...(reference.trim() ? { reference: reference.trim() } : {}), lines: v.lines } }), {
+  const [office, setOffice] = useState('');
+  const save = useApiMutation(() => api(`/companies/${companyId}/accounts/filed`, { method: 'POST', body: { periodEnd: v.period.end, filedOn, approvedOn, approvedBy: approvedBy.trim(), registeredOffice: office.trim(), ...(reference.trim() ? { reference: reference.trim() } : {}), lines: v.lines } }), {
     onSuccess: () => {
       toast({ tone: 'good', text: 'Recorded as filed: the books are locked through the period’s end' });
       onClose();
@@ -516,7 +599,7 @@ function RecordDialog({ v, companyId, onClose }: { v: CompanyFilingResponse; com
         <>
           {(save.error || wrong) && <span className="mr-auto self-center text-[12px] text-bad-ink">{save.error?.message ?? wrong}</span>}
           <Button onClick={onClose}>Cancel</Button>
-          <Button variant="primary" loading={save.isPending} disabled={Boolean(wrong) || !approvedBy.trim()} onClick={() => save.mutate(undefined)}>
+          <Button variant="primary" loading={save.isPending} disabled={Boolean(wrong) || !approvedBy.trim() || !office.trim()} onClick={() => save.mutate(undefined)}>
             I have submitted them: record it
           </Button>
         </>
@@ -528,6 +611,9 @@ function RecordDialog({ v, companyId, onClose }: { v: CompanyFilingResponse; com
         </Field>
         <Field label="Signed by (the director, as filed)" hint="Kept with this filing only.">
           <Input className="sensitive" maxLength={120} value={approvedBy} onChange={(e) => setApprovedBy(e.target.value)} />
+        </Field>
+        <Field label="Registered office, as the accounts state it" hint="As on the register. Kept with this filing only." className="sm:col-span-2">
+          <Input className="sensitive" maxLength={200} value={office} onChange={(e) => setOffice(e.target.value)} />
         </Field>
         <Field label="Filed on">
           <Input type="date" value={filedOn} max={today()} onChange={(e) => setFiledOn(e.target.value)} />
@@ -543,7 +629,8 @@ function RecordDialog({ v, companyId, onClose }: { v: CompanyFilingResponse; com
 function BookValueCard({ v, companyId }: { v: CompanyFilingResponse; companyId: string }) {
   const toast = useToast();
   const b = v.bookValue;
-  const record = useApiMutation(() => api(`/companies/${companyId}/accounts/book-value`, { method: 'POST', body: { periodEnd: v.period.end } }), {
+  const [oneClass, setOneClass] = useState(false);
+  const record = useApiMutation(() => api(`/companies/${companyId}/accounts/book-value`, { method: 'POST', body: { periodEnd: v.period.end, oneClass: true } }), {
     onSuccess: () => toast({ tone: 'good', text: 'Book value recorded on your shares’ account' }),
     onError: (e) => toast({ tone: 'bad', text: e.message }),
   });
@@ -561,7 +648,7 @@ function BookValueCard({ v, companyId }: { v: CompanyFilingResponse; companyId: 
             <p>
               {b.netAssets > 0 ? (
                 <>
-                  Net assets <Pounds value={b.netAssets} /> × {b.shares} of its {b.totalShares} shares = <Money value={b.value ?? 0} className="sensitive tabular font-medium" />.
+                  Net assets <Pounds value={b.netAssets} /> × {b.shares} of its {b.totalShares} {b.shareClass} shares = <Money value={b.value ?? 0} className="sensitive tabular font-medium" />.
                 </>
               ) : (
                 <>
@@ -569,10 +656,17 @@ function BookValueCard({ v, companyId }: { v: CompanyFilingResponse; companyId: 
                 </>
               )}
             </p>
+            {b.caveats.map((c) => (
+              <p key={c} className="text-warn-ink">
+                {c}
+              </p>
+            ))}
+            <Checkbox checked={oneClass} onChange={setOneClass} label={`It has issued ${b.shareClass ?? 'these'} shares only, every share ranking alike for capital`} />
             <div>
-              <Button size="sm" loading={record.isPending} onClick={() => record.mutate(undefined)}>
+              <Button size="sm" disabled={!oneClass} loading={record.isPending} onClick={() => record.mutate(undefined)}>
                 Record it as your shares’ value at {formatDate(b.asOf)}
               </Button>
+              {b.caveats.length > 0 && <span className="ml-2 text-[12px] text-ink-3">The note recorded with it says this too.</span>}
             </div>
           </>
         )}
@@ -607,7 +701,7 @@ export function FilingTab({ companyId }: { companyId: string }) {
   const [period, setPeriod] = useState<string | undefined>(undefined);
   const q = useApi<CompanyFilingResponse>(['company-filing', companyId, period ?? 'latest'], `/companies/${companyId}/filing${period ? `?period=${period}` : ''}`);
   const view = q.data;
-  const key = view ? `${view.company.id}:${view.period.end}:${JSON.stringify([view.notes, view.eligibility.notExcluded, view.eligibility.previousQualified])}` : '';
+  const key = view ? `${view.company.id}:${view.period.end}:${JSON.stringify([view.notes, view.eligibility.notExcluded, view.eligibility.previousQualified, view.eligibility.earlier, view.particulars])}` : '';
   if (q.error) return <ErrorNote error={q.error} />;
   if (!view || view.company.id !== companyId) return <Loading />;
   return <FilingView key={key} v={view} companyId={companyId} onPeriod={setPeriod} />;
@@ -649,6 +743,7 @@ function FilingView({ v, companyId, onPeriod }: { v: CompanyFilingResponse; comp
         {v.channel.webFiling
           ? `You file these by hand on Companies House WebFiling (its micro-entity accounts form), or through commercial software: nothing is sent from here. From ${formatDate(v.channel.softwareOnlyFrom)} accounts can be filed only through commercial software, in iXBRL; WebFiling and paper close for accounts then.`
           : `Since ${formatDate(v.channel.softwareOnlyFrom)} accounts are filed only through commercial software, in iXBRL: enter these figures there. Nothing is sent from here.`}
+        {` Directors’ identity verification has been law since ${formatDate(v.channel.identity.directorsFrom)} and does not stop accounts being filed; verifying the person who files is not required before ${formatMonth(v.channel.identity.presentersNotBefore)} at the earliest. WebFiling signs in with GOV.UK One Login and asks for the company’s authentication code.`}
       </Callout>
       {v.filing && <FiledCard v={v} />}
       <section className="no-print flex flex-col gap-5">

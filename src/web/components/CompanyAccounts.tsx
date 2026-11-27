@@ -134,7 +134,7 @@ function SheetCard({ sheet, codes, filed, prior }: { sheet: BalanceSheet; codes:
   return (
     <Card
       title="Balance sheet"
-      description="The micro-entity format 1 at the period’s last day, exact and in whole pounds: Companies House takes whole pounds and works the totals out from what is entered (F, G and K, and B and C from their sub-lines), so they are worked out here from the rounded figures too."
+      description="The micro-entity format 1 at the period’s last day, exact and in whole pounds: Companies House takes whole pounds, and a total on the accounts is the total of what they show, so F, G and K (and B and C from their sub-lines) are worked out here from the rounded figures, never rounded themselves."
       padded={false}
     >
       <div className="relative overflow-x-auto">
