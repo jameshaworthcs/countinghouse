@@ -29,7 +29,12 @@ logs and Claude transcripts stay clean.
      and every figure its filings hold (VAT boxes, micro-entity lines A–K, Corporation Tax, a VAT
      return's corrections of earlier errors and its own errors reported separately, with HMRC's
      reference) at a small company's threshold: £100 or more with pence, or £250 or more in whole
-     pounds that is not a multiple of £10 or a year, and not a placeholder. The VAT number is not stored;
+     pounds that is not a multiple of £10 or a year, and not a placeholder. The VAT number is not stored.
+     The director who signed accounts filed (`approvedBy`, in the books and in decided proposals), by
+     name and surname; and what the owner wrote in each period's accounts notes (`accountsNotes`: the
+     commitments, arrangements and directors' notes and an advance's interest and conditions) when more
+     than common words, with their own distinctive words, their totals and amounts written off or waived
+     at the same small company's threshold;
    - from a company's general ledger: every money figure of its own accounts' rows (their amounts,
      codings and split lines) and of its journals (`journals.jsonl`, and those decided proposals wrote
      or kept), at the same small company's threshold; and each journal's memo and evidence when they

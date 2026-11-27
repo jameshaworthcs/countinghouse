@@ -10,7 +10,7 @@ import path from 'node:path';
 import { tokenKey } from './text.ts';
 
 /** Bump when the build changes what it collects, so caches are rebuilt. */
-const BUILDER_VERSION = 15;
+const BUILDER_VERSION = 16;
 
 export interface Denylist {
   version: number;
@@ -191,7 +191,9 @@ const MONEY_KEYS = new Set(
     'readBalance residual statedMoneyIn statedMoneyOut targetAmount tax taxable taxablePay taxYearContributions taxYearInterest total totalValue ' +
     'value voluntaryCost weekly gross niEmployer niablePay pensionEmployer studentLoan ssp smp taxCredit ' +
     // A company's books for Corporation Tax: an asset's market value and what it fetched, and the tax figures brought forward.
-    'marketValue proceeds mainPool specialPool tradingLosses nonTradingDeficits preTradingExpenditure tradingLossesBefore2017 nonTradingDeficitsBefore2017'
+    'marketValue proceeds mainPool specialPool tradingLosses nonTradingDeficits preTradingExpenditure tradingLossesBefore2017 nonTradingDeficitsBefore2017 ' +
+    // A company's accounts notes: an advance to a director written off or waived.
+    'writtenOff waived'
   ).split(/\s+/),
 );
 
@@ -249,15 +251,17 @@ export function distinctiveCompanyAmount(n: number): string | undefined {
 /**
  * Filings (a company's books): their references, and every figure they hold, at the small-company
  * threshold; a VAT return's corrections of earlier errors (`corrections`) and its own errors reported
- * separately (`disclosed`, with HMRC's reference) too.
+ * separately (`disclosed`, with HMRC's reference) too; and the director who signed accounts filed
+ * (`approvedBy`), a person's name.
  */
-function collectFilings(filings: Json[], addReference: (value: string | undefined) => void, into: Set<string>): void {
+function collectFilings(filings: Json[], addReference: (value: string | undefined) => void, into: Set<string>, addName: (value: string | undefined) => void = () => {}): void {
   const add = (v: unknown) => {
     const a = typeof v === 'number' ? distinctiveCompanyAmount(v) : undefined;
     if (a) into.add(a);
   };
   for (const f of filings) {
     addReference(str(f.reference));
+    addName(str(f.approvedBy));
     for (const o of objects(f.figures)) for (const v of Object.values(o)) add(v);
     for (const c of Array.isArray(f.corrections) ? f.corrections.filter(isObject) : []) add(c.amount);
     if (isObject(f.disclosed)) {
@@ -533,14 +537,33 @@ export async function buildDenylist(dataDir: string): Promise<{ denylist: Denyli
   const addReference = (ref: string | undefined) => {
     if (ref && (ref.match(/\d/g) ?? []).length >= 4 && ref.replace(/\W/g, '').length >= 5) add('filing-reference', ref, { min: 5, generic: false });
   };
-  collectFilings(booksFilings(companies), addReference, amounts);
+  // The director who signed accounts filed: a person, by name and surname.
+  const addSigner = (name: string | undefined) => {
+    add('person', name, { generic: false });
+    const parts = (name ?? '').split(/\s+/);
+    if (parts.length > 1) add('person', parts.at(-1), { generic: false });
+  };
+  collectFilings(booksFilings(companies), addReference, amounts, addSigner);
+  // What the owner wrote in a period's accounts notes (a lease, a guarantee, a loan's conditions): the
+  // words, as a journal's memo is read. Their totals are read with the books' figures below.
+  for (const c of companies) {
+    const notes = isObject(c.books) && Array.isArray(c.books.accountsNotes) ? c.books.accountsNotes.filter(isObject) : [];
+    for (const nt of notes) {
+      for (const k of ['offBalanceSheet', 'commitments', 'directors'] as const) {
+        const text = isObject(nt[k]) ? str(nt[k].text) : undefined;
+        add('filing-note', text, { min: 10, generic: 'words' });
+        addWords('filing-note', text);
+      }
+      if (isObject(nt.advances)) for (const k of ['interest', 'conditions'] as const) add('filing-note', str(nt.advances[k]), { min: 10, generic: 'words' });
+    }
+  }
   // A company's books' own figures for Corporation Tax (tax brought forward, the AIA allocated to it), at the small-company threshold.
   collectCompanyAmounts(
     companies.flatMap((c) => (isObject(c.books) ? [{ ...c.books, filings: [] }] : [])),
     amounts,
   );
   const decided = listFiles(file('proposals'), (n) => n.endsWith('.json')).map(readJson);
-  collectFilings(proposalFilings(decided), addReference, amounts);
+  collectFilings(proposalFilings(decided), addReference, amounts, addSigner);
   // A company's general ledger: its own accounts' rows and its journals, at the small-company threshold,
   // and each journal's own words (its memo and evidence, which name who and what it was).
   const companyAccounts = new Set(list(readJson(file('accounts.json')), 'accounts').flatMap((a) => (str(a.companyId) ? [str(a.id)!] : [])));
