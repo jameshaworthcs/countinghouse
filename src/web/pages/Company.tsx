@@ -288,6 +288,7 @@ function draftOf(books: CompanyBooks | null): Draft {
     paye: books?.paye ?? { from: '' },
     ...(books?.confirmationStatement ? { confirmationStatement: books.confirmationStatement } : {}),
     ...(books?.deadlinesFrom ? { deadlinesFrom: books.deadlinesFrom } : {}),
+    ...(books?.ledgerFrom ? { ledgerFrom: books.ledgerFrom } : {}),
     within: books?.withinChargeFrom === null ? 'dormant' : books?.withinChargeFrom ? 'on' : 'assumed',
     withinOn: books?.withinChargeFrom ?? '',
     tradeOn: books?.tradeStartedOn ?? '',
@@ -308,6 +309,7 @@ function setupOf(d: Draft): CompanyBooksSetup {
     ...(d.hasPaye && d.paye ? { paye: { from: d.paye.from, ...(d.paye.closedOn ? { closedOn: d.paye.closedOn } : {}) } } : {}),
     ...(d.confirmationStatement?.nextMadeUpTo ? { confirmationStatement: d.confirmationStatement } : {}),
     ...(d.deadlinesFrom ? { deadlinesFrom: d.deadlinesFrom } : {}),
+    ...(d.ledgerFrom ? { ledgerFrom: d.ledgerFrom } : {}),
     ...(d.within === 'dormant' ? { withinChargeFrom: null } : d.within === 'on' && d.withinOn ? { withinChargeFrom: d.withinOn } : {}),
     ...(d.tradeOn ? { tradeStartedOn: d.tradeOn } : {}),
   };
@@ -459,6 +461,9 @@ function BooksForm({ view, onSaved }: { view: CompanyBooksResponse; onSaved?: ()
           </Field>
           <Field label="List deadlines from" hint="Deadlines due before this day and not recorded here are left out: settled before you kept its books here.">
             <Input type="date" value={d.deadlinesFrom ?? ''} onChange={(e) => set({ deadlinesFrom: e.target.value || undefined })} />
+          </Field>
+          <Field label="Its books start on" hint="Taken over mid-life: before this day nothing posts but journals marked as opening balances. Empty: from its first record.">
+            <Input type="date" value={d.ledgerFrom ?? ''} onChange={(e) => set({ ledgerFrom: e.target.value || undefined })} />
           </Field>
         </div>
 

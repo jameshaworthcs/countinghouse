@@ -12,7 +12,7 @@ import { fromMinor, toMinor } from '../../shared/money';
 import { VAT_TREATMENTS, type BooksCoding, type BooksLine, type JournalInput, type Rule, type VatTreatment } from '../../shared/schema';
 import { api, useApi, useApiMutation } from '../lib/api';
 import { cn, matchWords } from '../lib/format';
-import { Badge, Button, Callout, Card, Dialog, EmptyState, ErrorNote, Field, Input, Loading, Money, NumberInput, Select, StatusBadge, tableClasses, useToast } from './ui';
+import { Badge, Button, Callout, Card, Checkbox, Dialog, EmptyState, ErrorNote, Field, Input, Loading, Money, NumberInput, Select, StatusBadge, tableClasses, useToast } from './ui';
 
 const KIND_LABELS: Record<LedgerKind, string> = { asset: 'Assets', liability: 'Liabilities', equity: 'Capital and reserves', income: 'Income', expense: 'Expenses' };
 const KINDS: LedgerKind[] = ['income', 'expense', 'asset', 'liability', 'equity'];
@@ -56,21 +56,23 @@ interface LineDraft {
   coversFrom: string;
   coversTo: string;
   months: number | undefined;
+  reg111: boolean;
+  connected: boolean;
 }
-const lineDraft = (l: Partial<BooksLine> = {}): LineDraft => ({ ledger: l.ledger ?? '', amount: l.amount, treatment: l.vat?.treatment ?? '', vat: l.vat?.amount, coversFrom: l.covers?.from ?? '', coversTo: l.covers?.to ?? '', months: l.asset?.months });
+const lineDraft = (l: Partial<BooksLine> = {}): LineDraft => ({ ledger: l.ledger ?? '', amount: l.amount, treatment: l.vat?.treatment ?? '', vat: l.vat?.amount, coversFrom: l.covers?.from ?? '', coversTo: l.covers?.to ?? '', months: l.asset?.months, reg111: l.vat?.claim === 'reg111', connected: l.asset?.connected === true });
 const lineOf = (d: LineDraft): BooksLine => {
   const assetClass = ledgerCode(d.ledger)?.asset?.part === 'cost' ? ledgerCode(d.ledger)!.asset!.class : undefined;
   return {
     ledger: d.ledger,
     amount: d.amount ?? 0,
-    ...(d.treatment ? { vat: { amount: d.vat ?? 0, treatment: d.treatment } } : {}),
+    ...(d.treatment ? { vat: { amount: d.vat ?? 0, treatment: d.treatment, ...(d.reg111 ? { claim: 'reg111' as const } : {}) } } : {}),
     ...(d.coversFrom && d.coversTo ? { covers: { from: d.coversFrom, to: d.coversTo } } : {}),
-    ...(assetClass ? { asset: { class: assetClass, ...(d.months ? { months: d.months } : {}) } } : {}),
+    ...(assetClass ? { asset: { class: assetClass, ...(d.months ? { months: d.months } : {}), ...(d.connected ? { connected: true } : {}) } } : {}),
   };
 };
 
 /** One line of a coding: its ledger, VAT (with the helper that takes it out of a VAT-inclusive amount), the period it covers and an asset's life. */
-function LineFields({ d, set, row, vatRegistered, showAmount }: { d: LineDraft; set: (p: Partial<LineDraft>) => void; row: BooksRowView; vatRegistered: boolean; showAmount: boolean }) {
+function LineFields({ d, set, row, vatRegistered, vatFrom, showAmount }: { d: LineDraft; set: (p: Partial<LineDraft>) => void; row: BooksRowView; vatRegistered: boolean; vatFrom: string | undefined; showAmount: boolean }) {
   const entry = ledgerCode(d.ledger);
   const gross = d.amount ?? row.amount;
   return (
@@ -114,6 +116,9 @@ function LineFields({ d, set, row, vatRegistered, showAmount }: { d: LineDraft; 
           </div>
         </Field>
       )}
+      {!vatRegistered && vatFrom && row.date < vatFrom && (d.treatment === 'standard' || d.treatment === 'reduced') && (
+        <Checkbox className="sm:col-span-2" checked={d.reg111} onChange={(reg111) => set({ reg111 })} label="Claim it in the first VAT return (bought before registration: goods within 4 years, still held then; services within 6 months; VAT Regulations 1995 reg 111)" />
+      )}
       <Field label="Covers (from)" hint="A cost or income for a period: a year’s subscription.">
         <Input type="date" value={d.coversFrom} onChange={(e) => set({ coversFrom: e.target.value })} />
       </Field>
@@ -125,6 +130,7 @@ function LineFields({ d, set, row, vatRegistered, showAmount }: { d: LineDraft; 
           <NumberInput value={d.months} onValue={(months) => set({ months: months === undefined ? undefined : Math.round(months) })} className="tabular" />
         </Field>
       )}
+      {entry?.asset?.part === 'cost' && <Checkbox className="sm:col-span-2" checked={d.connected} onChange={(connected) => set({ connected })} label="Bought from a connected person (a director, or a company they control): no annual investment allowance, and its cost capped (CAA 2001 ss214–218)" />}
     </div>
   );
 }
@@ -133,16 +139,21 @@ function LineFields({ d, set, row, vatRegistered, showAmount }: { d: LineDraft; 
 function CodingDialog({ companyId, row, vat, onClose }: { companyId: string; row: BooksRowView; vat: CompanyCodingResponse['vat']; onClose: () => void }) {
   const toast = useToast();
   const b = row.books;
-  const [lines, setLines] = useState<LineDraft[]>(b?.lines?.length ? b.lines.map(lineDraft) : [lineDraft(b ? { ledger: b.ledger ?? '', amount: row.amount, ...(b.vat ? { vat: b.vat } : {}), ...(b.covers ? { covers: b.covers } : {}), ...(b.asset ? { asset: b.asset } : {}) } : { amount: row.amount })]);
+  const [lines, setLines] = useState<LineDraft[]>(b?.lines?.length ? b.lines.map(lineDraft) : [lineDraft(b && !b.uncoded ? { ledger: b.ledger ?? '', amount: row.amount, ...(b.vat ? { vat: b.vat } : {}), ...(b.covers ? { covers: b.covers } : {}), ...(b.asset ? { asset: b.asset } : {}) } : { amount: row.amount })]);
+  const [invoiced, setInvoiced] = useState(b?.invoiceToCompany === true);
   const split = lines.length > 1;
   const vatRegistered = Boolean(vat && row.date >= vat.registeredFrom && (!vat.deregisteredOn || row.date <= vat.deregisteredOn));
-  const books = (): Omit<BooksCoding, 'setBy' | 'ruleId'> => {
-    if (split) return { lines: lines.map(lineOf) };
+  const books = (): Omit<BooksCoding, 'setBy' | 'ruleId' | 'uncoded'> => {
+    const invoice = row.side === 'paid-for' ? { invoiceToCompany: invoiced } : {};
+    if (split) return { lines: lines.map(lineOf), ...invoice };
     const { amount: _a, ...one } = lineOf({ ...lines[0]!, amount: row.amount });
-    return one;
+    return { ...one, ...invoice };
   };
   const left = toMinor(row.amount) - lines.reduce((s, l) => s + toMinor(l.amount ?? 0), 0);
-  const save = useApiMutation((body: Omit<BooksCoding, 'setBy' | 'ruleId'> | null) => api(`/companies/${companyId}/rows/${row.id}/books`, { method: 'PUT', body: { books: body } }), { onSuccess: () => (toast({ tone: 'good', text: 'Coded' }), onClose()) });
+  const save = useApiMutation(({ body, reset }: { body: Omit<BooksCoding, 'setBy' | 'ruleId' | 'uncoded'> | null; reset?: boolean }) => api(`/companies/${companyId}/rows/${row.id}/books`, { method: 'PUT', body: { books: body, ...(reset ? { reset } : {}) } }), {
+    onSuccess: () => (toast({ tone: 'good', text: 'Saved' }), onClose()),
+  });
+  const claimsVat = lines.some((l) => l.treatment && l.treatment !== 'reverse-charge' && toMinor(l.vat ?? 0) !== 0);
   const set = (i: number) => (p: Partial<LineDraft>) => setLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...p } : l)));
   return (
     <Dialog
@@ -158,11 +169,16 @@ function CodingDialog({ companyId, row, vat, onClose }: { companyId: string; row
       footer={
         <>
           {b && (
-            <Button variant="ghost" loading={save.isPending} onClick={() => save.mutate(null)}>
-              Take the coding away
+            <Button variant="ghost" loading={save.isPending} title="No coding at all: the book rules code it, if one matches" onClick={() => save.mutate({ body: null, reset: true })}>
+              Let the rules code it
             </Button>
           )}
-          <Button variant="primary" loading={save.isPending} disabled={lines.some((l) => !l.ledger) || (split && left !== 0)} onClick={() => save.mutate(books())}>
+          {!b?.uncoded && (
+            <Button variant="ghost" loading={save.isPending} title="It stays uncoded (posted to suspense), and the book rules leave it" onClick={() => save.mutate({ body: null })}>
+              Leave it uncoded
+            </Button>
+          )}
+          <Button variant="primary" loading={save.isPending} disabled={lines.some((l) => !l.ledger) || (split && (left !== 0 || lines.some((l) => !toMinor(l.amount ?? 0))))} onClick={() => save.mutate({ body: books() })}>
             Save
           </Button>
         </>
@@ -179,15 +195,33 @@ function CodingDialog({ companyId, row, vat, onClose }: { companyId: string; row
                 </Button>
               </div>
             )}
-            <LineFields d={l} set={set(i)} row={row} vatRegistered={vatRegistered} showAmount={split} />
+            <LineFields d={l} set={set(i)} row={row} vatRegistered={vatRegistered} vatFrom={vat?.registeredFrom} showAmount={split} />
           </div>
         ))}
         <div className="flex flex-wrap items-center gap-3 text-[12.5px] text-ink-3">
-          <Button size="sm" icon={<Plus className="size-3.5" />} onClick={() => setLines((ls) => (ls.length === 1 ? [{ ...ls[0]!, amount: row.amount }, lineDraft({ amount: 0 })] : [...ls, lineDraft({ amount: fromMinor(left) })]))}>
+          <Button
+            size="sm"
+            icon={<Plus className="size-3.5" />}
+            onClick={() =>
+              setLines((ls) => {
+                // Split in two, half each (the odd penny on the first); a further line takes what is left.
+                if (ls.length > 1) return [...ls, lineDraft({ amount: fromMinor(left) })];
+                const whole = toMinor(row.amount);
+                const second = Math.trunc(whole / 2);
+                return [{ ...ls[0]!, amount: fromMinor(whole - second), vat: undefined, treatment: '' }, lineDraft({ amount: fromMinor(second) })];
+              })
+            }
+          >
             Split it
           </Button>
-          {split && <span className={cn(left ? 'text-warn-ink' : 'text-good-ink')}>{left ? <>Left to code: {minorText(left)}</> : 'The lines add up to the payment.'}</span>}
+          {split && <span className={cn(left || lines.some((l) => !toMinor(l.amount ?? 0)) ? 'text-warn-ink' : 'text-good-ink')}>{left ? <>Left to code: {minorText(left)}</> : lines.some((l) => !toMinor(l.amount ?? 0)) ? 'A line of nothing: give it an amount or remove it.' : 'The lines add up to the payment.'}</span>}
         </div>
+        {row.side === 'paid-for' && (
+          <div className="flex flex-col gap-1">
+            <Checkbox checked={invoiced} onChange={setInvoiced} label="The supply was made to the company, and its VAT invoice is addressed to it" />
+            {claimsVat && !invoiced && <p className="text-[12.5px] text-warn-ink">Without an invoice addressed to the company it cannot reclaim the VAT you paid (VATA 1994 s24(1); VAT Regulations 1995 reg 29(2)): the books ask about it until you say so.</p>}
+          </div>
+        )}
         {save.error && <ErrorNote error={save.error} />}
       </div>
     </Dialog>
@@ -304,6 +338,7 @@ function CodedAs({ r }: { r: BooksRowView }) {
       </span>
     );
   if (!r.books) return <StatusBadge status="warn">Not coded</StatusBadge>;
+  if (r.books.uncoded) return <StatusBadge status="warn">{r.books.setBy === 'agent' ? 'Left uncoded by a proposal' : 'Left uncoded by you'}</StatusBadge>;
   return (
     <span>
       <CodingWords books={r.books} /> <span className="text-[11.5px] text-ink-3">({SET_BY[r.books.setBy]})</span>
@@ -411,6 +446,7 @@ function JournalDialog({ companyId, accounts, onClose }: { companyId: string; ac
     { ledger: '', amount: undefined },
   ]);
   const total = lines.reduce((s, l) => s + toMinor(l.amount ?? 0), 0);
+  const [opening, setOpening] = useState(false);
   const ready = memo.trim() && lines.length >= 2 && lines.every((l) => l.ledger && l.amount) && total === 0;
   const save = useApiMutation((journal: JournalInput) => api(`/companies/${companyId}/journals`, { method: 'POST', body: { journal } }), { onSuccess: () => (toast({ tone: 'good', text: 'Journal written' }), onClose()) });
   return (
@@ -421,7 +457,7 @@ function JournalDialog({ companyId, accounts, onClose }: { companyId: string; ac
       title="Write a journal"
       description="An entry in the company’s books that is not a payment: shares issued at incorporation, a month’s pay and its PAYE, a dividend declared. Debits are positive and credits negative; the lines add up to nothing."
       footer={
-        <Button variant="primary" disabled={!ready} loading={save.isPending} onClick={() => save.mutate({ date, memo: memo.trim(), lines: lines.map((l) => ({ ledger: l.ledger, amount: l.amount! })), ...(evidence.trim() ? { evidence: evidence.trim() } : {}) })}>
+        <Button variant="primary" disabled={!ready} loading={save.isPending} onClick={() => save.mutate({ date, memo: memo.trim(), lines: lines.map((l) => ({ ledger: l.ledger, amount: l.amount! })), ...(evidence.trim() ? { evidence: evidence.trim() } : {}), ...(opening ? { opening } : {}) })}>
           Save
         </Button>
       }
@@ -438,6 +474,7 @@ function JournalDialog({ companyId, accounts, onClose }: { companyId: string; ac
         <Field label="What shows it" hint="The document: a payroll summary, a board minute, an invoice.">
           <Input value={evidence} onChange={(e) => setEvidence(e.target.value)} />
         </Field>
+        <Checkbox checked={opening} onChange={setOpening} label="An opening balance: it posts even before the day its books start (Settings)" />
         {lines.map((l, i) => (
           <div key={i} className="grid items-end gap-2 sm:grid-cols-[1fr_9rem_auto]">
             <Field label={`Line ${i + 1}`}>
@@ -613,6 +650,11 @@ const CHECK_TITLES: Record<LedgerCheck['kind'], string> = {
   'link-invalid': 'A link that does not fit',
   'journal-invalid': 'A journal that does not fit',
   'vat-unregistered': 'VAT on a day the company was not registered for it',
+  reg111: 'VAT claimed from before registration, out of time (VAT Regulations 1995 reg 111)',
+  'reverse-charge-rate': 'A reverse charge whose VAT is not the standard rate on the amount',
+  'vat-no-invoice': 'VAT you paid claimed without an invoice addressed to the company',
+  'journal-double-count': 'Maybe the same money twice: a journal on your loan and a row of yours for the same',
+  'loan-balance-differs': 'A balance recorded on your director’s loan the books do not add up to',
   unbalanced: 'Postings that do not add up (please report this)',
 };
 
@@ -639,6 +681,32 @@ function checkLine(c: LedgerCheck): ReactNode {
       return c.problem;
     case 'journal-invalid':
       return `${formatDate(c.date)} · ${c.memo}: ${c.problem}`;
+    case 'vat-no-invoice':
+      return (
+        <>
+          {formatDate(c.date)} · <span className="sensitive">{c.description}</span> · VAT <Money value={c.amount} className="sensitive" />: say the invoice is addressed to the company, or code it without VAT
+        </>
+      );
+    case 'reg111':
+      return `${formatDate(c.date)}: ${c.problem}`;
+    case 'reverse-charge-rate':
+      return (
+        <>
+          {formatDate(c.date)} · VAT <Money value={c.amount} className="sensitive" />, where the standard rate gives <Money value={c.expected} className="sensitive" />
+        </>
+      );
+    case 'journal-double-count':
+      return (
+        <>
+          {formatDate(c.date)} · <Money value={c.amount} className="sensitive" /> beside your <span className="sensitive">{c.description}</span>: take one away if they are the same
+        </>
+      );
+    case 'loan-balance-differs':
+      return (
+        <>
+          {formatDate(c.date)}: recorded <Money value={c.recorded} className="sensitive" />, the books <Money value={c.ledger} className="sensitive" /> (a difference of <Money value={c.difference} className="sensitive" />)
+        </>
+      );
     case 'vat-unregistered':
       return (
         <>
