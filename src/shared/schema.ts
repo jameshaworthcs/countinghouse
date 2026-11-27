@@ -269,11 +269,21 @@ export type VatTreatment = (typeof VAT_TREATMENTS)[number];
  * The VAT in a coded amount: how much (signed like the amount, part of it; for a reverse charge the
  * notional VAT on an amount that does not include it) and its treatment.
  */
-export const BooksVatSchema = z.object({ amount: MoneySchema, treatment: z.enum(VAT_TREATMENTS) });
+export const BooksVatSchema = z.object({
+  amount: MoneySchema,
+  treatment: z.enum(VAT_TREATMENTS),
+  /** Input tax on a supply before the company registered for VAT, claimed under VAT Regulations 1995 reg 111. */
+  claim: z.literal('reg111').optional(),
+});
 /** The period a cost or income is for (a year's subscription), so it can be spread over it. */
 export const CoversSchema = z.object({ from: ISODateSchema, to: ISODateSchema });
 /** A fixed asset: its class, and its life in whole months when known. */
-export const BooksAssetSchema = z.object({ class: z.enum(FIXED_ASSET_CLASSES), months: z.number().int().min(1).max(600).optional() });
+export const BooksAssetSchema = z.object({
+  class: z.enum(FIXED_ASSET_CLASSES),
+  months: z.number().int().min(1).max(600).optional(),
+  /** Bought from a connected person (a director, a company they control): no annual investment allowance, and its qualifying cost capped (CAA 2001 ss214–218). */
+  connected: z.boolean().optional(),
+});
 
 /** One line of a coded payment split across ledgers: its amount (signed like the payment, VAT included), its ledger and the rest. */
 export const BooksLineSchema = z.object({
@@ -298,6 +308,10 @@ export const BooksCodingSchema = z.object({
   covers: CoversSchema.optional(),
   asset: BooksAssetSchema.optional(),
   lines: z.array(BooksLineSchema).max(30).optional(),
+  /** On a row of yours paid for the company: the supply was made to the company and its VAT invoice is addressed to it, so the company may reclaim the VAT (VATA 1994 s24(1), reg 29(2)). */
+  invoiceToCompany: z.boolean().optional(),
+  /** Left uncoded on purpose (no ledger, no lines): you, or a proposal, took the coding away, so book rules leave it. */
+  uncoded: z.literal(true).optional(),
   setBy: z.enum(['user', 'rule', 'agent']),
   /** The book rule that set it (`setBy: rule`). */
   ruleId: z.string().regex(/^rule_[0-9a-z]+$/).optional(),
@@ -314,6 +328,8 @@ export const CompanyLinkSchema = z.object({
   /** Empty: you said this row is not the other side of any of yours (`setBy: user`), so the app links it to none. */
   rows: z.array(z.string().regex(/^tx_[0-9a-f]{16}$/)).max(30),
   setBy: z.enum(['auto', 'user', 'agent']),
+  /** A fee you confirmed, larger than a link allows by itself: what was sent less what arrived, to the penny (yours only). */
+  fee: MoneySchema.refine((v) => v > 0, { message: 'A confirmed fee is more than nothing' }).optional(),
 });
 export type CompanyLink = z.infer<typeof CompanyLinkSchema>;
 
@@ -857,6 +873,11 @@ const companyBooksShape = {
   ctPeriods: z.array(BooksPeriodSchema).max(60).default([]),
   /** Deadlines due before this day are not listed: settled before the books were kept here. */
   deadlinesFrom: ISODateSchema.optional(),
+  /**
+   * The day its general ledger starts (books taken over mid-life): before it nothing posts but journals
+   * marked `opening` (its opening balances). Absent: from its first record.
+   */
+  ledgerFrom: ISODateSchema.optional(),
 };
 /** A company's books without its filings and who set them: what the owner edits and an agent proposes (`set_company_books`). */
 export const CompanyBooksSetupSchema = z.object(companyBooksShape);
@@ -913,7 +934,12 @@ export type Company = z.infer<typeof CompanySchema>;
 export const JournalLineSchema = z.object({
   ledger: LedgerCodeSchema,
   amount: MoneySchema,
-  vat: z.object({ treatment: z.enum(VAT_TREATMENTS) }).optional(),
+  /**
+   * The VAT this line is, said outright: its treatment, whether it is input tax (reclaimed) or output tax
+   * (charged), and a claim of input tax from before registration (reg 111). Never inferred from the
+   * ledger: output tax in a correction must not land among input tax.
+   */
+  vat: z.object({ treatment: z.enum(VAT_TREATMENTS), side: z.enum(['input', 'output']), claim: z.literal('reg111').optional() }).optional(),
   covers: CoversSchema.optional(),
   asset: BooksAssetSchema.optional(),
 });
@@ -926,6 +952,8 @@ export const JournalInputSchema = z.object({
   lines: z.array(JournalLineSchema).min(2).max(40),
   /** What shows it: the document, the payroll summary, the board minute. */
   evidence: z.string().trim().min(1).max(500).optional(),
+  /** An opening balance: it posts even before the ledger's first day (`books.ledgerFrom`). */
+  opening: z.boolean().optional(),
 });
 export type JournalInput = z.infer<typeof JournalInputSchema>;
 
@@ -1303,6 +1331,8 @@ export const RuleSchema = z.object({
         vat: z.object({ treatment: z.enum(VAT_TREATMENTS) }).optional(),
         asset: BooksAssetSchema.optional(),
         coversMonths: z.number().int().min(1).max(120).optional(),
+        /** On rows of yours paid for the company: their VAT invoices are addressed to the company. */
+        invoiceToCompany: z.boolean().optional(),
       })
       .optional(),
   }),

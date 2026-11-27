@@ -322,6 +322,10 @@
                 "outside",
                 "reverse-charge"
               ]
+            },
+            "claim": {
+              "type": "string",
+              "const": "reg111"
             }
           },
           "required": [
@@ -355,6 +359,7 @@
                 "computer",
                 "office",
                 "furniture",
+                "van",
                 "motor"
               ]
             },
@@ -362,6 +367,9 @@
               "type": "integer",
               "minimum": 1,
               "maximum": 600
+            },
+            "connected": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -401,6 +409,10 @@
                       "outside",
                       "reverse-charge"
                     ]
+                  },
+                  "claim": {
+                    "type": "string",
+                    "const": "reg111"
                   }
                 },
                 "required": [
@@ -434,6 +446,7 @@
                       "computer",
                       "office",
                       "furniture",
+                      "van",
                       "motor"
                     ]
                   },
@@ -441,6 +454,9 @@
                     "type": "integer",
                     "minimum": 1,
                     "maximum": 600
+                  },
+                  "connected": {
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -453,6 +469,13 @@
               "amount"
             ]
           }
+        },
+        "invoiceToCompany": {
+          "type": "boolean"
+        },
+        "uncoded": {
+          "type": "boolean",
+          "const": true
         },
         "setBy": {
           "type": "string",
@@ -489,6 +512,10 @@
             "user",
             "agent"
           ]
+        },
+        "fee": {
+          "type": "number",
+          "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
         }
       },
       "required": [

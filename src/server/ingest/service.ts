@@ -1045,7 +1045,8 @@ export class ImportService extends EventEmitter {
       if (!tx) throw new StoreError('Unknown transaction', 404);
       if (tx.transferGroup) throw new StoreError('That transaction is linked to another already.', 409);
       if (tx.company) throw new StoreError('That transaction is marked as money with a company of yours, not a transfer between your accounts: take the mark away first.', 409);
-      if (tx.companyLink?.rows.length) throw new StoreError('That row of the company’s is linked to money between you and it, not a transfer between its accounts: unlink it on the company’s Books tab first.', 409);
+      if (tx.companyLink?.rows.length) throw new StoreError('That row of the company’s is linked to money between you and it, not a transfer between its accounts: unlink it in the company’s books first.', 409);
+      if (tx.books?.setBy === 'user') throw new StoreError('You coded that row of the company’s in its books, so it is not a transfer between its accounts: take its coding away in the company’s books first, then link it.', 409);
       if (toMinor(tx.amount) !== -toMinor(mine.found.row.amount)) throw new StoreError('The two legs of a transfer are the same amount, one in and one out.');
       if (sameAccount(mine.account, { id: tx.accountId })) throw new StoreError('A transfer is between two of your accounts: these are in the same one.');
       const otherAccount = this.store.account(tx.accountId);
@@ -1126,7 +1127,7 @@ export class ImportService extends EventEmitter {
           const tx = txId ? this.store.transaction(txId) : undefined;
           const mine = sectionAccount(this.store, section);
           const otherAccount = tx ? this.store.account(tx.accountId) : undefined;
-          if (tx && !tx.transferGroup && !tx.company && !tx.companyLink?.rows.length && mine && otherAccount) {
+          if (tx && !tx.transferGroup && !tx.company && !tx.companyLink?.rows.length && tx.books?.setBy !== 'user' && mine && otherAccount) {
             draft = replaceRow(draft, { ...asTransferLeg(withoutLink(row), mine, otherAccount), transferMatch: tx.id });
           } else {
             const { pendingLink: _gone, ...rest } = row;

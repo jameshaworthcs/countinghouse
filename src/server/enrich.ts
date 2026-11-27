@@ -233,6 +233,8 @@ export async function enrich(store: Store, opts: { accountIds?: string[]; rows?:
   const view = (raw: Transaction): Transaction => ({ ...seen(raw), ...(patches.get(raw.id) ?? {}) });
   let transfersLinked = 0;
   let companyLinked = 0;
+  // Every row pairing touches, in scope or not (a partner leg in another account): its books are kept right too.
+  const paired = new Set<string>();
   const sides: [Transaction[], ReturnType<typeof transferReader>, readonly Account[], boolean][] = [[store.transactions(), transferReader(store, categoriser), store.accounts, false]];
   for (const [companyId, accounts] of companies) sides.push([store.companyTransactions(companyId), companyTransferReader(store, accounts), accounts, true]);
   for (const [rows, reader, accounts, company] of sides) {
@@ -261,6 +263,10 @@ export async function enrich(store: Store, opts: { accountIds?: string[]; rows?:
         patch.payee = payee;
         if (!company) accountPayees.add(t.id);
       }
+      // A leg of a transfer between the company's own accounts posts by itself: a rule's or a proposal's
+      // coding goes (one you set keeps the row out of pairing, above).
+      if (company && raw.books && raw.books.setBy !== 'user') patch.books = undefined;
+      paired.add(t.id);
       patches.set(t.id, patch);
     }
     if (company) companyLinked += pairs.count;
@@ -275,7 +281,7 @@ export async function enrich(store: Store, opts: { accountIds?: string[]; rows?:
   let booksChanged = 0;
   const stage = (id: string, p: Partial<Transaction>) => {
     const raw = store.transaction(id);
-    if (!raw || !inScope(raw) || skipped(raw)) return;
+    if (!raw || (!inScope(raw) && !paired.has(id)) || skipped(raw)) return;
     patches.set(id, { ...seed(raw), ...(patches.get(id) ?? {}), ...p });
     booksChanged++;
   };
@@ -291,13 +297,16 @@ export async function enrich(store: Store, opts: { accountIds?: string[]; rows?:
     companyTransactions: (id) => store.companyTransactions(id).map(view),
     companyJournals: (id) => store.companyJournals(id),
     bookRules: (id) => store.bookRules(id),
+    balances: (id) => store.balances(id),
   };
   for (const raw of [...store.transactions(), ...[...companies.keys()].flatMap((id) => store.companyTransactions(id))]) {
     const t = view(raw);
     if (t.books && 'problem' in codingPlace(t, overlay)) stage(t.id, { books: undefined });
     if (t.companyLink && !store.account(t.accountId)?.companyId) stage(t.id, { companyLink: undefined });
   }
+  // Only for a company whose books are kept here: without them its Books tab is not there to see them.
   for (const c of store.companies) {
+    if (!c.books) continue;
     for (const { id, patch } of bookRulePatches(overlay, c.id)) stage(id, patch);
     if (companies.has(c.id)) for (const { id, patch } of autoLinkPatches(overlay, c.id)) stage(id, patch);
   }
@@ -662,6 +671,8 @@ export async function linkTransfers(store: Store, ids: string[], message: string
           // A category you set stays on your rows; a company's row takes none of yours (companyRowPatch).
           ...(t.categorisedBy !== 'user' || side ? { category: transferLegCategory(acc.type, other.type, t.amount), categorisedBy: 'transfer' as const, ruleId: undefined } : {}),
           ...(payee ? { payee } : {}),
+          // A company's transfer leg posts by itself: a rule's or a proposal's coding goes (yours keeps the row out, above).
+          ...(side && t.books ? { books: undefined } : {}),
         },
       });
     }

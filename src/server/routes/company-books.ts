@@ -25,8 +25,17 @@ import { nowAfter, nowISO, randomHex } from '../fsutil';
 import { filingId, ruleId } from '../ids';
 import { StoreError } from '../store';
 
-const CodingBody = z.object({ books: BooksCodingSchema.omit({ setBy: true, ruleId: true }).nullable() });
-const LinkBody = z.object({ /** The rows of yours it is the other side of; [] says it is linked to none; null takes the link away. */ rows: z.array(z.string().regex(/^tx_[0-9a-f]{16}$/)).max(30).nullable() });
+const CodingBody = z.object({
+  /** null: leave it uncoded, and book rules leave it so (with `reset`, take that away too, so rules may code it). */
+  books: BooksCodingSchema.omit({ setBy: true, ruleId: true, uncoded: true }).nullable(),
+  reset: z.boolean().optional(),
+});
+const LinkBody = z.object({
+  /** The rows of yours it is the other side of; [] says it is linked to none; null takes the link away. */
+  rows: z.array(z.string().regex(/^tx_[0-9a-f]{16}$/)).max(30).nullable(),
+  /** A fee you confirm, larger than a link allows by itself: what was sent less what arrived, to the penny. */
+  fee: z.number().positive().optional(),
+});
 const JournalBody = z.object({ journal: JournalInputSchema, /** An edit: the journal's `updatedAt` it was made against. */ was: TimestampSchema.optional() });
 const BookRuleBody = RuleSchema.omit({ id: true, createdAt: true, updatedAt: true });
 
@@ -179,19 +188,29 @@ export function companyBookRoutes(ctx: AppContext): Hono {
     return t;
   };
 
-  /** Code a row (null takes its coding away): yours, so nothing else changes it. */
+  /**
+   * Code a row: yours, so nothing else changes it. `books: null` leaves it uncoded on purpose (a coding
+   * of yours that says so, which book rules leave); with `reset: true` it has no coding at all, and the
+   * book rules may code it again.
+   */
   app.put('/companies/:id/rows/:txId/books', async (c) => {
     ownerOnly(c);
     const company = keptOr404(c.req.param('id'));
     const t = rowOf(company, c.req.param('txId'));
-    const { books } = await readJson(c, CodingBody);
+    const { books, reset } = await readJson(c, CodingBody);
     if (books) {
       const place = codingPlace(t, { account: (id) => store.account(id), company: (id) => store.company(id) });
       if ('problem' in place) throw new StoreError(place.problem, 422);
       if (isLinked(t) && !(books.ledger === 'directors-loan' && !books.lines?.length && !books.vat)) throw new StoreError('It is linked to money between you and the company, so it is the director’s loan: unlink it first to code it otherwise.', 422);
     }
-    const [updated] = await store.updateTransactions([{ id: t.id, patch: { books: books ? { ...books, setBy: 'user' } : undefined } }], `books: ${company.name} ${books ? 'code' : 'uncode'} ${t.id}`);
-    return c.json(updated);
+    const next = books ? { ...books, setBy: 'user' as const } : reset ? undefined : { uncoded: true as const, setBy: 'user' as const };
+    await store.updateTransactions([{ id: t.id, patch: { books: next } }], `books: ${company.name} ${books ? 'code' : reset ? 'reset' : 'leave uncoded'} ${t.id}`);
+    // Back to no coding: the book rules code it again, as they would have.
+    if (reset) {
+      const patches = bookRulePatches(store, company.id, { only: new Set([t.id]) });
+      if (patches.length) await store.updateTransactions(patches.map(({ id, patch }) => ({ id, patch })), `books: ${company.name} rule codes ${t.id}`);
+    }
+    return c.json(store.transaction(t.id));
   });
 
   /** Link a company row to rows of yours lent to it or repaid by it (null: take the link away; []: linked to none). */
@@ -200,9 +219,10 @@ export function companyBookRoutes(ctx: AppContext): Hono {
     const company = keptOr404(c.req.param('id'));
     const t = rowOf(company, c.req.param('txId'));
     if (!store.account(t.accountId)?.companyId) throw new StoreError('A link is set on the company’s row, naming the rows of yours that are the same money.', 422);
-    const { rows } = await readJson(c, LinkBody);
+    const { rows, fee } = await readJson(c, LinkBody);
     for (const id of rows ?? []) rowOf(company, id);
-    const [updated] = await store.updateTransactions([{ id: t.id, patch: { companyLink: rows === null ? undefined : { rows, setBy: 'user' } } }], `books: ${company.name} ${rows?.length ? 'link' : 'unlink'} ${t.id}`);
+    if (fee !== undefined && !rows?.length) throw new StoreError('A fee is confirmed on a link to rows of yours.', 422);
+    const [updated] = await store.updateTransactions([{ id: t.id, patch: { companyLink: rows === null ? undefined : { rows, setBy: 'user', ...(fee !== undefined ? { fee } : {}) } } }], `books: ${company.name} ${rows?.length ? 'link' : 'unlink'} ${t.id}`);
     return c.json(updated);
   });
 

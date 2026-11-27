@@ -26,6 +26,8 @@ import {
   reverseChargeVat,
   ruleBooksProblems,
   ruleCoding,
+  takesVat,
+  VAT_BLOCKED,
   vatInGross,
 } from '../src/shared/ledger';
 import { fromMinor, toMinor } from '../src/shared/money';
@@ -357,6 +359,144 @@ describe('the postings', () => {
   });
 });
 
+describe('after review: what the books may claim, and when', () => {
+  it('codes a payment for the shares to share capital not paid, and keeps VAT off the balance sheet', () => {
+    expect(codingProblems(100, coded('share-capital-unpaid'), 'company')).toEqual([]);
+    expect(codingProblems(-120, coded('directors-loan', { vat: { amount: -20, treatment: 'standard' } }), 'company').join(' ')).toMatch(/takes no VAT/);
+    expect(codingProblems(-120, coded('paye', { vat: { amount: 0, treatment: 'outside' } }), 'company').join(' ')).toMatch(/takes no VAT/);
+    expect(codingProblems(-1200, coded('fixed-assets:van:cost', { vat: { amount: -200, treatment: 'standard' }, asset: { class: 'van', connected: true } }), 'company')).toEqual([]);
+  });
+
+  it('blocks input VAT on entertaining and cars, and a reverse charge on a sale', () => {
+    expect(codingProblems(-60, coded('entertainment', { vat: { amount: -10, treatment: 'standard' } }), 'company').join(' ')).toMatch(/SI 1992\/3222, art 5/);
+    expect(codingProblems(-60, coded('entertainment'), 'company')).toEqual([]);
+    expect(codingProblems(-24000, coded('fixed-assets:motor:cost', { vat: { amount: -4000, treatment: 'standard' } }), 'company').join(' ')).toMatch(/art 7/);
+    expect(codingProblems(500, coded('turnover', { vat: { amount: 100, treatment: 'reverse-charge' } }), 'company').join(' ')).toMatch(/outside the scope/);
+  });
+
+  it('has the codes a small company needs, on their lines and with their Corporation Tax treatment', () => {
+    expect(ledgerCode('loans-due-within-year')?.sheet?.credit).toBe('E');
+    expect(ledgerCode('loans:bbl')?.sheet?.credit).toBe('H');
+    expect(ledgerCode('debtors:other')?.sheet?.debit).toBe('C');
+    expect(ledgerCode('creditors:other')?.sheet?.credit).toBe('E');
+    expect(ledgerCode('net-wages')?.sheet?.credit).toBe('E');
+    expect(ledgerCode('stock')?.sheet?.debit).toBe('C');
+    expect(ledgerCode('intangible-assets:cost')?.sheet?.debit).toBe('B');
+    expect(ledgerCode('investments')?.sheet?.debit).toBe('B');
+    expect(ledgerCode('penalties')?.ct).toBe('disallowable');
+    expect(ledgerCode('donations')?.ct).toBe('disallowable');
+    expect(ledgerCode('disposals')).toMatchObject({ profit: 'B', profitDebit: 'F' });
+    expect(ledgerCode('small-equipment')?.ct).toBe('capital');
+    expect(ledgerCode('interest-payable')?.ct).toBe('loan-relationship');
+    expect(ledgerCode('share-capital-unpaid')?.codable).toBe(true);
+  });
+
+  it('takes in a cost from before incorporation on incorporation, its own day in its memo (CA 2006 s51)', () => {
+    const early = tx('card', '2024-01-15', -12, 'COMPANIES HOUSE', { company: paidFor, books: coded('formation-costs') });
+    const pre = journal('2024-02-10', 'Name search', [['formation-costs', 5], ['directors-loan', -5]]);
+    const { postings } = companyLedger(memory([early], { journals: [pre] }), CO);
+    for (const p of postings) expect(p.date).toBe('2024-03-01');
+    expect(postings.find((p) => p.source.id === early.id)?.memo).toMatch(/15 Jan 2024, before incorporation: taken in on incorporation/);
+    expect(ledgerDirectorLoanMovements(memory([early], { journals: [pre] }), CO).map((m) => m.date)).toEqual(['2024-03-01', '2024-03-01']);
+  });
+
+  it('says a journal’s VAT side outright, and claims VAT from before registration under reg 111 within its time', () => {
+    // Output VAT on a disposal, in a journal: output because it says so, not because of the ledger.
+    const sold = journal('2025-06-01', 'Laptop sold', [['bank:studio-bank', 240], ['disposals', -200], ['vat', -40]]);
+    sold.lines[2]!.vat = { treatment: 'standard', side: 'output' };
+    const claim = journal('2024-03-20', 'Pre-registration VAT', [['vat', 30], ['directors-loan', -30]]);
+    claim.lines[0]!.vat = { treatment: 'standard', side: 'input', claim: 'reg111' };
+    const late = tx('card', '2023-07-01', -120, 'EXAMPLE DESIGN AGENCY', { company: paidFor, books: coded('advertising', { vat: { amount: -20, treatment: 'standard', claim: 'reg111' }, invoiceToCompany: true }) });
+    const goods = tx('card', '2023-07-02', -1200, 'EXAMPLE COMPUTERS', { company: paidFor, books: coded('fixed-assets:computer:cost', { vat: { amount: -200, treatment: 'standard', claim: 'reg111' }, asset: { class: 'computer' }, invoiceToCompany: true }) });
+    const res = companyLedger(memory([late, goods], { journals: [sold, claim], company: { ...company(), books: books({ incorporatedOn: '2023-06-01' }) } }), CO);
+    expect(res.postings.find((p) => p.source.id === sold.id && p.ledger === 'vat')?.vat).toEqual({ treatment: 'standard', side: 'output', part: 'tax' });
+    expect(res.postings.find((p) => p.source.id === late.id && p.ledger === 'vat')?.vat).toMatchObject({ claim: 'reg111', side: 'input' });
+    // Claimed under reg 111, not "VAT before registration"; services more than 6 months before it are out of time, goods within 4 years are not.
+    expect(res.checks.filter((c) => c.kind === 'vat-unregistered')).toEqual([]);
+    expect(res.checks.filter((c) => c.kind === 'reg111').map((c) => (c as { source: { id: string } }).source.id)).toEqual([late.id]);
+    expect(journalProblems({ lines: [{ ledger: 'vat', amount: -5, vat: { treatment: 'standard', side: 'output', claim: 'reg111' } }, { ledger: 'travel', amount: 5 }] }, () => false).join(' ')).toMatch(/reg 111 is input tax/);
+  });
+
+  it('asks about VAT you paid that the company claims without an invoice addressed to it', () => {
+    const withVat = tx('card', '2025-05-09', -24, 'EXAMPLE DOMAINS', { company: paidFor, books: coded('software-hosting', { vat: { amount: -4, treatment: 'standard' } }) });
+    const invoiced = { ...withVat, id: 'tx_00000000000000f1', books: { ...withVat.books!, invoiceToCompany: true } };
+    expect(companyLedger(memory([withVat]), CO).checks).toContainEqual(expect.objectContaining({ kind: 'vat-no-invoice', transactionId: withVat.id, amount: -4 }));
+    expect(companyLedger(memory([invoiced]), CO).checks.some((c) => c.kind === 'vat-no-invoice')).toBe(false);
+    expect(codingProblems(-24, { ...coded('travel'), invoiceToCompany: true }, 'company').join(' ')).toMatch(/only of a payment of yours/);
+  });
+
+  it('asks about a reverse charge whose VAT is not the standard rate on the amount', () => {
+    const off = tx('studio-card', '2025-05-03', -36, 'EXAMPLE CLOUD INC', { books: coded('software-hosting', { vat: { amount: -6, treatment: 'reverse-charge' } }) });
+    expect(companyLedger(memory([off]), CO).checks).toContainEqual(expect.objectContaining({ kind: 'reverse-charge-rate', amount: -6, expected: -7.2 }));
+  });
+
+  it('flags the same money twice within a link’s fee, and a journal that says again what a row of yours says', () => {
+    const lent = tx('current', '2025-05-10', -300, 'TO STUDIO', { company: loanMark });
+    const arrived = tx('studio-bank', '2025-05-12', 295, 'FROM J BLOGGS', { books: coded('directors-loan') });
+    const again = journal('2025-05-14', 'Loan from director', [['bank:studio-bank', 300], ['directors-loan', -300]]);
+    const res = companyLedger(memory([lent, arrived], { journals: [again] }), CO);
+    expect(res.checks).toContainEqual(expect.objectContaining({ kind: 'possible-double-count', personalId: lent.id, companyRowId: arrived.id }));
+    expect(res.checks).toContainEqual(expect.objectContaining({ kind: 'journal-double-count', journalId: again.id, personalId: lent.id }));
+  });
+
+  it('starts the ledger on its first day: before it, only opening journals post', () => {
+    const old = tx('studio-bank', '2025-01-10', 500, 'EXAMPLE CLIENT', { books: coded('turnover') });
+    const kept = tx('studio-bank', '2025-02-10', 600, 'EXAMPLE CLIENT', { books: coded('turnover') });
+    const opening = { ...journal('2025-01-31', 'Opening balances', [['bank:studio-bank', 4000], ['directors-loan', -1500], ['retained-earnings', -2500]]), opening: true };
+    const ignored = journal('2025-01-20', 'Not an opening', [['travel', 5], ['directors-loan', -5]]);
+    const src = memory([old, kept], { journals: [opening, ignored], company: { ...company(), books: books({ ledgerFrom: '2025-02-01' }) } });
+    const sources = new Set(companyLedger(src, CO).postings.map((p) => p.source.id));
+    expect([...sources].sort()).toEqual([kept.id, opening.id].sort());
+    expect(ledgerDirectorLoanMovements(src, CO).map((m) => m.amount)).toEqual([1500]);
+  });
+
+  it('says where a balance recorded on your loan is not what the books add up to', () => {
+    const lent = tx('current', '2025-05-10', -300, 'TO STUDIO', { company: loanMark });
+    const src = { ...memory([lent]), balances: (id: string) => (id === 'loan' ? [{ id: 'bal_0000000000000001', accountId: 'loan', date: '2025-05-31', balance: 350, currency: 'GBP', kind: 'manual' as const, dateSource: 'manual' as const, source: {}, createdAt: stamp }] : []) };
+    expect(companyLedger(src, CO).checks).toContainEqual(expect.objectContaining({ kind: 'loan-balance-differs', recorded: 350, ledger: 300, difference: 50 }));
+  });
+
+  it('takes a fee you confirmed on your own link, larger than a link allows by itself, only to the penny', () => {
+    const p = { id: 'p', date: '2025-05-10', amount: -2000 };
+    const c = { id: 'c', date: '2025-05-11', amount: 1940 };
+    expect(linkGroupProblem([p], [c])).toMatch(/differ by £60\.00/);
+    expect(linkGroupProblem([p], [c], 60)).toBeUndefined();
+    expect(linkGroupProblem([p], [c], 59)).toMatch(/not what the two sides differ by/);
+    const lent = tx('current', '2025-05-10', -2000, 'TO STUDIO', { company: loanMark });
+    const mine = tx('studio-bank', '2025-05-11', 1940, 'FROM J BLOGGS', { companyLink: { rows: [lent.id], setBy: 'user', fee: 60 } });
+    const agents = { ...mine, companyLink: { rows: [lent.id], setBy: 'agent' as const, fee: 60 } };
+    const ok = companyLedger(memory([lent, mine]), CO);
+    expect(ok.checks.some((x) => x.kind === 'link-invalid')).toBe(false);
+    // The fee posts on the company row's day.
+    expect(ok.postings.filter((x) => x.source.kind === 'link').map((x) => [x.date, x.ledger, x.amount])).toEqual([
+      ['2025-05-11', 'bank-charges', 6000],
+      ['2025-05-11', 'directors-loan', -6000],
+    ]);
+    expect(companyLedger(memory([lent, agents]), CO).checks.find((x) => x.kind === 'link-invalid')).toMatchObject({ problem: 'Only you confirm a fee larger than a link allows by itself.' });
+  });
+
+  it('never links a company row in another currency', () => {
+    const lent = tx('current', '2025-05-10', -500, 'TO STUDIO', { company: loanMark });
+    const dollars = { ...tx('studio-bank', '2025-05-11', 500, 'FROM J BLOGGS'), currency: 'USD' };
+    expect(autoLinks(memory([lent, dollars]), CO).size).toBe(0);
+    const linked = { ...dollars, companyLink: { rows: [lent.id], setBy: 'user' as const } };
+    const src = memory([lent, linked]);
+    expect(companyLinkProblem({ companyIds: [linked.id], personalIds: [lent.id] }, (id) => src.transaction(id), src)).toMatch(/in USD/);
+    // The loan of yours then posts as not linked, so it is never lost.
+    expect(ofSource(companyLedger(src, CO).postings, lent.id)).toEqual({ 'directors-loan': -50000, 'bank-not-imported': 50000 });
+  });
+
+  it('leaves a row you left uncoded in suspense, says so, and no book rule codes it', () => {
+    const left = tx('studio-card', '2025-05-03', -36, 'EXAMPLE CLOUD INC', { books: { uncoded: true, setBy: 'user' } });
+    const res = companyLedger(memory([left]), CO);
+    expect(ofSource(res.postings, left.id)).toEqual({ 'card:studio-card': -3600, suspense: 3600 });
+    expect(res.checks).toContainEqual(expect.objectContaining({ kind: 'uncoded', transactionId: left.id, leftUncoded: true }));
+    const rule: Rule = { id: 'rule_cloud', enabled: true, priority: 100, match: { field: 'description', op: 'contains', value: 'EXAMPLE CLOUD', caseSensitive: false, company: { id: CO, rows: 'own' } }, set: { books: { ledger: 'software-hosting' } }, createdAt: stamp, updatedAt: stamp };
+    expect(bookRulePatches(memory([left], { rules: [rule] }), CO)).toEqual([]);
+    expect(codingProblems(-36, { uncoded: true, ledger: 'travel' }, 'company').join(' ')).toMatch(/Left uncoded/);
+  });
+});
+
 describe('book rules', () => {
   const rule = (extra: Partial<Rule['match']> = {}, set: Partial<NonNullable<Rule['set']['books']>> = {}, created = stamp): Rule => ({ id: `rule_${(n++).toString(36)}`, enabled: true, priority: 100, match: { field: 'description', op: 'contains', value: 'EXAMPLE CLOUD', caseSensitive: false, company: { id: CO, rows: 'own' }, ...extra }, set: { books: { ledger: 'software-hosting', ...set } }, createdAt: created, updatedAt: created });
 
@@ -442,13 +582,13 @@ function build(w: World): { rows: Transaction[]; journals: Journal[]; extras: { 
     const amount = fromMinor(-p.pence);
     const code = CODABLE[p.code]!;
     const vat = p.vat ? vatInGross(amount, day(p.day), 'standard') : 0;
-    const vatOk = vat !== 0 && Math.abs(toMinor(vat)) < p.pence;
+    const vatOk = vat !== 0 && Math.abs(toMinor(vat)) < p.pence && takesVat(code) && !VAT_BLOCKED[code];
     rows.push(tx('card', day(p.day), amount, 'EXAMPLE SUPPLIER', { company: paidFor, ...(p.coded ? { books: coded(code, vatOk ? { vat: { amount: vat, treatment: 'standard' } } : {}) } : {}) }));
   }
   for (const o of w.own) {
     const amount = fromMinor((o.out ? -1 : 1) * o.pence);
     const vat = o.vat ? vatInGross(amount, day(o.day), 'standard') : 0;
-    const vatOk = vat !== 0 && Math.abs(toMinor(vat)) < o.pence;
+    const vatOk = vat !== 0 && Math.abs(toMinor(vat)) < o.pence && takesVat(CODABLE[o.code]!) && !VAT_BLOCKED[CODABLE[o.code]!];
     rows.push(tx(o.out ? 'studio-card' : 'studio-bank', day(o.day), amount, 'EXAMPLE TRADE', o.coded ? { books: coded(CODABLE[o.code]!, vatOk ? { vat: { amount: vat, treatment: 'standard' } } : {}) } : {}));
   }
   for (const d of w.dlRows) {

@@ -279,6 +279,7 @@
                               "computer",
                               "office",
                               "furniture",
+                              "van",
                               "motor"
                             ]
                           },
@@ -286,6 +287,9 @@
                             "type": "integer",
                             "minimum": 1,
                             "maximum": 600
+                          },
+                          "connected": {
+                            "type": "boolean"
                           }
                         },
                         "required": [
@@ -296,6 +300,9 @@
                         "type": "integer",
                         "minimum": 1,
                         "maximum": 120
+                      },
+                      "invoiceToCompany": {
+                        "type": "boolean"
                       }
                     },
                     "required": [
@@ -2052,6 +2059,10 @@
                   "deadlinesFrom": {
                     "type": "string",
                     "description": "Calendar date, YYYY-MM-DD"
+                  },
+                  "ledgerFrom": {
+                    "type": "string",
+                    "description": "Calendar date, YYYY-MM-DD"
                   }
                 },
                 "required": [
@@ -2480,6 +2491,10 @@
                               "outside",
                               "reverse-charge"
                             ]
+                          },
+                          "claim": {
+                            "type": "string",
+                            "const": "reg111"
                           }
                         },
                         "required": [
@@ -2513,6 +2528,7 @@
                               "computer",
                               "office",
                               "furniture",
+                              "van",
                               "motor"
                             ]
                           },
@@ -2520,6 +2536,9 @@
                             "type": "integer",
                             "minimum": 1,
                             "maximum": 600
+                          },
+                          "connected": {
+                            "type": "boolean"
                           }
                         },
                         "required": [
@@ -2559,6 +2578,10 @@
                                     "outside",
                                     "reverse-charge"
                                   ]
+                                },
+                                "claim": {
+                                  "type": "string",
+                                  "const": "reg111"
                                 }
                               },
                               "required": [
@@ -2592,6 +2615,7 @@
                                     "computer",
                                     "office",
                                     "furniture",
+                                    "van",
                                     "motor"
                                   ]
                                 },
@@ -2599,6 +2623,9 @@
                                   "type": "integer",
                                   "minimum": 1,
                                   "maximum": 600
+                                },
+                                "connected": {
+                                  "type": "boolean"
                                 }
                               },
                               "required": [
@@ -2611,6 +2638,13 @@
                             "amount"
                           ]
                         }
+                      },
+                      "invoiceToCompany": {
+                        "type": "boolean"
+                      },
+                      "uncoded": {
+                        "type": "boolean",
+                        "const": true
                       }
                     }
                   },
@@ -2738,10 +2772,22 @@
                                 "outside",
                                 "reverse-charge"
                               ]
+                            },
+                            "side": {
+                              "type": "string",
+                              "enum": [
+                                "input",
+                                "output"
+                              ]
+                            },
+                            "claim": {
+                              "type": "string",
+                              "const": "reg111"
                             }
                           },
                           "required": [
-                            "treatment"
+                            "treatment",
+                            "side"
                           ]
                         },
                         "covers": {
@@ -2770,6 +2816,7 @@
                                 "computer",
                                 "office",
                                 "furniture",
+                                "van",
                                 "motor"
                               ]
                             },
@@ -2777,6 +2824,9 @@
                               "type": "integer",
                               "minimum": 1,
                               "maximum": 600
+                            },
+                            "connected": {
+                              "type": "boolean"
                             }
                           },
                           "required": [
@@ -2794,6 +2844,9 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 500
+                  },
+                  "opening": {
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -3270,6 +3323,10 @@
                           "outside",
                           "reverse-charge"
                         ]
+                      },
+                      "claim": {
+                        "type": "string",
+                        "const": "reg111"
                       }
                     },
                     "required": [
@@ -3303,6 +3360,7 @@
                           "computer",
                           "office",
                           "furniture",
+                          "van",
                           "motor"
                         ]
                       },
@@ -3310,6 +3368,9 @@
                         "type": "integer",
                         "minimum": 1,
                         "maximum": 600
+                      },
+                      "connected": {
+                        "type": "boolean"
                       }
                     },
                     "required": [
@@ -3349,6 +3410,10 @@
                                 "outside",
                                 "reverse-charge"
                               ]
+                            },
+                            "claim": {
+                              "type": "string",
+                              "const": "reg111"
                             }
                           },
                           "required": [
@@ -3382,6 +3447,7 @@
                                 "computer",
                                 "office",
                                 "furniture",
+                                "van",
                                 "motor"
                               ]
                             },
@@ -3389,6 +3455,9 @@
                               "type": "integer",
                               "minimum": 1,
                               "maximum": 600
+                            },
+                            "connected": {
+                              "type": "boolean"
                             }
                           },
                           "required": [
@@ -3401,6 +3470,13 @@
                         "amount"
                       ]
                     }
+                  },
+                  "invoiceToCompany": {
+                    "type": "boolean"
+                  },
+                  "uncoded": {
+                    "type": "boolean",
+                    "const": true
                   },
                   "setBy": {
                     "type": "string",
@@ -3437,6 +3513,10 @@
                       "user",
                       "agent"
                     ]
+                  },
+                  "fee": {
+                    "type": "number",
+                    "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
                   }
                 },
                 "required": [
@@ -4266,6 +4346,7 @@
                               "computer",
                               "office",
                               "furniture",
+                              "van",
                               "motor"
                             ]
                           },
@@ -4273,6 +4354,9 @@
                             "type": "integer",
                             "minimum": 1,
                             "maximum": 600
+                          },
+                          "connected": {
+                            "type": "boolean"
                           }
                         },
                         "required": [
@@ -4283,6 +4367,9 @@
                         "type": "integer",
                         "minimum": 1,
                         "maximum": 120
+                      },
+                      "invoiceToCompany": {
+                        "type": "boolean"
                       }
                     },
                     "required": [
@@ -5028,6 +5115,10 @@
                     "type": "string",
                     "description": "Calendar date, YYYY-MM-DD"
                   },
+                  "ledgerFrom": {
+                    "type": "string",
+                    "description": "Calendar date, YYYY-MM-DD"
+                  },
                   "filings": {
                     "default": [],
                     "maxItems": 1000,
@@ -5514,10 +5605,22 @@
                             "outside",
                             "reverse-charge"
                           ]
+                        },
+                        "side": {
+                          "type": "string",
+                          "enum": [
+                            "input",
+                            "output"
+                          ]
+                        },
+                        "claim": {
+                          "type": "string",
+                          "const": "reg111"
                         }
                       },
                       "required": [
-                        "treatment"
+                        "treatment",
+                        "side"
                       ]
                     },
                     "covers": {
@@ -5546,6 +5649,7 @@
                             "computer",
                             "office",
                             "furniture",
+                            "van",
                             "motor"
                           ]
                         },
@@ -5553,6 +5657,9 @@
                           "type": "integer",
                           "minimum": 1,
                           "maximum": 600
+                        },
+                        "connected": {
+                          "type": "boolean"
                         }
                       },
                       "required": [
@@ -5570,6 +5677,9 @@
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 500
+              },
+              "opening": {
+                "type": "boolean"
               },
               "id": {
                 "type": "string",

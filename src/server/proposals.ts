@@ -31,7 +31,7 @@ import { sameTerms, type TermsContent } from '../shared/terms';
 import { AccountSchema, AgreementSchema, BalanceSnapshotSchema, CompanyBooksSchema, CompanyBooksSetupSchema, CompanyFilingSchema, CompanySchema, EarmarkSetupSchema, EmploymentSchema, JournalSchema, POT_EFFECTS, ProposalSchema, TermsSchema, type BooksCoding, type Journal, type Earmarks, type Account, type Agreement, type BalanceSnapshot, type Category, type Company, type CompanyBooks, type CompanyFiling, type Terms, type Employment, type PensionArrangement, type Proposal, type ProposalInput, type ProposalStatus, type ProposedChange, type Provenance, type ReturnEntry, type Rule, type Transaction } from '../shared/schema';
 import { paidToText } from './analytics/agreements';
 import { BalanceEngine, type BalanceSource } from './analytics/balances';
-import { bookRulePatches, codingKey, companyBookRules, linkNeighbours, sameJournal } from './analytics/ledger';
+import { bookRulePatches, codingKey, companyBookRules, ledgerAsLeft, linkNeighbours, sameJournal, type LedgerSource } from './analytics/ledger';
 import { decisionProblem, earmarkFigures, setupProblem, withSetup } from './analytics/earmarks';
 import { earmarkAccountIds, EFFECT_WORDS } from '../shared/earmarks';
 import { taxReturn } from './analytics/taxreturn';
@@ -746,16 +746,19 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
         // Yours wins: a coding you set is not changed or taken away by a proposal.
         const was = store.transaction(t.id)?.books;
         if (was?.setBy === 'user') return { problem: `You coded it yourself (${codingWords(was)}), so a proposal leaves it to you: change it on the company’s Books tab if you want to.` };
-        if (c.books === null) {
-          if (!t.books) return { alreadySo: true };
-          patch(t, { books: undefined });
-          return { books: { what: `Takes away its coding (${codingWords(t.books)}).` } };
-        }
-        const next: BooksCoding = { ...c.books, setBy: 'agent' };
-        if (t.books && codingKey(t.books) === codingKey(next)) return { alreadySo: true };
         const marks = { account: (id: string) => store.account(id), company: (id: string | undefined) => store.company(id) };
         const place = codingPlace(t, marks);
         if ('problem' in place) return { problem: place.problem };
+        const keeper = store.company(place.companyId);
+        if (!keeper?.books) return { problem: `${keeper?.name ?? place.companyId}’s books are not kept here: set them up first.` };
+        // Taken away, it is left uncoded on purpose (the agent's say), so book rules do not code it again.
+        if (c.books === null) {
+          if (!t.books || t.books.uncoded) return { alreadySo: true };
+          patch(t, { books: { uncoded: true, setBy: 'agent' } });
+          return { books: { what: `Takes away its coding (${codingWords(t.books)}), and leaves it uncoded.` } };
+        }
+        const next: BooksCoding = { ...c.books, setBy: 'agent' };
+        if (t.books && codingKey(t.books) === codingKey(next)) return { alreadySo: true };
         const problems = codingProblems(t.amount, next, place.row);
         if (problems.length) return { problem: problems.join(' ') };
         if (t.companyLink?.rows.length && !linkableCoding(next)) return { problem: `${brief(t, accountName)} is linked to money between you and the company: it is the director’s loan, so it takes no other coding. Unlink it first.` };
@@ -767,6 +770,7 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
         if (!t) return { problem: gone(c.transaction) };
         const own = store.account(t.accountId);
         if (!own?.companyId) return { problem: `${brief(t, accountName)} is not a company account’s row: a link is set on the company’s row, naming the rows of yours that are the same money.` };
+        if (!store.company(own.companyId)?.books) return { problem: `${store.company(own.companyId)?.name ?? own.companyId}’s books are not kept here: set them up first.` };
         const was = store.transaction(t.id)?.companyLink;
         if (was && was.setBy === 'user') return { problem: `You linked it yourself, so a proposal leaves it to you: change it on the company’s Books tab if you want to.` };
         if (c.rows === null) {
@@ -951,7 +955,7 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
   // this proposal takes away), the statement or your own balances either side of it add up.
   const moves = changes.filter((c) => c.kind === 'remove_internal_move' && !leaveOut.has(c.key) && !out.results.get(c.key)?.problem && !out.results.get(c.key)?.alreadySo);
   if (moves.length) {
-    const engine = new BalanceEngine(sourceAsLeft(store, row));
+    const engine = new BalanceEngine(sourceAsLeft(store, row, { journals: { add: [...out.journals.values()], remove: new Set(out.journalsRemoved.keys()) } }));
     for (const c of moves) {
       const t = out.removed.get((c as Extract<ProposedChange, { kind: 'remove_internal_move' }>).transaction)!;
       const b = engine.between(t.accountId, t.date);
@@ -970,7 +974,7 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
     const engineWith = (keep?: string) => {
       const placed = (b: BalanceSnapshot) => (b.id === keep ? b.accountId : (out.moves.get(b.id)?.to ?? b.accountId));
       const all = store.balances();
-      return new BalanceEngine(sourceAsLeft(store, row, { accounts, balances: (id) => all.filter((b) => placed(b) === id) }));
+      return new BalanceEngine(sourceAsLeft(store, row, { accounts, balances: (id) => all.filter((b) => placed(b) === id), journals: { add: [...out.journals.values()], remove: new Set(out.journalsRemoved.keys()) } }));
     };
     const after = engineWith();
     const said = (b: { balance: number; date: string }) => `${formatMoney(b.balance)} on ${formatDate(b.date)}`;
@@ -1010,14 +1014,20 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
  * The data as a proposal's changes leave it, for the balance engine: your rows as `row` gives them
  * (undefined: removed), your accounts and balances (as given), and your companies, so a director's
  * loan's movements are worked out from the rows as the changes leave them (a mark set earlier in the
- * proposal counts).
+ * proposal counts). It is a ledger source too (analytics/ledger.ts, `ledgerAsLeft`): once a company keeps
+ * books here its loan is read from them, with the company's rows and journals as the changes leave them,
+ * as the app reads it.
  */
-export function sourceAsLeft(store: Store, row: (id: string) => Transaction | undefined, opts: { accounts?: Account[]; balances?: (id: string) => BalanceSnapshot[] } = {}): BalanceSource {
+export function sourceAsLeft(store: Store, row: (id: string) => Transaction | undefined, opts: { accounts?: Account[]; balances?: (id: string) => BalanceSnapshot[]; journals?: { add?: readonly Journal[]; remove?: ReadonlySet<string> } } = {}): BalanceSource & LedgerSource {
+  const balances = opts.balances ?? ((id: string) => store.balances(id));
   return {
+    // A company's books as the changes leave them, so its director's loan is read as the app reads it.
+    ...ledgerAsLeft(store, row, opts.journals),
+    account: (id) => opts.accounts?.find((a) => a.id === id) ?? store.account(id),
     accounts: opts.accounts ?? store.accounts,
     settings: store.settings,
     companies: store.companies,
-    balances: opts.balances ?? ((id) => store.balances(id)),
+    balances,
     transactions: (id) => (id ? store.transactions(id) : store.transactions()).flatMap((t) => row(t.id) ?? []),
   };
 }

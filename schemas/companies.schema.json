@@ -334,6 +334,10 @@
                 "type": "string",
                 "description": "Calendar date, YYYY-MM-DD"
               },
+              "ledgerFrom": {
+                "type": "string",
+                "description": "Calendar date, YYYY-MM-DD"
+              },
               "filings": {
                 "default": [],
                 "maxItems": 1000,

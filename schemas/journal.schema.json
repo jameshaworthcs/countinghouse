@@ -44,10 +44,22 @@
                   "outside",
                   "reverse-charge"
                 ]
+              },
+              "side": {
+                "type": "string",
+                "enum": [
+                  "input",
+                  "output"
+                ]
+              },
+              "claim": {
+                "type": "string",
+                "const": "reg111"
               }
             },
             "required": [
-              "treatment"
+              "treatment",
+              "side"
             ]
           },
           "covers": {
@@ -76,6 +88,7 @@
                   "computer",
                   "office",
                   "furniture",
+                  "van",
                   "motor"
                 ]
               },
@@ -83,6 +96,9 @@
                 "type": "integer",
                 "minimum": 1,
                 "maximum": 600
+              },
+              "connected": {
+                "type": "boolean"
               }
             },
             "required": [
@@ -100,6 +116,9 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 500
+    },
+    "opening": {
+      "type": "boolean"
     },
     "id": {
       "type": "string",

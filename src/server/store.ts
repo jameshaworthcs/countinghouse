@@ -1635,7 +1635,7 @@ export class Store extends EventEmitter {
             const { companyLink: _l, ...rest } = t;
             drops.push(rest);
           }
-        } else throw new StoreError(`${problem} The company’s row is linked to it by hand: unlink them on the company’s Books tab first.`, 409);
+        } else throw new StoreError(`${problem} The company’s row is linked to it by hand: unlink them in the company’s books first.`, 409);
       }
     }
     return drops;

@@ -1616,7 +1616,7 @@ export interface LedgerPosting {
    */
   source: { kind: 'row' | 'personal' | 'journal' | 'transfer' | 'link'; id: string; line?: number };
   /** Its VAT: the treatment, input (reclaimed) or output (charged), and whether this is the net amount or the tax. */
-  vat?: { treatment: VatTreatment; side: 'input' | 'output'; part: 'net' | 'tax' };
+  vat?: { treatment: VatTreatment; side: 'input' | 'output'; part: 'net' | 'tax'; claim?: 'reg111' };
   covers?: { from: string; to: string };
   asset?: { class: FixedAssetClass; months?: number };
   memo: string;
@@ -1624,7 +1624,7 @@ export interface LedgerPosting {
 
 /** What the ledger asks of you: a row to code, a missing side, a link that does not fit, money maybe counted twice. */
 export type LedgerCheck =
-  | { kind: 'uncoded'; transactionId: string; accountId: string; date: string; amount: number; description: string; side: 'company' | 'paid-for' }
+  | { kind: 'uncoded'; transactionId: string; accountId: string; date: string; amount: number; description: string; side: 'company' | 'paid-for'; leftUncoded?: true }
   | { kind: 'coding-invalid'; transactionId: string; accountId: string; date: string; amount: number; description: string; problem: string }
   | { kind: 'bank-not-imported'; transactionId: string; accountId: string; date: string; amount: number; description: string }
   | { kind: 'transfer-unmatched'; transactionId: string; accountId: string; date: string; amount: number; description: string }
@@ -1633,6 +1633,11 @@ export type LedgerCheck =
   | { kind: 'link-invalid'; companyRowIds: string[]; personalIds: string[]; problem: string }
   | { kind: 'journal-invalid'; journalId: string; date: string; memo: string; problem: string }
   | { kind: 'vat-unregistered'; source: LedgerPosting['source']; date: string; amount: number }
+  | { kind: 'reg111'; source: LedgerPosting['source']; date: string; problem: string }
+  | { kind: 'reverse-charge-rate'; source: LedgerPosting['source']; date: string; amount: number; expected: number }
+  | { kind: 'vat-no-invoice'; transactionId: string; accountId: string; date: string; amount: number; description: string }
+  | { kind: 'journal-double-count'; journalId: string; personalId: string; date: string; amount: number; description: string }
+  | { kind: 'loan-balance-differs'; balanceId: string; date: string; recorded: number; ledger: number; difference: number }
   | { kind: 'unbalanced'; source: LedgerPosting['source']; amount: number };
 
 /** GET /companies/:id/ledger: a company's postings in a date range, what is posted to each ledger there, and the ledger's checks. */

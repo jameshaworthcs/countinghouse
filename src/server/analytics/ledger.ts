@@ -12,12 +12,12 @@
 
 import type { BooksRowView, CompanyCodingResponse, CompanyLedgerResponse, DirectorLoanMovement, LedgerCheck, LedgerPosting, LinkSuggestion, LinkView } from '../../shared/api';
 import { directorLoanKind, markCounts, movesDirectorLoan, type MarkContext } from '../../shared/company';
-import { diffDays, type ISODate } from '../../shared/dates';
+import { diffDays, formatDate, type ISODate } from '../../shared/dates';
 import { CategoryIndex } from '../../shared/categories';
 import { Categoriser } from '../../shared/categorise';
-import { accountLedger, AUTO_LINK_DAYS, codingLines, codingPlace, codingProblems, companyLinkProblem, DOUBLE_COUNT_DAYS, isLinked, journalProblems, ledgerCode, linkableCoding, linkFeeMinor, linkGroups, linkTolerance, ruleBooksProblems, ruleCoding, type LinkGroup } from '../../shared/ledger';
+import { accountLedger, AUTO_LINK_DAYS, codingLines, codingPlace, codingProblems, companyLinkProblem, DOUBLE_COUNT_DAYS, isLinked, journalProblems, ledgerCode, linkableCoding, linkFeeMinor, linkGroups, linkTolerance, reg111Problem, REVERSE_CHARGE_TOLERANCE_MINOR, reverseChargeVat, ruleBooksProblems, ruleCoding, type LinkGroup } from '../../shared/ledger';
 import { fromMinor, toMinor } from '../../shared/money';
-import type { Account, BooksCoding, BooksLine, Company, Journal, Rule, Transaction } from '../../shared/schema';
+import type { Account, BalanceSnapshot, BooksCoding, BooksLine, Company, Journal, Rule, Transaction } from '../../shared/schema';
 import { ruleCatches } from '../categoriser';
 
 /** What the ledger reads: any record by id, your rows, and one company's own accounts, rows and journals. */
@@ -30,6 +30,8 @@ export interface LedgerSource extends MarkContext {
   companyTransactions(companyId: string): Transaction[];
   companyJournals(companyId: string): Journal[];
   bookRules(companyId?: string): Rule[];
+  /** The balances recorded on an account (your director's loan's, checked against the books). */
+  balances(accountId: string): BalanceSnapshot[];
 }
 
 /** Whether a balance engine's source can give a company's books (the store can; a test's plain object cannot). */
@@ -71,42 +73,62 @@ export function companyLedger(src: LedgerSource, companyId: string): Ledger {
   const company = src.company(companyId);
   const own = src.companyAccounts(companyId);
   const ownIds = new Set(own.map((a) => a.id));
+  const books = company?.books;
   const rows = src.companyTransactions(companyId);
   const postings: LedgerPosting[] = [];
   const checks: LedgerCheck[] = [];
   const counters = new Map<string, number>();
+  // Before the ledger's first day (books taken over mid-life) nothing posts but opening journals.
+  const before = (date: ISODate) => Boolean(books?.ledgerFrom && date < books.ledgerFrom);
+  // A source dated before incorporation is taken in on incorporation (CA 2006 s51: the promoter's until
+  // the company adopts it), its own day kept in its memo.
+  const day = (date: ISODate) => (books && date < books.incorporatedOn ? books.incorporatedOn : date);
+  const memoOf = (memo: string, date: ISODate) => (books && date < books.incorporatedOn ? `${memo} (${formatDate(date)}, before incorporation: taken in on incorporation)` : memo);
   const post = (source: LedgerPosting['source'], date: ISODate, ledger: string, minor: number, memo: string, extra: Pick<LedgerPosting, 'vat' | 'covers' | 'asset'> = {}) => {
     if (!minor) return;
     const key = `${source.kind}:${source.id}`;
     const n = counters.get(key) ?? 0;
     counters.set(key, n + 1);
-    postings.push({ id: `${key}:${n}`, date, ledger, amount: minor, source, memo, ...extra });
+    postings.push({ id: `${key}:${n}`, date: day(date), ledger, amount: minor, source, memo: memoOf(memo, date), ...extra });
   };
-  /** A coding's lines posted against what paid them (`against`: its own account's ledger, or the director's loan). */
+  /** A VAT claimed under reg 111, said of the source and line it is on, with the code that says whether it was goods or services. */
+  const reg111 = (source: LedgerPosting['source'], date: ISODate, code: string) => {
+    const problem = reg111Problem(code, date, books?.vat?.registeredFrom);
+    if (problem) checks.push({ kind: 'reg111', source: { kind: source.kind, id: source.id }, date, problem });
+  };
+  /** A coding's lines posted against what paid them (its own account's ledger, or the director's loan). */
   const postLines = (source: LedgerPosting['source'], date: ISODate, lines: readonly BooksLine[], memo: string) => {
     lines.forEach((l, line) => {
       const at = { ...source, ...(lines.length > 1 ? { line } : {}) };
       const gross = toMinor(l.amount);
       const vat = l.vat ? toMinor(l.vat.amount) : 0;
       const side = ledgerCode(l.ledger)?.kind === 'income' ? 'output' : 'input';
+      const claim = l.vat?.claim ? { claim: l.vat.claim } : {};
       const meta = { ...(l.covers ? { covers: l.covers } : {}), ...(l.asset ? { asset: l.asset } : {}) };
+      if (l.vat?.claim === 'reg111') reg111(at, date, l.ledger);
       if (l.vat?.treatment === 'reverse-charge') {
         post(at, date, l.ledger, -gross, memo, { ...meta, vat: { treatment: 'reverse-charge', side: 'input', part: 'net' } });
         post(at, date, 'vat', vat, memo, { vat: { treatment: 'reverse-charge', side: 'output', part: 'tax' } });
         post(at, date, 'vat', -vat, memo, { vat: { treatment: 'reverse-charge', side: 'input', part: 'tax' } });
+        // The notional VAT is the standard rate on what was paid: a penny out is asked about.
+        const expected = toMinor(reverseChargeVat(l.amount, date));
+        if (Math.abs(vat - expected) > REVERSE_CHARGE_TOLERANCE_MINOR) checks.push({ kind: 'reverse-charge-rate', source: { kind: at.kind, id: at.id }, date, amount: fromMinor(vat), expected: fromMinor(expected) });
       } else {
-        post(at, date, l.ledger, -(gross - vat), memo, { ...meta, ...(l.vat ? { vat: { treatment: l.vat.treatment, side, part: 'net' as const } } : {}) });
-        if (l.vat) post(at, date, 'vat', -vat, memo, { vat: { treatment: l.vat.treatment, side, part: 'tax' } });
+        post(at, date, l.ledger, -(gross - vat), memo, { ...meta, ...(l.vat ? { vat: { treatment: l.vat.treatment, side, part: 'net' as const, ...claim } } : {}) });
+        if (l.vat) post(at, date, 'vat', -vat, memo, { vat: { treatment: l.vat.treatment, side, part: 'tax', ...claim } });
       }
     });
   };
-  /** A row's coding when it fits (shared/ledger.ts); a check when it is there and does not. */
+  /** A row's coding when it fits (shared/ledger.ts); a check when it is there and does not. Left uncoded on purpose: none. */
   const fitting = (t: Transaction, side: 'company' | 'paid-for'): BooksLine[] | undefined => {
-    if (!t.books) return undefined;
+    if (!t.books || t.books.uncoded) return undefined;
     const problem = codingProblems(t.amount, t.books, side)[0];
     if (!problem) return codingLines(t.amount, t.books);
     checks.push({ kind: 'coding-invalid', transactionId: t.id, accountId: t.accountId, date: t.date, amount: t.amount, description: t.description, problem });
     return undefined;
+  };
+  const uncoded = (t: Transaction, side: 'company' | 'paid-for') => {
+    if (!t.books || t.books.uncoded) checks.push({ kind: 'uncoded', transactionId: t.id, accountId: t.accountId, date: t.date, amount: t.amount, description: t.description, side, ...(t.books?.uncoded ? { leftUncoded: true } : {}) });
   };
 
   // Links: the groups that fit count; the rest are checks, and their rows post as not linked.
@@ -119,6 +141,7 @@ export function companyLedger(src: LedgerSource, companyId: string): Ledger {
   // The company's own accounts' rows.
   const transfers = new Map<string, Transaction[]>();
   for (const t of rows) {
+    if (before(t.date)) continue;
     const account = src.account(t.accountId)!;
     const other = t.transferGroup && t.counterpartyAccountId ? src.account(t.counterpartyAccountId) : undefined;
     if (other && ownIds.has(other.id) && t.currency === 'GBP') {
@@ -141,7 +164,7 @@ export function companyLedger(src: LedgerSource, companyId: string): Ledger {
     if (lines) postLines(source, t.date, lines, memo);
     else {
       post(source, t.date, 'suspense', -toMinor(t.amount), memo);
-      if (!t.books) checks.push({ kind: 'uncoded', transactionId: t.id, accountId: t.accountId, date: t.date, amount: t.amount, description: t.description, side: 'company' });
+      uncoded(t, 'company');
     }
   }
   for (const [group, legs] of transfers) {
@@ -159,17 +182,23 @@ export function companyLedger(src: LedgerSource, companyId: string): Ledger {
 
   // Rows of yours with the company: paid for it, or lent to it (or repaid by it).
   const unlinkedLoans: Transaction[] = [];
+  const marked: Transaction[] = [];
   for (const t of src.transactions()) {
-    if (t.company?.id !== companyId || !movesDirectorLoan(t, src)) continue;
+    if (t.company?.id !== companyId || !movesDirectorLoan(t, src) || before(t.date)) continue;
+    marked.push(t);
     const source = { kind: 'personal' as const, id: t.id };
     const memo = brief(t);
     if (t.company.as === 'paid-for') {
       post(source, t.date, 'directors-loan', toMinor(t.amount), memo);
       const lines = fitting(t, 'paid-for');
-      if (lines) postLines(source, t.date, lines, memo);
-      else {
+      if (lines) {
+        postLines(source, t.date, lines, memo);
+        // The company reclaims VAT you paid only on a supply made to it, invoiced to it (VATA 1994 s24(1), reg 29(2)).
+        const claimed = lines.reduce((sum, l) => sum + (l.vat && l.vat.treatment !== 'reverse-charge' ? toMinor(l.vat.amount) : 0), 0);
+        if (claimed && !t.books?.invoiceToCompany) checks.push({ kind: 'vat-no-invoice', transactionId: t.id, accountId: t.accountId, date: t.date, amount: fromMinor(claimed), description: t.description });
+      } else {
         post(source, t.date, 'suspense', -toMinor(t.amount), memo);
-        if (!t.books) checks.push({ kind: 'uncoded', transactionId: t.id, accountId: t.accountId, date: t.date, amount: t.amount, description: t.description, side: 'paid-for' });
+        uncoded(t, 'paid-for');
       }
       continue;
     }
@@ -179,51 +208,79 @@ export function companyLedger(src: LedgerSource, companyId: string): Ledger {
     checks.push({ kind: 'bank-not-imported', transactionId: t.id, accountId: t.accountId, date: t.date, amount: t.amount, description: t.description });
     unlinkedLoans.push(t);
   }
-  // The fee each link's two sides differ by: the company's bank charge, and your loan moved by your own side.
+  // The fee each link's two sides differ by: the company's bank charge on the company row's day (the
+  // latest of them), and your loan moved by your own side.
   for (const g of counting) {
     const personal = g.personalIds.map((id) => src.transaction(id)!);
     const companyRows = g.companyIds.map((id) => src.transaction(id)!);
     const fee = linkFeeMinor(personal, companyRows);
-    if (!fee) continue;
-    const date = [...companyRows, ...personal].map((t) => t.date).sort().at(-1)!;
+    const date = companyRows.map((t) => t.date).sort().at(-1)!;
+    if (!fee || before(date)) continue;
     const source = { kind: 'link' as const, id: g.personalIds[0]! };
     post(source, date, 'bank-charges', fee, `Fee on ${brief(personal[0]!)}`);
     post(source, date, 'directors-loan', -fee, `Fee on ${brief(personal[0]!)}`);
   }
 
-  // Journals, as written.
+  // Journals, as written; before the ledger's first day, only opening balances.
+  const journalLoan: { j: Journal; minor: number }[] = [];
   for (const j of src.companyJournals(companyId)) {
+    if (before(j.date) && !j.opening) continue;
     const problem = journalProblems(j, (id) => ownIds.has(id))[0];
     if (problem) {
       checks.push({ kind: 'journal-invalid', journalId: j.id, date: j.date, memo: j.memo, problem });
       continue;
     }
+    // What a reg 111 claim was for: the journal's first line that is not VAT itself.
+    const what = j.lines.find((l) => l.ledger !== 'vat')?.ledger ?? 'vat';
     j.lines.forEach((l, line) => {
-      const side = ledgerCode(l.ledger)?.kind === 'income' ? 'output' : 'input';
-      post({ kind: 'journal', id: j.id, line }, j.date, l.ledger, toMinor(l.amount), j.memo, { ...(l.vat ? { vat: { treatment: l.vat.treatment, side, part: l.ledger === 'vat' ? ('tax' as const) : ('net' as const) } } : {}), ...(l.covers ? { covers: l.covers } : {}), ...(l.asset ? { asset: l.asset } : {}) });
+      const source = { kind: 'journal' as const, id: j.id, line };
+      if (l.vat?.claim === 'reg111') reg111(source, j.date, what);
+      post(source, j.date, l.ledger, toMinor(l.amount), j.memo, { ...(l.vat ? { vat: { treatment: l.vat.treatment, side: l.vat.side, part: l.ledger === 'vat' ? ('tax' as const) : ('net' as const), ...(l.vat.claim ? { claim: l.vat.claim } : {}) } } : {}), ...(l.covers ? { covers: l.covers } : {}), ...(l.asset ? { asset: l.asset } : {}) });
+      if (l.ledger === 'directors-loan') journalLoan.push({ j, minor: toMinor(l.amount) });
     });
   }
 
-  // Maybe the same money twice: a loan of yours with no company row linked, and a company row coded to the
-  // director's loan with no row of yours linked, the same amount the other way within 10 days.
-  // A company row you said is linked to none of yours (an empty link) is not asked about.
-  const dlRows = rows.filter((t) => !linkedCompany.has(t.id) && !t.companyLink && t.books?.ledger === 'directors-loan' && !t.books.lines?.length && !codingProblems(t.amount, t.books, 'company').length);
+  // Maybe the same money twice: a loan of yours with no company row linked, and a company row coded to
+  // the director's loan with no row of yours linked, the other way within 10 days, the two sides within
+  // a link's fee of each other. A company row you said is linked to none of yours is not asked about.
+  const dlRows = rows.filter((t) => !before(t.date) && !linkedCompany.has(t.id) && !t.companyLink && t.currency === 'GBP' && t.books?.ledger === 'directors-loan' && !t.books.lines?.length && !codingProblems(t.amount, t.books, 'company').length);
   for (const p of unlinkedLoans) {
     for (const c of dlRows) {
-      if (toMinor(p.amount) + toMinor(c.amount) !== 0 || Math.abs(diffDays(p.date, c.date)) > DOUBLE_COUNT_DAYS) continue;
+      const fee = linkFeeMinor([p], [c]);
+      if (Math.sign(p.amount) === Math.sign(c.amount) || fee < 0 || fee > linkTolerance(toMinor(p.amount)) || Math.abs(diffDays(p.date, c.date)) > DOUBLE_COUNT_DAYS) continue;
       checks.push({ kind: 'possible-double-count', personalId: p.id, companyRowId: c.id, date: c.date, amount: c.amount, description: c.description });
     }
   }
+  // A journal on the loan that says again what a row of yours says (the same way, within a link's fee, within 10 days).
+  for (const { j, minor } of journalLoan) {
+    for (const t of marked) {
+      const p = toMinor(t.amount);
+      if (Math.sign(p) !== Math.sign(minor) || Math.abs(p - minor) > linkTolerance(p) || Math.abs(diffDays(t.date, j.date)) > DOUBLE_COUNT_DAYS) continue;
+      checks.push({ kind: 'journal-double-count', journalId: j.id, personalId: t.id, date: j.date, amount: fromMinor(minor), description: t.description });
+    }
+  }
 
-  // VAT before the company was registered for it (or after it deregistered).
-  const vat = company?.books?.vat;
+  // VAT before the company was registered for it (or after it deregistered), unless claimed under reg 111.
+  const vat = books?.vat;
   const vatSources = new Map<string, LedgerPosting>();
-  for (const p of postings) if (p.vat?.part === 'tax' && (!vat || p.date < vat.registeredFrom || (vat.deregisteredOn && p.date > vat.deregisteredOn))) vatSources.set(`${p.source.kind}:${p.source.id}`, p);
+  for (const p of postings) if (p.vat?.part === 'tax' && !p.vat.claim && (!vat || p.date < vat.registeredFrom || (vat.deregisteredOn && p.date > vat.deregisteredOn))) vatSources.set(`${p.source.kind}:${p.source.id}`, p);
   for (const p of vatSources.values()) {
     // The VAT it carries: a reverse charge posts it both ways, so the larger side, not the two added.
     const tax = postings.filter((x) => x.source.kind === p.source.kind && x.source.id === p.source.id && x.vat?.part === 'tax');
     const [debits, credits] = [tax.reduce((s, x) => s + Math.max(0, x.amount), 0), tax.reduce((s, x) => s - Math.min(0, x.amount), 0)];
     checks.push({ kind: 'vat-unregistered', source: { kind: p.source.kind, id: p.source.id }, date: p.date, amount: fromMinor(Math.max(debits, credits)) });
+  }
+
+  // The balances recorded on your director's loan against the books: a recorded balance anchors the
+  // loan, so one the books do not add up to is said, with the difference, never passed over.
+  const loanAccount = company?.directorLoanAccountId;
+  if (loanAccount && books) {
+    const loanPostings = postings.filter((p) => p.ledger === 'directors-loan');
+    for (const b of src.balances(loanAccount)) {
+      const ledger = -loanPostings.filter((p) => p.date <= b.date).reduce((sum, p) => sum + p.amount, 0);
+      const recorded = toMinor(b.balance);
+      if (recorded !== ledger) checks.push({ kind: 'loan-balance-differs', balanceId: b.id, date: b.date, recorded: b.balance, ledger: fromMinor(ledger), difference: fromMinor(recorded - ledger) });
+    }
   }
 
   // Every source adds up to nothing: by construction, so this never fires; it is here to say so if it did.
@@ -305,7 +362,7 @@ export function ledgerDirectorLoanMovements(src: LedgerSource, companyId: string
 /** A company row that can be the other side of a loan of yours: not a leg of a transfer between its accounts, coded to nothing but the director's loan. */
 function linkable(src: LedgerSource, t: Transaction, ownIds: ReadonlySet<string>): boolean {
   const other = t.transferGroup && t.counterpartyAccountId ? src.account(t.counterpartyAccountId) : undefined;
-  return !(other && ownIds.has(other.id)) && linkableCoding(t.books) && t.amount !== 0;
+  return !(other && ownIds.has(other.id)) && linkableCoding(t.books) && t.amount !== 0 && t.currency === 'GBP';
 }
 
 /**
@@ -478,3 +535,22 @@ export function linkNeighbours(src: LedgerSource, companyId: string, personalIds
 
 /** A company's book rules (rules.json, `set.books`). */
 export const companyBookRules = (src: Pick<LedgerSource, 'bookRules'>, companyId: string): Rule[] => src.bookRules(companyId);
+
+/**
+ * A company's books as a proposal's changes leave them, for the balance engine's director's loan
+ * (proposals.ts, `sourceAsLeft`): every row as `row` gives it (undefined: removed), the company's
+ * journals with those the proposal writes and without those it takes away. So a proposal's checks read
+ * the loan from the same source the app does.
+ */
+export function ledgerAsLeft(src: Omit<LedgerSource, 'transactions' | 'balances'>, row: (id: string) => Transaction | undefined, journals: { add?: readonly Journal[]; remove?: ReadonlySet<string> } = {}): Omit<LedgerSource, 'transactions' | 'balances'> {
+  return {
+    account: (id) => src.account(id),
+    company: (id) => src.company(id),
+    transaction: (id) => row(id),
+    companyAccounts: (id) => src.companyAccounts(id),
+    companyTransactions: (id) => src.companyTransactions(id).flatMap((t) => row(t.id) ?? []),
+    companyJournals: (id) =>
+      [...src.companyJournals(id).filter((j) => !journals.remove?.has(j.id)), ...(journals.add ?? []).filter((j) => j.companyId === id)].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)),
+    bookRules: (id) => src.bookRules(id),
+  };
+}

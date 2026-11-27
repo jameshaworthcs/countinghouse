@@ -12,7 +12,9 @@ import type { AccountDetailResponse, CompanyCodingResponse, CompanyLedgerRespons
 import type { Account, Company, Journal, ProposalInput, Rule, Transaction } from '../src/shared/schema';
 import { createApp, type App } from '../src/server/app';
 import { loadConfig } from '../src/server/config';
+import { BalanceEngine } from '../src/server/analytics/balances';
 import { enrich } from '../src/server/enrich';
+import { sourceAsLeft } from '../src/server/proposals';
 import { transactionId } from '../src/server/ids';
 import { Store } from '../src/server/store';
 import { requiredScope } from '../src/server/tokens';
@@ -204,6 +206,117 @@ describe('a company’s general ledger through the app', () => {
     expect((await apply(gone.body.proposal.id)).proposal.status).toBe('applied');
     expect(store.journal(journal.id)).toBeUndefined();
     expect((await store.readProposal(gone.body.proposal.id))?.before?.journals?.[0]?.id).toBe(journal.id);
+  });
+
+  it('imports the other leg of a company transfer later: a rule’s coding on the leg already there goes', async () => {
+    for (const a of [acct('forge-tide', 'Forge Tide', 'current', { institutionId: 'tide', last4: '7788', companyId: CO, includeInNetWorth: false }), acct('forge-cot', 'Forge card', 'credit_card', { institutionId: 'capital-on-tap', companyId: CO, includeInNetWorth: false })]) await store.upsertAccount(a);
+    const upload = async (file: string, accountId: string) => {
+      const form = new FormData();
+      form.append('file', new Blob([await readFile(path.join(import.meta.dirname, 'fixtures', file))]), file);
+      form.append('accountId', accountId);
+      const up = await req('/api/imports', { method: 'POST', headers: { 'x-finance-csrf': '1' }, body: form });
+      expect(up.status).toBe(201);
+      const id = ((await up.json()) as { results: { id: string }[] }).results[0]!.id;
+      for (let i = 0; i < 400; i++) {
+        const r = (await (await req(`/api/imports/${id}`)).json()) as { status: string };
+        if (r.status === 'review') break;
+        await new Promise((ok) => setTimeout(ok, 25));
+      }
+      return id;
+    };
+    const commit = async (id: string) => (await req(`/api/imports/${id}/commit`, { method: 'POST', headers: { 'x-finance-csrf': '1' } })).status;
+    expect(await commit(await upload('tide.csv', 'forge-tide'))).toBe(200);
+    const repayment = store.transactions('forge-tide').find((t) => t.amount === -250)!;
+    // A rule coded it before its card's statement came.
+    await store.updateTransactions([{ id: repayment.id, patch: { books: { ledger: 'general-expenses', setBy: 'rule', ruleId: 'rule_gone' } } }], 'test: a rule coded it');
+    expect(await commit(await upload('capital-on-tap.csv', 'forge-cot'))).toBe(200);
+    expect(store.transaction(repayment.id)).toMatchObject({ counterpartyAccountId: 'forge-cot' });
+    expect(store.transaction(repayment.id)?.books).toBeUndefined();
+  });
+
+  it('does not match a company row you coded as the other leg of an import', async () => {
+    for (const a of [acct('forge-tide', 'Forge Tide', 'current', { institutionId: 'tide', last4: '7788', companyId: CO, includeInNetWorth: false }), acct('forge-cot', 'Forge card', 'credit_card', { institutionId: 'capital-on-tap', companyId: CO, includeInNetWorth: false })]) await store.upsertAccount(a);
+    const form = (file: string, accountId: string) => {
+      const f = new FormData();
+      return readFile(path.join(import.meta.dirname, 'fixtures', file)).then((b) => {
+        f.append('file', new Blob([b]), file);
+        f.append('accountId', accountId);
+        return f;
+      });
+    };
+    const run = async (file: string, accountId: string) => {
+      const up = await req('/api/imports', { method: 'POST', headers: { 'x-finance-csrf': '1' }, body: await form(file, accountId) });
+      const id = ((await up.json()) as { results: { id: string }[] }).results[0]!.id;
+      for (let i = 0; i < 400; i++) {
+        if (((await (await req(`/api/imports/${id}`)).json()) as { status: string }).status === 'review') break;
+        await new Promise((ok) => setTimeout(ok, 25));
+      }
+      return (await req(`/api/imports/${id}/commit`, { method: 'POST', headers: { 'x-finance-csrf': '1' } })).status;
+    };
+    expect(await run('tide.csv', 'forge-tide')).toBe(200);
+    const repayment = store.transactions('forge-tide').find((t) => t.amount === -250)!;
+    await store.updateTransactions([{ id: repayment.id, patch: { books: { ledger: 'debtors:other', setBy: 'user' } } }], 'test: you coded it');
+    expect(await run('capital-on-tap.csv', 'forge-cot')).toBe(200);
+    expect(store.transaction(repayment.id)?.transferGroup).toBeUndefined();
+    expect(store.transaction(repayment.id)?.books).toEqual({ ledger: 'debtors:other', setBy: 'user' });
+  });
+
+  it('leaves a row uncoded when you take its coding away, so book rules leave it; reset, they code it again', async () => {
+    await send('POST', `/api/companies/${CO}/book-rules`, { enabled: true, priority: 100, match: { field: 'description', op: 'contains', value: 'EXAMPLE CLOUD', caseSensitive: false, company: { id: CO, rows: 'own' } }, set: { books: { ledger: 'software-hosting' } } });
+    expect(store.transaction(cloud.id)?.books?.setBy).toBe('rule');
+    expect((await send('PUT', `/api/companies/${CO}/rows/${cloud.id}/books`, { books: null })).status).toBe(200);
+    expect(store.transaction(cloud.id)?.books).toEqual({ uncoded: true, setBy: 'user' });
+    await enrich(store);
+    expect(store.transaction(cloud.id)?.books).toEqual({ uncoded: true, setBy: 'user' });
+    expect((await send('PUT', `/api/companies/${CO}/rows/${cloud.id}/books`, { books: null, reset: true })).status).toBe(200);
+    expect(store.transaction(cloud.id)?.books).toMatchObject({ ledger: 'software-hosting', setBy: 'rule' });
+  });
+
+  it('takes a fee you confirm on your own link, larger than a link allows by itself', async () => {
+    const big = tx('current', '2025-06-20', -2000, 'TO FORGE ACCOUNT', { company: { id: CO, as: 'loan', setBy: 'user' } });
+    const net = tx('forge-bank', '2025-06-21', 1940, 'FROM J BLOGGS VIA EXAMPLE PAY');
+    await store.addTransactions([big, net], 'test: a big fee');
+    expect((await send('PUT', `/api/companies/${CO}/rows/${net.id}/link`, { rows: [big.id] })).status).toBe(422);
+    expect((await send('PUT', `/api/companies/${CO}/rows/${net.id}/link`, { rows: [big.id], fee: 61 })).status).toBe(422);
+    expect((await send('PUT', `/api/companies/${CO}/rows/${net.id}/link`, { rows: [big.id], fee: 60 })).status).toBe(200);
+    expect(store.transaction(net.id)?.companyLink).toEqual({ rows: [big.id], setBy: 'user', fee: 60 });
+  });
+
+  it('works out links and book rules only for a company whose books are kept here', async () => {
+    const { books: _b, ...withoutBooks } = store.company(CO)!;
+    await store.upsertCompany(withoutBooks);
+    await store.setBookRules(CO, [{ id: 'rule_forgecloud', enabled: true, priority: 100, match: { field: 'description', op: 'contains', value: 'EXAMPLE CLOUD', caseSensitive: false, company: { id: CO, rows: 'own' } }, set: { books: { ledger: 'software-hosting' } }, createdAt: stamp, updatedAt: stamp }]);
+    await enrich(store);
+    expect(store.transaction(arrived.id)?.companyLink).toBeUndefined();
+    expect(store.transaction(cloud.id)?.books).toBeUndefined();
+    // Nor does an agent code or link for it.
+    const res = await propose({ title: 'Code', summary: 'Too soon.', changes: [{ key: 'a', kind: 'set_books', why: 'Hosting.', transaction: cloud.id, books: { ledger: 'software-hosting' } }, { key: 'b', kind: 'link_company', why: 'Same money.', transaction: arrived.id, rows: [lent.id] }] });
+    expect(res.status).toBe(422);
+    expect(res.body.problems?.map((x) => x.problem)).toEqual([expect.stringMatching(/books are not kept here/), expect.stringMatching(/books are not kept here/)]);
+  });
+
+  it('drops a rule’s coding from a company row that becomes a transfer leg, even one outside a scoped re-working', async () => {
+    await store.upsertAccount({ ...store.account('forge-card')!, aliases: ['Forge Card'] });
+    const paid = tx('forge-bank', '2025-06-10', -400, 'PAYMENT TO FORGE CARD');
+    const received = tx('forge-card', '2025-06-11', 400, 'PAYMENT RECEIVED THANK YOU', { books: { ledger: 'general-expenses', setBy: 'rule', ruleId: 'rule_gone' } });
+    await store.addTransactions([paid, received], 'test: a card paid');
+    // Re-working only the bank's row (as separateSides does for one account's rows) links its card leg too.
+    await enrich(store, { rows: new Set([paid.id]) });
+    expect(store.transaction(received.id)?.transferGroup).toBeTruthy();
+    expect(store.transaction(received.id)?.books).toBeUndefined();
+    // One you coded is never made a leg.
+    const yours = tx('forge-card', '2025-06-12', 90, 'PAYMENT RECEIVED THANK YOU', { books: { ledger: 'debtors:other', setBy: 'user' } });
+    const out = tx('forge-bank', '2025-06-12', -90, 'PAYMENT TO FORGE CARD');
+    await store.addTransactions([yours, out], 'test: one you coded');
+    await enrich(store);
+    expect(store.transaction(yours.id)?.transferGroup).toBeUndefined();
+  });
+
+  it('reads the director’s loan from the books in a proposal’s checks, as the app does', async () => {
+    await store.putJournal({ id: 'jnl_00000000000c', companyId: CO, date: '2025-06-30', memo: 'Dividend credited', lines: [{ ledger: 'dividends', amount: 400 }, { ledger: 'directors-loan', amount: -400 }], createdBy: 'owner', createdAt: stamp, updatedAt: stamp }, 'test: dividend');
+    const left = new BalanceEngine(sourceAsLeft(store, (id) => store.transaction(id)));
+    for (const d of ['2025-06-01', '2025-06-03', '2025-06-30', '2025-07-31']) expect(left.balanceOn('forge-loan', d)).toEqual(app.ctx.analytics.engine.balanceOn('forge-loan', d));
+    expect(left.balanceOn('forge-loan', '2025-07-31')?.value).toBe(750 + 60 + 400);
   });
 
   it('reads a hand edit that left a coding, a link or a journal where it does not fit as a warning, never as data lost', async () => {

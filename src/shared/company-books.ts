@@ -412,6 +412,7 @@ export function booksProblems(books: CompanyBooksSetup & { filings?: readonly Co
   };
   periodsProblems(books.periods, 'The accounting period', ACCOUNTING_PERIOD_RULES.maxMonths, 'CA 2006 s392(5)');
   periodsProblems(books.ctPeriods, 'The Corporation Tax period', CT_PERIOD_RULES.maxMonths, 'CTA 2009 s10(1)(a)');
+  if (books.ledgerFrom && books.ledgerFrom < inc) out.push(`Its books start on ${day(books.ledgerFrom)}, before it was incorporated (${day(inc)}).`);
   if (books.tradeStartedOn && books.tradeStartedOn < inc) out.push(`Trade started on ${day(books.tradeStartedOn)}, before the company was incorporated (${day(inc)}).`);
   if (books.withinChargeFrom && books.withinChargeFrom < inc) out.push(`It came within the charge to Corporation Tax on ${day(books.withinChargeFrom)}, before it was incorporated (${day(inc)}).`);
   if (books.tradeStartedOn && books.withinChargeFrom && books.tradeStartedOn < books.withinChargeFrom) out.push(`Trade started on ${day(books.tradeStartedOn)}, before it came within the charge to Corporation Tax (${day(books.withinChargeFrom)}): trading brings a company within the charge (CTA 2009 s9(2)).`);

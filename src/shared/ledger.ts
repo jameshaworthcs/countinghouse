@@ -11,7 +11,7 @@
 // Pure: no store. Amounts here are pounds as stored, worked in integer pence (shared/money.ts).
 
 import { markCounts, type MarkContext } from './company';
-import { formatDate, type ISODate } from './dates';
+import { addMonths, addYears, diffDays, formatDate, type ISODate } from './dates';
 import { formatMoney, fromMinor, toMinor } from './money';
 import type { Account, BooksCoding, BooksLine, Journal, Rule, Transaction, VatTreatment } from './schema';
 import { lastDayOfMonths, vatRateOn } from './uk';
@@ -36,20 +36,35 @@ export type ProfitLine = 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G';
 
 /**
  * How Corporation Tax treats a code, for the tax computation later: trading income, non-trading income
- * (interest received: a loan relationship credit), an allowable or a disallowable expense, capital (a
- * fixed asset's cost: capital allowances instead of a deduction), the tax itself, or none (the rest of
- * the balance sheet).
+ * (interest received: a loan relationship credit), an allowable or a disallowable expense, a loan
+ * relationship debit (interest paid, CTA 2009 Part 5), capital (a fixed asset's cost, or equipment
+ * expensed in the accounts: capital allowances instead of a deduction, CTA 2009 s53), the tax itself,
+ * or none (the rest of the balance sheet).
  */
-export type CtTreatment = 'trading-income' | 'non-trading-income' | 'allowable' | 'disallowable' | 'capital' | 'tax' | 'none';
+export type CtTreatment = 'trading-income' | 'non-trading-income' | 'allowable' | 'disallowable' | 'loan-relationship' | 'capital' | 'tax' | 'none';
 
-/** The classes of fixed asset a cost can be capitalised in. Motor vehicles have capital allowance rules of their own, not worked out here. */
-export const FIXED_ASSET_CLASSES = ['computer', 'office', 'furniture', 'motor'] as const;
+/**
+ * The classes of fixed asset a cost can be capitalised in. Cars have capital allowance rules of their
+ * own (CAA 2001 Part 2 Ch 10A), not worked out here, and their input VAT is blocked (`VAT_BLOCKED`); a
+ * van is plant like any other.
+ */
+export const FIXED_ASSET_CLASSES = ['computer', 'office', 'furniture', 'van', 'motor'] as const;
 export type FixedAssetClass = (typeof FIXED_ASSET_CLASSES)[number];
 export const FIXED_ASSET_CLASS_META: Record<FixedAssetClass, { name: string; capitalAllowances: 'supported' | 'not-supported' }> = {
   computer: { name: 'Computer equipment', capitalAllowances: 'supported' },
   office: { name: 'Office equipment', capitalAllowances: 'supported' },
   furniture: { name: 'Furniture and fittings', capitalAllowances: 'supported' },
-  motor: { name: 'Motor vehicles', capitalAllowances: 'not-supported' },
+  van: { name: 'Vans and commercial vehicles', capitalAllowances: 'supported' },
+  motor: { name: 'Cars', capitalAllowances: 'not-supported' },
+};
+
+/**
+ * Codes whose input VAT may not be reclaimed: business entertainment (Value Added Tax (Input Tax)
+ * Order 1992, SI 1992/3222, art 5) and cars (art 7). Their VAT is part of their cost.
+ */
+export const VAT_BLOCKED: Readonly<Record<string, string>> = {
+  entertainment: 'VAT on business entertainment cannot be reclaimed (Input Tax Order 1992, SI 1992/3222, art 5)',
+  'fixed-assets:motor:cost': 'VAT on a car cannot be reclaimed (Input Tax Order 1992, SI 1992/3222, art 7): a van’s can, coded as one',
 };
 
 export interface LedgerCode {
@@ -58,8 +73,10 @@ export interface LedgerCode {
   kind: LedgerKind;
   /** A balance sheet code: the line a debit balance and a credit balance is shown on (a bank account overdrawn is a creditor). */
   sheet?: { debit: SheetLine; credit: SheetLine };
-  /** A profit and loss code: its line. */
+  /** A profit and loss code: its line (for a code that can be either, its line when the balance is a credit). */
   profit?: ProfitLine;
+  /** A profit and loss code whose line depends on its balance: the line when it is a debit (a loss on disposal is an other charge). */
+  profitDebit?: ProfitLine;
   ct: CtTreatment;
   /** A payment can be coded to it (`books`); the rest are posted by the ledger itself, or written in journals. */
   codable: boolean;
@@ -78,12 +95,17 @@ const assetLine = (debit: SheetLine, credit: SheetLine = 'E') => ({ debit, credi
 
 const BASE: LedgerCode[] = [
   // Assets.
-  { code: 'share-capital-unpaid', name: 'Called up share capital not paid', kind: 'asset', sheet: both('A'), ct: 'none', codable: false, hint: 'Shares issued and not yet paid for (a journal at incorporation).' },
+  { code: 'share-capital-unpaid', name: 'Called up share capital not paid', kind: 'asset', sheet: both('A'), ct: 'none', codable: true, hint: 'Shares issued and not yet paid for (a journal at incorporation); the payment for them, when it comes, is coded here.' },
   ...FIXED_ASSET_CLASSES.flatMap((c): LedgerCode[] => [
     { code: `fixed-assets:${c}:cost`, name: `${FIXED_ASSET_CLASS_META[c].name}: cost`, kind: 'asset', sheet: both('B'), ct: 'capital', codable: true, asset: { class: c, part: 'cost' }, hint: 'Equipment kept and used for more than a year, capitalised rather than spent.' },
     { code: `fixed-assets:${c}:depreciation`, name: `${FIXED_ASSET_CLASS_META[c].name}: depreciation`, kind: 'asset', sheet: both('B'), ct: 'none', codable: false, asset: { class: c, part: 'depreciation' }, hint: 'What its cost has been written down by (worked out from its life).' },
   ]),
+  { code: 'intangible-assets:cost', name: 'Intangible assets: cost', kind: 'asset', sheet: both('B'), ct: 'capital', codable: true, hint: 'Goodwill, software developed or bought to keep, trade marks (CTA 2009 Part 8 for tax).' },
+  { code: 'intangible-assets:amortisation', name: 'Intangible assets: amortisation', kind: 'asset', sheet: both('B'), ct: 'none', codable: false, hint: 'What their cost has been written down by.' },
+  { code: 'investments', name: 'Investments', kind: 'asset', sheet: both('B'), ct: 'none', codable: true, hint: 'Shares and other investments held for the long term.' },
+  { code: 'stock', name: 'Stock', kind: 'asset', sheet: assetLine('C'), ct: 'none', codable: false, hint: 'Goods held to sell, at the period end (a journal).' },
   { code: 'debtors:trade', name: 'Trade debtors', kind: 'asset', sheet: assetLine('C'), ct: 'none', codable: true, hint: 'Invoices sent and not yet paid.' },
+  { code: 'debtors:other', name: 'Other debtors', kind: 'asset', sheet: assetLine('C'), ct: 'none', codable: true, hint: 'Money owed to the company that is not for its sales: a deposit, a refund due, money in transit at a period end.' },
   { code: 'prepayments', name: 'Prepayments', kind: 'asset', sheet: both('D'), ct: 'none', codable: false, hint: 'Costs paid for a later period.' },
   { code: 'accrued-income', name: 'Accrued income', kind: 'asset', sheet: both('D'), ct: 'none', codable: false, hint: 'Income earned and not yet invoiced.' },
   { code: 'bank', name: 'Bank', kind: 'asset', sheet: assetLine('C'), ct: 'none', codable: false, account: true, hint: 'The company’s current and savings accounts, one each.' },
@@ -92,20 +114,24 @@ const BASE: LedgerCode[] = [
   { code: 'bank-not-imported', name: 'Company bank: not imported', kind: 'asset', sheet: assetLine('C'), ct: 'none', codable: false, clearing: true, hint: 'Money between you and the company whose company side is not in its imported accounts.' },
   // Liabilities.
   { code: 'card', name: 'Credit card', kind: 'liability', sheet: { debit: 'C', credit: 'E' }, ct: 'none', codable: false, account: true, hint: 'The company’s cards, one each.' },
-  { code: 'loans', name: 'Loans', kind: 'liability', sheet: { debit: 'C', credit: 'H' }, ct: 'none', codable: false, account: true, hint: 'The company’s loan accounts, one each.' },
+  { code: 'loans', name: 'Loans', kind: 'liability', sheet: { debit: 'C', credit: 'H' }, ct: 'none', codable: false, account: true, hint: 'The company’s loan accounts, one each: due after more than a year.' },
+  { code: 'loans-due-within-year', name: 'Loans due within a year', kind: 'liability', sheet: { debit: 'C', credit: 'E' }, ct: 'none', codable: false, hint: 'The part of its loans due within a year of the period end, moved here from the loan account by a journal at the period end.' },
   { code: 'creditors:trade', name: 'Trade creditors', kind: 'liability', sheet: { debit: 'C', credit: 'E' }, ct: 'none', codable: true, hint: 'Bills received and not yet paid.' },
+  { code: 'creditors:other', name: 'Other creditors', kind: 'liability', sheet: { debit: 'C', credit: 'E' }, ct: 'none', codable: true, hint: 'Money the company owes that is not a bill for supplies, tax or a loan.' },
+  { code: 'net-wages', name: 'Net wages payable', kind: 'liability', sheet: { debit: 'C', credit: 'E' }, ct: 'none', codable: true, hint: 'Pay due after tax: a payroll journal credits it, and the payment of the pay is coded here.' },
   { code: 'paye', name: 'PAYE and National Insurance', kind: 'liability', sheet: { debit: 'C', credit: 'E' }, ct: 'none', codable: true, hint: 'Tax and National Insurance owed to HMRC on pay: a payment to HMRC for PAYE.' },
   { code: 'corporation-tax', name: 'Corporation Tax', kind: 'liability', sheet: { debit: 'C', credit: 'E' }, ct: 'none', codable: true, hint: 'Corporation Tax owed: a payment of it to HMRC.' },
   { code: 'directors-loan', name: 'Director’s loan', kind: 'liability', sheet: { debit: 'C', credit: 'E' }, ct: 'none', codable: true, hint: 'Money between the company and you that is not pay or a dividend: what it owes you (or you owe it).' },
   { code: 'accruals', name: 'Accruals', kind: 'liability', sheet: { debit: 'D', credit: 'J' }, ct: 'none', codable: false, hint: 'Costs of the period not yet billed.' },
   { code: 'deferred-income', name: 'Deferred income', kind: 'liability', sheet: { debit: 'D', credit: 'J' }, ct: 'none', codable: false, hint: 'Income received for a later period.' },
   // Capital and reserves.
-  { code: 'share-capital', name: 'Share capital', kind: 'equity', sheet: both('K'), ct: 'none', codable: true, hint: 'What shareholders paid for their shares.' },
+  { code: 'share-capital', name: 'Share capital', kind: 'equity', sheet: both('K'), ct: 'none', codable: true, hint: 'The nominal value of the shares issued. Issued and not yet paid for, the other side is called up share capital not paid, which their payment clears.' },
   { code: 'retained-earnings', name: 'Retained earnings', kind: 'equity', sheet: both('K'), ct: 'none', codable: false, hint: 'Profits kept from earlier years.' },
   { code: 'dividends', name: 'Dividends', kind: 'equity', sheet: both('K'), ct: 'none', codable: true, hint: 'Dividends paid to shareholders: from reserves, not a cost.' },
   // Income.
   { code: 'turnover', name: 'Sales', kind: 'income', profit: 'A', ct: 'trading-income', codable: true, hint: 'What the company is paid for its work or goods.' },
   { code: 'interest-receivable', name: 'Interest received', kind: 'income', profit: 'B', ct: 'non-trading-income', codable: true, hint: 'Interest on the company’s bank accounts.' },
+  { code: 'disposals', name: 'Profit or loss on disposal of fixed assets', kind: 'income', profit: 'B', profitDebit: 'F', ct: 'capital', codable: true, hint: 'A fixed asset sold: what it fetched against what it stood at (balancing adjustments for tax instead).' },
   // Expenses.
   { code: 'cost-of-sales', name: 'Cost of sales', kind: 'expense', profit: 'C', ct: 'allowable', codable: true, hint: 'Materials and subcontractors bought for the work sold.' },
   { code: 'directors-salaries', name: 'Directors’ salaries', kind: 'expense', profit: 'D', ct: 'allowable', codable: true, hint: 'Pay to directors, before tax.' },
@@ -114,7 +140,7 @@ const BASE: LedgerCode[] = [
   { code: 'depreciation', name: 'Depreciation', kind: 'expense', profit: 'E', ct: 'disallowable', codable: false, hint: 'Fixed assets written down (capital allowances are given instead).' },
   { code: 'software-hosting', name: 'Software and hosting', kind: 'expense', profit: 'F', ct: 'allowable', codable: true },
   { code: 'bank-charges', name: 'Bank charges', kind: 'expense', profit: 'F', ct: 'allowable', codable: true },
-  { code: 'interest-payable', name: 'Interest paid', kind: 'expense', profit: 'F', ct: 'allowable', codable: true },
+  { code: 'interest-payable', name: 'Interest paid', kind: 'expense', profit: 'F', ct: 'loan-relationship', codable: true, hint: 'A loan relationship debit for tax (CTA 2009 Part 5).' },
   { code: 'professional-fees', name: 'Accountancy and legal fees', kind: 'expense', profit: 'F', ct: 'allowable', codable: true },
   { code: 'companies-house-fees', name: 'Companies House fees', kind: 'expense', profit: 'F', ct: 'allowable', codable: true, hint: 'A confirmation statement’s fee (incorporation’s is a formation cost).' },
   { code: 'formation-costs', name: 'Formation costs', kind: 'expense', profit: 'F', ct: 'disallowable', codable: true, hint: 'Setting the company up: capital in nature, so not allowable.' },
@@ -122,11 +148,13 @@ const BASE: LedgerCode[] = [
   { code: 'rent', name: 'Rent', kind: 'expense', profit: 'F', ct: 'allowable', codable: true },
   { code: 'telephone-internet', name: 'Telephone and internet', kind: 'expense', profit: 'F', ct: 'allowable', codable: true },
   { code: 'travel', name: 'Travel', kind: 'expense', profit: 'F', ct: 'allowable', codable: true },
-  { code: 'small-equipment', name: 'Small equipment', kind: 'expense', profit: 'F', ct: 'allowable', codable: true, hint: 'Equipment too small to capitalise.' },
+  { code: 'small-equipment', name: 'Small equipment', kind: 'expense', profit: 'F', ct: 'capital', codable: true, hint: 'Equipment too small to capitalise in the accounts: still capital for tax (CTA 2009 s53), so it takes capital allowances (the annual investment allowance), not a deduction.' },
   { code: 'advertising', name: 'Advertising', kind: 'expense', profit: 'F', ct: 'allowable', codable: true },
   { code: 'insurance', name: 'Insurance', kind: 'expense', profit: 'F', ct: 'allowable', codable: true },
   { code: 'office-costs', name: 'Office costs', kind: 'expense', profit: 'F', ct: 'allowable', codable: true, hint: 'Stationery, postage and the like.' },
-  { code: 'entertainment', name: 'Entertaining', kind: 'expense', profit: 'F', ct: 'disallowable', codable: true, hint: 'Entertaining clients: not allowable (CTA 2009 s1298).' },
+  { code: 'entertainment', name: 'Entertaining', kind: 'expense', profit: 'F', ct: 'disallowable', codable: true, hint: 'Entertaining clients: not allowable (CTA 2009 s1298), and its VAT is not reclaimable.' },
+  { code: 'penalties', name: 'Penalties and fines', kind: 'expense', profit: 'F', ct: 'disallowable', codable: true, hint: 'Tax penalties and interest on them (CTA 2009 s1303), and fines: not allowable.' },
+  { code: 'donations', name: 'Donations', kind: 'expense', profit: 'F', ct: 'disallowable', codable: true, hint: 'Gifts to charity: not a trading expense; qualifying charitable donations relief is given separately.' },
   { code: 'general-expenses', name: 'General expenses', kind: 'expense', profit: 'F', ct: 'allowable', codable: true },
   { code: 'corporation-tax-charge', name: 'Corporation Tax charge', kind: 'expense', profit: 'G', ct: 'tax', codable: false, hint: 'The year’s Corporation Tax (a journal).' },
 ];
@@ -176,6 +204,13 @@ export const VAT_TREATMENT_LABELS: Record<VatTreatment, string> = {
   'reverse-charge': 'Reverse charge',
 };
 
+/** Whether a code may carry VAT: income, expenses, and the cost of fixed and intangible assets; never another balance sheet code. */
+export function takesVat(code: string): boolean {
+  const entry = ledgerCode(code);
+  if (!entry) return false;
+  return entry.kind === 'income' || entry.kind === 'expense' || entry.asset?.part === 'cost' || code === 'intangible-assets:cost';
+}
+
 /** Treatments that carry no VAT on the payment. */
 const NO_VAT: ReadonlySet<VatTreatment> = new Set(['zero', 'exempt', 'outside']);
 
@@ -203,7 +238,8 @@ export function reverseChargeVat(amount: number, date: ISODate): number {
 // ─── Coding a payment ────────────────────────────────────────────────────────────────────────────
 
 /** A coding's lines, as one list: its own ledger as one line of the whole amount, or its split. */
-export function codingLines(amount: number, books: Pick<BooksCoding, 'ledger' | 'vat' | 'covers' | 'asset' | 'lines'>): BooksLine[] {
+export function codingLines(amount: number, books: Pick<BooksCoding, 'ledger' | 'vat' | 'covers' | 'asset' | 'lines' | 'uncoded'>): BooksLine[] {
+  if (books.uncoded) return [];
   if (books.lines?.length) return books.lines;
   return books.ledger ? [{ ledger: books.ledger, amount, ...(books.vat ? { vat: books.vat } : {}), ...(books.covers ? { covers: books.covers } : {}), ...(books.asset ? { asset: books.asset } : {}) }] : [];
 }
@@ -243,8 +279,11 @@ export function codingPlace(t: Pick<Transaction, 'accountId' | 'amount' | 'curre
  * - a fixed asset only on a fixed asset's cost, of that class, with a life in whole months;
  * - a period it covers that does not end before it starts.
  */
-export function codingProblems(amount: number, books: Pick<BooksCoding, 'ledger' | 'vat' | 'covers' | 'asset' | 'lines'>, row: CodedRow): string[] {
+export function codingProblems(amount: number, books: Pick<BooksCoding, 'ledger' | 'vat' | 'covers' | 'asset' | 'lines' | 'uncoded' | 'invoiceToCompany'>, row: CodedRow): string[] {
   const out: string[] = [];
+  // Left uncoded on purpose: nothing else beside it.
+  if (books.uncoded) return books.ledger || books.lines?.length || books.vat || books.covers || books.asset ? ['Left uncoded, it has no ledger, lines or VAT.'] : [];
+  if (books.invoiceToCompany !== undefined && row !== 'paid-for') out.push('Whether the invoice is addressed to the company is said only of a payment of yours for it.');
   if (books.lines?.length && (books.ledger || books.vat || books.covers || books.asset)) out.push('A split codes each line: give its ledger, VAT, period and asset on the lines, not beside them.');
   if (!books.lines?.length && !books.ledger) out.push('Give a ledger to code it to, or split it across two or more.');
   if (books.lines && books.lines.length === 1) out.push('A split has two lines or more: code it to one ledger instead.');
@@ -265,6 +304,10 @@ export function codingProblems(amount: number, books: Pick<BooksCoding, 'ledger'
     if (row === 'paid-for' && l.ledger === 'directors-loan') out.push(`${where}a payment of yours for the company moves your director’s loan already: code it to what it bought.`);
     if (toMinor(l.amount) === 0) out.push(`${where}a line of nothing.`);
     out.push(...vatProblems(l, where));
+    if (l.vat && !takesVat(l.ledger)) out.push(`${where}${entry.name} takes no VAT: VAT goes on income, expenses and a fixed asset’s cost.`);
+    if (l.vat?.treatment === 'reverse-charge' && entry.kind === 'income') out.push(`${where}a reverse charge is the buyer’s: a sale of services to a business abroad is outside the scope of UK VAT, not a reverse charge.`);
+    if (l.vat && toMinor(l.vat.amount) !== 0 && VAT_BLOCKED[l.ledger]) out.push(`${where}${VAT_BLOCKED[l.ledger]}: code the whole amount, VAT included, with no VAT.`);
+    if (l.vat?.claim === 'reg111' && (ledgerCode(l.ledger)?.kind === 'income' || l.vat.treatment === 'reverse-charge' || NO_VAT.has(l.vat.treatment))) out.push(`${where}a claim under reg 111 is input tax charged on a purchase.`);
     if (l.asset && entry.asset?.part !== 'cost') out.push(`${where}a fixed asset is coded to a fixed asset’s cost.`);
     if (l.asset && entry.asset && l.asset.class !== entry.asset.class) out.push(`${where}${entry.name} is for ${FIXED_ASSET_CLASS_META[entry.asset.class].name.toLowerCase()}, not ${FIXED_ASSET_CLASS_META[l.asset.class].name.toLowerCase()}.`);
     if (l.covers && l.covers.from > l.covers.to) out.push(`${where}the period it covers ends (${formatDate(l.covers.to)}) before it starts (${formatDate(l.covers.from)}).`);
@@ -328,6 +371,7 @@ export function ruleCoding(r: Pick<Rule, 'id' | 'set'>, t: Pick<Transaction, 'am
     ...(treatment ? { vat: { amount, treatment } } : {}),
     ...(b.coversMonths ? { covers: { from: t.date, to: lastDayOfMonths(t.date, b.coversMonths) } } : {}),
     ...(b.asset ? { asset: b.asset } : {}),
+    ...(b.invoiceToCompany !== undefined ? { invoiceToCompany: b.invoiceToCompany } : {}),
     setBy: 'rule',
     ruleId: r.id,
   };
@@ -360,6 +404,8 @@ export function journalProblems(j: Pick<Journal, 'lines'>, ownAccount: (accountI
     if (l.asset && entry.asset?.part !== 'cost') out.push(`${where}a fixed asset is on a fixed asset’s cost.`);
     if (l.asset && entry.asset && l.asset.class !== entry.asset.class) out.push(`${where}${entry.name} is for ${FIXED_ASSET_CLASS_META[entry.asset.class].name.toLowerCase()}.`);
     if (l.covers && l.covers.from > l.covers.to) out.push(`${where}the period it covers ends before it starts.`);
+    if (l.vat && !takesVat(l.ledger) && l.ledger !== 'vat') out.push(`${where}${entry.name} takes no VAT: a VAT line is on VAT itself, or on income, an expense or a fixed asset’s cost.`);
+    if (l.vat?.claim === 'reg111' && l.vat.side !== 'input') out.push(`${where}a claim under reg 111 is input tax.`);
   }
   return out;
 }
@@ -397,7 +443,7 @@ interface LinkRow {
  * arrived is no more than what was sent, short by at most `linkTolerance` of your side (`linkFeeMinor`:
  * a fee taken on the way, which the company bears).
  */
-export function linkGroupProblem(personal: readonly LinkRow[], company: readonly LinkRow[]): string | undefined {
+export function linkGroupProblem(personal: readonly LinkRow[], company: readonly LinkRow[], confirmedFee?: number): string | undefined {
   if (!personal.length || !company.length) return 'A link joins a row of yours with a row of the company’s.';
   if (personal.length > 1 && company.length > 1) return 'Several rows of yours and several of the company’s cannot be one link: link one to many, or many to one.';
   const ps = new Set(personal.map((t) => Math.sign(t.amount)));
@@ -405,12 +451,14 @@ export function linkGroupProblem(personal: readonly LinkRow[], company: readonly
   if (ps.size !== 1 || cs.size !== 1 || ps.has(0) || cs.has(0)) return 'Every row of yours goes one way and every row of the company’s the other.';
   if ([...ps][0] === [...cs][0]) return 'Money you lent the company arrives in its account, and money it paid you back leaves it: the two sides go opposite ways.';
   const dates = [...personal, ...company].map((t) => t.date).sort();
-  const span = (Date.parse(dates.at(-1)!) - Date.parse(dates[0]!)) / 86_400_000;
+  const span = diffDays(dates[0]!, dates.at(-1)!);
   if (span > LINK_DAYS) return `The rows are ${span} days apart: a link is at most ${LINK_DAYS}.`;
   const p = personal.reduce((s, t) => s + toMinor(t.amount), 0);
   const c = company.reduce((s, t) => s + toMinor(t.amount), 0);
   const fee = -(p + c);
   if (fee < 0) return `More arrived (${formatMoney(fromMinor(Math.min(Math.abs(p), Math.abs(c)) + Math.abs(fee)))}) than was sent (${formatMoney(fromMinor(Math.min(Math.abs(p), Math.abs(c))))}): a link allows only a fee taken on the way.`;
+  // A fee you confirmed on the link may be more than a link allows by itself: it is exactly what the sides differ by.
+  if (confirmedFee !== undefined) return toMinor(confirmedFee) === fee ? undefined : `The fee you confirmed (${formatMoney(confirmedFee)}) is not what the two sides differ by (${formatMoney(fromMinor(fee))}).`;
   if (fee > linkTolerance(p)) return `The two sides differ by ${formatMoney(fromMinor(fee))}, more than the ${formatMoney(fromMinor(linkTolerance(p)))} a fee may be (${LINK_FEE.percent}% of yours, at least ${formatMoney(fromMinor(LINK_FEE.minMinor))}, at most ${formatMoney(fromMinor(LINK_FEE.maxMinor))}).`;
   return undefined;
 }
@@ -457,8 +505,8 @@ export function linkGroups(companyRows: readonly Pick<Transaction, 'id' | 'compa
 /** A company row linked to rows of yours (a link that names none, your "not linked", is not one). */
 export const isLinked = (t: Pick<Transaction, 'companyLink'>): boolean => Boolean(t.companyLink?.rows.length);
 
-/** A company row's coding that a link leaves as it is: none, or the director's loan alone (no split, no VAT). */
-export const linkableCoding = (books: BooksCoding | undefined): boolean => !books || (books.ledger === 'directors-loan' && !books.lines?.length && !books.vat);
+/** A company row's coding that a link leaves as it is: none (or left uncoded), or the director's loan alone (no split, no VAT). */
+export const linkableCoding = (books: BooksCoding | undefined): boolean => !books || books.uncoded === true || (books.ledger === 'directors-loan' && !books.lines?.length && !books.vat);
 
 /**
  * Why a link group does not fit, in words, or undefined (`linkGroupProblem` for the amounts and days):
@@ -476,11 +524,39 @@ export function companyLinkProblem(group: LinkGroup, row: (id: string) => Transa
   for (const t of company) {
     const place = codingPlace(t!, ctx);
     if ('problem' in place) return place.problem;
+    if (t!.currency !== 'GBP') return `${formatMoney(t!.amount, { currency: t!.currency })} on ${formatDate(t!.date)} is in ${t!.currency}: the books are in pounds, so only a company row in pounds is linked.`;
     if (!linkableCoding(t!.books)) return `${formatMoney(t!.amount)} on ${formatDate(t!.date)} is coded to something other than the director’s loan: a row linked to money you lent or were repaid is the director’s loan.`;
   }
   for (const t of personal) {
     if (ctx.account(t!.accountId)?.companyId) return `${formatMoney(t!.amount)} on ${formatDate(t!.date)} is a company’s own row, not one of yours.`;
     if (t!.company?.id !== companyId || t!.company.as !== 'loan' || !markCounts(t!, ctx)) return `${formatMoney(t!.amount)} on ${formatDate(t!.date)} is not marked as a loan with ${ctx.company(companyId)?.name ?? companyId} (with a mark that counts).`;
   }
-  return linkGroupProblem(personal as Transaction[], company as Transaction[]);
+  // A fee is confirmed by you, on your own link.
+  const confirmed = company.find((t) => t!.companyLink?.fee !== undefined)?.companyLink;
+  if (confirmed && confirmed.setBy !== 'user') return 'Only you confirm a fee larger than a link allows by itself.';
+  return linkGroupProblem(personal as Transaction[], company as Transaction[], confirmed?.fee);
 }
+
+// ─── VAT before registration (VAT Regulations 1995 reg 111) ─────────────────────────────────────────
+
+/** Codes whose purchases are goods (reg 111(2)(b): within 4 years, still held at registration); the rest are services (reg 111(2)(d): within 6 months). */
+export const reg111Goods = (code: string): boolean => ledgerCode(code)?.asset?.part === 'cost' || code === 'cost-of-sales' || code === 'small-equipment' || code === 'stock';
+
+/**
+ * Why a reg 111 claim of input tax on a supply before registration is out of time, or undefined: goods
+ * bought within 4 years before registration (and still held then, which only you can say), services
+ * within 6 months; a claim dated on or after registration is ordinary input tax.
+ */
+export function reg111Problem(code: string, date: ISODate, registeredFrom: ISODate | undefined): string | undefined {
+  if (!registeredFrom) return 'The company is not registered for VAT: a claim under reg 111 is made in its first return after it registers.';
+  if (date >= registeredFrom) return `${formatDate(date)} is after registration (${formatDate(registeredFrom)}): this is ordinary input tax, not a claim under reg 111.`;
+  if (reg111Goods(code)) {
+    if (date < addYears(registeredFrom, -4)) return `Goods bought on ${formatDate(date)}, more than 4 years before registration (${formatDate(registeredFrom)}): out of time under reg 111(2)(b).`;
+    return undefined;
+  }
+  if (date < addMonths(registeredFrom, -6)) return `Services bought on ${formatDate(date)}, more than 6 months before registration (${formatDate(registeredFrom)}): out of time under reg 111(2)(d).`;
+  return undefined;
+}
+
+/** How far a reverse charge's notional VAT may be from the standard rate on the amount before it is asked about: a penny. */
+export const REVERSE_CHARGE_TOLERANCE_MINOR = 1;

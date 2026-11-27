@@ -169,6 +169,24 @@ const balance = (accountId: string, date: string, value: number): BalanceSnapsho
 
 const MONTH_LIST = Array.from({ length: MONTHS }, (_, i) => addMonths(FIRST, i).slice(0, 7));
 
+const INCORPORATED = addMonths(FIRST, -20);
+/**
+ * The company's books as kept here: its dates and registrations, in S as in S ∪ C, so whatever keeping
+ * books changes of yours (book rules for the rows you paid for it, your loan read from its books) is the
+ * same on both sides; C adds its filings, its rows, journals and book rules for its own rows. (Your loan
+ * from its books against your marks alone is tests/ledger.test.ts's property.)
+ */
+const BOOKS = {
+  incorporatedOn: INCORPORATED,
+  accountingReferenceDate: '01-31',
+  periods: [],
+  ctPeriods: [],
+  tradeStartedOn: addDays(INCORPORATED, 30),
+  vat: { registeredFrom: FIRST, scheme: 'cash' as const, schedule: [{ from: FIRST, stagger: 'quarterly-1' as const }] },
+  paye: { from: addDays(INCORPORATED, 40) },
+  deadlinesFrom: addDays(INCORPORATED, 1),
+};
+
 /** Your data alone: S. */
 async function writePersonal(dir: string, w: World, extra: { date: string; amount: number; description: string }[] = []): Promise<{ txIds: string[] }> {
   const store = await Store.open(dir);
@@ -182,7 +200,7 @@ async function writePersonal(dir: string, w: World, extra: { date: string; amoun
     await store.upsertInstitution(inst);
   await store.setAccounts(PERSONAL);
   await store.setEmployments([{ id: 'studio-job', employer: 'EXAMPLE STUDIO LTD', aliases: [], payrollNumbers: ['ES12345'], owed: [], pensionArrangements: [], createdBy: 'owner', createdAt: stamp, updatedAt: stamp }]);
-  await store.setCompanies([{ id: COMPANY, name: 'EXAMPLE STUDIO LTD', number: '12345678', holdings: [{ shareClass: 'Ordinary', shares: 100, totalShares: 100, acquiredOn: '2024-05-14', source: {} }], valuations: [], accountId: 'shares', directorLoanAccountId: 'studio-loan', employmentId: 'studio-job', createdBy: 'owner', createdAt: stamp, updatedAt: stamp }]);
+  await store.setCompanies([{ id: COMPANY, name: 'EXAMPLE STUDIO LTD', number: '12345678', holdings: [{ shareClass: 'Ordinary', shares: 100, totalShares: 100, acquiredOn: '2024-05-14', source: {} }], valuations: [], accountId: 'shares', directorLoanAccountId: 'studio-loan', employmentId: 'studio-job', books: { ...BOOKS, filings: [], setBy: 'owner', updatedAt: stamp }, createdBy: 'owner', createdAt: stamp, updatedAt: stamp }]);
   await store.setRules([{ id: 'rule_hosting', name: 'Hosting', enabled: true, priority: 100, match: { field: 'description', op: 'contains', value: 'EXAMPLE HOSTING', caseSensitive: false }, set: { category: 'software' }, createdAt: stamp, updatedAt: stamp }]);
   // A book rule for the rows of yours paid for the company: about your rows, so it is yours, in S.
   await store.setBookRules(COMPANY, [{ id: 'rule_paidhosting', name: 'Hosting you paid', enabled: true, priority: 100, match: { field: 'description', op: 'contains', value: 'EXAMPLE HOSTING', caseSensitive: false, company: { id: COMPANY, rows: 'paid-for' } }, set: { books: { ledger: 'software-hosting', vat: { treatment: 'standard' } } }, createdAt: stamp, updatedAt: stamp }]);
@@ -237,19 +255,12 @@ async function writeCompany(dir: string, w: World, personalTx: readonly Transact
   // Its books: its dates, VAT, PAYE and filings, some overdue and due soon, so its deadlines are there
   // to leak (and named like your Self Assessment's: tax, a return, HMRC, 31 January).
   const company = store.company(COMPANY)!;
-  const inc = addMonths(FIRST, -20);
+  const inc = INCORPORATED;
   const quarter = (n: number) => endOfMonth(addMonths(FIRST, 3 * n + 2));
   await store.upsertCompany({
     ...company,
     books: {
-      incorporatedOn: inc,
-      accountingReferenceDate: '01-31',
-      periods: [],
-      ctPeriods: [],
-      tradeStartedOn: addDays(inc, 30),
-      vat: { registeredFrom: FIRST, scheme: 'cash', schedule: [{ from: FIRST, stagger: 'quarterly-1' }] },
-      paye: { from: addDays(inc, 40) },
-      deadlinesFrom: addDays(inc, 1),
+      ...BOOKS,
       filings: [
         { id: filingId(COMPANY, 'vat', quarter(0)), kind: 'vat', periodStart: FIRST, periodEnd: quarter(0), filedOn: addDays(quarter(0), 45), reference: '975318642', figures: { vatDueSales: 2412.6, vatDueAcquisitions: 0, totalVatDue: 2412.6, vatReclaimedCurrPeriod: 318.45, netVatDue: 2094.15, totalValueSalesExVAT: 12063, totalValuePurchasesExVAT: 1592, totalValueGoodsSuppliedExVAT: 0, totalAcquisitionsExVAT: 0 }, addedBy: 'owner' },
         { id: filingId(COMPANY, 'confirmation', addDays(addYears(inc, 1), -1)), kind: 'confirmation', periodEnd: addDays(addYears(inc, 1), -1), filedOn: addYears(inc, 1), addedBy: 'agent' },
@@ -587,7 +598,7 @@ describe('company accounts never touch a personal figure', () => {
           for (const t of store.transactions()) if (t.company) expect(t.transferGroup).toBeUndefined();
           // The company's books were there, and their own routes serve them (the routes left out above).
           const books = async (a: App) => (await (await a.app.request(`http://localhost/api/companies/${COMPANY}/books`, { headers: { host: 'localhost' } })).json()) as CompanyBooksResponse;
-          expect((await books(p.personal.app)).books).toBeNull();
+          expect((await books(p.personal.app)).books?.filings).toEqual([]);
           const theirs = await books(p.both.app);
           expect(theirs.books?.filings).toHaveLength(3);
           expect(theirs.deadlines.some((d) => d.status === 'overdue' || d.status === 'due-soon')).toBe(true);

@@ -170,6 +170,7 @@
                           "computer",
                           "office",
                           "furniture",
+                          "van",
                           "motor"
                         ]
                       },
@@ -177,6 +178,9 @@
                         "type": "integer",
                         "minimum": 1,
                         "maximum": 600
+                      },
+                      "connected": {
+                        "type": "boolean"
                       }
                     },
                     "required": [
@@ -187,6 +191,9 @@
                     "type": "integer",
                     "minimum": 1,
                     "maximum": 120
+                  },
+                  "invoiceToCompany": {
+                    "type": "boolean"
                   }
                 },
                 "required": [
