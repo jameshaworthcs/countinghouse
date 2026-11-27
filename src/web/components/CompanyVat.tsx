@@ -8,10 +8,10 @@
 import { Download, Printer } from 'lucide-react';
 import { Fragment, useState, type ReactNode } from 'react';
 import type { CompanyVatResponse, VatBoxView, VatCorrectionsView, VatErrorRow, VatFiledComparison, VatLeftOut, VatPenaltyView, VatPeriodRow, VatPeriodStatus, VatReturnCheck, VatReturnView, VatThresholdView } from '../../shared/api';
-import { VAT_STAGGER_LABELS } from '../../shared/company-books';
+import { addVatCorrection, addVatDisclosure, VAT_STAGGER_LABELS } from '../../shared/company-books';
 import { formatDate, formatSpan, today } from '../../shared/dates';
 import { ledgerName, VAT_TREATMENT_LABELS } from '../../shared/ledger';
-import { fromMinor } from '../../shared/money';
+import { addMoney, fromMinor, toMinor } from '../../shared/money';
 import type { CompanyFiling } from '../../shared/schema';
 import { api, useApi, useApiMutation } from '../lib/api';
 import { cn } from '../lib/format';
@@ -58,10 +58,9 @@ function Net({ value }: { value: number | null }) {
 }
 
 const LEFT_OUT: Record<VatLeftOut['reason'], string> = {
-  outside: 'Outside the scope of VAT, and not a sale abroad: left out of boxes 6 and 7',
+  outside: 'Outside the scope of VAT, not a supply (no consideration): left out of boxes 6 and 7',
   'not-a-supply': 'Not a supply (pay, pensions, depreciation, Corporation Tax, penalties, donations): never in boxes 6 and 7',
-  untreated: 'No VAT treatment said: left out of boxes 6 and 7 until you say one (zero rate, exempt or outside the scope)',
-  reg111: 'Bought before registration: its VAT is claimed in box 4, its value is not this period’s purchase (box 7)',
+  untreated: 'No VAT treatment said: left out of boxes 6 and 7 until you say one (zero rate, exempt, supplied outside the UK or outside the scope)',
 };
 
 function checkWords(c: VatReturnCheck): { title: string; line?: ReactNode } {
@@ -72,6 +71,15 @@ function checkWords(c: VatReturnCheck): { title: string; line?: ReactNode } {
       return { title: `The books start on ${formatDate(c.ledgerFrom)}, within or after the period: what came before is not in them` };
     case 'suspense':
       return { title: 'Rows posted to suspense in the period', line: <><Pence value={c.amount} />: their VAT is not known until they are coded</> };
+    case 'cash-limit':
+      return {
+        title: `Taxable supplies reached the cash accounting scheme’s limit for leaving (£${c.limit.toLocaleString('en-GB')}) in the 12 months to ${formatDate(c.periodEnd)}`,
+        line: (
+          <>
+            <Pence value={c.turnover} />: the scheme ends with that period, and the VAT on everything still outstanding is due then (VAT Notice 731 paras 2.5 and 6.4). The books do not work that out, nor later returns on the normal basis.
+          </>
+        ),
+      };
     case 'ledger':
       return { title: CHECK_TITLES[c.check.kind], line: checkLine(c.check) };
   }
@@ -88,7 +96,7 @@ function BoxRow({ b, filed }: { b: VatBoxView; filed?: VatFiledComparison['boxes
         <td className={tableClasses.td}>
           {b.label}
           {b.unsupported && <div className="text-[11.5px] text-ink-3">Not supported here (Northern Ireland’s goods): 0</div>}
-          {b.exact !== undefined && b.exact !== b.value * 100 && (
+          {b.exact !== undefined && b.exact !== toMinor(b.value) && (
             <div className="text-[11.5px] text-ink-3">
               exact <Pence value={b.exact} />, the pence left out
             </div>
@@ -118,7 +126,7 @@ function BoxRow({ b, filed }: { b: VatBoxView; filed?: VatFiledComparison['boxes
                 {ledgerName(l.ledger)}
                 {l.treatment && ` · ${VAT_TREATMENT_LABELS[l.treatment].toLowerCase()}`}
                 {l.counted === 'reg111' && ' · from before registration: claimed in the first return'}
-                {l.counted === 'tax-point' && ' · paid after the period: its service ended within it'}
+                {l.counted === 'tax-point' && ' · on its tax point, not its own day (reg 82)'}
               </div>
             </td>
             <td className={cn(tableClasses.td, tableClasses.num, 'py-1')}>
@@ -178,7 +186,7 @@ function ReturnCard({ ret, companyId }: { ret: VatReturnView; companyId: string 
           </Callout>
         ) : (
           <div className="rounded-lg border border-line bg-panel-2 px-4 py-3">
-            <div className="text-[13px] font-medium text-ink">{ret.checks.length === 1 && ret.checks[0]!.kind === 'not-ended' ? 'Not ended yet: the boxes so far' : 'Not ready to file'}</div>
+            <div className="text-[13px] font-medium text-ink">{p.filedOn ? 'Filed; the books have checks to clear' : ret.checks.length === 1 && ret.checks[0]!.kind === 'not-ended' ? 'Not ended yet: the boxes so far' : 'Not ready to file'}</div>
             <div className="mt-2 flex flex-col gap-2 text-[13px]">
               {[...groups.values()].map((g) => (
                 <details key={g.title} open={g.lines.length <= 3}>
@@ -222,6 +230,7 @@ function ReturnCard({ ret, companyId }: { ret: VatReturnView; companyId: string 
         {ret.notes.map((n) => (
           <p key={n}>{n}</p>
         ))}
+        {ret.latePayment && <LatePayment l={ret.latePayment} />}
         {leftOut.size > 0 && (
           <details className="no-print">
             <summary className="cursor-pointer font-medium text-ink">Left out of boxes 6 and 7 ({ret.leftOut.length})</summary>
@@ -244,6 +253,17 @@ function ReturnCard({ ret, companyId }: { ret: VatReturnView; companyId: string 
         )}
       </div>
     </Card>
+  );
+}
+
+/** Late payment penalties on box 5, were none of it paid by its due day: information. */
+function LatePayment({ l }: { l: NonNullable<VatReturnView['latePayment']> }) {
+  if (!l.rates) return <p>Paid late, it would take late payment penalties at the rates then (Finance Act 2021 Sch 26), not covered here; and interest.</p>;
+  const r = l.rates;
+  return (
+    <p>
+      Paid late (due by {formatDate(l.due)}): nothing in the first {r.graceDays} days; then {r.firstPercent}% of what is unpaid on day {r.graceDays} (<Pence value={l.atFirst} /> if none of it is paid), and a further {r.secondPercent}% of what is still unpaid on day {r.secondDays} (<Pence value={l.atSecond} /> in all); from day {r.dailyFromDay} a second penalty of {r.yearlyPercent}% a year, daily, on what is unpaid, and late payment interest besides, not worked out here (Finance Act 2021 Sch 26; GOV.UK, “How late payment penalties work if you pay VAT late”). Check your VAT account for HMRC’s figures.
+    </p>
   );
 }
 
@@ -305,7 +325,7 @@ function FiledCard({ filed }: { filed: VatFiledComparison }) {
 function PeriodsCard({ periods, current, onPick }: { periods: VatPeriodRow[]; current: string | undefined; onPick: (end: string) => void }) {
   const rows = [...periods].reverse();
   return (
-    <Card title="VAT periods" description="Each return from registration to the period running, its due day and state, and its net VAT as the books give it and as filed." padded={false} className="no-print">
+    <Card title="VAT periods" description="Each return from registration to the period running, its due day and state, and its net VAT for its own period as the books give it and as filed (less any corrections of earlier returns the filing included)." padded={false} className="no-print">
       <div className="relative overflow-x-auto">
         <table className={tableClasses.table}>
           <thead>
@@ -336,6 +356,11 @@ function PeriodsCard({ periods, current, onPick }: { periods: VatPeriodRow[]; cu
                 </td>
                 <td className={cn(tableClasses.td, tableClasses.num, 'hidden sm:table-cell')}>
                   <Net value={p.filed} />
+                  {p.correctionsIncluded !== undefined && (
+                    <div className="text-[11.5px] text-ink-3">
+                      for its own period; its filing also corrected <Pence value={p.correctionsIncluded} />
+                    </div>
+                  )}
                 </td>
               </tr>
             ))}
@@ -358,14 +383,14 @@ function CorrectionDialog({ companyId, error, filings, onClose }: { companyId: s
   const [amount, setAmount] = useState<number | undefined>(fromMinor(error.uncorrected));
   const [day, setDay] = useState(today());
   const [reference, setReference] = useState('');
+  // What is recorded already, on the return chosen (method 1) or on the return itself (method 2): what is entered is added to it.
+  const target = later.find((x) => x.id === on);
+  const already = how === 'return' ? (target?.corrections?.find((c) => c.periodEnd === error.end)?.amount ?? 0) : (own?.disclosed?.amount ?? 0);
   const save = useApiMutation(
     () => {
-      if (how === 'return') {
-        const f = later.find((x) => x.id === on)!;
-        const corrections = [...(f.corrections ?? []).filter((c) => c.periodEnd !== error.end), { periodEnd: error.end, amount: amount ?? 0 }];
-        return api(`/companies/${companyId}/filings/${f.id}/vat-corrections`, { method: 'PUT', body: { corrections } });
-      }
-      return api(`/companies/${companyId}/filings/${own!.id}/vat-corrections`, { method: 'PUT', body: { disclosed: { on: day, amount: amount ?? 0, ...(reference.trim() ? { reference: reference.trim() } : {}) } } });
+      if (how === 'return') return api(`/companies/${companyId}/filings/${target!.id}/vat-corrections`, { method: 'PUT', body: { corrections: addVatCorrection(target!.corrections, error.end, amount ?? 0) } });
+      const disclosed = addVatDisclosure(own!.disclosed, day, amount ?? 0, reference);
+      return api(`/companies/${companyId}/filings/${own!.id}/vat-corrections`, { method: 'PUT', body: { disclosed: disclosed ?? null } });
     },
     {
       onSuccess: () => {
@@ -384,7 +409,7 @@ function CorrectionDialog({ companyId, error, filings, onClose }: { companyId: s
         <>
           {save.error && <span className="mr-auto self-center text-[12px] text-bad-ink">{save.error.message}</span>}
           <Button onClick={onClose}>Cancel</Button>
-          <Button variant="primary" loading={save.isPending} disabled={!amount || (how === 'return' ? !on : !own)} onClick={() => save.mutate(undefined)}>
+          <Button variant="primary" loading={save.isPending} disabled={!amount || (how === 'return' ? !target : !own)} onClick={() => save.mutate(undefined)}>
             Record
           </Button>
         </>
@@ -419,7 +444,18 @@ function CorrectionDialog({ companyId, error, filings, onClose }: { companyId: s
             </Field>
           </div>
         )}
-        <Field label="Net VAT corrected" hint="Positive: VAT the company owed HMRC; negative: VAT due to it.">
+        <Field
+          label={already ? 'Net VAT corrected now, added to what is recorded' : 'Net VAT corrected'}
+          hint={
+            already ? (
+              <>
+                Already recorded {how === 'return' ? 'on that return for this period' : 'as reported separately'}: <Pence value={toMinor(already)} />; with this, <Pence value={toMinor(addMoney(already, amount ?? 0))} />. Positive: VAT the company owed HMRC.
+              </>
+            ) : (
+              'Positive: VAT the company owed HMRC; negative: VAT due to it.'
+            )
+          }
+        >
           <NumberInput value={amount} onValue={setAmount} className="sensitive tabular sm:w-48" />
         </Field>
       </div>
@@ -456,7 +492,8 @@ function CorrectionsCard({ c, companyId, filings }: { c: VatCorrectionsView; com
                   <td className={tableClasses.td}>
                     {formatSpan(e.start, e.end)}
                     <div className="text-[12px] text-ink-3">
-                      output tax <Pence value={e.output} />, input tax <Pence value={e.input} /> · {e.outOfTime ? `out of time since ${formatDate(e.inTimeUntil)}` : `in time until ${formatDate(e.inTimeUntil)}`}
+                      output tax <Pence value={e.output} /> {e.output !== 0 && `(in time until ${formatDate(e.outputUntil)})`}, input tax <Pence value={e.input} /> {e.input !== 0 && `(in time until ${formatDate(e.inputUntil)})`}
+                      {e.outOfTime && ' · out of time'}
                       {e.unsettled && ' · its books have checks to clear, so it is not counted'}
                       {e.correctedBy.map((x, i) => (
                         <Fragment key={i}>
@@ -496,12 +533,12 @@ function CorrectionsCard({ c, companyId, filings }: { c: VatCorrectionsView; com
           <p className="font-medium text-ink">
             Net of the errors left: <Pence value={c.net} /> {c.net > 0 ? 'due to HMRC' : 'due to the company'}.{' '}
             {c.method === 'next-return'
-              ? `It may be corrected on the current return${c.on ? ` (for ${formatSpan(c.on.start, c.on.end)})` : ''}, in box ${c.net > 0 ? 1 : 4}${c.limit === 'box6' ? ': above £10,000, but within 1% of its box 6 and £50,000' : ''}.`
-              : 'It is over the limit for the current return: report it to HMRC separately (method 2: online, or form VAT652).'}
+              ? `It may be corrected on the current return${c.on ? ` (for ${formatSpan(c.on.start, c.on.end)})` : ''}, in box ${c.net > 0 ? 1 : 4}${c.limit === 'box6' ? `: above ${pounds(c.rules.limit)}, but within ${c.rules.box6Percent}% of its box 6 and ${pounds(c.rules.upperLimit)}` : ''}.`
+              : 'It is over the limit for the current return: report it to HMRC separately (method 2: online or in writing).'}
           </p>
         )}
         <p>
-          A net error of up to {pounds(c.rules.limit)}, or up to {pounds(c.rules.upperLimit)} when that is no more than {c.rules.box6Percent}% of box 6 of the return for the period it is found in{c.on ? ` (${formatSpan(c.on.start, c.on.end)}: box 6 so far £${c.on.box6.toLocaleString('en-GB')}${c.on.provisional ? ', provisional' : ''})` : ''}, may be corrected on that return (method 1); anything more, or any error made deliberately, is reported separately (method 2), which may be chosen for any error. Errors are corrected within {c.rules.years} years: from the end of the period for VAT under-declared, from the return’s due day for input tax under-claimed (VAT Notice 700/45 sections 4.2–4.7).
+          A net error of up to {pounds(c.rules.limit)}, or up to {pounds(c.rules.upperLimit)} when that is no more than {c.rules.box6Percent}% of box 6 of the return for the period it is found in{c.on ? ` (${formatSpan(c.on.start, c.on.end)}: box 6 so far £${c.on.box6.toLocaleString('en-GB')}${c.on.provisional ? ', provisional' : ''})` : ''}, may be corrected on that return (method 1); anything more, or any error made deliberately, is reported separately (method 2: online or in writing, form VAT652 having been withdrawn), which may be chosen for any error. Each part of an error is corrected within {c.rules.years} years: output tax, and input tax claimed too much, from the end of its period; input tax under-claimed from the return’s due day (VAT Notice 700/45 sections 4.2–4.7).
         </p>
       </div>
       {editing && <CorrectionDialog companyId={companyId} error={editing} filings={filings} onClose={() => setEditing(null)} />}
@@ -580,18 +617,24 @@ function ThresholdCard({ t }: { t: VatThresholdView }) {
           <Pence value={t.taxable} />
         </div>
         <p>
-          Taxable sales <Pence value={t.parts.sales} />, sales with no VAT treatment counted as taxable <Pence value={t.parts.untreated} />, services received from abroad under the reverse charge <Pence value={t.parts.reverseCharge} />. Exempt and outside-the-scope sales and the sale of the company’s own fixed assets are left out. By the day paid, as the books are kept.
+          Taxable sales <Pence value={t.parts.sales} />, sales with no VAT treatment counted as taxable <Pence value={t.parts.untreated} />, services received from abroad under the reverse charge <Pence value={t.parts.reverseCharge} />. Exempt sales, interest, sales outside the scope or supplied outside the UK, and the sale of the company’s own fixed assets are left out. The law counts supplies when they are made (their tax point); the books count them when paid, so sales on credit not yet paid are missing, and for a company not registered the figure can be too low.
           {t.partial && ' The books start within these 12 months: what came before is not in them.'}
         </p>
         <p>
           {t.registered
-            ? t.taxable < t.deregistration * 100
-              ? `Below the deregistration threshold: a registered business may ask HMRC to cancel its registration when its taxable turnover falls below ${pounds(t.deregistration)}.`
-              : `Registered, and above the deregistration threshold (${pounds(t.deregistration)}).`
-            : t.taxable > t.registration * 100
+            ? t.taxable < toMinor(t.deregistration)
+              ? `The last 12 months were below the deregistration threshold (${pounds(t.deregistration)}). That is a hint, not the test: a registered business may cancel when HMRC are satisfied its taxable supplies in the year ahead will not exceed it (VATA 1994 Sch 1 para 4).`
+              : `Registered, and the last 12 months were above the deregistration threshold (${pounds(t.deregistration)}); the test for cancelling looks at the year ahead (VATA 1994 Sch 1 para 4).`
+            : t.taxable > toMinor(t.registration)
               ? `Over the registration threshold: a business must register when its taxable turnover in the last 12 months goes over ${pounds(t.registration)}, from the first day of the second month after.`
               : `Not registered here, and under the registration threshold (${pounds(t.registration)}). It must also register if it expects to go over it in the next 30 days alone.`}
         </p>
+        {t.registered && (
+          <p>
+            Cash accounting: taxable supplies with the sale of capital assets, <Pence value={t.cash.turnover} /> in these 12 months, against {pounds(t.cash.join)} to join and {pounds(t.cash.leave)} to leave (VAT Notice 731 paras 2.1 and 2.5).{' '}
+            {t.cash.over ? 'Over the limit for leaving: the scheme ends with the current period, and the VAT on everything outstanding is due then.' : 'Within the scheme.'} Supplies the scheme excludes (payment not due within 6 months, or invoiced before the supply: VAT Regulations 1995 reg 58(2)) are not detected.
+          </p>
+        )}
         {open && (
           <div className="relative overflow-x-auto">
             <table className={tableClasses.table}>
