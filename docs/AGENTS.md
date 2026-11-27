@@ -330,7 +330,11 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
     the director's loan on a row paid for the company), its VAT signed like the row and smaller, none
     for zero rate, exempt and outside the scope, and a reverse charge's the notional VAT on what was
     paid; lines add up to the row; a fixed asset only on that class's cost. A coding the owner set is
-    never changed (`books: null` takes only an agent's or a rule's away); the same coding is already so.
+    never changed (`books: null` takes only an agent's or a rule's away, and leaves the row uncoded so
+    book rules leave it); the same coding is already so. VAT only on income, expenses and an asset's
+    cost, never on entertaining or a car (blocked input tax), a reverse charge never on a sale; on a row
+    of the owner's, `invoiceToCompany: true` only when the invoice is addressed to the company. Both
+    `set_books` and `link_company` are only for a company whose books are kept here.
     A company row linked to the owner's loans is the director's loan and takes no other coding. Code
     from the invoice or receipt (its VAT as printed), never from a guess at a rate.
   - A link (`link_company`, transactions `companyLink`) is set on a company account's row and names the
@@ -342,7 +346,8 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
     rows' words and amounts in the `why`.
   - A journal (`add_journal`, journals.jsonl) is for a company whose books are kept here, dated no
     later than today, its lines on codes of the chart (or the company's own accounts), never the books'
-    clearing codes, debits positive and credits negative, adding up to nothing; the same journal there
+    clearing codes, debits positive and credits negative, adding up to nothing; a VAT line says its side
+    (`input` or `output`) and a reg 111 claim (`claim: "reg111"`) outright; the same journal there
     already is already so. Its `evidence` names the document (a payroll summary, a board minute).
     Taking one away (`remove_journal`) is only for an agent's journal; the owner's is theirs.
   - A book rule (`add_rule` with `rule.books` and `rule.match.company`) codes a company's rows: its own

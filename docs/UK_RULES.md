@@ -324,6 +324,27 @@ for the VAT on what it paid: output VAT and input VAT of the same amount, which 
 reclaims in the same return, so nothing is paid. The amounts are the coding's: the helper only fills
 them in.
 
+What the books let the company claim (FORMULAS.md §22, "What VAT may be claimed"):
+
+- **Blocked input tax.** VAT on business entertainment (Value Added Tax (Input Tax) Order 1992, SI
+  1992/3222, art 5) and on a motor car (art 7) is not reclaimable: coded there, it takes no VAT. A van
+  is not a car, and has a class of its own.
+- **VAT paid by a director.** The company may treat VAT as its input tax only on a supply made to it
+  (VATA 1994 s24(1)), and must hold a VAT invoice for it (VAT Regulations 1995 reg 29(2); VAT Notice
+  700, "Who can reclaim"): a supply invoiced to the director personally is the director's. Under the cash
+  accounting scheme (Part VIII of the Regulations, regs 56–65) input tax is claimed when the company
+  pays; paying the director back, or crediting the director's loan, is that payment.
+- **Before registration** (VAT Regulations 1995 reg 111): input tax on goods supplied to the company
+  within 4 years before it registered, and still held (or used to make goods still held) when it
+  registered, and on services supplied within 6 months before it, may be claimed in its first return,
+  with the invoices and, for goods, a stock account. Goods on hand or used up before registration, and
+  services used up for goods disposed of before it, are not claimable; the app checks the 4 years and
+  6 months, and leaves "still held" to you.
+- **Pre-incorporation costs** (Companies Act 2006 s51): a contract made for a company before it is
+  formed is the person's who made it, until the company adopts it; the books take such a cost in on the
+  day of incorporation. Reg 111(2) lets a company claim VAT on goods and services supplied to the person
+  who became a member or officer, for its business, before it was incorporated, on the same terms.
+
 ### The micro-entity formats (a company's chart of accounts)
 
 The chart of accounts (`shared/ledger.ts`, FORMULAS.md §22) maps each code to a line of the
@@ -432,9 +453,12 @@ Checked 26 November 2026 (companies: periods and deadlines):
 - HMRC's manuals, [CTM01800](https://www.gov.uk/hmrc-internal-manuals/company-taxation-manual/ctm01800) (Corporation Tax due dates, with examples), [CTM92010](https://www.gov.uk/hmrc-internal-manuals/company-taxation-manual/ctm92010) (nine months and one day), [CTM93030](https://www.gov.uk/hmrc-internal-manuals/company-taxation-manual/ctm93030), [CTM93040](https://www.gov.uk/hmrc-internal-manuals/company-taxation-manual/ctm93040) (counting the months; 28 and 29 February) and [CTM93050](https://www.gov.uk/hmrc-internal-manuals/company-taxation-manual/ctm93050) (the filing date and its examples), [DMBM530020](https://www.gov.uk/hmrc-internal-manuals/debt-management-and-banking/dmbm530020) (VAT staggers 1–3, and monthly returns as stagger 0)
 - GOV.UK, [Dormant for Corporation Tax](https://www.gov.uk/dormant-company/dormant-for-corporation-tax) ("Trading includes … getting interest"; a notice to deliver a return must be answered), [VAT Returns: deadlines](https://www.gov.uk/vat-returns/deadlines) (1 calendar month and 7 days, online), [VAT Annual Accounting Scheme: return and payment deadlines](https://www.gov.uk/vat-annual-accounting-scheme/return-and-payment-deadlines) (2 months; 1 month under 4 months), [Filing your company's confirmation statement](https://www.gov.uk/guidance/confirmation-statement-guidance) (the review period and 14 days)
 
-Cited 26 November 2026 (companies: a company's ledger, its VAT rates and the micro-entity formats),
-from the legislation as known, not fetched again for this change, so worth a check against the current
-text:
+Cited 26 November 2026 (companies: a company's ledger, its VAT rates and the micro-entity formats; and,
+after review, blocked input tax, a director's VAT, reg 111, pre-incorporation costs, penalties and
+connected persons' assets), from the legislation as known, not fetched again for this change, so worth
+a check against the current text:
+
+- legislation.gov.uk, [VATA 1994 s24](https://www.legislation.gov.uk/ukpga/1994/23/section/24) (input tax: supplies to the taxable person), [VAT Regulations 1995 reg 29](https://www.legislation.gov.uk/uksi/1995/2518/regulation/29) (the claim and the VAT invoice) and [reg 111](https://www.legislation.gov.uk/uksi/1995/2518/regulation/111) (VAT before registration and incorporation), [Value Added Tax (Input Tax) Order 1992 arts 5 and 7](https://www.legislation.gov.uk/uksi/1992/3222) (business entertainment; motor cars), [Companies Act 2006 s51](https://www.legislation.gov.uk/ukpga/2006/46/section/51) (pre-incorporation contracts), [CTA 2009 s1303](https://www.legislation.gov.uk/ukpga/2009/4/section/1303) (tax penalties and interest not deductible), [CAA 2001 ss214–218](https://www.legislation.gov.uk/ukpga/2001/2/part/2/chapter/17) (connected persons and plant: no annual investment allowance, qualifying cost capped, s217–218); GOV.UK, VAT Notice 700 (who can reclaim VAT)
 
 - legislation.gov.uk, [VATA 1994 s2](https://www.legislation.gov.uk/ukpga/1994/23/section/2) (the standard rate), [s8](https://www.legislation.gov.uk/ukpga/1994/23/section/8) (the reverse charge on services received from abroad), [s29A](https://www.legislation.gov.uk/ukpga/1994/23/section/29A) and [Sch 7A](https://www.legislation.gov.uk/ukpga/1994/23/schedule/7A) (the reduced rate), [Finance (No. 2) Act 2010 s3](https://www.legislation.gov.uk/ukpga/2010/31/section/3) (20% from 4 January 2011); [SI 2013/3008](https://www.legislation.gov.uk/uksi/2013/3008) (the micro-entity formats inserted into SI 2008/409 Sch 1 Part 1 Section C); [CTA 2009 s53](https://www.legislation.gov.uk/ukpga/2009/4/section/53) (capital expenditure), [s1298](https://www.legislation.gov.uk/ukpga/2009/4/section/1298) (business entertainment); FRS 105 (the Financial Reporting Council's standard for the micro-entities regime); GOV.UK, VAT Notice 741A (place of supply of services)
 

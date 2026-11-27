@@ -159,7 +159,7 @@ depend on).
 | `tags` | yours: short labels to group and filter by (up to 20, each up to 40 characters, one spelling per tag whatever the case). Tag Gift Aided donations `gift-aid` |
 | `splits` | yours: `[{amount, category, note?}]`, two or more lines adding up to `amount`, each signed like it, in spending or income categories. Spending, income and budgets count the lines ([FORMULAS.md §14](FORMULAS.md)). A transfer is never split, and correcting the amount so the lines no longer add up removes the split |
 
-**Coding a payment** (`books`): `{ledger?, vat?, covers?, asset?, lines?, setBy, ruleId?}`, the
+**Coding a payment** (`books`): `{ledger?, vat?, covers?, asset?, lines?, invoiceToCompany?, uncoded?, setBy, ruleId?}`, the
 company's chart of accounts and what each code means being [FORMULAS.md §22](FORMULAS.md), "The
 general ledger" (`src/shared/ledger.ts`):
 
@@ -167,16 +167,25 @@ general ledger" (`src/shared/ledger.ts`):
   `fixed-assets:computer:cost`…); never one of the company's own accounts (money between them is a
   transfer, linked as one), and on a row of yours paid for the company never `directors-loan` (that
   row moves the loan already).
-- `vat`: `{amount, treatment}`. `treatment` is `standard`, `reduced`, `zero`, `exempt`, `outside` or
+- `vat`: `{amount, treatment, claim?}`. `treatment` is `standard`, `reduced`, `zero`, `exempt`, `outside` or
   `reverse-charge`; `amount` is the VAT in the row's amount, signed like it and smaller than it, `0` for
   zero rate, exempt and outside the scope. For a reverse charge it is the notional VAT on an amount that
-  does not include it (a service bought from abroad), posted both ways.
+  does not include it (a service bought from abroad), posted both ways; never on income. `claim:
+  "reg111"`: input tax on a purchase before the company registered for VAT, claimed under VAT
+  Regulations 1995 reg 111. VAT goes only on income, expenses and a fixed or intangible asset's cost,
+  and never on business entertainment or a car, whose input VAT is blocked (FORMULAS.md §22).
 - `covers`: `{from, to}`, the period a cost or income is for (a year's subscription), not ending
   before it starts.
-- `asset`: `{class, months?}` on a fixed asset's cost only, of that code's class (`computer`,
-  `office`, `furniture`, `motor`), with its life in whole months when known.
+- `asset`: `{class, months?, connected?}` on a fixed asset's cost only, of that code's class (`computer`,
+  `office`, `furniture`, `van`, `motor` (cars)), with its life in whole months when known; `connected`
+  when it was bought from a connected person (CAA 2001 ss214–218).
 - `lines`: two or more `{ledger, amount, vat?, covers?, asset?}` adding up to the row's amount (an HMRC
   repayment that is part VAT, part interest), in place of `ledger` and the rest beside it.
+- `invoiceToCompany`: on a row of yours paid for the company, that the supply was made to it and its VAT
+  invoice is addressed to it, so it may reclaim the VAT (VATA 1994 s24(1), reg 29(2)); VAT claimed
+  without it is a check.
+- `uncoded: true`, with no ledger, lines or VAT: left uncoded on purpose, by you or a proposal (taking a
+  coding away), so book rules leave it; it posts to suspense like any row not coded.
 - `setBy`: `user` (you: nothing else changes it), `rule` (a book rule, `ruleId`), `agent` (a proposal
   you applied).
 
@@ -187,15 +196,16 @@ row it does not apply to (a hand edit, a mark taken away), whoever set it, and n
 one that applies but does not fit counts for nothing and is listed on the company's Books tab. Changing
 a row's mark away from paid for that company takes its coding away in the same write.
 
-**Linking money with you** (`companyLink`): `{rows, setBy}` on a company account's row, naming the
+**Linking money with you** (`companyLink`): `{rows, setBy, fee?}` on a company account's row, naming the
 rows of yours marked as a loan with that company that are the same money (you lent it; it paid you
 back). `setBy` is `auto` (the app, worked out again whenever rows are: an exact, unique match within 4
 days), `user` (you; no rows says it is linked to none, so the app never links it) or `agent` (a
 proposal you applied). One company row naming several rows of yours, or several naming one, is one
 link; several and several are not. It fits when the two sides go opposite ways, are at most 31 days
 apart, and what arrived is no more than what was sent, short by at most 3% of your side (at least £1,
-at most £25): a fee taken on the way. A linked company row is coded to the director's loan or not at
-all. The store refuses a link that does not fit; a change to a row that breaks one (a mark taken away,
+at most £25): a fee taken on the way, unless you confirmed a larger one on your own link (`fee`, in
+pounds, exactly what the two sides differ by). Every company row in it is in pounds. A linked company
+row is coded to the director's loan or not at all. The store refuses a link that does not fit; a change to a row that breaks one (a mark taken away,
 an amount corrected, a row removed) takes an automatic link with it and is refused for one you or a
 proposal made. The link is on the company's row, not yours, so your rows never change because a
 company's data is here (DECISIONS 2026-11-26).
@@ -410,7 +420,7 @@ which its deadlines are worked out ([FORMULAS.md §22](FORMULAS.md)). They are t
 yours: `GET /api/companies` leaves them out, and only the company's own routes serve them
 (`GET /api/companies/:id/books`, `/api/company-books`, `/api/company-alerts`). Optional and additive
 (no format version). `{incorporatedOn, accountingReferenceDate?, periods, vat?, paye?,
-confirmationStatement?, tradeStartedOn?, ctPeriods, deadlinesFrom?, filings, setBy, updatedAt}`:
+confirmationStatement?, tradeStartedOn?, ctPeriods, deadlinesFrom?, ledgerFrom?, filings, setBy, updatedAt}`:
 
 - `incorporatedOn`: the day Companies House incorporated it.
 - `accountingReferenceDate`: `"MM-DD"`, its reference date from incorporation. Absent, the default:
@@ -443,6 +453,8 @@ confirmationStatement?, tradeStartedOn?, ctPeriods, deadlinesFrom?, filings, set
   incorporation.
 - `deadlinesFrom`: deadlines due before this day that no filing here does are not listed (they were
   settled before the books were kept here).
+- `ledgerFrom`: the day its general ledger starts (books taken over mid-life): nothing dated before it
+  posts but journals marked `opening`. Not before incorporation.
 - `filings`: what the company filed or paid, each `{id, kind, periodStart?, periodEnd, filedOn,
   reference?, note?, figures?, addedBy}`:
   - `kind`: `accounts`, `ct600` (a company tax return), `ct-payment` (Corporation Tax paid;
@@ -774,8 +786,9 @@ lives in the work area (`<work>/proposals/`), never here.
     id (given as the store gives it) and `addedBy: "agent"`; never a second for the same kind and
     period's end.
   - `set_books {transaction, books | null}`: code a row in a company's books (transactions, `books`,
-    without `setBy`), or take an agent's coding away (`null`); applied, it is `setBy: "agent"`, and a
-    coding you set is never changed.
+    without `setBy`), or take an agent's or a rule's coding away (`null`: left uncoded, `uncoded: true`,
+    so book rules leave it); applied, it is `setBy: "agent"`, and a coding you set is never changed.
+    Only for a company whose books are kept here, as `link_company` is.
   - `link_company {transaction, rows | null}`: on a company account's row, the rows of yours that are
     the same money (transactions, `companyLink`), or no link (`null`); applied, `setBy: "agent"`, never
     over a link you made.
@@ -803,8 +816,12 @@ a month's pay and its PAYE, a dividend declared), one per line. Optional: no fil
   are positive and credits negative**, not signed from your point of view (DECISIONS 2026-11-26):
   a journal is written as an accountant writes one. They add up to nothing, none is £0, each `ledger`
   is a code of the chart or one of the company's own accounts (`bank:<accountId>`, an opening balance),
-  never the ledger's own clearing codes (`suspense`, `bank-not-imported`). `vat` is `{treatment}`, a tag
-  for the VAT return; `covers` and `asset` as on a coding.
+  never the ledger's own clearing codes (`suspense`, `bank-not-imported`). `vat` is `{treatment, side,
+  claim?}`, said outright for the VAT return: `side` is `input` (reclaimed) or `output` (charged), never
+  inferred from the ledger, and `claim: "reg111"` a claim of input tax from before registration; a VAT
+  line is on `vat` itself, or on income, an expense or an asset's cost. `covers` and `asset` as on a
+  coding.
+- `opening`: an opening balance, which posts even before the books' first day (`books.ledgerFrom`).
 - `memo`: what it is; `evidence`: what shows it (a payroll summary, a board minute).
 - `createdBy`: `owner`, or `agent` when a proposal you applied wrote it.
 

@@ -3126,3 +3126,42 @@ prepayments and accruals, reconciliation and locking) come next and are built on
   director's loan's decision rejected); signing journals from the owner's side (ambiguous, above); the
   link on the owner's row (it would make the owner's rows depend on company data); a separate file for
   book rules (the brief asked for rules.json and the matcher; scoping the accessors keeps them apart).
+
+## 2026-11-26: The ledger after review: what VAT may be claimed, when a source posts, and books first
+
+A code review and an accounting review of the general ledger (the entry above) were taken in; the
+accountant confirmed the double entry, the micro-entity line mapping, the reverse charge and the
+director's loan's sign and timing. What changed, and why:
+
+- **Book rules and automatic links need the company's books kept here.** Without books its Books tab is
+  not there to show what they did. The company-scope test now keeps the company's books (its dates and
+  registrations) in the personal store as well, so whatever keeping books changes of the owner's (a book
+  rule for the rows they paid for the company, the loan read from the books) is on both sides, and the
+  test still finds the one difference by design exactly; the loan from the books against the marks
+  alone is `tests/ledger.test.ts`'s property.
+- **Taking a coding away leaves the row uncoded on purpose** (`books: {uncoded: true}`), so a book rule
+  does not code it again behind the owner's back; "Let the rules code it" takes even that away.
+- **A coded company row that becomes a transfer leg** loses a rule's or an agent's coding in the same
+  write (a commit's match, a scoped re-working's partner leg, a link by hand); one the owner coded is
+  never paired, and linking it by hand is refused with what to do. A commit can no longer fail halfway on
+  a coded leg already stored.
+- **VAT is claimed only where it may be:** on income, expenses and assets' costs; never on entertaining
+  or cars (blocked input tax), and a reverse charge never on a sale. Refused rather than turned into a
+  "blocked" treatment: the coding then says what the company paid, VAT included, and nothing pretends a
+  claim. VAT the owner paid needs an invoice addressed to the company (a check until said); VAT from
+  before registration is claimed under reg 111 within its time limits, and a journal's VAT says its side
+  outright.
+- **A source before incorporation posts on incorporation** (CA 2006 s51), its own day in its memo, so
+  no posting falls before the company's first period; and a company whose books start mid-life sets
+  `ledgerFrom`, before which only opening journals post.
+- **More double counts are asked about** (within a link's fee, and journals on the loan that repeat a
+  marked row), and a balance recorded on the director's loan that the books do not add up to is a check
+  with its difference, since a recorded balance anchors the loan.
+- **The chart grew** to what a small company needs (other debtors and creditors, net wages, stock,
+  intangible assets, investments, loans due within a year, penalties, donations, disposals), equipment
+  expensed in the accounts is capital for tax, interest paid a loan relationship debit, and an asset can
+  say it came from a connected person. Share capital not paid is codable, so the payment for it clears it.
+- **A link you make may carry a confirmed fee** above the cap, exactly what its sides differ by; the
+  app's links stay within it. Its fee posts on the company row's day.
+- **A proposal's checks read the loan as the app does**: `sourceAsLeft` is a ledger source, with the
+  company's rows and journals as the proposal leaves them.

@@ -2059,28 +2059,35 @@ and how Corporation Tax treats it:
 | Codes | Kind | Balance sheet line (debit / credit) or profit and loss line | Corporation Tax |
 |---|---|---|---|
 | `share-capital-unpaid` | asset | A / A | none |
-| `fixed-assets:<class>:cost` (computer, office, furniture, motor) | asset | B / B | capital |
-| `fixed-assets:<class>:depreciation` | asset | B / B | none |
-| `debtors:trade`, `bank:<account>`, `vat`, `suspense`, `bank-not-imported` | asset (VAT: liability) | C / E | none |
+| `fixed-assets:<class>:cost` (computer, office, furniture, van, motor: cars), `intangible-assets:cost` | asset | B / B | capital |
+| `fixed-assets:<class>:depreciation`, `intangible-assets:amortisation`, `investments` | asset | B / B | none |
+| `stock`, `debtors:trade`, `debtors:other`, `bank:<account>`, `vat`, `suspense`, `bank-not-imported` | asset (VAT: liability) | C / E | none |
 | `prepayments`, `accrued-income` | asset | D / D | none |
-| `card:<account>`, `creditors:trade`, `paye`, `corporation-tax`, `directors-loan` | liability | C / E | none |
+| `card:<account>`, `creditors:trade`, `creditors:other`, `net-wages`, `paye`, `corporation-tax`, `directors-loan`, `loans-due-within-year` | liability | C / E | none |
 | `loans:<account>` | liability | C / H | none |
 | `accruals`, `deferred-income` | liability | D / J | none |
 | `share-capital`, `retained-earnings`, `dividends` | equity | K / K | none |
 | `turnover` | income | A turnover | trading income |
 | `interest-receivable` | income | B other income | non-trading income |
+| `disposals` (profit or loss on disposal of fixed assets) | income | B other income as a credit, F other charges as a debit | capital (balancing adjustments instead) |
 | `cost-of-sales` | expense | C raw materials and consumables | allowable |
 | `directors-salaries`, `employer-ni`, `staff-pensions` | expense | D staff costs | allowable |
 | `depreciation` | expense | E depreciation | disallowable |
-| `software-hosting`, `bank-charges`, `interest-payable`, `professional-fees`, `companies-house-fees`, `registered-office`, `rent`, `telephone-internet`, `travel`, `small-equipment`, `advertising`, `insurance`, `office-costs`, `general-expenses` | expense | F other charges | allowable |
-| `formation-costs`, `entertainment` | expense | F other charges | disallowable |
+| `software-hosting`, `bank-charges`, `professional-fees`, `companies-house-fees`, `registered-office`, `rent`, `telephone-internet`, `travel`, `advertising`, `insurance`, `office-costs`, `general-expenses` | expense | F other charges | allowable |
+| `interest-payable` | expense | F other charges | loan relationship debit (CTA 2009 Part 5) |
+| `small-equipment` | expense | F other charges | capital: equipment is capital for tax whatever the accounts say (CTA 2009 s53), so capital allowances (the annual investment allowance) |
+| `formation-costs`, `entertainment`, `penalties` (CTA 2009 s1303 for tax penalties; fines by the general rule), `donations` (not a trading expense; qualifying charitable donations relief is separate) | expense | F other charges | disallowable |
 | `corporation-tax-charge` | expense | G tax | tax |
 
 A balance sheet code's line depends on its balance's sign where it can go either way: a bank account
 overdrawn is a creditor (E), the director's loan a debtor (C) when you owe the company. F and G of the
 balance sheet are totals, I (provisions) has no code yet. Each of the company's own accounts posts to a
 ledger of its own (`accountLedger`): a card to `card:<id>`, a loan account to `loans:<id>`, any other
-to `bank:<id>`. A payment can be coded only to the codes marked codable; `suspense` and
+to `bank:<id>`. A loan account is due after more than a year (H); the part due within a year of a
+period end is moved to `loans-due-within-year` (E) by a journal at that period end (the reports of the
+next slice show it). Shares issued and not paid for are a journal at incorporation (Dr
+`share-capital-unpaid`, Cr `share-capital`); the payment for them, when it comes, is coded to
+`share-capital-unpaid`, which clears it. A payment can be coded only to the codes marked codable; `suspense` and
 `bank-not-imported` are the ledger's own clearing codes, never written by you; depreciation,
 prepayments, accruals, retained earnings and the tax charge are written in journals (and by the later
 slices that work them out).
@@ -2095,24 +2102,57 @@ VAT-inclusive amount is *g* × *r* ÷ (1 + *r*) to the penny, half a penny away 
 (`vatInGross`); a reverse charge's is *g* × *r* (`reverseChargeVat`), *r* the rate on the row's day
 (`VAT_RATES`, uk.ts).
 
+**What VAT may be claimed** (UK_RULES.md, "VAT rates"):
+- VAT goes only on income, expenses and a fixed or intangible asset's cost (`takesVat`), never on
+  another balance sheet code (the director's loan, PAYE, share capital, VAT itself on a coding).
+- Input VAT on business entertainment and on a car is blocked (Input Tax Order 1992, SI 1992/3222,
+  arts 5 and 7; `VAT_BLOCKED`): such a coding takes no VAT, its VAT being part of its cost. A van's is
+  not blocked (its own class).
+- A reverse charge is the buyer's: never on income (a sale of services to a business abroad is outside
+  the scope). Its notional VAT should be the standard rate on what was paid: more than a penny out is a
+  check. On the VAT return its net amount belongs in boxes 6 and 7 as well as its VAT in boxes 1 and 4
+  (the next slice maps them); import VAT on goods (postponed VAT accounting) is not covered yet.
+- **VAT you paid for the company** is the company's to reclaim only on a supply made to it, with a VAT
+  invoice addressed to it (VATA 1994 s24(1); VAT Regulations 1995 reg 29(2); VAT Notice 700): a
+  coding on a row of yours says so (`invoiceToCompany`), and VAT claimed without it is a check. Under
+  cash accounting the claim falls when the company pays or credits you: the credit to your loan on the
+  row's day is that, so the VAT posts on that day.
+- **Before registration** (VAT Regulations 1995 reg 111): input tax on goods bought within 4 years
+  before registration and still held then, or services within 6 months, is claimed in the first return
+  (`claim: "reg111"` on the VAT; a journal line says it too). Such a claim is not "VAT before
+  registration"; one out of time (or dated on or after registration) is a check (`reg111Problem`;
+  goods are fixed and intangible assets' costs, cost of sales, small equipment and stock, the rest
+  services). Whether goods were still held is yours to say.
+- A journal's VAT line says its side outright (`{treatment, side, claim?}`): never inferred from its
+  ledger, so output VAT in a correction (on a disposal, say) is never taken for input VAT.
+
+**Dates.** A source dated before incorporation (a cost you paid for the company before it existed, a
+journal) is taken in on the day of incorporation, its own day kept in its memo: until the company
+adopts it, a pre-incorporation contract is the promoter's (CA 2006 s51), so the books take it in when
+the company comes into being, never in a period before its first. With `books.ledgerFrom` (books taken
+over mid-life), nothing dated before it posts but journals marked `opening`: the opening balances stand
+for everything before.
+
 **Postings, source by source** (each balances):
 
 | Source (`source.kind`) | Postings |
 |---|---|
-| A company account's row *t* (`row`) | *t* to its account's own ledger; then, linked to loans of yours: −*t* to `directors-loan`; coded: for each line, −(*g* − *v*) to the line's ledger and −*v* to `vat` (a reverse charge: −*g* to the line's ledger, +*v* to `vat` as output VAT and −*v* to `vat` as input VAT, so it nets to nothing); uncoded, or coded where it does not fit: −*t* to `suspense` |
+| A company account's row *t* (`row`) | *t* to its account's own ledger; then, linked to loans of yours: −*t* to `directors-loan`; coded: for each line, −(*g* − *v*) to the line's ledger and −*v* to `vat` (a reverse charge: −*g* to the line's ledger, +*v* to `vat` as output VAT and −*v* to `vat` as input VAT, so it nets to nothing); uncoded, left uncoded by you (`uncoded`, which book rules leave), or coded where it does not fit: −*t* to `suspense`. A row in another currency posts nothing (a check) and is never linked |
 | The two legs of a transfer between the company's own accounts (`transfer`, the group's id) | each leg's amount to its own account's ledger (bank −250, card +250); no coding. A leg whose other leg is not there posts as a row, to `suspense` |
 | A row of yours *m* paid for the company (`personal`) | *m* to `directors-loan` (a cost you paid, *m* < 0, is a credit: the company owes you more), and its coding's lines as a company row's would be (uncoded: −*m* to `suspense`) |
 | A row of yours *m* lent to the company or repaid by it, not linked (`personal`) | *m* to `directors-loan`, −*m* to `bank-not-imported` (the company's bank side is not in its imported accounts) |
-| A row of yours lent or repaid, linked (`link`, its row of yours) | nothing of its own (its company rows post it), but the fee *d* its two sides differ by: +*d* to `bank-charges`, −*d* to `directors-loan`, on the latest day of the link |
+| A row of yours lent or repaid, linked (`link`, its row of yours) | nothing of its own (its company rows post it), but the fee *d* its two sides differ by: +*d* to `bank-charges`, −*d* to `directors-loan`, on the company row's day (the latest of them). A link across a period end leaves money in transit (sent before it, arrived after): an `other debtors` accrual by journal at the period end holds it |
 | A journal (`journal`, with its `line`) | its lines as written |
 
 So a sale of £1,200 with £200 VAT is bank +120000, turnover −100000, VAT −20000; a laptop of £1,440
 with £240 VAT capitalised is fixed assets +120000, VAT +24000, bank −144000; a £24 domain you paid for
 the company with £4 VAT is software +2000, VAT +400, director's loan −2400.
 
-Each posting carries what the later reports need: its VAT (`{treatment, side, part}`: input when
-reclaimed, output when charged, by the line's ledger being income or not; the net amount or the tax),
-the period a cost covers (`covers`) and the fixed asset it is (`asset`).
+Each posting carries what the later reports need: its VAT (`{treatment, side, part, claim?}`: on a
+coding, input when reclaimed and output when charged, by the line's ledger being income or not; on a
+journal, as the line says; the net amount or the tax; a reg 111 claim), the period a cost covers
+(`covers`) and the fixed asset it is (`asset`, with `connected` when it was bought from a connected
+person: no annual investment allowance, its cost capped, CAA 2001 ss214–218, for the tax slice).
 
 **Links** (`companyLink`, `linkGroupProblem`, `companyLinkProblem`). A company row naming rows of yours
 lent to it or repaid by it, and those rows, are one link group (`linkGroups`: rows naming a row of
@@ -2122,14 +2162,17 @@ to the director's loan or not at all; the two sides go opposite ways, at most 31
 (`LINK_DAYS`); and the fee *d* = −(Σ yours + Σ the company's), in pence, is 0 ≤ *d* ≤ min(£25, max(£1,
 3% of |Σ yours|)) (`linkTolerance`): what was sent less what arrived, a fee taken on the way (a card
 processor's on money you lent, a bank's on money it repaid), which the company bears as a bank charge, so
-your loan moves by your own side. One that does not fit counts for nothing: its rows post as not
-linked, and it is a check.
+your loan moves by your own side. A link you make yourself may carry a larger fee you confirm
+(`companyLink.fee`), which must be exactly what the two sides differ by; the app's own links and an
+agent's never do. Every company row is in pounds. One that does not fit counts for nothing: its rows post
+as not linked, and it is a check.
 
 The app links by itself (`autoLinks`, enrichment) a row of yours marked as a loan and a company row the
 same amount the other way, to the penny, at most 4 days apart (`AUTO_LINK_DAYS`), neither linked by you
 or a proposal, the company row coded to the director's loan or not at all, where each is the other's
-only such row. It works these out again whenever rows are worked out (`setBy: auto`); yours and an
-agent's stay, and an empty link of yours ("not linked") stops it. The Books tab suggests the company
+only such row. It works these out again whenever rows are worked out (`setBy: auto`), for a company
+whose books are kept here only; yours and an agent's stay, and an empty link of yours ("not linked")
+stops it. The Books tab suggests the company
 rows within 10 days (`DOUBLE_COUNT_DAYS`) and the fee tolerance for each loan not linked.
 
 **Book rules** (`bookRulePatches`, `ruleCoding`). A company's enabled book rules, by priority then age,
@@ -2139,15 +2182,28 @@ it (the matcher of your rules) and whose coding fits it: its ledger; its VAT amo
 on the row's day (the VAT in it at the standard or reduced rate, a reverse charge's notional VAT, £0
 otherwise); its asset; and, with `coversMonths` *n*, `covers` from the row's day to the last day of *n*
 months beginning with it. A row a rule coded that none matches now loses its coding. Applied when a rule
-is made, changed or removed, and whenever rows are worked out.
+is made, changed or removed, and whenever rows are worked out, for a company whose books are kept here
+only; a row you or a proposal left uncoded (`uncoded`) is left so.
 
-**Checks** (`LedgerCheck`), across the whole ledger: a row not coded (posted to suspense); a coding
-that does not fit; a company row in another currency (the books are in pounds, so it is not posted); a loan of yours with no company row (posted to the bank not imported); a transfer leg
-whose other leg is not there; **maybe the same money twice**: a loan of yours not linked and a company
-row coded to the director's loan not linked, the same amount the other way within 10 days (both would
-move the loan); a link or a journal that does not fit; VAT on a posting before the company registered
-for VAT (or after it deregistered); and a source whose postings do not add up, which by construction
-never happens (it is there to say so if it did).
+**A company row that becomes a transfer leg** (linked with another of the company's accounts, by
+re-working rows out, a commit or by hand) loses a rule's or a proposal's coding in the same write,
+whichever account's re-working found the pair; one you coded is never paired (re-working, the commit's
+match and the import's other-leg match leave it out, and linking it by hand is refused until you take
+its coding away).
+
+**Checks** (`LedgerCheck`), across the whole ledger: a row not coded (posted to suspense), or left
+uncoded by you; a coding that does not fit; a company row in another currency (the books are in pounds,
+so it is not posted); a loan of yours with no company row (posted to the bank not imported); a transfer
+leg whose other leg is not there; **maybe the same money twice**: a loan of yours not linked and a
+company row coded to the director's loan not linked, the other way within 10 days and within a link's
+fee of each other (both would move the loan), and a journal line on the director's loan that says what
+a marked row of yours says (the same way, within a link's fee, within 10 days); a link or a journal that
+does not fit; VAT on a posting before the company registered for VAT (or after it deregistered), but
+for a reg 111 claim; a reg 111 claim out of time; a reverse charge whose VAT is not the standard rate on
+the amount; VAT you paid claimed without an invoice addressed to the company; **a balance recorded on
+your director's loan that the books do not add up to on its day** (recorded, the books' figure, and the
+difference: a recorded balance anchors the loan, so it is never passed over in silence); and a source
+whose postings do not add up, which by construction never happens (it is there to say so if it did).
 
 ### The director's loan from the books (`director-loan.ts`, `loanMovements`)
 
@@ -2157,7 +2213,10 @@ keeps books here (`Company.books`), they are its ledger's postings to `directors
 books (it owes you more) is the loan you hold growing. A row of yours keeps its mark's id and kind; a
 company row linked to loans of yours is "Lent" or "Paid back"; one coded to the loan alone is "Into"
 or "Out of the company's account"; a journal's lines on it are a "Journal"; a link's fee is "Fee taken
-on the way". The balance engine reads them as before, and balances you record still anchor them.
+on the way". The balance engine reads them as before, and balances you record still anchor them (each
+one the books do not add up to is a check, above). A cost you paid before incorporation moves the loan
+on the day of incorporation, as the books take it in; with `ledgerFrom`, the loan starts from the
+opening journal's line on it.
 
 So with nothing but your marks and links (every loan of yours linked to company rows or not linked,
 every row paid for the company coded or not), the loan is the same as from your marks alone, on every

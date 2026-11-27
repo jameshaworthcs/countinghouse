@@ -258,7 +258,10 @@ The company seen from its own side: its records and deadlines, when you keep its
   `linkUpkeep`, `journalProblems`), and keeps an index of which company rows name a row of yours, so a
   change to your row that breaks a link takes the app's own link with it and is refused for one you
   made. Enrichment codes by book rules and links exact matches (`bookRulePatches`, `autoLinkPatches`)
-  after it works out transfers.
+  after it works out transfers, for a company whose books are kept here; a company row that pairing
+  makes a transfer leg loses a rule's or an agent's coding in the same write, whatever the scope. A
+  proposal's checks read the books as the changes leave them (`sourceAsLeft` is a ledger source,
+  `ledgerAsLeft`).
 - **Its own routes serve it** (`GET /api/companies/:id/ledger`, `GET /api/companies/:id/coding`), and
   the owner's writes (`PUT /api/companies/:id/rows/:txId/books` and `/link`, `POST
   /api/companies/:id/links/auto`, journals and book rules), which no token may use; an agent proposes

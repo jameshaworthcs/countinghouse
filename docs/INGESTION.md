@@ -779,7 +779,10 @@ dates ("Proposed: …"), and keeps it when you change them.
     longer applies to (one now a leg of a transfer between its accounts, which posts by itself). It
     also links, by itself, a company row to a loan of yours that is the same money to the penny within
     4 days (`companyLink`), and a company row linked to your loans, or one you coded, is never paired as
-    a transfer, at drafting, commit, re-applying or by hand.
+    a transfer, at drafting, commit, re-applying or by hand (refused, with what to do). A row a rule or a
+    proposal coded that becomes a transfer leg (its other leg arriving in a later import, or found by
+    re-working another account's rows) loses that coding in the same write. Book rules and the app's own
+    links run only for a company whose books are kept here.
   - The one exception: each leg of a transfer between two of the company's accounts has the transfer
     category for its leg (`credit-card-payment`, `transfers`…, by `transfer`), whatever it had
     before, so linking, unlinking and re-applying work as for yours.
