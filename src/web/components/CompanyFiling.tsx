@@ -8,6 +8,7 @@
 
 import { Download, Printer } from 'lucide-react';
 import { Fragment, useState, type ReactNode } from 'react';
+import { Link } from 'react-router';
 import { COMPANY_TYPE_LABELS, REGISTERED_IN_LABELS, type QualificationRule } from '../../shared/accounts-filing';
 import type { CompanyFilingResponse, EligibilityView, FilingSheetLine } from '../../shared/api';
 import { formatDate, formatMonth, formatSpan, today } from '../../shared/dates';
@@ -271,8 +272,21 @@ function SheetCard({ v, companyId }: { v: CompanyFilingResponse; companyId: stri
 // ─── What must be done, and whether it qualifies ─────────────────────────────────────────────────────
 
 function GateCard({ v }: { v: CompanyFilingResponse }) {
+  // A filing recorded with the books' setup (or the lock moved since) leaves them unlocked: said as it is.
+  const locked = Boolean(v.accounts.lockedThrough && v.accounts.lockedThrough >= v.period.end);
+  const filed = locked ? (
+    'Recorded as filed: the books are locked through the period’s end.'
+  ) : (
+    <>
+      Recorded as filed, but the books are not locked through the period’s end, so a change to them could still move what was filed. Set “Locked through” to {formatDate(v.period.end)} in{' '}
+      <Link to={`/company/${v.company.id}/settings`} className="text-accent hover:underline">
+        Settings
+      </Link>
+      .
+    </>
+  );
   return (
-    <Card title={v.filing ? `Filed ${formatDate(v.filing.filedOn)}` : v.ready ? 'Ready to file' : 'Before you file'} description={v.filing ? 'Recorded as filed: the books are locked through the period’s end.' : 'Each must be done before the accounts are filed and recorded here.'}>
+    <Card title={v.filing ? `Filed ${formatDate(v.filing.filedOn)}` : v.ready ? 'Ready to file' : 'Before you file'} description={v.filing ? filed : 'Each must be done before the accounts are filed and recorded here.'}>
       <ul className="flex flex-col gap-2 text-[13px]">
         {v.gate.map((g) => (
           <li key={g.key} className="flex items-start gap-2">
