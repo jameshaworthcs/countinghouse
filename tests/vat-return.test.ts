@@ -9,14 +9,14 @@ import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import type { CompanyVatResponse, VatBoxKey, VatReturnView } from '../src/shared/api';
 import { companyLedger, type LedgerSource } from '../src/server/analytics/ledger';
-import { companyVat, NOT_A_SUPPLY, taxableTurnover, vatFigures, vatReturnCsv } from '../src/server/analytics/vat-return';
+import { companyVat, NOT_A_SUPPLY, reverseChargeTaxPoint, taxableTurnover, vatFigures, vatReturnCsv } from '../src/server/analytics/vat-return';
 import { transactionId } from '../src/server/ids';
-import { booksProblems } from '../src/shared/company-books';
+import { addVatCorrection, addVatDisclosure, booksProblems } from '../src/shared/company-books';
 import { VAT_RETURN_DISCLAIMER } from '../src/shared/disclaimers';
 import { addDays } from '../src/shared/dates';
 import { poundsWithoutPence } from '../src/shared/money';
 import type { Account, BooksCoding, Company, CompanyFiling, Journal, Transaction, VatBoxes } from '../src/shared/schema';
-import { vatCorrectionDeadline, vatCorrectionMethod, vatPointExpiry, vatThresholdsOn } from '../src/shared/uk';
+import { VAT_DEREGISTRATION_ASSETS_RULES, vatCorrectionDeadline, vatCorrectionMethod, vatFrequencyOfPeriod, vatPointExpiry, vatThresholdsOn } from '../src/shared/uk';
 
 const stamp = '2024-01-01T00:00:00+00:00';
 const CO = 'example-kiln';
@@ -30,7 +30,7 @@ const companyOf = (books: Partial<Books> = {}): Company => ({ id: CO, name: 'Exa
 const journal = (date: string, memo: string, lines: Journal['lines'], extra: Partial<Journal> = {}): Journal => ({ id: `jnl_${(n++).toString(16).padStart(12, '0')}`, companyId: CO, date, memo, lines, createdBy: 'owner', createdAt: stamp, updatedAt: stamp, ...extra });
 const coded = (ledger: string, extra: Partial<BooksCoding> = {}): BooksCoding => ({ ledger, setBy: 'user', ...extra });
 const std = (amount: number) => ({ amount, treatment: 'standard' as const });
-const vatOf = (treatment: 'zero' | 'exempt' | 'outside') => ({ amount: 0, treatment });
+const vatOf = (treatment: 'zero' | 'exempt' | 'outside' | 'abroad') => ({ amount: 0, treatment });
 
 const ACCOUNTS: Account[] = [acct('current', 'Everyday', 'current'), acct('card', 'Example Card', 'credit_card'), acct('loan', 'Director’s loan', 'director_loan'), acct('kiln-bank', 'Kiln Account', 'current', { companyId: CO, includeInNetWorth: false })];
 const bank = (date: string, amount: number, description: string, books?: BooksCoding) => tx('kiln-bank', date, amount, description, books ? { books } : {});
@@ -157,14 +157,15 @@ describe('which return a posting is in', () => {
     expect(q4.period.status).toBe('not-ready');
   });
 
-  it('a claim under reg 111 in the first return, whatever its day, its value left out of box 7; one out of time stops the first return', () => {
+  it('a claim under reg 111 in the first return, whatever its day, its value in box 7 beside its VAT; one out of time stops the first return', () => {
     const laptop = bank('2024-02-10', -1200, 'EXAMPLE COMPUTERS', coded('fixed-assets:computer:cost', { vat: { amount: -200, treatment: 'standard', claim: 'reg111' }, asset: { class: 'computer', months: 36 } }));
     const first = vatOn(memory([laptop]), '2024-12-15', '2024-06-30').ret!;
     expect(first.period.first).toBe(true);
     expect(box(first, 'vatReclaimedCurrPeriod')).toMatchObject({ value: 20_000, lines: [expect.objectContaining({ counted: 'reg111', date: '2024-02-10' })] });
-    expect(box(first, 'totalValuePurchasesExVAT').value).toBe(0);
-    expect(first.leftOut).toEqual([expect.objectContaining({ reason: 'reg111', amount: 100_000 })]);
-    expect(first.notes.join(' ')).toMatch(/reg 111/);
+    expect(box(first, 'totalValuePurchasesExVAT')).toMatchObject({ value: 1_000, lines: [expect.objectContaining({ counted: 'reg111', amount: 100_000 })] });
+    expect(first.leftOut).toEqual([]);
+    expect(first.notes.join(' ')).toMatch(/reg 111\(3\)/);
+    expect(first.notes.join(' ')).toMatch(/box 7 beside their VAT in box 4/);
     expect(first.ready).toBe(true);
     // Services more than 6 months before registration: out of time, which stops the first return.
     const late = bank('2023-09-01', -120, 'EXAMPLE ADVICE', coded('professional-fees', { vat: { amount: -20, treatment: 'standard', claim: 'reg111' } }));
@@ -279,7 +280,7 @@ describe('errors on returns filed (VAT Notice 700/45)', () => {
   it('finds the net error by output and input tax, and what is left after a correction on a later return', () => {
     const company = companyOf({ filings: [filing('2024-07-01', '2024-09-30', '2024-11-01', short)] });
     const v = vatOn(memory(QUARTER, { company }), '2024-12-15');
-    expect(v.corrections.errors).toEqual([expect.objectContaining({ end: '2024-09-30', error: 3_000, output: 3_000, input: 0, uncorrected: 3_000, runningTotal: 3_000, outOfTime: false, unsettled: false, inTimeUntil: '2028-09-30' })]);
+    expect(v.corrections.errors).toEqual([expect.objectContaining({ end: '2024-09-30', error: 3_000, output: 3_000, input: 0, uncorrected: 3_000, counted: 3_000, runningTotal: 3_000, outOfTime: false, unsettled: false, outputUntil: '2028-09-30', inputUntil: '2028-09-30' })]);
     expect(v.corrections).toMatchObject({ net: 3_000, method: 'next-return', limit: 'basic', on: { end: '2024-12-31', provisional: true } });
     // Corrected on the next return: its box 1 includes it, so its filing matches the books with it.
     const q4Filed = { vatDueSales: 30, vatDueAcquisitions: 0, totalVatDue: 30, vatReclaimedCurrPeriod: 0, netVatDue: 30, totalValueSalesExVAT: 0, totalValuePurchasesExVAT: 0, totalValueGoodsSuppliedExVAT: 0, totalAcquisitionsExVAT: 0 };
@@ -371,15 +372,144 @@ describe('the registration thresholds', () => {
       bank('2024-07-06', 300, 'ZERO SALE', coded('turnover', { vat: vatOf('zero') })),
       bank('2024-07-07', 400, 'ABROAD', coded('turnover', { vat: vatOf('outside') })),
       bank('2024-07-08', 50, 'EXEMPT', coded('interest-receivable', { vat: vatOf('exempt') })),
+      // Interest is exempt whatever a coding says.
+      bank('2024-07-12', 60, 'INTEREST', coded('interest-receivable')),
+      bank('2024-07-13', 80, 'SOLD ABROAD', coded('turnover', { vat: vatOf('abroad') })),
       bank('2024-07-09', 70, 'UNTREATED', coded('turnover')),
       bank('2024-07-10', 240, 'OLD LAPTOP', coded('disposals', { vat: std(40) })),
       bank('2024-07-11', -36, 'EXAMPLE CLOUD INC', coded('software-hosting', { vat: { amount: -7.2, treatment: 'reverse-charge' } })),
     ];
     const src = memory(rows);
-    expect(taxableTurnover(companyLedger(src, CO).postings, new Set(), '2024-01-01', '2024-12-31')).toEqual({ sales: 130_000, untreated: 7_000, reverseCharge: 3_600 });
+    expect(taxableTurnover(companyLedger(src, CO).postings, new Set(), '2024-01-01', '2024-12-31')).toEqual({ sales: 130_000, untreated: 7_000, reverseCharge: 3_600, capital: 20_000 });
     const t = vatOn(src, '2024-12-15').threshold;
-    expect(t).toMatchObject({ taxable: 140_600, registration: 90_000, deregistration: 88_000, registered: true, partial: true });
+    expect(t).toMatchObject({ taxable: 140_600, registration: 90_000, deregistration: 88_000, registered: true, partial: true, cash: { turnover: 157_000, join: 1_350_000, leave: 1_600_000, over: false } });
     expect(t.months).toHaveLength(12);
+  });
+});
+
+describe('after review', () => {
+  it('records a second correction or disclosure for a period by adding to the first, never replacing it', () => {
+    const once = addVatCorrection(undefined, '2024-09-30', 30);
+    expect(once).toEqual([{ periodEnd: '2024-09-30', amount: 30 }]);
+    const twice = addVatCorrection([...once, { periodEnd: '2024-03-31', amount: -4.5 }], '2024-09-30', 12.35);
+    expect(twice).toEqual([{ periodEnd: '2024-03-31', amount: -4.5 }, { periodEnd: '2024-09-30', amount: 42.35 }]);
+    // One that comes to nothing is taken away.
+    expect(addVatCorrection(twice, '2024-03-31', 4.5)).toEqual([{ periodEnd: '2024-09-30', amount: 42.35 }]);
+    const first = addVatDisclosure(undefined, '2024-12-01', 30, 'EXAMPLE-A');
+    expect(addVatDisclosure(first, '2025-01-10', 15, '')).toEqual({ on: '2025-01-10', amount: 45, reference: 'EXAMPLE-A' });
+    expect(addVatDisclosure(first, '2025-01-10', -30)).toBeUndefined();
+    // Through the corrections: the two parts together correct the error.
+    const short = { ...FILED, vatDueSales: 157.2, totalVatDue: 157.2, netVatDue: 120 };
+    const company = companyOf({ filings: [filing('2024-07-01', '2024-09-30', '2024-11-01', short, { disclosed: addVatDisclosure(addVatDisclosure(undefined, '2024-12-01', 10), '2024-12-05', 20)! })] });
+    expect(vatOn(memory(QUARTER, { company }), '2024-12-15').corrections.errors[0]).toMatchObject({ uncorrected: 0, correctedBy: [{ kind: 'separately', amount: 3_000 }] });
+  });
+
+  it('shows the last return of a company deregistered with everything filed', () => {
+    const company = companyOf({
+      vat: { registeredFrom: '2024-04-01', scheme: 'cash', schedule: [{ from: '2024-04-01', stagger: 'quarterly-1' }], deregisteredOn: '2024-09-30' },
+      filings: [filing('2024-04-01', '2024-06-30', '2024-07-20'), filing('2024-07-01', '2024-09-30', '2024-10-20', FILED)],
+    });
+    const v = vatOn(memory(QUARTER, { company }), '2025-03-01');
+    expect(v.next).toBeUndefined();
+    expect(v.ret!.period).toMatchObject({ end: '2024-09-30', final: true, status: 'filed' });
+    expect(v.ret!.notes.join(' ')).toContain(`£${VAT_DEREGISTRATION_ASSETS_RULES[0]!.limit.toLocaleString('en-GB')}`);
+  });
+
+  it('gives a filed net for its own period, beside the corrections its filing included', () => {
+    const q4 = { vatDueSales: 30, vatDueAcquisitions: 0, totalVatDue: 30, vatReclaimedCurrPeriod: 0, netVatDue: 30, totalValueSalesExVAT: 0, totalValuePurchasesExVAT: 0, totalValueGoodsSuppliedExVAT: 0, totalAcquisitionsExVAT: 0 };
+    const company = companyOf({ filings: [filing('2024-10-01', '2024-12-31', '2025-01-20', q4, { corrections: [{ periodEnd: '2024-09-30', amount: 30 }] })] });
+    expect(vatOn(memory(QUARTER, { company }), '2025-02-15').periods.find((p) => p.end === '2024-12-31')).toMatchObject({ computed: 0, filed: 0, correctionsIncluded: 3_000 });
+  });
+
+  it('says a filed return with checks left is filed, in the CSV too', () => {
+    const company = companyOf({ filings: [filing('2024-07-01', '2024-09-30', '2024-11-01', FILED)] });
+    const ret = vatOn(memory([...QUARTER, bank('2024-08-09', -9.99, 'EXAMPLE UNKNOWN')], { company }), '2024-12-15', '2024-09-30').ret!;
+    expect(ret.ready).toBe(false);
+    const csv = vatReturnCsv(companyOf(), ret, (x) => String(x));
+    expect(csv).toContain('Filed; the books have 2 checks to clear');
+    expect(csv).not.toContain('Not ready to file');
+  });
+
+  it('counts a supply abroad in box 6 or 7, and outside the scope only when it is a sale read from before', () => {
+    const rows = [
+      bank('2024-07-05', 500, 'EXAMPLE OVERSEAS CLIENT', coded('turnover', { vat: vatOf('abroad') })),
+      bank('2024-07-06', -180, 'EXAMPLE HOTEL ABROAD', coded('travel', { vat: vatOf('abroad') })),
+      bank('2024-07-07', -40, 'EXAMPLE CHARITY FEE', coded('general-expenses', { vat: vatOf('outside') })),
+      bank('2024-07-08', 60, 'EXAMPLE GRANT', coded('interest-receivable', { vat: vatOf('outside') })),
+      bank('2024-07-09', 70, 'EXAMPLE OLD SALE ABROAD', coded('turnover', { vat: vatOf('outside') })),
+    ];
+    const ret = vatOn(memory(rows), '2024-12-15', '2024-09-30').ret!;
+    expect(values(ret)).toMatchObject({ 6: 570, 7: 180 });
+    expect(ret.leftOut.map((l) => [l.reason, l.amount])).toEqual([
+      ['outside', 4_000],
+      ['outside', 6_000],
+    ]);
+    expect(ret.notes.join(' ')).toMatch(/coded outside the scope is counted in box 6 as supplied outside the UK/);
+  });
+
+  it('takes a reverse charge on reg 82’s tax point: a journal neither paid nor invoiced at the year’s end, an invoiced one at its period’s end', () => {
+    expect(reverseChargeTaxPoint('2024-10-03', true)).toBe('2024-10-03');
+    expect(reverseChargeTaxPoint('2024-10-03', true, { from: '2024-09-01', to: '2024-09-30' })).toBe('2024-09-30');
+    expect(reverseChargeTaxPoint('2024-10-03', true, { from: '2024-10-03', to: '2025-10-02' })).toBe('2024-10-03');
+    expect(reverseChargeTaxPoint('2025-03-10', false, { from: '2024-11-01', to: '2025-02-28' })).toBe('2024-12-31');
+    expect(reverseChargeTaxPoint('2025-03-10', false, { from: '2024-11-01', to: '2025-02-28' }, '2025-03-01')).toBe('2025-02-28');
+    expect(reverseChargeTaxPoint('2025-03-10', false)).toBe('2025-03-10');
+    const rc = (extra: Partial<Journal['lines'][number]> = {}) =>
+      journal('2025-03-10', 'Design service from abroad, not yet paid', [
+        { ledger: 'software-hosting', amount: 100, vat: { treatment: 'reverse-charge', side: 'input' }, covers: { from: '2024-11-01', to: '2025-02-28' }, ...extra },
+        { ledger: 'vat', amount: -20, vat: { treatment: 'reverse-charge', side: 'output' } },
+        { ledger: 'vat', amount: 20, vat: { treatment: 'reverse-charge', side: 'input' } },
+        { ledger: 'creditors:trade', amount: -100 },
+      ]);
+    const yearEnd = vatOn(memory([], { journals: [rc()] }), '2025-06-15', '2024-12-31').ret!;
+    expect(values(yearEnd)).toMatchObject({ 1: 2_000, 4: 2_000, 6: 100, 7: 100 });
+    const invoiced = vatOn(memory([], { journals: [rc({ invoicedOn: '2025-03-01' })] }), '2025-06-15', '2025-03-31').ret!;
+    expect(values(invoiced)).toMatchObject({ 1: 2_000, 4: 2_000, 6: 100, 7: 100 });
+  });
+
+  it('warns when a reverse charge paid says no period for its service', () => {
+    const ret = vatOn(memory(QUARTER), '2024-12-15', '2024-09-30').ret!;
+    expect(ret.notes.join(' ')).toMatch(/A reverse charge is taken on the day paid, with no period said/);
+  });
+
+  it('gives each part of an error its own 4 years: input tax under-claimed from the due day', () => {
+    // Box 1 £30 short (output under-declared), box 4 £10 short (input under-claimed).
+    const both = { ...FILED, vatDueSales: 157.2, totalVatDue: 157.2, vatReclaimedCurrPeriod: 27.2, netVatDue: 130 };
+    const company = companyOf({ filings: [filing('2024-07-01', '2024-09-30', '2024-11-01', both)] });
+    const inTime = vatOn(memory(QUARTER, { company }), '2025-02-15').corrections.errors[0]!;
+    expect(inTime).toMatchObject({ error: 2_000, output: 3_000, input: -1_000, counted: 2_000, outputUntil: '2028-09-30', inputUntil: '2028-11-07' });
+    // Between the two: the output part is out of time, the input part is not.
+    const later = vatOn(memory(QUARTER, { company }), '2028-10-15');
+    expect(later.corrections.errors[0]).toMatchObject({ outOfTime: false, counted: -1_000 });
+    expect(later.corrections.net).toBe(-1_000);
+  });
+
+  it('stops returns once taxable supplies reach the cash accounting scheme’s limit for leaving', () => {
+    const big = bank('2024-08-01', 1_920_000, 'EXAMPLE BIG CLIENT', coded('turnover', { vat: std(320_000) }));
+    const v = vatOn(memory([big]), '2025-02-15');
+    const q3 = vatOn(memory([big]), '2025-02-15', '2024-09-30').ret!;
+    expect(q3.checks).toEqual([{ kind: 'cash-limit', periodEnd: '2024-09-30', turnover: 160_000_000, limit: 1_600_000 }]);
+    expect(v.periods.find((p) => p.end === '2024-12-31')!.status).toBe('not-ready');
+    expect(v.threshold.cash.over).toBe(true);
+  });
+
+  it('gives late payment penalties beside a return to pay, at the rates of its due day', () => {
+    const sale = bank('2025-07-05', 1200, 'EXAMPLE CLIENT LTD', coded('turnover', { vat: std(200) }));
+    const ret = vatOn(memory([sale]), '2025-12-15', '2025-09-30').ret!;
+    expect(ret.latePayment).toEqual({ due: '2025-11-07', rates: { graceDays: 15, firstPercent: 3, secondDays: 30, secondPercent: 3, dailyFromDay: 31, yearlyPercent: 10 }, atFirst: 600, atSecond: 1_200 });
+    // Due before the rates covered: shown without figures; nothing to pay: none.
+    expect(vatOn(memory(QUARTER), '2024-12-15', '2024-09-30').ret!.latePayment).toMatchObject({ rates: null });
+    expect(vatOn(memory([]), '2025-12-15', '2025-09-30').ret!.latePayment).toBeUndefined();
+  });
+
+  it('puts a period in the penalty points table by its length', () => {
+    expect(vatFrequencyOfPeriod({ start: '2024-04-01', end: '2024-06-30' })).toBe('quarterly');
+    expect(vatFrequencyOfPeriod({ start: '2024-04-01', end: '2024-04-30' })).toBe('monthly');
+    // A short first period with a quarterly stagger: 5 weeks.
+    expect(vatFrequencyOfPeriod({ start: '2024-05-27', end: '2024-06-30' })).toBe('monthly');
+    // 20 weeks exactly is still quarterly; a day more is annual.
+    expect(vatFrequencyOfPeriod({ start: '2024-01-01', end: addDays('2024-01-01', 139) })).toBe('quarterly');
+    expect(vatFrequencyOfPeriod({ start: '2024-01-01', end: addDays('2024-01-01', 140) })).toBe('annual');
   });
 });
 

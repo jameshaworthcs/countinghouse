@@ -135,6 +135,7 @@ export function companyBookRoutes(ctx: AppContext): Hono {
     const id = c.req.param('id');
     const input = await readJson(c, CompanyFilingInputSchema);
     if (input.filedOn > today()) throw new StoreError(`${formatDate(input.filedOn)} is in the future.`, 422);
+    if (input.kind === 'vat' && input.disclosed && input.disclosed.on > today()) throw new StoreError(`${formatDate(input.disclosed.on)} is in the future.`, 422);
     const filing = CompanyFilingSchema.parse({ ...input, id: filingId(id, input.kind, input.periodEnd), addedBy: 'owner' });
     const name = companyOr404(id).name;
     await store.updateCompany(

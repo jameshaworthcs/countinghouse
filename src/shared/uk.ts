@@ -4,7 +4,8 @@
 // through the codebase. Sources and caveats: docs/UK_RULES.md. When adding a year, add a row to
 // TAX_YEAR_PARAMS with only the fields that changed; later years inherit earlier values.
 
-import { addDays, addMonths, addYears, endOfMonth, makeDate, startOfMonth, weekday, type ISODate } from './dates';
+import { addDays, addMonths, addYears, diffDays, endOfMonth, makeDate, startOfMonth, weekday, type ISODate } from './dates';
+import { mulDivRound, toMinor } from './money';
 
 export interface TaxYear {
   /** "2026/27" */
@@ -977,7 +978,8 @@ export function lastWorkingDayOfMonth(date: ISODate): ISODate {
  * corrected on the current return ("method 1", using its boxes 1 and 4: Notice 700/12 para 6.6) when it
  * is no more than £10,000, or no more than £50,000 and no more than 1% of the box 6 of the return for
  * the period the errors are found in. Above that, or for errors made deliberately, they are reported to
- * HMRC separately ("method 2"), which may be chosen for an error of any size. An error is corrected
+ * HMRC separately ("method 2": online or in writing, form VAT652 having been withdrawn in September
+ * 2025), which may be chosen for an error of any size. An error is corrected
  * within 4 years: from the end of the period it was made in for output tax under-declared and input tax
  * over-claimed, from the return's due date for input tax under-claimed (section 4.7; the limit does not
  * apply to deliberate errors). By the day the errors are found: these limits from 1 July 2008 (£2,000
@@ -989,12 +991,12 @@ export const VAT_ERROR_CORRECTION_RULES: readonly { from: ISODate; limit: number
 export function vatCorrectionMethod(netMinor: number, box6: number, day: ISODate): { method: 'next-return' | 'separately'; limit: 'basic' | 'box6' | 'over'; maxMinor: number } {
   const r = ruleOn(VAT_ERROR_CORRECTION_RULES, day);
   const net = Math.abs(netMinor);
-  if (net <= r.limit * 100) return { method: 'next-return', limit: 'basic', maxMinor: r.limit * 100 };
-  // 1% of box 6, in pence: box 6 is whole pounds, so 1% of it is box6 pence.
-  const onePercent = Math.max(0, box6) * r.box6Percent;
-  const upper = Math.min(r.upperLimit * 100, onePercent);
+  const limit = toMinor(r.limit);
+  if (net <= limit) return { method: 'next-return', limit: 'basic', maxMinor: limit };
+  const onePercent = mulDivRound(toMinor(Math.max(0, box6)), r.box6Percent, 100);
+  const upper = Math.min(toMinor(r.upperLimit), onePercent);
   if (net <= upper) return { method: 'next-return', limit: 'box6', maxMinor: upper };
-  return { method: 'separately', limit: 'over', maxMinor: Math.max(r.limit * 100, upper) };
+  return { method: 'separately', limit: 'over', maxMinor: Math.max(limit, upper) };
 }
 
 /**
@@ -1011,7 +1013,18 @@ export type VatFrequency = 'annual' | 'quarterly' | 'monthly';
 export const vatFrequencyOf = (stagger: VatStagger): VatFrequency => (stagger === 'annual' ? 'annual' : stagger === 'monthly' ? 'monthly' : 'quarterly');
 
 /**
- * Late submission penalties for VAT returns (Finance Act 2021 s116 and Sch 24; GOV.UK, "Penalty points
+ * The column of the penalty points table a period is in, by its length (Finance Act 2021 Sch 24 para 2's
+ * table): more than 20 weeks (annual), more than 8 weeks and not more than 20 (quarterly), 8 weeks or
+ * less (monthly). A short first period counts by its own length, not by its stagger.
+ */
+export function vatFrequencyOfPeriod(p: { start: ISODate; end: ISODate }): VatFrequency {
+  const weeks = (diffDays(p.start, p.end) + 1) / 7;
+  return weeks > 20 ? 'annual' : weeks > 8 ? 'quarterly' : 'monthly';
+}
+
+/**
+ * Late submission penalties for VAT returns (Finance Act 2021 s116 and Sch 24, the thresholds by the
+ * length of the period in its para 2 table; GOV.UK, "Penalty points
  * and penalties if you submit your VAT Return late" and "Remove penalty points you've received after
  * submitting your VAT Return late"), for VAT periods starting on or after 1 January 2023 (default
  * surcharge before, not covered): a point for each return submitted late, nil and repayment returns
@@ -1085,3 +1098,38 @@ export const VAT_REGISTRATION_THRESHOLDS: readonly { from: ISODate; registration
 export function vatThresholdsOn(date: ISODate): { from: ISODate; registration: number; deregistration: number } {
   return ruleOn(VAT_REGISTRATION_THRESHOLDS, date);
 }
+
+/**
+ * A final return after deregistration accounts for VAT on the stock and other assets held on the day of
+ * cancellation, when VAT was (or could have been) reclaimed on them and the VAT due on them is over the
+ * limit (GOV.UK, "Cancel your VAT registration": "the total VAT due on these assets is over £1,000"; VAT
+ * Notice 700/11; VATA 1994 Sch 4 para 8). The books do not work it out; the final return says so. By
+ * the day of deregistration: the limit as GOV.UK gives it now, dated from when it was checked (Notice
+ * 700/11 was last updated on 31 March 2026); an earlier day takes it too, and when it was set is not
+ * covered.
+ */
+export const VAT_DEREGISTRATION_ASSETS_RULES: readonly { from: ISODate; limit: number }[] = [{ from: '2026-03-31', limit: 1_000 }];
+
+/**
+ * The cash accounting scheme's limits (VAT Notice 731 paras 2.1 and 2.5; VAT Regulations 1995 reg 58(1),
+ * the joining limit substituted from 1 April 2007 by SI 2007/768): a business may join when it expects
+ * its taxable supplies in the next year to be £1.35 million or less, and must leave at the end of the
+ * period in which the annual value of its taxable supplies, the disposal of stock and capital assets
+ * included, reaches £1.6 million, accounting then for the VAT on everything outstanding (para 6.4,
+ * or within a further 6 months where allowed). By the period's end.
+ */
+export const VAT_CASH_ACCOUNTING_RULES: readonly { from: ISODate; join: number; leave: number }[] = [{ from: '2007-04-01', join: 1_350_000, leave: 1_600_000 }];
+
+/**
+ * Late payment penalties for VAT (Finance Act 2021 Sch 26; GOV.UK, "How late payment penalties work if
+ * you pay VAT late", updated 10 July 2025), for VAT periods starting on or after 1 January 2023: none
+ * when paid within 15 days of the due day; then 3% of what was unpaid on day 15, and a further 3% of what
+ * is still unpaid on day 30; from day 31 a second penalty at 10% a year, daily, on what is unpaid. Late
+ * payment interest is charged besides, and not worked out here. The rates as GOV.UK gives them now,
+ * dated from 1 April 2025, when they took effect as far as is known (the page does not say); looked up
+ * by the due day, and a payment due before the first row is shown without figures: earlier rates are
+ * not covered.
+ */
+export const VAT_LATE_PAYMENT_RULES: readonly { from: ISODate; graceDays: number; firstPercent: number; secondDays: number; secondPercent: number; dailyFromDay: number; yearlyPercent: number }[] = [
+  { from: '2025-04-01', graceDays: 15, firstPercent: 3, secondDays: 30, secondPercent: 3, dailyFromDay: 31, yearlyPercent: 10 },
+];

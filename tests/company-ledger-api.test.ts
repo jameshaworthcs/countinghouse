@@ -382,6 +382,10 @@ describe('a company’s general ledger through the app', () => {
     const filed = await send('POST', `/api/companies/${CO}/filings`, { kind: 'vat', periodStart: '2025-07-01', periodEnd: '2025-09-30', filedOn: '2025-10-20', figures: boxes });
     expect(filed.status).toBe(201);
     const fid = filed.body.id as string;
+    // Errors reported separately on a day not yet come are refused, on recording a filing and on saying so after.
+    const future = '2999-01-01';
+    expect((await send('POST', `/api/companies/${CO}/filings`, { kind: 'vat', periodStart: '2025-10-01', periodEnd: '2025-12-31', filedOn: '2026-01-20', figures: boxes, disclosed: { on: future, amount: 5 } })).status).toBe(422);
+    expect((await send('PUT', `/api/companies/${CO}/filings/${fid}/vat-corrections`, { disclosed: { on: future, amount: 5 } })).status).toBe(422);
     expect((await send('PUT', `/api/companies/${CO}/filings/${fid}/vat-corrections`, { corrections: [{ periodEnd: '2025-06-30', amount: 10 }] }, agent)).status).toBe(403);
     expect((await send('PUT', `/api/companies/${CO}/filings/${fid}/vat-corrections`, { corrections: [{ periodEnd: '2025-09-30', amount: 10 }] })).status).toBe(422);
     const ok = await send('PUT', `/api/companies/${CO}/filings/${fid}/vat-corrections`, { corrections: [{ periodEnd: '2025-06-30', amount: 10 }] });

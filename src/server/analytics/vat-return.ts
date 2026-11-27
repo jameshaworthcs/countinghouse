@@ -13,9 +13,9 @@ import { vatPeriodsOf, type VatPeriod } from '../../shared/company-books';
 import { addDays, addMonths, diffDays, endOfMonth, startOfMonth, type ISODate } from '../../shared/dates';
 import { VAT_RETURN_DISCLAIMER } from '../../shared/disclaimers';
 import { ledgerCode, takesVat } from '../../shared/ledger';
-import { formatMoney, fromMinor, poundsWithoutPence, toMinor } from '../../shared/money';
+import { formatMoney, fromMinor, mulDivRound, poundsWithoutPence, toMinor } from '../../shared/money';
 import type { Company, CompanyFiling, VatBoxes } from '../../shared/schema';
-import { ruleOn, VAT_ERROR_CORRECTION_RULES, VAT_PENALTY_POINTS_FROM, VAT_PENALTY_RULES, vatCorrectionDeadline, vatCorrectionMethod, vatFrequencyOf, vatPointExpiry, vatReturnDue, vatThresholdsOn } from '../../shared/uk';
+import { ruleOn, VAT_CASH_ACCOUNTING_RULES, VAT_DEREGISTRATION_ASSETS_RULES, VAT_ERROR_CORRECTION_RULES, VAT_LATE_PAYMENT_RULES, VAT_PENALTY_POINTS_FROM, VAT_PENALTY_RULES, vatCorrectionDeadline, vatCorrectionMethod, vatFrequencyOf, vatFrequencyOfPeriod, vatPointExpiry, vatReturnDue, vatThresholdsOn } from '../../shared/uk';
 import { companyLedger, type Ledger, type LedgerSource } from './ledger';
 
 /** The nine boxes in order: their key (HMRC's Making Tax Digital names) and what VAT Notice 700/12 calls them. */
@@ -60,9 +60,30 @@ interface Worked {
   /** Reverse charges in it: their VAT (box 1 and 4 each) and value (6 and 7 each), pence. */
   reverseTax: number;
   reverseNet: number;
+  /** Reverse charges paid with no period said for the service, and sales on `turnover` coded outside the scope (read as supplied abroad). */
+  uncovered: number;
+  outsideSales: number;
 }
 
-const emptyWorked = (): Worked => ({ box1: 0, box4: 0, box6: 0, box7: 0, lines: { 1: [], 4: [], 6: [], 7: [] }, leftOut: [], sources: new Set(), reverseTax: 0, reverseNet: 0 });
+const emptyWorked = (): Worked => ({ box1: 0, box4: 0, box6: 0, box7: 0, lines: { 1: [], 4: [], 6: [], 7: [] }, leftOut: [], sources: new Set(), reverseTax: 0, reverseNet: 0, uncovered: 0, outsideSales: 0 });
+
+/**
+ * A reverse charge's tax point (VAT Regulations 1995 reg 82; HMRC's VATTOS9450; Notice 700 para 15.12):
+ * a service received from abroad is supplied when performed, or when paid if earlier (reg 82(2),
+ * (5)(a)); one supplied over a period, at the end of each period it is paid or invoiced for, or when paid
+ * if earlier (reg 82(4), (5)(b)). So a payment (`paid`) for the period it covers (`covers`) is at the
+ * earlier of payment and that period's end; with no period said, the day paid. With no payment (a
+ * journal), the period's end when it was invoiced (`invoicedOn`), else a continuous supply's forced tax
+ * point, the end of the calendar year (Notice 700 para 15.12), the whole line at the first one in its
+ * period (a line over more than one year is split by the owner). A journal with no period: its day.
+ */
+export function reverseChargeTaxPoint(day: ISODate, paid: boolean, covers?: { from: ISODate; to: ISODate }, invoicedOn?: ISODate): ISODate {
+  if (!covers) return day;
+  if (paid) return covers.to < day ? covers.to : day;
+  if (invoicedOn) return covers.to;
+  const yearEnd = `${covers.from.slice(0, 4)}-12-31`;
+  return yearEnd < covers.to ? yearEnd : covers.to;
+}
 
 export interface VatInput {
   src: LedgerSource;
@@ -75,20 +96,22 @@ export interface VatInput {
 
 /**
  * Where each posting's VAT and value belong: the VAT period of the day its rule gives (FORMULAS.md §22,
- * "VAT returns"). Under cash accounting the posting's own day, its payment's (VAT Notice 731 paras
- * 4.4–4.5; a row of yours paid for the company falls on its day, when the company credits your loan); a
- * claim under reg 111 in the first return, whatever its day (Notice 731 para 3.2); a reverse charge on
- * the earlier of its payment and the last day of the service it covers (Notice 700 para 15.12: a single
- * supply's tax point is when it is completed, or paid if earlier; a continuous one's the end of its
- * billing period, or payment if earlier). An opening journal is the balances brought in, never a supply.
+ * "VAT returns"). Under cash accounting the posting's own day, its payment's (VAT Regulations 1995 reg
+ * 57; VAT Notice 731 paras 4.4–4.5); a row of yours paid for the company falls on its day, when you paid
+ * the supplier as the company's agent (a judgment: FORMULAS.md §22 gives the cautious alternative of the
+ * day the company repays you); a claim under reg 111 in the first return, whatever its day (reg 111(3);
+ * Notice 731 para 3.2); a reverse charge on its tax point (`reverseChargeTaxPoint`). An opening journal
+ * is the balances brought in, never a supply.
  */
 function workOut(postings: readonly LedgerPosting[], periods: readonly VatPeriod[], opening: ReadonlySet<string>): Worked[] {
   const out = periods.map(emptyWorked);
   if (!periods.length) return out;
   const periodOf = (d: ISODate) => periods.findIndex((p) => p.start <= d && p.end >= d);
-  // A reverse charge's service end, from its net posting (its VAT postings share the line).
-  const coversTo = new Map<string, ISODate>();
-  for (const p of postings) if (p.vat?.treatment === 'reverse-charge' && p.vat.part === 'net' && p.covers) coversTo.set(lineKey(p.source), p.covers.to);
+  // A reverse charge's period and invoice, from its net posting: a coding's VAT postings share its line;
+  // a journal's VAT lines are lines of their own, so a journal is one reverse charge (its first net line's).
+  const rcKey = (s: LedgerPosting['source']) => (s.kind === 'journal' ? sourceKey(s) : lineKey(s));
+  const reverse = new Map<string, Pick<LedgerPosting, 'covers' | 'invoicedOn'>>();
+  for (const p of postings) if (p.vat?.treatment === 'reverse-charge' && p.vat.part === 'net' && !reverse.has(rcKey(p.source))) reverse.set(rcKey(p.source), { ...(p.covers ? { covers: p.covers } : {}), ...(p.invoicedOn ? { invoicedOn: p.invoicedOn } : {}) });
   const own = (p: LedgerPosting) => p.source.kind === 'row' || p.source.kind === 'personal' || (p.source.kind === 'journal' && !opening.has(p.source.id));
   for (const p of postings) {
     if (!own(p)) continue;
@@ -99,15 +122,17 @@ function workOut(postings: readonly LedgerPosting[], periods: readonly VatPeriod
       day = periods[0]!.start;
       counted = 'reg111';
     } else if (p.vat?.treatment === 'reverse-charge') {
-      const end = coversTo.get(lineKey(p.source));
-      if (end && end < p.date) {
-        day = end;
+      const meta = reverse.get(rcKey(p.source));
+      const point = reverseChargeTaxPoint(p.date, p.source.kind !== 'journal', meta?.covers, meta?.invoicedOn);
+      if (point !== p.date) {
+        day = point;
         counted = 'tax-point';
       }
     }
     const i = periodOf(day);
     if (i < 0) continue;
     const w = out[i]!;
+    if (p.vat?.treatment === 'reverse-charge' && p.vat.part === 'net' && p.source.kind !== 'journal' && !reverse.get(rcKey(p.source))?.covers) w.uncovered++;
     const line = (amount: number): VatBoxLine => ({ postingId: p.id, source: p.source, date: p.date, ...(counted && periodOf(p.date) !== i ? { counted } : {}), ledger: p.ledger, ...(p.vat ? { treatment: p.vat.treatment } : {}), amount, memo: p.memo });
     const add = (box: 1 | 4 | 6 | 7, amount: number) => {
       if (!amount) return;
@@ -147,14 +172,20 @@ function workOut(postings: readonly LedgerPosting[], periods: readonly VatPeriod
     if (p.vat.side === 'output') {
       const amount = -p.amount;
       if (NOT_A_SUPPLY.has(p.ledger)) leave('not-a-supply', 'sales', amount);
-      // Outside the scope: a sale whose place of supply is abroad (Notice 741A) is in box 6 (Notice
-      // 700/12 para 3.7); anything else outside the scope is not a supply.
+      // Supplied outside the UK (Notice 741A) is in box 6 (Notice 700/12 para 3.7). A sale on `turnover`
+      // coded outside the scope before `abroad` existed is read as one (and the return says so);
+      // anything else outside the scope is not a supply.
       else if (p.vat.treatment === 'outside' && p.ledger !== 'turnover') leave('outside', 'sales', amount);
-      else add(6, amount);
+      else {
+        if (p.vat.treatment === 'outside') w.outsideSales++;
+        add(6, amount);
+      }
       continue;
     }
-    if (p.vat.claim === 'reg111') leave('reg111', 'purchases', p.amount);
-    else if (NOT_A_SUPPLY.has(p.ledger)) leave('not-a-supply', 'purchases', p.amount);
+    // Purchases: supplied outside the UK (a hotel abroad) is in box 7; outside the scope as not a supply
+    // (no consideration) is not (Notice 700/12 para 3.8). A reg 111 claim's purchase is in box 7 of the
+    // first return beside its VAT in box 4, the VAT being treated as that return's input tax.
+    if (NOT_A_SUPPLY.has(p.ledger)) leave('not-a-supply', 'purchases', p.amount);
     else if (p.vat.treatment === 'outside') leave('outside', 'purchases', p.amount);
     else add(7, p.amount);
   }
@@ -229,6 +260,8 @@ export function companyVat({ src, company, today, period: wanted, ledger: given 
     });
   };
 
+  // The cash accounting scheme ends with the first period whose 12 months reach its limit for leaving.
+  let cashLimit: Extract<VatReturnCheck, { kind: 'cash-limit' }> | undefined;
   const views: VatReturnView[] = periods.map((p, i) => {
     const w = worked[i]!;
     const due = vatReturnDue(p, p.stagger);
@@ -241,11 +274,18 @@ export function companyVat({ src, company, today, period: wanted, ledger: given 
       for (const c of checksOf(i)) checks.push({ kind: 'ledger', check: c });
       const suspense = ledger.postings.filter((x) => x.ledger === 'suspense' && x.date >= p.start && x.date <= p.end).reduce((s, x) => s + x.amount, 0);
       if (suspense) checks.push({ kind: 'suspense', amount: suspense });
+      if (!cashLimit) {
+        const leave = ruleOn(VAT_CASH_ACCOUNTING_RULES, p.end).leave;
+        const turnover = cashTurnover(ledger.postings, opening, addDays(addMonths(p.end, -12), 1), p.end);
+        if (turnover >= toMinor(leave)) cashLimit = { kind: 'cash-limit', periodEnd: p.end, turnover, limit: leave };
+      }
+      if (cashLimit) checks.push(cashLimit);
     }
     const boxes = inBooks ? boxesOf(w) : boxesOf(emptyWorked());
     const box3 = boxValue(boxes, 'totalVatDue');
     const box4 = boxValue(boxes, 'vatReclaimedCurrPeriod');
     const filing = p.filing?.kind === 'vat' ? p.filing : undefined;
+    const included = (filing?.corrections ?? []).reduce((s, c) => s + toMinor(c.amount), 0);
     const late = Boolean(filing && filing.filedOn > due);
     const ready = ended && inBooks && checks.length === 0;
     const isFirst = i === 0;
@@ -260,25 +300,31 @@ export function companyVat({ src, company, today, period: wanted, ledger: given 
       first: isFirst,
       final: isFinal,
       computed: inBooks ? signedNet({ box3, box4 }) : null,
-      filed: filing?.figures ? toMinor(filing.figures.totalVatDue) - toMinor(filing.figures.vatReclaimedCurrPeriod) : null,
+      filed: filing?.figures ? toMinor(filing.figures.totalVatDue) - toMinor(filing.figures.vatReclaimedCurrPeriod) - included : null,
+      ...(included ? { correctionsIncluded: included } : {}),
       ...(filing ? { filedOn: filing.filedOn, ...(filing.reference ? { reference: filing.reference } : {}), filingId: filing.id } : {}),
     };
     const notes: string[] = [];
-    if (isFirst && w.lines[4]!.some((l) => l.counted === 'reg111' || l.date < p.start)) notes.push('It includes VAT claimed on goods and services bought before registration (VAT Regulations 1995 reg 111): the first return is where it is claimed.');
-    if (isFinal) notes.push('The final return after deregistration also accounts for VAT on the stock and assets held then, if more than £1,000 (VAT Notice 700/11): not worked out here.');
-    if (w.lines[1]!.some((l) => l.counted === 'tax-point')) notes.push('A reverse charge paid after the period is in it: its service ended within it, and the tax point is the earlier of that and payment (VAT Notice 700 para 15.12).');
+    if (isFirst && w.lines[4]!.some((l) => l.counted === 'reg111' || l.date < p.start)) notes.push('It includes VAT claimed on goods and services bought before registration: treated as input tax of the first return (VAT Regulations 1995 reg 111(3); VAT Notice 731 para 3.2).');
+    if (isFinal) notes.push(`The final return after deregistration also accounts for VAT on the stock and assets held then, when VAT on them was or could have been reclaimed and the VAT due on them is over £${ruleOn(VAT_DEREGISTRATION_ASSETS_RULES, p.end).limit.toLocaleString('en-GB')} (VAT Notice 700/11): not worked out here.`);
+    if (w.lines[1]!.some((l) => l.counted === 'tax-point')) notes.push('A reverse charge dated outside the period is in it on its tax point: the end of the period of service it covers when that came before payment, or a year’s end for a continuous supply neither paid nor invoiced (VAT Regulations 1995 reg 82; Notice 700 para 15.12).');
+    if (w.uncovered) notes.push(`${w.uncovered === 1 ? 'A reverse charge is' : `${w.uncovered} reverse charges are`} taken on the day paid, with no period said for the service: if the service ended before it was paid, its tax point was then (reg 82), perhaps in an earlier return. Say the period it covers on the coding.`);
+    if (w.outsideSales) notes.push(`${w.outsideSales === 1 ? 'A sale' : `${w.outsideSales} sales`} on Sales coded outside the scope ${w.outsideSales === 1 ? 'is' : 'are'} counted in box 6 as supplied outside the UK, as the books read that before the treatment existed: code ${w.outsideSales === 1 ? 'it' : 'them'} “Supplied outside the UK”, or, if not a supply at all, move ${w.outsideSales === 1 ? 'it' : 'them'} off Sales.`);
+    if (isFirst && w.lines[7]!.some((l) => l.counted === 'reg111')) notes.push('The amounts of those purchases are in box 7 beside their VAT in box 4: the VAT is treated as this return’s input tax.');
     let filed: VatFiledComparison | undefined;
     // Only a period the books cover whole is compared: part of one would differ by what is not in them.
     if (filing?.figures && first <= p.start) filed = compare(filing, boxes, w, due);
     if (filed && !filed.matches) row.differs = true;
-    return { period: row, boxes, direction: box3 > box4 ? 'pay' : box3 < box4 ? 'reclaim' : 'nil', inBooks, checks, ready, leftOut: inBooks ? w.leftOut : [], notes, ...(filed ? { filed } : {}) };
+    const latePayment = box3 > box4 && p.start >= VAT_PENALTY_POINTS_FROM ? latePaymentOf(due, box3 - box4) : undefined;
+    return { period: row, boxes, direction: box3 > box4 ? 'pay' : box3 < box4 ? 'reclaim' : 'nil', inBooks, checks, ready, leftOut: inBooks ? w.leftOut : [], notes, ...(filed ? { filed } : {}), ...(latePayment ? { latePayment } : {}) };
   });
 
   // The return to file next: the earliest ended and not filed (that the books reach, and not settled
   // before they were kept here), else the one running.
   const from = books.deadlinesFrom;
   const next = views.find((v) => !v.period.filedOn && v.period.end < today && v.inBooks && !(from && v.period.due < from)) ?? views.find((v) => v.period.start <= today && v.period.end >= today);
-  const shown = wanted ? views.find((v) => v.period.end === wanted) : next;
+  // A company deregistered with everything filed has no next return: its last is shown.
+  const shown = wanted ? views.find((v) => v.period.end === wanted) : (next ?? views.at(-1));
   if (wanted && !shown) return undefined;
 
   const running = views.find((v) => v.period.start <= today && v.period.end >= today) ?? views.at(-1);
@@ -315,10 +361,12 @@ function compare(filing: Extract<CompanyFiling, { kind: 'vat' }>, boxes: readonl
   const d = (box: number) => rows[box - 1]!.difference;
   const causes: string[] = [];
   const money = (minor: number) => formatMoney(fromMinor(Math.abs(minor)));
-  const rcPounds = Math.abs(w.reverseNet) / 100;
+  const rcNet = Math.abs(w.reverseNet);
+  // Boxes 6 and 7 are whole pounds: short by the reverse charge's value to within a pound.
+  const shortBy = (box: number) => Math.abs(toMinor(d(box)) + rcNet) <= toMinor(1);
   if (w.reverseTax && d(1) === -w.reverseTax && d(4) === -w.reverseTax) {
-    const values = Math.abs(d(6) + rcPounds) <= 1 && Math.abs(d(7) + rcPounds) <= 1;
-    causes.push(`The reverse charge looks left out of the filing: boxes 1 and 4 are each ${money(w.reverseTax)} short, which nets to nothing (box 5 is the same)${values ? `, and boxes 6 and 7 about £${Math.round(rcPounds).toLocaleString('en-GB')} short` : ''}. A reverse charge goes in boxes 1, 4, 6 and 7 (VAT Notice 741A para 5.2).`);
+    const values = shortBy(6) && shortBy(7);
+    causes.push(`The reverse charge looks left out of the filing: boxes 1 and 4 are each ${money(w.reverseTax)} short, which nets to nothing (box 5 is the same)${values ? `, and boxes 6 and 7 about ${money(rcNet)} short` : ''}. A reverse charge goes in boxes 1, 4, 6 and 7 (VAT Notice 741A para 5.2).`);
   } else if (d(1) && d(1) === d(4)) causes.push(`Boxes 1 and 4 differ by the same ${money(d(1))}, so the net VAT is the same: VAT accounted both ways (a reverse charge, say) is in one and not the other.`);
   else {
     if (d(1) && !d(4)) causes.push('Only box 1 differs: sales VAT counted differently (a sale in another period, or a credit note), or a correction of an earlier return the filing included and this does not know of (record it below).');
@@ -363,17 +411,26 @@ function corrections(views: readonly VatReturnView[], filings: readonly Extract<
       ...filings.flatMap((x) => (x.corrections ?? []).filter((c) => c.periodEnd === v.period.end).map((c) => ({ kind: 'return' as const, periodEnd: x.periodEnd, amount: toMinor(c.amount) }))),
       ...(filing.disclosed ? [{ kind: 'separately' as const, on: filing.disclosed.on, amount: toMinor(filing.disclosed.amount), ...(filing.disclosed.reference ? { reference: filing.disclosed.reference } : {}) }] : []),
     ];
-    const uncorrected = error - correctedBy.reduce((s, c) => s + c.amount, 0);
-    // Input tax under-claimed has 4 years from the return's due day; the rest from the period's end.
-    const inTimeUntil = vatCorrectionDeadline(v.period.end, v.period.due, error < 0 && input < 0);
-    const outOfTime = today > inTimeUntil;
+    const corrected = correctedBy.reduce((s, c) => s + c.amount, 0);
+    const uncorrected = error - corrected;
+    // Each part has its own 4 years (para 4.7): output tax, and input tax claimed too much, from the
+    // period's end; input tax under-claimed (input < 0) from the return's due day.
+    const outputUntil = vatCorrectionDeadline(v.period.end, v.period.due, false);
+    const inputUntil = vatCorrectionDeadline(v.period.end, v.period.due, input < 0);
+    const outputInTime = !output || today <= outputUntil;
+    const inputInTime = !input || today <= inputUntil;
+    const outOfTime = !(output && outputInTime) && !(input && inputInTime);
     const unsettled = v.checks.length > 0;
-    if (!outOfTime && !unsettled) total += uncorrected;
-    errors.push({ start: v.period.start, end: v.period.end, due: v.period.due, error, output, input, correctedBy, uncorrected, runningTotal: total, inTimeUntil, outOfTime, unsettled });
+    // What counts: the parts in time, less what was corrected (never past nothing, either way).
+    const inTime = (output && outputInTime ? output : 0) + (input && inputInTime ? input : 0);
+    const left = inTime - corrected;
+    const counted = unsettled || outOfTime || Math.sign(left) !== Math.sign(inTime) ? 0 : left;
+    total += counted;
+    errors.push({ start: v.period.start, end: v.period.end, due: v.period.due, error, output, input, correctedBy, uncorrected, counted, runningTotal: total, outputUntil, inputUntil, outOfTime, unsettled });
   }
   const on = running ? { start: running.period.start, end: running.period.end, box6: boxValue(running.boxes, 'totalValueSalesExVAT'), provisional: !running.ready } : undefined;
   const chosen = total ? vatCorrectionMethod(total, on?.box6 ?? 0, today) : undefined;
-  return { errors, net: total, ...(on ? { on } : {}), method: chosen?.method ?? 'none', limit: chosen?.limit ?? null, maxMinor: chosen?.maxMinor ?? rules.limit * 100, rules: { from: rules.from, limit: rules.limit, upperLimit: rules.upperLimit, box6Percent: rules.box6Percent, years: rules.years } };
+  return { errors, net: total, ...(on ? { on } : {}), method: chosen?.method ?? 'none', limit: chosen?.limit ?? null, maxMinor: chosen?.maxMinor ?? toMinor(rules.limit), rules: { from: rules.from, limit: rules.limit, upperLimit: rules.upperLimit, box6Percent: rules.box6Percent, years: rules.years } };
 }
 
 /**
@@ -386,7 +443,8 @@ function corrections(views: readonly VatReturnView[], filings: readonly Extract<
 function penalties(views: readonly VatReturnView[], schedule: NonNullable<NonNullable<Company['books']>['vat']>['schedule'], today: ISODate, settledBefore: ISODate | undefined): VatPenaltyView {
   const r = ruleOn(VAT_PENALTY_RULES, today);
   const now = views.find((v) => v.period.start <= today && v.period.end >= today) ?? views.at(-1);
-  const frequency = vatFrequencyOf(now?.period.stagger ?? schedule.at(-1)!.stagger);
+  // The column of Sch 24 para 2's table goes by the period's length.
+  const frequency = now ? vatFrequencyOfPeriod(now.period) : vatFrequencyOf(schedule.at(-1)!.stagger);
   const late: VatPenaltyView['late'] = [];
   for (const v of views) {
     const p = v.period;
@@ -422,8 +480,8 @@ function penalties(views: readonly VatReturnView[], schedule: NonNullable<NonNul
  * of services received from abroad under the reverse charge (VAT Notice 700 para 5.4). By the day paid,
  * as the books are kept (cash accounting): a supply not yet paid for is not in it.
  */
-export function taxableTurnover(postings: readonly LedgerPosting[], opening: ReadonlySet<string>, from: ISODate, to: ISODate): VatThresholdView['parts'] {
-  const parts = { sales: 0, untreated: 0, reverseCharge: 0 };
+export function taxableTurnover(postings: readonly LedgerPosting[], opening: ReadonlySet<string>, from: ISODate, to: ISODate): VatThresholdView['parts'] & { capital: number } {
+  const parts = { sales: 0, untreated: 0, reverseCharge: 0, capital: 0 };
   for (const p of postings) {
     if (p.date < from || p.date > to) continue;
     if (!(p.source.kind === 'row' || p.source.kind === 'personal' || (p.source.kind === 'journal' && !opening.has(p.source.id)))) continue;
@@ -432,18 +490,39 @@ export function taxableTurnover(postings: readonly LedgerPosting[], opening: Rea
       parts.reverseCharge += p.amount;
       continue;
     }
-    if (entry?.kind !== 'income' || p.ledger === 'disposals') continue;
-    if (!p.vat) parts.untreated -= p.amount;
-    else if (p.vat.part === 'net' && (p.vat.treatment === 'standard' || p.vat.treatment === 'reduced' || p.vat.treatment === 'zero')) parts.sales -= p.amount;
+    // Interest is exempt whatever a coding says, so never taxable turnover.
+    if (entry?.kind !== 'income' || p.ledger === 'interest-receivable') continue;
+    const taxable = !p.vat || (p.vat.part === 'net' && (p.vat.treatment === 'standard' || p.vat.treatment === 'reduced' || p.vat.treatment === 'zero'));
+    if (!taxable) continue;
+    if (p.ledger === 'disposals') parts.capital -= p.amount;
+    else if (!p.vat) parts.untreated -= p.amount;
+    else parts.sales -= p.amount;
   }
   return parts;
+}
+
+/** Taxable supplies for the cash accounting scheme's limit (Notice 731 para 2.5): sales, the disposal of stock and capital assets included; not services received. */
+function cashTurnover(postings: readonly LedgerPosting[], opening: ReadonlySet<string>, from: ISODate, to: ISODate): number {
+  const t = taxableTurnover(postings, opening, from, to);
+  return t.sales + t.untreated + t.capital;
+}
+
+/** The late payment penalties on `minor` unpaid from `due` (VAT_LATE_PAYMENT_RULES), or null rates before the first row. */
+function latePaymentOf(due: ISODate, minor: number): NonNullable<VatReturnView['latePayment']> {
+  const r = due >= VAT_LATE_PAYMENT_RULES[0]!.from ? ruleOn(VAT_LATE_PAYMENT_RULES, due) : undefined;
+  if (!r) return { due, rates: null, atFirst: 0, atSecond: 0 };
+  const { from: _from, ...rates } = r;
+  const atFirst = mulDivRound(minor, r.firstPercent, 100);
+  return { due, rates, atFirst, atSecond: atFirst + mulDivRound(minor, r.secondPercent, 100) };
 }
 
 function threshold(postings: readonly LedgerPosting[], opening: ReadonlySet<string>, books: NonNullable<Company['books']>, today: ISODate): VatThresholdView {
   const to = today;
   const from = addDays(addMonths(to, -12), 1);
-  const parts = taxableTurnover(postings, opening, from, to);
+  const { capital: _capital, ...parts } = taxableTurnover(postings, opening, from, to);
   const t = vatThresholdsOn(to);
+  const c = ruleOn(VAT_CASH_ACCOUNTING_RULES, to);
+  const cash = cashTurnover(postings, opening, from, to);
   const months: VatThresholdView['months'] = [];
   for (let k = 12; k >= 1; k--) {
     const end = endOfMonth(addMonths(startOfMonth(today), -k));
@@ -463,6 +542,7 @@ function threshold(postings: readonly LedgerPosting[], opening: ReadonlySet<stri
     months,
     partial: (books.ledgerFrom ?? books.incorporatedOn) > from,
     registered: Boolean(vat && vat.registeredFrom <= to && !(vat.deregisteredOn && vat.deregisteredOn < to)),
+    cash: { turnover: cash, join: c.join, leave: c.leave, over: cash >= toMinor(c.leave) },
   };
 }
 
@@ -473,7 +553,8 @@ export function vatReturnCsv(company: Pick<Company, 'name'>, ret: VatReturnView,
   lines.push('', ['company', company.name].map(cell).join(','), ['period', `${ret.period.start} to ${ret.period.end}`].map(cell).join(','), ['due', ret.period.due].map(cell).join(','));
   lines.push(['box 5 is', ret.direction === 'pay' ? 'to pay' : ret.direction === 'reclaim' ? 'to reclaim' : 'nil'].map(cell).join(','));
   lines.push(['state', ret.period.status].map(cell).join(','));
-  if (!ret.ready) lines.push(cell(`Not ready to file: ${ret.checks.length} check${ret.checks.length === 1 ? '' : 's'} to clear (see the VAT tab).`));
+  const checks = `${ret.checks.length} check${ret.checks.length === 1 ? '' : 's'} to clear (see the VAT tab)`;
+  if (!ret.ready) lines.push(cell(ret.period.filedOn ? `Filed; the books have ${checks}.` : `Not ready to file: ${checks}.`));
   lines.push(cell('Boxes 1 to 5 are in pounds and pence; boxes 6 to 9 in whole pounds, the pence left out. Boxes 2, 8 and 9 (goods between Northern Ireland and the EU) are not supported here.'));
   lines.push('', cell(VAT_RETURN_DISCLAIMER));
   return lines.join('\n') + '\n';

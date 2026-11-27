@@ -9,8 +9,8 @@ import type { Alert } from './api';
 import { addDays, diffDays, formatDate, formatSpan, type ISODate } from './dates';
 import { DEADLINE_LEAD_DAYS, DEADLINE_WARN_DAYS } from './deadlines';
 import { FIXED_ASSET_CLASS_META } from './ledger';
-import { toMinor } from './money';
-import type { Company, CompanyBooksSetup, CompanyFiling, CompanyFilingKind } from './schema';
+import { addMoney, toMinor } from './money';
+import type { Company, CompanyBooksSetup, CompanyFiling, CompanyFilingKind, VatCorrection, VatDisclosure } from './schema';
 import {
   ACCOUNTING_PERIOD_RULES,
   accountsFilingDeadline,
@@ -485,4 +485,27 @@ export function lockAfterFiling(books: Pick<CompanyBooksSetup, 'lockedThrough'>,
 export function addedBooksProblems(before: (CompanyBooksSetup & { filings?: readonly CompanyFiling[] }) | undefined, after: CompanyBooksSetup & { filings?: readonly CompanyFiling[] }): string[] {
   const had = new Set(before ? booksProblems(before) : []);
   return booksProblems(after).filter((p) => !had.has(p));
+}
+
+/**
+ * A VAT return's corrections with `amount` (pounds, signed as HMRC sees it) more recorded for the period
+ * to `periodEnd`: added to what it records for that period already, so recording a second part never
+ * replaces the first (one that comes to nothing is taken away). In period order.
+ */
+export function addVatCorrection(corrections: readonly VatCorrection[] | undefined, periodEnd: ISODate, amount: number): VatCorrection[] {
+  const was = corrections?.find((c) => c.periodEnd === periodEnd)?.amount ?? 0;
+  const next = addMoney(was, amount);
+  return [...(corrections ?? []).filter((c) => c.periodEnd !== periodEnd), ...(next ? [{ periodEnd, amount: next }] : [])].sort((a, b) => a.periodEnd.localeCompare(b.periodEnd));
+}
+
+/**
+ * A VAT return's errors reported separately, with `amount` more reported on `on`: added to what was
+ * reported already, dated by the latest report, with the latest reference given (else the one kept).
+ * Undefined when it comes to nothing.
+ */
+export function addVatDisclosure(disclosed: VatDisclosure | undefined, on: ISODate, amount: number, reference?: string): VatDisclosure | undefined {
+  const next = addMoney(disclosed?.amount ?? 0, amount);
+  if (!next) return undefined;
+  const ref = reference?.trim() || disclosed?.reference;
+  return { on: disclosed && disclosed.on > on ? disclosed.on : on, amount: next, ...(ref ? { reference: ref } : {}) };
 }

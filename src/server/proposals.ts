@@ -735,6 +735,7 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
         const label = c.filing.kind === 'ct-payment' && c.filing.figures?.amount === 0 ? 'No Corporation Tax to pay' : FILING_KIND_LABELS[c.filing.kind];
         if (there) return filingKey(there) === filingKey(filing) ? { alreadySo: true } : { problem: `${label} for the period to ${formatDate(c.filing.periodEnd)} is recorded already, otherwise: change it on ${company.name}’s page.` };
         if (c.filing.filedOn > today()) return { problem: `${formatDate(c.filing.filedOn)} is in the future.` };
+        if (c.filing.kind === 'vat' && c.filing.disclosed && c.filing.disclosed.on > today()) return { problem: `${formatDate(c.filing.disclosed.on)} is in the future.` };
         const books = { ...company.books, filings: [...company.books.filings, filing], ...lockAfterFiling(company.books, filing) };
         const problems = booksProblems(books);
         if (problems.length) return { problem: problems.join(' ') };

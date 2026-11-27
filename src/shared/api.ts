@@ -1883,8 +1883,9 @@ export interface VatBoxLine {
   date: string;
   /**
    * Why it is in this return though its day is not in the period: a claim of VAT from before
-   * registration (`reg111`, the first return), or a reverse charge's tax point (`tax-point`: the end of
-   * the service it covers, when that comes before it was paid).
+   * registration (`reg111`, the first return), or a reverse charge's tax point (`tax-point`, VAT
+   * Regulations 1995 reg 82: the end of the period it covers when that comes before it was paid, or a
+   * year's end for a continuous supply neither paid nor invoiced).
    */
   counted?: 'reg111' | 'tax-point';
   ledger: string;
@@ -1909,13 +1910,12 @@ export interface VatBoxView {
 }
 
 /**
- * A posting to a sales or purchase code left out of boxes 6 and 7: outside the scope (`outside`), not
- * a supply by its code (`not-a-supply`: wages, pensions, depreciation, Corporation Tax, penalties,
- * donations), no VAT treatment said (`untreated`), or the value of a purchase from before registration
- * whose VAT is claimed (`reg111`).
+ * A posting to a sales or purchase code left out of boxes 6 and 7: outside the scope, not a supply
+ * (`outside`), not a supply by its code (`not-a-supply`: wages, pensions, depreciation, Corporation Tax,
+ * penalties, donations), or no VAT treatment said (`untreated`).
  */
 export interface VatLeftOut extends VatBoxLine {
-  reason: 'outside' | 'not-a-supply' | 'untreated' | 'reg111';
+  reason: 'outside' | 'not-a-supply' | 'untreated';
   side: 'sales' | 'purchases';
 }
 
@@ -1927,7 +1927,14 @@ export type VatReturnCheck =
   /** A ledger check on something that belongs to this return (an uncoded row, a loan not imported, VAT with no invoice…). */
   | { kind: 'ledger'; check: LedgerCheck }
   /** Rows posted to suspense in the period, net (pence): not coded, so their VAT is not known. */
-  | { kind: 'suspense'; amount: number };
+  | { kind: 'suspense'; amount: number }
+  /**
+   * Taxable supplies in the 12 months to the period's end (or an earlier period's) reached the cash
+   * accounting scheme's limit for leaving (pence; the limit in pounds): the scheme ends with that period,
+   * and the VAT on everything outstanding is due (VAT Notice 731 paras 2.5 and 6.4), which the books do
+   * not work out.
+   */
+  | { kind: 'cash-limit'; periodEnd: string; turnover: number; limit: number };
 
 /** open: not ended; not-ready: ended, not filed, a check stops it; ready: ended, nothing stops it; filed and filed late: recorded; before-books: not filed and not in the books. */
 export type VatPeriodStatus = 'open' | 'not-ready' | 'ready' | 'filed' | 'filed-late' | 'before-books';
@@ -1946,8 +1953,10 @@ export interface VatPeriodRow {
   final: boolean;
   /** The books' net VAT, box 3 less box 4 in pence (positive to pay, negative to reclaim); null when the books do not cover the period. */
   computed: number | null;
-  /** The return filed: its box 3 less box 4, in pence; null without figures. */
+  /** The return filed for its own period: its box 3 less box 4, less the corrections of earlier returns it included, in pence (on the same basis as `computed`); null without figures. */
   filed: number | null;
+  /** The corrections of earlier returns its filing included, net, in pence (positive: due to HMRC). */
+  correctionsIncluded?: number;
   filedOn?: string;
   reference?: string;
   /** The filing recorded for it. */
@@ -1986,6 +1995,13 @@ export interface VatReturnView {
   /** What it does not cover, in words (a final return's stock and assets, say). */
   notes: string[];
   filed?: VatFiledComparison;
+  /**
+   * For a return with VAT to pay (box 5), the late payment penalties if none of it were paid by its due
+   * day (Finance Act 2021 Sch 26), as information: what the first penalty would be at day 15 and day 30
+   * (pence), and the yearly rate of the second from its day. `rates: null` when the due day is before the
+   * rates covered. Interest is not worked out.
+   */
+  latePayment?: { due: string; rates: { graceDays: number; firstPercent: number; secondDays: number; secondPercent: number; dailyFromDay: number; yearlyPercent: number } | null; atFirst: number; atSecond: number };
 }
 
 /** A filed return's error, as the books find it (VAT Notice 700/45). */
@@ -2000,10 +2016,14 @@ export interface VatErrorRow {
   /** Corrected since: on later returns, or reported separately (pence, signed as the error). */
   correctedBy: ({ kind: 'return'; periodEnd: string; amount: number } | { kind: 'separately'; on: string; amount: number; reference?: string })[];
   uncorrected: number;
-  /** The uncorrected errors up to and including this one, added up. */
+  /** What of it counts towards the net: the parts still in time, less what was corrected (pence). */
+  counted: number;
+  /** The uncorrected errors that count up to and including this one, added up. */
   runningTotal: number;
-  /** The last day it may be corrected (4 years). */
-  inTimeUntil: string;
+  /** The last day each part may be corrected (4 years, VAT Notice 700/45 para 4.7): output tax, and input tax claimed too much, from the period's end; input tax under-claimed from the return's due day. */
+  outputUntil: string;
+  inputUntil: string;
+  /** Every part that is not nothing is out of time. */
   outOfTime: boolean;
   /** The books for the period have checks to clear: the difference may be theirs, so it is not counted. */
   unsettled: boolean;
@@ -2052,6 +2072,8 @@ export interface VatThresholdView {
   /** The books start within the 12 months: what came before is not in them. */
   partial: boolean;
   registered: boolean;
+  /** The cash accounting scheme's limits (pounds) against taxable supplies in the same 12 months with the disposal of capital assets (pence). */
+  cash: { turnover: number; join: number; leave: number; over: boolean };
 }
 
 /** GET /companies/:id/vat?period=<end>: a company's VAT returns from its books. */
