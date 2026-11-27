@@ -1,5 +1,5 @@
 // The "check everything yourself" disclaimers every return the app prepares carries (CLAUDE.md,
-// "Invariants"): Self Assessment for you, and a company's VAT return. Shared by the server (its CSV
+// "Invariants"): Self Assessment for you, and a company's VAT return and Corporation Tax return. Shared by the server (its CSV
 // exports, its responses) and the web app (`components/CheckEverything.tsx`).
 
 /** The heading the disclaimer is shown under. */
@@ -10,3 +10,6 @@ export const SA_DISCLAIMER =
 
 export const VAT_RETURN_DISCLAIMER =
   'These boxes are worked out from the company’s books to help you prepare its VAT return. They are not tax advice and can be incomplete or wrong: they are only as good as the coding of every payment, and only the cash accounting scheme is covered. Nothing here is sent to HMRC. Check every box against the company’s records, invoices and bank statements before you submit it through your Making Tax Digital software. The company is responsible for its return.';
+
+export const CT_DISCLAIMER =
+  'This computation and these CT600 boxes are worked out from the company’s books to help you prepare its Company Tax Return. They are not tax advice and can be incomplete or wrong: they are only as good as the coding of every payment, they make the default choices described (claims the company may make differently), and much of Corporation Tax is not covered here (cars, intangible assets, chargeable gains, group relief, s455 tax on loans to participators, qualifying donations, R&D and other reliefs). Nothing here is sent to HMRC. Check every figure against the company’s accounts and records, and the computation your filing software or accountant produces, before you submit. The company is responsible for its return.';

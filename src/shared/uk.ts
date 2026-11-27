@@ -1133,3 +1133,92 @@ export const VAT_CASH_ACCOUNTING_RULES: readonly { from: ISODate; join: number; 
 export const VAT_LATE_PAYMENT_RULES: readonly { from: ISODate; graceDays: number; firstPercent: number; secondDays: number; secondPercent: number; dailyFromDay: number; yearlyPercent: number }[] = [
   { from: '2025-04-01', graceDays: 15, firstPercent: 3, secondDays: 30, secondPercent: 3, dailyFromDay: 31, yearlyPercent: 10 },
 ];
+
+// ─── Companies: Corporation Tax (docs/UK_RULES.md, "Corporation Tax") ───────────────────────────
+//
+// The rates and allowances a small company's Corporation Tax computation uses (shared/corporation-tax.ts,
+// analytics/corporation-tax.ts; FORMULAS.md §22, "Corporation Tax"). Each a dated row, looked up by the
+// date (or financial year) that decides it; a period before the first row is not supported, and says so.
+
+/**
+ * The rates of Corporation Tax by financial year (financial year n runs from 1 April n to 31 March
+ * n + 1), each row from the year it starts, percent. One rate on all profits (`small` absent): 20% for FY
+ * 2015 and FY 2016 (FA 2013 s6(1); FA 2015 s6), 19% for FY 2017 to FY 2022 (F(No.2)A 2015 s7(1); FA 2020
+ * ss5–6; FA 2021 s6(2)(a)). From FY 2023 the main rate is 25% (FA 2021 s6(2)(b); F(No.2)A 2023 s5,
+ * F(No.2)A 2024 s12, FA 2025 s13 for FY 2024 to FY 2026) and the small profits rate 19% (CTA 2010 s18A,
+ * inserted by FA 2021 Sch 1), with marginal relief between the lower and upper limits (s18B, s18D(2):
+ * £50,000 and £250,000) at the standard fraction 3/200 (FA 2021 s7(2); F(No.2)A 2023 s6, F(No.2)A 2024
+ * s13, FA 2025 s14). A later year takes the last row until a new one is added. Earlier years are not
+ * covered.
+ */
+export const CT_RATES: readonly { fy: number; main: number; small?: number; lower?: number; upper?: number; fraction?: { n: number; d: number } }[] = [
+  { fy: 2015, main: 20 },
+  { fy: 2017, main: 19 },
+  { fy: 2023, main: 25, small: 19, lower: 50_000, upper: 250_000, fraction: { n: 3, d: 200 } },
+];
+
+/** The financial year a day is in, by the year it starts. */
+export function financialYearOf(date: ISODate): number {
+  const y = Number(date.slice(0, 4));
+  return date.slice(5) >= '04-01' ? y : y - 1;
+}
+
+/** The rates for a financial year: the latest row from then or before; undefined before the first (not covered). */
+export function ctRatesFor(fy: number): (typeof CT_RATES)[number] | undefined {
+  let row: (typeof CT_RATES)[number] | undefined;
+  for (const r of CT_RATES) if (r.fy <= fy) row = r;
+  return row;
+}
+
+/**
+ * The annual investment allowance's yearly maximum (CAA 2001 s51A(5)), by the day it took effect for
+ * Corporation Tax: £500,000 from 1 April 2014 (FA 2014 s10, Sch 2), £200,000 from 1 January 2016 (F(No.2)A
+ * 2015 s8), £1,000,000 from 1 January 2019 (FA 2019 s32, Sch 13), permanent from 1 April 2023 (F(No.2)A
+ * 2023 s8). A period that straddles a change takes the transitional rules of the Act that made it, which
+ * are not worked out here (refused as not supported).
+ */
+export const AIA_LIMITS: readonly { from: ISODate; limit: number }[] = [
+  { from: '2014-04-01', limit: 500_000 },
+  { from: '2016-01-01', limit: 200_000 },
+  { from: '2019-01-01', limit: 1_000_000 },
+];
+
+/**
+ * Writing-down allowances (percent a year), for chargeable periods beginning on or after the row's day:
+ * the main pool 18% (CAA 2001 s56(1)) and 14% from 1 April 2026 (FA 2026 s28); the special rate pool 8%
+ * and 6% from 1 April 2019 (s104D(1), FA 2019 s31). A period running over a change takes the hybrid rate
+ * of the Act that made it (`wdaRateHundredths`).
+ */
+export const WDA_RATES: readonly { from: ISODate; main: number; special: number }[] = [
+  { from: '2012-04-01', main: 18, special: 8 },
+  { from: '2019-04-01', main: 18, special: 6 },
+  { from: '2026-04-01', main: 14, special: 6 },
+];
+
+/** The small pools allowance (CAA 2001 s56A): a main or special rate pool of this much or less (proportionately reduced for a period shorter than a year) may be written off in full. */
+export const SMALL_POOLS_LIMIT: readonly { from: ISODate; limit: number }[] = [{ from: '2008-04-01', limit: 1_000 }];
+
+/**
+ * First-year allowances for companies on plant that is unused and not second-hand (percent of the
+ * expenditure), for expenditure incurred on or after the row's day (CAA 2001 s45S, inserted by F(No.2)A
+ * 2023 s7, made permanent by FA 2024 s1; the rates in s52's table): full expensing, 100% on main rate
+ * expenditure, and 50% on special rate expenditure. The super-deduction and special rate allowance of 1
+ * April 2021 to 31 March 2023 (FA 2021 s9), and the 40% allowance from 1 January 2026 for cases outside
+ * s45S (s45U, FA 2026 s29: mainly plant for leasing), are not covered: the annual investment allowance
+ * is used instead.
+ */
+export const FIRST_YEAR_ALLOWANCES: readonly { from: ISODate; main: number; special: number }[] = [{ from: '2023-04-01', main: 100, special: 50 }];
+
+/** Pre-trading expenses incurred within this many years before the trade starts are treated as incurred on its first day (CTA 2009 s61(1)–(2)). */
+export const PRE_TRADING_YEARS = 7;
+
+/**
+ * The deductions allowance (CTA 2010 s269ZR, s269ZW: £5 million a year, reduced for a shorter period and
+ * shared within a group): carried-forward losses and deficits beyond it are restricted to half the
+ * profits above it (ss269ZB, 269ZD). The allowance is the amount the company specifies in its return (nil
+ * if none, s269ZB(7)); the restriction itself is not worked out here (refused as not supported above it).
+ */
+export const LOSS_DEDUCTIONS_ALLOWANCE = 5_000_000;
+
+/** Losses of periods beginning on or after this day are carried forward under CTA 2010 s45A (against total profits, by claim); earlier ones under s45 (against the same trade's profits, automatically). */
+export const FLEXIBLE_LOSSES_FROM: ISODate = '2017-04-01';

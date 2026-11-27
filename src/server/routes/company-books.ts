@@ -5,7 +5,8 @@
 //
 // Its general ledger too (analytics/ledger.ts, FORMULAS.md §22): its postings and checks, the rows to
 // code with the links between its rows and yours, its journals and its book rules; and its accounts for
-// each accounting period (analytics/period-accounts.ts).
+// each accounting period (analytics/period-accounts.ts); its VAT returns (analytics/vat-return.ts) and
+// Corporation Tax computations (analytics/corporation-tax.ts).
 //
 // Only the owner changes the books: no agent token may use the routes that change them (tokens.ts
 // lists none of them); an agent proposes instead (`set_company_books`, `add_filing`, `set_books`,
@@ -21,6 +22,7 @@ import { codingPlace, isLinked } from '../../shared/ledger';
 import { autoLinkPatches, bookRulePatches, codingView, companyBookRules, ledgerView } from '../analytics/ledger';
 import { periodAccounts } from '../analytics/period-accounts';
 import { companyVat, vatReturnCsv } from '../analytics/vat-return';
+import { companyCorporationTax, ctComputationCsv } from '../analytics/corporation-tax';
 import { defaultAccountingReferenceDate } from '../../shared/uk';
 import { companyView } from '../analytics/companies';
 import { agentTokenOf, csvCell, queryDate, readJson, type AppContext } from '../context';
@@ -253,6 +255,27 @@ export function companyBookRoutes(ctx: AppContext): Hono {
     if (!body.ret) throw new StoreError(`${company.name} has no VAT return to export: it is not registered for VAT here.`, 404);
     return new Response(vatReturnCsv(company, body.ret, csvCell), {
       headers: { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="vat-return-${company.id}-${body.ret.period.end}.csv"` },
+    });
+  });
+
+  /**
+   * Its Corporation Tax computations from the books (`?period=<a CT period's last day>`; absent: the one
+   * to work on next): the CT periods and their state, the computation (accounts' profit, adjustments,
+   * pre-trading expenditure, capital allowances, losses, non-trading income, tax by financial year) with
+   * the CT600's boxes and what stops it being ready. `format=csv`: the boxes and working, ending with the
+   * disclaimer. Nothing is sent to HMRC.
+   */
+  app.get('/companies/:id/corporation-tax', (c) => {
+    const company = keptOr404(c.req.param('id'));
+    const wanted = c.req.query('period');
+    const period = queryDate(wanted);
+    if (wanted && !period) throw new StoreError('A Corporation Tax period is given by its last day, YYYY-MM-DD.', 400);
+    const body = companyCorporationTax({ src: store, company, engine: ctx.analytics.companyEngine(company.id), today: today(), period });
+    if (!body) throw new StoreError(`${company.name} has no Corporation Tax period ending on ${formatDate(period ?? '')} in its books.`, 404);
+    if (c.req.query('format') !== 'csv') return c.json(body);
+    if (!body.computation) throw new StoreError(`${company.name} has no Corporation Tax computation to export${period ? ' for that period: it is before these books' : ''}.`, 404);
+    return new Response(ctComputationCsv(company, { form: body.form, disclaimer: body.disclaimer, computation: body.computation }, csvCell), {
+      headers: { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="corporation-tax-${company.id}-${body.computation.period.end}.csv"` },
     });
   });
 

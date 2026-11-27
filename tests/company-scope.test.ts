@@ -340,6 +340,7 @@ const DIFFERENT: Record<string, string> = {
   '/api/companies/:id/coding': "a company's rows to code, its links, journals and book rules",
   '/api/companies/:id/accounts': "a company's accounts for a period (trial balance, profit and loss, balance sheet, register, its bank reconciled), from its ledger",
   '/api/companies/:id/vat': "a company's VAT returns from its ledger (boxes, returns filed, errors, penalty points, thresholds)",
+  '/api/companies/:id/corporation-tax': "a company's Corporation Tax computations and CT600 boxes from its ledger and accounts",
   '/api/imports/history': 'every committed document, a company account’s statements too (no figure; an account’s own page lists its own)',
   '/api/audit': 'the log of this process: its own times and hashes',
   '/api/audit/export': 'the log of this process: its own times and hashes',

@@ -8,8 +8,8 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { AccountDetailResponse, CompanyAccountsResponse, CompanyCodingResponse, CompanyLedgerResponse, CompanyVatResponse, DataHealthResponse, ProposalDecision, ProposalView } from '../src/shared/api';
-import { VAT_RETURN_DISCLAIMER } from '../src/shared/disclaimers';
+import type { AccountDetailResponse, CompanyAccountsResponse, CompanyCtResponse, CompanyCodingResponse, CompanyLedgerResponse, CompanyVatResponse, DataHealthResponse, ProposalDecision, ProposalView } from '../src/shared/api';
+import { CT_DISCLAIMER, VAT_RETURN_DISCLAIMER } from '../src/shared/disclaimers';
 import type { Account, Company, Journal, ProposalInput, Rule, Transaction } from '../src/shared/schema';
 import { createApp, type App } from '../src/server/app';
 import { csvCell } from '../src/server/context';
@@ -396,6 +396,25 @@ describe('a company’s general ledger through the app', () => {
     expect(store.company(CO)!.books!.filings.find((f) => f.id === fid)).not.toHaveProperty('corrections');
     const ct = await send('POST', `/api/companies/${CO}/filings`, { kind: 'confirmation', periodEnd: '2025-01-31', filedOn: '2025-02-03' });
     expect((await send('PUT', `/api/companies/${CO}/filings/${ct.body.id as string}/vat-corrections`, { corrections: [] })).status).toBe(422);
+  });
+  it('serves its Corporation Tax computations from the company’s own route, as CSV ending with the disclaimer', async () => {
+    const c = await json<CompanyCtResponse>(`/api/companies/${CO}/corporation-tax`);
+    expect(c.company).toEqual({ id: CO, name: 'Example Forge Ltd' });
+    expect(c.periods[0]).toMatchObject({ start: '2024-02-01' });
+    expect(c.disclaimer).toBe(CT_DISCLAIMER);
+    const end = c.periods.find((p) => p.end >= '2025-06-05')!.end;
+    const one = await json<CompanyCtResponse>(`/api/companies/${CO}/corporation-tax?period=${end}`);
+    expect(one.computation!.period.end).toBe(end);
+    // The rows not yet coded (and the accounts not reconciled): not ready.
+    expect(one.computation!.ready).toBe(false);
+    const csv = await req(`/api/companies/${CO}/corporation-tax?period=${end}&format=csv`);
+    expect(csv.headers.get('content-type')).toMatch(/text\/csv/);
+    const text = await csv.text();
+    expect(text.split('\n')[0]).toBe('box,description,value,working');
+    expect(text.trim().split('\n').at(-1)).toBe(csvCell(CT_DISCLAIMER));
+    expect((await req(`/api/companies/${CO}/corporation-tax?period=2025-06-29`)).status).toBe(404);
+    expect((await req(`/api/companies/${CO}/corporation-tax?period=June`)).status).toBe(400);
+    expect((await req(`/api/companies/${CO}/corporation-tax`, { headers: { authorization: agent } })).status).toBe(200);
   });
   it('locks the books through the end of a period whose accounts are filed: nothing changes them, but the owner may move the lock', async () => {
     // Before filing: a laptop on the register, and a policy for computers from the start.
