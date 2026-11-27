@@ -8,9 +8,10 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import fc from 'fast-check';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { balanceSheetStatements, directorAdvances, isYear, monthsOfYear, qualification, sizeTest, turnoverLimit, type YearFigures } from '../src/shared/accounts-filing';
-import type { CompanyBooksResponse, CompanyFilingResponse, CompanyView } from '../src/shared/api';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { accountingPolicies, balanceSheetStatements, directorAdvances, isYear, monthsOfYear, qualification, sizeTest, turnoverLimit, type YearFigures } from '../src/shared/accounts-filing';
+import { booksProblems } from '../src/shared/company-books';
+import type { CompanyBooksResponse, CompanyFilingResponse, CompanyView, ProposalView } from '../src/shared/api';
 import { FILING_DISCLAIMER } from '../src/shared/disclaimers';
 import { companySizeRulesFor } from '../src/shared/uk';
 import { companyFiling } from '../src/server/analytics/accounts-filing';
@@ -22,6 +23,7 @@ import { balanceId, transactionId } from '../src/server/ids';
 import { SettingsSchema, type Account, type BalanceSnapshot, type Company, type Journal, type Transaction } from '../src/shared/schema';
 
 const stamp = '2024-01-01T00:00:00+00:00';
+const PARTICULARS = { registeredIn: 'england-and-wales' as const, type: 'private-limited-by-shares' as const, notWoundUp: true as const };
 const LIMITS = { turnover: 1_000_000, balanceSheet: 500_000, employees: 10 };
 
 describe('the size of a company', () => {
@@ -42,6 +44,15 @@ describe('the size of a company', () => {
     expect(turnoverLimit(1_000_000, { start: '2025-01-01', end: '2025-06-30' })).toBe(49_589_041);
     // 13 months from 2 May 2023: 396 days over the 366 of the 12 months beginning then (29 February 2024 in them).
     expect(turnoverLimit(632_000, { start: '2023-05-02', end: '2024-05-31' })).toBe(Math.round((63_200_000 * 396) / 366));
+  });
+
+  it('counts a year of 52 or 53 weeks as a year (s390(3)): its turnover limit whole, its statements for the year', () => {
+    expect(isYear({ start: '2025-01-01', end: '2025-12-30' })).toBe(true);
+    expect(isYear({ start: '2025-01-01', end: '2026-01-06' })).toBe(true);
+    expect(isYear({ start: '2025-01-01', end: '2025-12-29' })).toBe(false);
+    expect(turnoverLimit(1_000_000, { start: '2025-01-01', end: '2025-12-30' })).toBe(100_000_000);
+    expect(turnoverLimit(1_000_000, { start: '2025-01-01', end: '2026-01-06' })).toBe(100_000_000);
+    expect(balanceSheetStatements({ start: '2025-01-01', end: '2025-12-30' })[0]!.text).toMatch(/^For the year ending 30 December 2025/);
   });
 
   it('meets the conditions with two or more requirements within the limits, and says when it cannot tell', () => {
@@ -69,6 +80,16 @@ describe('the size of a company', () => {
     expect(q(true, false, true, false)).toMatchObject({ qualifies: true });
   });
 
+  it('uses your answer for the year before only while the books cannot work it out, and stops asking once they can', () => {
+    // The books know the year before qualified (its first year, within the limits): an answer saying it did not is not used.
+    const known = qualification([year(0, true), year(1, false)], LIMITS, { firstYear: true, previousQualified: false });
+    expect(known).toMatchObject({ qualifies: true, rule: 'one-year-only', askPrevious: false });
+    // Not known: the answer settles it.
+    expect(qualification([year(0, undefined), year(1, false)], LIMITS, { firstYear: false, previousQualified: false })).toMatchObject({ qualifies: false, rule: 'told', askPrevious: true });
+    // Later the books learn the year before (its employees given, say): they decide, the answer stays unused.
+    expect(qualification([year(0, true), year(1, true)], LIMITS, { firstYear: true, previousQualified: false })).toMatchObject({ qualifies: true, rule: 'two-years', askPrevious: false });
+  });
+
   it('as a property: it qualifies as the latest two consecutive years that agree, else as its first year', () => {
     fc.assert(
       fc.property(fc.array(fc.boolean(), { minLength: 1, maxLength: 9 }), (m) => {
@@ -87,6 +108,9 @@ describe('the size of a company', () => {
     // Over this year after qualifying: it still qualifies if last year was within, not if it was over too.
     expect(q(false, true)).toBeUndefined();
     expect(q(true, false)).toBeUndefined();
+    // Asked for only while it would settle the year.
+    expect(qualification([year(0, undefined), year(1, true)], LIMITS, { firstYear: false }).askPrevious).toBe(true);
+    expect(qualification([year(0, true), year(1, true)], LIMITS, { firstYear: true }).askPrevious).toBe(false);
     // A year whose test is not known at all cannot be decided.
     expect(qualification([year(0, true), year(1, undefined)], LIMITS, { firstYear: true }).qualifies).toBeUndefined();
   });
@@ -112,6 +136,24 @@ describe('a director’s advances (s413)', () => {
   });
   it('counts an advance owed at the start, and what is still owed at the end', () => {
     expect(directorAdvances({ opening: -20_000, movements: [{ date: '2025-02-01', amount: -5_000 }] })).toMatchObject({ any: true, opening: 20_000, advanced: 5_000, closing: 25_000, maximum: 25_000, lentToCompany: false });
+  });
+});
+
+describe('the accounting policies', () => {
+  it('says a life that changed in the period from its day, with the life before it', () => {
+    const text = accountingPolicies({ lives: [{ class: 'computer', months: 24, from: '2025-07-01', before: 36 }, { class: 'office', months: 60 }], ownLives: false, residual: false, months: 'acquisition', tangible: true, intangible: false, vat: false, accruals: false }).join('\n');
+    expect(text).toContain('computer equipment 24 months from 1 July 2025 (36 months before); office equipment 60 months.');
+  });
+});
+
+describe('an accounts filing’s approval', () => {
+  const books = (f: Record<string, unknown>) => ({ incorporatedOn: '2024-01-01', periods: [], ctPeriods: [], filings: [{ id: 'fil_000000000001', kind: 'accounts' as const, periodEnd: '2024-12-31', filedOn: '2025-03-01', addedBy: 'owner' as const, ...f }] });
+  it('is given whole, on or after the balance sheet date and not after the filing', () => {
+    expect(booksProblems(books({ approvedOn: '2025-02-20', approvedBy: 'Jo Example' }))).toEqual([]);
+    expect(booksProblems(books({ approvedOn: '2025-02-20' }))[0]).toMatch(/together/);
+    expect(booksProblems(books({ approvedBy: 'Jo Example' }))[0]).toMatch(/together/);
+    expect(booksProblems(books({ approvedOn: '2024-12-30', approvedBy: 'Jo Example' }))[0]).toMatch(/before the balance sheet date/);
+    expect(booksProblems(books({ approvedOn: '2025-03-02', approvedBy: 'Jo Example' }))[0]).toMatch(/after they were filed/);
   });
 });
 
@@ -208,10 +250,10 @@ describe('the filing sheet', () => {
   });
 
   it('shows the advance the director’s loan made, and asks for its interest and conditions before it is ready', () => {
-    const v = sheetOf(company({ employees: [{ periodEnd: '2024-12-31', average: 1 }, { periodEnd: '2025-12-31', average: 1 }], accountsNotes: [{ periodEnd: '2025-12-31', offBalanceSheet: { none: true }, commitments: { none: true }, directors: { none: true }, notExcluded: true }] }));
+    const v = sheetOf(company({ employees: [{ periodEnd: '2024-12-31', average: 1 }, { periodEnd: '2025-12-31', average: 1 }], accountsNotes: [{ periodEnd: '2025-12-31', offBalanceSheet: { none: true }, commitments: { none: true }, directors: { none: true }, notExcluded: true, particulars: PARTICULARS }] }));
     expect(v.notes.advances).toMatchObject({ any: true, opening: 0, advanced: 150_000, closing: 150_000, given: null });
     expect(v.gate.filter((g) => !g.ok).map((g) => g.key)).toEqual(['notes']);
-    const done = sheetOf(company({ employees: [{ periodEnd: '2024-12-31', average: 1 }, { periodEnd: '2025-12-31', average: 1 }], accountsNotes: [{ periodEnd: '2025-12-31', offBalanceSheet: { none: true }, commitments: { none: true }, directors: { none: true }, advances: { interest: 'none', conditions: 'unsecured, repayable on demand' }, notExcluded: true }] }));
+    const done = sheetOf(company({ employees: [{ periodEnd: '2024-12-31', average: 1 }, { periodEnd: '2025-12-31', average: 1 }], accountsNotes: [{ periodEnd: '2025-12-31', offBalanceSheet: { none: true }, commitments: { none: true }, directors: { none: true }, advances: { interest: 'none', conditions: 'unsecured, repayable on demand' }, notExcluded: true, particulars: PARTICULARS }] }));
     expect(done.ready).toBe(true);
     expect(done.eligibility.micro).toMatchObject({ qualifies: true, rule: 'two-years' });
     expect(done.eligibility.small.qualifies).toBe(true);
@@ -220,10 +262,46 @@ describe('the filing sheet', () => {
   it('is not ready without the employees, the notes and your confirmation that no exclusion applies, and never says it qualifies without them', () => {
     const v = sheetOf(company());
     expect(v.ready).toBe(false);
-    expect(v.gate.filter((g) => !g.ok).map((g) => g.key)).toEqual(['employees', 'notes', 'eligibility']);
+    expect(v.gate.filter((g) => !g.ok).map((g) => g.key)).toEqual(['employees', 'notes', 'particulars', 'eligibility']);
+    // Without its number, the accounts cannot name it as Companies House asks.
+    expect(sheetOf(company({}, { number: undefined })).gate.find((g) => g.key === 'number')!.ok).toBe(false);
     // Turnover and assets within the limits decide each year without the employees.
     expect(v.eligibility.micro.qualifies).toBe(true);
     expect(v.notes.employees.average).toBeNull();
+  });
+
+  it('lists the exclusions an owner confirms, the group and special register bodies among them (ss478(c), 479(1))', () => {
+    const keys = sheetOf(company()).eligibility.exclusions.map((x) => x.key);
+    expect(keys).toEqual(expect.arrayContaining(['public', 'parent', 'special-register', 'group-audit', 'audit']));
+    expect(sheetOf(company()).eligibility.exclusions.find((x) => x.key === 'group-audit')!.source).toBe('CA 2006 s479(1)');
+  });
+
+  it('gives the period before’s employees and commitments beside this period’s (FRS 105 paras 3.7, 3.10)', () => {
+    const v = sheetOf(company({ employees: [{ periodEnd: '2024-12-31', average: 2 }, { periodEnd: '2025-12-31', average: 1 }], accountsNotes: [{ periodEnd: '2024-12-31', commitments: { text: 'A van on hire purchase.', amount: 4_800 } }] }));
+    expect(v.notes.employees).toMatchObject({ average: 1, prior: 2 });
+    expect(v.notes.commitmentsPrior).toEqual({ text: 'A van on hire purchase.', amount: 4_800 });
+    // The years before, whose employees the size test reads, offered to give.
+    expect(v.eligibility.earlier).toEqual([{ start: '2024-01-01', end: '2024-12-31', employees: 2 }]);
+  });
+
+  it('describes a depreciation life that changed in the period, with the life before', () => {
+    const rows = [...ROWS('works-bank'), tx('works-bank', '2024-05-01', -1_200, 'EXAMPLE COMPUTERS LTD', { books: { ledger: 'fixed-assets:computer:cost', asset: { class: 'computer' }, setBy: 'user' } })];
+    const v = sheetOf(company({ policies: [{ class: 'computer', months: 36 }, { class: 'computer', months: 24, effectiveFrom: '2025-07-01' }] }), rows);
+    expect(v.policies.join(' ')).toContain('computer equipment 24 months from 1 July 2025 (36 months before)');
+  });
+
+  it('values one class of share only, and says what a book value leaves out', () => {
+    expect(sheetOf(company({}, { holdings: [{ shareClass: 'A ordinary', shares: 25, totalShares: 100, source: {} }, { shareClass: 'B ordinary', shares: 5, totalShares: 100, source: {} }] })).bookValue.why).toMatch(/more than one class/);
+    const v = sheetOf(company());
+    expect(v.bookValue.shareClass).toBe('Ordinary');
+    // Line A: £100 of share capital not paid, owed by the shareholders.
+    expect(v.bookValue.caveats).toEqual([expect.stringMatching(/share capital not paid \(£100, line A\)/)]);
+    // Net liabilities while it owes you £1,000 on the loan: the estate may overstate by up to £1,000.
+    const rows = [...ROWS('works-bank').filter((t) => t.description !== 'J BLOGGS ADVANCE'), tx('works-bank', '2025-10-01', -20_000, 'EXAMPLE LAWYERS LLP', coded('professional-fees'))];
+    const loss = sheetOf(company(), rows, [statement('works-bank', '2024-12-31', 5_700), statement('works-bank', '2025-12-31', -8_500)]);
+    expect(loss.bookValue).toMatchObject({ value: 0 });
+    expect(loss.bookValue.netAssets).toBeLessThan(0);
+    expect(loss.bookValue.caveats[0]).toMatch(/overstate by up to £1,000\.00/);
   });
 
   it('offers the book value of your shares, never below nothing', () => {
@@ -272,7 +350,7 @@ describe('filing the accounts through the app', () => {
     const r = await req(p, { method, headers: { ...CSRF, ...(auth ? { authorization: auth } : {}) }, body: JSON.stringify(body) });
     return { status: r.status, body: (await r.json()) as Record<string, unknown> };
   };
-  const NOTES = { offBalanceSheet: { none: true }, commitments: { text: 'A lease of the workshop to 2028.', amount: 14_400 }, directors: { none: true }, advances: { interest: 'none', conditions: 'unsecured, repayable on demand' }, notExcluded: true };
+  const NOTES = { offBalanceSheet: { none: true }, commitments: { text: 'A lease of the workshop to 2028.', amount: 14_400 }, directors: { none: true }, advances: { interest: 'none', conditions: 'unsecured, repayable on demand' }, notExcluded: true, particulars: PARTICULARS };
 
   it('takes what the owner confirms, refuses an agent, and keeps it when the books are set up again', async () => {
     expect((await send('PUT', `/api/companies/${CO}/accounts-notes`, { periodEnd: '2025-12-31', employees: 1 }, agent)).status).toBe(403);
@@ -301,10 +379,14 @@ describe('filing the accounts through the app', () => {
     const json = (await (await req(`/api/companies/${CO}/filing?period=2025-12-31&format=json`)).json()) as { disclaimer: string; lines: Record<string, number> };
     expect(json.disclaimer).toBe(FILING_DISCLAIMER);
     expect(json.lines.K).toBe(10_600);
+    // The notes in pounds and pence, as labelled: the £1,500 advance, not 150000 pence.
+    const notes = (json as unknown as { currency: string; notes: { advances: Record<string, unknown> } });
+    expect(notes.currency).toMatch(/notes in pounds and pence/);
+    expect(notes.notes.advances).toMatchObject({ owedAtStart: 0, advanced: 1_500, repaid: 0, owedAtEnd: 1_500, mostOwed: 1_500, any: true });
   });
 
   it('records the accounts as filed only when ready and as the books give them, locking the books; never twice', async () => {
-    const filed = (body: Record<string, unknown>, auth?: string) => send('POST', `/api/companies/${CO}/accounts/filed`, { periodEnd: '2025-12-31', filedOn: '2026-02-20', approvedOn: '2026-02-18', approvedBy: 'Jo Example', lines: { A: 100, B: 0, C: 10_500, D: 0, E: 0, F: 10_500, G: 10_600, H: 0, I: 0, J: 0, K: 10_600 }, ...body }, auth);
+    const filed = (body: Record<string, unknown>, auth?: string) => send('POST', `/api/companies/${CO}/accounts/filed`, { periodEnd: '2025-12-31', filedOn: '2026-02-20', approvedOn: '2026-02-18', approvedBy: 'Jo Example', registeredOffice: '1 Example Street, Exampleton, CR2 6XH', lines: { A: 100, B: 0, C: 10_500, D: 0, E: 0, F: 10_500, G: 10_600, H: 0, I: 0, J: 0, K: 10_600 }, ...body }, auth);
     expect((await filed({}, agent)).status).toBe(403);
     // Not ready: no employees or notes yet.
     expect((await filed({})).status).toBe(422);
@@ -313,9 +395,11 @@ describe('filing the accounts through the app', () => {
     expect((await filed({ lines: { A: 100, B: 0, C: 10_501, D: 0, E: 0, F: 10_501, G: 10_601, H: 0, I: 0, J: 0, K: 10_601 } })).status).toBe(409);
     expect((await filed({ approvedOn: '2025-12-30' })).status).toBe(422);
     expect((await filed({ approvedOn: '2026-02-21' })).status).toBe(422);
+    // The registered office is stated on the accounts, so it is asked for.
+    expect((await filed({ registeredOffice: undefined })).status).toBe(400);
     const ok = await filed({ reference: 'EX12345' });
     expect(ok.status).toBe(201);
-    expect(ok.body).toMatchObject({ kind: 'accounts', periodStart: '2025-01-01', periodEnd: '2025-12-31', approvedOn: '2026-02-18', approvedBy: 'Jo Example', figures: { C: 10_500, K: 10_600 } });
+    expect(ok.body).toMatchObject({ kind: 'accounts', periodStart: '2025-01-01', periodEnd: '2025-12-31', approvedOn: '2026-02-18', approvedBy: 'Jo Example', registeredOffice: '1 Example Street, Exampleton, CR2 6XH', figures: { C: 10_500, K: 10_600 } });
     expect((await filed({})).status).toBe(409);
     const books = (await (await req(`/api/companies/${CO}/books`)).json()) as CompanyBooksResponse;
     expect(books.books!.lockedThrough).toBe('2025-12-31');
@@ -324,19 +408,53 @@ describe('filing the accounts through the app', () => {
     expect(v.ready).toBe(false);
   });
 
+  it('checks an accounts filing’s approval however it is recorded: by hand, or by an agent’s proposal', async () => {
+    const base = { kind: 'accounts', periodStart: '2024-01-01', periodEnd: '2024-12-31', filedOn: '2025-03-01' };
+    expect((await send('POST', `/api/companies/${CO}/filings`, { ...base, approvedOn: '2025-02-20' })).status).toBe(422);
+    expect((await send('POST', `/api/companies/${CO}/filings`, { ...base, approvedOn: '2024-12-01', approvedBy: 'Jo Example' })).status).toBe(422);
+    expect((await send('POST', `/api/companies/${CO}/filings`, { ...base, approvedOn: '2025-03-02', approvedBy: 'Jo Example' })).status).toBe(422);
+    const r = await req('/api/proposals', { method: 'POST', headers: { ...CSRF, authorization: agent }, body: JSON.stringify({ title: 'Accounts filed', summary: 'Its filing history.', changes: [{ kind: 'add_filing', why: 'Its filing history lists them.', company: CO, filing: { ...base, approvedOn: '2025-04-01', approvedBy: 'Jo Example' } }] }) });
+    const proposal = (await r.json()) as ProposalView & { problems?: { problem: string }[] };
+    expect(proposal.problems?.[0]?.problem).toMatch(/after they were filed/);
+    expect((await send('POST', `/api/companies/${CO}/filings`, { ...base, approvedOn: '2025-02-20', approvedBy: 'Jo Example' })).status).toBe(201);
+  });
+
+  it('takes away only a balance it added when the valuation is not kept: never one another request wrote meanwhile', async () => {
+    const store = app.ctx.store;
+    const add = store.addBalances.bind(store);
+    const value = () => store.balances('works-shares').filter((b) => b.date === '2025-12-31').length;
+    // Another request writes the same balance just before this one: this one adds nothing, and keeps it when it fails.
+    const adds = vi.spyOn(store, 'addBalances').mockImplementationOnce(async (snaps, message) => {
+      await add(snaps, message);
+      return add(snaps, message);
+    });
+    const updates = vi.spyOn(store, 'updateCompany').mockImplementationOnce(() => Promise.reject(new Error('the company changed meanwhile')));
+    expect((await send('POST', `/api/companies/${CO}/accounts/book-value`, { periodEnd: '2025-12-31', oneClass: true })).status).toBe(500);
+    expect(value()).toBe(1);
+    // Alone, the balance it added is taken away again.
+    await store.deleteBalance(store.balances('works-shares').find((b) => b.date === '2025-12-31')!.id, 'test: reset');
+    updates.mockImplementationOnce(() => Promise.reject(new Error('the company changed meanwhile')));
+    expect((await send('POST', `/api/companies/${CO}/accounts/book-value`, { periodEnd: '2025-12-31', oneClass: true })).status).toBe(500);
+    expect(value()).toBe(0);
+    adds.mockRestore();
+    updates.mockRestore();
+  });
+
   it('records the book value of your shares only when asked, once', async () => {
+    // Without confirming its shares are of your one class, refused.
+    expect((await send('POST', `/api/companies/${CO}/accounts/book-value`, { periodEnd: '2025-12-31' })).status).toBe(400);
     const before = (await (await req('/api/companies')).json()) as CompanyView[];
     expect(before[0]!.valuation).toBeUndefined();
-    expect((await send('POST', `/api/companies/${CO}/accounts/book-value`, { periodEnd: '2025-12-31' }, agent)).status).toBe(403);
+    expect((await send('POST', `/api/companies/${CO}/accounts/book-value`, { periodEnd: '2025-12-31', oneClass: true }, agent)).status).toBe(403);
     // A period not ended: the figure could still change.
-    expect((await send('POST', `/api/companies/${CO}/accounts/book-value`, { periodEnd: '2026-12-31' })).status).toBe(422);
+    expect((await send('POST', `/api/companies/${CO}/accounts/book-value`, { periodEnd: '2026-12-31', oneClass: true })).status).toBe(422);
     // Its accounts ready is enough: the notes do not move net assets.
-    const r = await send('POST', `/api/companies/${CO}/accounts/book-value`, { periodEnd: '2025-12-31' });
+    const r = await send('POST', `/api/companies/${CO}/accounts/book-value`, { periodEnd: '2025-12-31', oneClass: true });
     expect(r).toMatchObject({ status: 201, body: { value: 2_650 } });
     const after = (await (await req('/api/companies')).json()) as CompanyView[];
     expect(after[0]!.valuation).toMatchObject({ asOf: '2025-12-31', method: 'net-assets', netAssets: 10_600, value: 2_650 });
     expect(after[0]!.value).toMatchObject({ amount: 2_650, date: '2025-12-31' });
-    expect((await send('POST', `/api/companies/${CO}/accounts/book-value`, { periodEnd: '2025-12-31' })).status).toBe(409);
+    expect((await send('POST', `/api/companies/${CO}/accounts/book-value`, { periodEnd: '2025-12-31', oneClass: true })).status).toBe(409);
     expect((await sheet()).bookValue.recorded).toEqual({ value: 2_650, netAssets: 10_600 });
   });
 });

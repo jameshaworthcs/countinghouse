@@ -889,10 +889,12 @@ const filingKinds = <T extends z.ZodRawShape>(extra: T) =>
       kind: z.literal('accounts'),
       ...filingBase,
       figures: MicroEntityLinesSchema.optional(),
-      /** The day the board approved the accounts (on or after the balance sheet date: CA 2006 s414(1)), as filed. */
+      /** The day the board approved the accounts (on or after the balance sheet date, not after `filedOn`: CA 2006 s414(1)), as filed; given with `approvedBy`. */
       approvedOn: ISODateSchema.optional(),
-      /** The director who signed the balance sheet on the board's behalf (s414(1)–(2)), as filed: the only name kept. */
+      /** The director who signed the balance sheet on the board's behalf, named on the copy delivered (ss414(1)–(2), 444(6)): the only name kept; given with `approvedOn`. */
       approvedBy: z.string().trim().min(1).max(120).optional(),
+      /** The registered office as the accounts state it (s396(A1)(d); FRS 105 para 3.13A), as filed: kept here only. */
+      registeredOffice: z.string().trim().min(1).max(200).optional(),
     }),
     z.object({ ...extra, kind: z.literal('ct600'), ...filingBase, figures: z.object({ taxPayable: MoneySchema.refine((v) => v >= 0, { message: 'Tax payable is not negative' }) }).optional() }),
     // A payment of £0 says there is no Corporation Tax to pay for the period.
@@ -1050,6 +1052,11 @@ const companyBooksShape = {
    */
   lockedThrough: ISODateSchema.optional(),
 };
+/** The part of the United Kingdom a company is registered in (CA 2006 s88: England and Wales, Wales, Scotland, Northern Ireland). */
+export const REGISTERED_IN = ['england-and-wales', 'wales', 'scotland', 'northern-ireland'] as const;
+/** A micro-entity's kind of company, as its accounts state it (s396(A1)(c)). */
+export const COMPANY_TYPES = ['private-limited-by-shares', 'private-limited-by-guarantee'] as const;
+
 /**
  * A note to a micro-entity's accounts that the books cannot work out, as you confirm it: none (`none`),
  * or what it says, with its total where the law asks for one (docs/FORMULAS.md §22, "Filing the accounts").
@@ -1087,8 +1094,21 @@ export const AccountsNotesSchema = z.object({
     .optional(),
   /** None of the exclusions from the micro-entity provisions and the audit exemption applied at any time in the period (CA 2006 ss384, 384A(8), 384B, 476, 478): yours to say. */
   notExcluded: z.boolean().optional(),
-  /** Whether it qualified as a micro-entity for the period before, when the books cannot work that out (s384A(3)). */
+  /** Whether it qualified as a micro-entity for the period before, used only while the books cannot work that out (s384A(3)). */
   previousQualified: z.boolean().optional(),
+  /**
+   * The particulars the accounts state that the books do not hold (CA 2006 s396(A1); FRS 105 para
+   * 3.13A): the part of the United Kingdom it is registered in, what kind of company it is, and that it
+   * is not being wound up (one being wound up is not covered). Its number is the company's own; its
+   * registered office is given when the filing is recorded, and kept on the filing.
+   */
+  particulars: z
+    .object({
+      registeredIn: z.enum(REGISTERED_IN),
+      type: z.enum(COMPANY_TYPES),
+      notWoundUp: z.literal(true),
+    })
+    .optional(),
 });
 export type AccountsNotes = z.infer<typeof AccountsNotesSchema>;
 

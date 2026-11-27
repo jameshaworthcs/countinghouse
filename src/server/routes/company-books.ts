@@ -64,6 +64,7 @@ const AccountsFiledBody = z.object({
   reference: z.string().trim().min(1).max(60).optional(),
   approvedOn: ISODateSchema,
   approvedBy: z.string().trim().min(1).max(120),
+  registeredOffice: z.string().trim().min(1).max(200),
   lines: z.object(Object.fromEntries(MICRO_ENTITY_LINES.map((l) => [l, z.number().int()])) as Record<(typeof MICRO_ENTITY_LINES)[number], z.ZodNumber>),
 });
 
@@ -177,7 +178,6 @@ export function companyBookRoutes(ctx: AppContext): Hono {
     const input = await readJson(c, CompanyFilingInputSchema);
     if (input.filedOn > today()) throw new StoreError(`${formatDate(input.filedOn)} is in the future.`, 422);
     if (input.kind === 'vat' && input.disclosed && input.disclosed.on > today()) throw new StoreError(`${formatDate(input.disclosed.on)} is in the future.`, 422);
-    if (input.kind === 'accounts' && input.approvedOn && (input.approvedOn < input.periodEnd || input.approvedOn > input.filedOn)) throw new StoreError('The accounts are approved on or after the balance sheet date, and before they are filed.', 422);
     const filing = CompanyFilingSchema.parse({ ...input, id: filingId(id, input.kind, input.periodEnd), addedBy: 'owner' });
     await recordFiling(id, filing);
     return c.json(filing, 201);
@@ -379,9 +379,8 @@ export function companyBookRoutes(ctx: AppContext): Hono {
     if (moved.length) throw new StoreError(`The books have changed since you opened the sheet (line${moved.length === 1 ? '' : 's'} ${moved.join(', ')}): reload it and check what you filed.`, 409);
     const now = today();
     if (body.filedOn > now) throw new StoreError(`${formatDate(body.filedOn)} is in the future.`, 422);
-    if (body.approvedOn < body.periodEnd) throw new StoreError('The accounts are approved on or after the balance sheet date.', 422);
-    if (body.approvedOn > body.filedOn) throw new StoreError('The accounts are approved before they are filed.', 422);
-    const filing = CompanyFilingSchema.parse({ kind: 'accounts', periodStart: sheet.period.start, periodEnd: body.periodEnd, filedOn: body.filedOn, ...(body.reference ? { reference: body.reference } : {}), figures: sheet.lines, approvedOn: body.approvedOn, approvedBy: body.approvedBy, id: filingId(id, 'accounts', body.periodEnd), addedBy: 'owner' });
+    // The approval's days are the books' own check (`booksProblems`), as for any accounts filing recorded.
+    const filing = CompanyFilingSchema.parse({ kind: 'accounts', periodStart: sheet.period.start, periodEnd: body.periodEnd, filedOn: body.filedOn, ...(body.reference ? { reference: body.reference } : {}), figures: sheet.lines, approvedOn: body.approvedOn, approvedBy: body.approvedBy, registeredOffice: body.registeredOffice, id: filingId(id, 'accounts', body.periodEnd), addedBy: 'owner' });
     await recordFiling(id, filing);
     return c.json(filing, 201);
   });
@@ -389,13 +388,14 @@ export function companyBookRoutes(ctx: AppContext): Hono {
   /**
    * Record the book value of your shares at a period's end (FORMULAS.md §9, "Shares in a company"): its
    * net assets (K, as filed or as the books give it) × your shares ÷ the shares it has issued, never below
-   * nothing, as a valuation of the account that carries them and a balance on it. The one write here that
-   * reaches a figure of yours, and only on your click.
+   * nothing, as a valuation of the account that carries them and a balance on it. Only for one class of
+   * share, which you confirm is the only class it has issued (`oneClass`), so its issued shares are that
+   * class's. The one write here that reaches a figure of yours, and only on your click.
    */
   app.post('/companies/:id/accounts/book-value', async (c) => {
     ownerOnly(c);
     const id = c.req.param('id');
-    const { periodEnd } = await readJson(c, z.object({ periodEnd: ISODateSchema }));
+    const { periodEnd } = await readJson(c, z.object({ periodEnd: ISODateSchema, oneClass: z.literal(true, { error: 'Confirm that it has issued shares of your class only: a book value by class is not worked out here.' }) }));
     const company = keptOr404(id);
     const sheet = filingOf(company, periodEnd);
     const bv = sheet.bookValue;
@@ -404,12 +404,14 @@ export function companyBookRoutes(ctx: AppContext): Hono {
     const account = store.account(company.accountId!);
     if (!account) throw new StoreError('The account that carries your shares is no longer in your data.', 422);
     const pounds = (n: number) => `£${n.toLocaleString('en-GB')}`;
-    const note = bv.netAssets > 0 ? `Book value: net assets ${pounds(bv.netAssets)} × ${bv.shares} of its ${bv.totalShares} shares, from its accounts to ${formatDate(periodEnd)}.` : `Book value: nothing. Its accounts to ${formatDate(periodEnd)} show ${bv.netAssets < 0 ? `net liabilities of ${pounds(-bv.netAssets)}` : 'no net assets'}; shares are never valued below nothing.`;
+    const worked = bv.netAssets > 0 ? `Book value: net assets ${pounds(bv.netAssets)} × ${bv.shares} of its ${bv.totalShares} ${bv.shareClass} shares (its only class), from its accounts to ${formatDate(periodEnd)}.` : `Book value: nothing (never below). Its accounts to ${formatDate(periodEnd)} show ${bv.netAssets < 0 ? `net liabilities of ${pounds(-bv.netAssets)}` : 'no net assets'}.`;
+    // With what a book value leaves out, as many of its caveats as a note holds (400 characters).
+    const note = bv.caveats.reduce((n, c) => (`${n} ${c}`.length <= 400 ? `${n} ${c}` : n), worked);
     const stamp = nowISO();
     const balance = BalanceSnapshotSchema.parse({ id: balanceId(account.id, periodEnd, bv.value, 'manual'), accountId: account.id, date: periodEnd, balance: bv.value, currency: 'GBP', kind: 'manual', dateSource: 'document', note, source: {}, createdAt: stamp });
-    // A balance there already (the same value on the same day) is the valuation's: it is never taken away below.
-    const existed = store.balances(account.id).some((b) => b.id === balance.id);
-    await store.addBalances([balance], `balance: ${account.name} book value at ${periodEnd}`);
+    // Only a balance this request added is taken away if the valuation is not kept: one there already (the
+    // same value on the same day, perhaps written by another request meanwhile) stays.
+    const added = await store.addBalances([balance], `balance: ${account.name} book value at ${periodEnd}`);
     try {
       await store.updateCompany(
         id,
@@ -421,7 +423,7 @@ export function companyBookRoutes(ctx: AppContext): Hono {
         `company: ${company.name} book value at ${periodEnd}`,
       );
     } catch (err) {
-      if (!existed) await store.deleteBalance(balance.id, `balance: ${account.name} book value at ${periodEnd} not kept`);
+      if (added > 0) await store.deleteBalance(balance.id, `balance: ${account.name} book value at ${periodEnd} not kept`);
       throw err;
     }
     return c.json({ ok: true, value: bv.value, balanceId: balance.id }, 201);

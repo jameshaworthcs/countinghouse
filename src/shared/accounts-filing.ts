@@ -7,15 +7,24 @@
 import { addDays, diffDays, type ISODate } from './dates';
 import { FIXED_ASSET_CLASS_META, type AssetRegisterClass } from './ledger';
 import { mulDivRound, toMinor } from './money';
+import type { COMPANY_TYPES, REGISTERED_IN } from './schema';
 import { lastDayOfMonths, type SizeLimits } from './uk';
 
-/** Whether a period is a year: exactly 12 months, its last day the last of 12 months beginning with its first. */
-export const isYear = (p: { start: ISODate; end: ISODate }): boolean => p.end === lastDayOfMonths(p.start, 12);
+/**
+ * Whether a financial year is a year: exactly 12 months (its last day the last of 12 months beginning
+ * with its first), or 52 or 53 weeks, as a year made up to a day within 7 days of the reference date can
+ * be (CA 2006 s390(2)–(3)).
+ */
+export const isYear = (p: { start: ISODate; end: ISODate }): boolean => {
+  const days = diffDays(p.start, p.end) + 1;
+  return p.end === lastDayOfMonths(p.start, 12) || days === 364 || days === 371;
+};
 
 /**
- * The turnover limit for a financial year, in pence: the limit itself for a year, else proportionately
- * adjusted (CA 2006 s384A(5), s382(4)), by its days over the days of the 12 months beginning with its
- * first day (so a year of 366 days is a year, and 6 months of 181 days is 181 ÷ 365 of the limit).
+ * The turnover limit for a financial year, in pence: the limit itself for a year (`isYear`: 12 months,
+ * or 52 or 53 weeks), else proportionately adjusted (CA 2006 s384A(5), s382(4)), by its days over the
+ * days of the 12 months beginning with its first day (so a year of 366 days is a year, and 6 months of
+ * 181 days is 181 ÷ 365 of the limit).
  */
 export function turnoverLimit(limit: number, p: { start: ISODate; end: ISODate }): number {
   if (isYear(p)) return toMinor(limit);
@@ -73,6 +82,8 @@ export interface Qualification {
   rule: QualificationRule;
   /** Each year's size test, oldest first, the year decided last. */
   years: SizeTest[];
+  /** Whether what you say of the year before is wanted: the years given cannot settle the last one, and your answer could. */
+  askPrevious: boolean;
 }
 
 /**
@@ -81,7 +92,8 @@ export interface Qualification {
  * meeting or ceasing to meet them changes its qualification only when that happens in two consecutive
  * years (s384A(2)–(3), s382(1A)–(2)). So it qualifies as it meets them when this year and the last agree,
  * and as it qualified last year when they differ. `previousQualified` is what you say of the year before
- * the last one given, where the years given cannot settle it.
+ * the last one given: used only while the years given cannot work out how it qualified then, and asked
+ * for (`askPrevious`) only when it would settle the last year.
  */
 export function qualification(years: readonly YearFigures[], limits: SizeLimits, opts: { firstYear: boolean; previousQualified?: boolean | undefined }): Qualification {
   const tests = years.map((y) => sizeTest(y, limits));
@@ -98,8 +110,10 @@ export function qualification(years: readonly YearFigures[], limits: SizeLimits,
       const prevM = k > 0 ? tests[k - 1]!.meets : undefined;
       if (prevM !== undefined && prevM === m) out = { q: m, rule: 'two-years' };
       else {
-        const told = k === n && opts.previousQualified !== undefined;
-        const prevQ = told ? opts.previousQualified : k > 0 ? q(k - 1).q : undefined;
+        // How it qualified the year before: from the years given, else (for the last year only) as you say.
+        const fromYears = k > 0 ? q(k - 1).q : undefined;
+        const told = fromYears === undefined && k === n && opts.previousQualified !== undefined;
+        const prevQ = told ? opts.previousQualified : fromYears;
         if (prevQ === undefined) out = { q: undefined, rule: 'unknown' };
         // Met (or not) this year alone: as it qualified the year before. With last year's test not
         // known, that holds only when this year agrees with how it qualified then.
@@ -111,7 +125,12 @@ export function qualification(years: readonly YearFigures[], limits: SizeLimits,
     return out;
   };
   const last = n >= 0 ? q(n) : { q: undefined, rule: 'unknown' as const };
-  return { ...(last.q === undefined ? {} : { qualifies: last.q }), rule: last.rule, years: tests };
+  // Your answer is wanted when the last year's test is known, it is not the first year, the year before's
+  // test does not agree with it, and the years given cannot say how it qualified then.
+  const m = tests[n]?.meets;
+  const prevM = n > 0 ? tests[n - 1]!.meets : undefined;
+  const askPrevious = n >= 0 && m !== undefined && !(n === 0 && opts.firstYear) && prevM !== m && (n === 0 || q(n - 1).q === undefined);
+  return { ...(last.q === undefined ? {} : { qualifies: last.q }), rule: last.rule, years: tests, askPrevious };
 }
 
 // ─── A director's advances (CA 2006 s413) ─────────────────────────────────────────────────────────
@@ -201,10 +220,14 @@ const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'Ju
 /** A day as the accounts write it: 31 December 2025. */
 export const longDate = (d: ISODate): string => `${Number(d.slice(8, 10))} ${MONTH_NAMES[Number(d.slice(5, 7)) - 1]} ${d.slice(0, 4)}`;
 
+/** The particulars in words (CA 2006 s396(A1)(a), (c)). */
+export const REGISTERED_IN_LABELS: Record<(typeof REGISTERED_IN)[number], string> = { 'england-and-wales': 'England and Wales', wales: 'Wales', scotland: 'Scotland', 'northern-ireland': 'Northern Ireland' };
+export const COMPANY_TYPE_LABELS: Record<(typeof COMPANY_TYPES)[number], string> = { 'private-limited-by-shares': 'a private company limited by shares', 'private-limited-by-guarantee': 'a private company limited by guarantee' };
+
 /** The rounding statement (FRS 105 para 3.13(d)): the accounts are in whole pounds. */
 export const ROUNDING_STATEMENT = 'The figures in these accounts are rounded to the nearest pound.';
 
-/** The line the director signs under (CA 2006 s414(1)–(2)): approved by the board, signed on its behalf. */
+/** The line the director signs under: approved by the board, signed on its behalf by a director named on the copy delivered (CA 2006 ss414(1)–(2), 444(6)). */
 export function approvalLine(approvedOn: ISODate | undefined, approvedBy: string | undefined): string {
   return `Approved by the board of directors on ${approvedOn ? longDate(approvedOn) : '[date]'} and signed on its behalf by ${approvedBy ?? '[name]'}, Director.`;
 }
@@ -212,8 +235,8 @@ export function approvalLine(approvedOn: ISODate | undefined, approvedBy: string
 // ─── The accounting policies (optional for a micro-entity) ────────────────────────────────────────
 
 export interface PoliciesInput {
-  /** Each class's life in months from the company's policies, in force at the period's end (and earlier lives changed in it). */
-  lives: { class: AssetRegisterClass; months: number; from?: ISODate | undefined }[];
+  /** Each class's life in months from the company's policies, in force at the period's end; one that took effect in the period with the day it did and the life before it. */
+  lives: { class: AssetRegisterClass; months: number; from?: ISODate | undefined; before?: number | undefined }[];
   /** Whether any asset on the register at the period's end has a life of its own. */
   ownLives: boolean;
   /** Whether any asset has a residual value. */
@@ -246,7 +269,7 @@ export function accountingPolicies(i: PoliciesInput): string[] {
   const lives = (intangible: boolean) =>
     i.lives
       .filter((l) => (l.class === 'intangible') === intangible)
-      .map((l) => `${FIXED_ASSET_CLASS_META[l.class].name.toLowerCase()} ${l.months} months${l.from ? ` (from ${longDate(l.from)})` : ''}`)
+      .map((l) => `${FIXED_ASSET_CLASS_META[l.class].name.toLowerCase()} ${l.months} months${l.from ? ` from ${longDate(l.from)}${l.before ? ` (${l.before} months before)` : ''}` : ''}`)
       .join('; ');
   const residual = i.residual ? ' less its residual value' : '';
   if (i.tangible) {

@@ -844,6 +844,15 @@ export function companySizeRulesFor(start: ISODate): { from: ISODate; covered: b
 }
 
 /**
+ * Identity verification at Companies House (Economic Crime and Corporate Transparency Act 2023): a
+ * director's identity must be verified from 18 November 2025, which does not stop accounts being filed;
+ * verifying the person who files (a presenter) is not required before November 2027 at the earliest
+ * (GOV.UK, "Identity verification at Companies House"; ICAEW, August 2026). WebFiling signs in with
+ * GOV.UK One Login and asks for the company's authentication code.
+ */
+export const IDENTITY_VERIFICATION = { directorsFrom: '2025-11-18', presentersNotBefore: '2027-11' } as const;
+
+/**
  * How the accounts reach Companies House, by the day they are filed: WebFiling and paper take a
  * micro-entity's accounts until 31 March 2028; from 1 April 2028 every company files its accounts through
  * commercial software in iXBRL, the web and paper services closed for accounts, and a company claiming

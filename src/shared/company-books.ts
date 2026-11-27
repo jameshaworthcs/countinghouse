@@ -467,6 +467,12 @@ export function booksProblems(books: CompanyBooksSetup & { filings?: readonly Co
       if (toMinor(b.totalVatDue) !== toMinor(b.vatDueSales) + toMinor(b.vatDueAcquisitions)) out.push(`${what}: box 3 is not boxes 1 and 2 together.`);
       if (toMinor(b.netVatDue) !== Math.abs(toMinor(b.totalVatDue) - toMinor(b.vatReclaimedCurrPeriod))) out.push(`${what}: box 5 is not the difference of boxes 3 and 4.`);
     }
+    if (f.kind === 'accounts') {
+      // Approved by the board on or after the balance sheet date, and before the accounts are filed (CA 2006 s414; WebFiling's help).
+      if ((f.approvedOn === undefined) !== (f.approvedBy === undefined)) out.push(`${what}: give the day they were approved and the director who signed them together.`);
+      if (f.approvedOn && f.approvedOn < f.periodEnd) out.push(`${what} are approved (${day(f.approvedOn)}) before the balance sheet date.`);
+      if (f.approvedOn && f.approvedOn > f.filedOn) out.push(`${what} are approved (${day(f.approvedOn)}) after they were filed (${day(f.filedOn)}).`);
+    }
     if (f.kind === 'vat') {
       const corrected = (f.corrections ?? []).map((c) => c.periodEnd);
       for (const c of f.corrections ?? []) if (c.periodEnd >= (f.periodStart ?? f.periodEnd)) out.push(`${what} corrects the period to ${day(c.periodEnd)}, which is not before it: an error is corrected on a later return.`);

@@ -10,15 +10,15 @@
 // This is company data, served only from its own routes (routes/company-books.ts). The book value of
 // your shares it offers is recorded only when you choose to (POST /api/companies/:id/accounts/book-value).
 
-import { accountingPolicies, approvalLine, balanceSheetStatements, directorAdvances, monthsOfYear, qualification, ROUNDING_STATEMENT, type Qualification, type YearFigures } from '../../shared/accounts-filing';
+import { accountingPolicies, approvalLine, COMPANY_TYPE_LABELS, REGISTERED_IN_LABELS, balanceSheetStatements, directorAdvances, longDate, monthsOfYear, qualification, ROUNDING_STATEMENT, type Qualification, type YearFigures } from '../../shared/accounts-filing';
 import type { CompanyAccountsResponse, CompanyFilingResponse, EligibilityView, FilingGateItem, FilingSheetLine, ReportCode } from '../../shared/api';
 import { accountingPeriodsOf } from '../../shared/company-books';
 import type { ISODate } from '../../shared/dates';
 import { ASSET_REGISTER_CLASSES, type AssetRegisterClass } from '../../shared/ledger';
 import { FILING_DISCLAIMER } from '../../shared/disclaimers';
-import { fromMinor, mulDivRound, toMinor } from '../../shared/money';
+import { formatMoney, fromMinor, mulDivRound, toMinor } from '../../shared/money';
 import { MICRO_ENTITY_LINES, type Company, type MicroEntityLines } from '../../shared/schema';
-import { ACCOUNTS_FILING_CHANNEL_RULES, companySizeRulesFor, ruleOn, type SizeLimits } from '../../shared/uk';
+import { ACCOUNTS_FILING_CHANNEL_RULES, COMPANY_SIZE_RULES, companySizeRulesFor, IDENTITY_VERIFICATION, ruleOn, type SizeLimits } from '../../shared/uk';
 import type { BalanceEngine } from './balances';
 import { companyLedger, type Ledger, type LedgerSource } from './ledger';
 import { accountsPeriods, periodAccounts } from './period-accounts';
@@ -38,6 +38,8 @@ export const MICRO_EXCLUSIONS: readonly { key: string; text: string; source: str
   { key: 'credit-insurance', text: 'A credit institution (a CRR firm) or an insurance undertaking.', source: 'CA 2006 s384B(1)(d)–(e)' },
   { key: 'charity', text: 'A charity.', source: 'CA 2006 s384B(1)(f)' },
   { key: 'parent', text: 'A parent company (it qualifies only when its group qualifies as small, and not when it prepares group accounts), or a subsidiary whose accounts are included in consolidated group accounts for the year.', source: 'CA 2006 ss384A(8), 384B(2)' },
+  { key: 'special-register', text: 'A special register body or an employers’ association (Trade Union and Labour Relations (Consolidation) Act 1992).', source: 'CA 2006 s478(c)' },
+  { key: 'group-audit', text: 'A member of a group at any time in the year (a parent or a subsidiary), unless the group qualifies as small and was not ineligible at any time in the year: audit exemption then depends on the group.', source: 'CA 2006 s479(1)' },
   { key: 'audit', text: 'Members holding 10% or more of its shares (of any class) asked for an audit, by notice deposited at least one month before the end of the year.', source: 'CA 2006 s476' },
 ];
 
@@ -170,44 +172,57 @@ export function companyFiling({ src, company, engine, today, period }: CompanyFi
   let small = qualification(years, rules.small, { firstYear, ...(notes?.previousQualified ? { previousQualified: true } : {}) });
   // Within the micro-entity limits is within the small ones, so a micro-entity is small (FORMULAS.md §22).
   if (small.qualifies === undefined && micro.qualifies) small = { ...small, qualifies: true, rule: micro.rule };
-  const last = micro.years.at(-1);
-  const before = micro.years.at(-2);
-  const askPrevious = rules.covered && micro.qualifies === undefined && last?.meets !== undefined && !(micro.years.length === 1 && firstYear);
+  // Your answer for the year before is asked for, and used, only while the books cannot work it out.
+  const askPrevious = rules.covered && micro.askPrevious;
   const eligibility: CompanyFilingResponse['eligibility'] = {
     from: rules.from,
     covered: rules.covered,
+    coveredFrom: COMPANY_SIZE_RULES[0]!.from,
     micro: view('micro', rules.micro, micro),
     small: view('small', rules.small, small),
     notExcluded: notes?.notExcluded ?? null,
-    previousQualified: notes?.previousQualified ?? null,
-    askPrevious: askPrevious || notes?.previousQualified !== undefined,
-    ...(before && before.meets === undefined ? { previousUnknown: true } : {}),
+    previousQualified: askPrevious ? (notes?.previousQualified ?? null) : null,
+    askPrevious,
+    // The years before the books, whose employees you may give for the size test.
+    earlier: periods.filter((y) => y.end < p.end).slice(-3).map((y) => ({ start: y.start, end: y.end, employees: books.employees?.find((e) => e.periodEnd === y.end)?.average ?? null })),
     exclusions: MICRO_EXCLUSIONS.map((x) => ({ ...x })),
   };
 
   // ─── What must be done before filing ─────────────────────────────────────────────────────────────
   const notesDone = Boolean(notes?.offBalanceSheet && notes.commitments && notes.directors && (!advances.any || notes.advances));
+  const particulars = notes?.particulars;
   const eligible = rules.covered && micro.qualifies === true && small.qualifies === true && notes?.notExcluded === true;
   const gate: FilingGateItem[] = [
     { key: 'ended', ok: p.ended, label: 'The period has ended', detail: p.ended ? 'Its last day has passed.' : `It runs to its last day, ${p.end}.` },
     { key: 'accounts', ok: acc.ready, label: 'Its accounts are ready', detail: acc.ready ? 'Every check on the Accounts tab is clear.' : `${acc.checks.length} check${acc.checks.length === 1 ? '' : 's'} on the Accounts tab to clear.` },
     { key: 'employees', ok: employees !== undefined, label: 'The average number of employees is given', detail: employees !== undefined ? `${employees}.` : 'Give it below: a note every company gives (CA 2006 s411(1)).' },
     { key: 'notes', ok: notesDone, label: 'The notes are confirmed', detail: notesDone ? 'Arrangements off the balance sheet, advances and guarantees for directors, commitments.' : 'Confirm each note below, “none” where there is none.' },
-    { key: 'eligibility', ok: eligible, label: 'It qualifies for the micro-entity provisions', detail: !rules.covered ? 'Periods beginning before 1 January 2016 are not covered.' : eligible ? 'By its size, and none of the exclusions applies, as you confirmed.' : micro.qualifies === false ? 'Not by its size: micro-entity accounts are not for it.' : notes?.notExcluded !== true ? 'Confirm that none of the exclusions applies.' : 'Its size cannot be told yet: see below.' },
+    { key: 'number', ok: Boolean(company.number), label: 'Its company number is known', detail: company.number ? `${company.number}.` : 'The accounts must give the company’s name and number (CA 2006 s396(A1)(b)): give its number with the company, on its shares’ account page.' },
+    { key: 'particulars', ok: Boolean(particulars), label: 'Its particulars are confirmed', detail: particulars ? 'Where it is registered, what kind of company it is, and that it is not being wound up.' : 'Confirm below where it is registered, what kind of company it is, and that it is not being wound up (CA 2006 s396(A1); FRS 105 para 3.13A).' },
+    { key: 'eligibility', ok: eligible, label: 'It qualifies for the micro-entity provisions', detail: !rules.covered ? `Periods beginning before ${longDate(COMPANY_SIZE_RULES[0]!.from)} are not covered.` : eligible ? 'By its size, and none of the exclusions applies, as you confirmed.' : micro.qualifies === false ? 'Not by its size: micro-entity accounts are not for it.' : notes?.notExcluded !== true ? 'Confirm that none of the exclusions applies.' : 'Its size cannot be told yet: see below.' },
   ];
 
   // ─── The book value of your shares ──────────────────────────────────────────────────────────────
   const k = filedFigures(p.end)?.K ?? line('K').whole;
+  const unpaid = filedFigures(p.end)?.A ?? line('A').whole;
   const shares = company.holdings.reduce((s, h) => s + h.shares, 0);
+  const classes = [...new Set(company.holdings.map((h) => h.shareClass))];
   const totals = [...new Set(company.holdings.map((h) => h.totalShares).filter((t): t is number => t !== undefined))];
   const recorded = company.valuations.find((v) => v.asOf === p.end && v.method === 'net-assets');
   let why: string | undefined;
   if (!p.ended) why = 'The period has not ended.';
   else if (!acc.ready && !filed) why = 'Its accounts are not ready or filed: the figure could still change.';
   else if (!company.holdings.length) why = 'You hold no shares in it here: add your holding on its account page.';
-  else if (totals.length !== 1 || company.holdings.some((h) => h.totalShares === undefined)) why = 'Give the shares it has issued (of every class) with your holding on its account page.';
+  else if (classes.length !== 1) why = 'Your shares are of more than one class: a book value by class is not worked out here.';
+  else if (totals.length !== 1 || company.holdings.some((h) => h.totalShares === undefined)) why = 'Give the shares it has issued with your holding on its account page.';
   else if (!company.accountId) why = 'Your shares in it have no account in your estate to record a value on.';
   const value = why ? undefined : k <= 0 ? 0 : fromMinor(mulDivRound(toMinor(k), Math.round(shares * 1e6), Math.round(totals[0]! * 1e6)));
+  // What a book value leaves out: the loan it owes you counted in full beside shares at nothing, and share capital you owe it.
+  const pounds = (n: number) => `£${n.toLocaleString('en-GB')}`;
+  const owedToYou = loan && loan.closing > 0 ? fromMinor(loan.closing) : 0;
+  const caveats: string[] = [];
+  if (k < 0 && owedToYou > 0) caveats.push(`Your estate counts the ${formatMoney(owedToYou)} it owes you on your director’s loan in full beside these shares at nothing: with its net liabilities, that may overstate by up to ${formatMoney(Math.min(-k, owedToYou))}.`);
+  if (unpaid > 0) caveats.push(`Its share capital not paid (${pounds(unpaid)}, line A) is owed to it by its shareholders, you among them: it is in its net assets already.`);
 
   const channel = ruleOn(ACCOUNTS_FILING_CHANNEL_RULES, today);
   const softwareOnly = ACCOUNTS_FILING_CHANNEL_RULES.find((r) => !r.webFiling)!.from;
@@ -216,7 +231,7 @@ export function companyFiling({ src, company, engine, today, period }: CompanyFi
     company: { id: company.id, name: company.name, ...(company.number ? { number: company.number } : {}) },
     periods: acc.periods,
     period: acc.period,
-    channel: { webFiling: channel.webFiling, softwareOnlyFrom: softwareOnly, enhancedAuditStatement: channel.enhancedAuditStatement },
+    channel: { webFiling: channel.webFiling, softwareOnlyFrom: softwareOnly, enhancedAuditStatement: channel.enhancedAuditStatement, enhancedStatementFrom: ACCOUNTS_FILING_CHANNEL_RULES.find((r) => r.enhancedAuditStatement)!.from, identity: { ...IDENTITY_VERIFICATION } },
     accounts: { ready: acc.ready, checks: acc.checks.length, ...(acc.lockedThrough ? { lockedThrough: acc.lockedThrough } : {}) },
     ...(acc.comparative ? { comparative: { start: acc.comparative.start, end: acc.comparative.end, sheet: acc.comparative.sheet } } : {}),
     sheet,
@@ -227,9 +242,12 @@ export function companyFiling({ src, company, engine, today, period }: CompanyFi
       offBalanceSheet: notes?.offBalanceSheet ?? null,
       commitments: notes?.commitments ?? null,
       directors: notes?.directors ?? null,
-      employees: { average: employees ?? null, ...(hint ? { hint } : {}) },
+      employees: { average: employees ?? null, ...(acc.comparative ? { prior: books.employees?.find((e) => e.periodEnd === acc.comparative!.end)?.average ?? null } : {}), ...(hint ? { hint } : {}) },
+      // The period before's commitments as you confirmed them, beside this period's (FRS 105 paras 3.7, 3.10).
+      ...(acc.comparative ? { commitmentsPrior: books.accountsNotes?.find((x) => x.periodEnd === acc.comparative!.end)?.commitments ?? null } : {}),
       advances: { ...advances, loan: Boolean(loan), given: notes?.advances ?? null },
     },
+    particulars: particulars ?? null,
     statements: balanceSheetStatements(p),
     approval: { line: approvalLine(filed?.kind === 'accounts' ? filed.approvedOn : undefined, filed?.kind === 'accounts' ? filed.approvedBy : undefined) },
     policies: accountingPolicies({
@@ -246,20 +264,24 @@ export function companyFiling({ src, company, engine, today, period }: CompanyFi
     gate,
     ready: gate.every((g) => g.ok) && !filed,
     ...(filed?.kind === 'accounts'
-      ? { filing: { filedOn: filed.filedOn, ...(filed.reference ? { reference: filed.reference } : {}), ...(filed.approvedOn ? { approvedOn: filed.approvedOn } : {}), ...(filed.approvedBy ? { approvedBy: filed.approvedBy } : {}), lines: filedLines, matches: filedLines.every((l) => l.filed === l.computed) } }
+      ? { filing: { filedOn: filed.filedOn, ...(filed.reference ? { reference: filed.reference } : {}), ...(filed.approvedOn ? { approvedOn: filed.approvedOn } : {}), ...(filed.approvedBy ? { approvedBy: filed.approvedBy } : {}), ...(filed.registeredOffice ? { registeredOffice: filed.registeredOffice } : {}), lines: filedLines, matches: filedLines.every((l) => l.filed === l.computed) } }
       : {}),
-    bookValue: { asOf: p.end, netAssets: k, ...(why ? { why } : {}), ...(shares ? { shares } : {}), ...(totals.length === 1 ? { totalShares: totals[0]! } : {}), ...(value !== undefined ? { value } : {}), ...(recorded ? { recorded: { value: recorded.value, ...(recorded.netAssets !== undefined ? { netAssets: recorded.netAssets } : {}) } } : {}) },
+    bookValue: { asOf: p.end, netAssets: k, ...(why ? { why } : {}), ...(shares ? { shares } : {}), ...(classes.length === 1 ? { shareClass: classes[0]! } : {}), ...(totals.length === 1 ? { totalShares: totals[0]! } : {}), caveats, ...(value !== undefined ? { value } : {}), ...(recorded ? { recorded: { value: recorded.value, ...(recorded.netAssets !== undefined ? { netAssets: recorded.netAssets } : {}) } } : {}) },
     disclaimer: FILING_DISCLAIMER,
   };
 }
 
 /** Each class's depreciation policy in force at a period's end, for the classes on its register: the day it took effect when that was in the period. */
-function policiesInForce(policies: NonNullable<NonNullable<Company['books']>['policies']>, classes: ReadonlySet<string>, p: { start: ISODate; end: ISODate }): { class: AssetRegisterClass; months: number; from?: ISODate }[] {
-  const out: { class: AssetRegisterClass; months: number; from?: ISODate }[] = [];
+function policiesInForce(policies: NonNullable<NonNullable<Company['books']>['policies']>, classes: ReadonlySet<string>, p: { start: ISODate; end: ISODate }): { class: AssetRegisterClass; months: number; from?: ISODate; before?: number }[] {
+  const out: { class: AssetRegisterClass; months: number; from?: ISODate; before?: number }[] = [];
   for (const c of ASSET_REGISTER_CLASSES) {
     if (!classes.has(c)) continue;
-    const inForce = policies.filter((x) => x.class === c && (!x.effectiveFrom || x.effectiveFrom <= p.end)).sort((a, b) => (a.effectiveFrom ?? '').localeCompare(b.effectiveFrom ?? '')).at(-1);
-    if (inForce) out.push({ class: c, months: inForce.months, ...(inForce.effectiveFrom && inForce.effectiveFrom >= p.start ? { from: inForce.effectiveFrom } : {}) });
+    const rows = policies.filter((x) => x.class === c && (!x.effectiveFrom || x.effectiveFrom <= p.end)).sort((a, b) => (a.effectiveFrom ?? '').localeCompare(b.effectiveFrom ?? ''));
+    const inForce = rows.at(-1);
+    const changed = inForce?.effectiveFrom && inForce.effectiveFrom >= p.start ? inForce.effectiveFrom : undefined;
+    // A change in the period: the life before it too (the latest earlier row, for the class), so the period's charge is explained.
+    const before = changed ? rows.at(-2)?.months : undefined;
+    if (inForce) out.push({ class: c, months: inForce.months, ...(changed ? { from: changed } : {}), ...(before !== undefined ? { before } : {}) });
   }
   return out;
 }
@@ -276,9 +298,11 @@ export function filingCsv(company: Pick<Company, 'name' | 'number'>, v: CompanyF
   out.push(cell('Capital and reserves'));
   for (const l of v.capital) out.push(row(l));
   out.push('', ['company', company.name].map(cell).join(','), ['company number', company.number ?? ''].map(cell).join(','), ['period', `${v.period.start} to ${v.period.end}`].map(cell).join(','));
+  if (v.particulars) out.push(['registered in', REGISTERED_IN_LABELS[v.particulars.registeredIn]].map(cell).join(','), ['company type', COMPANY_TYPE_LABELS[v.particulars.type]].map(cell).join(','));
+  out.push(['registered office', v.filing?.registeredOffice ?? 'given when the filing is recorded'].map(cell).join(','));
   const n = v.notes;
   const note = (label: string, x: CompanyFilingResponse['notes']['commitments']) => [label, x === null ? 'not confirmed' : 'none' in x ? 'None' : `${x.text}${x.amount !== undefined ? ` (total £${x.amount.toFixed(2)})` : ''}`].map(cell).join(',');
-  out.push(['average number of employees', n.employees.average ?? 'not given'].map((x) => cell(x)).join(','));
+  out.push(['average number of employees', n.employees.average ?? 'not given', ...(n.employees.prior !== undefined ? [`period before: ${n.employees.prior ?? 'not given'}`] : [])].map((x) => cell(x)).join(','));
   out.push(
     [
       'advances and credits to directors (books)',
@@ -289,6 +313,7 @@ export function filingCsv(company: Pick<Company, 'name' | 'number'>, v: CompanyF
   );
   out.push(note('other advances, credits and guarantees for directors', n.directors));
   out.push(note('financial commitments, guarantees and contingencies', n.commitments));
+  if (n.commitmentsPrior !== undefined) out.push(note('financial commitments, guarantees and contingencies (period before)', n.commitmentsPrior));
   out.push(note('arrangements not on the balance sheet', n.offBalanceSheet));
   out.push('');
   for (const s of v.statements) out.push(cell(s.text));
@@ -304,11 +329,29 @@ export function filingJson(company: Pick<Company, 'name' | 'number'>, v: Company
     company: { name: company.name, ...(company.number ? { number: company.number } : {}) },
     period: { start: v.period.start, end: v.period.end },
     ...(v.comparative ? { comparative: { start: v.comparative.start, end: v.comparative.end, sheet: v.comparative.sheet } } : {}),
-    currency: 'GBP, whole pounds',
+    currency: 'GBP: the balance sheet in whole pounds, the notes in pounds and pence',
     balanceSheet: v.sheet.map((l) => ({ ...(l.line ? { line: l.line } : {}), label: l.label, ...(l.sub ? { subLine: true } : {}), value: l.whole, ...(l.prior !== undefined ? { prior: l.prior } : {}) })),
     capitalAndReserves: v.capital.map((l) => ({ label: l.label, value: l.whole, ...(l.prior !== undefined ? { prior: l.prior } : {}) })),
     lines: v.lines,
-    notes: { averageEmployees: v.notes.employees.average, advances: v.notes.advances, directors: v.notes.directors, commitments: v.notes.commitments, offBalanceSheet: v.notes.offBalanceSheet },
+    notes: {
+      averageEmployees: v.notes.employees.average,
+      ...(v.notes.employees.prior !== undefined ? { averageEmployeesBefore: v.notes.employees.prior } : {}),
+      // The books' advances are pence: given here in pounds and pence, as every other note's amount.
+      advances: {
+        owedAtStart: fromMinor(v.notes.advances.opening),
+        advanced: fromMinor(v.notes.advances.advanced),
+        repaid: fromMinor(v.notes.advances.repaid),
+        owedAtEnd: fromMinor(v.notes.advances.closing),
+        mostOwed: fromMinor(v.notes.advances.maximum),
+        any: v.notes.advances.any,
+        ...(v.notes.advances.given ? { interest: v.notes.advances.given.interest, conditions: v.notes.advances.given.conditions, writtenOff: v.notes.advances.given.writtenOff ?? 0, waived: v.notes.advances.given.waived ?? 0 } : {}),
+      },
+      directors: v.notes.directors,
+      commitments: v.notes.commitments,
+      ...(v.notes.commitmentsPrior !== undefined ? { commitmentsBefore: v.notes.commitmentsPrior } : {}),
+      offBalanceSheet: v.notes.offBalanceSheet,
+    },
+    particulars: { number: company.number ?? null, ...(v.particulars ?? {}), ...(v.filing?.registeredOffice ? { registeredOffice: v.filing.registeredOffice } : {}) },
     statements: v.statements.map((s) => s.text),
     rounding: v.rounding,
     ready: v.ready,

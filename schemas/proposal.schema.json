@@ -2387,6 +2387,11 @@
                         "type": "string",
                         "minLength": 1,
                         "maxLength": 120
+                      },
+                      "registeredOffice": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
                       }
                     },
                     "required": [
@@ -5853,6 +5858,11 @@
                               "type": "string",
                               "minLength": 1,
                               "maxLength": 120
+                            },
+                            "registeredOffice": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 200
                             }
                           },
                           "required": [
@@ -6343,6 +6353,36 @@
                         },
                         "previousQualified": {
                           "type": "boolean"
+                        },
+                        "particulars": {
+                          "type": "object",
+                          "properties": {
+                            "registeredIn": {
+                              "type": "string",
+                              "enum": [
+                                "england-and-wales",
+                                "wales",
+                                "scotland",
+                                "northern-ireland"
+                              ]
+                            },
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "private-limited-by-shares",
+                                "private-limited-by-guarantee"
+                              ]
+                            },
+                            "notWoundUp": {
+                              "type": "boolean",
+                              "const": true
+                            }
+                          },
+                          "required": [
+                            "registeredIn",
+                            "type",
+                            "notWoundUp"
+                          ]
                         }
                       },
                       "required": [

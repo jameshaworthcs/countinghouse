@@ -1913,7 +1913,7 @@ export interface EligibilityView {
   years: SizeTest[];
 }
 
-export type FilingGateKey = 'ended' | 'accounts' | 'employees' | 'notes' | 'eligibility';
+export type FilingGateKey = 'ended' | 'accounts' | 'employees' | 'notes' | 'number' | 'particulars' | 'eligibility';
 export interface FilingGateItem {
   key: FilingGateKey;
   ok: boolean;
@@ -1927,7 +1927,7 @@ export interface CompanyFilingResponse {
   periods: AccountsPeriodChoice[];
   period: AccountsPeriodChoice & { first: boolean };
   /** How accounts reach Companies House on the day: WebFiling until software-only filing begins (`ACCOUNTS_FILING_CHANNEL_RULES`). */
-  channel: { webFiling: boolean; softwareOnlyFrom: string; enhancedAuditStatement: boolean };
+  channel: { webFiling: boolean; softwareOnlyFrom: string; enhancedAuditStatement: boolean; enhancedStatementFrom: string; identity: { directorsFrom: string; presentersNotBefore: string } };
   accounts: { ready: boolean; checks: number; lockedThrough?: string };
   comparative?: { start: string; end: string; sheet: 'filed' | 'computed' };
   /** Lines A–K and the sub-lines of B and C, in the form's order. */
@@ -1940,9 +1940,14 @@ export interface CompanyFilingResponse {
     offBalanceSheet: OwnerNote | null;
     commitments: OwnerNote | null;
     directors: OwnerNote | null;
-    employees: { average: number | null; hint?: { paye: boolean; months: number; payrollMonths: number; staffCosts: number; onePerson: number } };
+    /** `prior`: the period before's, beside it (FRS 105 paras 3.7, 3.10), when there is a period before. */
+    employees: { average: number | null; prior?: number | null; hint?: { paye: boolean; months: number; payrollMonths: number; staffCosts: number; onePerson: number } };
+    /** The period before's commitments as confirmed, when there is a period before. */
+    commitmentsPrior?: OwnerNote | null;
     advances: DirectorAdvances & { loan: boolean; given: NonNullable<AccountsNotes['advances']> | null };
   };
+  /** The particulars you confirmed (CA 2006 s396(A1)); the number is the company's, the registered office the filing's. */
+  particulars: NonNullable<AccountsNotes['particulars']> | null;
   statements: BalanceSheetStatement[];
   approval: { line: string };
   /** Accounting policies in words from the books: optional for a micro-entity. */
@@ -1951,21 +1956,24 @@ export interface CompanyFilingResponse {
     /** The limits' row, by the period's first day; `covered`: false before the first row. */
     from: string;
     covered: boolean;
+    /** The first day of a financial year the limits cover. */
+    coveredFrom: string;
     micro: EligibilityView;
     small: EligibilityView;
     notExcluded: boolean | null;
     previousQualified: boolean | null;
-    /** Whether to ask you if it qualified for the period before: the books cannot settle it. */
+    /** Whether to ask you if it qualified for the period before: the books cannot work that out, and your answer would settle this one. Your answer is shown, and used, only then. */
     askPrevious: boolean;
-    previousUnknown?: true;
+    /** The years before this one (up to three), with the average employees you gave for each: the size test reads them. */
+    earlier: { start: string; end: string; employees: number | null }[];
     exclusions: { key: string; text: string; source: string }[];
   };
   gate: FilingGateItem[];
   /** Every item of the gate is done, and the accounts are not recorded as filed. */
   ready: boolean;
-  filing?: { filedOn: string; reference?: string; approvedOn?: string; approvedBy?: string; lines: { line: string; filed: number; computed: number }[]; matches: boolean };
+  filing?: { filedOn: string; reference?: string; approvedOn?: string; approvedBy?: string; registeredOffice?: string; lines: { line: string; filed: number; computed: number }[]; matches: boolean };
   /** The book value of your shares at the period's end (FORMULAS.md §9): offered, never recorded by itself. */
-  bookValue: { asOf: string; netAssets: number; why?: string; shares?: number; totalShares?: number; value?: number; recorded?: { value: number; netAssets?: number } };
+  bookValue: { asOf: string; netAssets: number; why?: string; shares?: number; shareClass?: string; totalShares?: number; value?: number; caveats: string[]; recorded?: { value: number; netAssets?: number } };
   disclaimer: string;
 }
 
