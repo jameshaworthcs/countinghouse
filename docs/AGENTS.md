@@ -330,8 +330,9 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
     company's books: one of its own accounts' rows (not a leg of a transfer between them), or a row of
     the owner's marked as paid for it. Its ledger is one of the chart's a payment can be coded to (never
     the director's loan on a row paid for the company), its VAT signed like the row and smaller, none
-    for zero rate, exempt and outside the scope, and a reverse charge's the notional VAT on what was
-    paid; lines add up to the row; a fixed asset only on that class's cost. A coding the owner set is
+    for zero rate, exempt, outside the scope (`outside`: not a supply) and supplied outside the UK
+    (`abroad`: outside the scope by its place of supply), and a reverse charge's the notional VAT on
+    what was paid; lines add up to the row; a fixed asset only on that class's cost. A coding the owner set is
     never changed (`books: null` takes only an agent's or a rule's away, and leaves the row uncoded so
     book rules leave it); the same coding is already so. VAT only on income, expenses and an asset's
     cost, never on entertaining or a car (blocked input tax), a reverse charge never on a sale; on a row

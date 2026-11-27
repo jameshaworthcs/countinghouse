@@ -121,7 +121,7 @@ function LineFields({ d, set, row, vatRegistered, vatFrom, showAmount, assets }:
         </Field>
       )}
       <Field label="VAT" hint={vatRegistered ? undefined : 'The company is not registered for VAT on this day.'}>
-        <Select value={d.treatment} onChange={(e) => set({ treatment: e.target.value as VatTreatment | '', ...(['zero', 'exempt', 'outside'].includes(e.target.value) ? { vat: 0 } : {}) })} aria-label="VAT treatment">
+        <Select value={d.treatment} onChange={(e) => set({ treatment: e.target.value as VatTreatment | '', ...(['zero', 'exempt', 'outside', 'abroad'].includes(e.target.value) ? { vat: 0 } : {}) })} aria-label="VAT treatment">
           <option value="">No VAT</option>
           {VAT_TREATMENTS.map((t) => (
             <option key={t} value={t}>

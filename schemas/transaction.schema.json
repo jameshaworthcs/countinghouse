@@ -320,6 +320,7 @@
                 "zero",
                 "exempt",
                 "outside",
+                "abroad",
                 "reverse-charge"
               ]
             },
@@ -424,6 +425,7 @@
                       "zero",
                       "exempt",
                       "outside",
+                      "abroad",
                       "reverse-charge"
                     ]
                   },

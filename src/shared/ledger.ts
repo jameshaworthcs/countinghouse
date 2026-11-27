@@ -237,7 +237,8 @@ export const VAT_TREATMENT_LABELS: Record<VatTreatment, string> = {
   reduced: 'Reduced rate',
   zero: 'Zero rate',
   exempt: 'Exempt',
-  outside: 'Outside the scope',
+  outside: 'Outside the scope (not a supply)',
+  abroad: 'Supplied outside the UK',
   'reverse-charge': 'Reverse charge',
 };
 
@@ -249,7 +250,7 @@ export function takesVat(code: string): boolean {
 }
 
 /** Treatments that carry no VAT on the payment. */
-const NO_VAT: ReadonlySet<VatTreatment> = new Set(['zero', 'exempt', 'outside']);
+const NO_VAT: ReadonlySet<VatTreatment> = new Set(['zero', 'exempt', 'outside', 'abroad']);
 
 /**
  * The VAT in an amount that includes it, at a rate on a day (`vatRateOn`, uk.ts): gross × r ÷ (1 + r),
@@ -370,7 +371,7 @@ export function codingProblems(amount: number, books: Pick<BooksCoding, 'ledger'
     if (toMinor(l.amount) === 0) out.push(`${where}a line of nothing.`);
     out.push(...vatProblems(l, where));
     if (l.vat && !takesVat(l.ledger)) out.push(`${where}${entry.name} takes no VAT: VAT goes on income, expenses and a fixed asset’s cost.`);
-    if (l.vat?.treatment === 'reverse-charge' && entry.kind === 'income') out.push(`${where}a reverse charge is the buyer’s: a sale of services to a business abroad is outside the scope of UK VAT, not a reverse charge.`);
+    if (l.vat?.treatment === 'reverse-charge' && entry.kind === 'income') out.push(`${where}a reverse charge is the buyer’s: a sale of services to a business abroad is supplied outside the UK (outside the scope of UK VAT by its place of supply), not a reverse charge.`);
     if (l.vat && toMinor(l.vat.amount) !== 0 && VAT_BLOCKED[l.ledger]) out.push(`${where}${VAT_BLOCKED[l.ledger]}: code the whole amount, VAT included, with no VAT.`);
     if (l.vat?.claim === 'reg111' && (ledgerCode(l.ledger)?.kind === 'income' || l.vat.treatment === 'reverse-charge' || NO_VAT.has(l.vat.treatment))) out.push(`${where}a claim under reg 111 is input tax charged on a purchase.`);
     if (l.asset && entry.asset?.part !== 'cost') out.push(`${where}a fixed asset is coded to a fixed asset’s cost.`);
@@ -389,7 +390,7 @@ function vatProblems(l: Pick<BooksLine, 'amount' | 'vat'>, where: string): strin
   const gross = toMinor(l.amount);
   const label = VAT_TREATMENT_LABELS[l.vat.treatment].toLowerCase();
   if (NO_VAT.has(l.vat.treatment)) return vat ? [`${where}${label} carries no VAT: its VAT is £0.`] : [];
-  if (!vat) return [`${where}${label} carries VAT: give it, or say it is zero rate, exempt or outside the scope.`];
+  if (!vat) return [`${where}${label} carries VAT: give it, or say it is zero rate, exempt, supplied outside the UK or outside the scope.`];
   if (Math.sign(vat) !== Math.sign(gross)) return [`${where}the VAT (${formatMoney(l.vat.amount)}) is signed the other way from the amount (${formatMoney(l.amount)}).`];
   if (Math.abs(vat) > Math.abs(gross)) return [`${where}the VAT (${formatMoney(l.vat.amount)}) is more than the amount (${formatMoney(l.amount)}).`];
   if (l.vat.treatment !== 'reverse-charge' && Math.abs(vat) === Math.abs(gross)) return [`${where}the VAT is the whole amount: code a payment of VAT alone to VAT, with no VAT of its own.`];

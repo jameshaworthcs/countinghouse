@@ -261,8 +261,15 @@ export const LedgerCodeSchema = z
   .regex(/^[a-z][a-z0-9-]*(?::[a-z0-9-]+){0,2}$/, 'A ledger code of the chart, such as "software-hosting" or "fixed-assets:computer:cost"')
   .meta({ description: 'A ledger code of the chart (src/shared/ledger.ts)' });
 
-/** How VAT treats a supply: the standard or reduced rate, zero rate, exempt, outside the scope, or a reverse charge (the buyer accounts for it). */
-export const VAT_TREATMENTS = ['standard', 'reduced', 'zero', 'exempt', 'outside', 'reverse-charge'] as const;
+/**
+ * How VAT treats a supply: the standard or reduced rate, zero rate, exempt, outside the scope (`outside`:
+ * not a supply at all, no consideration: a grant, compensation, a fine), supplied outside the UK
+ * (`abroad`: a supply outside the scope of UK VAT by its place of supply, such as a sale of services to
+ * a business abroad or a hotel abroad, which a VAT return still counts in box 6 or 7), or a reverse
+ * charge (the buyer accounts for it). `abroad` was added after `outside`; a sale on `turnover` coded
+ * `outside` before it is still read as one abroad (docs/FORMULAS.md §22, "VAT returns").
+ */
+export const VAT_TREATMENTS = ['standard', 'reduced', 'zero', 'exempt', 'outside', 'abroad', 'reverse-charge'] as const;
 export type VatTreatment = (typeof VAT_TREATMENTS)[number];
 
 /**
@@ -840,9 +847,9 @@ export const VatCorrectionSchema = z.object({
 });
 export type VatCorrection = z.infer<typeof VatCorrectionSchema>;
 /**
- * The errors on this VAT return reported to HMRC separately (Notice 700/45, "method 2": online, or by
- * form VAT652), not on a later return: the day, the net VAT (signed as a correction is), and HMRC's
- * reference.
+ * The errors on this VAT return reported to HMRC separately (Notice 700/45, "method 2": online or in
+ * writing; form VAT652 was withdrawn in September 2025), not on a later return: the day, the net VAT
+ * (signed as a correction is), and HMRC's reference. Reported again, the amounts add up.
  */
 export const VatDisclosureSchema = z.object({
   on: ISODateSchema,

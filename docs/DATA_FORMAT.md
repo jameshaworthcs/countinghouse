@@ -167,9 +167,13 @@ general ledger" (`src/shared/ledger.ts`):
   `fixed-assets:computer:cost`…); never one of the company's own accounts (money between them is a
   transfer, linked as one), and on a row of yours paid for the company never `directors-loan` (that
   row moves the loan already).
-- `vat`: `{amount, treatment, claim?}`. `treatment` is `standard`, `reduced`, `zero`, `exempt`, `outside` or
-  `reverse-charge`; `amount` is the VAT in the row's amount, signed like it and smaller than it, `0` for
-  zero rate, exempt and outside the scope. For a reverse charge it is the notional VAT on an amount that
+- `vat`: `{amount, treatment, claim?}`. `treatment` is `standard`, `reduced`, `zero`, `exempt`,
+  `outside` (outside the scope: not a supply at all, such as a grant, compensation or a fine), `abroad`
+  (supplied outside the UK: outside the scope of UK VAT by its place of supply, such as services sold to
+  a business abroad or a hotel abroad; a VAT return counts it in box 6 or 7) or `reverse-charge`;
+  `abroad` is additive, and a sale on `turnover` coded `outside` before it existed is read as one
+  abroad. `amount` is the VAT in the row's amount, signed like it and smaller than it, `0` for zero
+  rate, exempt, outside the scope and supplied outside the UK. For a reverse charge it is the notional VAT on an amount that
   does not include it (a service bought from abroad), posted both ways; never on income. `claim:
   "reg111"`: input tax on a purchase before the company registered for VAT, claimed under VAT
   Regulations 1995 reg 111. VAT goes only on income, expenses and a fixed or intangible asset's cost,
