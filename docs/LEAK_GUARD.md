@@ -26,9 +26,10 @@ logs and Claude transcripts stay clean.
      the details that name a place or a person;
    - from a company's books (`companies.json`, `books`): each filing's reference with four digits
      or more (a submission receipt, a payment reference; a form's name such as "CT600" is not one),
-     and every figure its filings hold (VAT boxes, micro-entity lines A–K, Corporation Tax) at a
-     small company's threshold: £100 or more with pence, or £250 or more in whole pounds that is
-     not a multiple of £10 or a year, and not a placeholder. The VAT number is not stored;
+     and every figure its filings hold (VAT boxes, micro-entity lines A–K, Corporation Tax, a VAT
+     return's corrections of earlier errors and its own errors reported separately, with HMRC's
+     reference) at a small company's threshold: £100 or more with pence, or £250 or more in whole
+     pounds that is not a multiple of £10 or a year, and not a placeholder. The VAT number is not stored;
    - from a company's general ledger: every money figure of its own accounts' rows (their amounts,
      codings and split lines) and of its journals (`journals.jsonl`, and those decided proposals wrote
      or kept), at the same small company's threshold; and each journal's memo and evidence when they

@@ -30,6 +30,7 @@ const AMOUNT = 3141.59;
 const LAST4 = '8' + '264';
 const FILING_REF = 'VR' + '5530917';
 const PROPOSED_REF = 'PAY' + '8812046';
+const DISCLOSED_REF = 'EC' + '7140362';
 const JOURNAL_WORD = 'Wrenfield';
 const JOURNAL_EVIDENCE = 'WR' + '-55821';
 
@@ -70,7 +71,7 @@ function writePersona(dir: string): void {
         books: {
           incorporatedOn: '2023-02-06',
           filings: [
-            { id: 'fil_000000000001', kind: 'vat', periodStart: '2025-01-01', periodEnd: '2025-03-31', filedOn: '2025-04-20', reference: FILING_REF, figures: { vatDueSales: 813.27, vatDueAcquisitions: 0, totalVatDue: 813.27, vatReclaimedCurrPeriod: 96.4, netVatDue: 716.87, totalValueSalesExVAT: 4066, totalValuePurchasesExVAT: 482, totalValueGoodsSuppliedExVAT: 0, totalAcquisitionsExVAT: 0 } },
+            { id: 'fil_000000000001', kind: 'vat', periodStart: '2025-01-01', periodEnd: '2025-03-31', filedOn: '2025-04-20', reference: FILING_REF, figures: { vatDueSales: 813.27, vatDueAcquisitions: 0, totalVatDue: 813.27, vatReclaimedCurrPeriod: 96.4, netVatDue: 716.87, totalValueSalesExVAT: 4066, totalValuePurchasesExVAT: 482, totalValueGoodsSuppliedExVAT: 0, totalAcquisitionsExVAT: 0 }, corrections: [{ periodEnd: '2024-12-31', amount: 286.43 }], disclosed: { on: '2025-05-02', amount: 1371, reference: DISCLOSED_REF } },
             { id: 'fil_000000000002', kind: 'accounts', periodEnd: '2024-02-29', filedOn: '2024-10-01', figures: { B: 637, C: 2911, E: 450, K: 3098 } },
             { id: 'fil_000000000003', kind: 'ct600', periodEnd: '2024-02-29', filedOn: '2024-10-01', reference: 'CT600', figures: { taxPayable: 341.75 } },
           ],
@@ -234,6 +235,9 @@ describe('the denylist', () => {
     // From decided proposals too: an add_filing change's, and the companies as they were before.
     expect(has(PROPOSED_REF)).toBe('filing-reference');
     expect(denylist.amounts).toEqual(expect.arrayContaining(['1287.35', '1863.00']));
+    // A VAT return's corrections of earlier errors, and its errors reported separately with HMRC's reference.
+    expect(denylist.amounts).toEqual(expect.arrayContaining(['286.43', '1371.00']));
+    expect(has(DISCLOSED_REF)).toBe('filing-reference');
     const found = new Scanner({ denylist, allow: new Allowlist('') }).scanText('src/x.ts', `const lineB = 637;\nconst ref = '${FILING_REF}';\n`);
     expect(found.map((f) => `${f.line}:${f.rule}`)).toEqual(['1:amount', '2:filing-reference']);
   });

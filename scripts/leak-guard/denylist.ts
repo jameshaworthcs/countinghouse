@@ -10,7 +10,7 @@ import path from 'node:path';
 import { tokenKey } from './text.ts';
 
 /** Bump when the build changes what it collects, so caches are rebuilt. */
-const BUILDER_VERSION = 12;
+const BUILDER_VERSION = 13;
 
 export interface Denylist {
   version: number;
@@ -244,15 +244,23 @@ export function distinctiveCompanyAmount(n: number): string | undefined {
   return `${pounds}.00`;
 }
 
-/** Filings (a company's books): their references, and every figure they hold, at the small-company threshold. */
+/**
+ * Filings (a company's books): their references, and every figure they hold, at the small-company
+ * threshold; a VAT return's corrections of earlier errors (`corrections`) and its own errors reported
+ * separately (`disclosed`, with HMRC's reference) too.
+ */
 function collectFilings(filings: Json[], addReference: (value: string | undefined) => void, into: Set<string>): void {
+  const add = (v: unknown) => {
+    const a = typeof v === 'number' ? distinctiveCompanyAmount(v) : undefined;
+    if (a) into.add(a);
+  };
   for (const f of filings) {
     addReference(str(f.reference));
-    for (const o of objects(f.figures)) {
-      for (const v of Object.values(o)) {
-        const a = typeof v === 'number' ? distinctiveCompanyAmount(v) : undefined;
-        if (a) into.add(a);
-      }
+    for (const o of objects(f.figures)) for (const v of Object.values(o)) add(v);
+    for (const c of Array.isArray(f.corrections) ? f.corrections.filter(isObject) : []) add(c.amount);
+    if (isObject(f.disclosed)) {
+      add(f.disclosed.amount);
+      addReference(str(f.disclosed.reference));
     }
   }
 }
