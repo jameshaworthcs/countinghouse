@@ -10,7 +10,7 @@ import { addDays, diffDays, formatDate, formatSpan, type ISODate } from './dates
 import { DEADLINE_LEAD_DAYS, DEADLINE_WARN_DAYS } from './deadlines';
 import { FIXED_ASSET_CLASS_META } from './ledger';
 import { addMoney, toMinor } from './money';
-import type { Company, CompanyBooksSetup, CompanyFiling, CompanyFilingKind, VatCorrection, VatDisclosure } from './schema';
+import type { Company, CompanyBooks, CompanyBooksSetup, CompanyFiling, CompanyFilingKind, VatCorrection, VatDisclosure } from './schema';
 import {
   ACCOUNTING_PERIOD_RULES,
   accountsFilingDeadline,
@@ -485,6 +485,14 @@ export function booksProblems(books: CompanyBooksSetup & { filings?: readonly Co
 export function lockAfterFiling(books: Pick<CompanyBooksSetup, 'lockedThrough'>, filing: Pick<CompanyFiling, 'kind' | 'periodEnd'>): { lockedThrough?: ISODate } {
   if (filing.kind !== 'accounts') return books.lockedThrough ? { lockedThrough: books.lockedThrough } : {};
   return { lockedThrough: books.lockedThrough && books.lockedThrough > filing.periodEnd ? books.lockedThrough : filing.periodEnd };
+}
+
+/**
+ * What a company's books keep whoever sets them up (the owner's form, an applied proposal): its filings,
+ * and what you confirmed for each period's accounts (the average number employed, the notes).
+ */
+export function keptWithBooks(books: Pick<CompanyBooks, 'filings' | 'employees' | 'accountsNotes'> | undefined): Pick<CompanyBooks, 'filings' | 'employees' | 'accountsNotes'> {
+  return { filings: books?.filings ?? [], ...(books?.employees ? { employees: books.employees } : {}), ...(books?.accountsNotes ? { accountsNotes: books.accountsNotes } : {}) };
 }
 
 /**

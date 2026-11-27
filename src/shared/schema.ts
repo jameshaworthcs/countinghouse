@@ -884,7 +884,16 @@ const filingBase = {
 };
 const filingKinds = <T extends z.ZodRawShape>(extra: T) =>
   [
-    z.object({ ...extra, kind: z.literal('accounts'), ...filingBase, figures: MicroEntityLinesSchema.optional() }),
+    z.object({
+      ...extra,
+      kind: z.literal('accounts'),
+      ...filingBase,
+      figures: MicroEntityLinesSchema.optional(),
+      /** The day the board approved the accounts (on or after the balance sheet date: CA 2006 s414(1)), as filed. */
+      approvedOn: ISODateSchema.optional(),
+      /** The director who signed the balance sheet on the board's behalf (s414(1)–(2)), as filed: the only name kept. */
+      approvedBy: z.string().trim().min(1).max(120).optional(),
+    }),
     z.object({ ...extra, kind: z.literal('ct600'), ...filingBase, figures: z.object({ taxPayable: MoneySchema.refine((v) => v >= 0, { message: 'Tax payable is not negative' }) }).optional() }),
     // A payment of £0 says there is no Corporation Tax to pay for the period.
     z.object({ ...extra, kind: z.literal('ct-payment'), ...filingBase, figures: z.object({ amount: MoneySchema.refine((v) => v >= 0, { message: 'A payment is not negative (£0: nothing to pay)' }) }).optional() }),
@@ -1041,6 +1050,62 @@ const companyBooksShape = {
    */
   lockedThrough: ISODateSchema.optional(),
 };
+/**
+ * A note to a micro-entity's accounts that the books cannot work out, as you confirm it: none (`none`),
+ * or what it says, with its total where the law asks for one (docs/FORMULAS.md §22, "Filing the accounts").
+ */
+export const OwnerNoteSchema = z.union([
+  z.object({ none: z.literal(true) }),
+  z.object({ text: z.string().trim().min(1).max(2000), amount: MoneySchema.refine((v) => v >= 0, { message: 'A total is not negative' }).optional() }),
+]);
+export type OwnerNote = z.infer<typeof OwnerNoteSchema>;
+
+/**
+ * What you confirm for one accounting period's micro-entity accounts before filing them (by the
+ * period's last day): the notes the books cannot work out, and the questions of eligibility only you can
+ * answer. Nothing here is a figure the books give.
+ */
+export const AccountsNotesSchema = z.object({
+  periodEnd: ISODateSchema,
+  /** Arrangements not reflected in the balance sheet: their nature and business purpose (CA 2006 s410A; FRS 105 para 6A.1). */
+  offBalanceSheet: OwnerNoteSchema.optional(),
+  /** Financial commitments, guarantees and contingencies not in the balance sheet, and their total (SI 2008/409 Sch 1 para 57). */
+  commitments: OwnerNoteSchema.optional(),
+  /** Advances, credits and guarantees for directors the books do not hold (another director's loan, a guarantee of a director's borrowing: s413). */
+  directors: OwnerNoteSchema.optional(),
+  /**
+   * What the books cannot say about an advance to a director they hold (s413(3)): its interest rate and
+   * main conditions, and any amounts written off or waived (the books give its amount and what was repaid).
+   */
+  advances: z
+    .object({
+      interest: z.string().trim().min(1).max(200),
+      conditions: z.string().trim().min(1).max(500),
+      writtenOff: MoneySchema.refine((v) => v >= 0, { message: 'An amount written off is given as a positive amount' }).optional(),
+      waived: MoneySchema.refine((v) => v >= 0, { message: 'An amount waived is given as a positive amount' }).optional(),
+    })
+    .optional(),
+  /** None of the exclusions from the micro-entity provisions and the audit exemption applied at any time in the period (CA 2006 ss384, 384A(8), 384B, 476, 478): yours to say. */
+  notExcluded: z.boolean().optional(),
+  /** Whether it qualified as a micro-entity for the period before, when the books cannot work that out (s384A(3)). */
+  previousQualified: z.boolean().optional(),
+});
+export type AccountsNotes = z.infer<typeof AccountsNotesSchema>;
+
+/**
+ * The average number of persons employed under contracts of service in an accounting period, by its last
+ * day (CA 2006 s411(1), (3)–(4); s384A(7)): yours to give, never worked out.
+ */
+export const BooksEmployeesSchema = z.object({
+  periodEnd: ISODateSchema,
+  average: z
+    .number()
+    .min(0)
+    .max(100_000)
+    .refine((v) => Math.abs(v * 100 - Math.round(v * 100)) < 1e-6, { message: 'At most two decimal places' }),
+});
+export type BooksEmployees = z.infer<typeof BooksEmployeesSchema>;
+
 /** A company's books without its filings and who set them: what the owner edits and an agent proposes (`set_company_books`). */
 export const CompanyBooksSetupSchema = z.object(companyBooksShape);
 export type CompanyBooksSetup = z.infer<typeof CompanyBooksSetupSchema>;
@@ -1052,6 +1117,18 @@ export type CompanyBooksSetup = z.infer<typeof CompanyBooksSetupSchema>;
 export const CompanyBooksSchema = z.object({
   ...companyBooksShape,
   filings: z.array(CompanyFilingSchema).max(1000).default([]),
+  /** The average number employed in each accounting period, by its last day (`BooksEmployeesSchema`): yours, kept with the filings. */
+  employees: z
+    .array(BooksEmployeesSchema)
+    .max(60)
+    .refine((l) => new Set(l.map((e) => e.periodEnd)).size === l.length, { message: 'One average number of employees per period' })
+    .optional(),
+  /** What you confirm for each period's accounts before filing them (`AccountsNotesSchema`), kept with the filings. */
+  accountsNotes: z
+    .array(AccountsNotesSchema)
+    .max(60)
+    .refine((l) => new Set(l.map((e) => e.periodEnd)).size === l.length, { message: 'One set of notes per period' })
+    .optional(),
   /** Who set it up last: you, or an agent's proposal you applied (a proposal never changes yours). */
   setBy: z.enum(['owner', 'agent']).default('owner'),
   updatedAt: TimestampSchema,

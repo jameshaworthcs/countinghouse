@@ -23,7 +23,7 @@ import { agreementPattern, isScheduledPayment } from '../shared/agreements';
 import { CategoryIndex } from '../shared/categories';
 import { COMPANY_MARK_LABELS, companyMarkProblem, sameMark } from '../shared/company';
 import { Categoriser, isWrapperAccount, linkedPayee, transferLegCategory } from '../shared/categorise';
-import { addedBooksProblems, booksProblems, FILING_KIND_LABELS, lockAfterFiling } from '../shared/company-books';
+import { addedBooksProblems, booksProblems, FILING_KIND_LABELS, keptWithBooks, lockAfterFiling } from '../shared/company-books';
 import { codingPlace, codingProblems, companyLinkProblem, journalProblems, ledgerName, linkableCoding, ruleBooksProblems, VAT_TREATMENT_LABELS } from '../shared/ledger';
 import { addDays, diffDays, formatDate, formatSpan, today } from '../shared/dates';
 import { formatMoney, fromMinor, isMoney, toMinor } from '../shared/money';
@@ -711,7 +711,7 @@ function simulate(store: Store, changes: ProposedChange[], leaveOut: ReadonlySet
         const now = company.books;
         // The lock is the owner's alone: a proposal keeps it as it is.
         const { lockedThrough: _proposed, ...proposed } = c.books;
-        const next = CompanyBooksSchema.parse({ ...proposed, ...(now?.lockedThrough ? { lockedThrough: now.lockedThrough } : {}), filings: now?.filings ?? [], setBy: 'agent', updatedAt: now?.updatedAt ?? nowISO() });
+        const next = CompanyBooksSchema.parse({ ...proposed, ...(now?.lockedThrough ? { lockedThrough: now.lockedThrough } : {}), ...keptWithBooks(now), setBy: 'agent', updatedAt: now?.updatedAt ?? nowISO() });
         // Already so whatever it was proposed against: you (or another proposal) set them so.
         if (now && booksSetupKey(now) === booksSetupKey(next)) return { alreadySo: true };
         if (now?.setBy === 'owner') return { problem: `You set up ${company.name}’s books yourself: change them on its Company page.` };
@@ -1335,7 +1335,7 @@ export class ProposalService extends EventEmitter {
             if (op.setup) {
               if ((books?.updatedAt ?? null) !== op.setup.seen) throw changed();
               const { lockedThrough: _l, ...setup } = op.setup.books;
-              books = { ...setup, ...(books?.lockedThrough ? { lockedThrough: books.lockedThrough } : {}), filings: books?.filings ?? [] };
+              books = { ...setup, ...(books?.lockedThrough ? { lockedThrough: books.lockedThrough } : {}), ...keptWithBooks(books) };
             }
             if (!books) throw changed();
             for (const f of op.filings) {

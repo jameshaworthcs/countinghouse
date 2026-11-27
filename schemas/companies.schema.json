@@ -581,6 +581,15 @@
                               "maximum": 9007199254740991
                             }
                           }
+                        },
+                        "approvedOn": {
+                          "type": "string",
+                          "description": "Calendar date, YYYY-MM-DD"
+                        },
+                        "approvedBy": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 120
                         }
                       },
                       "required": [
@@ -905,6 +914,176 @@
                         "filedOn"
                       ]
                     }
+                  ]
+                }
+              },
+              "employees": {
+                "maxItems": 60,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "periodEnd": {
+                      "type": "string",
+                      "description": "Calendar date, YYYY-MM-DD"
+                    },
+                    "average": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 100000
+                    }
+                  },
+                  "required": [
+                    "periodEnd",
+                    "average"
+                  ]
+                }
+              },
+              "accountsNotes": {
+                "maxItems": 60,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "periodEnd": {
+                      "type": "string",
+                      "description": "Calendar date, YYYY-MM-DD"
+                    },
+                    "offBalanceSheet": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "none": {
+                              "type": "boolean",
+                              "const": true
+                            }
+                          },
+                          "required": [
+                            "none"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "text": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 2000
+                            },
+                            "amount": {
+                              "type": "number",
+                              "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                            }
+                          },
+                          "required": [
+                            "text"
+                          ]
+                        }
+                      ]
+                    },
+                    "commitments": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "none": {
+                              "type": "boolean",
+                              "const": true
+                            }
+                          },
+                          "required": [
+                            "none"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "text": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 2000
+                            },
+                            "amount": {
+                              "type": "number",
+                              "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                            }
+                          },
+                          "required": [
+                            "text"
+                          ]
+                        }
+                      ]
+                    },
+                    "directors": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "none": {
+                              "type": "boolean",
+                              "const": true
+                            }
+                          },
+                          "required": [
+                            "none"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "text": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 2000
+                            },
+                            "amount": {
+                              "type": "number",
+                              "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                            }
+                          },
+                          "required": [
+                            "text"
+                          ]
+                        }
+                      ]
+                    },
+                    "advances": {
+                      "type": "object",
+                      "properties": {
+                        "interest": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "conditions": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 500
+                        },
+                        "writtenOff": {
+                          "type": "number",
+                          "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                        },
+                        "waived": {
+                          "type": "number",
+                          "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                        }
+                      },
+                      "required": [
+                        "interest",
+                        "conditions"
+                      ]
+                    },
+                    "notExcluded": {
+                      "type": "boolean"
+                    },
+                    "previousQualified": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "periodEnd"
                   ]
                 }
               },
