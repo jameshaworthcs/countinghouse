@@ -83,6 +83,21 @@ export function timeOnDay(b: { date: ISODate; at?: string | undefined }): string
   return b.at && b.at.slice(0, 10) === b.date ? b.at.slice(11, 19) : undefined;
 }
 
+/**
+ * When an imported balance with no time of its own was seen at the latest, when it is no close
+ * (docs/FORMULAS.md §9): it was recorded on its own day, and a row of that day came from another
+ * document. The day was not over when it was recorded, and a statement downloaded during the day ends
+ * at its last row so far: a row it does not have may have come after it. When it has every row of
+ * its day it stays the day's close. A screenshot keeps its own rules.
+ */
+export function recordedOnItsDay(
+  b: { date: ISODate; kind: string; createdAt?: string | undefined; source: { importId?: string | undefined } },
+  day: readonly { source: { importId?: string | undefined } }[],
+): string | undefined {
+  if (b.kind === 'screenshot' || !b.source.importId || b.createdAt?.slice(0, 10) !== b.date) return undefined;
+  return day.some((t) => t.source.importId !== b.source.importId) ? b.createdAt.slice(11, 19) : undefined;
+}
+
 interface Series {
   dates: ISODate[];
   prefix: number[]; // prefix[i] = Σ minor of items 0..i
@@ -410,9 +425,12 @@ export class BalanceEngine {
       // One anchor a day: the later one, else the stronger (`outranks`). A screenshot may be taken
       // mid-day, and would hide what a statement's or your own balance says from the gap check; one
       // you typed yourself weighs as your own.
+      const byDay = daysOf(txs);
       for (const s of real) {
         const source = s.kind === 'screenshot' && s.enteredBy !== 'user' ? 'screenshot' : 'snapshot';
-        const at = timeOnDay(s);
+        // A bank's or card's statement recorded during its day without every row of it is no close;
+        // a valuation is never one.
+        const at = timeOnDay(s) ?? (mode === 'ledger' ? recordedOnItsDay(s, byDay.get(s.date) ?? []) : undefined);
         const interest = s.taxYearInterest !== undefined ? { interest: { from: (s.taxYear ? parseTaxYear(s.taxYear) : null)?.start ?? taxYearOf(s.date).start, minor: toMinor(s.taxYearInterest) } } : {};
         const next: Anchor = { date: s.date, minor: toMinor(s.balance) + plusCash(s), source, ...(at ? { at } : {}), ...interest };
         const current = anchors.get(s.date);
@@ -420,7 +438,6 @@ export class BalanceEngine {
       }
       // A balance seen mid-day is not its day's close: rows of that day not known to come before it
       // (no time, or a later one) may follow it, so it cannot show a gap.
-      const byDay = daysOf(txs);
       for (const a of anchors.values()) {
         if (a.at && (byDay.get(a.date) ?? []).some((t) => !t.time || t.time.length < 5 || t.time.padEnd(8, ':00').slice(0, 8) > a.at!)) a.midDay = true;
       }

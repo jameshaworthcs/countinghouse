@@ -362,6 +362,13 @@ years), both paths grow at the median:
   - A balance is a day's close unless it says when it was seen (`at`): a screenshot's capture
     time, or when you gave a balance for that same day. A screenshot that does not say is some
     time that day.
+  - An imported balance with no time of its own (not a screenshot) is no close when it was
+    recorded on its own day and a row of that day came from another document: a statement
+    downloaded during the day ends at its last row so far, and the row it lacks may have come
+    after it. It was seen by the time it was recorded (`createdAt`, `recordedOnItsDay`), so the
+    day's running close (24:00) outranks it, and for gaps it is a balance seen mid-day. With every
+    row of its day it stays the day's close. It is known only from when it was recorded: one
+    downloaded during a day and imported on a later one is still taken as that day's close.
   - Of two that both say when, the later stands for the day; a close is the latest.
   - Otherwise, or at the same moment, the stronger: a statement's or your own balance, then a
     screenshot's, then a running balance. A figure you typed while reviewing an import
@@ -486,6 +493,7 @@ opening it adds nothing. A confirmation short of its first data changes nothing.
   that adds up exactly (`usableAnchors`).
 - A balance seen mid-day (`at`) is strong only when every row of its day shows a time no later
   than it. A row with no time, or a later one, may follow it, and would look like a gap.
+  - So is an imported balance recorded during its day without every row of it (above).
   - Its day's balance(D) is still that balance: rows of the day after it are not added.
 - A weak anchor (a screenshot's balance, or one seen mid-day) on day D is usable when the usable
   anchor before it (or, before the first, the strong one after it), carried by the rows between,

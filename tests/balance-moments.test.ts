@@ -89,6 +89,86 @@ describe('balances of one day', () => {
     expect(engine.gaps('bank')).toEqual([{ from: '2026-09-01', to: '2026-09-30', difference: -1 }]);
   });
 
+  it('takes a statement downloaded during its last day, without a row of it, as seen then: no gap, and the day’s running close stands', async () => {
+    // Downloaded at 13:07 on 25 Nov: its last row so far leaves £1,250.50. A payment that afternoon
+    // came in the next download, with its running balance, and that download ended on the 27th.
+    const first = { importId: 'imp_20261125_130706_aaaa' };
+    const next = { importId: 'imp_20261127_120954_bbbb' };
+    await store.addTransactions(
+      [
+        tx('2026-11-25', 250.5, 'EXAMPLE EMPLOYER PAY', { balanceAfter: 1250.5, source: first }),
+        tx('2026-11-25', -200, 'EXAMPLE STUDIO LTD TOP UP', { balanceAfter: 1050.5, source: next }),
+        tx('2026-11-27', -50.25, 'EXAMPLE SHOP', { balanceAfter: 1000.25, source: next }),
+      ],
+      'test',
+    );
+    await store.addBalances(
+      [
+        bal('2026-11-17', 1000, 'statement'),
+        bal('2026-11-25', 1250.5, 'statement', { createdAt: '2026-11-25T13:07:08+00:00', source: first }),
+        bal('2026-11-27', 1000.25, 'statement', { createdAt: '2026-11-27T12:09:55+00:00', source: next }),
+      ],
+      'test',
+    );
+    const engine = new BalanceEngine(store);
+    expect(engine.gaps('bank')).toEqual([]);
+    expect(engine.balanceOn('bank', '2026-11-25')!.value).toBe(1050.5);
+    expect(engine.balanceOn('bank', '2026-11-27')!.value).toBe(1000.25);
+    // The same statement recorded a day later is that day's close, and the afternoon payment a gap.
+    await store.addBalances([bal('2026-11-26', 1250.5, 'statement', { createdAt: '2026-11-27T09:00:00+00:00', source: first })], 'test');
+    expect(new BalanceEngine(store).gaps('bank')).toEqual([
+      { from: '2026-11-25', to: '2026-11-26', difference: 200 },
+      { from: '2026-11-26', to: '2026-11-27', difference: -200 },
+    ]);
+  });
+
+  it('keeps a statement recorded on its day as the close when it has every row of the day, even the same sum in and out', async () => {
+    // £400 in and straight out again, both on the statement: its printed balances read either way.
+    const own = { importId: 'imp_20261116_012137_cccc' };
+    await store.addTransactions(
+      [
+        tx('2026-11-16', -400, 'EXAMPLE TRANSFER OUT', { balanceAfter: 0, source: own }),
+        tx('2026-11-16', 400, 'EXAMPLE TRANSFER IN', { balanceAfter: 400, source: own }),
+      ],
+      'test',
+    );
+    await store.addBalances([bal('2026-10-31', 0, 'statement'), bal('2026-11-16', 0, 'statement', { createdAt: '2026-11-16T01:21:55+00:00', source: own })], 'test');
+    const engine = new BalanceEngine(store);
+    expect(engine.balanceOn('bank', '2026-11-16')!.value).toBe(0);
+    expect(engine.gaps('bank')).toEqual([]);
+  });
+
+  it('does not let a statement seen mid-day stand for a day whose chain cannot settle its close', async () => {
+    // Seen at 13:07 after £200 in (£1,200); £200 out that afternoon came in the next download (£1,000).
+    const first = { importId: 'imp_20261125_130706_dddd' };
+    const next = { importId: 'imp_20261127_120954_eeee' };
+    await store.addTransactions(
+      [
+        tx('2026-11-25', 200, 'EXAMPLE IN', { balanceAfter: 1200, source: first }),
+        tx('2026-11-25', -200, 'EXAMPLE OUT', { balanceAfter: 1000, source: next }),
+      ],
+      'test',
+    );
+    await store.addBalances([bal('2026-11-24', 1000, 'statement'), bal('2026-11-25', 1200, 'statement', { createdAt: '2026-11-25T13:07:08+00:00', source: first })], 'test');
+    const engine = new BalanceEngine(store);
+    expect(engine.balanceOn('bank', '2026-11-25')!.value).toBe(1000);
+    expect(engine.gaps('bank')).toEqual([]);
+  });
+
+  it('leaves a valued account’s figures of one day in their order: a valuation is never a close', async () => {
+    const isa: Account = { ...bank, id: 'isa', name: 'Example ISA', type: 'stocks_isa', last4: undefined };
+    await store.setAccounts([bank, isa]);
+    await store.addTransactions([{ ...tx('2026-09-30', 50, 'EXAMPLE DIVIDEND', { source: { importId: 'imp_20260930_120000_ffff' } }), accountId: 'isa' }], 'test');
+    await store.addBalances(
+      [
+        { ...bal('2026-09-30', 1000, 'export', { createdAt: '2026-09-30T13:55:17+01:00', source: { importId: 'imp_20260930_130433_gggg' } }), accountId: 'isa' },
+        { ...bal('2026-09-30', 1010, 'screenshot', { at: '2026-09-30T13:57:06+01:00', createdAt: '2026-09-30T13:59:44+01:00' }), accountId: 'isa' },
+      ],
+      'test',
+    );
+    expect(new BalanceEngine(store).balanceOn('isa', '2026-09-30')!.value).toBe(1000);
+  });
+
   it('checks a balance seen mid-day when every row of its day came before it', async () => {
     await store.addTransactions([tx('2026-09-30', -1, 'CAFE', { time: '08:15' })], 'test');
     await store.addBalances([bal('2026-09-01', 10, 'statement'), bal('2026-09-30', 7, 'manual', { at: '2026-09-30T12:00:00+01:00' })], 'test');
