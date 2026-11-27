@@ -12,13 +12,15 @@ import { DEADLINE_WARN_DAYS } from '../../shared/deadlines';
 import { toMinor, fromMinor } from '../../shared/money';
 import { COMPANY_FILING_KINDS, MICRO_ENTITY_LINES, type CompanyBooks, type CompanyBooksSetup, type CompanyFiling, type CompanyFilingInput, type CompanyFilingKind, type VatBoxes } from '../../shared/schema';
 import { VAT_STAGGERS, type VatStagger } from '../../shared/uk';
+import { ASSET_REGISTER_CLASSES, FIXED_ASSET_CLASS_META } from '../../shared/ledger';
 import { Badge, Button, Callout, Card, Checkbox, Dialog, EmptyState, ErrorNote, Field, Input, Loading, Money, NumberInput, PageHeader, Select, StatusBadge, Tabs, tableClasses, useToast } from '../components/ui';
 import { api, useApi, useApiMutation } from '../lib/api';
 import { KeepBooks } from '../components/KeepBooks';
 import { BooksTab } from '../components/CompanyLedger';
+import { AccountsTab } from '../components/CompanyAccounts';
 import { cn } from '../lib/format';
 
-type Tab = 'overview' | 'books' | 'settings';
+type Tab = 'overview' | 'books' | 'accounts' | 'settings';
 
 /** A deadline's state, as a badge: done (filed late marked), overdue, due within 14 days, due soon, later. */
 function DeadlineBadge({ d }: { d: CompanyDeadline }) {
@@ -113,7 +115,7 @@ function DeadlinesCard({ view, onRecord }: { view: CompanyBooksResponse; onRecor
           <EmptyState title="No deadlines">Its periods begin after today.</EmptyState>
         </div>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="relative overflow-x-auto">
           <table className={tableClasses.table}>
             <thead>
               <tr>
@@ -275,6 +277,40 @@ function PeriodsField({ label, hint, value, onChange }: { label: string; hint: R
   );
 }
 
+type Policy = NonNullable<CompanyBooksSetup['policies']>[number];
+
+/** Its depreciation policies: a life in months for each class of asset whose own coding gives none. */
+function PoliciesField({ value, onChange }: { value: Policy[]; onChange: (v: Policy[]) => void }) {
+  const free = ASSET_REGISTER_CLASSES.filter((c) => !value.some((p) => p.class === c));
+  return (
+    <div className="flex flex-col gap-1.5 border-t border-line pt-4">
+      <span className="text-[12.5px] font-medium text-ink-2">Depreciation policies</span>
+      {value.map((p, i) => (
+        <div key={p.class} className="flex flex-wrap items-center gap-2">
+          <Select aria-label="Class of asset" value={p.class} onChange={(e) => onChange(value.map((x, j) => (j === i ? { ...x, class: e.target.value as Policy['class'] } : x)))} className="w-56">
+            {[p.class, ...free].map((c) => (
+              <option key={c} value={c}>
+                {FIXED_ASSET_CLASS_META[c].name}
+              </option>
+            ))}
+          </Select>
+          <NumberInput aria-label="Life in months" value={p.months || undefined} onValue={(v) => onChange(value.map((x, j) => (j === i ? { ...x, months: v === undefined ? 0 : Math.max(0, Math.round(v)) } : x)))} className="w-24 tabular" />
+          <span className="text-[12.5px] text-ink-3">months</span>
+          <Button size="sm" variant="ghost" icon={<Trash2 className="size-3.5" />} aria-label="Take it away" onClick={() => onChange(value.filter((_, j) => j !== i))} />
+        </div>
+      ))}
+      {free.length > 0 && (
+        <div>
+          <Button size="sm" icon={<Plus className="size-3.5" />} onClick={() => onChange([...value, { class: free[0]!, months: 36 }])}>
+            Add a policy
+          </Button>
+        </div>
+      )}
+      <span className="text-[12px] text-ink-3">The life a fixed asset is written down over, straight line by whole months (the month it was bought in full), when its own coding gives none. With neither, the books ask for one.</span>
+    </div>
+  );
+}
+
 type Draft = Omit<CompanyBooksSetup, 'tradeStartedOn' | 'withinChargeFrom'> & { within: 'assumed' | 'on' | 'dormant'; withinOn: string; tradeOn: string; hasVat: boolean; hasPaye: boolean };
 
 function draftOf(books: CompanyBooks | null): Draft {
@@ -289,6 +325,7 @@ function draftOf(books: CompanyBooks | null): Draft {
     ...(books?.confirmationStatement ? { confirmationStatement: books.confirmationStatement } : {}),
     ...(books?.deadlinesFrom ? { deadlinesFrom: books.deadlinesFrom } : {}),
     ...(books?.ledgerFrom ? { ledgerFrom: books.ledgerFrom } : {}),
+    policies: books?.policies ?? [],
     within: books?.withinChargeFrom === null ? 'dormant' : books?.withinChargeFrom ? 'on' : 'assumed',
     withinOn: books?.withinChargeFrom ?? '',
     tradeOn: books?.tradeStartedOn ?? '',
@@ -310,6 +347,7 @@ function setupOf(d: Draft): CompanyBooksSetup {
     ...(d.confirmationStatement?.nextMadeUpTo ? { confirmationStatement: d.confirmationStatement } : {}),
     ...(d.deadlinesFrom ? { deadlinesFrom: d.deadlinesFrom } : {}),
     ...(d.ledgerFrom ? { ledgerFrom: d.ledgerFrom } : {}),
+    ...(d.policies?.length ? { policies: d.policies } : {}),
     ...(d.within === 'dormant' ? { withinChargeFrom: null } : d.within === 'on' && d.withinOn ? { withinChargeFrom: d.withinOn } : {}),
     ...(d.tradeOn ? { tradeStartedOn: d.tradeOn } : {}),
   };
@@ -467,8 +505,10 @@ function BooksForm({ view, onSaved }: { view: CompanyBooksResponse; onSaved?: ()
           </Field>
         </div>
 
+        <PoliciesField value={d.policies ?? []} onChange={(policies) => set({ policies })} />
+
         <div className="flex flex-wrap items-center gap-3">
-          <Button variant="primary" loading={save.isPending} disabled={!d.incorporatedOn} onClick={() => save.mutate(undefined)}>
+          <Button variant="primary" loading={save.isPending} disabled={!d.incorporatedOn || (d.policies ?? []).some((p) => !p.months)} onClick={() => save.mutate(undefined)}>
             Save
           </Button>
           {view.books && (
@@ -670,7 +710,7 @@ function FilingsCard({ view, onRecord }: { view: CompanyBooksResponse; onRecord:
           <EmptyState title="Nothing recorded yet">Record its accounts, confirmation statements, CT600s, Corporation Tax paid and VAT returns as they are filed.</EmptyState>
         </div>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="relative overflow-x-auto">
           <table className={tableClasses.table}>
             <thead>
               <tr>
@@ -713,7 +753,7 @@ function FilingsCard({ view, onRecord }: { view: CompanyBooksResponse; onRecord:
 
 export default function Company() {
   const { id = '', tab: tabParam } = useParams();
-  const tab: Tab = tabParam === 'settings' || tabParam === 'books' ? tabParam : 'overview';
+  const tab: Tab = tabParam === 'settings' || tabParam === 'books' || tabParam === 'accounts' ? tabParam : 'overview';
   const navigate = useNavigate();
   const q = useApi<CompanyBooksResponse>(['company-books', id], `/companies/${id}/books`);
   const list = useApi<CompanyBooksListItem[]>(['company-books'], '/company-books');
@@ -752,6 +792,7 @@ export default function Company() {
             tabs={[
               { value: 'overview', label: 'Overview' },
               { value: 'books', label: 'Books' },
+              { value: 'accounts', label: 'Accounts' },
               { value: 'settings', label: 'Settings' },
             ]}
           />
@@ -766,6 +807,8 @@ export default function Company() {
               </>
             ) : tab === 'books' ? (
               <BooksTab key={view.company.id} companyId={view.company.id} />
+            ) : tab === 'accounts' ? (
+              <AccountsTab key={view.company.id} companyId={view.company.id} />
             ) : (
               <>
                 {/* Keyed by the company too: switching company never leaves one's draft under another's id. */}

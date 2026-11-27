@@ -542,10 +542,15 @@ function JournalDialog({ companyId, accounts, initial, onClose }: { companyId: s
   );
 }
 
+/** Journals shown before you ask for all of them, newest first. */
+const JOURNALS_SHOWN = 6;
+
 function JournalsCard({ view, companyId }: { view: CompanyCodingResponse; companyId: string }) {
   const toast = useToast();
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<Journal | null>(null);
+  const [all, setAll] = useState(false);
+  const newest = useMemo(() => [...view.journals].reverse(), [view.journals]);
   const remove = useApiMutation((id: string) => api(`/companies/${companyId}/journals/${id}`, { method: 'DELETE' }), { onSuccess: () => toast({ tone: 'good', text: 'Journal taken away' }), onError: (e) => toast({ tone: 'bad', text: e.message }) });
   return (
     <Card
@@ -564,9 +569,9 @@ function JournalsCard({ view, companyId }: { view: CompanyCodingResponse; compan
         </div>
       ) : (
         <ul className="divide-y divide-line">
-          {[...view.journals].reverse().map((j) => (
+          {(all ? newest : newest.slice(0, JOURNALS_SHOWN)).map((j) => (
             <li key={j.id} className="flex flex-wrap items-start justify-between gap-2 px-5 py-3 text-[13px]">
-              <div className="min-w-0 flex-1">
+              <div className="min-w-0 flex-1 basis-64">
                 <div className="text-ink">
                   {formatDate(j.date)} · {j.memo}
                   {j.createdBy === 'agent' && (
@@ -599,6 +604,13 @@ function JournalsCard({ view, companyId }: { view: CompanyCodingResponse; compan
             </li>
           ))}
         </ul>
+      )}
+      {newest.length > JOURNALS_SHOWN && (
+        <div className="border-t border-line px-3 py-2">
+          <Button size="sm" variant="ghost" onClick={() => setAll((v) => !v)}>
+            {all ? 'Show the latest only' : `Show all ${newest.length}`}
+          </Button>
+        </div>
       )}
       {adding && <JournalDialog companyId={companyId} accounts={view.accounts} onClose={() => setAdding(false)} />}
       {editing && <JournalDialog key={editing.id} companyId={companyId} accounts={view.accounts} initial={editing} onClose={() => setEditing(null)} />}
