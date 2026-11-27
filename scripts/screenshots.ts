@@ -125,6 +125,8 @@ async function main() {
     ['company-accounts', '/company/example-studio/accounts'],
     // Its VAT returns: the return to file next with its boxes and working, the periods, a return filed that differs from the books, penalty points and the thresholds.
     ['company-vat', '/company/example-studio/vat'],
+    // Its Corporation Tax: the latest year's computation (adjustments, the laptop's allowance, the main pool at the hybrid rate, interest, the small profits rate), its CT600 boxes with working, and the periods.
+    ['company-tax', '/company/example-studio/corporation-tax'],
     ['company-settings', '/company/example-studio/settings'],
     ...accountPage('account-current', 'current'),
     ...accountPage('account-savings', 'savings'),

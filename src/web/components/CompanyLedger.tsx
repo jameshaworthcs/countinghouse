@@ -60,10 +60,21 @@ interface LineDraft {
   connected: boolean;
   disposedOn: string;
   residual: number | undefined;
+  /** For Corporation Tax: the asset's own fields (shared/schema.ts, `BooksAssetSchema`). */
+  tax: AssetTax;
   /** On a credit to a cost code: the asset whose cost it reduces. */
   reduces: string;
   invoicedOn: string;
 }
+/** An asset's fields for Corporation Tax: its market value (bought from a connected person), what it fetched, its pool, second-hand, and the allowance chosen. */
+type AssetTax = Pick<NonNullable<BooksLine['asset']>, 'marketValue' | 'proceeds' | 'pool' | 'used' | 'allowance'>;
+const taxOfAsset = (a: BooksLine['asset']): AssetTax => ({
+  ...(a?.marketValue !== undefined ? { marketValue: a.marketValue } : {}),
+  ...(a?.proceeds !== undefined ? { proceeds: a.proceeds } : {}),
+  ...(a?.pool ? { pool: a.pool } : {}),
+  ...(a?.used ? { used: true } : {}),
+  ...(a?.allowance ? { allowance: a.allowance } : {}),
+});
 const lineDraft = (l: Partial<BooksLine> = {}): LineDraft => ({
   ledger: l.ledger ?? '',
   amount: l.amount,
@@ -76,6 +87,7 @@ const lineDraft = (l: Partial<BooksLine> = {}): LineDraft => ({
   connected: l.asset?.connected === true,
   disposedOn: l.asset?.disposedOn ?? '',
   residual: l.asset?.residual,
+  tax: taxOfAsset(l.asset),
   reduces: l.reduces ?? '',
   invoicedOn: l.invoicedOn ?? '',
 });
@@ -85,11 +97,21 @@ const lineDraft = (l: Partial<BooksLine> = {}): LineDraft => ({
  * is an asset on the register, with its life, residual value and the day it left (`connected` only on a
  * tangible one); a credit reduces an asset, when it says which. Nothing else carries them.
  */
-function assetFieldsOf(d: Pick<LineDraft, 'ledger' | 'months' | 'connected' | 'disposedOn' | 'residual' | 'reduces'>, debit: boolean): Pick<BooksLine, 'asset' | 'reduces'> {
+function assetFieldsOf(d: Pick<LineDraft, 'ledger' | 'months' | 'connected' | 'disposedOn' | 'residual' | 'reduces'> & { tax?: AssetTax | undefined }, debit: boolean): Pick<BooksLine, 'asset' | 'reduces'> {
   const asset = ledgerCode(d.ledger)?.asset;
   if (asset?.part !== 'cost') return {};
   if (!debit) return d.reduces ? { reduces: d.reduces } : {};
-  return { asset: { class: asset.class, ...(d.months ? { months: d.months } : {}), ...(d.connected && asset.class !== 'intangible' ? { connected: true } : {}), ...(d.disposedOn ? { disposedOn: d.disposedOn } : {}), ...(d.residual ? { residual: d.residual } : {}) } };
+  // For tax only on plant capital allowances are worked out for (not an intangible asset or a car), each only where it fits.
+  const t = asset.class === 'intangible' || asset.class === 'motor' ? {} : (d.tax ?? {});
+  const connected = d.connected && asset.class !== 'intangible';
+  const tax = {
+    ...(connected && t.marketValue !== undefined ? { marketValue: t.marketValue } : {}),
+    ...(d.disposedOn && t.proceeds !== undefined ? { proceeds: t.proceeds } : {}),
+    ...(t.pool === 'special' ? { pool: 'special' as const } : {}),
+    ...(t.used ? { used: true } : {}),
+    ...(t.allowance && !(connected && t.allowance !== 'none') && !(t.used && t.allowance === 'first-year') ? { allowance: t.allowance } : {}),
+  };
+  return { asset: { class: asset.class, ...(d.months ? { months: d.months } : {}), ...(connected ? { connected: true } : {}), ...(d.disposedOn ? { disposedOn: d.disposedOn } : {}), ...(d.residual ? { residual: d.residual } : {}), ...tax } };
 }
 
 /** A coding's line from the form: on a row, money going out (a negative amount) is a debit in the company's books. */
@@ -166,7 +188,8 @@ function LineFields({ d, set, row, vatRegistered, vatFrom, showAmount, assets }:
         </Field>
       )}
       {entry?.asset?.part === 'cost' && debit && <AssetFields d={d} set={set} assetClass={entry.asset.class} />}
-      {entry?.asset?.part === 'cost' && debit && entry.asset.class !== 'intangible' && <Checkbox className="sm:col-span-2" checked={d.connected} onChange={(connected) => set({ connected })} label="Bought from a connected person (a director, or a company they control): no annual investment allowance, and its cost capped (CAA 2001 ss214–218)" />}
+      {entry?.asset?.part === 'cost' && debit && entry.asset.class !== 'intangible' && <Checkbox className="sm:col-span-2" checked={d.connected} onChange={(connected) => set({ connected })} label="Bought from a connected person (a director, or a company they control): no annual investment or first-year allowance (CAA 2001 s217), and its qualifying expenditure capped (s218)" />}
+      {entry?.asset?.part === 'cost' && debit && entry.asset.class !== 'intangible' && entry.asset.class !== 'motor' && <AssetTaxFields d={d} set={set} />}
       {entry?.asset?.part === 'cost' && !debit && <ReducesField value={d.reduces} onChange={(reduces) => set({ reduces })} assets={assets.filter((a) => a.ledger === d.ledger)} />}
     </div>
   );
@@ -185,6 +208,44 @@ function ReducesField({ value, onChange, assets }: { value: string; onChange: (v
         ))}
       </Select>
     </Field>
+  );
+}
+
+/** An asset's fields for Corporation Tax: its pool, the allowance chosen, second-hand, its market value when bought from a connected person, and what it fetched when it left. */
+function AssetTaxFields({ d, set }: { d: Pick<LineDraft, 'tax' | 'connected' | 'disposedOn'>; set: (p: Partial<Pick<LineDraft, 'tax'>>) => void }) {
+  const t = d.tax;
+  const put = (patch: Partial<AssetTax>) => set({ tax: Object.fromEntries(Object.entries({ ...t, ...patch }).filter(([, v]) => v !== undefined && v !== false)) });
+  return (
+    <details className="sm:col-span-2" open={Object.keys(t).length > 0}>
+      <summary className="cursor-pointer text-[12.5px] font-medium text-ink-2">For Corporation Tax (capital allowances)</summary>
+      <div className="mt-2 grid gap-3 sm:grid-cols-2">
+        <Field label="Pool" hint="Special rate: integral features, long-life assets, thermal insulation (CAA 2001 s104A). Most equipment is main rate.">
+          <Select value={t.pool ?? 'main'} onChange={(e) => put({ pool: e.target.value === 'special' ? 'special' : undefined })}>
+            <option value="main">Main rate</option>
+            <option value="special">Special rate</option>
+          </Select>
+        </Field>
+        <Field label="Allowance" hint="Usually: the annual investment allowance first, then full expensing (or 50% for special rate) on any excess, the rest to the pool.">
+          <Select value={t.allowance ?? ''} onChange={(e) => put({ allowance: (e.target.value || undefined) as AssetTax['allowance'] })}>
+            <option value="">The usual order</option>
+            {!d.connected && <option value="aia">Annual investment allowance</option>}
+            {!d.connected && !t.used && <option value="first-year">Full expensing or 50% (CAA 2001 s45S)</option>}
+            <option value="none">Writing-down allowances only</option>
+          </Select>
+        </Field>
+        <Checkbox className="sm:col-span-2" checked={t.used === true} onChange={(used) => put({ used: used || undefined, ...(used && t.allowance === 'first-year' ? { allowance: undefined } : {}) })} label="Second-hand, or used before it was bought: no full expensing or 50% allowance (CAA 2001 s45S)" />
+        {d.connected && (
+          <Field label="Its market value when bought" hint="Its qualifying expenditure is capped at the seller’s disposal value, or the smallest of its market value and the seller’s own cost (CAA 2001 s218). Empty: its cost is used, and the computation asks you to confirm it.">
+            <NumberInput value={t.marketValue} onValue={(marketValue) => put({ marketValue })} className="sensitive tabular" />
+          </Field>
+        )}
+        {d.disposedOn && (
+          <Field label="What it fetched" hint="Net of VAT: its disposal value, at most its cost (CAA 2001 ss61–62). Empty: what was coded to profit or loss on disposal in the period, when it alone left then.">
+            <NumberInput value={t.proceeds} onValue={(proceeds) => put({ proceeds })} className="sensitive tabular" />
+          </Field>
+        )}
+      </div>
+    </details>
   );
 }
 
@@ -520,11 +581,11 @@ interface JournalLineDraft {
   residual: number | undefined;
   reduces: string;
   /** What the form does not show, kept as it was on an edit while its ledger takes it: VAT, covers and the day invoiced, a connected seller. */
-  rest: Pick<JournalLine, 'vat' | 'covers' | 'invoicedOn'> & { connected?: boolean };
+  rest: Pick<JournalLine, 'vat' | 'covers' | 'invoicedOn'> & { connected?: boolean; tax?: AssetTax };
 }
 const journalLineDraft = (l?: JournalLine): JournalLineDraft => {
   const { ledger = '', amount, asset, reduces, ...rest } = l ?? {};
-  return { ledger, amount, months: asset?.months, disposedOn: asset?.disposedOn ?? '', residual: asset?.residual, reduces: reduces ?? '', rest: { ...rest, ...(asset?.connected ? { connected: true } : {}) } };
+  return { ledger, amount, months: asset?.months, disposedOn: asset?.disposedOn ?? '', residual: asset?.residual, reduces: reduces ?? '', rest: { ...rest, ...(asset?.connected ? { connected: true } : {}), ...(asset ? { tax: taxOfAsset(asset) } : {}) } };
 };
 /**
  * A journal's line from the form: what is kept from an edit only where its ledger now takes it (VAT on
@@ -532,7 +593,7 @@ const journalLineDraft = (l?: JournalLine): JournalLineDraft => {
  * it), and the fixed asset fields on a cost code by its side (a debit is an asset, a credit reduces one).
  */
 const journalLineOf = (d: JournalLineDraft): JournalLine => {
-  const { connected, vat, covers, invoicedOn } = d.rest;
+  const { connected, vat, covers, invoicedOn, tax } = d.rest;
   const kind = ledgerCode(d.ledger)?.kind;
   const spreads = kind === 'income' || kind === 'expense';
   return {
@@ -540,7 +601,7 @@ const journalLineOf = (d: JournalLineDraft): JournalLine => {
     amount: d.amount!,
     ...(vat && (takesVat(d.ledger) || d.ledger === 'vat') ? { vat } : {}),
     ...(covers && spreads ? { covers, ...(invoicedOn ? { invoicedOn } : {}) } : {}),
-    ...assetFieldsOf({ ...d, connected: connected === true }, (d.amount ?? 0) > 0),
+    ...assetFieldsOf({ ...d, connected: connected === true, tax }, (d.amount ?? 0) > 0),
   };
 };
 

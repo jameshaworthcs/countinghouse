@@ -19,9 +19,10 @@ import { KeepBooks } from '../components/KeepBooks';
 import { BooksTab } from '../components/CompanyLedger';
 import { AccountsTab } from '../components/CompanyAccounts';
 import { VatTab } from '../components/CompanyVat';
+import { CorporationTaxTab } from '../components/CompanyTax';
 import { cn } from '../lib/format';
 
-type Tab = 'overview' | 'books' | 'accounts' | 'vat' | 'settings';
+type Tab = 'overview' | 'books' | 'accounts' | 'vat' | 'corporation-tax' | 'settings';
 
 /** A deadline's state, as a badge: done (filed late marked), overdue, due within 14 days, due soon, later. */
 function DeadlineBadge({ d }: { d: CompanyDeadline }) {
@@ -335,6 +336,10 @@ function draftOf(books: CompanyBooks | null): Draft {
     policies: books?.policies ?? [],
     ...(books?.depreciationMonths ? { depreciationMonths: books.depreciationMonths } : {}),
     ...(books?.lockedThrough ? { lockedThrough: books.lockedThrough } : {}),
+    associatedCompanies: books?.associatedCompanies ?? [],
+    aiaAllocated: books?.aiaAllocated ?? [],
+    ...(books?.closeInvestmentHolding !== undefined ? { closeInvestmentHolding: books.closeInvestmentHolding } : {}),
+    ...(books?.taxBroughtForward ? { taxBroughtForward: books.taxBroughtForward } : {}),
     within: books?.withinChargeFrom === null ? 'dormant' : books?.withinChargeFrom ? 'on' : 'assumed',
     withinOn: books?.withinChargeFrom ?? '',
     tradeOn: books?.tradeStartedOn ?? '',
@@ -359,9 +364,102 @@ function setupOf(d: Draft): CompanyBooksSetup {
     ...(d.policies?.length ? { policies: d.policies.map((p) => ({ class: p.class, months: p.months, ...(p.effectiveFrom ? { effectiveFrom: p.effectiveFrom } : {}) })) } : {}),
     ...(d.depreciationMonths ? { depreciationMonths: d.depreciationMonths } : {}),
     ...(d.lockedThrough ? { lockedThrough: d.lockedThrough } : {}),
+    ...(d.associatedCompanies?.length ? { associatedCompanies: d.associatedCompanies.filter((a) => a.periodEnd) } : {}),
+    ...(d.aiaAllocated?.length ? { aiaAllocated: d.aiaAllocated.filter((a) => a.periodEnd) } : {}),
+    ...(d.closeInvestmentHolding !== undefined && d.closeInvestmentHolding !== null ? { closeInvestmentHolding: d.closeInvestmentHolding } : {}),
+    ...(d.ledgerFrom && d.taxBroughtForward ? { taxBroughtForward: d.taxBroughtForward } : {}),
     ...(d.within === 'dormant' ? { withinChargeFrom: null } : d.within === 'on' && d.withinOn ? { withinChargeFrom: d.withinOn } : {}),
     ...(d.tradeOn ? { tradeStartedOn: d.tradeOn } : {}),
   };
+}
+
+type BroughtForward = NonNullable<CompanyBooksSetup['taxBroughtForward']>;
+const BROUGHT_FORWARD: [keyof BroughtForward, string][] = [
+  ['mainPool', 'Main pool'],
+  ['specialPool', 'Special rate pool'],
+  ['tradingLosses', 'Trading losses'],
+  ['nonTradingDeficits', 'Non-trading deficits'],
+  ['preTradingExpenditure', 'Pre-trading expenditure'],
+];
+
+/** What the Corporation Tax computation needs to know beside the books: close investment-holding status, associated companies and the AIA shared, by CT period, and figures brought forward. */
+function CorporationTaxFields({ d, set, ctPeriods }: { d: Draft; set: (patch: Partial<Draft>) => void; ctPeriods: CompanyBooksResponse['periods']['ct'] }) {
+  const ends = [...ctPeriods].reverse().map((p) => p.end);
+  const assoc = d.associatedCompanies ?? [];
+  const aia = d.aiaAllocated ?? [];
+  const bf = d.taxBroughtForward;
+  const periodSelect = (value: string, onChange: (v: string) => void) => (
+    <Select aria-label="Corporation Tax period" value={value} onChange={(e) => onChange(e.target.value)} className="w-56">
+      <option value="">Choose a period…</option>
+      {[...new Set([...ends, value].filter(Boolean))].map((e) => (
+        <option key={e} value={e}>
+          {(() => {
+            const p = ctPeriods.find((x) => x.end === e);
+            return p ? formatSpan(p.start, p.end) : `to ${formatDate(e)}`;
+          })()}
+        </option>
+      ))}
+    </Select>
+  );
+  return (
+    <div className="grid gap-4 border-t border-line pt-4">
+      <span className="text-[12.5px] font-medium text-ink-2">Corporation Tax</span>
+      <Field label="Close investment-holding company" className="sm:max-w-xl" hint="A close company (one run by five or fewer people, or by its directors) pays the main rate on all its profits as one (CTA 2010 s18N) unless it exists wholly or mainly for a permitted purpose, such as trading on a commercial basis or letting land to people not connected with it. A trading company is not one. Before it trades, HMRC accepts that a company can exist to trade in a period with no trading income, but says that “would be exceptional” (CTM60720); a company with only interest on its bank account may be one. It is for you to decide.">
+        <Select value={d.closeInvestmentHolding === undefined || d.closeInvestmentHolding === null ? '' : d.closeInvestmentHolding ? 'yes' : 'no'} onChange={(e) => set({ closeInvestmentHolding: e.target.value === '' ? null : e.target.value === 'yes' })}>
+          <option value="">Not said</option>
+          <option value="no">No: it exists to trade (or another permitted purpose)</option>
+          <option value="yes">Yes: it pays the main rate</option>
+        </Select>
+      </Field>
+      <div className="flex flex-col gap-1.5">
+        <span className="text-[12.5px] font-medium text-ink-2">Associated companies</span>
+        {assoc.map((a, i) => (
+          <div key={i} className="flex flex-wrap items-center gap-2">
+            {periodSelect(a.periodEnd, (periodEnd) => set({ associatedCompanies: assoc.map((x, j) => (j === i ? { ...x, periodEnd } : x)) }))}
+            <NumberInput aria-label="Number of associated companies" value={a.count} onValue={(v) => set({ associatedCompanies: assoc.map((x, j) => (j === i ? { ...x, count: Math.max(0, Math.round(v ?? 0)) } : x)) })} className="w-20 tabular" />
+            <Button size="sm" variant="ghost" icon={<Trash2 className="size-3.5" />} aria-label="Take it away" onClick={() => set({ associatedCompanies: assoc.filter((_, j) => j !== i) })} />
+          </div>
+        ))}
+        <div>
+          <Button size="sm" icon={<Plus className="size-3.5" />} onClick={() => set({ associatedCompanies: [...assoc, { periodEnd: ends.find((e) => !assoc.some((a) => a.periodEnd === e)) ?? '', count: 0 }] })}>
+            Say how many for a period
+          </Button>
+        </div>
+        <span className="text-[12px] text-ink-3">Another company is associated with this one when one controls the other, or both are under the same control (yours, say), for any part of the period (CTA 2010 s18E; control as in ss450–451). One that carried on no trade or business in the period is left out, and so is a passive holding company (s18F). The small profits limits are divided by one more than the number. A period with none said is taken as none.</span>
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <span className="text-[12.5px] font-medium text-ink-2">Annual investment allowance shared</span>
+        {aia.map((a, i) => (
+          <div key={i} className="flex flex-wrap items-center gap-2">
+            {periodSelect(a.periodEnd, (periodEnd) => set({ aiaAllocated: aia.map((x, j) => (j === i ? { ...x, periodEnd } : x)) }))}
+            <NumberInput aria-label="Allowance allocated to this company" value={a.amount} onValue={(v) => set({ aiaAllocated: aia.map((x, j) => (j === i ? { ...x, amount: Math.max(0, v ?? 0) } : x)) })} className="sensitive w-32 tabular" />
+            <Button size="sm" variant="ghost" icon={<Trash2 className="size-3.5" />} aria-label="Take it away" onClick={() => set({ aiaAllocated: aia.filter((_, j) => j !== i) })} />
+          </div>
+        ))}
+        <div>
+          <Button size="sm" icon={<Plus className="size-3.5" />} onClick={() => set({ aiaAllocated: [...aia, { periodEnd: ends.find((e) => !aia.some((a) => a.periodEnd === e)) ?? '', amount: 0 }] })}>
+            Give its share for a period
+          </Button>
+        </div>
+        <span className="text-[12px] text-ink-3">A company in a group, or controlled by the same person as a related company (sharing premises or mainly the same activities), shares one annual investment allowance with them, allocated as they choose (CAA 2001 ss51B–51N). Give what is allocated to this one; with none given, it has the whole limit.</span>
+      </div>
+      {d.ledgerFrom && (
+        <div className="flex flex-col gap-1.5">
+          <Checkbox checked={Boolean(bf)} onChange={(v) => set({ taxBroughtForward: v ? {} : undefined })} label="Give the tax figures carried forward to these books (from its last Corporation Tax computation)" />
+          {bf && (
+            <div className="grid gap-3 sm:grid-cols-3">
+              {BROUGHT_FORWARD.map(([k, label]) => (
+                <Field key={k} label={label}>
+                  <NumberInput value={bf[k]} onValue={(v) => set({ taxBroughtForward: { ...bf, [k]: v === undefined ? undefined : Math.max(0, v) } })} className="sensitive tabular" />
+                </Field>
+              ))}
+            </div>
+          )}
+          <span className="text-[12px] text-ink-3">Its books start mid-life, so the written-down values of its pools, losses and deficits carried forward, and pre-trading expenditure not yet relieved, come from its last computation (trading losses from 1 April 2017). Empty is nil; ticking with all empty says there are none.</span>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function BooksForm({ view, onSaved }: { view: CompanyBooksResponse; onSaved?: () => void }) {
@@ -515,6 +613,8 @@ function BooksForm({ view, onSaved }: { view: CompanyBooksResponse; onSaved?: ()
             <Input type="date" value={d.ledgerFrom ?? ''} onChange={(e) => set({ ledgerFrom: e.target.value || undefined })} />
           </Field>
         </div>
+
+        <CorporationTaxFields d={d} set={set} ctPeriods={view.periods.ct} />
 
         <PoliciesField value={d.policies ?? []} onChange={(policies) => set({ policies })} convention={d.depreciationMonths} onConvention={(depreciationMonths) => set({ depreciationMonths })} />
 
@@ -777,7 +877,7 @@ function FilingsCard({ view, onRecord }: { view: CompanyBooksResponse; onRecord:
 
 export default function Company() {
   const { id = '', tab: tabParam } = useParams();
-  const tab: Tab = tabParam === 'settings' || tabParam === 'books' || tabParam === 'accounts' || tabParam === 'vat' ? tabParam : 'overview';
+  const tab: Tab = tabParam === 'settings' || tabParam === 'books' || tabParam === 'accounts' || tabParam === 'vat' || tabParam === 'corporation-tax' ? tabParam : 'overview';
   const navigate = useNavigate();
   const q = useApi<CompanyBooksResponse>(['company-books', id], `/companies/${id}/books`);
   const list = useApi<CompanyBooksListItem[]>(['company-books'], '/company-books');
@@ -818,6 +918,7 @@ export default function Company() {
               { value: 'books', label: 'Books' },
               { value: 'accounts', label: 'Accounts' },
               { value: 'vat', label: 'VAT' },
+              { value: 'corporation-tax', label: 'Corporation Tax' },
               { value: 'settings', label: 'Settings' },
             ]}
           />
@@ -836,6 +937,8 @@ export default function Company() {
               <AccountsTab key={view.company.id} companyId={view.company.id} />
             ) : tab === 'vat' ? (
               <VatTab key={view.company.id} companyId={view.company.id} filings={view.books.filings} />
+            ) : tab === 'corporation-tax' ? (
+              <CorporationTaxTab key={view.company.id} companyId={view.company.id} />
             ) : (
               <>
                 {/* Keyed by the company too: switching company never leaves one's draft under another's id. */}
