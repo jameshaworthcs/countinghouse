@@ -279,34 +279,40 @@ function PeriodsField({ label, hint, value, onChange }: { label: string; hint: R
 
 type Policy = NonNullable<CompanyBooksSetup['policies']>[number];
 
-/** Its depreciation policies: a life in months for each class of asset whose own coding gives none. */
-function PoliciesField({ value, onChange }: { value: Policy[]; onChange: (v: Policy[]) => void }) {
-  const free = ASSET_REGISTER_CLASSES.filter((c) => !value.some((p) => p.class === c));
+/** Its depreciation policies: a life in months for each class of asset whose own coding gives none, from a day when it changed. */
+function PoliciesField({ value, onChange, convention, onConvention }: { value: Policy[]; onChange: (v: Policy[]) => void; convention: CompanyBooksSetup['depreciationMonths']; onConvention: (v: CompanyBooksSetup['depreciationMonths']) => void }) {
   return (
     <div className="flex flex-col gap-1.5 border-t border-line pt-4">
       <span className="text-[12.5px] font-medium text-ink-2">Depreciation policies</span>
       {value.map((p, i) => (
-        <div key={p.class} className="flex flex-wrap items-center gap-2">
+        <div key={i} className="flex flex-wrap items-center gap-2">
           <Select aria-label="Class of asset" value={p.class} onChange={(e) => onChange(value.map((x, j) => (j === i ? { ...x, class: e.target.value as Policy['class'] } : x)))} className="w-56">
-            {[p.class, ...free].map((c) => (
+            {ASSET_REGISTER_CLASSES.map((c) => (
               <option key={c} value={c}>
                 {FIXED_ASSET_CLASS_META[c].name}
               </option>
             ))}
           </Select>
           <NumberInput aria-label="Life in months" value={p.months || undefined} onValue={(v) => onChange(value.map((x, j) => (j === i ? { ...x, months: v === undefined ? 0 : Math.max(0, Math.round(v)) } : x)))} className="w-24 tabular" />
-          <span className="text-[12.5px] text-ink-3">months</span>
+          <span className="text-[12.5px] text-ink-3">months, from</span>
+          <Input type="date" aria-label="From (empty: from the start)" value={p.effectiveFrom ?? ''} onChange={(e) => onChange(value.map((x, j) => (j === i ? { class: x.class, months: x.months, ...(e.target.value ? { effectiveFrom: e.target.value } : {}) } : x)))} className="w-40" />
           <Button size="sm" variant="ghost" icon={<Trash2 className="size-3.5" />} aria-label="Take it away" onClick={() => onChange(value.filter((_, j) => j !== i))} />
         </div>
       ))}
-      {free.length > 0 && (
-        <div>
-          <Button size="sm" icon={<Plus className="size-3.5" />} onClick={() => onChange([...value, { class: free[0]!, months: 36 }])}>
-            Add a policy
-          </Button>
-        </div>
-      )}
-      <span className="text-[12px] text-ink-3">The life a fixed asset is written down over, straight line by whole months (the month it was bought in full), when its own coding gives none. With neither, the books ask for one.</span>
+      <div>
+        <Button size="sm" icon={<Plus className="size-3.5" />} onClick={() => onChange([...value, { class: ASSET_REGISTER_CLASSES.find((c) => !value.some((p) => p.class === c)) ?? 'computer', months: 0 }])}>
+          Add a policy
+        </Button>
+      </div>
+      <span className="text-[12px] text-ink-3">
+        The life a fixed asset is written down over, straight line by whole months, when its own coding gives none: give the life the company decides on. A later row for the same class, from a day, is a change in estimate (FRS 105 para 12.18): from then, what is left of each asset’s cost is written down over what is left of the new life, and earlier periods are left as they were. With no policy and no life of its own, the books ask for one.
+      </span>
+      <Field label="Months counted" className="mt-2 sm:max-w-xl">
+        <Select value={convention ?? 'acquisition'} onChange={(e) => onConvention(e.target.value as CompanyBooksSetup['depreciationMonths'])}>
+          <option value="acquisition">A full month when bought, none when it leaves (usual)</option>
+          <option value="both">A full month when bought and when it leaves</option>
+        </Select>
+      </Field>
     </div>
   );
 }
@@ -326,6 +332,8 @@ function draftOf(books: CompanyBooks | null): Draft {
     ...(books?.deadlinesFrom ? { deadlinesFrom: books.deadlinesFrom } : {}),
     ...(books?.ledgerFrom ? { ledgerFrom: books.ledgerFrom } : {}),
     policies: books?.policies ?? [],
+    ...(books?.depreciationMonths ? { depreciationMonths: books.depreciationMonths } : {}),
+    ...(books?.lockedThrough ? { lockedThrough: books.lockedThrough } : {}),
     within: books?.withinChargeFrom === null ? 'dormant' : books?.withinChargeFrom ? 'on' : 'assumed',
     withinOn: books?.withinChargeFrom ?? '',
     tradeOn: books?.tradeStartedOn ?? '',
@@ -347,7 +355,9 @@ function setupOf(d: Draft): CompanyBooksSetup {
     ...(d.confirmationStatement?.nextMadeUpTo ? { confirmationStatement: d.confirmationStatement } : {}),
     ...(d.deadlinesFrom ? { deadlinesFrom: d.deadlinesFrom } : {}),
     ...(d.ledgerFrom ? { ledgerFrom: d.ledgerFrom } : {}),
-    ...(d.policies?.length ? { policies: d.policies } : {}),
+    ...(d.policies?.length ? { policies: d.policies.map((p) => ({ class: p.class, months: p.months, ...(p.effectiveFrom ? { effectiveFrom: p.effectiveFrom } : {}) })) } : {}),
+    ...(d.depreciationMonths ? { depreciationMonths: d.depreciationMonths } : {}),
+    ...(d.lockedThrough ? { lockedThrough: d.lockedThrough } : {}),
     ...(d.within === 'dormant' ? { withinChargeFrom: null } : d.within === 'on' && d.withinOn ? { withinChargeFrom: d.withinOn } : {}),
     ...(d.tradeOn ? { tradeStartedOn: d.tradeOn } : {}),
   };
@@ -505,7 +515,20 @@ function BooksForm({ view, onSaved }: { view: CompanyBooksResponse; onSaved?: ()
           </Field>
         </div>
 
-        <PoliciesField value={d.policies ?? []} onChange={(policies) => set({ policies })} />
+        <PoliciesField value={d.policies ?? []} onChange={(policies) => set({ policies })} convention={d.depreciationMonths} onConvention={(depreciationMonths) => set({ depreciationMonths })} />
+
+        <div className="grid gap-4 border-t border-line pt-4 sm:grid-cols-2">
+          <Field label="Books locked through" hint="Set to a period’s end when its accounts are recorded as filed: nothing that changes a posting on or before it is written (codings, journals, links, marks, assets, policies). A correction goes through a journal in a later period.">
+            <Input type="date" value={d.lockedThrough ?? ''} onChange={(e) => set({ lockedThrough: e.target.value || undefined })} />
+          </Field>
+          {view.books?.lockedThrough && d.lockedThrough !== view.books.lockedThrough && (
+            <Callout tone="warn" title="Moving the lock">
+              {d.lockedThrough && d.lockedThrough > view.books.lockedThrough
+                ? 'Later: more of the books are kept as they are.'
+                : `Earlier or none: the books of periods whose accounts are filed (to ${formatDate(view.books.lockedThrough)}) can then be changed, and will no longer match what was filed. Do it only to put right a filing that was itself wrong (accounts revised under CA 2006 s454).`}
+            </Callout>
+          )}
+        </div>
 
         <div className="flex flex-wrap items-center gap-3">
           <Button variant="primary" loading={save.isPending} disabled={!d.incorporatedOn || (d.policies ?? []).some((p) => !p.months)} onClick={() => save.mutate(undefined)}>

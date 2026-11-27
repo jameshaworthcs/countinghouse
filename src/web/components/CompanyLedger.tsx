@@ -7,7 +7,7 @@ import { Link2, Plus, Trash2, Unlink, Wand2 } from 'lucide-react';
 import { useMemo, useState, type ReactNode } from 'react';
 import type { BooksRowView, CompanyCodingResponse, CompanyLedgerResponse, LedgerCheck, LinkSuggestion } from '../../shared/api';
 import { addDays, formatDate, today } from '../../shared/dates';
-import { FIXED_ASSET_CLASS_META, LEDGER_CODES, ledgerCode, ledgerName, reverseChargeVat, vatInGross, VAT_TREATMENT_LABELS, type AssetRegisterClass, type LedgerKind } from '../../shared/ledger';
+import { FIXED_ASSET_CLASS_META, LEDGER_CODES, ledgerCode, ledgerName, reverseChargeVat, takesVat, vatInGross, VAT_TREATMENT_LABELS, type AssetRegisterClass, type LedgerKind } from '../../shared/ledger';
 import { fromMinor, toMinor } from '../../shared/money';
 import { VAT_TREATMENTS, type BooksCoding, type BooksLine, type Journal, type JournalInput, type JournalLine, type Rule, type VatTreatment } from '../../shared/schema';
 import { api, useApi, useApiMutation } from '../lib/api';
@@ -59,23 +59,57 @@ interface LineDraft {
   reg111: boolean;
   connected: boolean;
   disposedOn: string;
+  residual: number | undefined;
+  /** On a credit to a cost code: the asset whose cost it reduces. */
+  reduces: string;
+  invoicedOn: string;
 }
-const lineDraft = (l: Partial<BooksLine> = {}): LineDraft => ({ ledger: l.ledger ?? '', amount: l.amount, treatment: l.vat?.treatment ?? '', vat: l.vat?.amount, coversFrom: l.covers?.from ?? '', coversTo: l.covers?.to ?? '', months: l.asset?.months, reg111: l.vat?.claim === 'reg111', connected: l.asset?.connected === true, disposedOn: l.asset?.disposedOn ?? '' });
+const lineDraft = (l: Partial<BooksLine> = {}): LineDraft => ({
+  ledger: l.ledger ?? '',
+  amount: l.amount,
+  treatment: l.vat?.treatment ?? '',
+  vat: l.vat?.amount,
+  coversFrom: l.covers?.from ?? '',
+  coversTo: l.covers?.to ?? '',
+  months: l.asset?.months,
+  reg111: l.vat?.claim === 'reg111',
+  connected: l.asset?.connected === true,
+  disposedOn: l.asset?.disposedOn ?? '',
+  residual: l.asset?.residual,
+  reduces: l.reduces ?? '',
+  invoicedOn: l.invoicedOn ?? '',
+});
+
+/**
+ * The fixed asset fields a line takes (FORMULAS.md §22, "The register"): on a cost code, a debit (`debit`)
+ * is an asset on the register, with its life, residual value and the day it left (`connected` only on a
+ * tangible one); a credit reduces an asset, when it says which. Nothing else carries them.
+ */
+function assetFieldsOf(d: Pick<LineDraft, 'ledger' | 'months' | 'connected' | 'disposedOn' | 'residual' | 'reduces'>, debit: boolean): Pick<BooksLine, 'asset' | 'reduces'> {
+  const asset = ledgerCode(d.ledger)?.asset;
+  if (asset?.part !== 'cost') return {};
+  if (!debit) return d.reduces ? { reduces: d.reduces } : {};
+  return { asset: { class: asset.class, ...(d.months ? { months: d.months } : {}), ...(d.connected && asset.class !== 'intangible' ? { connected: true } : {}), ...(d.disposedOn ? { disposedOn: d.disposedOn } : {}), ...(d.residual ? { residual: d.residual } : {}) } };
+}
+
+/** A coding's line from the form: on a row, money going out (a negative amount) is a debit in the company's books. */
 const lineOf = (d: LineDraft): BooksLine => {
-  const assetClass = ledgerCode(d.ledger)?.asset?.part === 'cost' ? ledgerCode(d.ledger)!.asset!.class : undefined;
+  const covers = d.coversFrom && d.coversTo ? { covers: { from: d.coversFrom, to: d.coversTo } } : {};
   return {
     ledger: d.ledger,
     amount: d.amount ?? 0,
     ...(d.treatment ? { vat: { amount: d.vat ?? 0, treatment: d.treatment, ...(d.reg111 ? { claim: 'reg111' as const } : {}) } } : {}),
-    ...(d.coversFrom && d.coversTo ? { covers: { from: d.coversFrom, to: d.coversTo } } : {}),
-    ...(assetClass ? { asset: { class: assetClass, ...(d.months ? { months: d.months } : {}), ...(d.connected ? { connected: true } : {}), ...(d.disposedOn ? { disposedOn: d.disposedOn } : {}) } } : {}),
+    ...covers,
+    ...(covers.covers && d.invoicedOn ? { invoicedOn: d.invoicedOn } : {}),
+    ...assetFieldsOf(d, (d.amount ?? 0) < 0),
   };
 };
 
 /** One line of a coding: its ledger, VAT (with the helper that takes it out of a VAT-inclusive amount), the period it covers and an asset's life. */
-function LineFields({ d, set, row, vatRegistered, vatFrom, showAmount }: { d: LineDraft; set: (p: Partial<LineDraft>) => void; row: BooksRowView; vatRegistered: boolean; vatFrom: string | undefined; showAmount: boolean }) {
+function LineFields({ d, set, row, vatRegistered, vatFrom, showAmount, assets }: { d: LineDraft; set: (p: Partial<LineDraft>) => void; row: BooksRowView; vatRegistered: boolean; vatFrom: string | undefined; showAmount: boolean; assets: CompanyCodingResponse['assets'] }) {
   const entry = ledgerCode(d.ledger);
   const gross = d.amount ?? row.amount;
+  const debit = gross < 0;
   return (
     <div className="grid gap-3 sm:grid-cols-2">
       <Field label="Ledger" className="sm:col-span-2" hint={entry?.hint}>
@@ -126,14 +160,36 @@ function LineFields({ d, set, row, vatRegistered, vatFrom, showAmount }: { d: Li
       <Field label="Covers (to)">
         <Input type="date" value={d.coversTo} onChange={(e) => set({ coversTo: e.target.value })} />
       </Field>
-      {entry?.asset?.part === 'cost' && <AssetFields d={d} set={set} assetClass={entry.asset.class} />}
-      {entry?.asset?.part === 'cost' && entry.asset.class !== 'intangible' && <Checkbox className="sm:col-span-2" checked={d.connected} onChange={(connected) => set({ connected })} label="Bought from a connected person (a director, or a company they control): no annual investment allowance, and its cost capped (CAA 2001 ss214–218)" />}
+      {d.coversFrom && d.coversTo && (
+        <Field label="Invoiced on" hint="The day the bill or invoice for it was issued, if it was: unpaid at a period end, it is then a trade creditor or debtor rather than an accrual.">
+          <Input type="date" value={d.invoicedOn} onChange={(e) => set({ invoicedOn: e.target.value })} />
+        </Field>
+      )}
+      {entry?.asset?.part === 'cost' && debit && <AssetFields d={d} set={set} assetClass={entry.asset.class} />}
+      {entry?.asset?.part === 'cost' && debit && entry.asset.class !== 'intangible' && <Checkbox className="sm:col-span-2" checked={d.connected} onChange={(connected) => set({ connected })} label="Bought from a connected person (a director, or a company they control): no annual investment allowance, and its cost capped (CAA 2001 ss214–218)" />}
+      {entry?.asset?.part === 'cost' && !debit && <ReducesField value={d.reduces} onChange={(reduces) => set({ reduces })} assets={assets.filter((a) => a.ledger === d.ledger)} />}
     </div>
   );
 }
 
+/** Money back on a fixed asset's cost (a supplier's part refund, a cost moved off it): the asset whose cost it reduces. */
+function ReducesField({ value, onChange, assets }: { value: string; onChange: (v: string) => void; assets: CompanyCodingResponse['assets'] }) {
+  return (
+    <Field label="Reduces the cost of" className="sm:col-span-2" hint="A credit to a fixed asset’s cost reduces one asset on the register: its net book value is then written down over what is left of its life. Without one, the books ask.">
+      <Select value={value} onChange={(e) => onChange(e.target.value)} aria-label="The asset it reduces">
+        <option value="">Choose an asset…</option>
+        {assets.map((a) => (
+          <option key={a.id} value={a.id}>
+            {a.memo} · {formatDate(a.acquired)} · {formatMoneyPlain(fromMinor(a.cost))}
+          </option>
+        ))}
+      </Select>
+    </Field>
+  );
+}
+
 /** A fixed asset's life (empty: the company's policy for its class) and the day it left the company. */
-function AssetFields({ d, set, assetClass }: { d: Pick<LineDraft, 'months' | 'disposedOn'>; set: (p: Partial<Pick<LineDraft, 'months' | 'disposedOn'>>) => void; assetClass: AssetRegisterClass }) {
+function AssetFields({ d, set, assetClass }: { d: Pick<LineDraft, 'months' | 'disposedOn' | 'residual'>; set: (p: Partial<Pick<LineDraft, 'months' | 'disposedOn' | 'residual'>>) => void; assetClass: AssetRegisterClass }) {
   const meta = FIXED_ASSET_CLASS_META[assetClass];
   const tax = meta.capitalAllowances === 'not-supported' ? ' Capital allowances on cars are not worked out here.' : meta.capitalAllowances === 'intangibles' ? ' For tax, the intangibles regime (CTA 2009 Part 8).' : '';
   return (
@@ -141,7 +197,10 @@ function AssetFields({ d, set, assetClass }: { d: Pick<LineDraft, 'months' | 'di
       <Field label={`${meta.name}: life in months`} hint={`Its cost is written down over it, straight line, the month it was bought in full. Empty: the company’s policy for the class (Settings).${tax}`}>
         <NumberInput value={d.months} onValue={(months) => set({ months: months === undefined ? undefined : Math.round(months) })} className="tabular" />
       </Field>
-      <Field label="Left the company on" hint="Sold, scrapped or given away: depreciation stops at that month, and its cost and depreciation leave the books. Code what it fetched to profit or loss on disposal.">
+      <Field label="Residual value" hint="What it is expected to fetch at the end of its life: only its cost less this is written down. Empty: nothing.">
+        <NumberInput value={d.residual} onValue={(residual) => set({ residual })} className="sensitive tabular" />
+      </Field>
+      <Field label="Left the company on" hint="Sold, scrapped or given away: depreciation stops (the month it left is counted as the company’s policy says), and its cost and depreciation leave the books. Code what it fetched to profit or loss on disposal.">
         <Input type="date" value={d.disposedOn} onChange={(e) => set({ disposedOn: e.target.value })} />
       </Field>
     </>
@@ -149,10 +208,14 @@ function AssetFields({ d, set, assetClass }: { d: Pick<LineDraft, 'months' | 'di
 }
 
 /** The coding editor: one ledger, or a split across lines that add up to the row. */
-function CodingDialog({ companyId, row, vat, onClose }: { companyId: string; row: BooksRowView; vat: CompanyCodingResponse['vat']; onClose: () => void }) {
+function CodingDialog({ companyId, row, vat, assets, onClose }: { companyId: string; row: BooksRowView; vat: CompanyCodingResponse['vat']; assets: CompanyCodingResponse['assets']; onClose: () => void }) {
   const toast = useToast();
   const b = row.books;
-  const [lines, setLines] = useState<LineDraft[]>(b?.lines?.length ? b.lines.map(lineDraft) : [lineDraft(b && !b.uncoded ? { ledger: b.ledger ?? '', amount: row.amount, ...(b.vat ? { vat: b.vat } : {}), ...(b.covers ? { covers: b.covers } : {}), ...(b.asset ? { asset: b.asset } : {}) } : { amount: row.amount })]);
+  const [lines, setLines] = useState<LineDraft[]>(
+    b?.lines?.length
+      ? b.lines.map(lineDraft)
+      : [lineDraft(b && !b.uncoded ? { ledger: b.ledger ?? '', amount: row.amount, ...(b.vat ? { vat: b.vat } : {}), ...(b.covers ? { covers: b.covers } : {}), ...(b.asset ? { asset: b.asset } : {}), ...(b.reduces ? { reduces: b.reduces } : {}), ...(b.invoicedOn ? { invoicedOn: b.invoicedOn } : {}) } : { amount: row.amount })],
+  );
   const [invoiced, setInvoiced] = useState(b?.invoiceToCompany === true);
   const split = lines.length > 1;
   const vatRegistered = Boolean(vat && row.date >= vat.registeredFrom && (!vat.deregisteredOn || row.date <= vat.deregisteredOn));
@@ -208,7 +271,7 @@ function CodingDialog({ companyId, row, vat, onClose }: { companyId: string; row
                 </Button>
               </div>
             )}
-            <LineFields d={l} set={set(i)} row={row} vatRegistered={vatRegistered} vatFrom={vat?.registeredFrom} showAmount={split} />
+            <LineFields d={{ ...l, ...(split ? {} : { amount: row.amount }) }} set={set(i)} row={row} vatRegistered={vatRegistered} vatFrom={vat?.registeredFrom} showAmount={split} assets={assets} />
           </div>
         ))}
         <div className="flex flex-wrap items-center gap-3 text-[12.5px] text-ink-3">
@@ -337,7 +400,7 @@ function RowsCard({ view, companyId }: { view: CompanyCodingResponse; companyId:
           )}
         </div>
       )}
-      {editing && <CodingDialog companyId={companyId} row={editing} vat={view.vat} onClose={() => setEditing(null)} />}
+      {editing && <CodingDialog companyId={companyId} row={editing} vat={view.vat} assets={view.assets} onClose={() => setEditing(null)} />}
     </Card>
   );
 }
@@ -454,21 +517,35 @@ interface JournalLineDraft {
   amount: number | undefined;
   months: number | undefined;
   disposedOn: string;
-  /** What the form does not show, kept as it was on an edit: VAT, covers, a connected seller. */
-  rest: Omit<JournalLine, 'ledger' | 'amount' | 'asset'> & { connected?: boolean };
+  residual: number | undefined;
+  reduces: string;
+  /** What the form does not show, kept as it was on an edit while its ledger takes it: VAT, covers and the day invoiced, a connected seller. */
+  rest: Pick<JournalLine, 'vat' | 'covers' | 'invoicedOn'> & { connected?: boolean };
 }
 const journalLineDraft = (l?: JournalLine): JournalLineDraft => {
-  const { ledger = '', amount, asset, ...rest } = l ?? {};
-  return { ledger, amount, months: asset?.months, disposedOn: asset?.disposedOn ?? '', rest: { ...rest, ...(asset?.connected ? { connected: true } : {}) } };
+  const { ledger = '', amount, asset, reduces, ...rest } = l ?? {};
+  return { ledger, amount, months: asset?.months, disposedOn: asset?.disposedOn ?? '', residual: asset?.residual, reduces: reduces ?? '', rest: { ...rest, ...(asset?.connected ? { connected: true } : {}) } };
 };
+/**
+ * A journal's line from the form: what is kept from an edit only where its ledger now takes it (VAT on
+ * VAT, income, an expense or an asset's cost; a period on income or an expense, the day invoiced beside
+ * it), and the fixed asset fields on a cost code by its side (a debit is an asset, a credit reduces one).
+ */
 const journalLineOf = (d: JournalLineDraft): JournalLine => {
-  const assetClass = ledgerCode(d.ledger)?.asset?.part === 'cost' ? ledgerCode(d.ledger)!.asset!.class : undefined;
-  const { connected, ...rest } = d.rest;
-  return { ...rest, ledger: d.ledger, amount: d.amount!, ...(assetClass ? { asset: { class: assetClass, ...(d.months ? { months: d.months } : {}), ...(connected ? { connected } : {}), ...(d.disposedOn ? { disposedOn: d.disposedOn } : {}) } } : {}) };
+  const { connected, vat, covers, invoicedOn } = d.rest;
+  const kind = ledgerCode(d.ledger)?.kind;
+  const spreads = kind === 'income' || kind === 'expense';
+  return {
+    ledger: d.ledger,
+    amount: d.amount!,
+    ...(vat && (takesVat(d.ledger) || d.ledger === 'vat') ? { vat } : {}),
+    ...(covers && spreads ? { covers, ...(invoicedOn ? { invoicedOn } : {}) } : {}),
+    ...assetFieldsOf({ ...d, connected: connected === true }, (d.amount ?? 0) > 0),
+  };
 };
 
 /** A journal's lines: debits positive, credits negative, adding up to nothing before it can be saved. A journal given is changed in place. */
-function JournalDialog({ companyId, accounts, initial, onClose }: { companyId: string; accounts: CompanyCodingResponse['accounts']; initial?: Journal; onClose: () => void }) {
+function JournalDialog({ companyId, accounts, assets, initial, onClose }: { companyId: string; accounts: CompanyCodingResponse['accounts']; assets: CompanyCodingResponse['assets']; initial?: Journal; onClose: () => void }) {
   const toast = useToast();
   const [date, setDate] = useState(initial?.date ?? today());
   const [memo, setMemo] = useState(initial?.memo ?? '');
@@ -522,11 +599,12 @@ function JournalDialog({ companyId, accounts, initial, onClose }: { companyId: s
                   <span className="sm:sr-only">Remove</span>
                 </Button>
               </div>
-              {asset?.part === 'cost' && (
+              {asset?.part === 'cost' && (l.amount ?? 0) > 0 && (
                 <div className="grid gap-2 rounded-lg border border-line p-3 sm:grid-cols-2">
                   <AssetFields d={l} set={(p) => set(i, p)} assetClass={asset.class} />
                 </div>
               )}
+              {asset?.part === 'cost' && (l.amount ?? 0) < 0 && <ReducesField value={l.reduces} onChange={(reduces) => set(i, { reduces })} assets={assets.filter((a) => a.ledger === l.ledger)} />}
             </div>
           );
         })}
@@ -612,8 +690,8 @@ function JournalsCard({ view, companyId }: { view: CompanyCodingResponse; compan
           </Button>
         </div>
       )}
-      {adding && <JournalDialog companyId={companyId} accounts={view.accounts} onClose={() => setAdding(false)} />}
-      {editing && <JournalDialog key={editing.id} companyId={companyId} accounts={view.accounts} initial={editing} onClose={() => setEditing(null)} />}
+      {adding && <JournalDialog companyId={companyId} accounts={view.accounts} assets={view.assets} onClose={() => setAdding(false)} />}
+      {editing && <JournalDialog key={editing.id} companyId={companyId} accounts={view.accounts} assets={view.assets} initial={editing} onClose={() => setEditing(null)} />}
     </Card>
   );
 }
@@ -718,9 +796,10 @@ export const CHECK_TITLES: Record<LedgerCheck['kind'], string> = {
   'loan-balance-differs': 'A balance recorded on your director’s loan the books do not add up to',
   unbalanced: 'Postings that do not add up (please report this)',
   'no-depreciation-policy': 'A fixed asset with no life: give it one, or a depreciation policy for its class (Settings)',
-  'fixed-asset-unmarked': 'Posted to a fixed asset’s cost without saying it is one: not on the register, so never depreciated',
+  'fixed-asset-unmarked': 'Posted to a fixed asset’s cost without saying what it is: a debit is an asset (with its life), a credit says which asset it reduces',
   'fixed-asset-invalid': 'A fixed asset, or its depreciation, that does not fit',
   'covers-not-spread': 'A period said on a balance sheet code: posted as it is, not spread over it',
+  'dividend-exceeds-reserves': 'A dividend more than the profit and loss reserve on the day it was paid (CA 2006 s830)',
 };
 
 export function checkLine(c: LedgerCheck): ReactNode {
@@ -794,6 +873,12 @@ export function checkLine(c: LedgerCheck): ReactNode {
       );
     case 'fixed-asset-invalid':
       return `${formatDate(c.date)}: ${c.problem}`;
+    case 'dividend-exceeds-reserves':
+      return (
+        <>
+          {formatDate(c.date)} · <Money value={c.amount} className="sensitive" />, with <Money value={c.available} className="sensitive" /> available before it (the reserve that day, this period’s own depreciation and accruals not yet in it)
+        </>
+      );
     case 'covers-not-spread':
       return (
         <>
@@ -955,7 +1040,10 @@ export function BooksTab({ companyId }: { companyId: string }) {
         <Field label="To">
           <Input type="date" value={to} min={from} onChange={(e) => e.target.value && setTo(e.target.value)} />
         </Field>
-        <p className="pb-2 text-[12.5px] text-ink-3">The rows and postings in these dates; what the books ask of you, across all of them.</p>
+        <p className="pb-2 text-[12.5px] text-ink-3">
+          The rows and postings in these dates; what the books ask of you, across all of them.
+          {coding.data.lockedThrough && ` Locked through ${formatDate(coding.data.lockedThrough)}: rows on or before it keep their coding as filed.`}
+        </p>
       </div>
       <ChecksCard checks={ledger.data.checks} />
       <RowsCard view={coding.data} companyId={companyId} />

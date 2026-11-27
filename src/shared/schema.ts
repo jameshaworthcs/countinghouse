@@ -292,7 +292,23 @@ export const BooksAssetSchema = z.object({
    * `disposals` on the row it came in on). docs/FORMULAS.md §22, "Disposals".
    */
   disposedOn: ISODateSchema.optional(),
+  /** What it is expected to fetch at the end of its life (pounds, not negative, at most its cost): the depreciable amount is its cost less this (FRS 105 para 12.17). Absent: nothing. */
+  residual: MoneySchema.refine((v) => v >= 0, { message: 'A residual value is not negative' }).optional(),
 });
+
+/** A fixed asset on the register, by id: its posting's source and line (`row:tx_…`, `row:tx_…:1`, `personal:tx_…`, `journal:jnl_…:0`). */
+export const AssetIdSchema = z.string().regex(/^(row|personal):tx_[0-9a-f]{16}(:\d{1,2})?$|^journal:jnl_[0-9a-f]{12}:\d{1,2}$/, 'A fixed asset on the register, by id: row:tx_…, personal:tx_… or journal:jnl_…:<line>');
+
+/**
+ * What a credit to a fixed asset's cost is, beside a period it covers: `reduces`, the asset on the
+ * register whose cost it reduces (a supplier's part refund, a cost moved off it); and with `covers`,
+ * `invoicedOn`, the day the bill or invoice for it was issued, so an amount not yet paid at a period end is
+ * a trade creditor or debtor rather than an accrual (docs/FORMULAS.md §22, "Covers").
+ */
+const lineExtras = {
+  reduces: AssetIdSchema.optional(),
+  invoicedOn: ISODateSchema.optional(),
+};
 
 /** One line of a coded payment split across ledgers: its amount (signed like the payment, VAT included), its ledger and the rest. */
 export const BooksLineSchema = z.object({
@@ -301,6 +317,7 @@ export const BooksLineSchema = z.object({
   vat: BooksVatSchema.optional(),
   covers: CoversSchema.optional(),
   asset: BooksAssetSchema.optional(),
+  ...lineExtras,
 });
 export type BooksLine = z.infer<typeof BooksLineSchema>;
 
@@ -316,6 +333,7 @@ export const BooksCodingSchema = z.object({
   vat: BooksVatSchema.optional(),
   covers: CoversSchema.optional(),
   asset: BooksAssetSchema.optional(),
+  ...lineExtras,
   lines: z.array(BooksLineSchema).max(30).optional(),
   /** On a row of yours paid for the company: the supply was made to the company and its VAT invoice is addressed to it, so the company may reclaim the VAT (VATA 1994 s24(1), reg 29(2)). */
   invoiceToCompany: z.boolean().optional(),
@@ -892,9 +910,27 @@ const companyBooksShape = {
    * none (straight line, docs/FORMULAS.md §22, "Depreciation"). One per class.
    */
   policies: z
-    .array(z.object({ class: z.enum(ASSET_REGISTER_CLASSES), months: z.number().int().min(1).max(600) }))
-    .max(ASSET_REGISTER_CLASSES.length)
+    .array(
+      z.object({
+        class: z.enum(ASSET_REGISTER_CLASSES),
+        months: z.number().int().min(1).max(600),
+        /** From when this life applies (a change in estimate, FRS 105 paras 12.18 and 8.12): an asset's remaining net book value is spread over what is left of the new life from then. Absent: from the start. */
+        effectiveFrom: ISODateSchema.optional(),
+      }),
+    )
+    .max(60)
     .optional(),
+  /**
+   * How months are counted for depreciation: `acquisition` (the default), a full month in the month an
+   * asset is bought and none in the month it leaves; `both`, a full month in each.
+   */
+  depreciationMonths: z.enum(['acquisition', 'both']).optional(),
+  /**
+   * The books are locked through this day: nothing that changes a posting dated on or before it is
+   * written (codings, journals, links, marks on your rows, assets, policies). Set to a period's end when
+   * its accounts are recorded as filed; only the owner moves it.
+   */
+  lockedThrough: ISODateSchema.optional(),
 };
 /** A company's books without its filings and who set them: what the owner edits and an agent proposes (`set_company_books`). */
 export const CompanyBooksSetupSchema = z.object(companyBooksShape);
@@ -959,6 +995,7 @@ export const JournalLineSchema = z.object({
   vat: z.object({ treatment: z.enum(VAT_TREATMENTS), side: z.enum(['input', 'output']), claim: z.literal('reg111').optional() }).optional(),
   covers: CoversSchema.optional(),
   asset: BooksAssetSchema.optional(),
+  ...lineExtras,
 });
 export type JournalLine = z.infer<typeof JournalLineSchema>;
 

@@ -12,7 +12,7 @@ import { accountingPeriodsOf, type BooksPeriod } from '../../shared/company-book
 import { addDays, type ISODate } from '../../shared/dates';
 import { accountLedger, LEDGER_CODES, ledgerCode, ledgerName, PROFIT_LINE_LABELS, SHEET_LINE_LABELS, type ProfitLine, type SheetLine } from '../../shared/ledger';
 import { roundToPounds, toMinor } from '../../shared/money';
-import { depreciationTo } from '../../shared/period-end';
+import { costOn, depreciationTo } from '../../shared/period-end';
 import { MICRO_ENTITY_LINES, type Company } from '../../shared/schema';
 import type { BalanceEngine } from './balances';
 import { companyLedger, ledgerDirectorLoanMovements, type Ledger, type LedgerSource } from './ledger';
@@ -60,12 +60,131 @@ export interface PeriodAccountsInput {
   src: LedgerSource;
   company: Company;
   /** The company's own balance engine (analytics/company-accounts.ts): the bank reconciliation's other side. */
-  engine: Pick<BalanceEngine, 'balanceOn'>;
+  engine: Pick<BalanceEngine, 'balanceOn' | 'statementFor'>;
   today: ISODate;
   /** The period's last day; absent: the latest period ended, or the current one when none has. */
   period?: ISODate | undefined;
   /** The ledger, when the caller has it already. */
   ledger?: Ledger;
+}
+
+/** The sub-lines of B and C Companies House's form totals them from: by code. */
+function partOf(line: 'B' | 'C', code: string): string {
+  if (line === 'B') return code.startsWith('intangible-assets') ? 'Intangible assets' : code === 'investments' ? 'Investments' : 'Tangible assets';
+  if (code === 'stock') return 'Stocks';
+  return ledgerCode(code)?.account ? 'Cash at bank and in hand' : 'Debtors';
+}
+const PARTS: Record<'B' | 'C', string[]> = { B: ['Intangible assets', 'Tangible assets', 'Investments'], C: ['Stocks', 'Debtors', 'Cash at bank and in hand'] };
+
+/**
+ * One period's statements from the ledger's postings (FORMULAS.md §22, "The period's accounts"): its
+ * profit and loss, trial balance and balance sheet (exact and in whole pounds).
+ */
+function statements(postings: readonly LedgerPosting[], start: ISODate, end: ISODate, openingJournals: ReadonlySet<string>, name: (code: string) => string) {
+  const atEnd = balances(postings, (p) => p.date <= end);
+  const before = balances(postings, (p) => p.date < start);
+  const inPeriod = (code: string) => (atEnd.get(code) ?? 0) - (before.get(code) ?? 0);
+  // Retained earnings written in the period by an opening journal are the opening balance, not a movement.
+  const openingInPeriod = postings.filter((p) => p.ledger === 'retained-earnings' && p.date >= start && p.date <= end && p.source.kind === 'journal' && openingJournals.has(p.source.id)).reduce((s, p) => s + p.amount, 0);
+
+  // Profit and loss for the period: each code's movement, on its line (by its sign where it can be either).
+  const lines = PROFIT_LINES.map((line) => ({ line, label: PROFIT_LINE_LABELS[line], amount: 0, codes: [] as ReportCode[] }));
+  for (const code of [...atEnd.keys()].filter(isProfit).sort(byChart)) {
+    const movement = inPeriod(code);
+    if (!movement) continue;
+    const entry = ledgerCode(code)!;
+    const line = movement > 0 ? (entry.profitDebit ?? entry.profit!) : entry.profit!;
+    const target = lines.find((l) => l.line === line)!;
+    target.amount -= movement;
+    target.codes.push({ ledger: code, name: name(code), amount: -movement });
+  }
+  const profitBeforeTax = lines.filter((l) => l.line !== 'G').reduce((s, l) => s + l.amount, 0);
+  const tax = lines.find((l) => l.line === 'G')!.amount;
+  const profitAndLoss: ProfitAndLoss = { lines, profitBeforeTax, tax, profit: profitBeforeTax + tax };
+
+  // Retained earnings: everything before the period closed into it, and its own movements.
+  const profitBefore = sumOf(before, isProfit);
+  const reOpeningBooks = (before.get('retained-earnings') ?? 0) + profitBefore + (before.get('dividends') ?? 0) + openingInPeriod;
+  const reOtherBooks = inPeriod('retained-earnings') - openingInPeriod;
+  const dividends = inPeriod('dividends');
+
+  // Trial balance at the end: balance sheet codes to date, profit and loss codes and dividends for the
+  // period, retained earnings as at its start (with its own movements in the period).
+  const tbRows: TrialBalance['rows'] = [];
+  for (const code of [...new Set([...atEnd.keys(), 'retained-earnings'])].sort(byChart)) {
+    const v = isProfit(code) || code === 'dividends' ? inPeriod(code) : code === 'retained-earnings' ? reOpeningBooks + reOtherBooks : (atEnd.get(code) ?? 0);
+    if (!v) continue;
+    tbRows.push({ ledger: code, name: name(code), debit: Math.max(0, v), credit: Math.max(0, -v) });
+  }
+  const trialBalance: TrialBalance = { rows: tbRows, debit: tbRows.reduce((s, r) => s + r.debit, 0), credit: tbRows.reduce((s, r) => s + r.credit, 0) };
+
+  // The balance sheet: every balance sheet code but capital and reserves, on its line by its sign.
+  const sheet = new Map<SheetLine, ReportCode[]>(SHEET_LINES.map((l) => [l, []]));
+  for (const [code, balance] of [...atEnd].sort(([a], [b]) => byChart(a, b))) {
+    if (!balance || isProfit(code)) continue;
+    const entry = ledgerCode(code);
+    if (entry?.kind === 'equity') continue;
+    // A code outside the chart (never written: every write is checked) is shown, not lost.
+    const line = entry?.sheet ? (balance > 0 ? entry.sheet.debit : entry.sheet.credit) : balance > 0 ? 'C' : 'E';
+    sheet.get(line)!.push({ ledger: code, name: name(code), amount: DEBIT_LINES.has(line) ? balance : -balance });
+  }
+  const exact = (l: SheetLine) => sheet.get(l)!.reduce((s, c) => s + c.amount, 0);
+  // B and C are the sums of their rounded sub-lines (as the form totals a breakdown); the rest each rounded.
+  const partsOf = (l: 'B' | 'C') =>
+    PARTS[l]
+      .map((label) => {
+        const codes = sheet.get(l)!.filter((c) => partOf(l, c.ledger) === label);
+        const e = codes.reduce((s, c) => s + c.amount, 0);
+        return { label, codes, exact: e, whole: roundToPounds(e) };
+      })
+      .filter((x) => x.codes.length);
+  const [bParts, cParts] = [partsOf('B'), partsOf('C')];
+  const whole = (l: SheetLine) => (l === 'B' ? bParts : l === 'C' ? cParts : undefined)?.reduce((s, x) => s + x.whole, 0) ?? roundToPounds(exact(l));
+  const e = Object.fromEntries((['A', 'B', 'C', 'D', 'E', 'H', 'I', 'J'] as const).map((l) => [l, exact(l)])) as Record<'A' | 'B' | 'C' | 'D' | 'E' | 'H' | 'I' | 'J', number>;
+  const w = Object.fromEntries((['A', 'B', 'C', 'D', 'E', 'H', 'I', 'J'] as const).map((l) => [l, whole(l)])) as Record<'A' | 'B' | 'C' | 'D' | 'E' | 'H' | 'I' | 'J', number>;
+  const eF = e.C + e.D - e.E;
+  const eG = e.A + e.B + eF;
+  const eK = eG - e.H - e.I - e.J;
+  const wF = w.C + w.D - w.E;
+  const wG = w.A + w.B + wF;
+  const wK = wG - w.H - w.I - w.J;
+  const equity = (code: string) => -(atEnd.get(code) ?? 0);
+  const [shareCapital, sharePremium, otherReserves] = [equity('share-capital'), equity('share-premium'), equity('other-reserves')];
+  const reserve = -(reOpeningBooks + reOtherBooks + dividends + sumOf(atEnd, isProfit) - profitBefore);
+  const [shareWhole, premiumWhole, otherWhole] = [shareCapital, sharePremium, otherReserves].map(roundToPounds) as [number, number, number];
+  const figure = (ex: number, wh: number) => ({ exact: ex, whole: wh });
+  const lineOf = (l: SheetLine | 'F' | 'G', ex: number, wh: number, codes: ReportCode[] = [], parts?: typeof bParts) => ({ line: l, label: SHEET_LINE_LABELS[l], codes, ...(parts ? { parts } : {}), ...figure(ex, wh) });
+  const capitalCodes: ReportCode[] = [
+    { ledger: 'share-capital', name: 'Called up share capital', amount: shareCapital },
+    ...(sharePremium ? [{ ledger: 'share-premium', name: 'Share premium account', amount: sharePremium }] : []),
+    ...(otherReserves ? [{ ledger: 'other-reserves', name: 'Other reserves', amount: otherReserves }] : []),
+    { ledger: 'retained-earnings', name: 'Profit and loss account', amount: reserve },
+  ];
+  const total = shareCapital + sharePremium + otherReserves + reserve;
+  const balanceSheet: BalanceSheet = {
+    lines: [
+      lineOf('A', e.A, w.A, sheet.get('A')),
+      lineOf('B', e.B, w.B, sheet.get('B'), bParts),
+      lineOf('C', e.C, w.C, sheet.get('C'), cParts),
+      lineOf('D', e.D, w.D, sheet.get('D')),
+      lineOf('E', e.E, w.E, sheet.get('E')),
+      lineOf('F', eF, wF),
+      lineOf('G', eG, wG),
+      lineOf('H', e.H, w.H, sheet.get('H')),
+      lineOf('I', e.I, w.I, sheet.get('I')),
+      lineOf('J', e.J, w.J, sheet.get('J')),
+      lineOf('K', eK, wK, capitalCodes),
+    ],
+    capital: {
+      shareCapital: figure(shareCapital, shareWhole),
+      sharePremium: figure(sharePremium, premiumWhole),
+      otherReserves: figure(otherReserves, otherWhole),
+      reserve: { ...figure(reserve, wK - shareWhole - premiumWhole - otherWhole), opening: -reOpeningBooks, profit: profitAndLoss.profit, dividends, other: -reOtherBooks },
+      total: figure(total, wK),
+    },
+    balances: eK === total,
+  };
+  return { atEnd, inPeriod, profitAndLoss, trialBalance, balanceSheet, whole: { ...w, F: wF, G: wG, K: wK } as Record<string, number>, netAssets: eK, total };
 }
 
 /**
@@ -88,96 +207,42 @@ export function periodAccounts({ src, company, engine, today, period: wanted, le
     return { start: p.start, end: p.end, ended: p.end < today, ...(f ? { filed: { filedOn: f.filedOn, ...(f.reference ? { reference: f.reference } : {}), lines } } : {}) };
   };
   const openingJournals = new Set(src.companyJournals(company.id).filter((j) => j.opening).map((j) => j.id));
-  const atEnd = balances(ledger.postings, (p) => p.date <= end);
-  const before = balances(ledger.postings, (p) => p.date < start);
-  const inPeriod = (code: string) => (atEnd.get(code) ?? 0) - (before.get(code) ?? 0);
-  // Retained earnings written in the period by an opening journal are the opening balance, not a movement.
-  const openingInPeriod = ledger.postings.filter((p) => p.ledger === 'retained-earnings' && p.date >= start && p.date <= end && p.source.kind === 'journal' && openingJournals.has(p.source.id)).reduce((s, p) => s + p.amount, 0);
   const name = (code: string) => ledgerName(code, (id) => src.account(id)?.name);
+  const now = statements(ledger.postings, start, end, openingJournals, name);
+  const { atEnd, profitAndLoss, trialBalance, balanceSheet } = now;
 
-  // Profit and loss for the period: each code's movement, on its line (by its sign where it can be either).
-  const profitCodes = [...atEnd.keys()].filter(isProfit).sort();
-  const lines = PROFIT_LINES.map((line) => ({ line, label: PROFIT_LINE_LABELS[line], amount: 0, codes: [] as ReportCode[] }));
-  for (const code of profitCodes) {
-    const movement = inPeriod(code);
-    if (!movement) continue;
-    const entry = ledgerCode(code)!;
-    const line = movement > 0 ? (entry.profitDebit ?? entry.profit!) : entry.profit!;
-    const target = lines.find((l) => l.line === line)!;
-    target.amount -= movement;
-    target.codes.push({ ledger: code, name: name(code), amount: -movement });
+  // The period before (FRS 105 para 3.7): its balance sheet as filed, where its accounts are recorded
+  // with lines, else worked out; its profit and loss when it is in these books.
+  const prior = accountingPeriodsOf(books, end).find((p) => p.end === addDays(start, -1));
+  let comparative: CompanyAccountsResponse['comparative'];
+  if (prior) {
+    const was = statements(ledger.postings, prior.start, prior.end, openingJournals, name);
+    const filed = accountsFiling(prior.end);
+    const figures = filed?.kind === 'accounts' && filed.figures && Object.values(filed.figures).some((v) => v !== undefined) ? filed.figures : undefined;
+    // A line the filing does not give (one left blank) is as the books work it out.
+    const priorLine = (l: string) => (figures ? (figures as Record<string, number | undefined>)[l] : undefined) ?? was.whole[l];
+    for (const l of balanceSheet.lines) {
+      const v = priorLine(l.line);
+      if (v !== undefined) l.prior = v;
+    }
+    const cap = balanceSheet.capital;
+    const wasCap = was.balanceSheet.capital;
+    cap.shareCapital.prior = wasCap.shareCapital.whole;
+    cap.sharePremium.prior = wasCap.sharePremium.whole;
+    cap.otherReserves.prior = wasCap.otherReserves.whole;
+    const k = priorLine('K');
+    if (k !== undefined) {
+      cap.total.prior = k;
+      cap.reserve.prior = k - wasCap.shareCapital.whole - wasCap.sharePremium.whole - wasCap.otherReserves.whole;
+    }
+    // Its profit and loss is in these books when the books reach its first day.
+    const inBooks = prior.start >= (books.ledgerFrom ?? books.incorporatedOn);
+    if (inBooks) {
+      for (const l of profitAndLoss.lines) l.prior = was.profitAndLoss.lines.find((x) => x.line === l.line)!.amount;
+      profitAndLoss.prior = { profitBeforeTax: was.profitAndLoss.profitBeforeTax, tax: was.profitAndLoss.tax, profit: was.profitAndLoss.profit };
+    }
+    comparative = { start: prior.start, end: prior.end, sheet: figures ? 'filed' : 'computed', profit: inBooks };
   }
-  const profitBeforeTax = lines.filter((l) => l.line !== 'G').reduce((s, l) => s + l.amount, 0);
-  const tax = lines.find((l) => l.line === 'G')!.amount;
-  const profitAndLoss: ProfitAndLoss = { lines, profitBeforeTax, tax, profit: profitBeforeTax + tax };
-
-  // Retained earnings: everything before the period closed into it, and its own movements.
-  const profitBefore = sumOf(before, isProfit);
-  const reOpeningBooks = (before.get('retained-earnings') ?? 0) + profitBefore + (before.get('dividends') ?? 0) + openingInPeriod;
-  const reOtherBooks = inPeriod('retained-earnings') - openingInPeriod;
-  const dividends = inPeriod('dividends');
-
-  // Trial balance at the end: balance sheet codes to date, profit and loss codes and dividends for the
-  // period, retained earnings as at its start (with its own movements in the period).
-  const tbRows: TrialBalance['rows'] = [];
-  const tbCodes = new Set([...atEnd.keys(), 'retained-earnings']);
-  for (const code of [...tbCodes].sort(byChart)) {
-    const v = isProfit(code) || code === 'dividends' ? inPeriod(code) : code === 'retained-earnings' ? reOpeningBooks + reOtherBooks : (atEnd.get(code) ?? 0);
-    if (!v) continue;
-    tbRows.push({ ledger: code, name: name(code), debit: Math.max(0, v), credit: Math.max(0, -v) });
-  }
-  const trialBalance: TrialBalance = { rows: tbRows, debit: tbRows.reduce((s, r) => s + r.debit, 0), credit: tbRows.reduce((s, r) => s + r.credit, 0) };
-
-  // The balance sheet: every balance sheet code but capital and reserves, on its line by its sign.
-  const sheet = new Map<SheetLine, ReportCode[]>(SHEET_LINES.map((l) => [l, []]));
-  for (const [code, balance] of [...atEnd].sort(([a], [b]) => byChart(a, b))) {
-    if (!balance || isProfit(code)) continue;
-    const entry = ledgerCode(code);
-    if (entry?.kind === 'equity') continue;
-    // A code outside the chart (never written: every write is checked) is shown, not lost.
-    const line = entry?.sheet ? (balance > 0 ? entry.sheet.debit : entry.sheet.credit) : balance > 0 ? 'C' : 'E';
-    sheet.get(line)!.push({ ledger: code, name: name(code), amount: DEBIT_LINES.has(line) ? balance : -balance });
-  }
-  const exact = (l: SheetLine) => sheet.get(l)!.reduce((s, c) => s + c.amount, 0);
-  const whole = (l: SheetLine) => roundToPounds(exact(l));
-  const [eA, eB, eC, eD, eE, eH, eI, eJ] = (['A', 'B', 'C', 'D', 'E', 'H', 'I', 'J'] as const).map(exact) as [number, number, number, number, number, number, number, number];
-  const [wA, wB, wC, wD, wE, wH, wI, wJ] = (['A', 'B', 'C', 'D', 'E', 'H', 'I', 'J'] as const).map(whole) as [number, number, number, number, number, number, number, number];
-  const eF = eC + eD - eE;
-  const eG = eA + eB + eF;
-  const eK = eG - eH - eI - eJ;
-  const wF = wC + wD - wE;
-  const wG = wA + wB + wF;
-  const wK = wG - wH - wI - wJ;
-  const shareCapital = -(atEnd.get('share-capital') ?? 0);
-  const reserve = -(reOpeningBooks + reOtherBooks + dividends + sumOf(atEnd, isProfit) - profitBefore);
-  const shareWhole = roundToPounds(shareCapital);
-  const figure = (e: number, w: number) => ({ exact: e, whole: w });
-  const lineOf = (l: SheetLine | 'F' | 'G', e: number, w: number, codes: ReportCode[] = []) => ({ line: l, label: SHEET_LINE_LABELS[l], codes, ...figure(e, w) });
-  const capitalCodes: ReportCode[] = [
-    { ledger: 'share-capital', name: 'Called up share capital', amount: shareCapital },
-    { ledger: 'retained-earnings', name: 'Profit and loss account', amount: reserve },
-  ];
-  const balanceSheet: BalanceSheet = {
-    lines: [
-      lineOf('A', eA, wA, sheet.get('A')),
-      lineOf('B', eB, wB, sheet.get('B')),
-      lineOf('C', eC, wC, sheet.get('C')),
-      lineOf('D', eD, wD, sheet.get('D')),
-      lineOf('E', eE, wE, sheet.get('E')),
-      lineOf('F', eF, wF),
-      lineOf('G', eG, wG),
-      lineOf('H', eH, wH, sheet.get('H')),
-      lineOf('I', eI, wI, sheet.get('I')),
-      lineOf('J', eJ, wJ, sheet.get('J')),
-      lineOf('K', eK, wK, capitalCodes),
-    ],
-    capital: {
-      shareCapital: figure(shareCapital, shareWhole),
-      reserve: { ...figure(reserve, wK - shareWhole), opening: -reOpeningBooks, profit: profitAndLoss.profit, dividends, other: -reOtherBooks },
-      total: figure(shareCapital + reserve, wK),
-    },
-    balances: eK === shareCapital + reserve,
-  };
 
   // The fixed asset register at the period's end.
   const register: RegisterRow[] = ledger.assets
@@ -186,7 +251,8 @@ export function periodAccounts({ src, company, engine, today, period: wanted, le
       const was = depreciationTo(a, addDays(start, -1));
       const toDate = depreciationTo(a, end);
       const gone = Boolean(a.disposedOn && a.disposedOn <= end);
-      return { ...a, before: was, charge: toDate - was, toDate, netBookValue: gone ? 0 : a.cost - toDate, disposedInPeriod: gone };
+      const costAtEnd = costOn(a, end);
+      return { ...a, before: was, charge: toDate - was, toDate, costAtEnd, netBookValue: gone ? 0 : costAtEnd - toDate, disposedInPeriod: gone };
     });
 
   // The director's loan over the period, from its postings, in your sign.
@@ -201,28 +267,27 @@ export function periodAccounts({ src, company, engine, today, period: wanted, le
     directorLoan = { opening: -booksOpening, closing: -booksClosing, movements, books: { opening: booksOpening, closing: booksClosing } };
   }
 
-  // Each company account's ledger against its balance from the balance engine on the period's last day.
+  // Each company account's ledger against a statement balance that settles the period's last day.
   const reconciliation: BankReconciliation[] = src.companyAccounts(company.id).map((a) => {
     const code = accountLedger(a);
     const held = atEnd.get(code) ?? 0;
     const base = { accountId: a.id, name: a.name, ledger: code, books: held };
     if (a.currency !== 'GBP') return { ...base, statement: null, difference: null, status: 'other-currency' as const };
     const point = engine.balanceOn(a.id, end);
-    if (!point) return { ...base, statement: null, difference: null, status: 'no-balance' as const };
-    const statement = toMinor(point.value);
-    const basis = point.basis ? { basis: { date: point.basis.date, kind: point.basis.kind } } : {};
-    if (!point.basis) return { ...base, statement, difference: statement - held, status: 'rows-only' as const };
-    return { ...base, statement, difference: statement - held, status: statement === held ? ('reconciled' as const) : ('differs' as const), ...basis };
+    const statement = point ? toMinor(point.value) : null;
+    const settled = engine.statementFor(a.id, end);
+    if (settled && statement !== null) return { ...base, statement, difference: statement - held, status: statement === held ? ('reconciled' as const) : ('differs' as const), basis: { date: settled.date, on: settled.on } };
+    const moved = held !== 0 || ledger.postings.some((p) => p.ledger === code && p.date >= start && p.date <= end);
+    return { ...base, statement, difference: statement === null ? null : statement - held, status: moved ? ('unverified' as const) : ('dormant' as const) };
   });
 
   // Locking against what was filed: the whole-pound lines filed against those worked out now.
   const filed = accountsFiling(end);
-  const computed: Record<string, number> = { A: wA, B: wB, C: wC, D: wD, E: wE, F: wF, G: wG, H: wH, I: wI, J: wJ, K: wK };
   const filing =
     filed?.kind === 'accounts'
       ? (() => {
           const figures = filed.figures ?? {};
-          const compared = MICRO_ENTITY_LINES.flatMap((l) => (figures[l] !== undefined ? [{ line: l, filed: figures[l], computed: computed[l]! }] : []));
+          const compared = MICRO_ENTITY_LINES.flatMap((l) => (figures[l] !== undefined ? [{ line: l, filed: figures[l], computed: now.whole[l]! }] : []));
           return { filedOn: filed.filedOn, ...(filed.reference ? { reference: filed.reference } : {}), lines: compared, matches: compared.every((l) => l.filed === l.computed) };
         })()
       : undefined;
@@ -236,14 +301,16 @@ export function periodAccounts({ src, company, engine, today, period: wanted, le
   }
   for (const code of CLEARING) if (atEnd.get(code)) checks.push({ kind: 'clearing', ledger: code, amount: atEnd.get(code)! });
   if (trialBalance.debit !== trialBalance.credit) checks.push({ kind: 'trial-balance', debit: trialBalance.debit, credit: trialBalance.credit });
-  if (!balanceSheet.balances) checks.push({ kind: 'sheet', netAssets: eK, capital: shareCapital + reserve });
-  for (const r of reconciliation) if (r.status === 'differs' || r.status === 'other-currency' || (r.status === 'no-balance' && r.books !== 0)) checks.push({ kind: 'bank', reconciliation: r });
+  if (!balanceSheet.balances) checks.push({ kind: 'sheet', netAssets: now.netAssets, capital: now.total });
+  for (const r of reconciliation) if (r.status === 'differs' || r.status === 'other-currency' || r.status === 'unverified') checks.push({ kind: 'bank', reconciliation: r });
   if (filing && !filing.matches) checks.push({ kind: 'drift', lines: filing.lines.filter((l) => l.filed !== l.computed) });
 
   return {
     company: { id: company.id, name: company.name },
     periods: offered.map(choice),
     period: { ...choice(period), first: period.start === books.incorporatedOn },
+    ...(comparative ? { comparative } : {}),
+    ...(books.lockedThrough ? { lockedThrough: books.lockedThrough } : {}),
     profitAndLoss,
     balanceSheet,
     trialBalance,

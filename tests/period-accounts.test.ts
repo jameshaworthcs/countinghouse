@@ -15,7 +15,7 @@ import { transactionId } from '../src/server/ids';
 import { accountingPeriodsOf, booksProblems } from '../src/shared/company-books';
 import { addDays, diffDays } from '../src/shared/dates';
 import { codingProblems, journalProblems, reg111Goods } from '../src/shared/ledger';
-import { carriedAt, coverParts, depreciationTo, monthsCounted, overlapDays } from '../src/shared/period-end';
+import { carriedAt, costOn, coverParts, depreciationTo, monthsCounted, overlapDays } from '../src/shared/period-end';
 import { SettingsSchema, type Account, type BalanceSnapshot, type BooksCoding, type Company, type Journal, type Transaction } from '../src/shared/schema';
 
 const stamp = '2024-01-01T00:00:00+00:00';
@@ -30,6 +30,8 @@ const companyOf = (books: Partial<Books> = {}): Company => ({ id: CO, name: 'Exa
 const journal = (date: string, memo: string, lines: Journal['lines'], extra: Partial<Journal> = {}): Journal => ({ id: `jnl_${(n++).toString(16).padStart(12, '0')}`, companyId: CO, date, memo, lines, createdBy: 'owner', createdAt: stamp, updatedAt: stamp, ...extra });
 const coded = (ledger: string, extra: Partial<BooksCoding> = {}): BooksCoding => ({ ledger, setBy: 'user', ...extra });
 const std = (amount: number) => ({ amount, treatment: 'standard' as const });
+/** An asset for depreciation alone: its cost (pence), the day it counts from and one life. */
+const asset = (cost: number, from: string, months: number | undefined) => ({ cost, from, lives: [{ from, ...(months ? { months } : {}) }] });
 
 const ACCOUNTS: Account[] = [acct('current', 'Everyday', 'current'), acct('loan', 'Director’s loan', 'director_loan'), acct('works-bank', 'Works Account', 'current', { companyId: CO, includeInNetWorth: false })];
 
@@ -79,26 +81,58 @@ describe('months and depreciation', () => {
 
   it('writes a cost down straight line by whole months, rounding cumulatively, never past its cost', () => {
     // £1,200 over 36 months from August 2024: 5, 17, 29 and 36 months to each year end.
-    const laptop = { cost: 120_000, from: '2024-08-11', months: 36 };
+    const laptop = asset(120_000, '2024-08-11', 36);
     expect(['2024-12-31', '2025-12-31', '2026-12-31', '2027-12-31', '2030-12-31'].map((d) => depreciationTo(laptop, d))).toEqual([16_667, 56_667, 96_667, 120_000, 120_000]);
-    expect(depreciationTo({ ...laptop, months: undefined }, '2030-12-31')).toBe(0);
-    // Stopped at the month it left.
-    expect(depreciationTo({ ...laptop, disposedOn: '2026-02-15' }, '2027-12-31')).toBe(63_333);
+    expect(depreciationTo(asset(120_000, '2024-08-11', undefined), '2030-12-31')).toBe(0);
+    // Stopped at the month it left: by default the month it leaves is not counted (18 months), or counted too.
+    expect(depreciationTo({ ...laptop, disposedOn: '2026-02-15' }, '2027-12-31')).toBe(60_000);
+    expect(depreciationTo({ ...laptop, disposedOn: '2026-02-15', convention: 'both' }, '2027-12-31')).toBe(63_333);
+    // Bought and sold within one month: nothing by default.
+    expect(depreciationTo({ ...laptop, disposedOn: '2024-08-30' }, '2025-12-31')).toBe(0);
+  });
+
+  it('writes down only the cost less its residual value', () => {
+    // £1,200 with £300 expected at the end, over 36 months: £900 written down, £25 a month.
+    const van = { ...asset(120_000, '2024-01-15', 36), residual: 30_000 };
+    expect(['2024-12-31', '2026-12-31', '2030-12-31'].map((d) => depreciationTo(van, d))).toEqual([30_000, 90_000, 90_000]);
+  });
+
+  it('applies a change of life from its day, spreading what is left over what is left of the new life', () => {
+    // £3,600 over 36 months from January 2024, then from January 2025 a life of 24 months in all:
+    // £1,200 written down by then, £2,400 left over the 12 months left.
+    const kit = { ...asset(360_000, '2024-01-10', 36), lives: [{ from: '2024-01-10', months: 36 }, { from: '2025-01-01', months: 24 }] };
+    expect(['2024-12-31', '2025-06-30', '2025-12-31', '2027-12-31'].map((d) => depreciationTo(kit, d))).toEqual([120_000, 240_000, 360_000, 360_000]);
+    // The year before the change is as it was.
+    expect(depreciationTo(kit, '2024-12-31')).toBe(depreciationTo(asset(360_000, '2024-01-10', 36), '2024-12-31'));
+    // A new life already passed writes what is left off in the month of the change.
+    const shorter = { ...asset(360_000, '2024-01-10', 36), lives: [{ from: '2024-01-10', months: 36 }, { from: '2025-01-01', months: 6 }] };
+    expect(depreciationTo(shorter, '2025-01-31')).toBe(360_000);
+    // No life at first, then one from a day: written down from then over what is left of it.
+    const later = { ...asset(120_000, '2024-01-10', undefined), lives: [{ from: '2024-01-10' }, { from: '2024-07-01', months: 12 }] };
+    expect(['2024-06-30', '2024-12-31'].map((d) => depreciationTo(later, d))).toEqual([0, 120_000]);
+  });
+
+  it('spreads a reduction of its cost over what is left of its life', () => {
+    // £1,200 over 12 months from January; £300 refunded in July: £600 written down by June, then £300 over the 6 months left.
+    const a = { ...asset(120_000, '2024-01-05', 12), reductions: [{ date: '2024-07-02', amount: 30_000 }] };
+    expect(costOn(a, '2024-12-31')).toBe(90_000);
+    // By June £600; then £300 left over 6 months.
+    expect(['2024-06-30', '2024-09-30', '2024-12-31'].map((d) => depreciationTo(a, d))).toEqual([60_000, 75_000, 90_000]);
   });
 
   it('as a property: to-date depreciation never falls, never passes the cost, and reaches it at the end of its life', () => {
     fc.assert(
       fc.property(fc.integer({ min: 1, max: 50_000_000 }), fc.integer({ min: 1, max: 120 }), fc.integer({ min: 0, max: 3_000 }), (cost, months, offset) => {
         const from = addDays('2024-01-01', offset);
-        const asset = { cost, from, months };
+        const a = asset(cost, from, months);
         let last = 0;
         for (let k = 0; k <= months + 2; k++) {
           const d = addDays(from, Math.round(k * 30.44));
-          const v = depreciationTo(asset, d);
+          const v = depreciationTo(a, d);
           if (v < last || v > cost) return false;
           last = v;
         }
-        return depreciationTo(asset, addDays(from, Math.ceil(months * 31) + 31)) === cost;
+        return depreciationTo(a, addDays(from, Math.ceil(months * 31) + 31)) === cost;
       }),
       { numRuns: 200 },
     );
@@ -167,24 +201,29 @@ describe('postings at a period’s end', () => {
     expect(reg111Goods('fixed-assets:computer:cost')).toBe(true);
   });
 
-  it('on disposal, stops depreciating at the month it left and takes its cost and depreciation away, the rest to disposals', () => {
+  it('on disposal, stops depreciating and takes its cost and depreciation away, the rest to disposals', () => {
     const laptop = tx('works-bank', '2024-08-11', -1_200, 'EXAMPLE COMPUTERS LTD', { books: coded('fixed-assets:computer:cost', { asset: { class: 'computer', months: 36, disposedOn: '2026-02-15' } }) });
     // What it fetched, coded to disposals on the row it came in on.
     const sold = tx('works-bank', '2026-02-16', 300, 'EXAMPLE RESELLER', { books: coded('disposals') });
     const { postings } = companyLedger(memory([laptop, sold]), CO);
     const disposal = postings.filter((p) => p.source.kind === 'disposal');
+    // By default a full month when bought, none when it leaves: 18 months, to January 2026.
     expect(disposal.map((p) => [p.date, p.ledger, p.amount])).toEqual([
       ['2026-02-15', 'fixed-assets:computer:cost', -120_000],
-      ['2026-02-15', 'fixed-assets:computer:depreciation', 63_333],
-      ['2026-02-15', 'disposals', 56_667],
+      ['2026-02-15', 'fixed-assets:computer:depreciation', 60_000],
+      ['2026-02-15', 'disposals', 60_000],
     ]);
-    // The charge for 2026 is January and February's, on the day it left.
-    expect(postings.filter((p) => p.source.kind === 'depreciation' && p.ledger === 'depreciation' && p.date >= '2026-01-01').map((p) => [p.date, p.amount])).toEqual([['2026-02-15', 6_666]]);
+    // The charge for 2026 is January's, on the day it left.
+    expect(postings.filter((p) => p.source.kind === 'depreciation' && p.ledger === 'depreciation' && p.date >= '2026-01-01').map((p) => [p.date, p.amount])).toEqual([['2026-02-15', 3_333]]);
     const after = byLedger(postings);
     expect(after['fixed-assets:computer:cost']).toBeUndefined();
     expect(after['fixed-assets:computer:depreciation']).toBeUndefined();
-    // A loss of £266.67: its net book value £566.67 less the £300 it fetched.
-    expect(after.disposals).toBe(26_667);
+    // A loss of £300: its net book value £600 less the £300 it fetched.
+    expect(after.disposals).toBe(30_000);
+    // A full month on both, the company's other policy: February counts too.
+    const both = companyLedger(memory([laptop, sold], { company: companyOf({ depreciationMonths: 'both' }) }), CO);
+    expect(both.postings.filter((p) => p.source.kind === 'disposal').map((p) => p.amount)).toEqual([-120_000, 63_333, 56_667]);
+    expect(byLedger(both.postings).disposals).toBe(26_667);
   });
 
   it('refuses a fixed asset on money coming in, or written as a credit, and asks about one left off the register', () => {
@@ -220,6 +259,74 @@ describe('postings at a period’s end', () => {
     expect(postings.filter((p) => p.source.kind === 'depreciation' && p.ledger === 'depreciation').map((p) => [p.date, p.amount])).toEqual([['2025-12-31', 60_000]]);
   });
 
+  it('reduces an asset’s cost by a credit that says which, and asks about a credit that says none', () => {
+    const kit = tx('works-bank', '2024-01-05', -1_200, 'EXAMPLE KIT', { books: coded('fixed-assets:office:cost', { asset: { class: 'office', months: 12 } }) });
+    const id = `row:${kit.id}`;
+    // A supplier's part refund, coded back to the asset's cost.
+    const refund = tx('works-bank', '2024-07-02', 300, 'EXAMPLE KIT REFUND', { books: coded('fixed-assets:office:cost', { reduces: id }) });
+    expect(codingProblems(300, { ledger: 'fixed-assets:office:cost', reduces: id }, 'company')).toEqual([]);
+    expect(codingProblems(-300, { ledger: 'fixed-assets:office:cost', reduces: id }, 'company')[0]).toMatch(/only a credit reduces/);
+    expect(codingProblems(300, { ledger: 'travel', reduces: id }, 'company')[0]).toMatch(/only a credit to a fixed asset’s cost/);
+    expect(journalProblems({ lines: [{ ledger: 'fixed-assets:office:cost', amount: -300, reduces: id }, { ledger: 'fixed-assets:computer:cost', amount: 300, asset: { class: 'computer', months: 24 } }] }, () => true)).toEqual([]);
+    const { postings, assets, checks } = companyLedger(memory([kit, refund]), CO);
+    expect(assets[0]!.reductions).toEqual([{ date: '2024-07-02', amount: 30_000, source: { kind: 'row', id: refund.id } }]);
+    // £600 by June, then £300 over the 6 months left: the cost and its depreciation both £900 at the year end.
+    expect(byLedger(postings, upTo('2024-12-31'))).toMatchObject({ 'fixed-assets:office:cost': 90_000, 'fixed-assets:office:depreciation': -90_000, depreciation: 90_000 });
+    expect(checks.filter((c) => c.kind.startsWith('fixed-asset'))).toEqual([]);
+    // A credit that names no asset, one on another class's code, and one larger than the net book value.
+    const bare = tx('works-bank', '2024-08-01', 50, 'EXAMPLE CREDIT NOTE', { books: coded('fixed-assets:office:cost') });
+    const wrong = tx('works-bank', '2024-08-02', 40, 'EXAMPLE MOVED', { books: coded('fixed-assets:computer:cost', { reduces: id }) });
+    const big = tx('works-bank', '2024-11-01', 500, 'EXAMPLE BIG REFUND', { books: coded('fixed-assets:office:cost', { reduces: id }) });
+    const bad = companyLedger(memory([kit, refund, bare, wrong, big]), CO).checks;
+    expect(bad).toContainEqual(expect.objectContaining({ kind: 'fixed-asset-unmarked', amount: -50 }));
+    expect(bad.filter((c) => c.kind === 'fixed-asset-invalid').map((c) => (c as { problem: string }).problem)).toEqual([expect.stringMatching(/posted to computer equipment: cost/i), expect.stringMatching(/more than its net book value/)]);
+  });
+
+  it('takes a life from the policy in force, and a later policy only from its day (a change in estimate)', () => {
+    const desk = tx('works-bank', '2024-01-05', -1_200, 'EXAMPLE DESK', { books: coded('fixed-assets:furniture:cost', { asset: { class: 'furniture' } }) });
+    const later = tx('works-bank', '2026-06-01', 1, 'EXAMPLE BANK INTEREST', { books: coded('interest-receivable') });
+    const before = companyLedger(memory([desk, later], { company: companyOf({ policies: [{ class: 'furniture', months: 48 }] }) }), CO);
+    const after = companyLedger(memory([desk, later], { company: companyOf({ policies: [{ class: 'furniture', months: 48 }, { class: 'furniture', months: 24, effectiveFrom: '2025-01-01' }] }) }), CO);
+    // 2024 is as it was; from 2025 the £900 left is written down over the 12 months left of 24.
+    expect(byLedger(after.postings, upTo('2024-12-31'))).toEqual(byLedger(before.postings, upTo('2024-12-31')));
+    expect(byLedger(after.postings, inSpan('2025-01-01', '2025-12-31')).depreciation).toBe(90_000);
+    expect(after.assets[0]).toMatchObject({ months: 48, life: 'policy', lives: [{ from: '2024-01-05', months: 48 }, { from: '2025-01-01', months: 24 }] });
+    expect(booksProblems(booksOf({ policies: [{ class: 'furniture', months: 48 }, { class: 'furniture', months: 24, effectiveFrom: '2025-01-01' }] }))).toEqual([]);
+  });
+
+  it('refuses connected on an intangible, and a residual value more than the cost', () => {
+    expect(codingProblems(-500, { ledger: 'intangible-assets:cost', asset: { class: 'intangible', months: 60, connected: true } }, 'company')[0]).toMatch(/intangible asset is not plant/);
+    expect(codingProblems(-500, { ledger: 'fixed-assets:van:cost', asset: { class: 'van', months: 60, residual: 600 } }, 'company')[0]).toMatch(/residual value/);
+  });
+
+  it('says when an asset in the opening balances left before the books start, and counts a mid-month start from the next month', () => {
+    const open = journal(
+      '2024-12-14',
+      'Opening balances',
+      [
+        { ledger: 'fixed-assets:computer:cost', amount: 1_200, asset: { class: 'computer', months: 12, disposedOn: '2024-12-01' } },
+        { ledger: 'fixed-assets:office:cost', amount: 1_200, asset: { class: 'office', months: 12 } },
+        { ledger: 'retained-earnings', amount: -2_400 },
+      ],
+      { opening: true },
+    );
+    const row = tx('works-bank', '2025-03-01', 5, 'EXAMPLE BANK INTEREST', { books: coded('interest-receivable') });
+    const { postings, assets, checks } = companyLedger(memory([row], { journals: [open], company: companyOf({ ledgerFrom: '2024-12-15' }) }), CO);
+    expect(checks.some((c) => c.kind === 'fixed-asset-invalid' && /before its books here start/.test(c.problem))).toBe(true);
+    expect(postings.filter((p) => p.source.kind === 'disposal')).toEqual([]);
+    // December was counted by the accounts before: from January 2025.
+    expect(assets.map((a) => a.from)).toEqual(['2025-01-01', '2025-01-01']);
+    expect(byLedger(postings, upTo('2024-12-31')).depreciation).toBeUndefined();
+  });
+
+  it('checks a dividend against the profit and loss reserve on the day it is paid (CA 2006 s830)', () => {
+    const sale = tx('works-bank', '2024-03-01', 1_000, 'EXAMPLE CLIENT', { books: coded('turnover') });
+    const fine = tx('works-bank', '2024-04-01', -600, 'DIVIDEND', { books: coded('dividends') });
+    const tooMuch = tx('works-bank', '2024-05-01', -600, 'DIVIDEND', { books: coded('dividends') });
+    const { checks } = companyLedger(memory([sale, fine, tooMuch]), CO);
+    expect(checks.filter((c) => c.kind === 'dividend-exceeds-reserves')).toEqual([expect.objectContaining({ date: '2024-05-01', amount: 600, available: 400 })]);
+  });
+
   describe('covers', () => {
     it('carries a cost paid ahead as a prepayment at the period end, reversed the next day', () => {
       const tools = tx('works-bank', '2024-09-03', -288, 'EXAMPLE DESIGN TOOLS', { books: coded('software-hosting', { vat: std(-48), covers: { from: '2024-09-03', to: '2025-09-02' } }) });
@@ -240,6 +347,17 @@ describe('postings at a period’s end', () => {
       expect(byLedger(postings, upTo('2024-12-31'))).toEqual({ 'professional-fees': 36_000, accruals: -36_000 });
       // Paid in 2025: the accrual reversed on its first day, so the cost is not counted again.
       expect(byLedger(postings, inSpan('2025-01-01', '2025-12-31'))).toEqual({ 'bank:works-bank': -36_000, accruals: 36_000 });
+    });
+
+    it('carries a bill received and not paid as a trade creditor, an invoice sent and not paid as a trade debtor', () => {
+      const fees = tx('works-bank', '2025-02-20', -360, 'EXAMPLE ACCOUNTANTS', { books: coded('professional-fees', { covers: { from: '2024-10-01', to: '2024-12-31' }, invoicedOn: '2024-12-31' }) });
+      const late = tx('works-bank', '2025-01-15', 620, 'EXAMPLE CLIENT DECEMBER', { books: coded('turnover', { covers: { from: '2024-12-01', to: '2024-12-31' }, invoicedOn: '2024-12-20' }) });
+      // Invoiced after the period end: still an accrual.
+      const after = tx('works-bank', '2025-02-21', -120, 'EXAMPLE CLEANERS', { books: coded('general-expenses', { covers: { from: '2024-12-01', to: '2024-12-31' }, invoicedOn: '2025-01-05' }) });
+      const atYearEnd = byLedger(companyLedger(memory([fees, late, after]), CO).postings, upTo('2024-12-31'));
+      expect(atYearEnd).toMatchObject({ 'creditors:trade': -36_000, 'debtors:trade': 62_000, accruals: -12_000 });
+      expect(atYearEnd['accrued-income']).toBeUndefined();
+      expect(codingProblems(-10, { ledger: 'travel', invoicedOn: '2024-12-31' }, 'company')[0]).toMatch(/beside the period it covers/);
     });
 
     it('defers income received ahead, and accrues income received late', () => {
@@ -304,7 +422,7 @@ describe('postings at a period’s end', () => {
         const late = tx('works-bank', addDays(date, 2_200), 1, 'EXAMPLE BANK INTEREST', { books: coded('interest-receivable') });
         const { postings } = companyLedger(memory([t, late]), CO);
         const charged = postings.filter((p) => p.source.kind === 'depreciation' && p.ledger === 'depreciation').reduce((s, p) => s + p.amount, 0);
-        const expected = depreciationTo({ cost: pence, from: date, months, disposedOn }, addDays(date, 2_200));
+        const expected = depreciationTo({ ...asset(pence, date, months), disposedOn }, addDays(date, 2_200));
         const all = byLedger(postings);
         const sources = new Map<string, number>();
         for (const p of postings) sources.set(`${p.source.kind}:${p.source.id}`, (sources.get(`${p.source.kind}:${p.source.id}`) ?? 0) + p.amount);
@@ -343,6 +461,9 @@ describe('a period’s accounts', () => {
     return { src, rows };
   }
   const report = (s: ReturnType<typeof studio>, period?: string, snapshots: BalanceSnapshot[] = [], today = '2026-06-01') => periodAccounts({ src: s.src, company: s.src.company(CO)!, engine: engineOf(s.src, snapshots), today, period })!;
+  /** The bank's statement balance on a day, as the books have it: the account reconciles. */
+  const statementAsBooks = (s: ReturnType<typeof studio>, day: string) => [snapshot(day, (byLedger(companyLedger(s.src, CO).postings, upTo(day))['bank:works-bank'] ?? 0) / 100)];
+  const ready = (s: ReturnType<typeof studio>, end: string) => report(s, end, statementAsBooks(s, end));
   const line = (r: CompanyAccountsResponse, l: string) => r.balanceSheet.lines.find((x) => x.line === l)!;
   const pl = (r: CompanyAccountsResponse, l: string) => r.profitAndLoss.lines.find((x) => x.line === l)!;
 
@@ -355,7 +476,7 @@ describe('a period’s accounts', () => {
     ]);
     expect(r.period).toMatchObject({ end: '2025-12-31', first: false });
     expect(report(studio(), '2024-12-31').period.first).toBe(true);
-    expect(periodAccounts({ src: studio().src, company: studio().src.company(CO)!, engine: { balanceOn: () => null }, today: '2026-06-01', period: '2024-06-30' })).toBeUndefined();
+    expect(periodAccounts({ src: studio().src, company: studio().src.company(CO)!, engine: { balanceOn: () => null, statementFor: () => null }, today: '2026-06-01', period: '2024-06-30' })).toBeUndefined();
   });
 
   it('works out the profit and loss by the micro-entity lines, with the codes beneath', () => {
@@ -444,16 +565,26 @@ describe('a period’s accounts', () => {
     expect(off.reconciliation[0]).toMatchObject({ status: 'differs', difference: 1_234 });
     expect(off.checks).toContainEqual({ kind: 'bank', reconciliation: off.reconciliation[0] });
     expect(off.ready).toBe(false);
-    // No statement balance: the engine's figure is the rows alone, said and not a block.
+    // No statement balance settling the day, and the account moved: not reconciled, and a block.
     const rows = report(s, '2024-12-31');
-    expect(rows.reconciliation[0]!.status).toBe('rows-only');
-    expect(rows.ready).toBe(true);
+    expect(rows.reconciliation[0]).toMatchObject({ status: 'unverified', books: atEnd });
+    expect(rows.checks).toContainEqual({ kind: 'bank', reconciliation: rows.reconciliation[0] });
+    expect(rows.ready).toBe(false);
+    // A statement balance after the day settles it when the rows from the one before add up to it.
+    const later = byLedger(companyLedger(s.src, CO).postings, upTo('2025-03-01'))['bank:works-bank']!;
+    const before = byLedger(companyLedger(s.src, CO).postings, upTo('2024-06-30'))['bank:works-bank']!;
+    const around = report(s, '2024-12-31', [snapshot('2024-06-30', before / 100), snapshot('2025-03-01', later / 100)]);
+    expect(around.reconciliation[0]).toMatchObject({ status: 'reconciled', basis: { date: '2025-03-01', on: false } });
+    // One after it alone (no balance before to carry from) does not.
+    expect(report(s, '2024-12-31', [snapshot('2025-03-01', later / 100)]).reconciliation[0]!.status).toBe('unverified');
+    // Nor does an approximate figure on the day.
+    expect(report(s, '2024-12-31', [{ ...snapshot('2024-12-31', atEnd / 100), approximate: true }]).reconciliation[0]!.status).toBe('unverified');
   });
 
   it('is not ready while the period runs, or with a row in suspense, and a check after the period end does not stop it', () => {
     const uncodedLater = tx('works-bank', '2025-04-01', -9.99, 'EXAMPLE STATIONERS');
     const s = studio({ extra: [uncodedLater] });
-    expect(report(s, '2024-12-31').ready).toBe(true);
+    expect(ready(s, '2024-12-31').ready).toBe(true);
     const y2 = report(s, '2025-12-31');
     expect(y2.checks).toContainEqual({ kind: 'clearing', ledger: 'suspense', amount: 999 });
     expect(y2.checks.some((c) => c.kind === 'ledger' && c.check.kind === 'uncoded')).toBe(true);
@@ -466,7 +597,8 @@ describe('a period’s accounts', () => {
     const r = report(studio(), '2024-12-31');
     const w = Object.fromEntries(r.balanceSheet.lines.map((l) => [l.line, l.whole]));
     const filing = (figures: Record<string, number>) => [{ id: 'fil_000000000001', kind: 'accounts' as const, periodStart: '2024-01-01', periodEnd: '2024-12-31', filedOn: '2025-06-01', addedBy: 'owner' as const, figures }];
-    const same = report(studio({ filings: filing({ B: w.B!, K: w.K! }) }), '2024-12-31');
+    const filedStudio = studio({ filings: filing({ B: w.B!, K: w.K! }) });
+    const same = ready(filedStudio, '2024-12-31');
     expect(same.filing).toMatchObject({ matches: true, lines: [{ line: 'B', filed: w.B, computed: w.B }, { line: 'K', filed: w.K, computed: w.K }] });
     expect(same.period.filed).toMatchObject({ filedOn: '2025-06-01', lines: true });
     expect(same.ready).toBe(true);
@@ -489,7 +621,7 @@ describe('a period’s accounts', () => {
           });
           const src = memory(rows);
           for (const end of ['2024-12-31', '2025-12-31', '2026-12-31']) {
-            const r = periodAccounts({ src, company: src.company(CO)!, engine: { balanceOn: () => null }, today: '2027-06-01', period: end })!;
+            const r = periodAccounts({ src, company: src.company(CO)!, engine: { balanceOn: () => null, statementFor: () => null }, today: '2027-06-01', period: end })!;
             const k = r.balanceSheet.lines.find((l) => l.line === 'K')!;
             if (r.trialBalance.debit !== r.trialBalance.credit || !r.balanceSheet.balances || k.whole !== r.balanceSheet.capital.total.whole) return false;
           }
@@ -500,8 +632,55 @@ describe('a period’s accounts', () => {
     );
   });
 
-  it('refuses two depreciation policies for one class', () => {
+  it('shows the period before beside each line: as filed where its accounts give lines, else worked out', () => {
+    const s = studio();
+    const y1 = report(s, '2024-12-31');
+    expect(y1.comparative).toBeUndefined();
+    const y2 = report(s, '2025-12-31');
+    expect(y2.comparative).toEqual({ start: '2024-01-01', end: '2024-12-31', sheet: 'computed', profit: true });
+    for (const l of y2.balanceSheet.lines) expect(l.prior).toBe(y1.balanceSheet.lines.find((x) => x.line === l.line)!.whole);
+    for (const l of y2.profitAndLoss.lines) expect(l.prior).toBe(y1.profitAndLoss.lines.find((x) => x.line === l.line)!.amount);
+    expect(y2.profitAndLoss.prior?.profit).toBe(y1.profitAndLoss.profit);
+    expect(y2.balanceSheet.capital.reserve.prior).toBe(y1.balanceSheet.capital.reserve.whole);
+    // Filed with lines: those, not the books' own.
+    const filed = studio({ filings: [{ id: 'fil_000000000002', kind: 'accounts', periodStart: '2024-01-01', periodEnd: '2024-12-31', filedOn: '2025-06-01', addedBy: 'owner', figures: { B: 1, K: 2 } }] });
+    const f = report(filed, '2025-12-31');
+    expect(f.comparative?.sheet).toBe('filed');
+    expect(f.balanceSheet.lines.find((l) => l.line === 'B')!.prior).toBe(1);
+    // A line it leaves blank, as the books work it out.
+    expect(f.balanceSheet.lines.find((l) => l.line === 'C')!.prior).toBe(report(filed, '2024-12-31').balanceSheet.lines.find((l) => l.line === 'C')!.whole);
+  });
+
+  it('totals B and C from their rounded sub-lines, as the filing form does, and shows share premium and provisions on their lines', () => {
+    // Cash of £x.50 and debtors of £y.50: each rounds up, so C is a pound more than its exact figure rounded.
+    const rows = [
+      tx('works-bank', '2024-02-01', 100.5, 'J BLOGGS SHARES', { books: { lines: [{ ledger: 'share-capital', amount: 50 }, { ledger: 'share-premium', amount: 50.5 }], setBy: 'user' } }),
+      tx('works-bank', '2024-03-01', -200.5, 'EXAMPLE DEPOSIT', { books: coded('debtors:other') }),
+      tx('works-bank', '2024-03-02', 300, 'J BLOGGS LOAN', { books: coded('directors-loan') }),
+    ];
+    const provision = journal('2024-12-31', 'Dilapidations provision', [
+      { ledger: 'general-expenses', amount: 75 },
+      { ledger: 'provisions', amount: -75 },
+    ]);
+    const src = memory(rows, { journals: [provision] });
+    const r = periodAccounts({ src, company: src.company(CO)!, engine: { balanceOn: () => null, statementFor: () => null }, today: '2025-06-01', period: '2024-12-31' })!;
+    const c = r.balanceSheet.lines.find((l) => l.line === 'C')!;
+    // Bank £200.00, debtors £200.50: 200 + 201.
+    expect(c.parts!.map((p) => [p.label, p.exact, p.whole])).toEqual([
+      ['Debtors', 20_050, 201],
+      ['Cash at bank and in hand', 20_000, 200],
+    ]);
+    expect(c.whole).toBe(401);
+    expect(r.balanceSheet.lines.find((l) => l.line === 'I')!.exact).toBe(7_500);
+    expect(r.balanceSheet.capital.sharePremium).toEqual({ exact: 5_050, whole: 51 });
+    expect(r.balanceSheet.balances).toBe(true);
+    const w = Object.fromEntries(r.balanceSheet.lines.map((l) => [l.line, l.whole]));
+    expect(r.balanceSheet.capital.reserve.whole).toBe(w.K! - 50 - 51);
+  });
+
+  it('refuses two depreciation policies for one class and day, and a lock before incorporation', () => {
     expect(booksProblems(booksOf({ policies: [{ class: 'computer', months: 36 }, { class: 'computer', months: 48 }] }))).toContainEqual(expect.stringMatching(/Two depreciation policies/));
+    expect(booksProblems(booksOf({ lockedThrough: '2023-12-31' }))).toContainEqual(expect.stringMatching(/locked through/));
     expect(diffDays('2024-01-01', '2024-12-31')).toBe(365);
   });
 });

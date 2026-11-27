@@ -418,8 +418,13 @@ export function booksProblems(books: CompanyBooksSetup & { filings?: readonly Co
   if (books.withinChargeFrom && books.withinChargeFrom < inc) out.push(`It came within the charge to Corporation Tax on ${day(books.withinChargeFrom)}, before it was incorporated (${day(inc)}).`);
   if (books.tradeStartedOn && books.withinChargeFrom && books.tradeStartedOn < books.withinChargeFrom) out.push(`Trade started on ${day(books.tradeStartedOn)}, before it came within the charge to Corporation Tax (${day(books.withinChargeFrom)}): trading brings a company within the charge (CTA 2009 s9(2)).`);
   if (books.tradeStartedOn && books.withinChargeFrom === null) out.push('It trades, so it is not dormant for Corporation Tax: give the day it came within the charge (CTA 2009 s9).');
-  const classes = (books.policies ?? []).map((p) => p.class);
-  for (const c of new Set(classes.filter((c, i) => classes.indexOf(c) !== i))) out.push(`Two depreciation policies are for ${FIXED_ASSET_CLASS_META[c].name.toLowerCase()}: give one life per class.`);
+  const policyKeys = (books.policies ?? []).map((p) => `${p.class}|${p.effectiveFrom ?? ''}`);
+  for (const k of new Set(policyKeys.filter((k, i) => policyKeys.indexOf(k) !== i))) {
+    const [c, from] = k.split('|') as [keyof typeof FIXED_ASSET_CLASS_META, string];
+    out.push(`Two depreciation policies are for ${FIXED_ASSET_CLASS_META[c].name.toLowerCase()} ${from ? `from ${day(from)}` : 'from the start'}: give one life per class and day.`);
+  }
+  for (const p of books.policies ?? []) if (p.effectiveFrom && p.effectiveFrom < inc) out.push(`A depreciation policy takes effect on ${day(p.effectiveFrom)}, before the company was incorporated.`);
+  if (books.lockedThrough && books.lockedThrough < inc) out.push(`Its books are locked through ${day(books.lockedThrough)}, before it was incorporated.`);
   if (books.confirmationStatement && books.confirmationStatement.nextMadeUpTo <= inc) out.push(`The next confirmation statement's made-up date (${day(books.confirmationStatement.nextMadeUpTo)}) is not after incorporation.`);
   if (books.paye) {
     if (books.paye.from < inc) out.push(`The PAYE scheme starts on ${day(books.paye.from)}, before the company was incorporated.`);
@@ -455,6 +460,16 @@ export function booksProblems(books: CompanyBooksSetup & { filings?: readonly Co
     }
   }
   return out;
+}
+
+/**
+ * The lock a filing leaves the books with (FORMULAS.md §22, "Locking"): accounts recorded as filed lock
+ * the books through their period's end, never earlier than they were locked already; any other filing
+ * leaves the lock as it is.
+ */
+export function lockAfterFiling(books: Pick<CompanyBooksSetup, 'lockedThrough'>, filing: Pick<CompanyFiling, 'kind' | 'periodEnd'>): { lockedThrough?: ISODate } {
+  if (filing.kind !== 'accounts') return books.lockedThrough ? { lockedThrough: books.lockedThrough } : {};
+  return { lockedThrough: books.lockedThrough && books.lockedThrough > filing.periodEnd ? books.lockedThrough : filing.periodEnd };
 }
 
 /**

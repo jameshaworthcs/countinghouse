@@ -339,7 +339,7 @@
                 "description": "Calendar date, YYYY-MM-DD"
               },
               "policies": {
-                "maxItems": 6,
+                "maxItems": 60,
                 "type": "array",
                 "items": {
                   "type": "object",
@@ -359,6 +359,10 @@
                       "type": "integer",
                       "minimum": 1,
                       "maximum": 600
+                    },
+                    "effectiveFrom": {
+                      "type": "string",
+                      "description": "Calendar date, YYYY-MM-DD"
                     }
                   },
                   "required": [
@@ -366,6 +370,17 @@
                     "months"
                   ]
                 }
+              },
+              "depreciationMonths": {
+                "type": "string",
+                "enum": [
+                  "acquisition",
+                  "both"
+                ]
+              },
+              "lockedThrough": {
+                "type": "string",
+                "description": "Calendar date, YYYY-MM-DD"
               },
               "filings": {
                 "default": [],

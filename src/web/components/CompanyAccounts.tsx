@@ -5,7 +5,7 @@
 // those worked out now. Everything from the company's own route (GET /api/companies/:id/accounts);
 // nothing here is a figure of yours.
 
-import { useState, type ReactNode } from 'react';
+import { Fragment, useState, type ReactNode } from 'react';
 import type { AccountsCheck, AccountsPeriodChoice, BalanceSheet, BankReconciliation, CompanyAccountsResponse, ProfitAndLoss, RegisterRow, ReportCode, TrialBalance } from '../../shared/api';
 import { DIRECTOR_LOAN_KIND_LABELS } from '../../shared/company';
 import { formatDate, formatSpan } from '../../shared/dates';
@@ -23,24 +23,60 @@ const Pounds = ({ value }: { value: number }) => <Money value={value} decimals={
 
 const periodLabel = (p: AccountsPeriodChoice) => `${formatSpan(p.start, p.end)}${p.ended ? '' : ' (running)'}${p.filed ? ' · filed' : ''}`;
 
-/** A report's codes, beneath its line. */
-function CodeRows({ codes, cols }: { codes: ReportCode[]; cols: number }) {
+/** Whole pounds, or a dash when there is none. */
+const PriorPounds = ({ value }: { value: number | undefined }) => (value === undefined ? <span className="text-ink-3">—</span> : <Pounds value={value} />);
+/** Pence, or a dash when there is none. */
+const PriorPence = ({ value }: { value: number | undefined }) => (value === undefined ? <span className="text-ink-3">—</span> : <Pence value={value} />);
+
+/** A report's codes, beneath its line: their figure, and empty cells for the columns beside it. */
+function CodeRows({ codes, blank, indent = 'pl-7', wideOnly = false }: { codes: ReportCode[]; blank: number; indent?: string; wideOnly?: boolean }) {
   return (
     <>
       {codes.map((c) => (
         <tr key={c.ledger} className="text-[12.5px] text-ink-2">
-          <td className={cn(tableClasses.td, 'py-1 pl-7')}>{c.name}</td>
-          <td className={cn(tableClasses.td, tableClasses.num, 'py-1')}>
+          <td className={cn(tableClasses.td, 'py-1', indent)}>
+            {c.name}
+            {/* On a phone the exact column is left out: its figure sits under the name. */}
+            {wideOnly && (
+              <div className="sm:hidden">
+                <Pence value={c.amount} />
+              </div>
+            )}
+          </td>
+          <td className={cn(tableClasses.td, tableClasses.num, 'py-1', wideOnly && 'hidden sm:table-cell')}>
             <Pence value={c.amount} />
           </td>
-          {cols > 2 && <td className={cn(tableClasses.td, 'py-1')} />}
+          {Array.from({ length: blank }, (_, i) => (
+            <td key={i} className={cn(tableClasses.td, 'py-1')} />
+          ))}
         </tr>
       ))}
     </>
   );
 }
 
-function ProfitCard({ pl, codes }: { pl: ProfitAndLoss; codes: boolean }) {
+function ProfitCard({ pl, codes, prior }: { pl: ProfitAndLoss; codes: boolean; prior: CompanyAccountsResponse['comparative'] }) {
+  const withPrior = Boolean(prior?.profit);
+  const row = (label: string, amount: number, before: number | undefined, strong = false) => (
+    <tr className={cn(strong && 'font-medium')}>
+      <td className={tableClasses.td}>{label}</td>
+      <td className={cn(tableClasses.td, tableClasses.num)}>
+        <Pence value={amount} />
+      </td>
+      {withPrior && (
+        <td className={cn(tableClasses.td, tableClasses.num)}>
+          <PriorPence value={before} />
+        </td>
+      )}
+    </tr>
+  );
+  const line = (l: ProfitAndLoss['lines'][number]) =>
+    l.amount || l.codes.length || Boolean(l.prior) ? (
+      <Fragment key={l.line}>
+        {row(`${l.line}. ${l.label}`, l.amount, l.prior)}
+        {codes && <CodeRows codes={l.codes} blank={withPrior ? 1 : 0} />}
+      </Fragment>
+    ) : null;
   return (
     <Card title="Profit and loss account" description="The micro-entity format, for the period. Income adds to the profit; charges, shown negative, take from it." padded={false}>
       <div className="relative overflow-x-auto">
@@ -48,128 +84,148 @@ function ProfitCard({ pl, codes }: { pl: ProfitAndLoss; codes: boolean }) {
           <thead>
             <tr>
               <th className={tableClasses.th}>Line</th>
-              <th className={cn(tableClasses.th, tableClasses.num)}>Amount</th>
+              <th className={cn(tableClasses.th, tableClasses.num)}>This period</th>
+              {withPrior && <th className={cn(tableClasses.th, tableClasses.num)}>Period before</th>}
             </tr>
           </thead>
           <tbody>
-            {pl.lines.map((l) => (
-              <LineRows key={l.line} label={`${l.line}. ${l.label}`} amount={l.amount} codes={codes ? l.codes : []} />
-            ))}
-            <tr className="font-medium">
-              <td className={tableClasses.td}>Profit or loss before tax (A to F)</td>
-              <td className={cn(tableClasses.td, tableClasses.num)}>
-                <Pence value={pl.profitBeforeTax} />
-              </td>
-            </tr>
-            <tr className="font-medium">
-              <td className={tableClasses.td}>H. {PROFIT_LINE_LABELS.H}</td>
-              <td className={cn(tableClasses.td, tableClasses.num)}>
-                <Pence value={pl.profit} />
-              </td>
-            </tr>
+            {pl.lines.filter((l) => l.line !== 'G').map(line)}
+            {row('Profit or loss before tax (A to F)', pl.profitBeforeTax, pl.prior?.profitBeforeTax, true)}
+            {pl.lines.filter((l) => l.line === 'G').map(line)}
+            {row(`H. ${PROFIT_LINE_LABELS.H}`, pl.profit, pl.prior?.profit, true)}
           </tbody>
         </table>
       </div>
-      <p className="px-5 py-3 text-[12px] text-ink-3">Corporation Tax is not worked out yet: line G holds only a charge written in a journal. The tax computation comes in a later step.</p>
+      <p className="px-5 py-3 text-[12px] text-ink-3">
+        Corporation Tax is not worked out yet: line G holds only a charge written in a journal. The tax computation comes in a later step.
+        {prior && !prior.profit && ` The period before (${formatSpan(prior.start, prior.end)}) is not in these books, so its profit and loss is not shown beside it.`}
+      </p>
     </Card>
   );
 }
 
-function LineRows({ label, amount, codes }: { label: string; amount: number; codes: ReportCode[] }) {
-  if (!amount && !codes.length) return null;
-  return (
-    <>
-      <tr>
-        <td className={tableClasses.td}>{label}</td>
-        <td className={cn(tableClasses.td, tableClasses.num)}>
-          <Pence value={amount} />
-        </td>
-      </tr>
-      <CodeRows codes={codes} cols={2} />
-    </>
-  );
-}
-
-function SheetCard({ sheet, codes, filed }: { sheet: BalanceSheet; codes: boolean; filed: CompanyAccountsResponse['filing'] }) {
+function SheetCard({ sheet, codes, filed, prior }: { sheet: BalanceSheet; codes: boolean; filed: CompanyAccountsResponse['filing']; prior: CompanyAccountsResponse['comparative'] }) {
   const filedLine = (l: string) => filed?.lines.find((x) => x.line === l);
   const totals = new Set(['F', 'G', 'K']);
+  const withPrior = Boolean(prior);
+  const cap = sheet.capital;
+  const capitalRow = (label: string, f: { exact: number; whole: number; prior?: number }, note?: ReactNode) => (
+    <tr className="text-[12.5px] text-ink-2">
+      <td className={cn(tableClasses.td, 'py-1 pl-7')}>
+        {label}
+        <div className="sm:hidden">
+          <Pence value={f.exact} />
+        </div>
+        {note && <div className="text-[11.5px] text-ink-3">{note}</div>}
+      </td>
+      <td className={cn(tableClasses.td, tableClasses.num, 'hidden py-1 sm:table-cell')}>
+        <Pence value={f.exact} />
+      </td>
+      <td className={cn(tableClasses.td, tableClasses.num, 'py-1')}>
+        <Pounds value={f.whole} />
+      </td>
+      {withPrior && (
+        <td className={cn(tableClasses.td, tableClasses.num, 'py-1')}>
+          <PriorPounds value={f.prior} />
+        </td>
+      )}
+    </tr>
+  );
   return (
-    <Card title="Balance sheet" description="The micro-entity format 1 at the period’s last day, exact and in whole pounds: Companies House takes whole pounds and works F, G and K out from the lines, so they are worked out here from the rounded lines too." padded={false}>
+    <Card
+      title="Balance sheet"
+      description="The micro-entity format 1 at the period’s last day, exact and in whole pounds: Companies House takes whole pounds and works the totals out from what is entered (F, G and K, and B and C from their sub-lines), so they are worked out here from the rounded figures too."
+      padded={false}
+    >
       <div className="relative overflow-x-auto">
         <table className={tableClasses.table}>
           <thead>
             <tr>
               <th className={tableClasses.th}>Line</th>
-              <th className={cn(tableClasses.th, tableClasses.num)}>Exact</th>
+              <th className={cn(tableClasses.th, tableClasses.num, 'hidden sm:table-cell')}>Exact</th>
               <th className={cn(tableClasses.th, tableClasses.num)}>To file</th>
+              {withPrior && <th className={cn(tableClasses.th, tableClasses.num)}>Before</th>}
             </tr>
           </thead>
           <tbody>
             {sheet.lines.map((l) => {
               const f = filedLine(l.line);
               return (
-                <SheetRows key={l.line} line={l.line} label={l.label} exact={l.exact} whole={l.whole} total={totals.has(l.line)} codes={codes && l.line !== 'K' ? l.codes : []} {...(f ? { filed: f.filed } : {})} />
+                <Fragment key={l.line}>
+                  <tr className={cn(totals.has(l.line) && 'bg-panel-2 font-medium')}>
+                    <td className={tableClasses.td}>
+                      {l.line}. {l.label}
+                      <div className="text-[11.5px] font-normal text-ink-3 sm:hidden">
+                        exact <Pence value={l.exact} />
+                      </div>
+                    </td>
+                    <td className={cn(tableClasses.td, tableClasses.num, 'hidden sm:table-cell')}>
+                      <Pence value={l.exact} />
+                    </td>
+                    <td className={cn(tableClasses.td, tableClasses.num)}>
+                      <Pounds value={l.whole} />
+                      {f && f.filed !== l.whole && (
+                        <div className="text-[11.5px] text-bad-ink">
+                          filed <Pounds value={f.filed} />
+                        </div>
+                      )}
+                    </td>
+                    {withPrior && (
+                      <td className={cn(tableClasses.td, tableClasses.num)}>
+                        <PriorPounds value={l.prior} />
+                      </td>
+                    )}
+                  </tr>
+                  {codes &&
+                    l.line !== 'K' &&
+                    (l.parts
+                      ? l.parts.map((part) => (
+                          <Fragment key={part.label}>
+                            <tr className="text-[12.5px] text-ink-2">
+                              <td className={cn(tableClasses.td, 'py-1 pl-7 font-medium')}>
+                                {part.label}
+                                <div className="font-normal sm:hidden">
+                                  <Pence value={part.exact} />
+                                </div>
+                              </td>
+                              <td className={cn(tableClasses.td, tableClasses.num, 'hidden py-1 sm:table-cell')}>
+                                <Pence value={part.exact} />
+                              </td>
+                              <td className={cn(tableClasses.td, tableClasses.num, 'py-1')}>
+                                <Pounds value={part.whole} />
+                              </td>
+                              {withPrior && <td className={cn(tableClasses.td, 'py-1')} />}
+                            </tr>
+                            <CodeRows codes={part.codes} blank={withPrior ? 2 : 1} indent="pl-10" wideOnly />
+                          </Fragment>
+                        ))
+                      : <CodeRows codes={l.codes} blank={withPrior ? 2 : 1} wideOnly />)}
+                </Fragment>
               );
             })}
-            <tr className="text-[12.5px] text-ink-2">
-              <td className={cn(tableClasses.td, 'py-1 pl-7')}>Called up share capital</td>
-              <td className={cn(tableClasses.td, tableClasses.num, 'py-1')}>
-                <Pence value={sheet.capital.shareCapital.exact} />
-              </td>
-              <td className={cn(tableClasses.td, tableClasses.num, 'py-1')}>
-                <Pounds value={sheet.capital.shareCapital.whole} />
-              </td>
-            </tr>
-            <tr className="text-[12.5px] text-ink-2">
-              <td className={cn(tableClasses.td, 'py-1 pl-7')}>
-                Profit and loss account
-                <div className="text-[11.5px] text-ink-3">
-                  At the start <Pence value={sheet.capital.reserve.opening} />, the period’s profit <Pence value={sheet.capital.reserve.profit} />, dividends <Pence value={-sheet.capital.reserve.dividends} />
-                  {sheet.capital.reserve.other !== 0 && (
-                    <>
-                      , other movements <Pence value={sheet.capital.reserve.other} />
-                    </>
-                  )}
-                </div>
-              </td>
-              <td className={cn(tableClasses.td, tableClasses.num, 'py-1')}>
-                <Pence value={sheet.capital.reserve.exact} />
-              </td>
-              <td className={cn(tableClasses.td, tableClasses.num, 'py-1')}>
-                <Pounds value={sheet.capital.reserve.whole} />
-              </td>
-            </tr>
+            {capitalRow('Called up share capital', cap.shareCapital)}
+            {(cap.sharePremium.exact !== 0 || Boolean(cap.sharePremium.prior)) && capitalRow('Share premium account', cap.sharePremium)}
+            {(cap.otherReserves.exact !== 0 || Boolean(cap.otherReserves.prior)) && capitalRow('Other reserves', cap.otherReserves)}
+            {capitalRow(
+              'Profit and loss account',
+              cap.reserve,
+              <>
+                At the start <Pence value={cap.reserve.opening} />, the period’s profit <Pence value={cap.reserve.profit} />, dividends <Pence value={-cap.reserve.dividends} />
+                {cap.reserve.other !== 0 && (
+                  <>
+                    , other movements <Pence value={cap.reserve.other} />
+                  </>
+                )}
+              </>,
+            )}
           </tbody>
         </table>
       </div>
       <p className="px-5 py-3 text-[12px] text-ink-3">
-        {sheet.balances ? 'Net assets (K) are capital and reserves, to the penny.' : 'Net assets (K) are not capital and reserves: please report this.'} In whole pounds the profit and loss account is K less the share capital, so the two add up to K.
+        {sheet.balances ? 'Net assets (K) are capital and reserves, to the penny.' : 'Net assets (K) are not capital and reserves: please report this.'} In whole pounds the profit and loss account is K less the share capital and other reserves, so they add up to K. The accounts state that their figures are rounded to the nearest pound (FRS 105 para 3.13(d)).
+        {prior && ` The period before (to ${formatDate(prior.end)}) is ${prior.sheet === 'filed' ? 'as filed' : 'as these books work it out'}.`}
       </p>
     </Card>
-  );
-}
-
-function SheetRows({ line, label, exact, whole, total, codes, filed }: { line: string; label: string; exact: number; whole: number; total: boolean; codes: ReportCode[]; filed?: number }) {
-  return (
-    <>
-      <tr className={cn(total && 'bg-panel-2 font-medium')}>
-        <td className={tableClasses.td}>
-          {line}. {label}
-        </td>
-        <td className={cn(tableClasses.td, tableClasses.num)}>
-          <Pence value={exact} />
-        </td>
-        <td className={cn(tableClasses.td, tableClasses.num)}>
-          <Pounds value={whole} />
-          {filed !== undefined && filed !== whole && (
-            <div className="text-[11.5px] text-bad-ink">
-              filed <Pounds value={filed} />
-            </div>
-          )}
-        </td>
-      </tr>
-      <CodeRows codes={codes} cols={3} />
-    </>
   );
 }
 
@@ -223,7 +279,7 @@ function TrialBalanceCard({ tb, accountName }: { tb: TrialBalance; accountName: 
 
 function RegisterCard({ register }: { register: RegisterRow[] }) {
   return (
-    <Card title="Fixed asset register" description="Each asset’s cost, written down straight line by whole months over its life (the month it was bought in full), to the period’s end." padded={false}>
+    <Card title="Fixed asset register" description="Each asset’s cost, less any residual value, written down straight line by whole months over its life (the month it was bought in full; the month it left as the company’s policy says), to the period’s end. A change of life applies from its day, to what is left." padded={false}>
       {register.length === 0 ? (
         <div className="p-5">
           <EmptyState title="No fixed assets">A payment coded to a fixed asset’s cost, with its life, is listed here.</EmptyState>
@@ -248,6 +304,19 @@ function RegisterCard({ register }: { register: RegisterRow[] }) {
                     <div className="text-[12px] text-ink-3">
                       {FIXED_ASSET_CLASS_META[a.class].name} · bought {formatDate(a.acquired)}
                       {a.from !== a.acquired && `, counted from ${formatDate(a.from)}`} · {a.months ? `${a.months} months${a.life === 'policy' ? ' (the policy)' : ''}` : 'no life: not written down'}
+                      {a.lives.length > 1 && ` · life changed ${a.lives.slice(1).map((l) => `${formatDate(l.from)} to ${l.months ?? 'none'}`).join(', ')}`}
+                      {a.residual !== undefined && (
+                        <>
+                          {' '}
+                          · residual <Pence value={a.residual} />
+                        </>
+                      )}
+                      {a.reductions.length > 0 && (
+                        <>
+                          {' '}
+                          · cost reduced by <Pence value={a.reductions.reduce((s, r) => s + r.amount, 0)} />
+                        </>
+                      )}
                       {a.disposedOn && ` · left ${formatDate(a.disposedOn)}`}
                     </div>
                     <div className="text-[12px] text-ink-3 sm:hidden">
@@ -255,7 +324,7 @@ function RegisterCard({ register }: { register: RegisterRow[] }) {
                     </div>
                   </td>
                   <td className={cn(tableClasses.td, tableClasses.num)}>
-                    <Pence value={a.cost} />
+                    <Pence value={a.costAtEnd} />
                   </td>
                   <td className={cn(tableClasses.td, tableClasses.num, 'hidden sm:table-cell')}>
                     <Pence value={a.charge} />
@@ -317,8 +386,8 @@ function LoanCard({ loan }: { loan: NonNullable<CompanyAccountsResponse['directo
 const RECONCILED: Record<BankReconciliation['status'], ReactNode> = {
   reconciled: <StatusBadge status="good">Reconciled</StatusBadge>,
   differs: <StatusBadge status="bad">Differs</StatusBadge>,
-  'rows-only': <Badge tone="muted">Rows only</Badge>,
-  'no-balance': <Badge tone="warn">No balance that day</Badge>,
+  unverified: <StatusBadge status="warn">No statement balance</StatusBadge>,
+  dormant: <Badge tone="muted">Dormant</Badge>,
   'other-currency': <Badge tone="warn">Not in pounds</Badge>,
 };
 
@@ -347,8 +416,9 @@ function ReconciliationCard({ list }: { list: BankReconciliation[] }) {
                     <div className="text-ink">{r.name}</div>
                     <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[12px] text-ink-3">
                       {RECONCILED[r.status]}
-                      {r.basis && <span>from its balance on {formatDate(r.basis.date)}</span>}
-                      {r.status === 'rows-only' && <span>no statement balance: its rows alone, which say nothing the books do not</span>}
+                      {r.basis && <span>{r.basis.on ? `its statement balance on ${formatDate(r.basis.date)}` : `its statement balance on ${formatDate(r.basis.date)}, the rows between adding up`}</span>}
+                      {r.status === 'unverified' && <span>no statement balance settles the day: record it on the account’s page</span>}
+                      {r.status === 'dormant' && <span>nothing moved and nothing held: no statement needed</span>}
                       {r.difference !== null && r.difference !== 0 && (
                         <span className="sm:hidden">
                           difference <Pence value={r.difference} />
@@ -393,7 +463,7 @@ function checkWords(c: AccountsCheck): { title: string; line?: ReactNode } {
       return { title: 'Net assets are not capital and reserves (please report this)' };
     case 'bank':
       return {
-        title: `${c.reconciliation.name}: the books and its statements differ at the period’s end`,
+        title: c.reconciliation.status === 'unverified' ? `${c.reconciliation.name}: not reconciled to a statement` : `${c.reconciliation.name}: the books and its statements differ at the period’s end`,
         line:
           c.reconciliation.status === 'differs' ? (
             <>
@@ -402,7 +472,9 @@ function checkWords(c: AccountsCheck): { title: string; line?: ReactNode } {
           ) : c.reconciliation.status === 'other-currency' ? (
             'Not in pounds: the books are kept in pounds'
           ) : (
-            'The account has no balance known on that day, though the books carry one'
+            <>
+              No statement balance on the period’s last day (or after it, the rows between adding up), and the account moved in the period or holds <Pence value={c.reconciliation.books} />: record its statement balance on the account’s page to reconcile it
+            </>
           ),
       };
     case 'drift':
@@ -411,13 +483,18 @@ function checkWords(c: AccountsCheck): { title: string; line?: ReactNode } {
 }
 
 function ReadyCard({ view }: { view: CompanyAccountsResponse }) {
-  if (view.ready)
+  if (view.ready) {
+    const reconciled = view.reconciliation.filter((r) => r.status === 'reconciled');
+    const dormant = view.reconciliation.filter((r) => r.status === 'dormant');
     return (
       <Callout tone="good" title="Ready">
-        The period has ended, every row is coded, nothing sits in suspense, the books balance and each account reconciles to its statements.
-        {view.filing && (view.filing.matches ? ' The lines filed match the books.' : '')}
+        The period has ended, every row is coded, nothing sits in suspense and the books balance.{' '}
+        {reconciled.length ? `Reconciled to statements: ${reconciled.map((r) => r.name).join(', ')}.` : 'No account was reconciled to a statement.'}
+        {dormant.length > 0 && ` Not reconciled, as nothing moved and nothing is held: ${dormant.map((r) => r.name).join(', ')}.`}
+        {view.filing && view.filing.lines.length > 0 && (view.filing.matches ? ' The lines filed match the books.' : '')}
       </Callout>
     );
+  }
   const groups = new Map<string, { title: string; lines: ReactNode[] }>();
   for (const c of view.checks) {
     const w = checkWords(c);
@@ -486,6 +563,7 @@ export function AccountsTab({ companyId }: { companyId: string }) {
         <div className="flex flex-wrap items-center gap-2 pb-2">
           {view.ready ? <StatusBadge status="good">Ready</StatusBadge> : view.period.ended ? <StatusBadge status="warn">Not ready</StatusBadge> : <Badge tone="neutral">Running</Badge>}
           {view.period.filed && <Badge tone="muted">Filed {formatDate(view.period.filed.filedOn)}</Badge>}
+          {view.lockedThrough && view.period.end <= view.lockedThrough && <Badge tone="muted">Locked</Badge>}
           <Button size="sm" variant="ghost" aria-pressed={codes} onClick={() => setCodes((v) => !v)}>
             {codes ? 'Hide the codes beneath' : 'Show the codes beneath'}
           </Button>
@@ -493,8 +571,8 @@ export function AccountsTab({ companyId }: { companyId: string }) {
       </div>
       <ReadyCard view={view} />
       <section className="grid gap-5 xl:grid-cols-2">
-        <ProfitCard pl={view.profitAndLoss} codes={codes} />
-        <SheetCard sheet={view.balanceSheet} codes={codes} filed={view.filing} />
+        <ProfitCard pl={view.profitAndLoss} codes={codes} prior={view.comparative} />
+        <SheetCard sheet={view.balanceSheet} codes={codes} filed={view.filing} prior={view.comparative} />
       </section>
       {view.filing && <FilingCard filing={view.filing} />}
       <RegisterCard register={view.register} />

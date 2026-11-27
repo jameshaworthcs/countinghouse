@@ -134,7 +134,7 @@ const BASE: LedgerCode[] = [
     { code: `fixed-assets:${c}:cost`, name: `${FIXED_ASSET_CLASS_META[c].name}: cost`, kind: 'asset', sheet: both('B'), ct: 'capital', codable: true, asset: { class: c, part: 'cost' }, hint: 'Equipment kept and used for more than a year, capitalised rather than spent.' },
     { code: `fixed-assets:${c}:depreciation`, name: `${FIXED_ASSET_CLASS_META[c].name}: depreciation`, kind: 'asset', sheet: both('B'), ct: 'none', codable: false, asset: { class: c, part: 'depreciation' }, hint: 'What its cost has been written down by (worked out from its life).' },
   ]),
-  { code: 'intangible-assets:cost', name: 'Intangible assets: cost', kind: 'asset', sheet: both('B'), ct: 'capital', codable: true, asset: { class: 'intangible', part: 'cost' }, hint: 'Goodwill, software developed or bought to keep, trade marks (CTA 2009 Part 8 for tax).' },
+  { code: 'intangible-assets:cost', name: 'Intangible assets: cost', kind: 'asset', sheet: both('B'), ct: 'capital', codable: true, asset: { class: 'intangible', part: 'cost' }, hint: 'Acquired intangibles: goodwill bought with a trade, software or trade marks bought to keep (one made in-house is a cost, never an asset: FRS 105 paras 13.4–13.5). For tax, CTA 2009 Part 8.' },
   { code: 'intangible-assets:amortisation', name: 'Intangible assets: amortisation', kind: 'asset', sheet: both('B'), ct: 'none', codable: false, asset: { class: 'intangible', part: 'depreciation' }, hint: 'What their cost has been written down by (worked out from its life).' },
   { code: 'investments', name: 'Investments', kind: 'asset', sheet: both('B'), ct: 'none', codable: true, hint: 'Shares and other investments held for the long term.' },
   { code: 'stock', name: 'Stock', kind: 'asset', sheet: assetLine('C'), ct: 'none', codable: false, hint: 'Goods held to sell, at the period end (a journal).' },
@@ -158,8 +158,11 @@ const BASE: LedgerCode[] = [
   { code: 'directors-loan', name: 'Director’s loan', kind: 'liability', sheet: { debit: 'C', credit: 'E' }, ct: 'none', codable: true, hint: 'Money between the company and you that is not pay or a dividend: what it owes you (or you owe it).' },
   { code: 'accruals', name: 'Accruals', kind: 'liability', sheet: { debit: 'D', credit: 'J' }, ct: 'none', codable: false, hint: 'Costs of the period not yet billed.' },
   { code: 'deferred-income', name: 'Deferred income', kind: 'liability', sheet: { debit: 'D', credit: 'J' }, ct: 'none', codable: false, hint: 'Income received for a later period.' },
+  { code: 'provisions', name: 'Provisions for liabilities', kind: 'liability', sheet: both('I'), ct: 'none', codable: false, hint: 'An obligation of uncertain timing or amount (FRS 105 Section 16), written in a journal.' },
   // Capital and reserves.
   { code: 'share-capital', name: 'Share capital', kind: 'equity', sheet: both('K'), ct: 'none', codable: true, hint: 'The nominal value of the shares issued. Issued and not yet paid for, the other side is called up share capital not paid, which their payment clears.' },
+  { code: 'share-premium', name: 'Share premium', kind: 'equity', sheet: both('K'), ct: 'none', codable: true, hint: 'What shares were issued for above their nominal value (CA 2006 s610).' },
+  { code: 'other-reserves', name: 'Other reserves', kind: 'equity', sheet: both('K'), ct: 'none', codable: false, hint: 'A capital redemption reserve or another reserve that is not the profit and loss account, written in a journal.' },
   { code: 'retained-earnings', name: 'Retained earnings', kind: 'equity', sheet: both('K'), ct: 'none', codable: false, hint: 'Profits kept from earlier years.' },
   { code: 'dividends', name: 'Dividends', kind: 'equity', sheet: both('K'), ct: 'none', codable: true, hint: 'Dividends paid to shareholders: from reserves, not a cost.' },
   // Income.
@@ -272,13 +275,37 @@ export function reverseChargeVat(amount: number, date: ISODate): number {
 // ─── Coding a payment ────────────────────────────────────────────────────────────────────────────
 
 /** Why money coming in is not a fixed asset's cost on the register. */
-const ASSET_BOUGHT = 'a fixed asset on the register is bought with money going out: what one fetched when it was sold is coded to profit or loss on disposal, and the day it left is set on the asset itself.';
+const ASSET_BOUGHT = 'a fixed asset on the register is a debit (money going out): a refund or a cost moved off one says which asset it reduces, what one fetched when sold is coded to profit or loss on disposal, and the day it left is set on the asset itself.';
 
 /** A coding's lines, as one list: its own ledger as one line of the whole amount, or its split. */
-export function codingLines(amount: number, books: Pick<BooksCoding, 'ledger' | 'vat' | 'covers' | 'asset' | 'lines' | 'uncoded'>): BooksLine[] {
+export function codingLines(amount: number, books: Pick<BooksCoding, 'ledger' | 'vat' | 'covers' | 'asset' | 'reduces' | 'invoicedOn' | 'lines' | 'uncoded'>): BooksLine[] {
   if (books.uncoded) return [];
   if (books.lines?.length) return books.lines;
-  return books.ledger ? [{ ledger: books.ledger, amount, ...(books.vat ? { vat: books.vat } : {}), ...(books.covers ? { covers: books.covers } : {}), ...(books.asset ? { asset: books.asset } : {}) }] : [];
+  return books.ledger
+    ? [{ ledger: books.ledger, amount, ...(books.vat ? { vat: books.vat } : {}), ...(books.covers ? { covers: books.covers } : {}), ...(books.asset ? { asset: books.asset } : {}), ...(books.reduces ? { reduces: books.reduces } : {}), ...(books.invoicedOn ? { invoicedOn: books.invoicedOn } : {}) }]
+    : [];
+}
+
+/**
+ * Why a line's fixed asset fields do not fit it, in words, `debit` whether the line is a debit in the
+ * company's books: `asset` on a debit to a fixed (or intangible) asset's cost of its class, a residual
+ * value no more than the line, never `connected` on an intangible; `reduces` (the asset whose cost a
+ * credit reduces) on a credit to a cost code, without `asset`; `invoicedOn` only beside `covers`.
+ */
+export function assetLineProblems(l: Pick<BooksLine, 'ledger' | 'amount' | 'asset' | 'reduces' | 'covers' | 'invoicedOn'>, debit: boolean, where: string): string[] {
+  const out: string[] = [];
+  const entry = ledgerCode(l.ledger);
+  const cost = entry?.asset?.part === 'cost';
+  if (l.asset && cost && !debit) out.push(`${where}${ASSET_BOUGHT}`);
+  if (l.asset?.connected && l.asset.class === 'intangible') out.push(`${where}an intangible asset is not plant: bought from a connected person or not, capital allowances do not apply to it (the intangibles regime, CTA 2009 Part 8).`);
+  if (l.asset?.residual !== undefined && toMinor(l.asset.residual) > Math.abs(toMinor(l.amount))) out.push(`${where}its residual value (${formatMoney(l.asset.residual)}) is more than its cost.`);
+  if (l.reduces) {
+    if (!cost) out.push(`${where}only a credit to a fixed asset’s cost reduces an asset on the register.`);
+    else if (debit) out.push(`${where}a debit to a fixed asset’s cost adds to the register (say it is an asset, with its life); only a credit reduces one.`);
+    if (l.asset) out.push(`${where}a line either is a fixed asset (a debit) or reduces one (a credit), not both.`);
+  }
+  if (l.invoicedOn && !l.covers) out.push(`${where}the day it was invoiced is said beside the period it covers.`);
+  return out;
 }
 
 /** Which row a coding is on: a company account's own row, or a row of yours paid for the company (its cost to the company). */
@@ -317,12 +344,12 @@ export function codingPlace(t: Pick<Transaction, 'accountId' | 'amount' | 'curre
  *   months, and on money going out (what one fetched when sold is coded to `disposals`);
  * - a period it covers that does not end before it starts.
  */
-export function codingProblems(amount: number, books: Pick<BooksCoding, 'ledger' | 'vat' | 'covers' | 'asset' | 'lines' | 'uncoded' | 'invoiceToCompany'>, row: CodedRow): string[] {
+export function codingProblems(amount: number, books: Pick<BooksCoding, 'ledger' | 'vat' | 'covers' | 'asset' | 'reduces' | 'invoicedOn' | 'lines' | 'uncoded' | 'invoiceToCompany'>, row: CodedRow): string[] {
   const out: string[] = [];
   // Left uncoded on purpose: nothing else beside it.
-  if (books.uncoded) return books.ledger || books.lines?.length || books.vat || books.covers || books.asset ? ['Left uncoded, it has no ledger, lines or VAT.'] : [];
+  if (books.uncoded) return books.ledger || books.lines?.length || books.vat || books.covers || books.asset || books.reduces || books.invoicedOn ? ['Left uncoded, it has no ledger, lines or VAT.'] : [];
   if (books.invoiceToCompany !== undefined && row !== 'paid-for') out.push('Whether the invoice is addressed to the company is said only of a payment of yours for it.');
-  if (books.lines?.length && (books.ledger || books.vat || books.covers || books.asset)) out.push('A split codes each line: give its ledger, VAT, period and asset on the lines, not beside them.');
+  if (books.lines?.length && (books.ledger || books.vat || books.covers || books.asset || books.reduces || books.invoicedOn)) out.push('A split codes each line: give its ledger, VAT, period and asset on the lines, not beside them.');
   if (!books.lines?.length && !books.ledger) out.push('Give a ledger to code it to, or split it across two or more.');
   if (books.lines && books.lines.length === 1) out.push('A split has two lines or more: code it to one ledger instead.');
   const lines = codingLines(amount, books);
@@ -348,7 +375,8 @@ export function codingProblems(amount: number, books: Pick<BooksCoding, 'ledger'
     if (l.vat?.claim === 'reg111' && (ledgerCode(l.ledger)?.kind === 'income' || l.vat.treatment === 'reverse-charge' || NO_VAT.has(l.vat.treatment))) out.push(`${where}a claim under reg 111 is input tax charged on a purchase.`);
     if (l.asset && entry.asset?.part !== 'cost') out.push(`${where}a fixed asset is coded to a fixed asset’s cost.`);
     if (l.asset && entry.asset && l.asset.class !== entry.asset.class) out.push(`${where}${entry.name} is for ${FIXED_ASSET_CLASS_META[entry.asset.class].name.toLowerCase()}, not ${FIXED_ASSET_CLASS_META[l.asset.class].name.toLowerCase()}.`);
-    if (l.asset && entry.asset?.part === 'cost' && toMinor(l.amount) > 0) out.push(`${where}${ASSET_BOUGHT}`);
+    // Money in (a positive line) is a credit in the company's books.
+    out.push(...assetLineProblems(l, toMinor(l.amount) < 0, where));
     if (l.covers && l.covers.from > l.covers.to) out.push(`${where}the period it covers ends (${formatDate(l.covers.to)}) before it starts (${formatDate(l.covers.from)}).`);
   }
   return out;
@@ -392,6 +420,7 @@ export function ruleBooksProblems(r: Pick<Rule, 'match' | 'set'>): string[] {
   if (b.ledger === 'directors-loan' && r.match.company && r.match.company.rows !== 'own') out.push('A payment of yours for the company moves your director’s loan already: a rule for those rows codes them to what they bought.');
   if (b.asset && entry?.asset?.part !== 'cost') out.push('A fixed asset is coded to a fixed asset’s cost.');
   if (b.asset && entry?.asset && b.asset.class !== entry.asset.class) out.push(`${entry.name} is not for ${FIXED_ASSET_CLASS_META[b.asset.class].name.toLowerCase()}.`);
+  if (b.asset?.connected && b.asset.class === 'intangible') out.push('An intangible asset is not plant: it is never bought from a connected person for capital allowances.');
   return out;
 }
 
@@ -442,7 +471,7 @@ export function journalProblems(j: Pick<Journal, 'lines'>, ownAccount: (accountI
     if (toMinor(l.amount) === 0) out.push(`${where}a line of nothing.`);
     if (l.asset && entry.asset?.part !== 'cost') out.push(`${where}a fixed asset is on a fixed asset’s cost.`);
     if (l.asset && entry.asset && l.asset.class !== entry.asset.class) out.push(`${where}${entry.name} is for ${FIXED_ASSET_CLASS_META[entry.asset.class].name.toLowerCase()}.`);
-    if (l.asset && entry.asset?.part === 'cost' && toMinor(l.amount) < 0) out.push(`${where}a fixed asset on the register is a debit (its cost): one that leaves the company says the day it left (\`disposedOn\`), and the books take its cost and depreciation away.`);
+    out.push(...assetLineProblems(l, toMinor(l.amount) > 0, where));
     if (l.covers && l.covers.from > l.covers.to) out.push(`${where}the period it covers ends before it starts.`);
     if (l.vat && !takesVat(l.ledger) && l.ledger !== 'vat') out.push(`${where}${entry.name} takes no VAT: a VAT line is on VAT itself, or on income, an expense or a fixed asset’s cost.`);
     if (l.vat?.claim === 'reg111' && l.vat.side !== 'input') out.push(`${where}a claim under reg 111 is input tax.`);

@@ -1621,7 +1621,11 @@ export interface LedgerPosting {
   /** Its VAT: the treatment, input (reclaimed) or output (charged), and whether this is the net amount or the tax. */
   vat?: { treatment: VatTreatment; side: 'input' | 'output'; part: 'net' | 'tax'; claim?: 'reg111' };
   covers?: { from: string; to: string };
-  asset?: { class: AssetRegisterClass; months?: number; connected?: boolean; disposedOn?: string };
+  asset?: { class: AssetRegisterClass; months?: number; connected?: boolean; disposedOn?: string; residual?: number };
+  /** On a credit to a fixed asset's cost: the asset on the register whose cost it reduces. */
+  reduces?: string;
+  /** Beside `covers`: the day it was invoiced (an amount not yet paid at a period end is then a trade creditor or debtor). */
+  invoicedOn?: string;
   memo: string;
 }
 
@@ -1642,10 +1646,18 @@ export interface FixedAsset {
   /** The day it was posted (taken in), and the day depreciation counts from: the ledger's first day for one brought in on an opening journal. */
   acquired: string;
   from: string;
-  /** Its life in months: its own, or the company's policy for its class; none: no policy (a check), and no depreciation. */
+  /** Its life in months when it counts from: its own, or the company's policy for its class; none: no policy then (a check when none ever is), and no depreciation. */
   months?: number;
   life: 'asset' | 'policy' | 'none';
+  /** Its life over time: the first from `from`, each later one a policy taking effect (a change in estimate, written forward). */
+  lives: { from: string; months?: number }[];
+  /** Pence: what it is expected to fetch at the end of its life. */
+  residual?: number;
+  /** Credits that reduced its cost (pence, positive), each with the posting it came from. */
+  reductions: { date: string; amount: number; source: LedgerPosting['source'] }[];
   disposedOn?: string;
+  /** How months were counted: a full month on acquisition and none on disposal, or a full month on both (`books.depreciationMonths`). */
+  convention: 'acquisition' | 'both';
   memo: string;
 }
 
@@ -1672,6 +1684,8 @@ export type LedgerCheck =
   | { kind: 'fixed-asset-unmarked'; source: LedgerPosting['source']; date: string; ledger: string; amount: number; memo: string }
   /** A fixed asset that does not fit (disposed of before it was bought), or a posting to a depreciation code written by hand. */
   | { kind: 'fixed-asset-invalid'; source: LedgerPosting['source']; date: string; problem: string }
+  /** A dividend more than the profit and loss reserve on the day it was paid (CA 2006 s830: profits available for distribution); `available` the reserve before it. */
+  | { kind: 'dividend-exceeds-reserves'; source: LedgerPosting['source']; date: string; amount: number; available: number }
   /** A period said on a code that is not income or an expense: it is posted as it is, not spread. */
   | { kind: 'covers-not-spread'; source: LedgerPosting['source']; date: string; ledger: string; amount: number };
 
@@ -1709,13 +1723,16 @@ export interface AccountsPeriodChoice {
 
 /** The micro-entity profit and loss account for a period (pence: income positive, charges negative, each line's part of the profit). */
 export interface ProfitAndLoss {
-  lines: { line: ProfitLine; label: string; amount: number; codes: ReportCode[] }[];
+  /** `prior`: the line for the period before (pence), when its profit and loss is in these books. */
+  lines: { line: ProfitLine; label: string; amount: number; codes: ReportCode[]; prior?: number }[];
   /** Lines A to F together. */
   profitBeforeTax: number;
   /** Line G: the Corporation Tax charge posted for the period (a journal: working it out is a later slice). */
   tax: number;
   /** H: the profit or loss for the period, after tax. */
   profit: number;
+  /** The same for the period before, when its profit and loss is in these books. */
+  prior?: { profitBeforeTax: number; tax: number; profit: number };
 }
 
 /** A balance sheet line, exact (pence) and in whole pounds as Companies House takes it. */
@@ -1731,12 +1748,25 @@ export interface BalanceSheet {
    * balances, both positive when they are what the line says), each rounded to the pound; F, G and K
    * worked out from the rounded lines (F = C + D − E, G = A + B + F, K = G − H − I − J).
    */
-  lines: ({ line: SheetLine | 'F' | 'G'; label: string; codes: ReportCode[] } & SheetFigure)[];
-  /** Capital and reserves: called-up share capital, and the profit and loss reserve (K less the share capital, in whole pounds). */
+  lines: ({
+    line: SheetLine | 'F' | 'G';
+    label: string;
+    codes: ReportCode[];
+    /** B and C: the sub-lines Companies House's form totals them from when a breakdown is entered, each rounded, the line their sum in whole pounds. */
+    parts?: ({ label: string; codes: ReportCode[] } & SheetFigure)[];
+    /** The line at the end of the period before, in whole pounds (as filed, or worked out). */
+    prior?: number;
+  } & SheetFigure)[];
+  /**
+   * Capital and reserves: called-up share capital, share premium and other reserves, each rounded, and
+   * the profit and loss reserve (K less them, in whole pounds), with the period before's beside each.
+   */
   capital: {
-    shareCapital: SheetFigure;
-    reserve: SheetFigure & { opening: number; profit: number; dividends: number; other: number };
-    total: SheetFigure;
+    shareCapital: SheetFigure & { prior?: number };
+    sharePremium: SheetFigure & { prior?: number };
+    otherReserves: SheetFigure & { prior?: number };
+    reserve: SheetFigure & { opening: number; profit: number; dividends: number; other: number; prior?: number };
+    total: SheetFigure & { prior?: number };
   };
   /** Net assets (K worked out from the lines) is capital and reserves, to the penny. */
   balances: boolean;
@@ -1755,7 +1785,9 @@ export interface RegisterRow extends FixedAsset {
   before: number;
   charge: number;
   toDate: number;
-  /** Cost less depreciation to date; 0 once it has left. */
+  /** Its cost at the period's end, after any reductions. */
+  costAtEnd: number;
+  /** Cost (after reductions) less depreciation to date; 0 once it has left. */
   netBookValue: number;
   /** It left the company in this period: its cost and depreciation were taken away, its net book value then posted to disposals. */
   disposedInPeriod: boolean;
@@ -1790,12 +1822,15 @@ export interface BankReconciliation {
   statement: number | null;
   difference: number | null;
   /**
-   * reconciled: the same; differs: not; rows-only: no statement balance, so the engine's balance is its
-   * rows alone and says nothing the ledger does not (said, not a block); no-balance: the account has no
-   * data on that day though the books carry a balance; other-currency: not in pounds.
+   * reconciled: a statement balance on the day (or the first after it, the rows between adding up from
+   * the one before) agrees with the books; differs: it does not; unverified: no such balance, and the
+   * account moved in the period or holds a balance (a block: record its statement balance on its page);
+   * dormant: no such balance, nothing moved and nothing held (said, not a block); other-currency: not in
+   * pounds.
    */
-  status: 'reconciled' | 'differs' | 'rows-only' | 'no-balance' | 'other-currency';
-  basis?: { date: string; kind: string };
+  status: 'reconciled' | 'differs' | 'unverified' | 'dormant' | 'other-currency';
+  /** The statement balance it was settled by. */
+  basis?: { date: string; on: boolean };
 }
 
 /** What stops a period's accounts being ready. */
@@ -1816,6 +1851,10 @@ export interface CompanyAccountsResponse {
   /** The periods it can show, newest first: those its ledger reaches, up to the one containing today. */
   periods: AccountsPeriodChoice[];
   period: AccountsPeriodChoice & { first: boolean };
+  /** The period before, shown beside it (FRS 105 para 3.7): its balance sheet as filed when its accounts are recorded with lines (a line left blank as worked out), else worked out; its profit and loss when it is in these books. */
+  comparative?: { start: string; end: string; sheet: 'filed' | 'computed'; profit: boolean };
+  /** The books are locked through this day (books.lockedThrough). */
+  lockedThrough?: string;
   profitAndLoss: ProfitAndLoss;
   balanceSheet: BalanceSheet;
   trialBalance: TrialBalance;
@@ -1874,6 +1913,10 @@ export interface CompanyCodingResponse {
   accounts: { id: string; name: string; ledger: string }[];
   /** Its VAT registration, so the coding editor offers VAT only when it is registered. */
   vat?: { registeredFrom: string; deregisteredOn?: string };
+  /** The fixed asset register, so a credit to a cost code can say which asset it reduces. */
+  assets: { id: string; ledger: string; memo: string; acquired: string; cost: number }[];
+  /** The books are locked through this day: rows on or before it keep their coding as filed. */
+  lockedThrough?: string;
 }
 
 /** GET /company-books: the companies whose books are kept here, with how many of their deadlines need you. */

@@ -701,6 +701,24 @@ export class BalanceEngine {
   }
 
   /**
+   * A statement balance that settles a day (docs/FORMULAS.md §22, "Bank reconciliation"): one on the
+   * day itself, or the first after it when the balance before the day, carried by the rows recorded,
+   * comes to it (no gap between). Never a screenshot, a balance seen mid-day or an approximate figure
+   * (`usableAnchors` keeps only those that add up). Null when there is none.
+   */
+  statementFor(accountId: string, date: ISODate): { date: ISODate; on: boolean; balance: number } | null {
+    const d = this.data.get(accountId);
+    if (!d || d.mode !== 'ledger') return null;
+    const list = this.usableAnchors(accountId).filter((a) => a.source === 'snapshot' || a.source === 'running');
+    const on = list.find((a) => a.date === date);
+    if (on) return { date, on: true, balance: fromMinor(on.minor) };
+    const after = list.find((a) => a.date > date);
+    const before = list.findLast((a) => a.date < date);
+    if (!after || !before || this.unexplained(accountId, before, after).difference !== 0) return null;
+    return { date: after.date, on: false, balance: fromMinor(after.minor) };
+  }
+
+  /**
    * The strong anchors either side of a day, for a row on it: the last before it and the first on
    * or after it (a row counts in its own day's close), with what the rows between leave unexplained.
    * Null without one on each side.

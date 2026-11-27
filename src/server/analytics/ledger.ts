@@ -13,12 +13,12 @@
 import type { BooksRowView, CompanyCodingResponse, CompanyLedgerResponse, DirectorLoanMovement, FixedAsset, LedgerCheck, LedgerPosting, LinkSuggestion, LinkView } from '../../shared/api';
 import { directorLoanKind, markCounts, movesDirectorLoan, type MarkContext } from '../../shared/company';
 import { accountingPeriodsOf, type BooksPeriod } from '../../shared/company-books';
-import { addDays, diffDays, formatDate, type ISODate } from '../../shared/dates';
+import { addDays, addMonths, diffDays, formatDate, startOfMonth, type ISODate } from '../../shared/dates';
 import { CategoryIndex } from '../../shared/categories';
 import { Categoriser } from '../../shared/categorise';
 import { accountLedger, AUTO_LINK_DAYS, codingLines, codingPlace, codingProblems, companyLinkProblem, DOUBLE_COUNT_DAYS, isLinked, journalProblems, ledgerCode, linkableCoding, linkFeeMinor, linkGroups, linkTolerance, reg111Problem, REVERSE_CHARGE_TOLERANCE_MINOR, reverseChargeVat, ruleBooksProblems, ruleCoding, type LinkGroup } from '../../shared/ledger';
-import { fromMinor, toMinor } from '../../shared/money';
-import { carriedAt, coverParts, depreciationTo } from '../../shared/period-end';
+import { formatMoney, fromMinor, toMinor } from '../../shared/money';
+import { carriedAt, costOn, coverParts, depreciationTo } from '../../shared/period-end';
 import type { Account, BalanceSnapshot, BooksCoding, BooksLine, Company, CompanyBooks, Journal, Rule, Transaction } from '../../shared/schema';
 import { ruleCatches } from '../categoriser';
 
@@ -93,7 +93,7 @@ export function companyLedger(src: LedgerSource, companyId: string, opts: { unti
   // the company adopts it), its own day kept in its memo.
   const day = (date: ISODate) => (books && date < books.incorporatedOn ? books.incorporatedOn : date);
   const memoOf = (memo: string, date: ISODate) => (books && date < books.incorporatedOn ? `${memo} (${formatDate(date)}, before incorporation: taken in on incorporation)` : memo);
-  const post = (source: LedgerPosting['source'], date: ISODate, ledger: string, minor: number, memo: string, extra: Pick<LedgerPosting, 'vat' | 'covers' | 'asset'> = {}) => {
+  const post = (source: LedgerPosting['source'], date: ISODate, ledger: string, minor: number, memo: string, extra: Pick<LedgerPosting, 'vat' | 'covers' | 'asset' | 'reduces' | 'invoicedOn'> = {}) => {
     if (!minor) return;
     const key = `${source.kind}:${source.id}`;
     const n = counters.get(key) ?? 0;
@@ -113,7 +113,7 @@ export function companyLedger(src: LedgerSource, companyId: string, opts: { unti
       const vat = l.vat ? toMinor(l.vat.amount) : 0;
       const side = ledgerCode(l.ledger)?.kind === 'income' ? 'output' : 'input';
       const claim = l.vat?.claim ? { claim: l.vat.claim } : {};
-      const meta = { ...(l.covers ? { covers: l.covers } : {}), ...(l.asset ? { asset: l.asset } : {}) };
+      const meta = lineMeta(l);
       if (l.vat?.claim === 'reg111') reg111(at, date, l.ledger);
       if (l.vat?.treatment === 'reverse-charge') {
         post(at, date, l.ledger, -gross, memo, { ...meta, vat: { treatment: 'reverse-charge', side: 'input', part: 'net' } });
@@ -244,7 +244,7 @@ export function companyLedger(src: LedgerSource, companyId: string, opts: { unti
     j.lines.forEach((l, line) => {
       const source = { kind: 'journal' as const, id: j.id, line };
       if (l.vat?.claim === 'reg111') reg111(source, j.date, what);
-      post(source, j.date, l.ledger, toMinor(l.amount), j.memo, { ...(l.vat ? { vat: { treatment: l.vat.treatment, side: l.vat.side, part: l.ledger === 'vat' ? ('tax' as const) : ('net' as const), ...(l.vat.claim ? { claim: l.vat.claim } : {}) } } : {}), ...(l.covers ? { covers: l.covers } : {}), ...(l.asset ? { asset: l.asset } : {}) });
+      post(source, j.date, l.ledger, toMinor(l.amount), j.memo, { ...(l.vat ? { vat: { treatment: l.vat.treatment, side: l.vat.side, part: l.ledger === 'vat' ? ('tax' as const) : ('net' as const), ...(l.vat.claim ? { claim: l.vat.claim } : {}) } } : {}), ...lineMeta(l) });
       if (l.ledger === 'directors-loan') journalLoan.push({ j, minor: toMinor(l.amount) });
     });
   }
@@ -295,6 +295,23 @@ export function companyLedger(src: LedgerSource, companyId: string, opts: { unti
   // At each accounting period's end: depreciation, disposals, prepayments and accruals.
   const end = books ? periodEnd(src, companyId, books, postings, post, checks, opts.until) : { assets: [], periods: [] };
 
+  // A dividend paid beyond the profits available (CA 2006 s830): the practical test is the profit and
+  // loss reserve on the day it is paid, the dividend taken off (retained earnings, every income and
+  // expense posting and the dividends to that day, the period's own depreciation and accruals not yet
+  // posted: interim figures).
+  const reserveTo = (d: ISODate) => -postings.filter((p) => p.date <= d && (p.ledger === 'retained-earnings' || p.ledger === 'dividends' || ['income', 'expense'].includes(ledgerCode(p.ledger)?.kind ?? ''))).reduce((sum, p) => sum + p.amount, 0);
+  const paid = new Map<string, { source: LedgerPosting['source']; date: ISODate; minor: number }>();
+  for (const p of postings) {
+    if (p.ledger !== 'dividends') continue;
+    const key = `${p.source.kind}:${p.source.id}`;
+    const e = paid.get(key) ?? paid.set(key, { source: { kind: p.source.kind, id: p.source.id }, date: p.date, minor: 0 }).get(key)!;
+    e.minor += p.amount;
+  }
+  for (const e of paid.values()) {
+    const after = reserveTo(e.date);
+    if (e.minor > 0 && after < 0) checks.push({ kind: 'dividend-exceeds-reserves', source: e.source, date: e.date, amount: fromMinor(e.minor), available: fromMinor(after + e.minor) });
+  }
+
   // Every source adds up to nothing: by construction, so this never fires; it is here to say so if it did.
   const sums = new Map<string, { source: LedgerPosting['source']; minor: number }>();
   for (const p of postings) {
@@ -306,6 +323,14 @@ export function companyLedger(src: LedgerSource, companyId: string, opts: { unti
 
   return { postings, checks, links, assets: end.assets, periods: end.periods };
 }
+
+/** What a coding's or journal's line carries onto its posting for the period end: its cover, asset, the asset it reduces and the day it was invoiced. */
+const lineMeta = (l: Pick<BooksLine, 'covers' | 'asset' | 'reduces' | 'invoicedOn'>): Pick<LedgerPosting, 'covers' | 'asset' | 'reduces' | 'invoicedOn'> => ({
+  ...(l.covers ? { covers: l.covers } : {}),
+  ...(l.asset ? { asset: l.asset } : {}),
+  ...(l.reduces ? { reduces: l.reduces } : {}),
+  ...(l.invoicedOn ? { invoicedOn: l.invoicedOn } : {}),
+});
 
 /** A posting's source and line, as one id: `row:tx_…`, `row:tx_…:1`, `journal:jnl_…:0`. */
 export const assetIdOf = (source: LedgerPosting['source']): string => `${source.kind}:${source.id}${source.line !== undefined ? `:${source.line}` : ''}`;
@@ -338,7 +363,15 @@ function periodEnd(src: LedgerSource, companyId: string, books: CompanyBooks, po
   const snapshot = [...postings];
   const first = books.ledgerFrom ?? books.incorporatedOn;
   const opening = new Set(src.companyJournals(companyId).filter((j) => j.opening).map((j) => j.id));
-  const policy = new Map((books.policies ?? []).map((p) => [p.class, p.months]));
+  const convention = books.depreciationMonths ?? 'acquisition';
+  const policies = [...(books.policies ?? [])].sort((a, b) => (a.effectiveFrom ?? '').localeCompare(b.effectiveFrom ?? ''));
+  /** An asset's life over time: its own, or each policy for its class in force from the day it counts from, then each taking effect later. */
+  const livesOf = (cls: FixedAsset['class'], from: ISODate, own: number | undefined): FixedAsset['lives'] => {
+    if (own) return [{ from, months: own }];
+    const rows = policies.filter((p) => p.class === cls);
+    const inForce = rows.filter((r) => !r.effectiveFrom || r.effectiveFrom <= from).at(-1);
+    return [{ from, ...(inForce ? { months: inForce.months } : {}) }, ...rows.filter((r) => r.effectiveFrom && r.effectiveFrom > from).map((r) => ({ from: r.effectiveFrom!, months: r.months }))];
+  };
   const dates = snapshot.flatMap((p) => [p.date, ...(p.covers ? [p.covers.to] : []), ...(p.asset?.disposedOn ? [p.asset.disposedOn] : [])]);
   if (!dates.length) return { assets: [], periods: [] };
   if (later) dates.push(later);
@@ -346,34 +379,84 @@ function periodEnd(src: LedgerSource, companyId: string, books: CompanyBooks, po
   const periods = accountingPeriodsOf(books, until);
   const periodOf = (d: ISODate) => periods.findIndex((p) => p.start <= d && p.end >= d);
 
-  // The register.
+  // The register: each debit to a cost code that says it is an asset.
   const assets: FixedAsset[] = [];
+  const credits: LedgerPosting[] = [];
   for (const p of snapshot) {
     const entry = ledgerCode(p.ledger);
     if (entry?.asset?.part === 'depreciation' && p.source.kind === 'journal') {
-      checks.push({ kind: 'fixed-asset-invalid', source: p.source, date: p.date, problem: `A journal writes to ${entry.name.toLowerCase()} by hand: the books work depreciation out from the register, so bring an asset in at its carrying amount with its remaining life, and record one that left by the day it left (impairment is not supported yet).` });
+      checks.push({ kind: 'fixed-asset-invalid', source: p.source, date: p.date, problem: `A journal writes to ${entry.name.toLowerCase()} by hand: the books work depreciation out from the register, so bring an asset in at its carrying amount with its remaining life, and record one that left by the day it left (impairment, FRS 105 Section 22, is not supported yet).` });
       continue;
     }
     if (entry?.asset?.part !== 'cost') continue;
+    if (p.reduces && !p.asset && p.amount < 0) {
+      credits.push(p);
+      continue;
+    }
     if (!p.asset) {
       checks.push({ kind: 'fixed-asset-unmarked', source: p.source, date: p.date, ledger: p.ledger, amount: fromMinor(p.amount), memo: p.memo });
       continue;
     }
     if (p.amount <= 0) {
-      checks.push({ kind: 'fixed-asset-invalid', source: p.source, date: p.date, problem: 'A fixed asset on the register is a debit to its cost: this one is a credit, so it is left off the register.' });
+      checks.push({ kind: 'fixed-asset-invalid', source: p.source, date: p.date, problem: 'A fixed asset on the register is a debit to its cost: this one is a credit, so it is left off the register (a credit says which asset it reduces instead).' });
       continue;
     }
     const id = assetIdOf(p.source);
-    const from = p.source.kind === 'journal' && opening.has(p.source.id) && books.ledgerFrom && p.date < books.ledgerFrom ? books.ledgerFrom : p.date;
+    // Brought in on an opening journal: from the books' first day, or, when that is not a month's first
+    // day, the next month's (the accounts before counted that month in full).
+    const broughtIn = p.source.kind === 'journal' && opening.has(p.source.id) && books.ledgerFrom !== undefined && p.date < books.ledgerFrom;
+    const from = broughtIn ? (books.ledgerFrom!.endsWith('-01') ? books.ledgerFrom! : addMonths(startOfMonth(books.ledgerFrom!), 1)) : p.date;
     let disposedOn = p.asset.disposedOn;
-    if (disposedOn && disposedOn < p.date) {
-      checks.push({ kind: 'fixed-asset-invalid', source: p.source, date: p.date, problem: `It left the company on ${formatDate(disposedOn)}, before it was bought (${formatDate(p.date)}): its disposal is left out until that is put right.` });
+    if (disposedOn && disposedOn < (broughtIn ? books.ledgerFrom! : p.date)) {
+      checks.push({ kind: 'fixed-asset-invalid', source: p.source, date: p.date, problem: broughtIn ? `It left the company on ${formatDate(disposedOn)}, before its books here start (${formatDate(books.ledgerFrom!)}): leave it out of the opening balances instead. Its disposal is left out.` : `It left the company on ${formatDate(disposedOn)}, before it was bought (${formatDate(p.date)}): its disposal is left out until that is put right.` });
       disposedOn = undefined;
     }
-    const months = p.asset.months ?? policy.get(entry.asset.class);
-    if (!months) checks.push({ kind: 'no-depreciation-policy', assetId: id, source: p.source, date: p.date, amount: fromMinor(p.amount), class: entry.asset.class, memo: p.memo });
+    const lives = livesOf(entry.asset.class, from, p.asset.months);
+    if (!lives.some((l) => l.months)) checks.push({ kind: 'no-depreciation-policy', assetId: id, source: p.source, date: p.date, amount: fromMinor(p.amount), class: entry.asset.class, memo: p.memo });
+    const residual = p.asset.residual !== undefined ? toMinor(p.asset.residual) : undefined;
+    if (residual !== undefined && residual > p.amount) checks.push({ kind: 'fixed-asset-invalid', source: p.source, date: p.date, problem: `Its residual value (${formatMoney(fromMinor(residual))}) is more than its cost net of VAT (${formatMoney(fromMinor(p.amount))}): nothing is written down.` });
     const depreciationLedger = entry.asset.class === 'intangible' ? 'intangible-assets:amortisation' : `fixed-assets:${entry.asset.class}:depreciation`;
-    assets.push({ id, source: p.source, ledger: p.ledger, depreciationLedger, class: entry.asset.class, cost: p.amount, acquired: p.date, from, ...(months ? { months } : {}), life: p.asset.months ? 'asset' : months ? 'policy' : 'none', ...(disposedOn ? { disposedOn } : {}), memo: p.memo });
+    const months = lives[0]!.months;
+    assets.push({
+      id,
+      source: p.source,
+      ledger: p.ledger,
+      depreciationLedger,
+      class: entry.asset.class,
+      cost: p.amount,
+      acquired: p.date,
+      from,
+      ...(months ? { months } : {}),
+      life: p.asset.months ? 'asset' : lives.some((l) => l.months) ? 'policy' : 'none',
+      lives,
+      ...(residual ? { residual } : {}),
+      reductions: [],
+      ...(disposedOn ? { disposedOn } : {}),
+      convention,
+      memo: p.memo,
+    });
+  }
+  // Credits that reduce an asset's cost (a supplier's part refund, a cost moved off it), on its own cost code, while it is held.
+  const byId = new Map(assets.map((a) => [a.id, a]));
+  for (const p of credits) {
+    const a = byId.get(p.reduces!);
+    const problem = !a
+      ? `It reduces ${p.reduces}, which is not a fixed asset on the register.`
+      : a.ledger !== p.ledger
+        ? `It reduces an asset on ${ledgerCode(a.ledger)?.name.toLowerCase() ?? a.ledger}, but is posted to ${ledgerCode(p.ledger)?.name.toLowerCase() ?? p.ledger}.`
+        : p.date < a.from
+          ? `It reduces an asset before it counts on the register (${formatDate(a.from)}).`
+          : a.disposedOn && p.date > a.disposedOn
+            ? `It reduces an asset after it left the company (${formatDate(a.disposedOn)}).`
+            : undefined;
+    if (problem || !a) {
+      checks.push({ kind: 'fixed-asset-invalid', source: p.source, date: p.date, problem: `${problem} Until that is put right it reduces no asset, so nothing writes it down.` });
+      continue;
+    }
+    const before = addDays(p.date, -1);
+    const bookValue = costOn(a, before) - depreciationTo(a, before);
+    if (-p.amount > bookValue) checks.push({ kind: 'fixed-asset-invalid', source: p.source, date: p.date, problem: `It reduces ${a.memo}'s cost by ${formatMoney(fromMinor(-p.amount))}, more than its net book value then (${formatMoney(fromMinor(bookValue))}).` });
+    a.reductions.push({ date: p.date, amount: -p.amount, source: p.source });
   }
 
   // Depreciation for each period, and disposals.
@@ -389,11 +472,12 @@ function periodEnd(src: LedgerSource, companyId: string, books: CompanyBooks, po
     }
     if (a.disposedOn) {
       const toDate = depreciationTo(a, a.disposedOn);
+      const cost = costOn(a, a.disposedOn);
       const source = { kind: 'disposal' as const, id: a.id };
       const memo = `Disposal: ${a.memo}`;
-      post(source, a.disposedOn, a.ledger, -a.cost, memo);
+      post(source, a.disposedOn, a.ledger, -cost, memo);
       post(source, a.disposedOn, a.depreciationLedger, toDate, memo);
-      post(source, a.disposedOn, 'disposals', a.cost - toDate, memo);
+      post(source, a.disposedOn, 'disposals', cost - toDate, memo);
     }
   }
 
@@ -415,8 +499,10 @@ function periodEnd(src: LedgerSource, companyId: string, books: CompanyBooks, po
       const carried = carriedAt(k, parts, p.amount, p.date, periods);
       if (!carried) continue;
       const paid = p.date <= periods[k]!.end;
-      const sheet = kind === 'expense' ? (paid ? 'prepayments' : 'accruals') : paid ? 'deferred-income' : 'accrued-income';
-      const word = kind === 'expense' ? (paid ? 'Prepaid' : 'Accrued') : paid ? 'Received ahead' : 'Accrued income';
+      // Not paid by then but invoiced: a trade creditor (a bill received) or debtor (an invoice sent), not an accrual.
+      const invoiced = !paid && p.invoicedOn !== undefined && p.invoicedOn <= periods[k]!.end;
+      const sheet = kind === 'expense' ? (paid ? 'prepayments' : invoiced ? 'creditors:trade' : 'accruals') : paid ? 'deferred-income' : invoiced ? 'debtors:trade' : 'accrued-income';
+      const word = kind === 'expense' ? (paid ? 'Prepaid' : invoiced ? 'Billed, not yet paid' : 'Accrued') : paid ? 'Received ahead' : invoiced ? 'Invoiced, not yet received' : 'Accrued income';
       const source = { kind: 'deferral' as const, id: `${p.id}@${periods[k]!.end}` };
       const memo = `${word}: ${p.memo}`;
       post(source, periods[k]!.end, p.ledger, carried, memo);
@@ -529,9 +615,12 @@ export function autoLinks(src: LedgerSource, companyId: string): Map<string, str
 /** The company's rows with their link as the app would leave it: the patches that set or take away automatic links. */
 export function autoLinkPatches(src: LedgerSource, companyId: string): { id: string; patch: Partial<Transaction> }[] {
   const want = autoLinks(src, companyId);
+  const lock = src.company(companyId)?.books?.lockedThrough;
   const out: { id: string; patch: Partial<Transaction> }[] = [];
   for (const t of src.companyTransactions(companyId)) {
     if (t.companyLink && t.companyLink.setBy !== 'auto') continue;
+    // A row dated within the lock keeps its link as filed (and one of yours it would name is checked by the store's lock).
+    if (lock && t.date <= lock) continue;
     const p = want.get(t.id);
     if (p && !(t.companyLink && t.companyLink.rows.length === 1 && t.companyLink.rows[0] === p)) out.push({ id: t.id, patch: { companyLink: { rows: [p], setBy: 'auto' } } });
     else if (!p && t.companyLink) out.push({ id: t.id, patch: { companyLink: undefined } });
@@ -606,6 +695,8 @@ export function codingView(src: LedgerSource, company: Company, from?: ISODate, 
     rules: src.bookRules(company.id),
     accounts: own.map((a) => ({ id: a.id, name: a.name, ledger: accountLedger(a) })),
     ...(vat ? { vat: { registeredFrom: vat.registeredFrom, ...(vat.deregisteredOn ? { deregisteredOn: vat.deregisteredOn } : {}) } } : {}),
+    assets: ledger.assets.map((a) => ({ id: a.id, ledger: a.ledger, memo: a.memo, acquired: a.acquired, cost: a.cost })),
+    ...(company.books?.lockedThrough ? { lockedThrough: company.books.lockedThrough } : {}),
   };
 }
 
@@ -632,8 +723,11 @@ export function bookRulePatches(src: LedgerSource, companyId: string, opts: { ru
   const scopeOf = (r: Rule) => r.match.company!.rows;
   const rows = [...src.companyTransactions(companyId).map((t) => ({ t, side: 'own' as const })), ...src.transactions().filter((t) => t.company?.id === companyId && t.company.as === 'paid-for').map((t) => ({ t, side: 'paid-for' as const }))];
   const out: { id: string; patch: Partial<Transaction>; ruleId?: string }[] = [];
+  // Rows dated within the lock keep their coding as filed.
+  const lock = src.company(companyId)?.books?.lockedThrough;
   for (const { t, side } of rows) {
     if (opts.only && !opts.only.has(t.id)) continue;
+    if (lock && t.date <= lock) continue;
     if (t.books && t.books.setBy !== 'rule') continue;
     const place = codingPlace(t, src);
     if ('problem' in place || isLinked(t)) continue;
@@ -687,3 +781,46 @@ export function ledgerAsLeft(src: Omit<LedgerSource, 'transactions' | 'balances'
     bookRules: (id) => src.bookRules(id),
   };
 }
+
+// ─── The lock (books.lockedThrough) ─────────────────────────────────────────────────────────────
+
+/**
+ * What a lock keeps (FORMULAS.md §22, "Locking"): the postings dated on or before `through`, added up
+ * by day, ledger and source (memos and ids aside), as one string. Two that differ mean a write would
+ * change the books of a period whose accounts are filed.
+ */
+export function lockedPostingsKey(src: LedgerSource, companyId: string, through: ISODate): string {
+  const sums = new Map<string, number>();
+  for (const p of companyLedger(src, companyId, { until: through }).postings) {
+    if (p.date > through) continue;
+    const key = `${p.date}|${p.ledger}|${p.source.kind}:${p.source.id}`;
+    sums.set(key, (sums.get(key) ?? 0) + p.amount);
+  }
+  return JSON.stringify([...sums].filter(([, v]) => v !== 0).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+}
+
+/**
+ * A ledger source as a write would leave it: rows changed (null: taken away), journals added (or
+ * replaced) and taken away, a company's record replaced. What the lock compares against.
+ */
+export function sourceWith(src: LedgerSource, change: { rows?: ReadonlyMap<string, Transaction | null>; journals?: { add?: readonly Journal[]; remove?: ReadonlySet<string> }; company?: Company }): LedgerSource {
+  const rows = change.rows ?? new Map<string, Transaction | null>();
+  const swap = (list: Transaction[]) => list.flatMap((t) => (rows.has(t.id) ? (rows.get(t.id) ? [rows.get(t.id)!] : []) : [t]));
+  const added = change.journals?.add ?? [];
+  const removed = new Set([...(change.journals?.remove ?? []), ...added.map((j) => j.id)]);
+  return {
+    account: (id) => src.account(id),
+    company: (id) => (change.company && id === change.company.id ? change.company : src.company(id)),
+    transaction: (id) => (rows.has(id) ? (rows.get(id) ?? undefined) : src.transaction(id)),
+    transactions: (accountId) => swap(src.transactions(accountId)),
+    companyAccounts: (id) => src.companyAccounts(id),
+    companyTransactions: (id) => swap(src.companyTransactions(id)),
+    companyJournals: (id) => [...src.companyJournals(id).filter((j) => !removed.has(j.id)), ...added.filter((j) => j.companyId === id)].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)),
+    bookRules: (id) => src.bookRules(id),
+    balances: (id) => src.balances(id),
+  };
+}
+
+/** The message a write the lock refuses gets. */
+export const lockedMessage = (company: Pick<Company, 'name'>, through: ISODate): string =>
+  `${company.name}’s books are locked through ${formatDate(through)} (its accounts to then are filed): this would change them. Correct it with a journal in a later period, or, if the filing itself was wrong, move the lock in its Settings first.`;

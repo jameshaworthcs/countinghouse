@@ -19,24 +19,76 @@ export function monthsCounted(from: ISODate, to: ISODate): number {
   return monthNumber(to) - monthNumber(from) + 1;
 }
 
-/** What depreciation needs of an asset: its cost (pence, positive), the day it counts from, its life in months, and the day it left. */
+/** How months are counted: a full month in the month an asset is bought and none in the month it leaves (`acquisition`), or a full month in both (`both`). */
+export type MonthConvention = 'acquisition' | 'both';
+
+/**
+ * What depreciation needs of an asset (pence, positive): its cost; the day it counts from; its life in
+ * months over time (`lives`: the first from `from`, each later one a change in estimate from its day;
+ * `months` undefined: no life then, so nothing is written down); what it is expected to fetch at the
+ * end (`residual`); credits that reduced its cost (`reductions`); the day it left; and how months count.
+ */
 export interface DepreciableAsset {
   cost: number;
   from: ISODate;
-  months?: number | undefined;
+  lives: readonly { from: ISODate; months?: number | undefined }[];
+  residual?: number | undefined;
+  reductions?: readonly { date: ISODate; amount: number }[];
   disposedOn?: ISODate | undefined;
+  convention?: MonthConvention | undefined;
+}
+
+/** An asset's cost on a day: its cost less the reductions dated by then. */
+export function costOn(asset: Pick<DepreciableAsset, 'cost' | 'reductions'>, date: ISODate): number {
+  return asset.cost - (asset.reductions ?? []).filter((r) => r.date <= date).reduce((s, r) => s + r.amount, 0);
+}
+
+/** Months counted to a day: from the month it counts from, to that day's month, or to the month it left (that month left out under the `acquisition` convention). */
+export function monthsTo(asset: Pick<DepreciableAsset, 'from' | 'disposedOn' | 'convention'>, date: ISODate): number {
+  const left = asset.disposedOn !== undefined && asset.disposedOn <= date;
+  const until = left ? asset.disposedOn! : date;
+  const m = monthsCounted(asset.from, until) - (left && (asset.convention ?? 'acquisition') === 'acquisition' ? 1 : 0);
+  return Math.max(0, m);
 }
 
 /**
- * An asset's depreciation to a day (pence), straight line by whole months with cumulative rounding:
- * round(cost × m ÷ life), m the months counted from the month it counts from to that day's month (to
- * the month it left, once it has), at most its life, so never more than its cost. No life: none.
+ * An asset's depreciation to a day (pence), straight line by whole months with cumulative rounding
+ * (docs/FORMULAS.md §22, "Depreciation"). With no change, round((cost − residual) × m ÷ life), m the
+ * months counted (`monthsTo`), at most its life. A change in estimate (a new life from a day, FRS 105
+ * paras 12.18 and 8.12) or a reduction of its cost from a day starts a new stretch at the months before
+ * that day's month, s: the net book value then less the residual, B, is spread over what is left of the
+ * life, n = life − s, as D(s) + round(B × min(m − s, n) ÷ n); with nothing left of it (n ≤ 0), B is
+ * written off in the month of the change. Never less than nothing to write down, never past it.
  */
 export function depreciationTo(asset: DepreciableAsset, date: ISODate): number {
-  if (!asset.months || asset.cost <= 0) return 0;
-  const until = asset.disposedOn && asset.disposedOn < date ? asset.disposedOn : date;
-  const m = Math.min(monthsCounted(asset.from, until), asset.months);
-  return m <= 0 ? 0 : mulDivRound(asset.cost, m, asset.months);
+  const mEnd = monthsTo(asset, date);
+  const residual = asset.residual ?? 0;
+  const last = asset.disposedOn && asset.disposedOn < date ? asset.disposedOn : date;
+  const events = [
+    ...asset.lives.slice(1).map((l) => ({ date: l.from, months: l.months, life: true as const, amount: 0 })),
+    ...(asset.reductions ?? []).map((r) => ({ date: r.date, months: undefined, life: false as const, amount: r.amount })),
+  ]
+    .filter((e) => e.date <= last)
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  let life = asset.lives[0]?.months;
+  let cost = asset.cost;
+  let s = 0;
+  let base = 0;
+  const remaining = () => Math.max(0, cost - residual - base);
+  const value = (m: number): number => {
+    if (!life || m <= s) return base;
+    const n = life - s;
+    if (n <= 0) return base + remaining();
+    return base + mulDivRound(remaining(), Math.min(m - s, n), n);
+  };
+  for (const e of events) {
+    const at = Math.min(Math.max(0, monthsCounted(asset.from, e.date) - 1), mEnd);
+    base = value(at);
+    s = at;
+    if (e.life) life = e.months;
+    else cost -= e.amount;
+  }
+  return value(mEnd);
 }
 
 /** A period: its first and last days. */

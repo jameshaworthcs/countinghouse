@@ -375,11 +375,23 @@
             "disposedOn": {
               "type": "string",
               "description": "Calendar date, YYYY-MM-DD"
+            },
+            "residual": {
+              "type": "number",
+              "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
             }
           },
           "required": [
             "class"
           ]
+        },
+        "reduces": {
+          "type": "string",
+          "pattern": "^(row|personal):tx_[0-9a-f]{16}(:\\d{1,2})?$|^journal:jnl_[0-9a-f]{12}:\\d{1,2}$"
+        },
+        "invoicedOn": {
+          "type": "string",
+          "description": "Calendar date, YYYY-MM-DD"
         },
         "lines": {
           "maxItems": 30,
@@ -467,11 +479,23 @@
                   "disposedOn": {
                     "type": "string",
                     "description": "Calendar date, YYYY-MM-DD"
+                  },
+                  "residual": {
+                    "type": "number",
+                    "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
                   }
                 },
                 "required": [
                   "class"
                 ]
+              },
+              "reduces": {
+                "type": "string",
+                "pattern": "^(row|personal):tx_[0-9a-f]{16}(:\\d{1,2})?$|^journal:jnl_[0-9a-f]{12}:\\d{1,2}$"
+              },
+              "invoicedOn": {
+                "type": "string",
+                "description": "Calendar date, YYYY-MM-DD"
               }
             },
             "required": [
