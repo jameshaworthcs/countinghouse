@@ -141,7 +141,13 @@ async function demoCompanyAccount(store: Store, dividendDay: string): Promise<vo
   await store.addTransactions(rows, 'demo: the company’s own account');
   let balance = STUDIO_OPENING_LINES.find((l) => l.ledger === 'bank:studio-current')!.amount;
   const snaps: BalanceSnapshot[] = [];
-  for (const r of [...rows].sort((a, b) => (a.date < b.date ? -1 : 1))) balance = roundMoney(balance + r.amount);
+  let atYearEnd: number | undefined;
+  for (const r of [...rows].sort((a, b) => (a.date < b.date ? -1 : 1))) {
+    if (r.date > STUDIO_YEAR_END && atYearEnd === undefined) atYearEnd = balance;
+    balance = roundMoney(balance + r.amount);
+  }
+  // Its statement at the year end, so the bank reconciles to a statement balance on that day.
+  snaps.push({ id: balanceId('studio-current', STUDIO_YEAR_END, atYearEnd ?? balance, 'statement'), accountId: 'studio-current', date: STUDIO_YEAR_END, balance: atYearEnd ?? balance, currency: 'GBP', kind: 'statement', dateSource: 'document', source: {}, createdAt: stamp });
   const last = rows.reduce((m, r) => (r.date > m ? r.date : m), rows[0]!.date);
   snaps.push({ id: balanceId('studio-current', last, balance, 'statement'), accountId: 'studio-current', date: last, balance, currency: 'GBP', kind: 'statement', dateSource: 'document', source: {}, createdAt: stamp });
   await store.addBalances(snaps, 'demo: the company’s balance');
@@ -292,7 +298,8 @@ async function demoStudioAccountsFiled(store: Store): Promise<void> {
   const figures = Object.fromEntries(MICRO_ENTITY_LINES.filter((l) => whole[l] !== 0 || ['F', 'G', 'K'].includes(l)).map((l) => [l, whole[l]]));
   await store.updateCompany(
     company.id,
-    (c) => (c?.books ? { ...c, books: { ...c.books, filings: c.books.filings.map((f) => (f.kind === 'accounts' && f.periodEnd === STUDIO_YEAR_END ? { ...f, figures } : f)) } } : c!),
+    // Recorded as filed, the books are locked through the year end (as the app does when a filing is recorded).
+    (c) => (c?.books ? { ...c, books: { ...c.books, lockedThrough: STUDIO_YEAR_END, filings: c.books.filings.map((f) => (f.kind === 'accounts' && f.periodEnd === STUDIO_YEAR_END ? { ...f, figures } : f)) } } : c!),
     'demo: the studio’s accounts filed',
   );
 }
