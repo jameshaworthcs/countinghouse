@@ -16,6 +16,7 @@ import { transactionId } from '../src/server/ids';
 import { daysInFinancialYear, fyParts, taxOnProfits, wdaRateHundredths, writingDown } from '../src/shared/corporation-tax';
 import { CT600_BOXES, profitBoxes } from '../src/shared/ct600';
 import { CT_DISCLAIMER } from '../src/shared/disclaimers';
+import { mulDivRound } from '../src/shared/money';
 import { assetTaxProblems, codingProblems } from '../src/shared/ledger';
 import { booksProblems } from '../src/shared/company-books';
 import { SettingsSchema, type Account, type BalanceSnapshot, type BooksCoding, type Company, type Journal, type Transaction } from '../src/shared/schema';
@@ -90,13 +91,31 @@ describe('the tax by financial year', () => {
     expect(t.parts.reduce((x, p) => x + p.net, 0)).toBe(4_116_094);
   });
 
-  it('gives marginal relief on a short period, the limits reduced by its days (CTM03930, by days rather than months)', () => {
-    // 1 January to 30 September 2024 (274 days), profits £55,000: U = 250,000 × 274/365 = £187,671.23;
-    // relief 3/200 × (187,671.23 − 55,000) = £1,990.07; tax £13,750 − £1,990.07.
+  it('gives marginal relief on a short period, the limits reduced by the days of each financial year (CTM03930 by days, CTM03955’s year days)', () => {
+    // 1 January to 30 September 2024: 91 days of FY 2023 (366 days) and 183 of FY 2024 (365), profits
+    // £55,000: U = 250,000 × (91/366 + 183/365) = £187,500.94; relief 3/200 × (187,500.94 − 55,000) =
+    // £1,987.51 (HMRC's example, by months, £1,987.50).
     const t = taxOnProfits({ start: '2024-01-01', end: '2024-09-30', profit: 55_000, associated: 0, closeInvestmentHolding: false });
     expect(t.parts.map((p) => p.band)).toEqual(['marginal', 'marginal']);
+    expect(t.parts[0]!.upper).toBe(18_750_094);
     expect(t.parts.reduce((x, p) => x + p.tax, 0)).toBe(1_375_000);
-    expect(t.parts.reduce((x, p) => x + p.marginalRelief, 0)).toBe(199_007);
+    expect(t.parts.reduce((x, p) => x + p.marginalRelief, 0)).toBe(198_751);
+    // A short period wholly in a leap financial year is reduced by its days over 366.
+    expect(taxOnProfits({ start: '2023-04-01', end: '2023-09-30', profit: 100, associated: 0, closeInvestmentHolding: false }).parts[0]!.lower).toBe(mulDivRound(5_000_000, 183, 366));
+  });
+
+  it('counts associated companies by financial year, splitting the period where they differ (CTM03640)', () => {
+    // To 31 December 2024, £40,000: with one associated company only in FY 2024, FY 2023's part keeps
+    // the whole limits (£50,000 × 91/366 for its 91 days) and FY 2024's has them halved.
+    const t = taxOnProfits({ start: '2024-01-01', end: '2024-12-31', profit: 40_000, associated: [0, 1], closeInvestmentHolding: false });
+    expect(t.parts.map((p) => [p.fy, p.profit, p.band])).toEqual([
+      [2023, 9_945, 'small'],
+      [2024, 30_055, 'marginal'],
+    ]);
+    expect(t.parts[0]!.lower).toBe(mulDivRound(5_000_000, 91, 366));
+    expect(t.parts[1]!.lower).toBe(mulDivRound(5_000_000, 275, 365 * 2));
+    // The same number throughout: one period, the limits whole.
+    expect(taxOnProfits({ start: '2024-01-01', end: '2024-12-31', profit: 40_000, associated: [0, 0], closeInvestmentHolding: false }).parts.map((p) => p.band)).toEqual(['small', 'small']);
   });
 
   it('charges the small profits rate up to the lower limit and the main rate above the upper, a close investment-holding company the main rate', () => {
@@ -147,9 +166,9 @@ describe('writing-down allowances', () => {
 
 describe('the profit boxes in whole pounds', () => {
   it('rounds each figure to the pound and adds the totals from the rounded boxes, never below nothing', () => {
-    const p = profitBoxes({ turnover: 6_000_049, tradingProfit: 10_040, lossesAgainstTrading: 0, nonTradingProfits: 40, lossesAgainstTotal: 10_080, deficitsAgainstTotal: 0 });
+    const p = profitBoxes({ turnover: 6_000_049, tradingProfit: 10_040, lossesAgainstTrading: 0, nonTradingProfits: 40, deficitsAgainstNonTrading: 0, lossesAgainstTotal: 10_080, deficitsAgainstTotal: 0 });
     expect(p).toMatchObject({ b145: 60_000, b155: 100, b165: 100, b170: 0, b235: 100, b285: 100, b300: 0, b315: 0 });
-    expect(profitBoxes({ turnover: null, tradingProfit: null, lossesAgainstTrading: 0, nonTradingProfits: 4_050, lossesAgainstTotal: 0, deficitsAgainstTotal: 0 })).toMatchObject({ b145: null, b155: null, b165: null, b170: 41, b315: 41 });
+    expect(profitBoxes({ turnover: null, tradingProfit: null, lossesAgainstTrading: 0, nonTradingProfits: 4_050, deficitsAgainstNonTrading: 0, lossesAgainstTotal: 0, deficitsAgainstTotal: 0 })).toMatchObject({ b145: null, b155: null, b165: null, b170: 41, b315: 41 });
   });
 });
 
@@ -171,7 +190,7 @@ describe('a trading year', () => {
   it('starts from the accounts’ profit and adds back what is not deductible, takes interest out to non-trading profits', () => {
     // Depreciation: £1,500 over 36 months, June to December counted (7 months): £291.67.
     const byCode = Object.fromEntries(v.accounts.lines.map((l) => [l.ledger, [l.amount, l.basis]]));
-    expect(byCode).toMatchObject({ turnover: [6_000_000, 'days'], 'software-hosting': [-200_000, 'days'], entertainment: [-30_000, 'days'], depreciation: [-29_167, 'days'], 'interest-receivable': [12_000, 'date'] });
+    expect(byCode).toMatchObject({ turnover: [6_000_000, 'days'], 'software-hosting': [-200_000, 'days'], entertainment: [-30_000, 'days'], depreciation: [-29_167, 'days'], 'interest-receivable': [12_000, 'days'] });
     expect(v.accounts.profit).toBe(6_000_000 - 200_000 - 30_000 - 29_167 + 12_000);
     expect(v.adjustments.map((a) => [a.kind, a.ledger, a.amount])).toEqual([
       ['non-trading', 'interest-receivable', -12_000],
@@ -197,7 +216,7 @@ describe('a trading year', () => {
   });
 
   it('fills the CT600’s boxes, with labels from the form and working for each', () => {
-    expect(boxes(v)).toMatchObject({ 1: 'Example Loom Ltd', 2: '01234567', 3: null, 4: 0, 30: '2024-01-01', 35: '2024-12-31', 145: 60_000, 155: 56_500, 165: 56_500, 170: 120, 235: 56_620, 295: 0, 300: 56_620, 315: 56_620, 326: null, 327: 0, 328: 0, 329: true, 330: 2023, 335: 14_078, 340: 25, 345: 351_950, 380: 2024, 385: 42_542, 390: 25, 395: 1_063_550, 430: 1_415_500, 435: 290_070, 440: 1_125_430, 475: 1_125_430, 480: null, 528: 1_125_430, 690: 1_500, 705: 1_500, 775: 1_500 });
+    expect(boxes(v)).toMatchObject({ 1: 'Example Loom Ltd', 2: '01234567', 3: null, 4: 0, 30: '2024-01-01', 35: '2024-12-31', 145: 60_000, 155: 56_500, 165: 56_500, 170: 120, 235: 56_620, 295: 0, 300: 56_620, 315: 56_620, 326: 0, 327: null, 328: null, 329: true, 330: 2023, 335: 14_078, 340: 25, 345: 351_950, 380: 2024, 385: 42_542, 390: 25, 395: 1_063_550, 430: 1_415_500, 435: 290_070, 440: 1_125_430, 475: 1_125_430, 480: null, 528: 1_125_430, 690: 1_500, 705: 1_500, 775: 1_500 });
     for (const b of v.boxes) {
       expect(b.working.length).toBeGreaterThan(3);
       expect(CT600_BOXES.find((d) => d.box === b.box)?.label).toBe(b.label);
@@ -250,8 +269,10 @@ describe('before the trade starts', () => {
     ]);
     expect(v.tradingResult).toBe(0);
     expect(v.beforeAllowances).toBe(0);
+    // The year's interest (£100) is shared between the two CT periods by days (CTA 2009 s307(2A)): 182 of 366 days, £49.73.
+    expect(v.accounts.lines.find((l) => l.ledger === 'interest-receivable')).toMatchObject({ amount: 4_973, basis: 'days' });
     expect(v.adjustments.map((a) => [a.kind, a.ledger, a.amount])).toEqual([
-      ['non-trading', 'interest-receivable', -4_000],
+      ['non-trading', 'interest-receivable', -4_973],
       ['pre-trading', 'software-hosting', 120_000],
       ['disallowable', 'formation-costs', 5_000],
     ]);
@@ -259,10 +280,10 @@ describe('before the trade starts', () => {
     // The laptop waits for the trade's first day (CAA 2001 s12).
     expect(v.capitalAllowances.deferred.map((a) => [a.acquired, a.incurred])).toEqual([['2024-03-01', '2024-07-01']]);
     expect(v.capitalAllowances.net).toBe(0);
-    // Only the interest is taxed: £40 at 19%.
-    expect(v.chargeable.whole).toBe(40);
-    expect(v.payable).toBe(760);
-    expect(boxes(v)).toMatchObject({ 145: null, 155: null, 165: null, 170: 40, 315: 40 });
+    // Only the interest is taxed: £50 at 19%.
+    expect(v.chargeable.whole).toBe(50);
+    expect(v.payable).toBe(950);
+    expect(boxes(v)).toMatchObject({ 145: null, 155: null, 165: null, 170: 50, 315: 50 });
     expect(v.notes.map((x) => x.text).join(' ')).toMatch(/s1218B.*CTM08070/);
   });
 
@@ -270,7 +291,7 @@ describe('before the trade starts', () => {
     const asked = ct(rows, books, { period: '2024-06-30' }).computation!;
     expect(kinds(asked)).toEqual(['close-investment-holding']);
     const cihc = ct(rows, { ...books, closeInvestmentHolding: true }, { period: '2024-06-30' }).computation!;
-    expect(cihc.payable).toBe(1_000);
+    expect(cihc.payable).toBe(1_250);
     expect(boxes(cihc)[4]).toBe(2);
   });
 
@@ -282,10 +303,11 @@ describe('before the trade starts', () => {
     expect(v.capitalAllowances.assets.map((a) => [a.incurred, a.aia])).toEqual([['2024-07-01', 90_000]]);
     expect(v.beforeAllowances).toBe(2_000_000 - 60_000 - 120_000);
     expect(v.tradingResult).toBe(2_000_000 - 60_000 - 120_000 - 90_000);
-    expect(v.chargeable.whole).toBe(17_300 + 60);
+    // Its share of the year's interest: £50.27.
+    expect(v.chargeable.whole).toBe(17_300 + 50);
     // A 184-day period in FY 2024: the lower limit £50,000 × 184/365 = £25,205.48, so 19%.
     expect(v.tax.parts.map((p) => [p.band, p.lower])).toEqual([['small', 2_520_548]]);
-    expect(v.payable).toBe(17_360 * 19);
+    expect(v.payable).toBe(17_350 * 19);
   });
 
   it('gives expenses incurred more than 7 years before the trade started nothing (CTA 2009 s61)', () => {
@@ -358,13 +380,16 @@ describe('capital allowances', () => {
     const y1 = ct(rows, books, { period: '2024-12-31' }).computation!;
     expect(y1.capitalAllowances.aiaLimit).toMatchObject({ period: 400_000, allocated: true, used: 400_000 });
     expect(y1.capitalAllowances.assets.map((a) => [a.treatment, a.aia, a.firstYear, a.toPool])).toEqual([['fya-50', 400_000, 300_000, 300_000]]);
-    // The pool's £3,000 at 6%.
-    expect(y1.capitalAllowances.pools.map((p) => [p.pool, p.rate, p.wda])).toEqual([['special', 6, 18_000]]);
-    expect(boxes(y1)).toMatchObject({ 690: 4_000, 693: 3_000, 695: 4_180, 760: 10_000, 773: 10_000 });
+    // The £3,000 left joins the special rate pool after this period's writing-down allowance (CAA 2001 s58): none this period.
+    expect(y1.capitalAllowances.pools.map((p) => [p.pool, p.afterAllowance, p.wda, p.carriedForward])).toEqual([['special', 300_000, 0, 300_000]]);
+    // The AIA's part is in 770, only what took 50% in 760 and 773.
+    expect(boxes(y1)).toMatchObject({ 690: 4_000, 693: 3_000, 695: 4_000, 760: 6_000, 770: 4_000, 773: 6_000 });
     // Its disposal value £2,000: the relevant proportion is half of the £6,000 that took 50% over £10,000, so £600 is a balancing charge.
     const y2 = ct(rows, books, { period: '2025-12-31' }).computation!;
     expect(y2.capitalAllowances.disposals.map((d) => [d.treatment, d.balancingCharge, d.fromPool])).toEqual([['fya-50', 60_000, 140_000]]);
     expect(boxes(y2)[694]).toBe(600);
+    // The pool brought forward (£3,000) less £1,400 at 6%.
+    expect(y2.capitalAllowances.pools.map((p) => [p.broughtForward, p.wda])).toEqual([[300_000, 9_600]]);
   });
 
   it('takes an AIA’d asset’s disposal value off the main pool, a balancing charge when it goes below nothing', () => {
@@ -447,6 +472,101 @@ describe('books taken over mid-life', () => {
     expect(v.capitalAllowances.pools.map((p) => [p.broughtForward, p.rate, p.wda])).toEqual([[500_000, 16, 80_000]]);
     expect(v.losses.trading).toMatchObject({ broughtForward: 100_000, usedAgainstTotal: 100_000 });
     expect(boxes(v)).toMatchObject({ 705: 800, 155: 40_000 - 900 - 800, 285: 1_000 });
+  });
+});
+
+describe('after review', () => {
+  it('splits an asset the AIA covered in part between boxes 775 and 760, and shows both allowances', () => {
+    const rows = [bank('2024-02-01', 30_000, 'EXAMPLE CLIENT LTD', coded('turnover')), bank('2024-03-01', -5_000, 'EXAMPLE PRESS LTD', coded('fixed-assets:office:cost', { asset: { class: 'office', months: 60 } }))];
+    const v = ct(rows, { closeInvestmentHolding: false, aiaAllocated: [{ periodEnd: '2024-12-31', amount: 2_000 }] }, { period: '2024-12-31' }).computation!;
+    expect(v.capitalAllowances.assets.map((a) => [a.treatment, a.aia, a.firstYear])).toEqual([['full-expensing', 200_000, 300_000]]);
+    expect(boxes(v)).toMatchObject({ 688: 3_000, 690: 2_000, 705: 2_000, 760: 3_000, 775: 2_000 });
+  });
+
+  it('takes an asset on an opening journal as brought in, whatever its day, and says the journal is misdated', () => {
+    const opening: Journal = { id: 'jnl_00000000ab02', companyId: CO, date: '2024-02-10', memo: 'Opening balances', lines: [{ ledger: 'fixed-assets:computer:cost', amount: 900, asset: { class: 'computer', months: 36 } }, { ledger: 'retained-earnings', amount: -900 }], opening: true, createdBy: 'owner', createdAt: stamp, updatedAt: stamp };
+    const rows = [bank('2024-03-01', 30_000, 'EXAMPLE CLIENT LTD', coded('turnover'))];
+    const v = ct(rows, { closeInvestmentHolding: false, ledgerFrom: '2024-01-01', taxBroughtForward: {} }, { period: '2024-12-31', journals: [opening] }).computation!;
+    expect(v.capitalAllowances.assets).toEqual([]);
+    expect(v.checks).toContainEqual({ kind: 'opening-journal', date: '2024-02-10', ledgerFrom: '2024-01-01' });
+  });
+
+  it('nets money back on small equipment before the trade started against it on the trade’s first day', () => {
+    const rows = [bank('2024-03-01', -300, 'EXAMPLE CABLES', coded('small-equipment')), bank('2024-04-01', 100, 'EXAMPLE CABLES REFUND', coded('small-equipment')), bank('2024-08-01', 5_000, 'EXAMPLE CLIENT LTD', coded('turnover'))];
+    const v = ct(rows, { tradeStartedOn: '2024-07-01', closeInvestmentHolding: false }, { period: '2024-12-31' }).computation!;
+    expect(v.capitalAllowances.assets.map((a) => [a.incurred, a.qualifying, a.aia])).toEqual([['2024-07-01', 20_000, 20_000]]);
+  });
+
+  it('stops a period with sales or interest paid before it came within the charge', () => {
+    const rows = [bank('2024-02-01', 500, 'EXAMPLE CLIENT LTD', coded('turnover')), bank('2024-02-15', -20, 'INTEREST PAID', coded('interest-payable')), bank('2024-05-01', 5_000, 'EXAMPLE CLIENT LTD', coded('turnover'))];
+    const v = ct(rows, { withinChargeFrom: '2024-03-01', tradeStartedOn: '2024-03-01', closeInvestmentHolding: false }, { period: '2024-12-31' }).computation!;
+    const before = v.checks.filter((c) => c.kind === 'income-before-charge');
+    expect(before.map((c) => c.kind === 'income-before-charge' && c.ledger).sort()).toEqual(['interest-payable', 'turnover']);
+  });
+
+  it('gives a connected asset no AIA even when chosen, naming the s230 exception', () => {
+    // A coding that says so is refused on every write (assetTaxProblems); one a hand edit left reaches the computation through the register.
+    const rows = [bank('2024-02-01', 30_000, 'EXAMPLE CLIENT LTD', coded('turnover')), bank('2024-03-01', -1_000, 'J BLOGGS DESK', coded('fixed-assets:furniture:cost', { asset: { class: 'furniture', months: 60, connected: true, marketValue: 1_000 } }))];
+    const company = companyOf({ closeInvestmentHolding: false });
+    const src = memory(rows, company);
+    const ledger = companyLedger(src, CO, { until: '2026-06-30' });
+    for (const x of ledger.assets) x.tax = { ...x.tax, allowance: 'aia' };
+    const a = companyCorporationTax({ src, company, engine: engineOf(src, ['2024-12-31']), today: '2026-06-30', period: '2024-12-31', ledger })!.computation!.capitalAllowances.assets[0]!;
+    expect([a.treatment, a.aia]).toEqual(['pool', 0]);
+    expect(a.notes.join(' ')).toMatch(/s217.*s230/);
+  });
+
+  it('says the hybrid rate by whether the period runs over a change of rate, from the table', () => {
+    const rows = [bank('2025-11-01', 40_000, 'EXAMPLE CLIENT LTD', coded('turnover'))];
+    const over = ct(rows, { incorporatedOn: '2025-04-01', accountingReferenceDate: '03-31', tradeStartedOn: '2025-04-01', withinChargeFrom: '2025-04-01', closeInvestmentHolding: false, ledgerFrom: '2025-04-01', taxBroughtForward: { mainPool: 5_000 } }, { today: '2026-06-30', period: '2026-03-31', statements: ['2026-03-31'] }).computation!;
+    expect(over.notes.some((n) => /hybrid|runs over/.test(n.text))).toBe(false);
+    const straddle = ct(rows, { incorporatedOn: '2025-01-01', accountingReferenceDate: '12-31', tradeStartedOn: '2025-01-01', withinChargeFrom: '2025-01-01', closeInvestmentHolding: false, ledgerFrom: '2025-01-01', taxBroughtForward: { mainPool: 5_000 } }, { today: '2027-06-30', period: '2026-12-31', statements: ['2025-12-31', '2026-12-31'] }).computation!;
+    expect(straddle.notes.find((n) => /runs over 1 Apr 2026/.test(n.text))?.text).toMatch(/18% to 14%.*FA 2026 s28/);
+  });
+
+  it('shares interest by days across the period of account by default, or as accrued to each CT period (CTA 2009 s307(2C))', () => {
+    const rows = [bank('2024-08-01', 5_000, 'EXAMPLE CLIENT LTD', coded('turnover')), bank('2024-12-31', 120, 'INTEREST', coded('interest-receivable', { covers: { from: '2024-07-01', to: '2024-12-31' } }))];
+    const books = { tradeStartedOn: '2024-07-01', closeInvestmentHolding: false };
+    // By days: 182 of 366 days fall in the CT period to 30 June: £59.67.
+    expect(ct(rows, books, { period: '2024-06-30' }).computation!.nonTrading.credits).toBe(5_967);
+    // As accrued: all of it is for July to December.
+    const accrued = ct(rows, { ...books, loanRelationshipBasis: 'accrued' }, { period: '2024-06-30' }).computation!;
+    expect(accrued.nonTrading.credits).toBe(0);
+    expect(ct(rows, { ...books, loanRelationshipBasis: 'accrued' }, { period: '2024-12-31' }).computation!.accounts.lines.find((l) => l.ledger === 'interest-receivable')).toMatchObject({ amount: 12_000, basis: 'accrued' });
+  });
+
+  it('says a first trading period’s loss cannot be carried back, and a later one only to periods of the trade (CTA 2010 s37(6))', () => {
+    const first = ct([bank('2024-06-01', -2_000, 'EXAMPLE AGENCY', coded('advertising'))], { closeInvestmentHolding: false }, { period: '2024-12-31' }).computation!;
+    expect(first.notes.find((n) => /s37/.test(n.text))?.text).toMatch(/not carried back.*s37\(6\)/);
+    const later = ct([bank('2024-06-01', 3_000, 'EXAMPLE CLIENT LTD', coded('turnover')), bank('2025-06-01', -2_000, 'EXAMPLE AGENCY', coded('advertising'))], { closeInvestmentHolding: false }, { period: '2025-12-31' }).computation!;
+    expect(later.notes.find((n) => /s37/.test(n.text))?.text).toMatch(/previous 12 months/);
+  });
+
+  it('relieves losses and deficits from before 1 April 2017 narrowly: against the trade’s profits (box 160) and non-trading profits (box 230)', () => {
+    const rows = [bank('2024-06-01', 600, 'EXAMPLE CLIENT LTD', coded('turnover')), bank('2024-12-31', 500, 'INTEREST', coded('interest-receivable'))];
+    const v = ct(rows, { closeInvestmentHolding: false, ledgerFrom: '2024-01-01', taxBroughtForward: { tradingLossesBefore2017: 1_000, nonTradingDeficitsBefore2017: 300 } }, { period: '2024-12-31' }).computation!;
+    expect(boxes(v)).toMatchObject({ 155: 600, 160: 600, 165: 0, 170: 500, 230: 300, 235: 200, 285: null, 315: 200 });
+    expect(v.carriedForward.tradingLosses).toBe(40_000);
+  });
+
+  it('uses boxes 327 and 328 only when the number of associated companies differs between the financial years', () => {
+    const v = ct(YEAR, { closeInvestmentHolding: false, associatedCompanies: [{ periodEnd: '2024-12-31', count: 0, secondYear: 1 }] }, { period: '2024-12-31' }).computation!;
+    expect(boxes(v)).toMatchObject({ 326: null, 327: 0, 328: 1 });
+    expect(v.tax.parts.map((p) => [p.band, p.upper])).toEqual([['marginal', mulDivRound(25_000_000, 91, 366)], ['marginal', mulDivRound(25_000_000, 275, 365 * 2)]]);
+  });
+
+  it('works out s455 tax on what was lent in the period and owed at its end, less relief for repayments (box 480)', () => {
+    const rows = [...YEAR, bank('2024-06-01', -2_000, 'TO J BLOGGS', coded('directors-loan')), bank('2025-02-01', 500, 'FROM J BLOGGS', coded('directors-loan'))];
+    const v = ct(rows, { closeInvestmentHolding: false }, { period: '2024-12-31', statements: ['2024-12-31', '2025-12-31', '2026-06-29'] }).computation!;
+    // £2,000 lent in 2024/25 at 33.75% = £675; £500 repaid within 9 months relieves £168.75.
+    expect(v.s455).toMatchObject({ owedAtEnd: 200_000, outstanding: 200_000, charge: 67_500, relief: 50_000, reliefTax: 16_875, tax: 50_625, provisional: false });
+    expect(boxes(v)).toMatchObject({ 440: 1_125_430, 480: 50_625, 510: 1_176_055, 528: 1_176_055 });
+    expect(v.payable).toBe(1_176_055);
+  });
+
+  it('says what to know beside every computation: dormant companies and iXBRL filing', () => {
+    const r = ct(YEAR, { closeInvestmentHolding: false });
+    expect(r.guidance.join(' ')).toMatch(/3 months.*iXBRL/s);
   });
 });
 

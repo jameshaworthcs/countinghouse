@@ -954,7 +954,15 @@ const companyBooksShape = {
    * profits limits are divided by one more than this. Absent for a period: none, and labelled so.
    */
   associatedCompanies: z
-    .array(z.object({ periodEnd: ISODateSchema, count: z.number().int().min(0).max(99) }))
+    .array(
+      z.object({
+        periodEnd: ISODateSchema,
+        /** In the period, or in its first financial year when it runs over 1 April. */
+        count: z.number().int().min(0).max(99),
+        /** In its second financial year, when that differs (HMRC's CTM03640: a company associated only in one part does not reduce the other's limits). Absent: the same. */
+        secondYear: z.number().int().min(0).max(99).optional(),
+      }),
+    )
     .max(60)
     .optional(),
   /**
@@ -973,10 +981,18 @@ const companyBooksShape = {
    */
   closeInvestmentHolding: z.boolean().nullable().optional(),
   /**
+   * How interest and other loan relationship amounts are shared between Corporation Tax periods within a
+   * period of account: `time` (absent: the default), by days (CTA 2009 s307(2A)–(2B), CTA 2010 s1172); or
+   * `accrued`, what accounts drawn up for each CT period would recognise, where time apportionment would
+   * work unreasonably or unjustly (s307(2C)): each amount over the days it covers, else on its day.
+   */
+  loanRelationshipBasis: z.enum(['time', 'accrued']).optional(),
+  /**
    * For books that start mid-life (`ledgerFrom`): the tax figures carried forward to the first
    * Corporation Tax period they reach, as its last computation gives them (pounds, each not negative;
-   * absent: none): the main and special rate pools' written-down values, trading losses (from 1 April
-   * 2017), non-trading loan relationship deficits, and pre-trading expenditure not yet relieved.
+   * absent: none): the main and special rate pools' written-down values, trading losses and non-trading
+   * loan relationship deficits (of periods from 1 April 2017, and apart those before, which are relieved
+   * more narrowly), and pre-trading expenditure not yet relieved.
    */
   taxBroughtForward: z
     .object({
@@ -984,6 +1000,10 @@ const companyBooksShape = {
       specialPool: MoneySchema.refine((v) => v >= 0, { message: 'A pool is not negative' }).optional(),
       tradingLosses: MoneySchema.refine((v) => v >= 0, { message: 'A loss carried forward is given as a positive amount' }).optional(),
       nonTradingDeficits: MoneySchema.refine((v) => v >= 0, { message: 'A deficit carried forward is given as a positive amount' }).optional(),
+      /** Trading losses of periods beginning before 1 April 2017: only against the same trade's profits (CTA 2010 s45). */
+      tradingLossesBefore2017: MoneySchema.refine((v) => v >= 0, { message: 'A loss carried forward is given as a positive amount' }).optional(),
+      /** Non-trading deficits of periods beginning before 1 April 2017: only against non-trading profits (CTA 2009 s457). */
+      nonTradingDeficitsBefore2017: MoneySchema.refine((v) => v >= 0, { message: 'A deficit carried forward is given as a positive amount' }).optional(),
       preTradingExpenditure: MoneySchema.refine((v) => v >= 0, { message: 'Pre-trading expenditure is given as a positive amount' }).optional(),
     })
     .optional(),

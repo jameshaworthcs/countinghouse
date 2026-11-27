@@ -1145,11 +1145,11 @@ export const VAT_LATE_PAYMENT_RULES: readonly { from: ISODate; graceDays: number
  * n + 1), each row from the year it starts, percent. One rate on all profits (`small` absent): 20% for FY
  * 2015 and FY 2016 (FA 2013 s6(1); FA 2015 s6), 19% for FY 2017 to FY 2022 (F(No.2)A 2015 s7(1); FA 2020
  * ss5–6; FA 2021 s6(2)(a)). From FY 2023 the main rate is 25% (FA 2021 s6(2)(b); F(No.2)A 2023 s5,
- * F(No.2)A 2024 s12, FA 2025 s13 for FY 2024 to FY 2026) and the small profits rate 19% (CTA 2010 s18A,
- * inserted by FA 2021 Sch 1), with marginal relief between the lower and upper limits (s18B, s18D(2):
- * £50,000 and £250,000) at the standard fraction 3/200 (FA 2021 s7(2); F(No.2)A 2023 s6, F(No.2)A 2024
- * s13, FA 2025 s14). A later year takes the last row until a new one is added. Earlier years are not
- * covered.
+ * F(No.2)A 2024 s12, FA 2025 s13 for FY 2024 to FY 2026); the small profits rate 19% and the standard
+ * marginal relief fraction 3/200 are set by FA 2021 s7 for FY 2023 (F(No.2)A 2023 s6, F(No.2)A 2024 s13,
+ * FA 2025 s14 for later years), CTA 2010 s18A and s18B (inserted by FA 2021 Sch 1) providing for them,
+ * with the lower and upper limits £50,000 and £250,000 (s18D(2)). A later year takes the last row until a
+ * new one is added. Earlier years are not covered.
  */
 export const CT_RATES: readonly { fy: number; main: number; small?: number; lower?: number; upper?: number; fraction?: { n: number; d: number } }[] = [
   { fy: 2015, main: 20 },

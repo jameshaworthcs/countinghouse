@@ -1660,8 +1660,10 @@ export interface FixedAsset {
   /** How months were counted: a full month on acquisition and none on disposal, or a full month on both (`books.depreciationMonths`). */
   convention: 'acquisition' | 'both';
   memo: string;
-  /** Brought in on an opening journal (books taken over mid-life): for tax, already in the pools brought forward. */
+  /** Brought in on an opening journal dated before the books' first day (books taken over mid-life): it counts from that first day. */
   broughtIn?: true;
+  /** On an opening journal, whatever its day: for tax, an asset brought in (in the pools brought forward), never one bought in these books. */
+  opening?: true;
   /** For Corporation Tax (`asset`'s own fields): bought from a connected person, its market value then and what it fetched when it left (pence), its pool, not new and unused, and the allowance chosen for it. */
   tax?: { connected?: true; marketValue?: number; proceeds?: number; pool?: 'main' | 'special'; used?: true; allowance?: 'aia' | 'first-year' | 'none' };
 }
@@ -2127,8 +2129,8 @@ export interface CtAccountsLine {
   ledger: string;
   name: string;
   amount: number;
-  /** How it is allocated from the period of account: by days (CTA 2009 s52), by its date, or (pre-trading) by its date as well. */
-  basis: 'days' | 'date';
+  /** How it is allocated from the period of account: by days (trading items, CTA 2009 s52; loan relationships by default, s307(2A)–(2B)), as accrued to the CT period (loan relationships on the s307(2C) basis), or by its date (before the trade started). */
+  basis: 'days' | 'accrued' | 'date';
   treatment: CtTreatmentKey;
 }
 /** A code's Corporation Tax treatment (shared/ledger.ts, `CtTreatment`), as the computation uses it. */
@@ -2193,6 +2195,8 @@ export interface CtPoolView {
   disposals: number;
   /** Brought forward + additions − disposals, before writing-down allowances. */
   available: number;
+  /** Of the additions, what is left of expenditure that had the 50% allowance: it joins after this period's writing-down allowance (CAA 2001 s58). */
+  afterAllowance: number;
   balancingCharge: number;
   /** The writing-down allowance (or the small pool allowance), its yearly rate (percent) and the period's share of a year. */
   wda: number;
@@ -2262,7 +2266,10 @@ export type CtCheck =
   | { kind: 'brought-forward'; ledgerFrom: string }
   | { kind: 'before-books'; ledgerFrom: string }
   | { kind: 'sales-before-trade'; amount: number }
-  | { kind: 'income-before-charge'; amount: number; from: string }
+  /** Interest, sales or interest paid dated before it came within the charge (in no CT period). */
+  | { kind: 'income-before-charge'; amount: number; from: string; ledger: string }
+  /** An opening journal dated on or after the books' first day that brings in a fixed asset. */
+  | { kind: 'opening-journal'; date: string; ledgerFrom: string }
   | { kind: 'disposal-proceeds'; count: number; amount: number }
   /** A pre-trading period with profits, from FY 2023, not said whether it is a close investment-holding company (CTA 2010 s18N): the rate depends on it. */
   | { kind: 'close-investment-holding' }
@@ -2298,7 +2305,14 @@ export interface CtComputationView {
   tax: { parts: CtTaxPart[]; atRates: number; marginalRelief: number; chargeable: number };
   payable: number;
   carriedForward: { preTrading: number; tradingLosses: number; nonTradingDeficits: number; mainPool: number; specialPool: number };
-  settings: { associatedCompanies: number; associatedSaid: boolean; aiaAllocated: number | null; closeInvestmentHolding: boolean | null };
+  settings: { associatedCompanies: number; associatedByYear: number[]; associatedSaid: boolean; aiaAllocated: number | null; closeInvestmentHolding: boolean | null };
+  /**
+   * Tax on loans to participators (CTA 2010 s455), when you owed the company at the period's end on loans
+   * it made you in the period (pence): owed at the end, the part lent in the period, the tax on it at the
+   * rate for each part's day, what has been repaid since (by today, before relief runs out) and the
+   * relief for it (s458), and so the tax (box 480). Provisional until 9 months after the period ends.
+   */
+  s455?: { owedAtEnd: number; outstanding: number; charge: number; relief: number; reliefTax: number; tax: number; due: string; provisional: boolean; parts: { date: string; amount: number; rate: number }[] };
   boxes: Ct600BoxView[];
   checks: CtCheck[];
   notes: CtNote[];
@@ -2315,6 +2329,8 @@ export interface CompanyCtResponse {
   /** What the computation reads from the books' settings. */
   setup: { tradeStartedOn: string | null; withinCharge: { from: string | null; assumed: boolean }; closeInvestmentHolding: boolean | null; ledgerFrom: string | null; broughtForward: boolean };
   form: { name: string; version: string; url: string };
+  /** What the owner should know beside the computation: being dormant, filing in iXBRL. */
+  guidance: string[];
   disclaimer: string;
 }
 

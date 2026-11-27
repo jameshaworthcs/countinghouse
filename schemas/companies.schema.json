@@ -344,6 +344,11 @@
                       "type": "integer",
                       "minimum": 0,
                       "maximum": 99
+                    },
+                    "secondYear": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 99
                     }
                   },
                   "required": [
@@ -379,6 +384,13 @@
                   "null"
                 ]
               },
+              "loanRelationshipBasis": {
+                "type": "string",
+                "enum": [
+                  "time",
+                  "accrued"
+                ]
+              },
               "taxBroughtForward": {
                 "type": "object",
                 "properties": {
@@ -395,6 +407,14 @@
                     "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
                   },
                   "nonTradingDeficits": {
+                    "type": "number",
+                    "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                  },
+                  "tradingLossesBefore2017": {
+                    "type": "number",
+                    "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
+                  },
+                  "nonTradingDeficitsBefore2017": {
                     "type": "number",
                     "description": "Amount in major units (e.g. pounds), at most 2 dp. Positive increases net worth."
                   },

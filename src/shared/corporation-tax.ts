@@ -17,12 +17,11 @@ export const daysOf = (start: ISODate, end: ISODate): number => diffDays(start, 
 export const isYear = (start: ISODate, end: ISODate): boolean => end === lastDayOfMonths(start, 12);
 
 /**
- * A period's share of a year, as a fraction num ÷ den: 1 for 12 months; otherwise its days ÷ 365. The
- * limits and allowances given for a year are "proportionately" reduced for a shorter period (CAA 2001
- * s51A(6) for the annual investment allowance, s56(3) for writing-down allowances, s56A for small pools;
- * CTA 2010 s18D(4) for the small profits limits). The Acts do not say how; HMRC works it by days
- * (CTM03930: "strictly the calculation should be carried out by reference to the number of days in the
- * short AP"), and the app over 365.
+ * A period's share of a year for capital allowances, as a fraction num ÷ den: 1 for 12 months; otherwise
+ * its days ÷ 365. The annual investment allowance, writing-down allowances and the small pools limit are
+ * "proportionately" reduced (or increased) for a period that is not a year (CAA 2001 s51A(6), s56(3),
+ * s56A); GOV.UK's guidance scales by days ÷ 365. (The small profits limits are reduced by the days of
+ * each financial year instead: `taxOnProfits`.)
  */
 export function yearShare(start: ISODate, end: ISODate): { num: number; den: number } {
   return isYear(start, end) ? { num: 1, den: 1 } : { num: daysOf(start, end), den: 365 };
@@ -71,33 +70,35 @@ export const daysInFinancialYear = (fy: number): number => daysOf(`${fy}-04-01`,
  * - the profits are apportioned between the financial years by days (CTA 2009 s8(5); CTA 2010 s1172's
  *   time basis; `apportion`, so the parts are whole pounds adding up to the whole);
  * - a year with one rate charges it on its part;
- * - from FY 2023, the years whose limits are the same are taken together (HMRC's CTM03640: the period
- *   is split only where the limits differ). The lower and upper limits L are divided by one more than
- *   the number of associated companies (CTA 2010 s18D(3)) and reduced proportionately (s18D(4)): for
- *   the whole period, by its days ÷ 365 when it is shorter than 12 months (CTM03930: "strictly … by
- *   reference to the number of days"); for a part treated as a period of its own where the limits
- *   differ, by its days ÷ the days of its financial year (CTM03955). With augmented profits A taken as
- *   the profits N (no exempt distributions are tracked: s18L), N ≤ L pays the small profits rate (s18A);
- *   L < N ≤ U the main rate less marginal relief F × (U − N) (s18B, the fraction N ÷ A being 1), shared
- *   between the years by days; more, the main rate;
+ * - from FY 2023, consecutive years with the same limits and the same number of associated companies
+ *   are taken together (HMRC's CTM03640: the period is split only where the limits differ, and a company
+ *   associated in one part does not reduce the other's). The lower and upper limits L are divided by one
+ *   more than the number of associated companies (CTA 2010 s18D(3)) and, for anything short of a whole
+ *   12-month period, "proportionately reduced" (s18D(4)) by the days of each financial year it holds over
+ *   that year's own days, 365 or 366 (CTM03955; CTM03930: "strictly … by reference to the number of
+ *   days"). With augmented profits A taken as the profits N (no exempt distributions are tracked: s18L),
+ *   N ≤ L pays the small profits rate (s18A); L < N ≤ U the main rate less marginal relief F × (U − N)
+ *   (s18B, the fraction N ÷ A being 1), shared between the years by days; more, the main rate;
  * - a close investment-holding company pays the main rate on all its profits (s18A(1)(b), s18B(1)(b),
  *   s18N).
  *
- * Tax is pence: a whole-pound profit at a whole-number rate is exact; marginal relief is rounded to the
- * penny, half away from nothing. `unsupported` when a year is before the rates covered.
+ * `associated` is a count for the whole period, or one for each financial year it holds. Tax is pence: a
+ * whole-pound profit at a whole-number rate is exact; marginal relief is rounded to the penny, half away
+ * from nothing. `unsupported` when a year is before the rates covered.
  */
-export function taxOnProfits(input: { start: ISODate; end: ISODate; profit: number; associated: number; closeInvestmentHolding: boolean }): { parts: TaxPart[]; unsupported?: string } {
-  const { start, end, profit, associated, closeInvestmentHolding } = input;
+export function taxOnProfits(input: { start: ISODate; end: ISODate; profit: number; associated: number | readonly number[]; closeInvestmentHolding: boolean }): { parts: TaxPart[]; unsupported?: string } {
+  const { start, end, profit, closeInvestmentHolding } = input;
   const fys = fyParts(start, end);
+  const assoc = fys.map((_, i) => (typeof input.associated === 'number' ? input.associated : (input.associated[i] ?? input.associated.at(-1) ?? 0)));
   const shares = apportion(profit, fys.map((p) => p.days));
   const rates = fys.map((p) => ctRatesFor(p.fy));
   const missing = fys.find((_, i) => !rates[i]);
   if (missing) return { parts: [], unsupported: `the financial year ${missing.fy} is before the rates covered here (from FY ${CT_RATES[0]!.fy})` };
   const limitsKey = (i: number) => {
     const r = rates[i]!;
-    return r.small === undefined ? `single:${i}` : `${r.lower}|${r.upper}|${r.fraction?.n}/${r.fraction?.d}`;
+    return r.small === undefined ? `single:${i}` : `${r.lower}|${r.upper}|${r.fraction?.n}/${r.fraction?.d}|${assoc[i]}`;
   };
-  // Consecutive years with the same limits, together.
+  // Consecutive years with the same limits (and associated companies), together.
   const groups: number[][] = [];
   fys.forEach((_, i) => (groups.length && limitsKey(groups.at(-1)![0]!) === limitsKey(i) ? groups.at(-1)!.push(i) : groups.push([i])));
   const parts: TaxPart[] = [];
@@ -107,10 +108,14 @@ export function taxOnProfits(input: { start: ISODate; end: ISODate; profit: numb
       for (const i of g) parts.push({ ...fys[i]!, profit: shares[i]!, rate: r.main, band: 'single', tax: shares[i]! * r.main, marginalRelief: 0, net: shares[i]! * r.main });
       continue;
     }
-    // The limits' share: num ÷ den of a year.
-    const whole = g.length === fys.length;
-    const { num, den } = whole ? yearShare(start, end) : { num: fys[g[0]!]!.days, den: daysInFinancialYear(fys[g[0]!]!.fy) };
-    const mult = den * (1 + associated);
+    // The limits' share of a year, num ÷ den: 1 for a whole 12-month period, else Σ days ÷ the financial year's days.
+    let num = 1;
+    let den = 1;
+    if (!(g.length === fys.length && isYear(start, end))) {
+      den = g.reduce((x, i) => x * daysInFinancialYear(fys[i]!.fy), 1);
+      num = g.reduce((x, i) => x + (fys[i]!.days * den) / daysInFinancialYear(fys[i]!.fy), 0);
+    }
+    const mult = den * (1 + assoc[g[0]!]!);
     const n = g.reduce((x, i) => x + shares[i]!, 0);
     const limits = { lower: mulDivRound(r.lower * 100, num, mult), upper: mulDivRound(r.upper * 100, num, mult) };
     // Compared exactly: N ≤ L × num ÷ mult is N × mult ≤ L × num.
@@ -127,6 +132,13 @@ export function taxOnProfits(input: { start: ISODate; end: ISODate; profit: numb
   return { parts };
 }
 
+/** The change of a pool's writing-down rate within a period, if there is one: the day, and the rates before and from it. */
+export function wdaChange(rows: readonly { from: ISODate; main: number; special: number }[], pool: 'main' | 'special', start: ISODate, end: ISODate): { from: ISODate; before: number; after: number } | undefined {
+  const r1 = (rows.filter((r) => r.from <= start).at(-1) ?? rows[0]!)[pool];
+  const change = rows.find((r) => r.from > start && r.from <= end && r[pool] !== r1);
+  return change ? { from: change.from, before: r1, after: change[pool] } : undefined;
+}
+
 /**
  * A pool's writing-down allowance rate for a period, in hundredths of a percent: the rate in force on
  * its first day; for a period running over a change, the hybrid rate X = r₁ × BRD ÷ CP + r₂ × ARD ÷ CP
@@ -134,19 +146,23 @@ export function taxOnProfits(input: { start: ISODate; end: ISODate; profit: numb
  * decimal places (FA 2019 s31(5)–(7) for the special rate, FA 2026 s28 for the main rate).
  */
 export function wdaRateHundredths(rows: readonly { from: ISODate; main: number; special: number }[], pool: 'main' | 'special', start: ISODate, end: ISODate): number {
-  const at = (d: ISODate) => rows.filter((r) => r.from <= d).at(-1) ?? rows[0]!;
-  const r1 = at(start)[pool];
-  const change = rows.find((r) => r.from > start && r.from <= end && r[pool] !== r1);
-  if (!change) return r1 * 100;
+  const change = wdaChange(rows, pool, start, end);
+  if (!change) return (rows.filter((r) => r.from <= start).at(-1) ?? rows[0]!)[pool] * 100;
   const cp = daysOf(start, end);
   const brd = diffDays(start, change.from);
   const ard = cp - brd;
   // Rounded up: the ceiling of 100 × (r₁ × BRD + r₂ × ARD) ÷ CP.
-  const scaled = 100 * (r1 * brd + change[pool] * ard);
+  const scaled = 100 * (change.before * brd + change.after * ard);
   return Math.floor(scaled / cp) + (scaled % cp ? 1 : 0);
 }
 
-/** A yearly amount (pence) for a period: in full for 12 months, else × days ÷ 365 (`yearShare`), rounded to the penny. */
+/**
+ * A yearly amount (pence) for a period: in full for 12 months, else × days ÷ 365 (`yearShare`), rounded to
+ * the penny: the annual investment allowance and the small pools limit, as GOV.UK's "Capital allowances:
+ * accounting periods which are more or less than a year" works them (its example scales by 187 ÷ 365). That
+ * example then claims £143.45 as £144, but states no rule; the app keeps the penny and the CT600's boxes
+ * round to the nearest pound.
+ */
 export function forPeriod(yearlyMinor: number, start: ISODate, end: ISODate): number {
   const s = yearShare(start, end);
   return mulDivRound(yearlyMinor, s.num, s.den);
@@ -161,3 +177,17 @@ export function writingDown(available: number, rateHundredths: number, start: IS
   const s = yearShare(start, end);
   return mulDivRound(available, rateHundredths * s.num, 10_000 * s.den);
 }
+
+/** The close investment-holding test in words (CTA 2010 s18N; HMRC's CTM60720), for the settings and the computation. */
+export const CIHC_TEST =
+  'A close company pays the main rate on all its profits unless, throughout the period, it existed wholly or mainly to carry on a trade on a commercial basis (or another permitted purpose, such as letting land to people not connected with it: CTA 2010 s18N). That is about its purpose, not whether it has sold anything yet: a company actively preparing to start its trade can pass, though HMRC treats that as exceptional and judges it by what the company actually did (CTM60720). A company that only held money on deposit is likely a close investment-holding company (box 4 = 2).';
+
+/** The associated companies test in words (CTA 2010 ss18E–18F; HMRC's CTM03750), for the settings and the computation. */
+export const ASSOCIATED_TEST =
+  'Another company is associated with this one when one controls the other, or both are under the control of the same person or people, for any part of the period (CTA 2010 s18E, control as in ss450–451, s18E(4)–(5)): a company you control is associated with this one. One that carried on no trade or business at any time in the period is left out, as is a passive holding company (s18F). A company of a relative or your spouse counts only where there is substantial commercial interdependence between them (s18G; CTM03750).';
+
+/** What the owner should know beside every computation. */
+export const CT_GUIDANCE: readonly string[] = [
+  'A company with no income and no business has no Corporation Tax accounting period and no return to make, unless HMRC sends a notice to deliver one (dormant for Corporation Tax). Tell HMRC within 3 months of coming within the charge, when it starts to trade or has income such as interest.',
+  'HMRC’s free online filing service for company tax returns closed on 31 March 2026: the CT600, with the accounts and computations in iXBRL, is filed through commercial software.',
+];

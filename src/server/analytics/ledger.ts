@@ -448,6 +448,7 @@ function periodEnd(src: LedgerSource, companyId: string, books: CompanyBooks, po
       convention,
       memo: p.memo,
       ...(broughtIn ? { broughtIn: true as const } : {}),
+      ...(p.source.kind === 'journal' && opening.has(p.source.id) ? { opening: true as const } : {}),
       ...taxOf(p.asset),
     });
   }

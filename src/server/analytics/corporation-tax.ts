@@ -11,15 +11,16 @@
 
 import type { CompanyCtResponse, CtAccountsLine, CtAdjustment, CtAssetRow, CtCapitalAllowances, CtCheck, CtComputationView, CtDisposalRow, CtNote, CtPeriodRow, CtPoolView, CtTreatmentKey, FixedAsset, LedgerPosting } from '../../shared/api';
 import { ctPeriodsOf, withinChargeAssumed, withinChargeFrom, type CtPeriod } from '../../shared/company-books';
-import { daysOf, forPeriod, isYear, taxOnProfits, wdaRateHundredths, writingDown } from '../../shared/corporation-tax';
+import { ASSOCIATED_TEST, CIHC_TEST, CT_GUIDANCE, daysOf, forPeriod, isYear, taxOnProfits, wdaChange, wdaRateHundredths, writingDown } from '../../shared/corporation-tax';
 import { CT600_FORM, ct600Boxes, profitBoxes, type ProfitFigures } from '../../shared/ct600';
 import { addDays, addYears, formatDate, type ISODate } from '../../shared/dates';
+import { monthsAfter } from '../../shared/uk';
 import { CT_DISCLAIMER } from '../../shared/disclaimers';
 import { LEDGER_CODES, ledgerCode, ledgerName } from '../../shared/ledger';
 import { apportion, fromMinor, mulDivRound, toMinor } from '../../shared/money';
-import { costOn } from '../../shared/period-end';
+import { costOn, coverParts } from '../../shared/period-end';
 import type { Company } from '../../shared/schema';
-import { AIA_LIMITS, ct600Due, ctPaymentDue, ctRatesFor, financialYearOf, FIRST_YEAR_ALLOWANCES, FLEXIBLE_LOSSES_FROM, LOSS_DEDUCTIONS_ALLOWANCE, PRE_TRADING_YEARS, ruleOn, SMALL_POOLS_LIMIT, WDA_RATES } from '../../shared/uk';
+import { AIA_LIMITS, ct600Due, s455Rate, ctPaymentDue, ctRatesFor, financialYearOf, FIRST_YEAR_ALLOWANCES, FLEXIBLE_LOSSES_FROM, LOSS_DEDUCTIONS_ALLOWANCE, PRE_TRADING_YEARS, ruleOn, SMALL_POOLS_LIMIT, WDA_RATES } from '../../shared/uk';
 import type { BalanceEngine } from './balances';
 import { companyLedger, type Ledger, type LedgerSource } from './ledger';
 import { accountsPeriods, periodAccounts } from './period-accounts';
@@ -97,6 +98,8 @@ interface Carried {
   releasing: boolean;
   losses: { amount: number; flexible: boolean }[];
   nonTradingDeficits: number;
+  /** Non-trading deficits of periods beginning before 1 April 2017: against non-trading profits only (CTA 2009 s457). */
+  oldDeficits: number;
   mainPool: number;
   specialPool: number;
   relieved: Map<string, Relieved>;
@@ -133,11 +136,13 @@ export function companyCorporationTax({ src, company, engine, today, period: wan
     const t = treatmentOf(p.ledger);
     return t !== undefined && t !== 'tax';
   });
-  /** Items allocated by their own date, whatever the phase: interest received and paid (by when the books recognise it), and everything before the trade started. */
-  const byDate = (p: LedgerPosting) => {
-    const t = treatmentOf(p.ledger)!;
-    return t === 'non-trading-income' || t === 'loan-relationship' || !trading(p.date);
+  /** A loan relationship's credit or debit: interest received or paid. */
+  const isLoanRelationship = (p: Pick<LedgerPosting, 'ledger'>) => {
+    const t = treatmentOf(p.ledger);
+    return t === 'non-trading-income' || t === 'loan-relationship';
   };
+  /** Items allocated by their own date: everything before the trade started but loan relationships (which are shared out on their own basis, below). */
+  const byDate = (p: LedgerPosting) => !isLoanRelationship(p) && !trading(p.date);
 
   // Pre-trading expenditure (CTA 2009 s61): revenue expenses before the trade started, those within 7
   // years before it treated as incurred on its first day; with any brought forward (taken as within).
@@ -155,7 +160,7 @@ export function companyCorporationTax({ src, company, engine, today, period: wan
     const tradingCts = periods.filter((c) => c.periodOfAccount.end === pe && c.start >= ps && trading(c.start) && c.start >= first);
     if (!tradingCts.length) continue;
     const totals = new Map<string, number>();
-    for (const p of pl) if (p.date >= ps && p.date <= pe && !byDate(p)) totals.set(p.ledger, (totals.get(p.ledger) ?? 0) + profitOf(p));
+    for (const p of pl) if (p.date >= ps && p.date <= pe && !byDate(p) && !isLoanRelationship(p)) totals.set(p.ledger, (totals.get(p.ledger) ?? 0) + profitOf(p));
     if (tradePoa && tradePoa.end === pe && releasable) totals.set(PRE_TRADING, -releasable);
     const weights = tradingCts.map((c) => daysOf(c.start, c.end));
     for (const [code, total] of totals) {
@@ -167,11 +172,50 @@ export function companyCorporationTax({ src, company, engine, today, period: wan
     }
   }
 
+  // Loan relationships (interest received and paid): shared between the CT periods of each period of
+  // account by days (CTA 2009 s307(2A)–(2B); CTA 2010 s1172), the days in no CT period (before it came
+  // within the charge) taking their share too, which is taxed nowhere (and stops the period, below);
+  // or, on the s307(2C) basis the owner may choose, as accounts drawn up for each CT period would
+  // recognise them: each amount over the days it covers (`covers`), else on its day.
+  const basis = books.loanRelationshipBasis ?? 'time';
+  const lrParts = new Map<ISODate, Map<string, number>>(); // CT period end → code → pence
+  const addLr = (end: ISODate, code: string, amount: number) => {
+    if (!amount) return;
+    const m = lrParts.get(end) ?? lrParts.set(end, new Map()).get(end)!;
+    m.set(code, (m.get(code) ?? 0) + amount);
+  };
+  const lrPostings = pl.filter(isLoanRelationship);
+  const inBooks = periods.filter((c) => c.start >= first);
+  if (basis === 'time') {
+    for (const key of new Set(inBooks.map((p) => `${p.periodOfAccount.start}|${p.periodOfAccount.end}`))) {
+      const [ps, pe] = key.split('|') as [ISODate, ISODate];
+      const cts = inBooks.filter((c) => c.periodOfAccount.end === pe && c.start >= ps);
+      const covered = cts.reduce((x, c) => x + daysOf(c.start, c.end), 0);
+      const weights = [...cts.map((c) => daysOf(c.start, c.end)), Math.max(0, daysOf(ps, pe) - covered)];
+      const totals = new Map<string, number>();
+      for (const p of lrPostings) if (p.date >= ps && p.date <= pe) totals.set(p.ledger, (totals.get(p.ledger) ?? 0) + profitOf(p));
+      for (const [code, total] of totals) apportion(total, weights).forEach((x, i) => i < cts.length && addLr(cts[i]!.end, code, x));
+    }
+  } else {
+    // Each posting as made (the ledger's own deferrals at period ends left out: its cover is spread here).
+    const spans = [...inBooks.map((c) => ({ start: c.start, end: c.end })), { start: dayAfter(inBooks.at(-1)?.end ?? today), end: '9999-12-31' }];
+    for (const p of lrPostings) {
+      if (p.source.kind === 'deferral') continue;
+      if (p.covers) coverParts(profitOf(p), p.covers, spans, first).forEach((x, i) => i < inBooks.length && addLr(inBooks[i]!.end, p.ledger, x));
+      else {
+        const c = inBooks.find((x) => x.start <= p.date && x.end >= p.date);
+        if (c) addLr(c.end, p.ledger, profitOf(p));
+      }
+    }
+  }
+
   // Plant: the register's tangible assets bought in these books (those brought in on opening journals
   // are in the pools brought forward; cars and intangibles are not worked out), and small equipment.
   const plant: PlantItem[] = [];
+  /** Brought in, not bought in these books: on an opening journal of books taken over mid-life, whatever its day (in the pools brought forward). */
+  const broughtIn = (a: FixedAsset) => Boolean(a.broughtIn || (books.ledgerFrom && a.opening));
   for (const a of ledger.assets) {
-    if (a.broughtIn || a.class === 'intangible' || a.class === 'motor') continue;
+    if (broughtIn(a) || a.class === 'intangible' || a.class === 'motor') continue;
     plant.push({ id: a.id, memo: a.memo, class: a.class, pool: a.tax?.pool ?? 'main', acquired: a.acquired, cost: a.cost, connected: Boolean(a.tax?.connected), ...(a.tax?.marketValue !== undefined ? { marketValue: a.tax.marketValue } : {}), used: Boolean(a.tax?.used), ...(a.tax?.allowance ? { allowance: a.tax.allowance } : {}), smallEquipment: false });
   }
   const smallCredits: LedgerPosting[] = [];
@@ -188,8 +232,9 @@ export function companyCorporationTax({ src, company, engine, today, period: wan
   const carried: Carried = {
     preTrading: bf?.preTradingExpenditure ? toMinor(bf.preTradingExpenditure) : 0,
     releasing: false,
-    losses: bf?.tradingLosses ? [{ amount: toMinor(bf.tradingLosses), flexible: true }] : [],
+    losses: [...(bf?.tradingLossesBefore2017 ? [{ amount: toMinor(bf.tradingLossesBefore2017), flexible: false }] : []), ...(bf?.tradingLosses ? [{ amount: toMinor(bf.tradingLosses), flexible: true }] : [])],
     nonTradingDeficits: bf?.nonTradingDeficits ? toMinor(bf.nonTradingDeficits) : 0,
+    oldDeficits: bf?.nonTradingDeficitsBefore2017 ? toMinor(bf.nonTradingDeficitsBefore2017) : 0,
     mainPool: bf?.mainPool ? toMinor(bf.mainPool) : 0,
     specialPool: bf?.specialPool ? toMinor(bf.specialPool) : 0,
     relieved: new Map(),
@@ -246,7 +291,7 @@ export function companyCorporationTax({ src, company, engine, today, period: wan
 
     // ── The accounts' profit for the period, and the adjustments ──
     const lineMap = new Map<string, CtAccountsLine>();
-    const addLine = (code: string, amount: number, basis: 'days' | 'date') => {
+    const addLine = (code: string, amount: number, basis: CtAccountsLine['basis']) => {
       if (!amount) return;
       const key = `${code}|${basis}`;
       const l = lineMap.get(key) ?? lineMap.set(key, { ledger: code, name: name(code), amount: 0, basis, treatment: treatmentOf(code)! }).get(key)!;
@@ -256,6 +301,16 @@ export function companyCorporationTax({ src, company, engine, today, period: wan
     for (const [code, amount] of parts) if (code !== PRE_TRADING) addLine(code, amount, 'days');
     const dated = pl.filter((p) => byDate(p) && p.date >= windowStart && p.date <= c.end);
     for (const p of dated) if (p.date >= c.start) addLine(p.ledger, profitOf(p), 'date');
+    const lr = lrParts.get(c.end) ?? new Map<string, number>();
+    for (const [code, amount] of lr) addLine(code, amount, basis === 'time' ? 'days' : 'accrued');
+    // Opening journals of books taken over mid-life are balances brought in, dated before the books start.
+    for (const a of ledger.assets) if (books!.ledgerFrom && a.opening && a.acquired >= first && a.acquired >= c.start && a.acquired <= c.end) checks.push({ kind: 'opening-journal', date: a.acquired, ledgerFrom: books!.ledgerFrom });
+    // Income or interest paid in no CT period (before it came within the charge): taxed nowhere, so the day it came within it is wrong.
+    for (const p of pl) {
+      const t = treatmentOf(p.ledger);
+      if (p.date < windowStart || p.date >= c.start) continue;
+      if (t === 'non-trading-income' || t === 'loan-relationship' || t === 'trading-income') checks.push({ kind: 'income-before-charge', amount: profitOf(p), from: c.start, ledger: p.ledger });
+    }
     const lines = [...lineMap.values()].filter((l) => l.amount).sort((a, b) => chartIndex(a.ledger) - chartIndex(b.ledger) || a.basis.localeCompare(b.basis));
     const accountsProfit = lines.reduce((x, l) => x + l.amount, 0);
 
@@ -289,26 +344,21 @@ export function companyCorporationTax({ src, company, engine, today, period: wan
     }
     if (salesBefore) checks.push({ kind: 'sales-before-trade', amount: salesBefore });
 
-    // Interest and pre-trading expenses by date (the window reaches back over days in no CT period, before it came within the charge).
-    const ntItems: CtComputationView['nonTrading']['items'] = [];
+    // Pre-trading expenses by date (the window reaches back over days in no CT period, before it came within the charge).
     const preTradingItems: CtComputationView['preTrading']['items'] = [];
+    for (const p of dated) {
+      if (treatmentOf(p.ledger) === 'allowable' && !trading(p.date)) preTradingItems.push({ date: p.date, memo: p.date < c.start ? `${p.memo} (before it came within the charge)` : p.memo, ledger: p.ledger, amount: p.amount });
+    }
+    // Loan relationships: interest received is a non-trading credit; interest paid a non-trading debit before the trade starts (a trading one after, s297).
+    const ntItems: CtComputationView['nonTrading']['items'] = [];
     let ntCredits = 0;
     let ntDebits = 0;
-    for (const p of dated) {
-      const t = treatmentOf(p.ledger)!;
-      const amount = profitOf(p);
-      if (t === 'non-trading-income') {
-        if (p.date < c.start) checks.push({ kind: 'income-before-charge', amount, from: c.start });
-        else {
-          ntCredits += amount;
-          ntItems.push({ date: p.date, memo: p.memo, ledger: p.ledger, amount });
-        }
-      } else if (t === 'loan-relationship' && phase === 'pre-trading' && p.date >= c.start) {
-        ntDebits -= amount;
-        ntItems.push({ date: p.date, memo: p.memo, ledger: p.ledger, amount });
-      } else if (t === 'allowable' && !trading(p.date)) {
-        preTradingItems.push({ date: p.date, memo: p.date < c.start ? `${p.memo} (before it came within the charge)` : p.memo, ledger: p.ledger, amount: -amount });
-      }
+    for (const [code, amount] of lr) {
+      const t = treatmentOf(code);
+      if (t === 'non-trading-income') ntCredits += amount;
+      else if (phase === 'pre-trading') ntDebits -= amount;
+      else continue;
+      ntItems.push({ date: c.end, memo: basis === 'time' ? 'Shared out from the period of account by days (CTA 2009 s307(2A))' : 'As accrued to the period (CTA 2009 s307(2C))', ledger: code, amount });
     }
 
     // ── Pre-trading expenditure: gathered until the trade starts, released on its first day ──
@@ -346,6 +396,11 @@ export function companyCorporationTax({ src, company, engine, today, period: wan
     const ntNet = ntCredits - ntDebits;
     const ntProfits = Math.max(0, ntNet);
     const ntArising = Math.max(0, -ntNet);
+    // Deficits of periods before 1 April 2017: against non-trading profits only (CTA 2009 s457; box 230).
+    const oldBroughtForward = s.oldDeficits;
+    const oldUsed = Math.min(oldBroughtForward, ntProfits);
+    s.oldDeficits -= oldUsed;
+    if (oldUsed) notes.push({ level: 'info', text: 'Non-trading deficits of periods before 1 April 2017 are set against non-trading profits only (CTA 2009 s457; box 230).' });
     if (ntArising) notes.push({ level: 'info', text: `A non-trading loan relationship deficit of ${money(ntArising)} arises (CTA 2009 s301): it is carried forward here (s463G). The company may instead claim to set it against this period’s other profits, or carry it back (s459, within 2 years after the period, s460).` });
 
     // ── Trading losses, and deductions against total profits ──
@@ -362,7 +417,7 @@ export function companyCorporationTax({ src, company, engine, today, period: wan
       roomTrading -= use;
       againstTrading += use;
     }
-    const totalProfits = tradingProfit - againstTrading + ntProfits;
+    const totalProfits = tradingProfit - againstTrading + ntProfits - oldUsed;
     // Then, against total profits by claim, as far as they go: trading losses from 1 April 2017 (s45A),
     // then non-trading deficits carried forward (CTA 2009 s463G).
     let room = totalProfits;
@@ -381,22 +436,25 @@ export function companyCorporationTax({ src, company, engine, today, period: wan
       const flexible = c.start >= FLEXIBLE_LOSSES_FROM;
       if (!flexible && c.end >= FLEXIBLE_LOSSES_FROM) unsupported('a trading loss in a period running over 1 April 2017: its parts are carried forward under different rules (CTA 2010 s45 and s45A)');
       s.losses.push({ amount: arising, flexible });
-      notes.push({ level: 'info', text: `A trading loss of ${money(arising)} is carried forward to later periods (CTA 2010 ${flexible ? 's45A' : 's45'}). The company may instead claim to set it against this period’s total profits and then the previous 12 months’ (CTA 2010 s37), within two years after the period ends: not worked out here.` });
+      // A loss may be carried back only to a period in which the company carried on the trade (s37(6)).
+      const back = trade && trade < c.start ? (addYears(c.start, -1) >= trade ? 'and then carried back against the total profits of the previous 12 months' : `and then carried back against the total profits of the months since the trade started (${formatDate(trade)}), not before it`) : 'but not carried back: the company did not carry on the trade before this period (s37(6)), so pre-trading interest stays taxed';
+      notes.push({ level: 'info', text: `A trading loss of ${money(arising)} is carried forward to later periods (CTA 2010 ${flexible ? 's45A' : 's45'}). The company may instead claim to set it against this period’s total profits, interest included (s37(3)(a)), ${back} (s37(3)(b)), within two years after the period ends: not worked out here.` });
     }
     if (againstTotal) notes.push({ level: 'info', text: 'Trading losses carried forward are claimed against total profits as far as they go (CTA 2010 s45A(4), a claim: the company may claim less, or none).' });
     if (deficitsUsed) notes.push({ level: 'info', text: 'Non-trading deficits carried forward are claimed against total profits as far as they go (CTA 2009 s463G, a claim within 2 years after the period: the company may claim less).' });
-    if (againstTrading + againstTotal + deficitsUsed) notes.push({ level: 'warn', text: `Carried-forward losses and deficits used are within the company’s deductions allowance (up to £${LOSS_DEDUCTIONS_ALLOWANCE.toLocaleString('en-GB')} a year, CTA 2010 s269ZR and s269ZW), which it must specify in its return (s269ZB, s269ZD): otherwise the allowance is nil and only half the profits can be relieved. Show the allowance used in the computation you file.` });
-    if (againstTrading + againstTotal + deficitsUsed > forPeriod(toMinor(LOSS_DEDUCTIONS_ALLOWANCE), c.start, c.end)) unsupported(`carried-forward losses of more than the deductions allowance: the restriction of CTA 2010 Part 7ZA is not worked out here`);
+    if (againstTrading + againstTotal + deficitsUsed + oldUsed) notes.push({ level: 'warn', text: `Carried-forward losses and deficits used are within the company’s deductions allowance (up to £${LOSS_DEDUCTIONS_ALLOWANCE.toLocaleString('en-GB')} a year, CTA 2010 s269ZR and s269ZW), which it must specify in its return (s269ZB, s269ZD): otherwise the allowance is nil and only half the profits can be relieved. Show the allowance used in the computation you file.` });
+    if (againstTrading + againstTotal + deficitsUsed + oldUsed > forPeriod(toMinor(LOSS_DEDUCTIONS_ALLOWANCE), c.start, c.end)) unsupported(`carried-forward losses of more than the deductions allowance: the restriction of CTA 2010 Part 7ZA is not worked out here`);
     const chargeableExact = totalProfits - againstTotal - deficitsUsed;
 
     // ── The profit boxes, in whole pounds, and the tax on box 315 ──
     const turnover = phase === 'trading' ? lines.filter((l) => l.treatment === 'trading-income').reduce((x, l) => x + l.amount, 0) : null;
-    const figures: ProfitFigures = { turnover, tradingProfit: phase === 'trading' ? tradingProfit : null, lossesAgainstTrading: againstTrading, nonTradingProfits: ntProfits, lossesAgainstTotal: againstTotal, deficitsAgainstTotal: deficitsUsed };
+    const figures: ProfitFigures = { turnover, tradingProfit: phase === 'trading' ? tradingProfit : null, lossesAgainstTrading: againstTrading, nonTradingProfits: ntProfits, deficitsAgainstNonTrading: oldUsed, lossesAgainstTotal: againstTotal, deficitsAgainstTotal: deficitsUsed };
     const chargeableWhole = profitBoxes(figures).b315;
     const assoc = books!.associatedCompanies?.find((a) => a.periodEnd === c.end);
     const associated = assoc?.count ?? 0;
+    const byYear = [associated, assoc?.secondYear ?? associated];
     const cihc = books!.closeInvestmentHolding ?? null;
-    const tax = taxOnProfits({ start: c.start, end: c.end, profit: chargeableWhole, associated, closeInvestmentHolding: cihc === true });
+    const tax = taxOnProfits({ start: c.start, end: c.end, profit: chargeableWhole, associated: byYear, closeInvestmentHolding: cihc === true });
     if (tax.unsupported) unsupported(tax.unsupported);
     const atRates = tax.parts.reduce((x, p) => x + p.tax, 0);
     const relief = tax.parts.reduce((x, p) => x + p.marginalRelief, 0);
@@ -404,18 +462,18 @@ export function companyCorporationTax({ src, company, engine, today, period: wan
     // Small profits rates apply in some financial year of the period (from FY 2023).
     const tiered = [financialYearOf(c.start), financialYearOf(c.end)].some((fy) => ctRatesFor(fy)?.small !== undefined);
     if (tiered && cihc === null && phase === 'pre-trading' && chargeableWhole > 0) checks.push({ kind: 'close-investment-holding' });
-    if (tiered && !assoc) notes.push({ level: 'info', text: 'No associated companies are said for this period: taken as none. Another company is associated with this one when one controls the other, or both are under the same control, for any part of the period (CTA 2010 s18E, control as in ss450–451): a company you control is associated with this one. One that carried on no trade or business at any time in the period is left out (s18E), as is a passive holding company (s18F). Say how many in Settings.' });
-    if (tiered && cihc === null && phase === 'trading') notes.push({ level: 'info', text: 'Not said whether it is a close investment-holding company (CTA 2010 s18N): taken as not one, as it exists to trade on a commercial basis. Say so in Settings if that changes.' });
+    if (tiered && !assoc) notes.push({ level: 'info', text: `No associated companies are said for this period: taken as none. ${ASSOCIATED_TEST} Say how many in Settings.` });
+    if (tiered && cihc === null && phase === 'trading') notes.push({ level: 'info', text: `Not said whether it is a close investment-holding company: taken as not one, as it trades. ${CIHC_TEST} Say so in Settings if that changes.` });
     if (tiered) notes.push({ level: 'info', text: 'Augmented profits are taken as the profits chargeable: exempt distributions it receives from companies outside its 51% group, which would count towards them (CTA 2010 s18L), are not tracked.' });
     if (phase === 'pre-trading' && ntCredits && s.preTrading) notes.push({ level: 'info', text: 'Pre-trading expenditure is not set against the interest: it waits for the trade to start (CTA 2009 s61). It is not management expenses either (s1219): a company holding cash on deposit until it is used in a trade it intends to carry on is not normally a company with investment business (s1218B; HMRC’s CTM08070).' });
 
     // ── What else to know ──
-    const loan = ledger.postings.filter((p) => p.ledger === 'directors-loan' && p.date <= c.end).reduce((x, p) => x + p.amount, 0);
-    if (loan > 0) notes.push({ level: 'warn', text: `At the period’s end you owed the company ${money(loan)} on your director’s loan: tax under CTA 2010 s455 may be due on what is still owed 9 months after the period ends (CT600A, box 480). Not worked out here.` });
+    const s455 = s455Of(c);
+    if (s455) notes.push({ level: 'warn', text: `At the period’s end you owed the company ${money(s455.owedAtEnd)} on your director’s loan, ${money(s455.outstanding)} of it lent in this period: tax under CTA 2010 s455 of ${money(s455.charge)} is due on that (at the rate for the tax year each part was lent), less relief for what is repaid by ${formatDate(s455.due)} (s458): ${money(s455.relief)} repaid so far, so ${money(s455.tax)}${s455.provisional ? ', so far' : ''}. It goes in box 480 (from the CT600A, which the return needs while a loan to a participator is outstanding at the period’s end) and is paid with the Corporation Tax. Matching repayments to loans oldest first; the rules on borrowing again (s464C, s464ZA) are not worked out.` });
     if (phase === 'trading' && lines.some((l) => l.treatment === 'loan-relationship')) notes.push({ level: 'info', text: 'Interest paid is taken as a trading loan relationship debit, a deduction from the trading profit (CTA 2009 s297): if the borrowing was not for the trade, it is non-trading (s301) instead.' });
     if (lines.some((l) => l.ledger === 'donations')) notes.push({ level: 'info', text: 'Qualifying charitable donations (CTA 2010 Part 6, CT600 box 305) are not worked out: a donation is only added back here.' });
 
-    const settings = { associatedCompanies: associated, associatedSaid: Boolean(assoc), aiaAllocated: books!.aiaAllocated?.find((a) => a.periodEnd === c.end)?.amount ?? null, closeInvestmentHolding: cihc };
+    const settings = { associatedCompanies: associated, associatedByYear: tax.parts.length > 1 ? byYear : [associated], associatedSaid: Boolean(assoc), aiaAllocated: books!.aiaAllocated?.find((a) => a.periodEnd === c.end)?.amount ?? null, closeInvestmentHolding: cihc };
     const view: CtComputationView = {
       period: { ...row },
       days,
@@ -433,7 +491,8 @@ export function companyCorporationTax({ src, company, engine, today, period: wan
       totalProfits,
       chargeable: { exact: chargeableExact, whole: chargeableWhole },
       tax: { parts: tax.parts, atRates, marginalRelief: relief, chargeable },
-      payable: chargeable,
+      payable: chargeable + (s455?.tax ?? 0),
+      ...(s455 ? { s455 } : {}),
       carriedForward: { preTrading: s.preTrading, tradingLosses: s.losses.reduce((x, l) => x + l.amount, 0), nonTradingDeficits: s.nonTradingDeficits, mainPool: s.mainPool, specialPool: s.specialPool },
       settings,
       boxes: [],
@@ -487,7 +546,8 @@ export function companyCorporationTax({ src, company, engine, today, period: wan
       return d >= c.start && d <= c.end;
     });
     const assets = items.map((i) => rowOf(i, incurredOf(i)));
-    let smallBack = smallCredits.filter((p) => p.date >= c.start && p.date <= c.end).reduce((x, p) => x - p.amount, 0);
+    // Money back counts on the day it came, or on the trade's first day when before it (as the equipment does, s12).
+    let smallBack = smallCredits.filter((p) => incurredOf({ acquired: p.date }) >= c.start && incurredOf({ acquired: p.date }) <= c.end).reduce((x, p) => x - p.amount, 0);
     for (const r of [...assets].reverse()) {
       if (!r.smallEquipment || !smallBack) continue;
       const take = Math.min(smallBack, r.qualifying);
@@ -524,11 +584,14 @@ export function companyCorporationTax({ src, company, engine, today, period: wan
       if (fyaEligible(r)) takeFya(r);
       else r.notes.push(`A first-year allowance is not available for it${fyaRow && r.incurred >= fyaRow.from ? '' : ` (only for expenditure from ${formatDate(FIRST_YEAR_ALLOWANCES[0]!.from)})`}: it goes to its pool.`);
     }
-    for (const r of assets.filter((x) => choice(x) === 'aia')) takeAia(r);
+    for (const r of assets.filter((x) => choice(x) === 'aia')) {
+      if (byId.get(r.id)!.connected) r.notes.push('You chose the annual investment allowance, but there is none on plant bought from a connected person (CAA 2001 s217): it goes to its pool. (New plant the seller sells in the ordinary course of its business is excepted, s230: not worked out here.)');
+      else takeAia(r);
+    }
     // Then the default: the annual investment allowance, special rate expenditure first, then by day.
     const defaults = assets.filter((x) => choice(x) === undefined);
     for (const r of [...defaults.filter((x) => x.pool === 'special'), ...defaults.filter((x) => x.pool === 'main')]) {
-      if (byId.get(r.id)!.connected) r.notes.push('No annual investment allowance or first-year allowance on plant bought from a connected person (CAA 2001 s217): it goes to its pool.');
+      if (byId.get(r.id)!.connected) r.notes.push('No annual investment allowance or first-year allowance on plant bought from a connected person (CAA 2001 s217): it goes to its pool. (New plant the seller sells in the ordinary course of its business is excepted, s230: not worked out here.)');
       else takeAia(r);
     }
     // What the annual investment allowance did not cover: full expensing or 50% where available.
@@ -552,19 +615,24 @@ export function companyCorporationTax({ src, company, engine, today, period: wan
       const out = disposals.filter((d) => d.pool === pool).reduce((x, d) => x + d.fromPool, 0) + (pool === 'main' ? smallBack : 0);
       const balance = broughtForward + additions - out;
       const charge = Math.max(0, -balance);
-      const available = Math.max(0, balance);
+      // What is left of expenditure that had the 50% allowance joins the pool after this period's writing-down allowance (CAA 2001 s58).
+      const afterAllowance = assets.filter((r) => r.pool === pool && r.treatment === 'fya-50').reduce((x, r) => x + r.toPool, 0);
+      const base = Math.max(0, balance - afterAllowance);
       const rate = wdaRateHundredths(WDA_RATES, pool, c.start, c.end);
-      const small = available > 0 && available <= smallLimit;
-      const allowance = small ? available : writingDown(available, rate, c.start, c.end);
+      const small = base > 0 && base <= smallLimit;
+      const allowance = small ? base : writingDown(base, rate, c.start, c.end);
       wda += allowance;
       balancingCharges += charge;
-      const carriedForward = available - allowance;
+      const carriedForward = Math.max(0, balance) - allowance;
       if (pool === 'main') s.mainPool = carriedForward;
       else s.specialPool = carriedForward;
-      if (broughtForward || additions || out) pools.push({ pool, broughtForward, additions, disposals: out, available: balance, balancingCharge: charge, wda: allowance, rate: rate / 100, smallPool: small, carriedForward });
-      if (available && !small && rate % 100) notes.push({ level: 'info', text: `The ${pool === 'main' ? 'main' : 'special rate'} pool’s writing-down allowance is at ${rate / 100}%: the period runs over a change of rate, so it takes the days before and after it (${pool === 'main' ? 'FA 2026 s28: 18% before 1 April 2026, 14% from then' : 'FA 2019 s31: 8% before 1 April 2019, 6% from then'}), rounded up to two decimal places.` });
+      if (broughtForward || additions || out) pools.push({ pool, broughtForward, additions, disposals: out, available: balance, afterAllowance, balancingCharge: charge, wda: allowance, rate: rate / 100, smallPool: small, carriedForward });
+      const change = wdaChange(WDA_RATES, pool, c.start, c.end);
+      if (base && !small && change) notes.push({ level: 'info', text: `The ${pool === 'main' ? 'main' : 'special rate'} pool’s writing-down allowance is at ${rate / 100}%: the period runs over ${formatDate(change.from)}, when the rate went from ${change.before}% to ${change.after}%, so it takes the days before and after it (${pool === 'main' ? 'FA 2026 s28' : 'FA 2019 s31'}), rounded up to two decimal places.` });
     }
-    if (pools.some((p) => p.smallPool)) notes.push({ level: 'info', text: `A pool of ${money(smallLimit)} or less${isYear(c.start, c.end) ? '' : ' (the £1,000 limit, proportionately reduced for a period shorter than a year)'} is written off in full by the small pools allowance (CAA 2001 s56A), a claim the company may choose not to make.` });
+    const smallYearly = ruleOn(SMALL_POOLS_LIMIT, c.start).limit;
+    if (pools.some((p) => p.smallPool)) notes.push({ level: 'info', text: `A pool of ${money(smallLimit)} or less${isYear(c.start, c.end) ? '' : ` (the £${smallYearly.toLocaleString('en-GB')} limit, proportionately reduced for a period shorter than a year)`} is written off in full by the small pools allowance (CAA 2001 s56A), a claim the company may choose not to make.` });
+    if (pools.some((p) => p.afterAllowance)) notes.push({ level: 'info', text: 'What is left of expenditure that had the 50% first-year allowance joins the special rate pool after this period’s writing-down allowance, which it first takes next period (CAA 2001 s58).' });
     const aia = assets.reduce((x, r) => x + r.aia, 0);
     const firstYear = assets.reduce((x, r) => x + r.firstYear, 0);
     return { aiaLimit: { annual, period: limit, allocated: Boolean(allocatedRow), used: aia }, assets, disposals, pools, aia, firstYear, wda, balancingCharges, net: aia + firstYear + wda - balancingCharges, deferred: [] };
@@ -598,7 +666,7 @@ export function companyCorporationTax({ src, company, engine, today, period: wan
       const relieved = s.relieved.get(a.id);
       const pool = relieved?.pool ?? a.tax?.pool ?? 'main';
       const qualifying = relieved?.qualifying ?? a.cost;
-      if (a.broughtIn) rowNotes.push('Brought in on an opening journal: in the pool brought forward. Its disposal value is capped at its cost as the register holds it (its carrying amount then); its original cost may be higher (CAA 2001 s62).');
+      if (broughtIn(a)) rowNotes.push('Brought in on an opening journal: in the pool brought forward. Its disposal value is capped at its cost as the register holds it (its carrying amount then); its original cost may be higher (CAA 2001 s62).');
       const disposalValue = Math.min(proceeds, qualifying);
       if (proceeds > qualifying) rowNotes.push('It fetched more than its qualifying expenditure: its disposal value is capped at that (CAA 2001 s62); the rest may be a chargeable gain, not worked out here.');
       // The relevant proportion: the expenditure relieved by the first-year allowance (halved for 50%) over its qualifying expenditure.
@@ -611,6 +679,55 @@ export function companyCorporationTax({ src, company, engine, today, period: wan
     const leftover = coded - out.reduce((x, d) => x + d.proceeds, 0);
     if (unsaid.length <= 1 && leftover > 0) notes.push({ level: 'warn', text: `${money(leftover)} coded to profit or loss on disposal in the period is not what any asset leaving says it fetched: check what each fetched.` });
     return out;
+  }
+
+  /**
+   * Tax on loans to participators for a period (CTA 2010 s455; CT600A): the director's loan's postings in
+   * date order, a debit balance (you owe the company) made up of the loans that took it there, each with
+   * its day, a credit repaying them oldest first. What was lent in the period and still owed at its end
+   * is charged at the rate for the tax year each part was lent (`s455Rate`); repayments after the end, by
+   * today and before relief runs out 9 months after it (s458), relieve it. Undefined when nothing lent in
+   * the period was owed at its end.
+   */
+  function s455Of(c: CtPeriod): NonNullable<CtComputationView['s455']> | undefined {
+    const postings = ledger.postings.filter((p) => p.ledger === 'directors-loan').sort((a, b) => a.date.localeCompare(b.date) || b.amount - a.amount);
+    const lots: { date: ISODate; amount: number; repaid: number }[] = [];
+    let balance = 0;
+    const cutoff = monthsAfter(c.end, 9);
+    const until = today < cutoff ? today : cutoff;
+    type Lot = (typeof lots)[number];
+    let atEnd: { owed: number; inPeriod: { lot: Lot; amount: number }[] } | undefined;
+    const owedFromPeriod = () => lots.filter((l) => l.date >= c.start && l.date <= c.end && l.amount > l.repaid).map((l) => ({ lot: l, amount: l.amount - l.repaid }));
+    for (const p of postings) {
+      if (p.date > until) break;
+      if (p.date > c.end && !atEnd) atEnd = { owed: Math.max(0, balance), inPeriod: owedFromPeriod() };
+      const before = balance;
+      balance += p.amount;
+      if (p.amount > 0) {
+        const lent = Math.max(0, balance) - Math.max(0, before);
+        // A loan made after the period's end is not relieved by a later repayment of it here: only earlier lots are.
+        if (lent) lots.push({ date: p.date, amount: lent, repaid: 0 });
+      } else {
+        let back = Math.max(0, before) - Math.max(0, balance);
+        for (const l of lots) {
+          const take = Math.min(back, l.amount - l.repaid);
+          l.repaid += take;
+          back -= take;
+          if (!back) break;
+        }
+      }
+    }
+    atEnd ??= { owed: Math.max(0, balance), inPeriod: owedFromPeriod() };
+    const outstanding = atEnd.inPeriod.reduce((x, l) => x + l.amount, 0);
+    if (!outstanding) return undefined;
+    const parts = atEnd.inPeriod.map((l) => ({ date: l.lot.date, amount: l.amount, rate: s455Rate(l.lot.date) }));
+    const tax = (amount: number, rate: number) => mulDivRound(amount, Math.round(rate * 10_000), 10_000);
+    const charge = parts.reduce((x, l) => x + tax(l.amount, l.rate), 0);
+    // What is still owed now of each part lent in the period, after repayments since the end.
+    const still = atEnd.inPeriod.map((l) => Math.min(l.amount, l.lot.amount - l.lot.repaid));
+    const relief = parts.reduce((x, l, i) => x + (l.amount - still[i]!), 0);
+    const reliefTax = parts.reduce((x, l, i) => x + tax(l.amount - still[i]!, l.rate), 0);
+    return { owedAtEnd: atEnd.owed, outstanding, charge, relief, reliefTax, tax: charge - reliefTax, due: cutoff, provisional: today <= cutoff, parts };
   }
 
   // The period to work on next: the earliest ended in the books with no CT600 recorded (not one settled
@@ -627,6 +744,7 @@ export function companyCorporationTax({ src, company, engine, today, period: wan
     computation: shown ?? null,
     setup: { tradeStartedOn: trade ?? null, withinCharge: { from: withinChargeFrom(books) ?? null, assumed: withinChargeAssumed(books) }, closeInvestmentHolding: books.closeInvestmentHolding ?? null, ledgerFrom: books.ledgerFrom ?? null, broughtForward: Boolean(bf) },
     form: { ...CT600_FORM },
+    guidance: [...CT_GUIDANCE],
     disclaimer: CT_DISCLAIMER,
   };
 }

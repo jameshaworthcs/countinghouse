@@ -5,9 +5,10 @@
 // to HMRC: the owner files through commercial software.
 
 import type { Ct600BoxView, CtComputationView } from './api';
-import { formatSpan } from './dates';
+import { formatDate, formatSpan } from './dates';
 import { roundToPounds } from './money';
 import type { Company } from './schema';
+import { ctRatesFor } from './uk';
 
 /** The form these boxes are from (GOV.UK, "Company Tax Return CT600 (2026) Version 3", HMRC 04/26). */
 export const CT600_FORM = {
@@ -59,6 +60,7 @@ export const CT600_BOXES: readonly Ct600BoxDef[] = [
   box('160', 'Trading losses brought forward set against trading profits', 'pounds', S.income),
   box('165', 'Net trading profits – box 155 minus box 160', 'pounds', S.income),
   box('170', 'Bank, building society or other interest, and profits from non-trading loan relationships', 'pounds', S.income),
+  box('230', 'Non-trade deficits on loan relationships (including interest) and derivative contracts (financial instruments) brought forward set against non-trading profits', 'pounds', S.profits),
   box('235', 'Profits before other deductions and reliefs – net sum of boxes 165 to 205 and 220 minus sum of boxes 225 and 230', 'pounds', S.profits),
   box('260', 'Non-trade deficits for this accounting period from loan relationships and derivative contracts (financial instruments)', 'pounds', S.deductions),
   box('263', 'Carried forward non-trade deficits from loan relationships and derivative contracts (financial instruments)', 'pounds', S.deductions),
@@ -112,6 +114,8 @@ export interface ProfitFigures {
   tradingProfit: number | null;
   lossesAgainstTrading: number;
   nonTradingProfits: number;
+  /** Non-trading deficits of periods before 1 April 2017 set against non-trading profits (box 230). */
+  deficitsAgainstNonTrading: number;
   lossesAgainstTotal: number;
   deficitsAgainstTotal: number;
 }
@@ -123,6 +127,7 @@ export interface ProfitBoxes {
   b160: number | null;
   b165: number | null;
   b170: number;
+  b230: number;
   b235: number;
   b263: number;
   b285: number;
@@ -144,12 +149,13 @@ export function profitBoxes(f: ProfitFigures): ProfitBoxes {
   const b160 = b155 === null ? null : Math.min(r(f.lossesAgainstTrading), b155);
   const b165 = b155 === null ? null : b155 - (b160 ?? 0);
   const b170 = r(f.nonTradingProfits);
-  const b235 = (b165 ?? 0) + b170;
+  const b230 = Math.min(r(f.deficitsAgainstNonTrading), b170);
+  const b235 = (b165 ?? 0) + b170 - b230;
   const b285 = Math.min(r(f.lossesAgainstTotal), b235);
   const b263 = Math.min(r(f.deficitsAgainstTotal), b235 - b285);
   const b295 = b263 + b285;
   const b300 = b235 - b295;
-  return { b145: f.turnover === null ? null : r(f.turnover), b155, b160, b165, b170, b235, b263, b285, b295, b300, b315: b300 };
+  return { b145: f.turnover === null ? null : r(f.turnover), b155, b160, b165, b170, b230, b235, b263, b285, b295, b300, b315: b300 };
 }
 
 /**
@@ -178,7 +184,8 @@ export function ct600Boxes(v: CtComputationView, company: Pick<Company, 'name' |
   set('160', p.b160 || null, p.b160 ? 'Trading losses of periods beginning before 1 April 2017 carried forward against the same trade’s profits (CTA 2010 s45), only as far as box 155.' : 'None: losses from 1 April 2017 that may be set against total profits go in box 285.');
   set('165', p.b165, p.b165 === null ? 'Left blank, as box 155 is.' : 'Box 155 minus box 160.');
   set('170', p.b170, `Interest received and other non-trading loan relationship credits less debits (CTA 2009 s301), when a profit${v.nonTrading.net < 0 ? ': here a deficit, in box 795' : ''}.`);
-  set('235', p.b235, 'Box 165 plus box 170 (the other boxes from 175 to 230 are not used here).');
+  set('230', p.b230 || null, p.b230 ? 'Non-trading deficits of periods before 1 April 2017 carried forward, set against non-trading profits only (CTA 2009 s457), as far as box 170.' : 'None: deficits from 1 April 2017 that may be set against total profits go in box 263.');
+  set('235', p.b235, 'Box 165 plus box 170, less box 230 (the other boxes from 175 to 225 are not used here).');
   set('260', null, v.nonTrading.net < 0 ? 'Left blank: this period’s deficit is carried forward, not claimed against this period’s profits (CTA 2009 s459), which the company may choose instead.' : 'Left blank: no deficit claimed against this period’s profits.');
   set('263', p.b263 || null, p.b263 ? 'Non-trading deficits carried forward set against total profits (CTA 2009 s463G, a claim), as far as they go after box 285.' : 'None used.');
   set('275', null, v.losses.trading.arising ? 'Left blank: this period’s loss is carried forward, not set against total profits by a claim under CTA 2010 s37.' : 'Left blank.');
@@ -191,11 +198,14 @@ export function ct600Boxes(v: CtComputationView, company: Pick<Company, 'name' |
   const parts = v.tax.parts;
   const marginal = parts.some((x) => x.band === 'small' || x.band === 'marginal');
   const straddles = parts.length > 1;
-  const assoc = v.settings.associatedCompanies;
+  const [assoc1 = 0, assoc2 = assoc1] = v.settings.associatedByYear;
+  // Boxes 327 and 328 replace 326 for a period over two financial years when the limits changed between them or the numbers differ (the CT600 guide).
+  const limitsChanged = parts.length > 1 && (ctRatesFor(parts[0]!.fy)?.lower !== ctRatesFor(parts[1]!.fy)?.lower || ctRatesFor(parts[0]!.fy)?.upper !== ctRatesFor(parts[1]!.fy)?.upper);
+  const split = parts.length > 1 && (limitsChanged || assoc1 !== assoc2);
   const assocWord = v.settings.associatedSaid ? 'as the settings say for this period' : 'none said in the settings for this period';
-  set('326', marginal && !straddles ? assoc : null, marginal ? (straddles ? 'Left blank: the period runs over two financial years, so boxes 327 and 328 are used.' : `Associated companies at any time in the period, not this one (CTA 2010 s18E), ${assocWord}.`) : 'Left blank: neither the small profits rate nor marginal relief applies.');
-  set('327', marginal && straddles ? assoc : null, marginal && straddles ? `Associated companies in the first financial year, ${assocWord}.` : 'Left blank.');
-  set('328', marginal && straddles ? assoc : null, marginal && straddles ? `Associated companies in the second financial year, ${assocWord}.` : 'Left blank.');
+  set('326', marginal && !split ? assoc1 : null, marginal ? (split ? `Left blank: the period runs over two financial years and ${limitsChanged ? 'the limits changed between them' : 'the number differs between them'}, so boxes 327 and 328 are used.` : `Associated companies for any part of the period, not this one (CTA 2010 s18E), ${assocWord}.`) : 'Left blank: neither the small profits rate nor marginal relief applies.');
+  set('327', marginal && split ? assoc1 : null, marginal && split ? `Associated companies in the first financial year, ${assocWord}.` : 'Left blank: box 326 is used.');
+  set('328', marginal && split ? assoc2 : null, marginal && split ? `Associated companies in the second financial year, ${assocWord}.` : 'Left blank: box 326 is used.');
   set('329', parts.some((x) => x.band === 'small' || x.band === 'marginal'), 'An X when the small profits rate or marginal relief applies to any part.');
   parts.slice(0, 2).forEach((x, k) => {
     const fyBox = k === 0 ? 330 : 380;
@@ -205,14 +215,16 @@ export function ct600Boxes(v: CtComputationView, company: Pick<Company, 'name' |
     set(String(fyBox + 15), x.tax, `${x.profit.toLocaleString('en-GB')} × ${x.rate}%.`);
   });
   set('430', v.tax.atRates, 'The tax at each rate, added up.');
-  set('435', v.tax.marginalRelief || null, v.tax.marginalRelief ? 'F × (U − A) × N ÷ A, with F 3/200, U the upper limit after associated companies and the period’s length, and A (augmented profits) taken as N (CTA 2010 s18B): see the tax by financial year.' : 'None.');
+  const fractions = [...new Set(parts.map((x) => ctRatesFor(x.fy)?.fraction).filter((f): f is { n: number; d: number } => Boolean(f)).map((f) => `${f.n}/${f.d}`))].join(' and ');
+  set('435', v.tax.marginalRelief || null, v.tax.marginalRelief ? `F × (U − A) × N ÷ A, with F ${fractions}, U the upper limit after associated companies and the period’s length, and A (augmented profits) taken as N (CTA 2010 s18B): see the tax by financial year.` : 'None.');
   set('440', v.tax.chargeable, 'Box 430 minus box 435.');
   set('470', 0, 'None: the reliefs in terms of tax (community investment, double taxation, advance Corporation Tax) are not worked out here.');
   set('475', v.tax.chargeable, 'Box 440 minus box 470.');
-  set('480', null, 'Tax on loans to participators (CTA 2010 s455, from the CT600A) is not worked out here: see the notes if your director’s loan was overdrawn.');
-  set('510', v.tax.chargeable, 'Box 475 (box 480 and the rest left out).');
+  const s455 = v.s455?.tax ?? 0;
+  set('480', v.s455 ? s455 : null, v.s455 ? `Tax on loans to participators (CTA 2010 s455), as box A80 of the CT600A would give it: what you were lent in the period and still owed at its end, at the rate for each part's tax year, less relief for repayments by ${formatDate(v.s455.due)} (s458)${v.s455.provisional ? ', so far' : ''}. Check it on your CT600A.` : 'None: nothing lent to you in the period was owed at its end (CTA 2010 s455).');
+  set('510', v.tax.chargeable + s455, 'Box 475 plus box 480 (the rest not used here).');
   set('515', 0, 'None: a company’s bank interest is paid gross.');
-  set('525', v.tax.chargeable, 'Box 510 minus box 515.');
+  set('525', v.tax.chargeable + s455, 'Box 510 minus box 515.');
   set('528', v.payable, 'Box 525 (no restitution tax or coronavirus support scheme overpayment): the tax payable.');
 
   const fe = ca.assets.filter((a) => a.treatment === 'full-expensing');
@@ -230,11 +242,12 @@ export function ct600Boxes(v: CtComputationView, company: Pick<Company, 'name' |
   set('700', some(pounds(pool('special')?.balancingCharge ?? 0)), 'A balancing charge when disposals exceed the special rate pool.');
   set('705', some(pounds(aiaIn('main') + (pool('main')?.wda ?? 0))), 'All allowances on the main pool, the annual investment allowance on main rate expenditure included (as the CT600 guide asks), and its writing-down allowance (or small pools allowance).');
   set('710', some(pounds(pool('main')?.balancingCharge ?? 0)), 'A balancing charge when disposals exceed the main pool.');
-  const fyaSpend = [...fe, ...sr].reduce((x, a) => x + a.qualifying, 0);
-  set('760', some(pounds(fyaSpend)), 'Expenditure on which a first-year allowance (full expensing or the 50% allowance) is claimed.');
-  set('770', some(pounds(ca.assets.filter((a) => a.pool === 'special' && a.treatment !== 'fya-50').reduce((x, a) => x + a.qualifying, 0))), 'Special rate expenditure (integral features, long-life assets, thermal insulation) not in box 760, any taking the annual investment allowance included.');
-  set('773', some(pounds(sr.reduce((x, a) => x + a.qualifying, 0))), 'Expenditure on which the 50% allowance is claimed (also in box 760).');
-  set('775', some(pounds(ca.assets.filter((a) => a.pool === 'main' && a.treatment !== 'full-expensing').reduce((x, a) => x + a.qualifying, 0))), 'Other plant and machinery: main rate expenditure not in box 760, any taking the annual investment allowance included.');
+  // The part of an asset the AIA covered is in 770 or 775; only what took a first-year allowance is in 760 (and 773 for 50%).
+  const fyaPart = (a: (typeof ca.assets)[number]) => (a.firstYear ? a.qualifying - a.aia : 0);
+  set('760', some(pounds(ca.assets.reduce((x, a) => x + fyaPart(a), 0))), 'Expenditure on which a first-year allowance (full expensing or the 50% allowance) is claimed: not any part the annual investment allowance covered.');
+  set('770', some(pounds(ca.assets.filter((a) => a.pool === 'special').reduce((x, a) => x + a.qualifying - fyaPart(a), 0))), 'Special rate expenditure (integral features, long-life assets, thermal insulation) not in box 760, the part taking the annual investment allowance included.');
+  set('773', some(pounds(sr.reduce((x, a) => x + fyaPart(a), 0))), 'Expenditure on which the 50% allowance is claimed (also in box 760).');
+  set('775', some(pounds(ca.assets.filter((a) => a.pool === 'main').reduce((x, a) => x + a.qualifying - fyaPart(a), 0))), 'Other plant and machinery: main rate expenditure not in box 760, the part taking the annual investment allowance included.');
   set('780', some(pounds(v.losses.trading.arising)), 'The trading loss of the period, after capital allowances.');
   set('795', some(pounds(v.losses.nonTrading.arising)), 'The non-trading loan relationship deficit of the period (CTA 2009 s301).');
 
