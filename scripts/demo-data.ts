@@ -298,8 +298,8 @@ async function demoCompanyLedger(store: Store): Promise<void> {
 /**
  * The studio's latest year ended, ready to file (FORMULAS.md §22, "Filing the accounts"): Jo, its one
  * director with a contract of service, is its average employee in that year and the one before, and
- * Jo has confirmed its notes (none of each: Jo's loan to it was in credit throughout, so no advance) and
- * that none of the exclusions applies. Its accounts for the year before, filed with their lines before
+ * Jo has confirmed its notes (none of each: Jo's loan to it was in credit throughout, so no advance), its
+ * particulars and that none of the exclusions applies. Its accounts for the year before, filed with their lines before
  * its books were kept here, lock the books through that year's end, as the app does when a filing is
  * recorded; the latest year is for Jo to file and record.
  */
@@ -323,7 +323,7 @@ async function demoStudioFilingSheet(store: Store): Promise<void> {
                 { periodEnd: STUDIO_OPENING, average: 1 },
                 { periodEnd: STUDIO_YEAR_END, average: 1 },
               ],
-              accountsNotes: [{ periodEnd: STUDIO_YEAR_END, offBalanceSheet: none, commitments: none, directors: none, notExcluded: true }],
+              accountsNotes: [{ periodEnd: STUDIO_YEAR_END, offBalanceSheet: none, commitments: none, directors: none, notExcluded: true, particulars: { registeredIn: 'england-and-wales', type: 'private-limited-by-shares', notWoundUp: true } }],
             },
           }
         : c!,
