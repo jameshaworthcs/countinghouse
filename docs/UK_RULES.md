@@ -529,7 +529,7 @@ Micro-entities Regime (the Financial Reporting Council; paragraphs as in its Sep
   sub-lines when a breakdown is entered), so the totals are worked out from the rounded figures here
   too, and the rounding difference sits in the profit and loss reserve.
 - Capital allowances for the tax computation are below ("Corporation Tax"); a car's own rules and the
-  intangibles regime (CTA 2009 Part 8) are not worked out yet.
+  intangibles regime (CTA 2009 Part 8) are not worked out.
 
 ### Corporation Tax (a company's books)
 

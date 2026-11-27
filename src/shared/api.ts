@@ -1732,7 +1732,7 @@ export interface ProfitAndLoss {
   lines: { line: ProfitLine; label: string; amount: number; codes: ReportCode[]; prior?: number }[];
   /** Lines A to F together. */
   profitBeforeTax: number;
-  /** Line G: the Corporation Tax charge posted for the period (a journal: working it out is a later slice). */
+  /** Line G: the Corporation Tax charge posted for the period (a journal: the computation, analytics/corporation-tax.ts, posts nothing). */
   tax: number;
   /** H: the profit or loss for the period, after tax. */
   profit: number;

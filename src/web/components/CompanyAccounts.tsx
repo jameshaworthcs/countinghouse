@@ -97,7 +97,7 @@ function ProfitCard({ pl, codes, prior }: { pl: ProfitAndLoss; codes: boolean; p
         </table>
       </div>
       <p className="px-5 py-3 text-[12px] text-ink-3">
-        Corporation Tax is not worked out yet: line G holds only a charge written in a journal. The tax computation comes in a later step.
+        Line G holds only a Corporation Tax charge written in a journal: the Corporation Tax tab works the tax out from the books, but posts nothing.
         {prior && !prior.profit && ` The period before (${formatSpan(prior.start, prior.end)}) is not in these books, so its profit and loss is not shown beside it.`}
       </p>
     </Card>

@@ -62,7 +62,7 @@ export const PROFIT_LINE_LABELS: Record<ProfitLine | 'H', string> = {
 };
 
 /**
- * How Corporation Tax treats a code, for the tax computation later: trading income, non-trading income
+ * How Corporation Tax treats a code, for the tax computation (analytics/corporation-tax.ts): trading income, non-trading income
  * (interest received: a loan relationship credit), an allowable or a disallowable expense, a loan
  * relationship debit (interest paid, CTA 2009 Part 5), capital (a fixed asset's cost, or equipment
  * expensed in the accounts: capital allowances instead of a deduction, CTA 2009 s53), the tax itself,
