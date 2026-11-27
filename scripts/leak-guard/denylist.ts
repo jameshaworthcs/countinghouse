@@ -10,7 +10,7 @@ import path from 'node:path';
 import { tokenKey } from './text.ts';
 
 /** Bump when the build changes what it collects, so caches are rebuilt. */
-const BUILDER_VERSION = 17;
+const BUILDER_VERSION = 18;
 
 export interface Denylist {
   version: number;
@@ -109,6 +109,8 @@ export const GENERIC_WORDS = new Set(
     'card cards credit debit charge loan loans student finance mortgage overdraft cash stocks shares share investment investments ' +
     'investing trading general premium plan plans money purchase reward rewards club plus premier select classic gold platinum ' +
     'black blue green cashback everyday regular monthly weekly annual year years month months day days interest bonus ' +
+    'january february march april may june july august september october november december ' +
+    'monday tuesday wednesday thursday friday saturday sunday ' +
     'business company limited ltd plc llp inc group holdings uk gb england bank banking building society direct online app ' +
     'payment payments transfer transfers deposit deposits withdrawal withdrawals refund refunds fee fees salary pay wages ' +
     'rent bills bill utilities groceries shopping transport travel holiday holidays gift gifts pot pots space spaces vault ' +

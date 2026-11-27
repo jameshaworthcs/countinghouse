@@ -60,7 +60,7 @@ function writePersona(dir: string): void {
   });
   // The company's own rows and journals: small figures a general amount would leave out, and a journal's words.
   w('transactions/bw-bank/2025.jsonl', `${JSON.stringify({ id: 'tx_00000000000000b1', accountId: 'bw-bank', date: '2025-06-03', amount: -316, currency: 'GBP', description: 'HOSTING', source: {}, books: { lines: [{ ledger: 'software-hosting', amount: -271 }, { ledger: 'vat', amount: -45 }], setBy: 'user' } })}\n`);
-  w('journals.jsonl', `${JSON.stringify({ id: 'jnl_0000000000b1', companyId: 'bw', date: '2025-06-30', memo: `${JOURNAL_WORD} retainer accrued`, evidence: `Invoice ${JOURNAL_EVIDENCE}`, lines: [{ ledger: 'accrued-income', amount: 612 }, { ledger: 'turnover', amount: -612 }], createdBy: 'owner', createdAt: stamp, updatedAt: stamp })}\n`);
+  w('journals.jsonl', `${JSON.stringify({ id: 'jnl_0000000000b1', companyId: 'bw', date: '2025-06-30', memo: `${JOURNAL_WORD} retainer accrued for April Monday`, evidence: `Invoice ${JOURNAL_EVIDENCE}`, lines: [{ ledger: 'accrued-income', amount: 612 }, { ledger: 'turnover', amount: -612 }], createdBy: 'owner', createdAt: stamp, updatedAt: stamp })}\n`);
   w('proposals/2025/prop_20250701_120000_ab13.json', { id: 'prop_20250701_120000_ab13', status: 'applied', changes: [{ key: 'a', kind: 'add_journal', why: 'Payroll.', company: 'bw', journal: { date: '2025-06-30', memo: 'June pay', lines: [{ ledger: 'directors-salaries', amount: 433 }, { ledger: 'paye', amount: -433 }] } }] });
   w('employments.json', { employments: [{ id: 'qf', employer: EMPLOYER, aliases: ['QUILLFEATHER'], payeReference: PAYE, payrollNumbers: [PAYROLL], createdAt: stamp, updatedAt: stamp }] });
   w('companies.json', {
@@ -271,6 +271,8 @@ describe('the denylist', () => {
     // A row of yours that small is not telling, nor a round company figure.
     expect(denylist.amounts).not.toContain('45.00');
     expect(has(JOURNAL_WORD)).toBe('journal');
+    expect(has('April')).toBeUndefined();
+    expect(has('Monday')).toBeUndefined();
     expect(has(`Invoice ${JOURNAL_EVIDENCE}`)).toBe('journal');
     expect(has('June pay')).toBeUndefined();
   });
