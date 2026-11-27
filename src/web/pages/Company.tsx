@@ -19,11 +19,12 @@ import { api, useApi, useApiMutation } from '../lib/api';
 import { KeepBooks } from '../components/KeepBooks';
 import { BooksTab } from '../components/CompanyLedger';
 import { AccountsTab } from '../components/CompanyAccounts';
+import { FilingTab } from '../components/CompanyFiling';
 import { VatTab } from '../components/CompanyVat';
 import { CorporationTaxTab } from '../components/CompanyTax';
 import { cn } from '../lib/format';
 
-type Tab = 'overview' | 'books' | 'accounts' | 'vat' | 'corporation-tax' | 'settings';
+type Tab = 'overview' | 'books' | 'accounts' | 'filing' | 'vat' | 'corporation-tax' | 'settings';
 
 /** A deadline's state, as a badge: done (filed late marked), overdue, due within 14 days, due soon, later. */
 function DeadlineBadge({ d }: { d: CompanyDeadline }) {
@@ -899,7 +900,7 @@ function FilingsCard({ view, onRecord }: { view: CompanyBooksResponse; onRecord:
 
 export default function Company() {
   const { id = '', tab: tabParam } = useParams();
-  const tab: Tab = tabParam === 'settings' || tabParam === 'books' || tabParam === 'accounts' || tabParam === 'vat' || tabParam === 'corporation-tax' ? tabParam : 'overview';
+  const tab: Tab = tabParam === 'settings' || tabParam === 'books' || tabParam === 'accounts' || tabParam === 'filing' || tabParam === 'vat' || tabParam === 'corporation-tax' ? tabParam : 'overview';
   const navigate = useNavigate();
   const q = useApi<CompanyBooksResponse>(['company-books', id], `/companies/${id}/books`);
   const list = useApi<CompanyBooksListItem[]>(['company-books'], '/company-books');
@@ -939,6 +940,7 @@ export default function Company() {
               { value: 'overview', label: 'Overview' },
               { value: 'books', label: 'Books' },
               { value: 'accounts', label: 'Accounts' },
+              { value: 'filing', label: 'Filing' },
               { value: 'vat', label: 'VAT' },
               { value: 'corporation-tax', label: 'Corporation Tax' },
               { value: 'settings', label: 'Settings' },
@@ -957,6 +959,8 @@ export default function Company() {
               <BooksTab key={view.company.id} companyId={view.company.id} />
             ) : tab === 'accounts' ? (
               <AccountsTab key={view.company.id} companyId={view.company.id} />
+            ) : tab === 'filing' ? (
+              <FilingTab key={view.company.id} companyId={view.company.id} />
             ) : tab === 'vat' ? (
               <VatTab key={view.company.id} companyId={view.company.id} filings={view.books.filings} />
             ) : tab === 'corporation-tax' ? (
