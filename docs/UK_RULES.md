@@ -575,7 +575,15 @@ text) or GOV.UK on 27 November 2026; Sources, below.
   within 2 years, [s460](https://www.legislation.gov.uk/ukpga/2009/4/section/460)); unrelieved, it is
   carried forward and may be claimed against total profits of a later period
   ([s463G](https://www.legislation.gov.uk/ukpga/2009/4/section/463G)), or is set against non-trading
-  profits where s463G is barred ([s463H](https://www.legislation.gov.uk/ukpga/2009/4/section/463H)).
+  profits where s463G is barred ([s463H](https://www.legislation.gov.uk/ukpga/2009/4/section/463H)). A
+  deficit of a period beginning before 1 April 2017 goes only against non-trading profits
+  ([s457](https://www.legislation.gov.uk/ukpga/2009/4/section/457); CT600 box 230).
+- **Loan relationships between accounting periods**: where a period of account does not coincide with
+  accounting periods, the amounts are apportioned on a time basis by default
+  ([s307](https://www.legislation.gov.uk/ukpga/2009/4/section/307)(2A)–(2B), CTA 2010 s1172); the
+  alternative, what accounts drawn up for each accounting period would recognise, applies only where
+  time apportionment "would work unreasonably or unjustly" (s307(2C)). The app takes days, and the owner
+  may choose the accrued basis.
 
 **Rates and marginal relief** ([CTA 2010 Part 3A](https://www.legislation.gov.uk/ukpga/2010/4/part/3A),
 inserted by FA 2021 Sch 1)
@@ -583,8 +591,8 @@ inserted by FA 2021 Sch 1)
 - Main rate 20% for FY 2015 and FY 2016, 19% for FY 2017 to FY 2022, 25% from FY 2023 (FA 2021
   [s6](https://www.legislation.gov.uk/ukpga/2021/26/section/6); FY 2024 to FY 2026 by F(No.2)A 2023 s5,
   F(No.2)A 2024 s12 and FA 2025 s13); the small profits rate 19% and the marginal relief fraction 3/200
-  from FY 2023 (FA 2021 [s7](https://www.legislation.gov.uk/ukpga/2021/26/section/7); F(No.2)A 2023 s6,
-  F(No.2)A 2024 s13, FA 2025 s14). GOV.UK's [rates and allowances](https://www.gov.uk/government/publications/rates-and-allowances-corporation-tax/rates-and-allowances-corporation-tax)
+  from FY 2023 are set by FA 2021 [s7](https://www.legislation.gov.uk/ukpga/2021/26/section/7) (F(No.2)A
+  2023 s6, F(No.2)A 2024 s13, FA 2025 s14 for later years), CTA 2010 s18A and s18B providing for them. GOV.UK's [rates and allowances](https://www.gov.uk/government/publications/rates-and-allowances-corporation-tax/rates-and-allowances-corporation-tax)
   table agrees for FY 2023 to FY 2026. The rows before FY 2023 were taken from the Acts as cited and a
   search for FY 2015 (FA 2013 s6(1)); worth a check if an old period is ever worked out.
 - The small profits rate applies when augmented profits "do not exceed the lower limit"
@@ -595,7 +603,8 @@ inserted by FA 2021 Sch 1)
   months "proportionately reduced" ([s18D](https://www.legislation.gov.uk/ukpga/2010/4/section/18D)).
   HMRC: "strictly the calculation should be carried out by reference to the number of days in the short
   AP" ([CTM03930](https://www.gov.uk/hmrc-internal-manuals/company-taxation-manual/ctm03930)); the app
-  uses days ÷ 365.
+  uses the days in each financial year over that year's own days (366 in a leap year), as CTM03955
+  does.
 - A period in two financial years: profits are apportioned between them
   ([CTA 2009 s8(5)](https://www.legislation.gov.uk/ukpga/2009/4/section/8)) "on a time basis"
   ([CTA 2010 s1172](https://www.legislation.gov.uk/ukpga/2010/4/section/1172)). Where the limits differ,
@@ -605,10 +614,17 @@ inserted by FA 2021 Sch 1)
   example the tests reproduce); where they do not, the period is not split.
 - **Associated companies** ([s18E](https://www.legislation.gov.uk/ukpga/2010/4/section/18E)): associated
   "for any part of the accounting period" when one controls the other or both are under the same
-  control (control as in [ss450](https://www.legislation.gov.uk/ukpga/2010/4/section/450)–451); one that
-  "has not carried on a trade or business at any time in the accounting period" is left out, as is a
-  passive holding company ([s18F](https://www.legislation.gov.uk/ukpga/2010/4/section/18F)). The CT600
-  guide: box 326 counts companies associated "for any part of the accounting period", not this one.
+  control (control as in [ss450](https://www.legislation.gov.uk/ukpga/2010/4/section/450)–451, s18E(4)–(5));
+  one that "has not carried on a trade or business at any time in the accounting period" is left out, as
+  is a passive holding company ([s18F](https://www.legislation.gov.uk/ukpga/2010/4/section/18F)). A
+  relative's or spouse's company counts only where there is substantial commercial interdependence
+  ([s18G](https://www.legislation.gov.uk/ukpga/2010/4/section/18G); HMRC's
+  [CTM03750](https://www.gov.uk/hmrc-internal-manuals/company-taxation-manual/ctm03750)). Where a period
+  runs over two financial years, the parts are treated separately in reducing the limits for associated
+  companies, so one associated only in one part does not reduce the other's (CTM03955, CTM03640). The
+  CT600 guide: box 326 counts companies associated "for any part of the accounting period", not this
+  one; boxes 327 and 328 replace it for a period over two financial years when the limits changed or the
+  numbers differ.
 - **Augmented profits** ([s18L](https://www.legislation.gov.uk/ukpga/2010/4/section/18L)): taxable total
   profits plus exempt distributions of a qualifying kind from companies other than 51% group companies.
   Not tracked: taken as the taxable total profits.
@@ -620,7 +636,10 @@ inserted by FA 2021 Sch 1)
   a company "may exist for the purpose of carrying on a trade, even though in a particular accounting
   period it does not receive any trading income, or, indeed, actually carry on a trade. This would be
   exceptional", looking at what it actually does ([CTM60730](https://www.gov.uk/hmrc-internal-manuals/company-taxation-manual/ctm60730)).
-  So a pre-trading company with interest only may be one: the app asks, and never decides.
+  So a pre-trading company with interest only may be one: the app asks, and never decides. In the app's
+  words: the test is the company's purpose, not whether it has sold anything yet; a company actively
+  preparing to start its trade can pass, though HMRC treats that as exceptional; one that only held money
+  on deposit is likely one (box 4 = 2).
 
 **Capital allowances** ([CAA 2001](https://www.legislation.gov.uk/ukpga/2001/2/contents) Part 2)
 
@@ -662,17 +681,29 @@ inserted by FA 2021 Sch 1)
   only in the final chargeable period ([s55(4)](https://www.legislation.gov.uk/ukpga/2001/2/section/55),
   [s65](https://www.legislation.gov.uk/ukpga/2001/2/section/65)), when the trade is permanently
   discontinued: not worked out.
+- **The 50% allowance and the pool**: expenditure that had a first-year allowance is allocated to its
+  pool only after that period's writing-down allowance ([s58](https://www.legislation.gov.uk/ukpga/2001/2/section/58)),
+  so what is left of it is first written down the next period.
+- **Short periods**: GOV.UK's [Capital allowances: accounting periods which are more or less than a
+  year](https://www.gov.uk/guidance/capital-allowances-accounting-periods-which-are-more-or-less-than-a-year)
+  scales the AIA, small pools and writing-down allowances (not first-year allowances); its 187-day example
+  uses 187 ÷ 365 and claims £143.45 as £144 without a stated rule. The app keeps the penny; the CT600's
+  boxes are rounded to the nearest pound.
 - **Connected persons** ([s214](https://www.legislation.gov.uk/ukpga/2001/2/section/214)): "no annual
   investment allowance or first-year allowance" on the buyer's expenditure ([s217](https://www.legislation.gov.uk/ukpga/2001/2/section/217)),
   and its qualifying expenditure capped ([s218](https://www.legislation.gov.uk/ukpga/2001/2/section/218))
   at the seller's disposal value where the seller brings one in, otherwise the smallest of the market
   value, the seller's capital expenditure and a connected person's: the app takes the market value given
-  (or the cost, asking for it).
+  (or the cost, asking for it). New plant the seller sells in the ordinary course of its business is
+  excepted from s217 ([s230](https://www.legislation.gov.uk/ukpga/2001/2/section/230)): named, not worked
+  out.
 
 **Losses** ([CTA 2010 Part 4](https://www.legislation.gov.uk/ukpga/2010/4/part/4))
 
-- A loss may be set against total profits of the period and carried back 12 months by claim within 2
-  years ([s37](https://www.legislation.gov.uk/ukpga/2010/4/section/37)): an option, never made here.
+- A loss may be set against total profits of the period, interest included (s37(3)(a)), and carried
+  back 12 months (s37(3)(b)) by claim within 2 years ([s37](https://www.legislation.gov.uk/ukpga/2010/4/section/37)),
+  but only to a period in which the company carried on the trade (s37(6)): a first trading period's loss
+  never goes back against pre-trading interest. An option, never made here.
 - Losses of periods beginning before 1 April 2017 are carried forward against the same trade's profits
   automatically ([s45](https://www.legislation.gov.uk/ukpga/2010/4/section/45)); later ones may be
   claimed against total profits ([s45A](https://www.legislation.gov.uk/ukpga/2010/4/section/45A)), or
@@ -682,6 +713,20 @@ inserted by FA 2021 Sch 1)
   [s269ZD](https://www.legislation.gov.uk/ukpga/2010/4/section/269ZD), [s269ZR](https://www.legislation.gov.uk/ukpga/2010/4/section/269ZR),
   [s269ZW](https://www.legislation.gov.uk/ukpga/2010/4/section/269ZW)), which is the amount the company
   specifies in its return, nil if none: the app says so, and refuses losses beyond it.
+
+**Tax on loans to participators** ([CTA 2010 s455](https://www.legislation.gov.uk/ukpga/2010/4/section/455)):
+a close company's loan to a participator outstanding at the end of the period is charged at the rate for
+the tax year it was made (`s455Rate`), relieved for what is repaid within 9 months after the period
+([s458](https://www.legislation.gov.uk/ukpga/2010/4/section/458)); it goes in box 480 from the CT600A,
+which the return needs while such a loan is outstanding at the period's end, and is payable with the
+Corporation Tax even when that is nil.
+
+**Dormant, and filing**: a company with no income and no business has no accounting period and no return
+unless HMRC sends a notice ([Dormant for Corporation Tax](https://www.gov.uk/dormant-company/dormant-for-corporation-tax));
+a company tells HMRC within 3 months of coming within the charge. HMRC's free online filing for company
+tax returns closed on 31 March 2026: the CT600, with accounts and computations in iXBRL, goes through
+commercial software. (Both as the UK corporate tax specialist's review of 27 November 2026 gave them; not
+fetched again here.)
 
 **The CT600**
 

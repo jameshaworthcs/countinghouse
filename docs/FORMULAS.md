@@ -2655,7 +2655,11 @@ pools, how each asset was relieved) the next brings in. A period starting before
 (`ledgerFrom`, else incorporation) is *before these books*: not worked out. With `ledgerFrom`, the first
 period in the books brings in `books.taxBroughtForward` (the pools' written-down values, trading losses
 from 1 April 2017, non-trading deficits, pre-trading expenditure, as the last computation gives them);
-without it, a check asks for them (all may be nil). The period to work on next is the earliest ended
+without it, a check asks for them (all may be nil). Losses and deficits of periods beginning before 1
+April 2017 are given apart (`tradingLossesBefore2017`, `nonTradingDeficitsBefore2017`): they are relieved
+more narrowly (below). An asset on an opening journal of such books is brought in, whatever its day (in the
+pools brought forward, never bought here); one dated on or after `ledgerFrom` is a check (opening balances
+are dated before the books start). The period to work on next is the earliest ended
 with no CT600 recorded (not one due before `deadlinesFrom`), else the earliest ended with its tax not
 recorded as paid, else the one running.
 
@@ -2667,13 +2671,17 @@ period at Companies House holding the CT period's last day). With *T* the day th
   capital items expensed) is added up by code over its period of account, and each code's total
   `apportion`ed between that period of account's trading CT periods by their days (s52(3): "by
   reference to the number of days"), the parts adding up exactly; or
-- *by date*: interest received and paid (loan relationships, by when the books recognise them: the day
-  posted, or across periods by `covers` at period ends), and every item dated before *T*.
+- *by date*: every other item dated before *T*;
+- *loan relationships* (interest received and paid) on their own basis: by default each code's total
+  over the period of account (as the accounts recognise it, period-end accruals included) shared by days
+  between all its CT periods, pre-trading and trading alike (CTA 2009 s307(2A)–(2B); CTA 2010 s1172), the
+  days in no CT period (before it came within the charge) taking a share that is taxed nowhere; or, where
+  the owner says time apportionment would work unreasonably or unjustly (`loanRelationshipBasis:
+  "accrued"`, s307(2C)), as accounts drawn up for each CT period would recognise them: each amount over
+  the days it covers (`covers`, `coverParts`), else on its day.
 
-s52 gives no other method for a trade's profits. Interest by its date is the books' choice for loan
-relationships: the alternative, sharing it by days too, differs only where one period of account holds
-two CT periods (one longer than 12 months, or the trade starting within it), and is named there
-(DECISIONS 2026-11-27). A CT period may not run over its period of account's end (one set otherwise is
+s52 gives no other method for a trade's profits. Sales, interest or interest paid dated in no CT period
+(before it came within the charge) are a check: something brought it within the charge sooner. A CT period may not run over its period of account's end (one set otherwise is
 refused as not supported), nor may its period of account start before the books (its profit could not
 be shared out from part of it).
 
@@ -2712,12 +2720,14 @@ the rate turns on it, and HMRC says a company existing to trade without trading 
    `small-equipment` (main pool plant), counting on its day or on *T* if bought before. Its qualifying
    expenditure *q* is its cost net of reclaimed VAT, less refunds by *P*'s end, and for a connected
    seller (`asset.connected`) at most `asset.marketValue` (s218; with none, its cost, and a note asks
-   to confirm it). Money back on small equipment nets against small equipment bought in *P* first.
+   to confirm it). Money back on small equipment counts on its day, or on *T* if before it (as the
+   equipment does), and nets against small equipment counting in *P* first.
 2. *The annual investment allowance* (s51A): *P*'s limit *L* = £1,000,000 × *y* (s51A(6)), or less what
    `books.aiaAllocated` gives *P* when it shares one (s51B–51N). The owner's choice on an asset comes
    first (`asset.allowance`: `none`, the pool only; `first-year`; `aia`), then the default: the AIA on
    special rate expenditure, then main rate, by day, until *L* is used. None on plant from a connected
-   person (s217).
+   person (s217), even when chosen (s230's exception for new plant the seller sells in the ordinary
+   course of its business is named, not worked out).
 3. *First-year allowances* (s45S, from 1 April 2023): on what the AIA did not cover, plant not from a
    connected person (s217), unused and not second-hand (`asset.used`; taken as unused, and said), not
    small equipment (whose condition the books cannot know): 100% (full expensing) on main rate, 50% on
@@ -2730,13 +2740,16 @@ the rate turns on it, and HMRC says a company existing to trade without trading 
    expensing, *v* × *f* ÷ *q* (s59A), and for 50%, *v* × *f* ÷ 2*q* (s59B), *f* the expenditure that took
    it. One that left before *T* never counted, and brings in nothing.
 6. *Each pool*: *B* = brought forward + additions − disposal values. *B* < 0 is a balancing charge of
-   −*B*, the pool then nothing. Else a pool of at most £1,000 × *y* is written off in full (the small
-   pools allowance, s56A), or the writing-down allowance is round(*B* × *r* × *y*) (s56(1), (3); s104D),
+   −*B*, the pool then nothing. What is left of expenditure that had the 50% allowance, *A*, joins the
+   pool after this period's writing-down allowance (CAA 2001 s58), so the allowance is on *W* = max(0,
+   *B* − *A*): a *W* of at most £1,000 × *y* is written off in full (the small pools allowance, s56A), or
+   the writing-down allowance is round(*W* × *r* × *y*) (s56(1), (3); s104D),
    *r* the yearly rate for periods beginning on its day (`WDA_RATES`: main 18%, 14% from 1 April 2026;
    special 8%, 6% from 1 April 2019). A period running over a change takes the hybrid rate *r* = *r*₁ ×
    *BRD* ÷ *CP* + *r*₂ × *ARD* ÷ *CP*, rounded up to two decimal places (FA 2026 s28; FA 2019 s31(5)–(7)):
    1 October 2025 to 30 September 2026 is 18 × 182 ÷ 365 + 14 × 183 ÷ 365 = 15.9945…, so 16.00%.
-   Carried forward: *B* less the allowance.
+   Carried forward: max(0, *B*) less the allowance. The allowances are kept to the penny; GOV.UK's
+   example of a short period claims £143.45 as £144 but states no rule, and the boxes round to the pound.
 
 The net (AIA + first-year + writing-down − balancing charges) reduces the trading result. Balancing
 allowances (only on the trade's cessation, s55(4), s65), cars, structures and buildings, short-life
@@ -2747,12 +2760,15 @@ supported.
 **Losses and non-trading profits.**
 
 - Trading profit = max(0, result); a loss (−result) is carried forward (CTA 2010 s45A, or s45 for a
-  period beginning before 1 April 2017), the s37 claim (against this period's total profits, then back
-  12 months) said as an option, never made.
+  period beginning before 1 April 2017), the s37 claim said as an option, never made: against this
+  period's total profits, interest included (s37(3)(a)), then back against the previous 12 months'
+  only as far as the company carried on the trade then (s37(3)(b), (6)), so a first trading period's
+  loss never goes back against pre-trading interest.
 - Non-trading loan relationships: net = credits − debits; a profit is box 170, a deficit carried
   forward (CTA 2009 s463G), the s459 claim said as an option.
-- Losses of periods before 1 April 2017 come off trading profits automatically (s45; box 160). Total
-  profits (box 235) = trading profit − those + non-trading profits. Then trading losses from 1 April 2017
+- Losses of periods before 1 April 2017 come off trading profits automatically (s45; box 160), and
+  non-trading deficits of then off non-trading profits only (CTA 2009 s457; box 230). Total profits (box
+  235) = trading profit − those losses + non-trading profits − those deficits. Then trading losses from 1 April 2017
   carried forward (s45A(4); box 285), then non-trading deficits carried forward (s463G; box 263), are
   claimed against total profits as far as they go: claims the company may make for less. Above the
   deductions allowance (£5m, s269ZR, s269ZW, pro rata) is not supported; within it, a note says the
@@ -2761,7 +2777,7 @@ supported.
 **The profit boxes in whole pounds** (`profitBoxes`): the CT600 prints ".00" against them. Each figure
 is rounded to the nearest pound, half away from nothing (no HMRC text found says how pence go:
 COM130040 rules out rounding to thousands on the form), and every total is the form's sum of the rounded
-boxes: 165 = 155 − 160, 235 = 165 + 170, 295 = 263 + 285 (each deduction capped at what it is set
+boxes: 165 = 155 − 160, 235 = 165 + 170 − 230, 295 = 263 + 285 (each deduction capped at what it is set
 against), 300 = 235 − 295, 315 = 300. The tax is worked out on box 315.
 
 **Tax** (`taxOnProfits`), on box 315's *N*, by financial year (CTA 2009 s8(5); CTA 2010 s1172):
@@ -2769,11 +2785,14 @@ against), 300 = 235 − 295, 315 = 300. The tax is worked out on box 315.
 - *N* is `apportion`ed between the period's financial years by days (whole pounds adding up to *N*).
 - A year with one rate (FY 2015–16 20%, FY 2017–22 19%) charges it on its part.
 - From FY 2023 (main rate 25%, small profits rate 19%, lower limit £50,000, upper £250,000, fraction
-  3/200): years with the same limits are taken together (HMRC's CTM03640: the period is split only where
-  limits differ). For the whole period the limits are *L* × *y* ÷ (1 + *a*) (CTA 2010 s18D(3)–(4);
-  CTM03930, by days), *a* the associated companies said for the period (`books.associatedCompanies`;
-  none said: 0, with a note on the control test of s18E); for a part where the limits differ, *L* ×
-  part's days ÷ its financial year's days ÷ (1 + *a*) (CTM03955). Augmented profits *A* are taken as *N*
+  3/200): consecutive years with the same limits and the same number of associated companies are taken
+  together (HMRC's CTM03640: the period is split only where the limits differ, and a company associated
+  only in one part does not reduce the other's). *a* is the number said for the period
+  (`books.associatedCompanies`, `count`, and `secondYear` for its second financial year when it differs;
+  none said: 0, with a note on the control test of s18E). The limits are *L* ÷ (1 + *a*) (CTA 2010
+  s18D(3)) for a whole 12-month period, else proportionately reduced (s18D(4)) by Σ (days in each
+  financial year ÷ that year's days, 365 or 366) (CTM03955; CTM03930, by days): 1 January to 30
+  September 2024 has 91 ÷ 366 + 183 ÷ 365 of the year, an upper limit of £187,500.94. Augmented profits *A* are taken as *N*
   (exempt distributions are not tracked, s18L, said). *N* ≤ lower: the small profits rate (s18A); lower <
   *N* ≤ upper: the main rate less marginal relief round(*F* × (*U* − *N*)) (s18B, *N* ÷ *A* = 1), shared
   between the years by days; above: the main rate. Compared exactly, in integers.
@@ -2784,25 +2803,42 @@ against), 300 = 235 − 295, 315 = 300. The tax is worked out on box 315.
   CTM03955 (to 31 December 2023, £175,000, two associated companies) gives £41,160.94.
 
 Corporation Tax chargeable (box 440) = tax at the rates − marginal relief; with no reliefs in terms of
-tax, s455 tax or income tax deducted worked out, it is boxes 475, 510, 525 and the tax payable, 528.
+tax or income tax deducted worked out, it is box 475; box 510 adds s455 tax (box 480, below), and so do
+525 and the tax payable, 528.
+
+**Tax on loans to participators** (CTA 2010 s455; CT600A; `s455Rate`, uk.ts): the director's loan's
+postings in date order, a debit balance (you owe the company) made of the loans that took it there,
+each with its day, a credit repaying them oldest first. What was lent in the period and still owed at
+its end is charged at the rate for the tax year each part was lent; repayments after the end, by today
+and within 9 months after it, relieve it (s458). The tax is box 480, in box 510 and the payable even
+when the Corporation Tax is nil, and the period says the CT600A is needed; provisional until the 9
+months are up. The rules on borrowing again (s464C, s464ZA) are not worked out. So £2,000 lent on 1
+June 2024 (2024/25: 33.75%) is £675, and £500 repaid in February 2025 relieves £168.75: £506.25.
 
 **The CT600's boxes** (`CT600_BOXES`, the CT600 (2026) Version 3, HMRC 04/26: UK_RULES.md, "The CT600"),
 labels verbatim, each with its working: 1–4 (box 3, the tax reference, is left for you: never kept here;
-box 4 is 0, or 2 for a close investment-holding company), 30, 35, 145, 155, 160, 165, 170, 235, 260 and
-275 (left blank: no claim), 263, 285, 295, 300, 305 (blank: qualifying donations not worked out), 315,
-326 (or 327 and 328 when the period runs over two financial years), 329, the grid 330–425 (one line per
-financial year), 430, 435, 440, 470, 475, 480 (blank: s455 not worked out), 510, 515, 525, 528; capital
+box 4 is 0, or 2 for a close investment-holding company), 30, 35, 145, 155, 160, 165, 170, 230, 235,
+260 and 275 (left blank: no claim), 263, 285, 295, 300, 305 (blank: qualifying donations not worked
+out), 315, 326 (or 327 and 328 when the period runs over two financial years and the limits changed
+between them or the numbers of associated companies differ, as the CT600 guide says), 329, the grid
+330–425 (one line per financial year), 430, 435 (its fraction from the rates' table), 440, 470, 475,
+480 (s455, above), 510, 515, 525, 528; capital
 allowances 688/689 (full expensing), 690 (AIA), 693/694 (50%), 695/700 (special rate pool) and 705/710
 (main pool) — 695 and 705 include the AIA on their pool's expenditure, as the CT600 guide asks —
-qualifying expenditure 760, 770, 773 and 775, and amounts arising 780 (trading loss) and 795
+qualifying expenditure 760 and 773 (only what took a first-year allowance: an asset the AIA covered in
+part has that part in 770 or 775), 770 and 775, and amounts arising 780 (trading loss) and 795
 (non-trading deficit). Profits, allowances and losses in whole pounds, tax in pounds and pence.
 
 **Ready** when the period has ended and nothing stops it: its period of account's accounts are ready
 (`periodAccounts`, "The period's accounts": every row coded, the bank reconciled…); an earlier period
 in the books is ready or has a CT600 recorded; the figures brought forward are given (books mid-life);
-and no sales before *T*, interest before it came within the charge, assets leaving with what each
-fetched not said, close investment-holding status unsaid (pre-trading, above), or anything not
-supported. Warnings that do not stop it: a connected seller's market value to confirm, assumptions
+and no sales before *T*, sales, interest or interest paid before it came within the charge, an opening
+journal bringing in an asset on or after the books' first day, assets leaving with what each fetched
+not said, close investment-holding status unsaid (pre-trading, above), or anything not supported.
+Beside every computation, what to know: a company with no income or business has no period and no
+return unless HMRC sends a notice, and tells HMRC within 3 months of coming within the charge; HMRC's
+free filing closed on 31 March 2026, so the return goes through commercial software with the accounts
+and computations in iXBRL. Warnings that do not stop it: a connected seller's market value to confirm, assumptions
 said, claims the company may make, and a director's loan the company is owed at the period's end (s455
 tax may be due, not worked out).
 
@@ -2814,14 +2850,19 @@ payment nor its CT600 says so, the tab offers one click to record a £0 payment 
 
 **Tested** (`tests/corporation-tax.test.ts`, `tests/company-ledger-api.test.ts`): HMRC's worked
 examples (CTM03955's straddle with associated companies, CTM03930's short period by days), the limits'
-edges and a close investment-holding company; the hybrid rates of FA 2026 s28 and FA 2019 s31; whole
+edges and a close investment-holding company; limits by each financial year's days and associated
+companies by year; the hybrid rates of FA 2026 s28 and FA 2019 s31 and the note by the table; whole
 pounds; a trading year (adjustments, the AIA, marginal relief by financial year, the boxes and their
 labels, readiness, the CSV); a pre-trading period (interest taxed, expenses waiting, plant deferred, the
 close investment-holding check) and the release on *T*, with expenses older than 7 years lapsing;
 losses and non-trading deficits carried forward and claimed; full expensing and its balancing charge,
 50% over a shared AIA and its half charge, a pool's balancing charge, a connected seller, small pools
 and small equipment, two disposals with nothing said, a car refused; books mid-life with figures
-brought forward; nothing to pay, a CT600 differing, an earlier period not ready; the route and its CSV;
+brought forward (and losses and deficits from before 1 April 2017 relieved narrowly); interest by days
+and as accrued; an asset partly under the AIA in boxes 760 and 775; an opening journal misdated; small
+equipment money back before the trade; sales and interest paid before the charge; a connected asset
+chosen for the AIA; the s37 note; boxes 327 and 328; s455 with relief; nothing to pay, a CT600
+differing, an earlier period not ready; the route and its CSV;
 and as properties, that tax rises with profits between 19% and 25% (never more than the marginal rate
 on a pound more), and that over generated plant no pool goes below nothing and what is relieved plus
 what is carried forward is exactly what was spent.

@@ -3410,3 +3410,52 @@ legislation.gov.uk and GOV.UK for this change. What was decided:
   the tax charge in the accounts is still a journal.
 - **Nothing to pay is offered, never recorded.** When an ended period is ready and the books give no
   tax, and no payment or CT600 says so, the tab offers the slice-3 £0 payment in one click.
+
+## 2026-11-27: Corporation Tax after code and corporate tax specialist review
+
+A code review and a UK corporate tax specialist's review of the Corporation Tax computation. The
+specialist confirmed the rates and limits, the CTM03640/03955 method, the writing-down allowances and
+the FA 2026 hybrid, the AIA pro rata, s12, s217, s59A/B, s61 with days, s1218B, the 12-month split,
+s45A and s459/460/463G, the CT600 labels and box 315 in whole pounds. What changed, and why:
+
+- **Interest is shared by days, not by its date** (reversing the earlier choice). CTA 2009 s307(2A)–(2B)
+  apportions loan relationship amounts on a time basis where accounting periods do not coincide with the
+  period of account; s307(2C)'s accounts basis applies only where that "would work unreasonably or
+  unjustly". So by default each period of account's interest is shared between all its CT periods by
+  days; the owner may choose the s307(2C) basis (`loanRelationshipBasis: "accrued"`), which takes each
+  amount over the days it covers, never its posting date.
+- **The 50% allowance's remainder joins the pool after the period's writing-down allowance** (CAA 2001
+  s58), so it is first written down the next period: no double relief in the period it was bought.
+- **Boxes 760 and 773 hold only what took a first-year allowance**; an asset the AIA covered in part has
+  that part in 770 or 775, and its row shows both allowances.
+- **An asset on an opening journal of books taken over mid-life is brought in, whatever its day**, never
+  bought here (so it takes no AIA on top of the pools brought forward), and an opening journal bringing
+  in an asset on or after the books' first day is a check.
+- **Money back on small equipment before the trade started counts on its first day**, as the equipment
+  does, so they net.
+- **Sales and interest paid in no CT period are checks**, like interest received was.
+- **A connected asset never takes the AIA, even when chosen** (s217); s230's exception for new plant
+  sold in the seller's ordinary course of business is named, not worked out.
+- **The small profits limits are reduced by the days of each financial year over that year's own days**
+  (366 in a leap year), as CTM03955 works them, for any period short of a whole 12 months; capital
+  allowances stay at days ÷ 365, as GOV.UK's guidance scales them. GOV.UK's example rounds a short
+  period's allowance up to the pound without a stated rule; the app keeps the penny and the boxes round.
+- **Associated companies by financial year**: a period over 1 April may have a second year's number
+  (CTM03640: one associated only in one part does not reduce the other's limits); boxes 327 and 328 are
+  used only when the limits changed or the numbers differ, else box 326.
+- **Losses and deficits from before 1 April 2017 are relieved narrowly**: given apart in the figures
+  brought forward, trading losses go only against the trade's profits (s45; box 160) and deficits only
+  against non-trading profits (CTA 2009 s457; box 230).
+- **The s37 note** says a loss is carried back only to periods of the trade (s37(6)): a first trading
+  period's loss never goes back against pre-trading interest, though it can be set against that
+  period's own interest (s37(3)(a)).
+- **s455 tax is worked out** (it was only a warning): what was lent in the period and owed at its end, at
+  the rate for each part's tax year, less relief for repayments by today within 9 months (s458), oldest
+  loans repaid first; it is box 480 and in the payable even when the Corporation Tax is nil, so "Nothing
+  to pay" is not offered while it is due. The borrowing-again rules are not worked out.
+- **Words**: the close investment-holding test in the specialist's words (purpose, not sales; exceptional;
+  a company only holding money on deposit is likely one), the associated companies test (s18E(4)–(5),
+  s18F, s18G and CTM03750 for relatives), what to know beside every computation (dormant companies,
+  telling HMRC within 3 months, iXBRL filing since HMRC's free service closed on 31 March 2026), and the
+  rule text built from the tables (the hybrid rates, the small pools limit, the marginal relief
+  fraction). The small profits rate is set by FA 2021 s7, s18A providing for it.

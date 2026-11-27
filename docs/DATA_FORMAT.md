@@ -481,16 +481,22 @@ confirmationStatement?, tradeStartedOn?, ctPeriods, associatedCompanies?, aiaAll
   (HMRC's notice sets them in practice): each 12 months at most, in order, none before
   incorporation.
 - For Corporation Tax (FORMULAS.md §22, "Corporation Tax"; optional and additive):
-  - `associatedCompanies`: `[{periodEnd, count}]`, the number of associated companies (0 to 99) in each
-    Corporation Tax period, by its last day, one per period (CTA 2010 s18E); a period with none given is
-    taken as none, and labelled so.
+  - `associatedCompanies`: `[{periodEnd, count, secondYear?}]`, the number of associated companies (0 to
+    99) in each Corporation Tax period, by its last day, one per period (CTA 2010 s18E): `count` for the
+    period (or its first financial year when it runs over 1 April), `secondYear` for its second financial
+    year when that differs; a period with none given is taken as none, and labelled so.
   - `aiaAllocated`: `[{periodEnd, amount}]`, pounds, the annual investment allowance allocated to this
     company for a period when it shares one (CAA 2001 ss51B–51N), one per period; absent, the whole limit.
   - `closeInvestmentHolding`: `true` or `false` as the owner decides it (CTA 2010 s18N: `true` charges the
     main rate on all profits); `null` or absent, not said.
-  - `taxBroughtForward`: `{mainPool?, specialPool?, tradingLosses?, nonTradingDeficits?, preTradingExpenditure?}`,
+  - `loanRelationshipBasis`: `time` (absent: the default), interest shared between the CT periods of a
+    period of account by days (CTA 2009 s307(2A)–(2B)); or `accrued`, as accounts drawn up for each CT
+    period would recognise it (s307(2C)).
+  - `taxBroughtForward`: `{mainPool?, specialPool?, tradingLosses?, nonTradingDeficits?, tradingLossesBefore2017?, nonTradingDeficitsBefore2017?, preTradingExpenditure?}`,
     pounds, each not negative (absent: nil), only with `ledgerFrom`: what the last computation before
-    these books carried forward to the first Corporation Tax period they reach. Present with nothing in
+    these books carried forward to the first Corporation Tax period they reach; losses and deficits of
+    periods beginning before 1 April 2017 apart (relieved only against the trade's profits, CTA 2010 s45,
+    and non-trading profits, CTA 2009 s457). Present with nothing in
     it says there is none; absent, the computation asks for it.
 - `deadlinesFrom`: deadlines due before this day that no filing here does are not listed (they were
   settled before the books were kept here).
