@@ -324,7 +324,9 @@ dismisses it on the Import page, under "Proposed fixes", change by change. The c
     that period does not fit. Its `why` names the document it is from (the filing history, a
     submission receipt, a payment confirmation). A VAT return's `corrections` (errors on earlier
     returns it corrected) and `disclosed` (its own errors reported separately) are proposed only from a
-    document that says so. The owner's own routes for the books
+    document that says so. Accounts' `approvedOn` and `approvedBy` (and `registeredOffice`) are given
+    only as the filed accounts print them, the day and the director together, the day on or after the
+    balance sheet date and not after the filing. The owner's own routes for the books
     (`PUT /api/companies/:id/books`, `POST` and `DELETE /api/companies/:id/filings`) are closed to
     tokens.
   - A coding (`set_books`, DATA_FORMAT.md transactions `books`; FORMULAS.md §22) is on a row of a

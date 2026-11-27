@@ -3468,7 +3468,7 @@ Companies House, prepared here and filed by hand (FORMULAS.md §22, "Filing the 
 guidance for this change. What was decided:
 
 - **The form's order, the format's words where its help has none.** WebFiling's micro-entity help gives
-  the balance sheet's headings in order but is old (it predates the employees note) and shows no line for
+  the balance sheet's headings in order but is undated (it does not mention the employees note) and shows no line for
   total assets less current liabilities or the profit and loss reserve; the live form was not seen. The
   sheet follows the help's order and words, adds G and the profit and loss account in the format's
   words, and says so. The earlier note that the form "has no boxes for F, G and K" is corrected to what
@@ -3521,3 +3521,44 @@ guidance for this change. What was decided:
   6 or 7 apart) says "Boxes differ", not "Differs from the books"; the threshold card's month-by-month
   toggle moves below what it explains, worded as what it shows, so it no longer reads as a label of the
   turnover figure.
+
+## 2026-11-27: Filing the accounts after code and micro-entity specialist review
+
+A code review and a micro-entity accounts specialist's review of slice 7. The specialist confirmed the
+size tests, the four statements' words, s444(5C), the four notes (s410A applying to micro-entities), the
+s413 derivation, F and K on the form, the comparatives, software-only filing from April 2028 (the micro
+profit and loss requirement paused, not withdrawn), the optional policies note and the £0 floor. What
+changed:
+
+- **Your answer for the year before is used only while the books cannot work it out**, and asked for only
+  then (`askPrevious` from `qualification`): once the books learn that year (its employees given, say),
+  they decide, the answer stays stored and unused. The sheet offers the three years before to give their
+  employees, which the size test reads.
+- **An accounts filing's approval is checked on every path** (`booksProblems`: by hand, from the sheet,
+  by an agent's proposal): day and director together, on or after the balance sheet date, not after the
+  filing.
+- **The book value's rollback** takes away only a balance the request itself added (by what
+  `addBalances` returned), never one another request wrote meanwhile.
+- **The JSON export's notes are in pounds and pence**, labelled so; the balance sheet stays in whole pounds.
+- **Exclusions**: s478(c) (special register bodies, employers' associations) and s479(1) (a group company
+  has s477 only when its group is small and never ineligible) added. **Signature**: cited as ss414(1)–(2),
+  444(6) (the copy delivered names the director). **A year of 52 or 53 weeks** (s390(3)) is a year: no
+  pro-rating, "year" in the statements. **A dormant company's s480 exemption** is said not to be covered.
+- **The notes' comparatives** (FRS 105 paras 3.7, 3.10): the period before's employees and commitments as
+  confirmed for it.
+- **Particulars** (s396(A1); FRS 105 para 3.13A): the company's number is a readiness item; where it is
+  registered, its kind and that it is not being wound up are confirmed; the registered office is given
+  when the filing is recorded and kept only on it (the leak guard reads it).
+- **Book value**: one class of share only, the owner confirming it is the company's only class (so the
+  issued shares are that class's); its caveats on the sheet and in the note: a director's loan it owes you
+  counted in full beside shares at nothing, so the estate may overstate by up to min(|K|, the loan); and
+  share capital not paid (line A), owed by the shareholders and already in K.
+- **The form's totals**: that WebFiling works totals out from what is entered is not established by any
+  source read, and is said to be unverified; the app's method (rounded lines, then F, G and K) stands
+  either way. The help is undated: it "does not mention" the employees note, which Companies House made
+  compulsory in software filings in 2020.
+- **The channel callout** adds identity verification (directors' since 18 November 2025, not blocking
+  accounts; presenters' not before November 2027; GOV.UK One Login and the authentication code). Its
+  dates, and the limits' coverage and the strengthened statement's, are built from the rule tables.
+- **Policies**: a life changed in the period is given with the life before it. **Leak guard**: an
+  advance's interest and conditions word by word, and the registered office.

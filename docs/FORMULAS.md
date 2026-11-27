@@ -525,7 +525,9 @@ out; an "other asset" is valued yearly, so it asks for a newer one after 400 day
   value the shares at £0). It assumes every share ranks alike for capital, as its confirmation
   statement says when it does. It is what the company is worth on its books, not what anyone would
   pay. For a company whose books are kept here, its filing sheet offers it at each period's end, from
-  its net assets in whole pounds, and records it only when you click (§22, "Filing the accounts").
+  its net assets in whole pounds, for one class of share you confirm is its only class, saying what it
+  leaves out (a loan it owes you, counted in full beside shares at nothing; share capital not paid), and
+  records it only when you click (§22, "Filing the accounts").
 - **Yours** (`yours`): a value you give.
 - **Its dividends**: each voucher (a `dividends_paid` figure naming it) with the bank credit that
   paid it (the same amount to the penny, within 10 days, naming it; the rule of §11), then its
@@ -2442,8 +2444,9 @@ here.
 serves one period's micro-entity accounts as the company files them at Companies House, worked out from
 the period's accounts and what you confirm (`books.employees`, `books.accountsNotes`), never stored;
 `format=csv` and `format=json` export the figures, each ending with the "check everything yourself"
-disclaimer (`FILING_DISCLAIMER`). Nothing is sent to Companies House: you file by hand. The rules and
-their sources are in UK_RULES.md, "Filing the accounts".
+disclaimer (`FILING_DISCLAIMER`): the balance sheet in whole pounds, the notes' amounts in pounds and
+pence (the books' pence converted), as the JSON says. Nothing is sent to Companies House: you file by
+hand. The rules and their sources are in UK_RULES.md, "Filing the accounts".
 
 **The sheet.** In the order and words of Companies House's micro-entity form (its WebFiling help, which
 gives the order and names of the balance sheet's headings; the format's own words for G, which the help
@@ -2460,14 +2463,19 @@ comes from. `lines` is A–K as a filing records them. With it: the rounding sta
 these accounts are rounded to the nearest pound.", FRS 105 para 3.13(d)); and the accounting policies in
 words from the books (basis of preparation under FRS 105, pounds rounded, turnover net of VAT when
 registered, the accrual basis when the period carries prepayments or accruals, and for each class on the
-register its policy's life in force at the period's end, a change in it during the period dated, an
-asset's own life, residual value and the month convention): optional for a micro-entity (FRS 105 para
-6.1), so offered, never put in.
+register its policy's life in force at the period's end, a change in it during the period dated with the
+life before it (the latest earlier policy for the class), an asset's own life, residual value and the
+month convention): optional for a micro-entity (FRS 105 para 6.1), so offered, never put in.
+
+**The particulars** (CA 2006 s396(A1); FRS 105 para 3.13A): the company's name and number (its number
+the company's own, `Company.number`); where it is registered, its kind of company and that it is not
+being wound up, as you confirm them (`particulars`; one being wound up is not covered); and its registered
+office, given when the filing is recorded and kept on the filing (`registeredOffice`).
 
 **The statements**, above the director's signature (CA 2006 ss414(3), 475(4)), in Companies House's
 words ("Preparing and filing Companies House accounts", §§9.4 and 11.1), "year" made "period" for a
-period that is not 12 months (`isYear`: its last day is the last of 12 months beginning with its first),
-the day written in full:
+period that is not a year (`isYear`: its last day is the last of 12 months beginning with its first, or
+it is 52 or 53 weeks, 364 or 371 days, as CA 2006 s390(2)–(3) allows), the day written in full:
 
 1. For the year ending 31 December 2025 the company was entitled to exemption from audit under section
    477 of the Companies Act 2006 relating to small companies. (ss475(2), 477)
@@ -2480,8 +2488,9 @@ the day written in full:
    (ss414(3)(a), 444(5))
 
 A micro-entity need not also say its profit and loss account is not delivered (s444(5C)). Then "Approved
-by the board of directors on [day] and signed on its behalf by [name], Director." (s414(1)–(2)); the day
-and the name are given when the filing is recorded.
+by the board of directors on [day] and signed on its behalf by [name], Director." (ss414(1)–(2), 444(6):
+the copy delivered names the director who signed); the day and the name are given when the filing is
+recorded. A dormant company's audit exemption (s480) is not covered: these statements are for s477.
 
 **The notes** a micro-entity gives, at the foot of the balance sheet (FRS 105 para 6.2; CA 2006 s472(1A)
 for the last two):
@@ -2506,6 +2515,9 @@ for the last two):
   borrowing: s413(1)(b), (4)) is yours (`directors`: none, or what and its total).
 - **Financial commitments, guarantees and contingencies** not in the balance sheet, and their total (SI
   2008/409 reg 5A, Sch 1 para 57): yours (`commitments`).
+
+With a period before, the notes give its average employees and its commitments as you confirmed them for
+it beside this period's (FRS 105 paras 3.7, 3.10): "not given" or "not recorded here" where there are none.
 - **Arrangements not reflected in the balance sheet** (s410A; FRS 105 para 6A.1): yours
   (`offBalanceSheet`).
 
@@ -2513,49 +2525,68 @@ for the last two):
 `COMPANY_SIZE_RULES` (`companySizeRulesFor`), applied to every earlier year too (SI 2024/1303 reg 3). A
 year meets the conditions when two or more of these are within the limits (`sizeTest`): turnover (line A
 of its profit and loss, pence, known when the books hold the whole year) against the limit, pro-rated for
-a year that is not 12 months as limit × its days ÷ the days of the 12 months beginning with its first day
+a year that is not a year (`isYear`, above) as limit × its days ÷ the days of the 12 months beginning with its first day
 (`turnoverLimit`: a judgment, as the Act says only "proportionately adjusted"; 181 days from 1 January
 2025 take £495,890.41 of £1 million); the balance sheet total, A + B + C + D in whole pounds as shown
 (its filed lines where its accounts are recorded with lines, a line not given as nil; else as the books
-give them; unknown before the books with no lines filed); the average number employed (yours). Known
-when two are within or two are over. Then, with the years from incorporation, oldest first:
+give them; unknown before the books with no lines filed); the average number employed (yours, for the
+years before too: the sheet offers the three years before to give them). Known when two are within or two
+are over. Then, with the years from incorporation, oldest first:
 
 - the first financial year qualifies as it meets the conditions (s384A(1));
 - a later year *k*, meeting them or not as the year before did, qualifies as it meets them; differing,
   it qualifies as year *k* − 1 did (s384A(2)–(3): a change counts only in two consecutive years). So it
   qualifies as the latest two consecutive years that agree, else as its first;
-- where the year before's test is not known, what you say of whether it qualified then
-  (`previousQualified`) decides it when this year agrees with it, and nothing else does.
+- where the years given cannot say how it qualified the year before, what you say of it
+  (`previousQualified`) is used: it decides the year when the year before's test differs from this one's
+  or is not known (when not known, only if this year agrees with it). It is asked for, and used, only while
+  the books cannot work the year before out: once they can (its employees given, say), they decide, and
+  the answer stays stored, unused.
 
 The small companies regime (s382, the same rules at the small limits) is worked out beside it; within
 the micro-entity limits is within the small ones, so a company that qualifies as a micro-entity is taken
 to qualify as small where the small test alone cannot tell. You confirm none of the exclusions applied
-at any time in the period (`notExcluded`: ss384, 384A(8), 384B, 476, 478; listed on the sheet). Years
-beginning before 1 January 2016 are not covered.
+at any time in the period (`notExcluded`: ss384, 384A(8), 384B, 476, 478 (a special register body or
+employers' association, s478(c)), 479(1) (a group company, unless its group is small and never
+ineligible in the year); listed on the sheet). Years beginning before the first row of
+`COMPANY_SIZE_RULES` (1 January 2016) are not covered.
 
 **Ready to file** when every item holds: the period has ended; its accounts are ready ("The period's
 accounts"); the average number employed is given; the notes are confirmed (arrangements, commitments and
-directors each none or said, and with an advance its interest and conditions); and it qualifies as a
-micro-entity and as small, none of the exclusions applying as you confirmed. **Recording the filing**
-(`POST /api/companies/:id/accounts/filed`, `{periodEnd, filedOn, reference?, approvedOn, approvedBy,
-lines}`), yours alone, once you have submitted: refused unless the sheet is ready, the lines you saw are
-those the books give now, the approval is on or after the balance sheet date and not after the filing,
-and the filing is not in the future; it records an `accounts` filing with lines A–K as worked out, the
-approval and reference, and locks the books through the period's end ("Locking"). Never automatic.
+directors each none or said, and with an advance its interest and conditions); its number is known; its
+particulars are confirmed; and it qualifies as a micro-entity and as small, none of the exclusions
+applying as you confirmed. **Recording the filing** (`POST /api/companies/:id/accounts/filed`,
+`{periodEnd, filedOn, reference?, approvedOn, approvedBy, registeredOffice, lines}`), yours alone, once
+you have submitted: refused unless the sheet is ready, the lines you saw are those the books give now, and
+the filing is not in the future; it records an `accounts` filing with lines A–K as worked out, the
+approval, registered office and reference, and locks the books through the period's end ("Locking").
+Never automatic. However an accounts filing is recorded (by hand, from the sheet, by an agent's
+proposal), its approval is given whole (day and director together), on or after the balance sheet date
+and not after the filing (`booksProblems`).
 
 **The book value of your shares** (yours; FORMULAS.md §9, "Shares in a company"). Offered at a period's
-end that has ended and whose accounts are ready or filed, when you hold shares in it with the shares it
-has issued given (one figure across your holdings) and an account carries them: with *K* its net assets
-in whole pounds (as filed, else as the books give them), *s* your shares and *S* its shares, value =
-round(*K* × *s* ÷ *S*) to the penny when *K* > 0, else £0 (shares are never valued below nothing; the
-net liabilities are said in the note). Recorded only on your click (`POST
-/api/companies/:id/accounts/book-value`), one per day: a `net-assets` valuation (`netAssets` = *K*) and a
-balance of the account on the period's last day. Company data alone changes nothing of yours: the
+end that has ended and whose accounts are ready or filed, when your shares are of one class, with the
+shares it has issued given (one figure across your holdings), and an account carries them: with *K* its
+net assets in whole pounds (as filed, else as the books give them), *s* your shares and *S* its shares,
+value = round(*K* × *s* ÷ *S*) to the penny when *K* > 0, else £0 (shares are never valued below
+nothing; the net liabilities are said in the note). *S* must be the issued shares of your class: you
+confirm it has issued that class only, every share ranking alike for capital (`oneClass`), or it is
+refused. What it leaves out is said on the sheet and in the note: with *K* < 0 and a director's loan it
+owes you of *L*, your estate counts *L* in full beside the shares at nothing, so it may overstate by up to
+min(|*K*|, *L*); and share capital not paid (line A) is owed to it by its shareholders, you among them, and
+is in *K* already. Recorded only on your click (`POST /api/companies/:id/accounts/book-value`,
+`{periodEnd, oneClass: true}`), one per day: a `net-assets` valuation (`netAssets` = *K*) and a balance
+of the account on the period's last day. Only a balance the request itself added is taken away if the
+valuation is then not kept (by what the store says it added, so one another request wrote meanwhile
+stays). Company data alone changes nothing of yours: the
 filing route is a read (tests/company-scope.test.ts lists it with the company's routes).
 
 **Tested** (`tests/accounts-filing.test.ts`): the limits by date (6 April 2025) and coverage, the turnover
-limit pro-rated by days with a leap year, two of three with unknowns, the first-year and two-year rules
-against a reference as a property over generated years, your answer for an unknown year, the advances of
+limit pro-rated by days with a leap year, a year of 52 or 53 weeks, two of three with unknowns, the
+first-year and two-year rules against a reference as a property over generated years, your answer for an
+unknown year used only while the books cannot decide it, the approval checked on every path, a life
+changed in the period, the exclusions, the notes' comparatives, one class and the caveats of a book
+value, a rollback that keeps another request's balance, the advances of
 a loan in credit, crossing into debit, owed at the start and repaid on a day of two movements, the
 statements' words for a year and a period, the months of a year, the sheet's order, totals and
 traces from books, its readiness, the book value never below nothing, and through the app: notes kept

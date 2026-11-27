@@ -31,9 +31,10 @@ logs and Claude transcripts stay clean.
      reference) at a small company's threshold: £100 or more with pence, or £250 or more in whole
      pounds that is not a multiple of £10 or a year, and not a placeholder. The VAT number is not stored.
      The director who signed accounts filed (`approvedBy`, in the books and in decided proposals), by
-     name and surname; and what the owner wrote in each period's accounts notes (`accountsNotes`: the
+     name and surname, and the registered office the accounts state (`registeredOffice`), whole, by its
+     parts and by its own words; and what the owner wrote in each period's accounts notes (`accountsNotes`: the
      commitments, arrangements and directors' notes and an advance's interest and conditions) when more
-     than common words, with their own distinctive words, their totals and amounts written off or waived
+     than common words, with their own distinctive words (each of them), their totals and amounts written off or waived
      at the same small company's threshold;
    - from a company's general ledger: every money figure of its own accounts' rows (their amounts,
      codings and split lines) and of its journals (`journals.jsonl`, and those decided proposals wrote

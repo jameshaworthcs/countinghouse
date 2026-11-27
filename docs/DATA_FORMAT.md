@@ -428,8 +428,9 @@ directorLoanAccountId?, books?, notes?, createdBy, createdAt, updatedAt}`:
   `net-assets` (book value: its net assets × your shares ÷ its shares, never below nothing) or `yours`.
   Each is recorded as a balance of its account (`balanceId`), its note saying how it was worked out
   ([FORMULAS.md §9](FORMULAS.md), "Shares in a company"). For a company whose books are kept here, its
-  filing sheet offers one at a period's end from its net assets (K), recorded only on your click
-  (`POST /api/companies/:id/accounts/book-value`, `{periodEnd}`), one per day.
+  filing sheet offers one at a period's end from its net assets (K), for one class of share, recorded only
+  on your click (`POST /api/companies/:id/accounts/book-value`, `{periodEnd, oneClass: true}`: you confirm
+  it has issued your class only), one per day.
 - `accountId`: the "other asset" account that carries its value in your estate (yours: never one
   of the company's own accounts). `employmentId`: your job there, when you work for it.
 - `directorLoanAccountId`: your director's loan account with it (accounts.json, `director_loan`):
@@ -534,11 +535,13 @@ confirmationStatement?, tradeStartedOn?, ctPeriods, associatedCompanies?, aiaAll
     `ct600`, `{taxPayable}` (0 says there is nothing to pay, which does the payment too); for
     `ct-payment`, `{amount}`, never negative: `0` records that there is no Corporation Tax to pay for
     the period ("Nothing to pay" on the payment's deadline, or an agent's `add_filing`).
-  - On an `accounts` filing, optionally, the approval as filed (CA 2006 s414): `approvedOn`, the day the
-    board approved the accounts (on or after the balance sheet date, not after `filedOn`), and
-    `approvedBy`, the director who signed them (at most 120 characters: the only name kept, and only
-    here). The filing sheet's `POST /api/companies/:id/accounts/filed` records both, with lines `A`–`K`
-    as the books give them. Optional and additive.
+  - On an `accounts` filing, optionally, the approval as filed (CA 2006 ss414(1)–(2), 444(6)):
+    `approvedOn`, the day the board approved the accounts (on or after the balance sheet date, not after
+    `filedOn`), and `approvedBy`, the director who signed them (at most 120 characters: the only name
+    kept, and only here), given together (the store refuses one without the other, on every path); and
+    `registeredOffice`, the registered office as the accounts state it (s396(A1); at most 200
+    characters, kept only here). The filing sheet's `POST /api/companies/:id/accounts/filed` records all
+    three, with lines `A`–`K` as the books give them. Optional and additive.
   - On a `vat` filing, optionally, what was done about errors (VAT Notice 700/45; FORMULAS.md §22,
     "VAT returns"): `corrections`, `[{periodEnd, amount}]`, the errors on earlier returns this return
     corrected (method 1), each the earlier period's last day (before this one's) and the net VAT in
@@ -552,7 +555,7 @@ confirmationStatement?, tradeStartedOn?, ctPeriods, associatedCompanies?, aiaAll
   s411(1), (3)–(4)): yours to give, one per period, never worked out (FORMULAS.md §22, "Filing the
   accounts"). Optional and additive.
 - `accountsNotes`: `[{periodEnd, offBalanceSheet?, commitments?, directors?, advances?, notExcluded?,
-  previousQualified?}]`, what you confirm for a period's micro-entity accounts before filing them, one
+  previousQualified?, particulars?}]`, what you confirm for a period's micro-entity accounts before filing them, one
   per period: `offBalanceSheet` (arrangements not on the balance sheet, s410A), `commitments`
   (financial commitments, guarantees and contingencies not on it, SI 2008/409 Sch 1 para 57) and
   `directors` (advances, credits and guarantees for directors that the books do not hold, s413) are
@@ -560,8 +563,11 @@ confirmationStatement?, tradeStartedOn?, ctPeriods, associatedCompanies?, aiaAll
   not negative); `advances` is `{interest, conditions, writtenOff?, waived?}`, what the books cannot say
   of an advance on the director's loan they hold (s413(3)); `notExcluded`, that none of the exclusions
   from the micro-entity provisions and audit exemption applied (ss384, 384A(8), 384B, 476, 478);
-  `previousQualified`, whether it qualified as a micro-entity for the period before, where the books
-  cannot tell. Optional and additive.
+  `previousQualified`, whether it qualified as a micro-entity for the period before, used only while the
+  books cannot tell; `particulars`, `{registeredIn, type, notWoundUp: true}`, what the accounts state of
+  it that the books do not hold (s396(A1)): `registeredIn` is `england-and-wales`, `wales`, `scotland` or
+  `northern-ireland`, `type` `private-limited-by-shares` or `private-limited-by-guarantee`. Optional and
+  additive.
 - `employees` and `accountsNotes` are kept whoever sets the books up again (your form, an applied
   proposal), as the filings are, and set with `PUT /api/companies/:id/accounts-notes` (`{periodEnd,
   employees?, notes?}`: each `null` takes it away, `notes` is replaced whole); no agent token may use it.

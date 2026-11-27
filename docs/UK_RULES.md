@@ -527,7 +527,7 @@ Micro-entities Regime (the Financial Reporting Council; paragraphs as in its Sep
   pounds, and a total on the accounts is the total of what they show (its WebFiling help lists net
   current assets and total net assets with what they are made of, has no line for total assets less
   current liabilities, and takes a breakdown of fixed assets, current assets and capital and reserves
-  without asking for one), so the totals are worked out from the rounded figures here too, and the
+  without asking for one), so a total is worked out from the rounded figures here, never rounded itself, and the
   rounding difference sits in the profit and loss reserve.
 - Capital allowances for the tax computation are below ("Corporation Tax"); a car's own rules and the
   intangibles regime (CTA 2009 Part 8) are not worked out.
@@ -546,7 +546,8 @@ app prepares them; you file them, by hand: nothing calls Companies House.
   not more than the limit, balance sheet total not more than the limit, and average number of employees
   not more than 10 (s384A(4)). The turnover limit is "proportionately adjusted" for a financial year
   that is not in fact a year (s384A(5): only turnover; the app adjusts by days over the days of the 12
-  months beginning with its first, a judgment); the balance sheet total is "the aggregate of the amounts
+  months beginning with its first, a judgment; a year of 52 or 53 weeks, which a financial year made up
+  to a day within 7 days of the reference date can be (s390(2)–(3)), counts as a year); the balance sheet total is "the aggregate of the amounts
   shown as assets in the company's balance sheet" (s384A(6): A + B + C + D of format 1); employees are
   the monthly numbers of persons employed under contracts of service, added and divided by the months
   of the year (s384A(7)). A parent company qualifies only if its group qualifies as small (s384A(8)).
@@ -578,8 +579,13 @@ app prepares them; you file them, by hand: nothing calls Companies House.
   ([s384B(1)](https://www.legislation.gov.uk/ukpga/2006/46/section/384B)); a parent company preparing
   group accounts under s399(4), or a company whose accounts are included in consolidated group accounts
   (s384B(2)). Audit exemption is lost too where members holding 10% or more ask for an audit
-  ([s476](https://www.legislation.gov.uk/ukpga/2006/46/section/476)) or the company is excluded by
-  [s478](https://www.legislation.gov.uk/ukpga/2006/46/section/478).
+  ([s476](https://www.legislation.gov.uk/ukpga/2006/46/section/476)); where the company is excluded by
+  [s478](https://www.legislation.gov.uk/ukpga/2006/46/section/478) (a public company, s478(a); a regulated
+  firm, s478(b); a special register body or an employers' association, s478(c)); and where it was a group
+  company at any time in the year, unless its group qualifies as small and was never ineligible in the year
+  ([s479(1)](https://www.legislation.gov.uk/ukpga/2006/46/section/479)). A dormant company's own audit
+  exemption ([s480](https://www.legislation.gov.uk/ukpga/2006/46/section/480)) and dormant accounts are
+  not covered.
 - **The notes a micro-entity gives** (FRS 105 para 6.2, at the foot of the balance sheet):
   - the **average number of persons employed** in the year
     ([s411(1)](https://www.legislation.gov.uk/ukpga/2006/46/section/411), which applies to every company;
@@ -605,9 +611,13 @@ app prepares them; you file them, by hand: nothing calls Companies House.
   1A, para 1.3; WebFiling's help: "not required for micro accounts"): the app offers them in words, never
   adds them by itself. The micro-entity minimum accounting items are presumed in law to give a true and
   fair view ([s396(2A)](https://www.legislation.gov.uk/ukpga/2006/46/section/396)). The accounts state the
-  rounding used (FRS 105 para 3.13(d)), and the particulars of s396(A1) (the part of the UK it is
-  registered in, its number, that it is private and limited, its registered office), which the app does
-  not hold: check them on the form.
+  rounding used (FRS 105 para 3.13(d)), and the particulars of s396(A1) (FRS 105 para 3.13A): the part
+  of the United Kingdom it is registered in, its registered number, whether it is a public or private
+  company and limited by shares or by guarantee, its registered office, and, where it is being wound up,
+  that fact. Companies House: "You must include the company name and number" (the filing sheet's gate
+  asks for the number). The other particulars are the owner's to confirm (where registered, the kind of
+  company, not being wound up; a company being wound up is not covered); the registered office is given
+  when the filing is recorded, and kept on it.
 - **The statements on the balance sheet**, above the director's signature: that the company was
   entitled to exemption from audit ([s475(2)](https://www.legislation.gov.uk/ukpga/2006/46/section/475),
   s477); that the members have not required an audit under s476, and that the directors acknowledge their
@@ -621,7 +631,9 @@ app prepares them; you file them, by hand: nothing calls Companies House.
   ([Preparing and filing Companies House accounts](https://www.gov.uk/government/publications/filing-your-companies-house-accounts/life-of-a-company-part-1-accounts),
   §9.4 for the micro-entity statement, §11.1 for audit exemption; the same on GOV.UK's
   [Audit exemption for private limited companies](https://www.gov.uk/audit-exemptions-for-private-limited-companies)).
-  The balance sheet is approved by the board and signed on its behalf by a director, named (s414(1)–(2));
+  The balance sheet is approved by the board and signed on its behalf by a director (s414(1)–(2)), the
+  copy delivered stating the name of the director who signed it
+  ([s444(6)](https://www.legislation.gov.uk/ukpga/2006/46/section/444); and s433 for copies published);
   WebFiling asks for the day of approval ("on or after the balance sheet date and must not be a date in
   the future") and the approving director's name, and that its statements be accepted
   ([WebFiling micro-entity accounts help](https://ewf.companieshouse.gov.uk/help/en/stdwf/microAccountsHelp.html)).
@@ -635,9 +647,13 @@ app prepares them; you file them, by hand: nothing calls Companies House.
   and on advances and credits to directors; and comparatives, required "unless there is no prior
   accounting period". Its words for net current assets ("Total current assets less prepayments and
   accrued income…") read as an error: format 1 adds prepayments (C + D − E), as its abbreviated accounts
-  help does. The help predates the requirement to give the average number of employees and shows no line
+  help does. The help, which is undated, does not mention the average number of employees and shows no line
   for total assets less current liabilities (G of the format) or the profit and loss reserve: the sheet
-  gives them, in the format's words. The live form was not seen.
+  gives them, in the format's words. Companies House made the average number of employees compulsory in
+  software filings in 2020 (its developer forum,
+  ["Accounts: clarification of average number of employees requirement"](https://xmlforum.companieshouse.gov.uk/t/accounts-clarification-of-average-number-of-employees-requirement/510),
+  as a specialist's review cited it; not fetched here). The live form was not seen, nor whether it works
+  out any total itself: the app works the totals out from the rounded lines (F, G and K) either way.
 - **How accounts are filed** (`ACCOUNTS_FILING_CHANNEL_RULES`, by the day of filing): WebFiling (and
   paper) take a micro-entity's accounts until **31 March 2028**; from **1 April 2028** every company files
   its accounts through commercial software, in iXBRL, the web and paper services closed for accounts, and
@@ -653,6 +669,12 @@ app prepares them; you file them, by hand: nothing calls Companies House.
   abridged accounts. The joint HMRC and Companies House service for accounts and the Company Tax Return
   closed on 31 March 2026
   ([closure](https://www.gov.uk/guidance/closure-of-the-service-to-file-your-company-accounts-and-tax-return)).
+- **Identity verification** (`IDENTITY_VERIFICATION`): a director's identity must be verified at
+  Companies House from 18 November 2025 (ECCTA 2023), which does not stop accounts being filed; verifying
+  the person who files (a presenter) is deferred to November 2027 at the earliest. WebFiling signs in with
+  GOV.UK One Login and asks for the company's authentication code. From GOV.UK's Companies House
+  identity verification guidance and ICAEW (August 2026), as a specialist's review cited them; not fetched
+  here.
 
 ### Corporation Tax (a company's books)
 
@@ -978,7 +1000,7 @@ Checked 27 November 2026 (companies: a period's accounts):
 
 - The Financial Reporting Council, [FRS 105, September 2024](https://media.frc.org.uk/documents/FRS_105_September_2024_Redacted_edition_zZFkzvN.pdf): para 2.24 (the accrual basis), paras 3.7, 3.10 and 3.13(d) (comparatives; the level of rounding stated), Section 8 paras 8.11–8.13 (changes in estimate) and 8.16–8.17 (prior period errors), Section 12 paras 12.14–12.21 and 12.26–12.27 (property, plant and equipment: components, depreciation, changes in estimate, derecognition), Section 13 paras 13.4–13.13 (intangible assets: internally generated, useful life, amortisation), para 14.2 (goodwill), Sections 16 and 22 (provisions; impairment)
 - legislation.gov.uk, [CA 2006 s830](https://www.legislation.gov.uk/ukpga/2006/46/section/830) (distributions out of profits available), [ss836–838](https://www.legislation.gov.uk/ukpga/2006/46/section/836) (the relevant accounts), [s454](https://www.legislation.gov.uk/ukpga/2006/46/section/454) (voluntary revision of defective accounts), [s610](https://www.legislation.gov.uk/ukpga/2006/46/section/610) (share premium)
-- Companies House's online filing of micro-entity accounts in whole pounds, its totals worked out from what is entered: as an accountant's review of this slice confirmed, not fetched then; its WebFiling help, read on 27 November 2026 (filing the accounts, below), lists net current assets and total net assets as headings and no line for total assets less current liabilities
+- Companies House's online filing of micro-entity accounts in whole pounds: as an accountant's review of this slice said, not fetched then. That the form works its totals out from what is entered is unverified: no source read establishes it, and the app works F, G and K out from the rounded lines itself. Its WebFiling help, read on 27 November 2026 ("Filing the accounts" above), lists net current assets and total net assets as headings and no line for total assets less current liabilities
 
 Checked 27 November 2026 (companies: filing the accounts), each link in "Filing the accounts (a
 company's books)" above: legislation.gov.uk's revised text of CA 2006 ss382–384B, 396, 410A, 411, 413,
