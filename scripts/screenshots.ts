@@ -123,6 +123,8 @@ async function main() {
     ['company-books', '/company/example-studio/books'],
     // Its accounts for a period: ready or not, profit and loss, balance sheet (exact and in whole pounds), register, loan, bank.
     ['company-accounts', '/company/example-studio/accounts'],
+    // Its accounts as it files them: the latest year ready to file (employees, notes and eligibility confirmed), the balance sheet in the form's order with the year before as filed, the statements.
+    ['company-filing', '/company/example-studio/filing'],
     // Its VAT returns: the return to file next with its boxes and working, the periods, a return filed that differs from the books, penalty points and the thresholds.
     ['company-vat', '/company/example-studio/vat'],
     // Its Corporation Tax: the latest year's computation (adjustments, the laptop's allowance, the main pool at the hybrid rate, interest, the small profits rate), its CT600 boxes with working, and the periods.

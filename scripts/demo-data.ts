@@ -30,7 +30,7 @@ import { accountingPeriodsOf, companyDeadlines, type CompanyDeadline } from '../
 import { companyEngine } from '../src/server/analytics/company-accounts';
 import { periodAccounts } from '../src/server/analytics/period-accounts';
 import { companyVat, vatFigures } from '../src/server/analytics/vat-return';
-import { CompanyBooksSchema, EmploymentSchema, MICRO_ENTITY_LINES, ExtractionSchema, HmrcRecordSchema, PayslipRecordSchema, type Account, type BalanceSnapshot, type CompanyFiling, type Employment, type ExtractedHmrc, type ExtractedPayslip, type Figure, type HmrcRecord, type HoldingsSnapshot, type ImportRecord, type MicroEntityLines, type PayslipRecord, type Transaction } from '../src/shared/schema';
+import { CompanyBooksSchema, EmploymentSchema, ExtractionSchema, HmrcRecordSchema, PayslipRecordSchema, type Account, type BalanceSnapshot, type CompanyFiling, type Employment, type ExtractedHmrc, type ExtractedPayslip, type Figure, type HmrcRecord, type HoldingsSnapshot, type ImportRecord, type MicroEntityLines, type PayslipRecord, type Transaction } from '../src/shared/schema';
 // A PDF with a text layer, as a saved gov.uk page has (the tests' helper).
 import { textPdf } from '../tests/pdf';
 
@@ -164,8 +164,8 @@ async function demoCompanyAccount(store: Store, dividendDay: string): Promise<vo
  * Example Studio's books (companies.json, `books`): Jo runs it and keeps its records here. Incorporated
  * on 2 May 2023, its year to 31 December, trading (and so within the charge to Corporation Tax) from
  * June, registered for VAT from April 2024 with quarters to March, June, September and December. What
- * fell due before today is filed (the second VAT return 9 days late), and last year's accounts and
- * CT600 went in together; the rest is still to come.
+ * fell due before today is filed (the second VAT return 9 days late); the latest year's accounts and
+ * CT600, not due yet, are still to come.
  * Worked out from its own deadlines, and drawing nothing from the random sequence.
  */
 async function demoCompanyBooks(store: Store): Promise<void> {
@@ -204,19 +204,17 @@ async function demoCompanyBooks(store: Store): Promise<void> {
   };
   const sheetFor = (end: string) => (end === STUDIO_OPENING ? opening : end < STUDIO_OPENING ? older[end.slice(0, 4)] : undefined);
   const taxFor = (end: string) => (end === STUDIO_OPENING ? 1_312.4 : end < STUDIO_OPENING ? ({ '2023': 2533.25, '2024': 9981.5 } as Record<string, number>)[end.slice(0, 4)] : undefined);
-  // Last year's accounts: the latest year ended (filed, with its CT600, even before they fall due).
-  const lastAccounts = deadlines.filter((d) => d.kind === 'accounts' && d.period.end < END).at(-1);
   const vats = deadlines.filter((d) => d.kind === 'vat');
   const filedOnOf = (d: CompanyDeadline, i: number) => {
     const ahead = d === vats[1] ? -9 : 6 + ((i * 7) % 24);
     const day = addDays(d.due, -ahead);
     return day <= d.period.end ? addDays(d.period.end, 3) : day > END ? END : day;
   };
-  const accountsFiled = lastAccounts ? filedOnOf(lastAccounts, 0) : undefined;
+  // What fell due is filed; the latest year's accounts and CT600, not due yet, are still to file
+  // (its accounts' filing sheet is ready: demoStudioFilingSheet).
   const filings: CompanyFiling[] = deadlines.flatMap((d, i): CompanyFiling[] => {
-    const withAccounts = accountsFiled !== undefined && (d === lastAccounts || (d.kind === 'ct600' && d.period.end === lastAccounts?.period.end));
-    if (d.period.end >= END || (d.due >= END && !withAccounts)) return [];
-    const filedOn = withAccounts ? accountsFiled : filedOnOf(d, i);
+    if (d.period.end >= END || d.due >= END) return [];
+    const filedOn = filedOnOf(d, i);
     const sheet = sheetFor(d.period.end);
     const taxPaid = taxFor(d.period.end);
     const base = { id: filingId('example-studio', d.kind, d.period.end), addedBy: 'owner' as const, periodEnd: d.period.end, filedOn, ...(d.kind !== 'confirmation' && d.period.start ? { periodStart: d.period.start } : {}) };
@@ -298,23 +296,38 @@ async function demoCompanyLedger(store: Store): Promise<void> {
 }
 
 /**
- * The studio's accounts for its latest year ended, filed (the deadlines filed them early, with no
- * lines): their whole-pound lines are the ones its books work out to, once every row is coded and
- * linked, so the Accounts tab shows a year ready and matching its filing.
+ * The studio's latest year ended, ready to file (FORMULAS.md §22, "Filing the accounts"): Jo, its one
+ * director with a contract of service, is its average employee in that year and the one before, and
+ * Jo has confirmed its notes (none of each: Jo's loan to it was in credit throughout, so no advance) and
+ * that none of the exclusions applies. Its accounts for the year before, filed with their lines before
+ * its books were kept here, lock the books through that year's end, as the app does when a filing is
+ * recorded; the latest year is for Jo to file and record.
  */
-async function demoStudioAccountsFiled(store: Store): Promise<void> {
+async function demoStudioFilingSheet(store: Store): Promise<void> {
   const company = store.company('example-studio');
   if (!company?.books) return;
   const report = periodAccounts({ src: store, company, engine: companyEngine(store, company.id), today: END, period: STUDIO_YEAR_END });
   if (!report) return;
   if (!report.ready) console.warn(`demo: the studio's year to ${STUDIO_YEAR_END} is not ready: ${report.checks.map((c) => (c.kind === 'ledger' ? c.check.kind : c.kind)).join(', ')}`);
-  const whole = Object.fromEntries(report.balanceSheet.lines.map((l) => [l.line, l.whole]));
-  const figures = Object.fromEntries(MICRO_ENTITY_LINES.filter((l) => whole[l] !== 0 || ['F', 'G', 'K'].includes(l)).map((l) => [l, whole[l]]));
+  const none = { none: true as const };
   await store.updateCompany(
     company.id,
-    // Recorded as filed, the books are locked through the year end (as the app does when a filing is recorded).
-    (c) => (c?.books ? { ...c, books: { ...c.books, lockedThrough: STUDIO_YEAR_END, filings: c.books.filings.map((f) => (f.kind === 'accounts' && f.periodEnd === STUDIO_YEAR_END ? { ...f, figures } : f)) } } : c!),
-    'demo: the studio’s accounts filed',
+    (c) =>
+      c?.books
+        ? {
+            ...c,
+            books: {
+              ...c.books,
+              lockedThrough: STUDIO_OPENING,
+              employees: [
+                { periodEnd: STUDIO_OPENING, average: 1 },
+                { periodEnd: STUDIO_YEAR_END, average: 1 },
+              ],
+              accountsNotes: [{ periodEnd: STUDIO_YEAR_END, offBalanceSheet: none, commitments: none, directors: none, notExcluded: true }],
+            },
+          }
+        : c!,
+    'demo: the studio’s filing sheet',
   );
 }
 
@@ -873,7 +886,7 @@ async function main() {
     );
   }
   const res = await enrich(store);
-  if (!SPARSE) await demoStudioAccountsFiled(store);
+  if (!SPARSE) await demoStudioFilingSheet(store);
   if (!SPARSE) await demoStudioVatFiled(store);
   console.log(`demo: ${txs.length} transactions, ${snapshots.length} balances; enrich: ${res.recategorised} categorised, ${res.transfersLinked} transfers linked`);
   // Three fares as an older version of the app filed them, for re-applying categorisation to change.
