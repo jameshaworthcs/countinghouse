@@ -209,6 +209,34 @@ export function companyCorporationTax({ src, company, engine, today, period: wan
     }
   }
 
+  // Pre-trading expenses: each period of account's shared between its pre-trading CT periods by days, as
+  // the trading result is (s52(3) by analogy), so a period-end adjustment dated on its last day (a
+  // prepayment carried) never leaves a CT period a negative line. Presentation only: s61 treats them all
+  // as incurred on the trade's first day. Those in a period of account with no pre-trading CT period stay
+  // by date.
+  const preShare = new Map<ISODate, Map<string, number>>(); // CT period end → code → pence (profit sign)
+  const preShared = new Set<string>(); // posting ids shared out
+  const preSharedPoas = new Set<ISODate>(); // periods of account with more than one pre-trading CT period
+  for (const key of new Set(inBooks.map((p) => `${p.periodOfAccount.start}|${p.periodOfAccount.end}`))) {
+    const [ps, pe] = key.split('|') as [ISODate, ISODate];
+    const cts = inBooks.filter((c) => c.periodOfAccount.end === pe && c.start >= ps && !trading(c.start));
+    if (!cts.length) continue;
+    if (cts.length > 1) preSharedPoas.add(pe);
+    const totals = new Map<string, number>();
+    for (const p of pl) {
+      if (treatmentOf(p.ledger) !== 'allowable' || trading(p.date) || p.date < ps || p.date > pe) continue;
+      preShared.add(p.id);
+      totals.set(p.ledger, (totals.get(p.ledger) ?? 0) + profitOf(p));
+    }
+    const weights = cts.map((c) => daysOf(c.start, c.end));
+    for (const [code, total] of totals)
+      apportion(total, weights).forEach((x, i) => {
+        if (!x) return;
+        const m = preShare.get(cts[i]!.end) ?? preShare.set(cts[i]!.end, new Map()).get(cts[i]!.end)!;
+        m.set(code, (m.get(code) ?? 0) + x);
+      });
+  }
+
   // Plant: the register's tangible assets bought in these books (those brought in on opening journals
   // are in the pools brought forward; cars and intangibles are not worked out), and small equipment.
   const plant: PlantItem[] = [];
@@ -300,7 +328,9 @@ export function companyCorporationTax({ src, company, engine, today, period: wan
     const parts = apportioned.get(c.end) ?? new Map<string, number>();
     for (const [code, amount] of parts) if (code !== PRE_TRADING) addLine(code, amount, 'days');
     const dated = pl.filter((p) => byDate(p) && p.date >= windowStart && p.date <= c.end);
-    for (const p of dated) if (p.date >= c.start) addLine(p.ledger, profitOf(p), 'date');
+    for (const p of dated) if (p.date >= c.start && !preShared.has(p.id)) addLine(p.ledger, profitOf(p), 'date');
+    const pre = preShare.get(c.end) ?? new Map<string, number>();
+    for (const [code, amount] of pre) addLine(code, amount, 'days');
     const lr = lrParts.get(c.end) ?? new Map<string, number>();
     for (const [code, amount] of lr) addLine(code, amount, basis === 'time' ? 'days' : 'accrued');
     // Opening journals of books taken over mid-life are balances brought in, dated before the books start.
@@ -344,11 +374,18 @@ export function companyCorporationTax({ src, company, engine, today, period: wan
     }
     if (salesBefore) checks.push({ kind: 'sales-before-trade', amount: salesBefore });
 
-    // Pre-trading expenses by date (the window reaches back over days in no CT period, before it came within the charge).
+    // Pre-trading expenses: the dated items are the working; the period's figure is its day-share of its
+    // period of account's (above), and by date only where none is shared (the window reaches back over
+    // days in no CT period, before it came within the charge).
     const preTradingItems: CtComputationView['preTrading']['items'] = [];
+    let preByDate = 0;
     for (const p of dated) {
-      if (treatmentOf(p.ledger) === 'allowable' && !trading(p.date)) preTradingItems.push({ date: p.date, memo: p.date < c.start ? `${p.memo} (before it came within the charge)` : p.memo, ledger: p.ledger, amount: p.amount });
+      if (treatmentOf(p.ledger) !== 'allowable' || trading(p.date)) continue;
+      preTradingItems.push({ date: p.date, memo: p.date < c.start ? `${p.memo} (before it came within the charge)` : p.memo, ledger: p.ledger, amount: p.amount });
+      if (!preShared.has(p.id)) preByDate += p.amount;
     }
+    const preDayShare = -[...pre.values()].reduce((x, v) => x + v, 0);
+    if (phase === 'pre-trading' && preSharedPoas.has(c.periodOfAccount.end)) notes.push({ level: 'info', text: 'Pre-trading expenses are shown as this period’s day-share of its period of account’s (as the trading result is shared, CTA 2009 s52(3)): the dated items are the working. No tax turns on it: they are all treated as incurred on the trade’s first day (s61).' });
     // Loan relationships: interest received is a non-trading credit; interest paid a non-trading debit before the trade starts (a trading one after, s297).
     const ntItems: CtComputationView['nonTrading']['items'] = [];
     let ntCredits = 0;
@@ -363,7 +400,7 @@ export function companyCorporationTax({ src, company, engine, today, period: wan
 
     // ── Pre-trading expenditure: gathered until the trade starts, released on its first day ──
     const preBroughtForward = s.preTrading;
-    const preAdded = preTradingItems.reduce((x, i) => x + i.amount, 0);
+    const preAdded = preByDate + preDayShare;
     s.preTrading += preAdded;
     let released = 0;
     let lapsed = 0;
@@ -482,7 +519,7 @@ export function companyCorporationTax({ src, company, engine, today, period: wan
       beforeAllowances,
       capitalAllowances: ca,
       tradingResult,
-      preTrading: { broughtForward: preBroughtForward, added: preAdded, released, lapsed, carriedForward: s.preTrading, items: preTradingItems },
+      preTrading: { broughtForward: preBroughtForward, added: preAdded, released, lapsed, carriedForward: s.preTrading, items: preTradingItems, ...(preSharedPoas.has(c.periodOfAccount.end) ? { dayShare: true as const } : {}) },
       nonTrading: { credits: ntCredits, debits: ntDebits, net: ntNet, items: ntItems },
       losses: {
         trading: { broughtForward: lossesBroughtForward, usedAgainstTrading: againstTrading, usedAgainstTotal: againstTotal, arising, carriedForward: s.losses.reduce((x, l) => x + l.amount, 0) },

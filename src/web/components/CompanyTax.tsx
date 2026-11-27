@@ -457,7 +457,7 @@ function CarriedCard({ v }: { v: CtComputationView }) {
       </div>
       {pre.items.length > 0 && (
         <details className="mt-3 text-[12.5px]">
-          <summary className="cursor-pointer text-ink-2">Pre-trading expenses in this period ({pre.items.length})</summary>
+          <summary className="cursor-pointer text-ink-2">Pre-trading expenses dated in this period ({pre.items.length}){pre.dayShare ? ': the working; the period takes its day-share of its period of account’s' : ''}</summary>
           <ul className="mt-1 flex flex-col gap-0.5 pl-4 text-ink-2">
             {pre.items.map((i, k) => (
               <li key={k}>

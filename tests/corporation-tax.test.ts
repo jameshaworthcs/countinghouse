@@ -310,6 +310,28 @@ describe('before the trade starts', () => {
     expect(v.payable).toBe(17_350 * 19);
   });
 
+  it('shares a period of account’s pre-trading expenses between its CT periods by days, so a prepayment carried at its end leaves no negative line', () => {
+    // A 13-month first period of account (1 January 2024 to 31 January 2025), no trade yet: two CT periods.
+    // The registered office paid on 1 March 2024 for a year: £9.21 (28 of 365 days) is prepaid at 31 January 2025.
+    const rows = [bank('2024-03-01', -120, 'EXAMPLE OFFICE LTD', coded('registered-office', { covers: { from: '2024-03-01', to: '2025-02-28' } }))];
+    const books = { accountingReferenceDate: '01-31', tradeStartedOn: null, closeInvestmentHolding: false };
+    const at = (end: string) => ct(rows, books, { period: end, statements: ['2025-01-31', '2026-01-31'] }).computation!;
+    const [one, two] = [at('2024-12-31'), at('2025-01-31')];
+    expect(two.period.periodOfAccount).toEqual({ start: '2024-01-01', end: '2025-01-31' });
+    // £110.79 for the period of account, 366 and 31 of its 397 days.
+    expect([one.preTrading.added, two.preTrading.added]).toEqual([10_214, 865]);
+    for (const v of [one, two]) {
+      expect(v.preTrading.added).toBeGreaterThan(0);
+      expect(v.accounts.lines.find((l) => l.ledger === 'registered-office')).toMatchObject({ basis: 'days' });
+      expect(v.accounts.lines.every((l) => l.amount <= 0)).toBe(true);
+      expect(v.preTrading.dayShare).toBe(true);
+    }
+    // The dated postings are the working: the payment in the first, the prepayment carried in the second.
+    expect(one.preTrading.items.map((i) => i.amount)).toEqual([12_000]);
+    expect(two.preTrading.items.map((i) => i.amount)).toEqual([-921]);
+    expect(two.preTrading.carriedForward).toBe(11_079);
+  });
+
   it('gives expenses incurred more than 7 years before the trade started nothing (CTA 2009 s61)', () => {
     const old = [bank('2024-02-12', -400, 'EXAMPLE SOFTWARE LTD', coded('software-hosting')), bank('2024-06-12', -100, 'EXAMPLE SOFTWARE LTD', coded('software-hosting')), bank('2032-03-01', 1_000, 'EXAMPLE CLIENT LTD', coded('turnover'))];
     const v = ct(old, { tradeStartedOn: '2031-04-01', closeInvestmentHolding: false }, { today: '2032-06-30', period: '2031-12-31', statements: ['2031-12-31'] }).computation!;

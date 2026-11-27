@@ -2699,8 +2699,11 @@ the period (the parts above):
 The trading result before capital allowances is the accounts' profit with the adjustments.
 
 **Before the trade starts** no trading profit or loss arises. Revenue expenses that would be allowable
-gather as pre-trading expenditure, with those dated before the first CT period (before it came within
-the charge) taken in by the first. On *T* (s61(2)), those incurred within 7 years before it
+gather as pre-trading expenditure: each period of account's are shared between its pre-trading CT
+periods by days, as the trading result is (s52(3) by analogy), so a prepayment carried at its end never
+leaves a CT period a negative line; the dated postings are the working. Presentation only: s61 treats
+them all as incurred on *T*. Those in a period of account with no pre-trading CT period stay by date,
+taken in by the next CT period (before it came within the charge). On *T* (s61(2)), those incurred within 7 years before it
 (`PRE_TRADING_YEARS`), and any brought forward, are treated as incurred on *T*: a deduction in *T*'s
 period of account, shared by days between its trading CT periods like any other trading item (with one
 trading CT period, all of it there); older ones lapse, and are shown. Plant bought before *T* counts for

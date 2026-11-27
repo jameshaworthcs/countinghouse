@@ -2293,7 +2293,8 @@ export interface CtComputationView {
   capitalAllowances: CtCapitalAllowances;
   /** The trading result: a profit (positive) or a loss (negative); nothing before the trade starts. */
   tradingResult: number;
-  preTrading: { broughtForward: number; added: number; released: number; lapsed: number; carriedForward: number; items: { date: string; memo: string; amount: number; ledger: string }[] };
+  /** Pre-trading expenditure: `added` is the period's day-share of its period of account's (`dayShare`, when that holds more than one pre-trading CT period) or, where none is shared, its dated items; `items` are the dated postings, the working. */
+  preTrading: { broughtForward: number; added: number; released: number; lapsed: number; carriedForward: number; items: { date: string; memo: string; amount: number; ledger: string }[]; dayShare?: true };
   nonTrading: { credits: number; debits: number; net: number; items: { date: string; memo: string; ledger: string; amount: number }[] };
   losses: {
     trading: { broughtForward: number; usedAgainstTrading: number; usedAgainstTotal: number; arising: number; carriedForward: number };
