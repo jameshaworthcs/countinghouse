@@ -18,9 +18,10 @@ import { api, useApi, useApiMutation } from '../lib/api';
 import { KeepBooks } from '../components/KeepBooks';
 import { BooksTab } from '../components/CompanyLedger';
 import { AccountsTab } from '../components/CompanyAccounts';
+import { VatTab } from '../components/CompanyVat';
 import { cn } from '../lib/format';
 
-type Tab = 'overview' | 'books' | 'accounts' | 'settings';
+type Tab = 'overview' | 'books' | 'accounts' | 'vat' | 'settings';
 
 /** A deadline's state, as a badge: done (filed late marked), overdue, due within 14 days, due soon, later. */
 function DeadlineBadge({ d }: { d: CompanyDeadline }) {
@@ -776,7 +777,7 @@ function FilingsCard({ view, onRecord }: { view: CompanyBooksResponse; onRecord:
 
 export default function Company() {
   const { id = '', tab: tabParam } = useParams();
-  const tab: Tab = tabParam === 'settings' || tabParam === 'books' || tabParam === 'accounts' ? tabParam : 'overview';
+  const tab: Tab = tabParam === 'settings' || tabParam === 'books' || tabParam === 'accounts' || tabParam === 'vat' ? tabParam : 'overview';
   const navigate = useNavigate();
   const q = useApi<CompanyBooksResponse>(['company-books', id], `/companies/${id}/books`);
   const list = useApi<CompanyBooksListItem[]>(['company-books'], '/company-books');
@@ -816,6 +817,7 @@ export default function Company() {
               { value: 'overview', label: 'Overview' },
               { value: 'books', label: 'Books' },
               { value: 'accounts', label: 'Accounts' },
+              { value: 'vat', label: 'VAT' },
               { value: 'settings', label: 'Settings' },
             ]}
           />
@@ -832,6 +834,8 @@ export default function Company() {
               <BooksTab key={view.company.id} companyId={view.company.id} />
             ) : tab === 'accounts' ? (
               <AccountsTab key={view.company.id} companyId={view.company.id} />
+            ) : tab === 'vat' ? (
+              <VatTab key={view.company.id} companyId={view.company.id} filings={view.books.filings} />
             ) : (
               <>
                 {/* Keyed by the company too: switching company never leaves one's draft under another's id. */}

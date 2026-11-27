@@ -123,6 +123,8 @@ async function main() {
     ['company-books', '/company/example-studio/books'],
     // Its accounts for a period: ready or not, profit and loss, balance sheet (exact and in whole pounds), register, loan, bank.
     ['company-accounts', '/company/example-studio/accounts'],
+    // Its VAT returns: the return to file next with its boxes and working, the periods, a return filed that differs from the books, penalty points and the thresholds.
+    ['company-vat', '/company/example-studio/vat'],
     ['company-settings', '/company/example-studio/settings'],
     ...accountPage('account-current', 'current'),
     ...accountPage('account-savings', 'savings'),

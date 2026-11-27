@@ -1,10 +1,11 @@
-import { ChevronRight, CircleCheck, CircleDashed, Download, FileWarning, Printer, TriangleAlert } from 'lucide-react';
+import { ChevronRight, CircleCheck, CircleDashed, Download, Printer, TriangleAlert } from 'lucide-react';
 import { Fragment, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import type { AllowanceLine, AllowancesResponse, ConfirmedNilView, MissingDaysView, PayResponse, SaItem, SelfAssessmentResponse, TaxBandEstimate } from '../../shared/api';
 import { formatDate, formatSpan } from '../../shared/dates';
 import type { SaStatus } from '../../shared/schema';
 import { Meter } from '../components/charts/bars';
+import { CheckEverything } from '../components/CheckEverything';
 import { InsightsPanel } from '../components/Intel';
 import { PayView } from '../components/Pay';
 import { TaxReturn } from '../components/TaxReturn';
@@ -493,12 +494,7 @@ function SelfAssessment({ sa, taxYear }: { sa: SelfAssessmentResponse; taxYear: 
   const [showNA, setShowNA] = useState(false);
   return (
     <div className="flex flex-col gap-5">
-      <div className="rounded-xl border-2 border-warn bg-warn-soft px-5 py-4" role="note">
-        <div className="flex items-center gap-2 text-[15px] font-semibold text-ink">
-          <FileWarning className="size-5 text-warn-ink" /> You must check everything before you submit
-        </div>
-        <p className="mt-1.5 text-[13px] text-ink-2">{sa.disclaimer}</p>
-      </div>
+      <CheckEverything text={sa.disclaimer} />
       <div className="no-print flex flex-wrap items-center justify-between gap-3">
         <div className="text-[13px] text-ink-2">
           Online filing and payment deadline for {sa.taxYear.label}: <span className="font-semibold text-ink">{formatDate(sa.taxYear.filingDeadline)}</span>
