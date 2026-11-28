@@ -3577,3 +3577,16 @@ changed:
   a second agreement with the same payments. One with the same counterparty still wins; failing that,
   the same name, the same payer and account (where both give one) and a payment in common is the
   same agreement. The record keeps the counterparty it has. No format change.
+
+## 2026-11-28: Pasting screenshots and files to import
+
+- **Direct on `/import`, confirmed everywhere else** (`GlobalPaste` in `src/web/components/Upload.tsx`,
+  `src/web/lib/paste.ts`, `docs/INGESTION.md`, "Ways in"): `Ctrl/⌘+V` with an image or file on the
+  clipboard uploads directly when on the Import page (matching `DropZone`), and opens a confirmation
+  modal with a preview and optional account selector on every other page (pre-selecting the account on
+  `/accounts/:id`). Unlike drag-and-drop, paste has no drag preview and uploading an image immediately
+  starts extraction (which may use Claude), so confirming outside `/import` avoids accidental uploads.
+  Plain-text pastes, editable inputs and open dialogs are never intercepted. Synthetic clipboard names
+  (`image.png`, `""`) are normalised to date-free names with `lastModified: 0` so ingestion keeps EXIF
+  when present and otherwise honestly marks the date as the upload day rather than fabricating a
+  filename or file-modified capture date.

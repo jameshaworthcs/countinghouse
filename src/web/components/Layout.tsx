@@ -9,7 +9,7 @@ import { cn } from '../lib/format';
 import { usePrefs } from '../lib/prefs';
 import { scrollToTop } from '../lib/scroll';
 import { useProposals } from './Proposals';
-import { GlobalDrop } from './Upload';
+import { GlobalDrop, GlobalPaste } from './Upload';
 import { IconButton } from './ui';
 
 const NAV: { to: string; label: string; icon: ReactNode; end?: boolean }[] = [
@@ -123,6 +123,7 @@ export function Layout() {
   return (
     <div className="min-h-dvh bg-canvas">
       <GlobalDrop />
+      <GlobalPaste />
       {/* Sidebar (desktop) */}
       <aside className="no-print fixed inset-y-0 left-0 z-30 hidden w-60 flex-col border-r border-line bg-canvas px-3 py-4 lg:flex">
         <div className="mb-5 flex items-center gap-2 px-2">

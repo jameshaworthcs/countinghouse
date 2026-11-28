@@ -5,8 +5,8 @@ this page covers the formats, the engines, and how to extend them.
 
 ## Ways in
 
-- **Import page**: drag and drop, or *Choose files*. On a phone this opens the camera roll.
-- **Anywhere in the app**: drop a file on any page.
+- **Import page**: drag and drop, paste a screenshot or file (`Ctrl/⌘+V`), or *Choose files*. On a phone this opens the camera roll.
+- **Anywhere in the app**: drop a file on any page, or paste a screenshot or file (`Ctrl/⌘+V`) to review a preview and optionally choose an account before uploading (on an account's page, that account is pre-selected).
 - **An account page** (or a row in the monthly checklist): the upload is pinned to that account,
   so no matching is needed.
 - **The inbox**: the data repository's `inbox/`, or wherever `FINANCE_INBOX_DIR` points. Drop
