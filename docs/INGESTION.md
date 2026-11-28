@@ -960,7 +960,11 @@ A schedule a document gives (rule 24) is drafted as the agreement it is (`src/se
 `draft.agreements`; [FORMULAS.md §10](FORMULAS.md), "Agreements"):
 
 - **New, or filling in one recorded already.** One recorded already is the same way round, with
-  the same counterparty, and the same name or a payment in common. The schedule is laid over it:
+  the same counterparty, and the same name or a payment in common. Failing that, it is one with the
+  same name, the same payer and account (where both give one) and a payment in common, whatever its
+  counterparty is called: documents of the same schedule word it differently ("University of
+  Example" on one page, "Your university or college" on the next). The record keeps the counterparty
+  it has. The schedule is laid over it:
   payments it lacks are added, and a payment's status is the one the latest document gives. It is
   ticked only when it adds a payment or a newer status; with nothing to add it is "already here".
 - **Its category** comes from what it is, and can be changed on the review page:

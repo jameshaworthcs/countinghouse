@@ -3568,3 +3568,12 @@ changed:
 - **VAT and period-based deadlines** (`src/shared/company-books.ts`, `docs/FORMULAS.md` §22): a filing whose period must end before it can be submitted (VAT returns, accounts, CT600 and Corporation Tax payment — not confirmation statements, which can be made up early) is not marked `due-soon` or shown as an Overview alert until `today > period.end`, even when its due date is within `DEADLINE_LEAD_DAYS` (60 days).
 - **Sending-bank boilerplate in third-party references** (`src/shared/categorise.ts`, `docs/INGESTION.md`): when `paymentParts` splits a payment into another party's name and a reference and the party is not the owner, the sending account's own institution name inside the reference does not match another of your accounts at that bank. Stale unlinked `counterpartyAccountId` values are cleared when a row stops being a transfer (in `enrich`, `applyRule`, `proposals` `add_rule`/`remove_rule`/`set_category`, and `PATCH /transactions/:id`), keeping counterparties on rows that remain transfers (or non-transfer agreement rows). In Set aside (`src/server/analytics/earmarks.ts`), `missing-other-side` skips rows decided as `own`.
 - **Opening coverage and partial-stretch labels** (`src/server/analytics/balances.ts`, `src/web/components/charts/partial.ts`, `docs/FORMULAS.md` §9): for ledger accounts, committed statement periods count alongside coverage confirmations for `confirmedFromOpening`, and `sourceAsLeft` / `companySource` forward `imports` (and confirmations) so simulations and company engines agree. `TimeChart` places incomplete-stretch labels widest-first without overlap.
+
+## 2026-11-28: A schedule whose counterparty is worded differently fills in the one recorded
+
+- **Matching a schedule to an agreement** (`recordedAs` in `src/server/ingest/schedules.ts`,
+  `docs/INGESTION.md`, "Schedules"): pages of the same schedule word who is paid differently (a
+  university's name on one, "Your university or college" on the next), so a later page was drafted as
+  a second agreement with the same payments. One with the same counterparty still wins; failing that,
+  the same name, the same payer and account (where both give one) and a payment in common is the
+  same agreement. The record keeps the counterparty it has. No format change.

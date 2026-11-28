@@ -220,6 +220,39 @@ describe('importing', () => {
       expect((await draftOf(newer)).agreements![0]).toMatchObject({ include: true, target: { mode: 'existing' }, adds: { payments: 0, statuses: 1 } });
     });
 
+    it('a later page that words the university generically fills in the one recorded, keeping its name', async () => {
+      const first = await pending(studentFinancePage);
+      await start();
+      await draftOf(first);
+      await svc.commit(first);
+      const tuition = studentFinancePage.schedules[1]!;
+      const generic = { ...tuition, paidTo: 'Your university or college', payments: [tuition.payments[0]!, { ...tuition.payments[1]!, status: 'paid' }] };
+      const later = await pending({ ...studentFinancePage, documentDate: '2027-02-10', schedules: [generic] });
+      await start();
+      const [d] = (await draftOf(later)).agreements!;
+      expect(d).toMatchObject({ include: true, target: { mode: 'existing' }, adds: { payments: 0, statuses: 1 }, record: { counterparty: 'University of Example' } });
+      expect(svc.readiness(svc.getPending(later)!).reasons).not.toContain('a new schedule to check');
+      await svc.commit(later);
+      const recorded = store.agreements.filter((a) => a.paidBy);
+      expect(recorded).toHaveLength(1);
+      expect(recorded[0]).toMatchObject({ counterparty: 'University of Example', statusAsOf: '2027-02-10' });
+      expect(recorded[0]!.payments.map((p) => p.status)).toEqual(['paid', 'paid']);
+    });
+
+    it('a schedule to someone else is new when its name, payer or payments differ, even with the same name elsewhere', async () => {
+      const first = await pending(studentFinancePage);
+      await start();
+      await draftOf(first);
+      await svc.commit(first);
+      const tuition = studentFinancePage.schedules[1]!;
+      const otherName = { ...tuition, name: 'Tuition Fee Loan 2027/28', paidTo: 'Your university or college' };
+      const otherPayer = { ...tuition, provider: 'Example Bursary Trust', paidTo: 'Your university or college' };
+      const noneInCommon = { ...tuition, paidTo: 'Your university or college', payments: [{ date: '2026-09-26', amount: 2400, label: 'Term 1', status: 'paid' }] };
+      const ids = [await pending({ ...studentFinancePage, schedules: [otherName] }), await pending({ ...studentFinancePage, schedules: [otherPayer] }), await pending({ ...studentFinancePage, schedules: [noneInCommon] })];
+      await start();
+      for (const id of ids) expect((await draftOf(id)).agreements![0]!.target.mode).toBe('new');
+    });
+
     it('two documents waiting with the same schedule record it once, whichever is committed first', async () => {
       const letter = await pending({ ...studentFinancePage, schedules: [{ ...studentFinancePage.schedules[1]!, payments: studentFinancePage.schedules[1]!.payments.map((p) => ({ ...p, status: 'scheduled' })) }] });
       const page = await pending(studentFinancePage);

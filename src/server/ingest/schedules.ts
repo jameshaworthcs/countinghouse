@@ -87,10 +87,20 @@ export function scheduleRecord(s: ExtractedSchedule, opts: { loanAccountId?: str
 const paymentKey = (p: { due: string; amount: number }) => `${p.due}|${toMinor(p.amount)}`;
 const directionOf = (a: Pick<Agreement, 'direction'>) => a.direction ?? 'out';
 
-/** The agreement recorded already that a schedule is: the same way round, with the same counterparty, and the same name or a payment in common. */
+/**
+ * The agreement recorded already that a schedule is: the same way round, with the same counterparty,
+ * and the same name or a payment in common. Failing that, one whose counterparty its documents word
+ * differently ("University of Example" on one page, "Your university or college" on the next) is the
+ * same when it has the same name, the same payer and account, and a payment in common.
+ */
 export function recordedAs(agreements: readonly Agreement[], rec: ScheduleRecord): Agreement | undefined {
   const keys = new Set(rec.payments.map(paymentKey));
-  return agreements.find((a) => directionOf(a) === directionOf(rec) && nameKey(a.counterparty) === nameKey(rec.counterparty) && (nameKey(a.name) === nameKey(rec.name) || a.payments.some((p) => keys.has(paymentKey(p)))));
+  const shares = (a: Agreement) => a.payments.some((p) => keys.has(paymentKey(p)));
+  const sameWay = agreements.filter((a) => directionOf(a) === directionOf(rec));
+  const byCounterparty = sameWay.find((a) => nameKey(a.counterparty) === nameKey(rec.counterparty) && (nameKey(a.name) === nameKey(rec.name) || shares(a)));
+  if (byCounterparty) return byCounterparty;
+  const same = (x: string | undefined, y: string | undefined) => !x || !y || nameKey(x) === nameKey(y);
+  return sameWay.find((a) => nameKey(a.name) === nameKey(rec.name) && shares(a) && same(a.paidBy, rec.paidBy) && same(a.accountId, rec.accountId));
 }
 
 /**
